@@ -1,0 +1,6 @@
+.current_host
+
+.env.secrets
+secrets/
+
+result
