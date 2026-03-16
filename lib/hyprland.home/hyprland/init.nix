@@ -101,14 +101,6 @@ in {
     XDG_SESSION_TYPE = "wayland";
     XDG_SESSION_DESKTOP = "Hyprland";
 
-    # 비밀번호 저장소를 gnome-keyring으로 강제 지정
-    # (Vivaldi 실행 인자에 --password-store=gnome-libsecret 를 주는 것과 같은 효과)
-    PYTHON_EGG_CACHE = "$XDG_CACHE_HOME/python-eggs"; # 예시일 뿐, 아래가 중요합니다.
-
-    # 크로미움 계열 키링 연동을 위한 설정
-    CHROME_EXECUTABLE = "vivaldi";
-    BROWSER = "vivaldi";
-
     # 기타 앱 힌트
     ELECTRON_OZONE_PLATFORM_HINT = "auto";
     _JAVA_AWT_WM_NONREPARENTING = "1";
