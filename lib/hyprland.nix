@@ -39,12 +39,23 @@
     ];
   };
 
-  fonts.packages = with pkgs; [
-    nanum
-    nanum-gothic-coding
+  fonts = {
+    packages = with pkgs; [
+      nanum
+      nanum-gothic-coding
 
-    noto-fonts-color-emoji
-  ];
+      noto-fonts-cjk-sans    # 핵심: 한중일 Sans (추천)
+      noto-fonts-cjk-serif   # 핵심: 한중일 Serif
+      noto-fonts-color-emoji
+    ];
+
+    fontconfig.defaultFonts = {
+      serif = [ "NanumMyeongjo" "Noto Serif CJK KR" ];
+      sansSerif = [ "NanumGothic" "Noto Sans CJK KR" ];
+      monospace = [ "NanumGothicCoding" ];
+      emoji = [ "Noto Color Emoji" ];
+    };
+  };
 
   xdg.portal = {
     enable = true;
