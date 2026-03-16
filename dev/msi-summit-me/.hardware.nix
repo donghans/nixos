@@ -20,8 +20,11 @@
 
   boot.kernelModules = [ "kvm-intel" "ec_sys" ];
   boot.kernelParams = [
-    "pcie_aspm=force"       # PCIe 전원 관리 강제
-    "i915.enable_psr=1"     # Intel 패널 셀프 리프레시 활성화
+    "pcie_aspm=force"                 # PCIe 전원 관리 강제
+    "i915.enable_psr=1"               # Intel 패널 셀프 리프레시 활성화
+    "i8042.nopnp"                     # PnP 기능이 문제를 일으킬 때 강제 비활성화
+    "pci=nocms"                       # MSI 일부 모델에서 효과가 있는 PCI 설정
+    "psmouse.synaptics_intertouch=0"  # Synaptics 패드일 경우 I2C 대신 PS/2 모드 강제
   ];
   boot.blacklistedKernelModules = [ "nouveau" "nvidia" "nvidia_drm" "nvidia_modeset" ];
   boot.extraModulePackages = [ ];
@@ -114,11 +117,22 @@
 
   services.tlp = {
     enable = true;
+
     settings = {
       # 배터리 사용 시 CPU 성능 제한
       CPU_SCALING_GOVERNOR_ON_BAT = "powersave";
       CPU_ENERGY_PERF_POLICY_ON_BAT = "power";
       CPU_MAX_PERF_ON_BAT = 30;
+
+      # AC 연결 시 설정
+      CPU_SCALING_GOVERNOR_ON_AC = "balanced"; # 혹은 powersave (발열 제어 우선 시)
+      CPU_ENERGY_PERF_POLICY_ON_AC = "balance_performance";
+      CPU_MAX_PERF_ON_AC = 100;
+
+      # 터보 부스트 제어 (가장 중요!)
+      # AC에서도 터보 부스트를 꺼버리면(0), 절대 뜨거워지지 않는 '선비' 같은 노트북이 됩니다.
+      CPU_BOOST_ON_BAT = 0;
+      CPU_BOOST_ON_AC = 0;
 
       # 하드디스크 및 장치 절전
       SATA_LINKPWR_ON_BAT = "med_power_with_dipm";
@@ -131,17 +145,10 @@
     };
   };
 
-  services.auto-cpufreq.enable = true;
-  services.auto-cpufreq.settings = {
-    battery = {
-      governor = "powersave";
-      turbo = "never";
-    };
-  };
-
   services.udev.extraRules = ''
-    # 가끔 powertop --auto-tune이 터치패드를 먹통으로 만들면 아래 규칙 추가
-    # ACTION=="add", SUBSYSTEM=="usb", ATTR{product}=="[터치패드이름]", ATTR{power/control}="on"
+    # 터치패드 전원 관리 강제 활성화 (자동 절전 방지)
+    # ELAN0305:00 04F3:31FD Touchpad 장치에 대해 절전 기능을 끕니다.
+    ACTION=="add", SUBSYSTEM=="i2c", ATTR{name}=="ELAN0305:00 04F3:31FD Touchpad", ATTR{power/control}="on"
 
     # 전원 어댑터 상태가 바뀔 때마다 (AC -> BAT, BAT -> AC) powertop 자동 최적화 실행
     SUBSYSTEM=="power_supply", ATTR{online}=="0", RUN+="${pkgs.powertop}/bin/powertop --auto-tune"
