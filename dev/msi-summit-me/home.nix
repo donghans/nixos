@@ -5,10 +5,18 @@
   home.homeDirectory = "/home/${metaConfig.username}";
 
   home.packages = with pkgs; [
+    bitwarden-desktop
+    bitwarden-cli
+
+    slack
+
     jetbrains.idea
     jetbrains.webstorm
     android-studio
     zed-editor
+
+    antigravity
+    jdk21
 
     nodejs_20
     python311

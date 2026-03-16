@@ -39,9 +39,74 @@
     wlo1.mtu = 1400; # 무선
   };
 
+  services.tailscale.enable = true;
+
+  virtualisation.docker = {
+    enable = true;
+    autoPrune.enable = true;
+  };
+
   # 사용자 계정
   users.users.${metaConfig.username} = {
     isNormalUser = true;
     extraGroups = [ "wheel" "networkmanager" "adbusers" "docker" ];
   };
+
+  # 1. nix-ld 활성화
+  programs.nix-ld.enable = true;
+
+  # 2. FVM/Flutter 바이너리가 참조할 라이브러리 목록
+  programs.nix-ld.libraries = with pkgs; [
+    # 필수 기본 라이브러리
+    stdenv.cc.cc
+    zlib
+    fuse3
+    icu
+    nss
+    openssl
+    curl
+    expat
+
+    # Flutter GUI / 그래픽 관련
+    libGL
+    glib
+    gtk3
+    cairo
+    pango
+    atk
+    gdk-pixbuf
+    harfbuzz
+    fontconfig
+    freetype
+
+    # X11 / Wayland 관련 (JetBrains와 Hyprland 환경 대응)
+    # libX11
+    # libXcomposite
+    # libXcursor
+    # libXdamage
+    # libXext
+    # libXfixes
+    # libXi
+    # libXrender
+    # libXtst
+    # libXrandr
+    # libXScrnSaver
+    # libxcb
+    # libxkbcommon
+    wayland
+
+    # 오디오 및 기타 미디어
+    alsa-lib
+    libpulseaudio
+    dbus
+    libdrm
+    mesa
+    libnotify
+  ];
+
+  # 3. FVM을 시스템 패키지에 추가 (선택 사항)
+  environment.systemPackages = with pkgs; [
+    fvm
+    unzip
+  ];
 }
