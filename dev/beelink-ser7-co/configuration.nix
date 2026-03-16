@@ -34,6 +34,12 @@
   # (선택사항) btrbk 설정
   # services.btrbk.instances."local" = { ... };
 
+  # MTU를 낮춰 Vivaldi 동기화 서버와의 문제 등을 회피함 (Tailscale, Double-NAT 등의 환경이 잦으므로 설정)
+  networking.interfaces = {
+    enp1s0.mtu = 1400; # 유선
+    wlp2s0.mtu = 1400; # 무선
+  };
+
   services.tailscale.enable = true;
 
   virtualisation.docker = {
