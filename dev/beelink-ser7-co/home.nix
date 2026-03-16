@@ -5,6 +5,11 @@
   home.homeDirectory = "/home/${metaConfig.username}";
 
   home.packages = with pkgs; [
+    bitwarden-desktop
+    bitwarden-cli
+
+    slack
+
     jetbrains.idea
     jetbrains.webstorm
     android-studio

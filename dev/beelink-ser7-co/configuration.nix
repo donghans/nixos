@@ -34,6 +34,13 @@
   # (선택사항) btrbk 설정
   # services.btrbk.instances."local" = { ... };
 
+  services.tailscale.enable = true;
+
+  virtualisation.docker = {
+    enable = true;
+    autoPrune.enable = true;
+  };
+
   # 사용자 계정
   users.users.${metaConfig.username} = {
     isNormalUser = true;
