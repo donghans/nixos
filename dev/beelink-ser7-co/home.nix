@@ -15,6 +15,9 @@
     android-studio
     zed-editor
 
+    antigravity
+    jdk21
+
     nodejs_20
     python311
     nodePackages.yarn
