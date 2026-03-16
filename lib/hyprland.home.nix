@@ -25,6 +25,8 @@
     xdg-desktop-portal-gtk
     xdg-desktop-portal-hyprland
 
+    git-credential-manager
+
     nemo
 
     vivaldi
@@ -33,6 +35,12 @@
 
   programs = {
     bash.enable = true;
+
+    git.extraConfig.credential = {
+      # Nix store에 있는 gcm 실행 파일 경로를 동적으로 할당
+      helper = "${pkgs.git-credential-manager}/bin/git-credential-manager";
+      credentialStore = "secretservice";
+    };
   };
 
   services.cliphist.enable = true;

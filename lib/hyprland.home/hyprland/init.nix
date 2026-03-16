@@ -107,6 +107,7 @@ in {
 
     # 크로미움 계열 키링 연동을 위한 설정
     CHROME_EXECUTABLE = "vivaldi";
+    BROWSER = "vivaldi";
 
     # 기타 앱 힌트
     ELECTRON_OZONE_PLATFORM_HINT = "auto";
