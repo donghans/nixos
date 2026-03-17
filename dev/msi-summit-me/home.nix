@@ -1,4 +1,4 @@
-{ pkgs, lib, metaConfig, ... }: {
+{ pkgs, unstable, lib, metaConfig, ... }: {
   imports = [ ../../lib/hyprland.home.nix ];
 
   home.username = metaConfig.username;
@@ -8,21 +8,42 @@
     bitwarden-desktop
     bitwarden-cli
 
-    slack
+    unstable.slack
 
-    jetbrains.idea
-    jetbrains.webstorm
-    android-studio
+    unstable.jetbrains.idea
+    unstable.jetbrains.webstorm
+    unstable.android-studio
     zed-editor
 
-    antigravity
-    jdk21
+    unstable.antigravity
 
-    nodejs_20
-    python311
-    nodePackages.yarn
-    flutter
+    jdk21 # Antigravity 요구사항
+
+    nodejs_24
+    pnpm
+
+    (python312.withPackages (ps: with ps; [ pip virtualenv ]))
+
+    (mkNixLDWrapper fvm [
+      stdenv.cc.cc zlib fuse3 icu nss openssl curl expat # 필수 기본 라이브러리
+      unzip # fvm 내 flutter install/set 시 압축 해제에 필요
+
+      libGL glib gtk3 cairo pango atk gdk-pixbuf harfbuzz fontconfig freetype # Flutter GUI / 그래픽 관련
+
+      wayland # X11 / Wayland 관련 (JetBrains와 Hyprland 환경 대응)
+      # libX11 libXcomposite libXcursor libXdamage libXext libXfixes libXi libXrender libXtst libXrandr libXScrnSaver libxcb libxkbcommon
+
+      alsa-lib libpulseaudio dbus libdrm mesa libnotify # 오디오 및 기타 미디어
+    ])
   ];
+
+  home.sessionVariables = {
+    # pnpm: Btrfs CoW(reflink) 사용 강제
+    PNPM_PACKAGE_IMPORT_METHOD = "clone";
+
+    # pnpm: 저장소 위치 지정
+    PNPM_STORE_DIR = "/home/${metaConfig.username}/.local/share/pnpm/store";
+  };
 
   programs.git.enable = true;
   programs.git.settings.user.name  = metaConfig.gitName;
