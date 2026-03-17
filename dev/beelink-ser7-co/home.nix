@@ -25,28 +25,25 @@
     (python312.withPackages (ps: with ps; [ pip virtualenv ]))
 
     (mkNixLDWrapper fvm [
-      # 필수 기본 라이브러리
-      stdenv.cc.cc zlib fuse3 icu nss openssl curl expat
+      stdenv.cc.cc zlib fuse3 icu nss openssl curl expat # 필수 기본 라이브러리
+      unzip # fvm 내 flutter install/set 시 압축 해제에 필요
 
-      # Flutter GUI / 그래픽 관련
-      libGL glib gtk3 cairo pango atk gdk-pixbuf harfbuzz fontconfig freetype
+      libGL glib gtk3 cairo pango atk gdk-pixbuf harfbuzz fontconfig freetype # Flutter GUI / 그래픽 관련
 
-      # X11 / Wayland 관련 (JetBrains와 Hyprland 환경 대응)
+      wayland # X11 / Wayland 관련 (JetBrains와 Hyprland 환경 대응)
       # libX11 libXcomposite libXcursor libXdamage libXext libXfixes libXi libXrender libXtst libXrandr libXScrnSaver libxcb libxkbcommon
-      wayland
 
-      # 오디오 및 기타 미디어
-      alsa-lib libpulseaudio dbus libdrm mesa libnotify
+      alsa-lib libpulseaudio dbus libdrm mesa libnotify # 오디오 및 기타 미디어
     ])
-
-    unzip # fvm 내 flutter 압축 해제에 필요
   ];
 
-  # pnpm 전역 설정을 파일로 직접 관리
-  home.file.".nmprc".text = ''
-    package-import-method=clone
-    store-dir=${config.home.homeDirectory}/.local/share/pnpm/store
-  '';
+  home.sessionVariables = {
+    # pnpm: Btrfs CoW(reflink) 사용 강제
+    PNPM_PACKAGE_IMPORT_METHOD = "clone";
+
+    # pnpm: 저장소 위치 지정
+    PNPM_STORE_DIR = "/home/${metaConfig.username}/.local/share/pnpm/store";
+  };
 
   programs.git.enable = true;
   programs.git.settings.user.name  = metaConfig.gitName;
