@@ -1,4 +1,4 @@
-{ pkgs, config, ... }: {
+{ pkgs, unstable, config, ... }: {
   _module.args = {
     hyprTerm = "${pkgs.kitty}/bin/kitty";
     notifyLog = "${config.home.homeDirectory}/.local/share/notify_logs/history.log";
@@ -29,8 +29,8 @@
 
     nemo
 
-    vivaldi
-    vivaldi-ffmpeg-codecs
+    unstable.vivaldi
+    unstable.vivaldi-ffmpeg-codecs
   ];
 
   programs = {

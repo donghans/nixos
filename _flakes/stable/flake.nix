@@ -2,13 +2,17 @@
   description = "My First NixOS Flake Configuration";
 
   inputs = {
+    # 최신 패키지를 위한 Unstable 채널
+    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
+
+    # 기본 패키지에 사용될 Stable 채널
     nixpkgs.url      =                "github:nixos/nixpkgs/nixos-25.11"; # 1. 패키지 저장소 박제
     home-manager.url = "github:nix-community/home-manager/release-25.11"; # 2. Home-manager 박제 (채널 대신 여기서 직접 가져옴)
 
     home-manager.inputs.nixpkgs.follows = "nixpkgs"; # HM이 시스템과 같은 Nix 패키지 버전을 쓰도록 강제
   };
 
-  outputs = { self, nixpkgs, home-manager, ... }@inputs: let
+  outputs = { self, nixpkgs, nixpkgs-unstable, home-manager, ... }@inputs: let
     stateVersion = "25.11";
 
     gitName = "donghans";
@@ -23,10 +27,16 @@
     # 설정 생성 헬퍼 함수 (재사용 가능한 팩토리 함수)
     mkHost = { hostname, system, isLaptop }: let
       metaConfig = { inherit stateVersion gitName gitEmail username hostname isLaptop; };
+
+      # Unstable 패키지 세트 초기화
+      unstable = import nixpkgs-unstable {
+        inherit system;
+        config.allowUnfree = true; # Gemini 관련 등 비자유 소프트웨어 허용 시 필요
+      };
     in
       nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { inherit inputs metaConfig; };
+        specialArgs = { inherit inputs metaConfig unstable; };
 
         modules = [
           # 호스트별 디렉토리 경로 동적 지정
@@ -40,7 +50,7 @@
             home-manager.backupFileExtension = "backup";
 
             home-manager.users.${username} = import ../../dev/${hostname}/home.nix;
-            home-manager.extraSpecialArgs = { inherit inputs metaConfig; };
+            home-manager.extraSpecialArgs = { inherit inputs metaConfig unstable; };
           }
         ];
       };
