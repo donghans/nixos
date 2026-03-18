@@ -36,6 +36,7 @@ in {
     # 커서 설정
     XCURSOR_SIZE = "24";
     HYPRCURSOR_SIZE = "24";
+    XCURSOR_THEME = "Bibata-Modern-Ice";
 
     # 입력기 (Fcitx5)
     GTK_IM_MODULE = ""; # GTK4부터는 비워두는 것이 권장됩니다.

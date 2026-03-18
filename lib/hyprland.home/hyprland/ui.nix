@@ -34,10 +34,5 @@
       always_follow_on_dnd = true;
       focus_on_activate = true;
     };
-
-    env = [
-      "XCURSOR_THEME,Bibata-Modern-Ice"
-      "XCURSOR_SIZE,24"
-    ];
   };
 }
