@@ -26,6 +26,7 @@ in {
       "$mainMod, P, exec, ${fuzzel}"
       "$mainMod, V, exec, ${cliphist} list | ${fuzzel} --dmenu | ${cliphist} decode | ${wl-copy}"
       "$mainMod, N, exec, cat -s ~/.local/share/notify_logs/history.log* | tac | ${fuzzel} --dmenu --width 150 --placeholder \"Search 30-day History...\""
+      "$mainMod, L, exec, hyprlock"
 
       # Special workspace
       "$mainMod, S, togglespecialworkspace, magic"

@@ -11,6 +11,7 @@
       ./hyprland.home/hyprland/bind.nix
       ./hyprland.home/hyprland/init.nix
       ./hyprland.home/hyprland/ui.nix
+    ./hyprland.home/hyprlock.nix
     ./hyprland.home/kitty.nix
     ./hyprland.home/mako.nix
     ./hyprland.home/waybar.nix
