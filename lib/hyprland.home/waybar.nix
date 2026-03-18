@@ -30,13 +30,21 @@
       separate-outputs = true;
     };
 
+    "battery" = {
+      format = "{} %";
+      states = {
+        warning = 30;
+        critical = 15;
+      };
+    };
+
     "tray" = {
       icon-size = 16;
       spacing = 12;
     };
 
     "clock" = {
-      format = "   {:%Y-%m-%d %H:%M}   ";
+      format = "  {:%Y-%m-%d %H:%M}   ";
       tooltip-format = "{:%A, %B %d, %Y}";
     };
   };
@@ -88,6 +96,33 @@
     #workspaces button.urgent {
       background-color: #ebcb8b;
       color: #2e3440;
+    }
+
+    /* Tray 오른쪽 패딩 추가 */
+    #tray {
+      padding-right: 8px; /* 원하는 간격만큼 조절하세요 */
+    }
+
+    #battery {
+      padding: 0 4px;
+    }
+
+    /* 충전 중일 때(charging) active 워크스페이스와 같은 밑줄 효과 */
+    #battery.charging, #battery.plugged {
+      color: #33ccff; /* 글자색도 active와 맞추면 더 깔끔합니다 */
+      box-shadow: inset 0 -3px 0 #33ccff; /* 하단 3px 선 */
+    }
+
+    /* 배터리 경고 시 스타일 */
+    #battery.warning:not(.charging) {
+      color: #ebcb8b;
+      box-shadow: inset 0 -3px 0 #ebcb8b; /* 경고는 노란 밑줄 */
+    }
+
+    /* 배터리 심각 시 스타일 */
+    #battery.critical:not(.charging) {
+      color: #f38ba8;
+      box-shadow: inset 0 -3px 0 #f38ba8; /* 심각은 빨간 밑줄 */
     }
   '';
 }
