@@ -20,7 +20,7 @@
 
   boot.kernelModules = [ "kvm-intel" "ec_sys" ];
   boot.kernelParams = [
-    "pcie_aspm=force"                 # PCIe 전원 관리 강제
+    "pcie_aspm=off"                   # PCIe 전원 관리로 인한 끊김 방지
     "i915.enable_psr=1"               # Intel 패널 셀프 리프레시 활성화
     "i8042.nopnp"                     # PnP 기능이 문제를 일으킬 때 강제 비활성화
     "pci=nocms"                       # MSI 일부 모델에서 효과가 있는 PCI 설정
@@ -147,6 +147,13 @@
       # 배터리 <=> AC 전환간 최적화가 풀리는 현상 방지
       RUNTIME_PM_ON_AC = "auto";
       RUNTIME_PM_ON_BAT = "auto";
+
+      # 배터리 모드에서도 Wi-Fi 절전 기능을 끕니다. (가장 중요)
+      WIFI_PWR_ON_AC = "off";
+      WIFI_PWR_ON_BAT = "off";
+
+      # 덮개를 닫았을 때(배터리 모드) 무선 장치를 끄는 기능을 비활성화합니다.
+      DEVICES_TO_DISABLE_ON_BAT_NOT_IN_USE = "";
     };
   };
 
@@ -159,6 +166,20 @@
     SUBSYSTEM=="power_supply", ATTR{online}=="0", RUN+="${pkgs.powertop}/bin/powertop --auto-tune"
     SUBSYSTEM=="power_supply", ATTR{online}=="1", RUN+="${pkgs.powertop}/bin/powertop --auto-tune"
   '';
+
+  services.logind.settings.Login = {
+    # 덮개를 닫았을 때 절전(Suspend) 방지
+    HandleLidSwitch = "ignore";
+    HandleLidSwitchExternalPower = "ignore";
+    HandleLidSwitchDocked = "ignore";
+
+    # 시스템이 절전 모드로 들어가기 전 대기 시간 (필요 시)
+    IdleAction = "ignore";
+  };
+
+  # Wi-Fi 네트워크가 절전모드로 들어가지 않게끔 함
+  networking.networkmanager.wifi.powersave = false;
+
 
   hardware.bluetooth = {
     enable = true;
