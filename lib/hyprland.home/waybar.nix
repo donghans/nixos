@@ -44,7 +44,7 @@
   programs.waybar.style = ''
     /* Waybar 전체 배경 */
     window#waybar {
-      background-color: rgba(0, 0, 0, 0.5);
+      background-color: rgba(0, 0, 0, 0.75);
       border-bottom: none;
     }
 
