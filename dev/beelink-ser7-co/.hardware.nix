@@ -18,6 +18,7 @@
 
   boot.kernelPackages = pkgs.linuxPackages;
   boot.kernelModules = [ "kvm-amd" ];
+  boot.kernelParams = [ "amd_pstate=active" ];
 
   boot.extraModulePackages = [ ];
 
@@ -84,6 +85,17 @@
 
   # 주기적인 Scrub (데이터 무결성 검사 및 복구)
   services = {
+    auto-cpufreq = {
+      enable = true;
+
+      settings.charger = {
+        governor = "performance";
+        turbo = "always";
+      };
+    };
+
+    irqbalance.enable = true;
+
     btrfs.autoScrub = {
       enable = true;
       interval = "weekly";
