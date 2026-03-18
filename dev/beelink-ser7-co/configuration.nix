@@ -47,6 +47,13 @@
     autoPrune.enable = true;
   };
 
+  programs.adb.enable = true;
+
+  networking.firewall = {
+    allowedTCPPortRanges = [ { from = 32768; to = 60999; } ]; # ADB 무선 페어링 및 연결을 위한 포트 범위 (Dynamic Ports)
+    allowedTCPPorts = [ 5555 ]; # 기본 ADB 리스닝 포트
+  };
+
   # 사용자 계정
   users.users.${metaConfig.username} = {
     isNormalUser = true;
