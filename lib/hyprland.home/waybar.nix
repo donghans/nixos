@@ -44,7 +44,7 @@
     };
 
     "clock" = {
-      format = "  {:%Y-%m-%d %H:%M}   ";
+      format = "{:%Y-%m-%d %H:%M}  ";
       tooltip-format = "{:%A, %B %d, %Y}";
     };
   };
@@ -123,6 +123,10 @@
     #battery.critical:not(.charging) {
       color: #f38ba8;
       box-shadow: inset 0 -3px 0 #f38ba8; /* 심각은 빨간 밑줄 */
+    }
+
+    #clock {
+      padding: 0 4px;
     }
   '';
 }
