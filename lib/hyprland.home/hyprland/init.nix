@@ -56,7 +56,7 @@ in {
 
     # 기타 앱 힌트
     ELECTRON_OZONE_PLATFORM_HINT = "auto";
-    _JAVA_AWT_WM_NONREPARENTING = "1";
+    _JAVA_OPTIONS = "-Dsun.java2d.uiScale=1.0";
   };
 
   services.my-notification-logger.enable = true;
