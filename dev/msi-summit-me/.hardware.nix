@@ -122,7 +122,7 @@
       # 배터리 사용 시 CPU 성능 제한
       CPU_SCALING_GOVERNOR_ON_BAT = "powersave";
       CPU_ENERGY_PERF_POLICY_ON_BAT = "power";
-      CPU_MAX_PERF_ON_BAT = 30;
+      CPU_MAX_PERF_ON_BAT = 50;
 
       # AC 연결 시 설정
       CPU_SCALING_GOVERNOR_ON_AC = "balanced"; # 혹은 powersave (발열 제어 우선 시)
@@ -133,6 +133,11 @@
       # AC에서도 터보 부스트를 꺼버리면(0), 절대 뜨거워지지 않는 '선비' 같은 노트북이 됩니다.
       CPU_BOOST_ON_BAT = 0;
       CPU_BOOST_ON_AC = 0;
+
+      # 인텔 하이브리드 아키텍처 최적화
+      # (선택 사항) 가벼운 작업 시 E-코어 우선 사용 유도
+      SCHED_POWERSAVE_ON_AC = 1;
+      SCHED_POWERSAVE_ON_BAT = 1;
 
       # 하드디스크 및 장치 절전
       SATA_LINKPWR_ON_BAT = "med_power_with_dipm";
