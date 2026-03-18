@@ -13,6 +13,7 @@ in {
     "exec-once" = [
       # 1. 시스템 설정 관련 (uwsm 없이 직접 실행해도 무방한 것들)
       "hyprctl setcursor Bibata-Modern-Ice 24"
+      "rfkill unblock bluetooth && bluetoothctl power on"
 
       # 2. 필수 서비스 (uwsm app 사용)
       "uwsm app -- fcitx5"
