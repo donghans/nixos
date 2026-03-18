@@ -45,6 +45,11 @@
     PNPM_STORE_DIR = "/home/${metaConfig.username}/.local/share/pnpm/store";
   };
 
+  home.shellAliases = {
+    npm = "pnpm";
+    npx = "pnpm dlx";
+  };
+
   programs.git.enable = true;
   programs.git.settings.user.name  = metaConfig.gitName;
   programs.git.settings.user.email = metaConfig.gitEmail;

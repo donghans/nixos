@@ -46,6 +46,9 @@
     autoPrune.enable = true;
   };
 
+  programs.adb.enable = true;
+  networking.firewall.allowedUDPPorts = [ 5353 ]; # ADB 기기 검색(mDNS)
+
   # 사용자 계정
   users.users.${metaConfig.username} = {
     isNormalUser = true;

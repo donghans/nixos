@@ -160,6 +160,13 @@
     SUBSYSTEM=="power_supply", ATTR{online}=="1", RUN+="${pkgs.powertop}/bin/powertop --auto-tune"
   '';
 
+  hardware.bluetooth = {
+    enable = true;
+    powerOnBoot = true;
+  };
+
+  services.blueman.enable = true;
+
 
   environment.systemPackages = with pkgs; [
     intel-media-driver # 하드웨어 가속용
