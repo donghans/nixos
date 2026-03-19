@@ -11,25 +11,28 @@ in {
 
   wayland.windowManager.hyprland.settings = {
     "exec-once" = [
-      # 1. 시스템 설정 관련 (uwsm 없이 직접 실행해도 무방한 것들)
+      # 시스템 설정 관련 (uwsm 없이 직접 실행해도 무방한 것들)
       "hyprctl setcursor Bibata-Modern-Ice 24"
       "rfkill unblock bluetooth && bluetoothctl power on"
 
-      # 2. 필수 서비스 (uwsm app 사용)
+      # 필수 서비스 (uwsm app 사용)
       "uwsm app -- fcitx5"
       "uwsm app -- ${pkgs.hyprpolkitagent}/libexec/hyprpolkitagent"
       "uwsm app -- ${pkgs.networkmanagerapplet}/bin/nm-applet"
 
-      # 3. UI 및 배경화면 (분리 실행 권장)
+      # UI 및 배경화면 (분리 실행 권장)
       "uwsm app -- ${pkgs.waybar}/bin/waybar"
       "uwsm app -- ${pkgs.hyprpaper}/bin/hyprpaper"
 
-      # 4. 클립보드 매니저
+      # 클립보드 매니저
       "uwsm app -- ${wl-paste} --type text --watch ${cliphist} store"
       "uwsm app -- ${wl-paste} --type image --watch ${cliphist} store"
 
-      # 5. 알림 및 로그
+      # 알림 및 로그
       "uwsm app -- notify-logger"
+
+      # 사용자 앱
+      "uwsm app -- ${pkgs.tailscale}/bin/tailscale systray"
     ];
   };
 
