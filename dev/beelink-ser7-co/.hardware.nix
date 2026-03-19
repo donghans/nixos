@@ -85,6 +85,15 @@
 
   # 주기적인 Scrub (데이터 무결성 검사 및 복구)
   services = {
+    btrfs.autoScrub = {
+      enable = true;
+      interval = "weekly";
+      fileSystems = [ "/" ];
+    };
+
+    fstrim.enable = true;
+
+
     auto-cpufreq = {
       enable = true;
 
@@ -95,15 +104,8 @@
     };
 
     irqbalance.enable = true;
-
-    btrfs.autoScrub = {
-      enable = true;
-      interval = "weekly";
-      fileSystems = [ "/" ];
-    };
-
-    fstrim.enable = true;
   };
+
 
   hardware.bluetooth = {
     enable = true;
