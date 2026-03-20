@@ -11,11 +11,9 @@
 
     background = [
       {
-        monitor = "";
         path = "screenshot";
-        color = "rgba(25, 20, 20, 1.0)";
-        blur_passes = 3; # 미니멀한 느낌을 위해 블러를 조금 더 높였습니다.
-        blur_size = 8;
+        blur_passes = 2; # 미니멀한 느낌을 위해 블러를 조금 더 높였습니다.
+        blur_size = 4;
       }
     ];
 
@@ -40,37 +38,17 @@
         halign = "center";
         valign = "center";
 
-        # 검증 중일 때도 투명 유지 (원치 않으면 색상 지정)
+        # 검증 중일 때도 투명 유지
         check_color = "rgba(0, 0, 0, 0.25)";
 
         # 실패 시 설정
         fail_color = "rgba(200, 0, 0, 0.25)"; # 실패 시에도 박스 색상은 투명하게 유지
-        fail_text = ""; # 커스텀 텍스트
+        fail_text = "";
       }
     ];
   };
 
-  # 시간이 흘렀을 때 잠그고 싶다면 추가 (수동으로 잠그는게 더 나을듯하여 비활성화함)
-  # services.hypridle = {
-  #   enable = true;
-  #   settings = {
-  #     general = {
-  #       lock_cmd = "pidof hyprlock || hyprlock"; # 잠금 명령
-  #       before_sleep_cmd = "loginctl lock-session"; # 절전 모드 진입 전 잠금
-  #       after_sleep_cmd = "hyprctl dispatch dpms on"; # 깨어날 때 모니터 켜기
-  #     };
-
-  #     listener = [
-  #       {
-  #         timeout = 600; # 10분간 미입력 시
-  #         on-timeout = "loginctl lock-session";
-  #       }
-  #       {
-  #         timeout = 1800; # 30분간 미입력 시 모니터 끄기
-  #         on-timeout = "hyprctl dispatch dpms off";
-  #         on-resume = "hyprctl dispatch dpms on";
-  #       }
-  #     ];
-  #   };
-  # };
+  # 아이들 기본 세팅
+  services.hypridle.enable = true;
+  services.hypridle.settings.general.lock_cmd = "pidof hyprlock || hyprlock"; # 잠금 명령
 }

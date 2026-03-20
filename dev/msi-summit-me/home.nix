@@ -80,29 +80,17 @@
     };
   };
 
-  services.hypridle = {
-    enable = true;
-
-    settings = {
-      general = {
-        # 자동 잠금 관련 명령어는 모두 비워둡니다.
-        # 잠금은 원하실 때 직접 `$ mod + L` (예시) 등으로 수행하세요.
-        after_sleep_cmd = "hyprctl dispatch dpms on && tlp start";
-      };
-
-      listener = [
-        # 덮개를 닫았을 때: 디스플레이만 끕니다.
-        {
-          event = "sw_lid_down";
-          # 화면을 끄고, TLP를 배터리 모드(최저 전력)로 강제 전환
-          on-event = "hyprctl dispatch dpms off && tlp bat";
-        }
-        {
-          event = "sw_lid_up";
-          # 화면을 켜고, TLP를 다시 자동(상태에 따라 AC/BAT)으로 복구
-          on-event = "hyprctl dispatch dpms on && tlp start";
-        }
-      ];
-    };
-  };
+  services.hypridle.listener = [
+    # 덮개를 닫았을 때: 화면을 잠그고 디스플레이 OFF
+    {
+      event = "sw_lid_down";
+      # 화면을 끄고, TLP를 배터리 모드(최저 전력)로 강제 전환
+      on-event = "loginctl lock-session && hyprctl dispatch dpms off && tlp bat";
+    }
+    {
+      event = "sw_lid_up";
+      # 화면을 켜고, TLP를 다시 자동(상태에 따라 AC/BAT)으로 복구
+      on-event = "hyprctl dispatch dpms on && tlp start";
+    }
+  ];
 }
