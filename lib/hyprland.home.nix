@@ -76,12 +76,4 @@
       color-scheme = "prefer-dark"; # 시스템 전역 다크모드 선호 신호
     };
   };
-
-  # FIXME hyprland.nix와 동일한 xdg portal 설정을 따라가게 할 것
-  xdg.configFile."xdg-desktop-portal/portals.conf".text = ''
-    [preferred]
-    default=gtk;hyprland
-    org.freedesktop.impl.portal.FileChooser=gtk
-    org.freedesktop.impl.portal.Settings=gtk
-  '';
 }
