@@ -16,6 +16,7 @@
     zed-editor
 
     unstable.antigravity
+    unstable.claude-code
 
     jdk21 # Antigravity 요구사항
 
