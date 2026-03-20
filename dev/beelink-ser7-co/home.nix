@@ -17,6 +17,7 @@
 
     unstable.antigravity
     unstable.claude-code
+    unstable.gemini-cli
 
     jdk21 # Antigravity 요구사항
 
