@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#!/usr/bin/env nix-shell
+#!nix-shell -i bash -p nh
 
 # 1. 경로 설정 및 상수
 NIXOS_PATH=$(dirname $(readlink -f "$0"))
@@ -42,18 +43,12 @@ if [ "$FLAKE" == "rolling" ]; then
     $GIT merge stable --no-edit
 fi
 
-# 5. 하위 호환성 심볼릭 링크 (당신의 핵심 요구사항)
-if [ "$(readlink /etc/nixos)" != "$NIXOS_PATH" ]; then
-    echo "🔗 Linking /etc/nixos to $NIXOS_PATH..."
-    sudo ln -sfn "$NIXOS_PATH" /etc/nixos
-fi
-
-# 6. 빌드 실행 (nh 사용)
+# 5. 빌드 실행 (nh 사용)
 echo "🚀 [nh] Building NixOS ($FLAKE) for #$HOST_ID with action: $ACTION"
 # 실제 빌드 경로는 Flake 디렉터리를 가리킵니다.
 nh os "$ACTION" "$NIXOS_PATH/_flakes/$FLAKE" -H "$HOST_ID"
 
-# 7. 빌드 후 메인 브랜치로 복귀 (선택 사항)
+# 6. 빌드 후 메인 브랜치로 복귀 (선택 사항)
 if [ "$FLAKE" == "rolling" ]; then
     $GIT checkout "$CURRENT_BRANCH"
 fi

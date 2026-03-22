@@ -1,0 +1,19 @@
+{
+  "username": "donghans",
+  "git": {
+    "name": "donghans",
+    "email": "78710114+donghans@users.noreply.github.com"
+  },
+  "hosts": [
+    {
+      "hostname": "beelink-ser7-co",
+      "system": "x86_64-linux",
+      "isLaptop": false
+    },
+    {
+      "hostname": "msi-summit-me",
+      "system": "x86_64-linux",
+      "isLaptop": true
+    }
+  ]
+}

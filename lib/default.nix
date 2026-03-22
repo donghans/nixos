@@ -53,11 +53,6 @@
 
   # 어디에서든 최소한 이 패키지들은 필요하다고 판단됨
   environment.systemPackages = with pkgs; [
-    nh # Nix Helper, nix 빌드를 편하게 도와주고 터미널상에서 보여줄 수 있는 시각적인 고급 정보(pkgs diff 등) 제공
-    btrfs-progs
-    snapper
-    btrbk
-
     git
     nano
     wget
