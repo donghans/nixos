@@ -3,7 +3,7 @@
 
 # 1. 경로 설정
 ROOT_PATH=$(dirname $(readlink -f "$0"))
-TARGET_DIR="${ROOT_PATH}/iso"
+TARGET_DIR="${ROOT_PATH}/_iso"
 
 # [중요] 이전 빌드 결과물 제거 (성공 여부 오판 방지)
 rm -f "${ROOT_PATH}/result"
@@ -12,6 +12,7 @@ rm -f "${ROOT_PATH}/result"
 ITEMS=(
     "flake.nix:../_flakes/stable/flake.nix:file"
     "flake.lock:../_flakes/stable/flake.lock:file"
+    "_info.json:../dev/_info.json:file"
     "lib:../lib:dir"
 )
 
@@ -61,6 +62,7 @@ echo "🚀 커스텀 ISO 빌드 시작"
 
 nom build "git+file://${ROOT_PATH}?dir=iso#nixosConfigurations.custom-iso.config.system.build.isoImage" \
   --extra-experimental-features "nix-command flakes" \
+  --impure \
   --print-build-logs
 
 # 5. 결과 확인 (현재 디렉터리의 result 링크 존재 여부 확인)

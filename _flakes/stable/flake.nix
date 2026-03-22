@@ -13,8 +13,17 @@
   };
 
   outputs = { self, nixpkgs, nixpkgs-unstable, home-manager, ... }@inputs: let
-    # 1. JSON 파일 읽기
-    info = builtins.fromJSON (builtins.readFile ../../dev/_info.json);
+    # 1. 경로 후보 정의
+    primaryInfoPath = ../../dev/_info.json;  # 일반 nh 빌드 시 (flake 위치 기준)
+    isoInfoPath = ./_info.json;             # iso.sh 빌드 시 (hardlink된 위치 기준)
+
+    # 2. 파일 존재 여부에 따라 경로 선택
+    chosenInfoPath = if builtins.pathExists primaryInfoPath
+      then primaryInfoPath
+      else isoInfoPath;
+
+    # 3. JSON 파일 읽기
+    info = builtins.fromJSON (builtins.readFile chosenInfoPath);
 
     stateVersion = "25.11";
     gitName = info.git.name;
