@@ -78,19 +78,13 @@
         disable_while_typing = true;
       };
     };
-  };
 
-  services.hypridle.listener = [
-    # 덮개를 닫았을 때: 화면을 잠그고 디스플레이 OFF
-    {
-      event = "sw_lid_down";
-      # 화면을 끄고, TLP를 배터리 모드(최저 전력)로 강제 전환
-      on-event = "loginctl lock-session && hyprctl dispatch dpms off && tlp bat";
-    }
-    {
-      event = "sw_lid_up";
-      # 화면을 켜고, TLP를 다시 자동(상태에 따라 AC/BAT)으로 복구
-      on-event = "hyprctl dispatch dpms on && tlp start";
-    }
-  ];
+    bindl = [
+      # 덮개를 닫을 때 (Lid Switch On)
+      ", switch:on:Lid Switch, exec, loginctl lock-session && hyprctl dispatch dpms off && tlp bat"
+
+      # 덮개를 열 때 (Lid Switch Off)
+      ", switch:off:Lid Switch, exec, hyprctl dispatch dpms on && tlp start"
+    ];
+  };
 }
