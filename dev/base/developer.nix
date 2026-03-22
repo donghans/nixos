@@ -17,7 +17,6 @@
 
   # 사용자 계정
   users.users.${metaConfig.username} = {
-    isNormalUser = true;
-    extraGroups = [ "wheel" "networkmanager" "adbusers" "docker" ];
+    extraGroups = [ "adbusers" "docker" ];
   };
 }

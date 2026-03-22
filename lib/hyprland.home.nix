@@ -30,8 +30,10 @@
 
     nemo
 
-    unstable.vivaldi
-    unstable.vivaldi-ffmpeg-codecs
+    (unstable.vivaldi.override {
+      proprietaryCodecs = true;
+      vivaldi-ffmpeg-codecs = unstable.vivaldi-ffmpeg-codecs;
+    })
   ];
 
   programs = {

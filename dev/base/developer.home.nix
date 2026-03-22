@@ -1,9 +1,6 @@
 { pkgs, unstable, lib, metaConfig, ... }: {
   imports = [ ../../lib/hyprland.home.nix ];
 
-  home.username = metaConfig.username;
-  home.homeDirectory = "/home/${metaConfig.username}";
-
   home.packages = with pkgs; [
     bitwarden-desktop
     bitwarden-cli

@@ -47,7 +47,7 @@
         ../../dev/${hostname}.nix
       ];
 
-      hmUser = if isISO then "root" else username;
+      hmUser = if isISO then "nixos" else username;
       hmConfig = if isISO then ./home.nix else ../../dev/${hostname}.home.nix;
     in
       nixpkgs.lib.nixosSystem {
