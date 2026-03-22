@@ -60,7 +60,7 @@ done
 # 4. 빌드 실행
 echo "🚀 커스텀 ISO 빌드 시작"
 
-nom build "git+file://${ROOT_PATH}?dir=iso#nixosConfigurations.custom-iso.config.system.build.isoImage" \
+nom build "git+file://${ROOT_PATH}?dir=_iso#nixosConfigurations.custom-iso.config.system.build.isoImage" \
   --extra-experimental-features "nix-command flakes" \
   --impure \
   --print-build-logs
