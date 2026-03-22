@@ -40,7 +40,7 @@
 
     "tray" = {
       icon-size = 16;
-      spacing = 12;
+      spacing = 6;
     };
 
     "clock" = {
@@ -100,11 +100,12 @@
 
     /* Tray 오른쪽 패딩 추가 */
     #tray {
-      padding-right: 8px; /* 원하는 간격만큼 조절하세요 */
+      padding-right: 4px; /* 원하는 간격만큼 조절하세요 */
     }
 
     #battery {
-      padding: 0 4px;
+      padding: 0 1px;
+      margin: 0 3px;
     }
 
     /* 충전 중일 때(charging) active 워크스페이스와 같은 밑줄 효과 */
