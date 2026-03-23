@@ -8,12 +8,14 @@ GIT="git -C $NIXOS_PATH"
 ID_FILE="$NIXOS_PATH/.current_host"
 HOST_ID=""
 
+SCOPE="home"
 ACTION="switch"
 FLAKE="stable" # 기본 Flake
 
 # 2. 인자 분석 (예: ./manage.sh laptop switch rolling)
 for arg in "$@"; do
     case $arg in
+        os|home) SCOPE="$arg" ;;
         switch|boot|test|update) ACTION="$arg" ;;
         rolling|stable) FLAKE="$arg" ;;
         *) HOST_ID="$arg" ;;
@@ -44,9 +46,9 @@ if [ "$FLAKE" == "rolling" ]; then
 fi
 
 # 5. 빌드 실행 (nh 사용)
-echo "🚀 [nh] Building NixOS ($FLAKE) for #$HOST_ID with action: $ACTION"
+echo "🚀 [nh] Building NixOS ($FLAKE) for #$HOST_ID with scope $SCOPE and action $ACTION"
 # 실제 빌드 경로는 Flake 디렉터리를 가리킵니다.
-nh os "$ACTION" "$NIXOS_PATH/_flakes/$FLAKE" -H "$HOST_ID"
+nh "$SCOPE" "$ACTION" "$NIXOS_PATH/_flakes/$FLAKE" -H "$HOST_ID"
 
 # 6. 빌드 후 메인 브랜치로 복귀 (선택 사항)
 if [ "$FLAKE" == "rolling" ]; then
