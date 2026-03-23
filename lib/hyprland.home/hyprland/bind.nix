@@ -74,6 +74,10 @@ in {
       ",XF86MonBrightnessDown, exec, brightnessctl -e4 -n2 set 5%-"
     ];
 
+    bindr = [
+      "SUPER_SHIFT, Hangul, exec, systemctl --user restart app-org.fcitx.Fcitx5@autostart"
+    ];
+
     # 터치패드 제스쳐, 3손가락 쓸어넘기로 워크스페이스 전환
     gesture = "3, horizontal, workspace";
   };
