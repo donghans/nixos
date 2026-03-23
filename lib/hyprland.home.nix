@@ -10,6 +10,7 @@
     ./hyprland.home/hyprland.nix
       ./hyprland.home/hyprland/bind.nix
       ./hyprland.home/hyprland/init.nix
+      ./hyprland.home/hyprland/notify.nix
       ./hyprland.home/hyprland/ui.nix
     ./hyprland.home/hyprlock.nix
     ./hyprland.home/kitty.nix

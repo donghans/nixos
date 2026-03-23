@@ -25,7 +25,7 @@ in {
       "$mainMod, F, togglefloating,"
       "$mainMod, P, exec, ${fuzzel}"
       "$mainMod, V, exec, ${cliphist} list | ${fuzzel} --dmenu | ${cliphist} decode | ${wl-copy}"
-      "$mainMod, N, exec, cat -s ~/.local/share/notify_logs/history.log* | tac | ${fuzzel} --dmenu --width 150 --placeholder \"Search 30-day History...\""
+      "$mainMod, N, exec, ls -tr ~/.local/share/notify.log* | xargs zcat -f | tac | ${fuzzel} --dmenu --width 150 --placeholder \"Search 30-day History...\""
       "$mainMod, L, exec, hyprlock"
       "$mainMod, Hangul, exec, systemctl --user restart app-org.fcitx.Fcitx5@autostart"
 

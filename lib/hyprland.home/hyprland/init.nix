@@ -2,8 +2,6 @@
   cliphist = "${pkgs.cliphist}/bin/cliphist";
   wl-paste = "${pkgs.wl-clipboard}/bin/wl-paste";
 in {
-  imports = [ ./notify.nix ];
-
   wayland.windowManager.hyprland.systemd = {
     enable = true;
     variables = ["--all"];
@@ -27,9 +25,6 @@ in {
       # 클립보드 매니저
       "uwsm app -- ${wl-paste} --type text --watch ${cliphist} store"
       "uwsm app -- ${wl-paste} --type image --watch ${cliphist} store"
-
-      # 알림 및 로그
-      "uwsm app -- notify-logger"
 
       # 사용자 앱
       "uwsm app -- ${pkgs.tailscale}/bin/tailscale systray"
