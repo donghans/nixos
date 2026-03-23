@@ -5,8 +5,6 @@
     extraGroups = [ "wheel" "networkmanager" ];
   };
 
-  programs.nix-ld.enable = true;
-
   nix = {
     settings = {
       auto-optimise-store = true; # Nixpkgs 등의 중복 파일 자동 하드링크
