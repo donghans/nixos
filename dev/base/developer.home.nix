@@ -22,7 +22,6 @@
 
     (mkNixLDWrapper fvm [
       stdenv.cc.cc zlib fuse3 icu nss openssl curl expat # 필수 기본 라이브러리
-      unzip # fvm 내 flutter install/set 시 압축 해제에 필요
 
       libGL glib gtk3 cairo pango atk gdk-pixbuf harfbuzz fontconfig freetype # Flutter GUI / 그래픽 관련
 
@@ -31,6 +30,8 @@
 
       alsa-lib libpulseaudio dbus libdrm mesa libnotify # 오디오 및 기타 미디어
     ])
+
+    unzip # fvm 내 flutter install/set 시 압축 해제에 필요
   ] ++ (let
     # IDE 바이너리를 감싸서 옵션을 주입하는 헬퍼 함수
     wrapIDE = pkg: binName: (pkgs.symlinkJoin {
