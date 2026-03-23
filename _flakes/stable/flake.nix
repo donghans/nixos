@@ -13,6 +13,8 @@
   };
 
   outputs = { self, nixpkgs, nixpkgs-unstable, home-manager, ... }@inputs: let
+    stateVersion = "25.11";
+
     # 1. 경로 후보 정의
     primaryInfoPath = ../../dev/_info.json;  # 일반 nh 빌드 시 (flake 위치 기준)
     isoInfoPath = ./_info.json;             # iso.sh 빌드 시 (hardlink된 위치 기준)
@@ -25,34 +27,47 @@
     # 3. JSON 파일 읽기
     info = builtins.fromJSON (builtins.readFile chosenInfoPath);
 
-    stateVersion = "25.11";
     gitName = info.git.name;
     gitEmail = info.git.email;
-    username = info.username;
-
-    # [수정] JSON에서 직접 hosts 리스트 추출
     hosts = info.hosts;
 
-    # 설정 생성 헬퍼 함수
-    mkHost = { hostname, system, isLaptop, isISO ? false }: let
+    # [핵심] Home Manager 설정을 만드는 공통 함수
+    getHM = { hostname, system, isLaptop, isISO ? false }: let
+      pkgs = import nixpkgs { inherit system; config.allowUnfree = true; };
       unstable = import nixpkgs-unstable { inherit system; config.allowUnfree = true; };
-      metaConfig = { inherit stateVersion gitName gitEmail username hostname isLaptop; };
 
-      # 호스트별 디렉토리 경로 동적 지정
-      mainConfig = if isISO then [
+      # ISO 부팅일 때만 유저명을 "nixos"로 고정
+      hmUser = if isISO then "nixos" else info.username;
+      hmConfig = if isISO then ./home.nix else ../../dev/${hostname}.home.nix;
+
+      metaConfig = {
+        inherit stateVersion gitName gitEmail hostname isLaptop;
+        username = hmUser;
+      };
+    in {
+      inherit hmUser hmConfig metaConfig unstable pkgs;
+    };
+
+    # 설정 생성 헬퍼 함수
+    mkHost = hostInfo: let
+      isISO = hostInfo.isISO or false;
+      h = getHM (hostInfo // { inherit isISO; }); # 위에서 만든 공통 설정을 가져옴
+
+      mainConfig = if isISO then [ # 호스트별 디렉토리 경로 동적 지정
         "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-graphical-base.nix"
         ./configuration.nix
       ] else [
         # 일반 호스트는 dev 디렉토리의 파일을 참조
-        ../../dev/${hostname}.nix
+        ../../dev/${hostInfo.hostname}.nix
       ];
-
-      hmUser = if isISO then "nixos" else username;
-      hmConfig = if isISO then ./home.nix else ../../dev/${hostname}.home.nix;
     in
       nixpkgs.lib.nixosSystem {
-        inherit system;
-        specialArgs = { inherit inputs metaConfig unstable; };
+        inherit (hostInfo) system;
+        specialArgs = {
+          inherit inputs;
+          metaConfig = h.metaConfig;
+          unstable = h.unstable;
+        };
 
         modules = mainConfig ++ [
           home-manager.nixosModules.home-manager {
@@ -61,8 +76,12 @@
 
             # 기존에 다른 configuration으로 NixOS를 사용하다 중간에 해당 nixos configuration을 적용시켰을 때 기존 설정값을 복원가능하도록 백업해두는 옵션
             home-manager.backupFileExtension = "backup";
-            home-manager.users.${hmUser} = import hmConfig;
-            home-manager.extraSpecialArgs = { inherit inputs metaConfig unstable; };
+            home-manager.users.${h.hmUser} = import h.hmConfig;
+            home-manager.extraSpecialArgs = {
+              inherit inputs;
+              metaConfig = h.metaConfig;
+              unstable = h.unstable;
+            };
           }
         ];
       };
@@ -81,5 +100,16 @@
           isISO = true;
         };
       };
+
+    # Home Manager 독립 설정 (nh home switch)
+    homeConfigurations = nixpkgs.lib.genAttrs (map (h: h.hostname) hosts) (name: let
+      hostInfo = builtins.head (builtins.filter (h: h.hostname == name) hosts);
+      h = getHM hostInfo; # 여기서도 동일한 헬퍼 사용 (DRY)
+    in
+      home-manager.lib.homeManagerConfiguration {
+        inherit (h) pkgs;
+        extraSpecialArgs = { inherit inputs; metaConfig = h.metaConfig; unstable = h.unstable; };
+        modules = [ (import h.hmConfig) ];
+      });
   };
 }
