@@ -7,9 +7,6 @@
 
     unstable.slack
 
-    unstable.jetbrains.idea
-    unstable.jetbrains.webstorm
-    unstable.android-studio
     zed-editor
 
     unstable.antigravity
@@ -34,7 +31,25 @@
 
       alsa-lib libpulseaudio dbus libdrm mesa libnotify # 오디오 및 기타 미디어
     ])
-  ];
+  ] ++ (let
+    # IDE 바이너리를 감싸서 옵션을 주입하는 헬퍼 함수
+    wrapIDE = pkg: binName: (pkgs.symlinkJoin {
+      name = "${pkg.name}-wrapped";
+      paths = [ pkg ];
+      nativeBuildInputs = [ pkgs.makeWrapper ];
+      postBuild = ''
+        wrapProgram $out/bin/${binName} \
+          --add-flags "-Dsun.java2d.uiScale=1.0"
+      '';
+    });
+  in with unstable; [
+    # JetBrains 시리즈
+    (wrapIDE unstable.jetbrains.idea "idea")
+    (wrapIDE unstable.jetbrains.datagrip "datagrip")
+    (wrapIDE unstable.jetbrains.pycharm "pycharm")
+    (wrapIDE unstable.jetbrains.webstorm "webstorm")
+    (wrapIDE unstable.android-studio "android-studio")
+  ]);
 
   home.sessionVariables = {
     # pnpm: Btrfs CoW(reflink) 사용 강제

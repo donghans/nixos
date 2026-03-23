@@ -62,16 +62,10 @@
     enable = true;
 
     extraPortals = with pkgs; [
-      xdg-desktop-portal-gtk      # 파일 선택/테마용
       xdg-desktop-portal-hyprland # 화면 공유용
+      xdg-desktop-portal-gtk      # 파일 선택/테마용
     ];
 
-    config.common = {
-      # 모든 것의 기본은 GTK로 설정 (파일 선택 포함)
-      default = [ "gtk" ];
-      # 화면 공유 관련만 hyprland에게 위임
-      "org.freedesktop.impl.portal.ScreenCast" = [ "hyprland" ];
-      "org.freedesktop.impl.portal.Screenshot" = [ "hyprland" ];
-    };
+    config.common.default = [ "hyprland" "gtk" ];
   };
 }
