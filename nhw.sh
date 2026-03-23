@@ -5,6 +5,9 @@
 NIXOS_PATH=$(dirname $(readlink -f "$0"))
 GIT="git -C $NIXOS_PATH"
 
+DO_CLEAN=false
+CLEAN_TARGET="user"
+
 ID_FILE="$NIXOS_PATH/.current_host"
 HOST_ID=""
 
@@ -15,12 +18,22 @@ FLAKE="stable" # 기본 Flake
 # 2. 인자 분석 (예: ./manage.sh laptop switch rolling)
 for arg in "$@"; do
     case $arg in
+        clean) DO_CLEAN=true ;;
+        all) CLEAN_TARGET="all" ;;
+
         os|home) SCOPE="$arg" ;;
         switch|boot|test|update) ACTION="$arg" ;;
         rolling|stable) FLAKE="$arg" ;;
         *) HOST_ID="$arg" ;;
     esac
 done
+
+# 2-1. Clean 로직 처리 (다른 로직 무시하고 즉시 실행 후 종료)
+if [ "$DO_CLEAN" = true ]; then
+    echo "🧹 [nh] Cleaning GC roots (Target: $CLEAN_TARGET, Keep: 3)..."
+    sudo nh clean "$CLEAN_TARGET" --keep 3
+    exit 0
+fi
 
 # 3. Host ID 로직
 if [ -z "$HOST_ID" ]; then
