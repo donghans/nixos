@@ -90,7 +90,10 @@
         unstable = h.unstable;
       };
 
-      modules = mainConfig ++ [
+      modules = mainConfig ++ [{
+        nixpkgs.overlays = myOverlays;
+        nixpkgs.config.allowUnfree = true;
+      }] ++ [
         home-manager.nixosModules.home-manager {
           home-manager.useGlobalPkgs = true;
           home-manager.useUserPackages = true;
