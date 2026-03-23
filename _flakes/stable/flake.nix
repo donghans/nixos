@@ -15,6 +15,23 @@
   outputs = { self, nixpkgs, nixpkgs-unstable, home-manager, ... }@inputs: let
     stateVersion = "25.11";
 
+    myOverlays = [
+      (self: super: {
+        mkNixLDWrapper = pkg: libs: super.symlinkJoin {
+          name = "${pkg.name}-nix-ld";
+          paths = [ pkg ];
+          nativeBuildInputs = [ super.makeWrapper ];
+          postBuild = ''
+            for bin in $out/bin/*; do
+              wrapProgram "$bin" \
+                --set NIX_LD_LIBRARY_PATH "${super.lib.makeLibraryPath libs}" \
+                --set NIX_LD "${super.stdenv.cc.bintools.dynamicLinker}"
+            done
+          '';
+        };
+      })
+    ];
+
     # 1. 경로 후보 정의
     primaryInfoPath = ../../dev/_info.json;  # 일반 nh 빌드 시 (flake 위치 기준)
     isoInfoPath = ./_info.json;             # iso.sh 빌드 시 (hardlink된 위치 기준)
@@ -33,7 +50,12 @@
 
     # [핵심] Home Manager 설정을 만드는 공통 함수
     getHM = { hostname, system, isLaptop, isISO ? false }: let
-      pkgs = import nixpkgs { inherit system; config.allowUnfree = true; };
+      pkgs = import nixpkgs {
+        inherit system;
+        config.allowUnfree = true;
+        overlays = myOverlays;
+      };
+
       unstable = import nixpkgs-unstable { inherit system; config.allowUnfree = true; };
 
       # ISO 부팅일 때만 유저명을 "nixos"로 고정
@@ -60,31 +82,30 @@
         # 일반 호스트는 dev 디렉토리의 파일을 참조
         ../../dev/${hostInfo.hostname}.nix
       ];
-    in
-      nixpkgs.lib.nixosSystem {
-        inherit (hostInfo) system;
-        specialArgs = {
-          inherit inputs;
-          metaConfig = h.metaConfig;
-          unstable = h.unstable;
-        };
-
-        modules = mainConfig ++ [
-          home-manager.nixosModules.home-manager {
-            home-manager.useGlobalPkgs = true;
-            home-manager.useUserPackages = true;
-
-            # 기존에 다른 configuration으로 NixOS를 사용하다 중간에 해당 nixos configuration을 적용시켰을 때 기존 설정값을 복원가능하도록 백업해두는 옵션
-            home-manager.backupFileExtension = "backup";
-            home-manager.users.${h.hmUser} = import h.hmConfig;
-            home-manager.extraSpecialArgs = {
-              inherit inputs;
-              metaConfig = h.metaConfig;
-              unstable = h.unstable;
-            };
-          }
-        ];
+    in nixpkgs.lib.nixosSystem {
+      inherit (hostInfo) system;
+      specialArgs = {
+        inherit inputs;
+        metaConfig = h.metaConfig;
+        unstable = h.unstable;
       };
+
+      modules = mainConfig ++ [
+        home-manager.nixosModules.home-manager {
+          home-manager.useGlobalPkgs = true;
+          home-manager.useUserPackages = true;
+
+          # 기존에 다른 configuration으로 NixOS를 사용하다 중간에 해당 nixos configuration을 적용시켰을 때 기존 설정값을 복원가능하도록 백업해두는 옵션
+          home-manager.backupFileExtension = "backup";
+          home-manager.users.${h.hmUser} = import h.hmConfig;
+          home-manager.extraSpecialArgs = {
+            inherit inputs;
+            metaConfig = h.metaConfig;
+            unstable = h.unstable;
+          };
+        }
+      ];
+    };
   in {
     # JSON의 hosts 리스트를 AttrSet으로 자동 변환
     nixosConfigurations = (nixpkgs.lib.genAttrs
@@ -102,14 +123,19 @@
       };
 
     # Home Manager 독립 설정 (nh home switch)
-    homeConfigurations = nixpkgs.lib.genAttrs (map (h: h.hostname) hosts) (name: let
-      hostInfo = builtins.head (builtins.filter (h: h.hostname == name) hosts);
-      h = getHM hostInfo; # 여기서도 동일한 헬퍼 사용 (DRY)
-    in
-      home-manager.lib.homeManagerConfiguration {
+    homeConfigurations = builtins.listToAttrs (map (hostInfo: let
+      h = getHM hostInfo;
+    in {
+      name = "${h.metaConfig.username}@${hostInfo.hostname}"; # 키 이름을 "유저명@호스트명" 형식으로 생성
+      value = home-manager.lib.homeManagerConfiguration {
         inherit (h) pkgs;
-        extraSpecialArgs = { inherit inputs; metaConfig = h.metaConfig; unstable = h.unstable; };
+        extraSpecialArgs = {
+          inherit inputs;
+          metaConfig = h.metaConfig;
+          unstable = h.unstable;
+        };
         modules = [ (import h.hmConfig) ];
-      });
+      };
+    }) hosts);
   };
 }

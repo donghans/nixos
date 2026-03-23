@@ -7,27 +7,6 @@
 
   programs.nix-ld.enable = true;
 
-  nixpkgs = {
-    config.allowUnfree = true;
-
-    overlays = [
-      (self: super: {
-        mkNixLDWrapper = pkg: libs: super.symlinkJoin {
-          name = "${pkg.name}-nix-ld";
-          paths = [ pkg ];
-          nativeBuildInputs = [ super.makeWrapper ];
-          postBuild = ''
-            for bin in $out/bin/*; do
-              wrapProgram "$bin" \
-                --set NIX_LD_LIBRARY_PATH "${super.lib.makeLibraryPath libs}" \
-                --set NIX_LD "${super.stdenv.cc.bintools.dynamicLinker}"
-            done
-          '';
-        };
-      })
-    ];
-  };
-
   nix = {
     settings = {
       auto-optimise-store = true; # Nixpkgs 등의 중복 파일 자동 하드링크

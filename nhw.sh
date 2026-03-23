@@ -61,7 +61,13 @@ fi
 # 5. 빌드 실행 (nh 사용)
 echo "🚀 [nh] Building NixOS ($FLAKE) for #$HOST_ID with scope $SCOPE and action $ACTION"
 # 실제 빌드 경로는 Flake 디렉터리를 가리킵니다.
-nh "$SCOPE" "$ACTION" "$NIXOS_PATH/_flakes/$FLAKE" -H "$HOST_ID"
+if [ "$SCOPE" == "os" ]; then
+    nh os "$ACTION" "$NIXOS_PATH/_flakes/$FLAKE" -H "$HOST_ID"
+elif [ "$SCOPE" == "home" ]; then
+    nh home "$ACTION" "$NIXOS_PATH/_flakes/$FLAKE"
+else
+    echo "X Error: 명령어가 등록되지 않은 스코프입니다: $SCOPE, nhw.sh 스크립트에 추가해주세요!"
+fi
 
 # 6. 빌드 후 메인 브랜치로 복귀 (선택 사항)
 if [ "$FLAKE" == "rolling" ]; then
