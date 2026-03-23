@@ -1,5 +1,8 @@
 { config, ... }: {
-  imports = [ ./base/developer.nix ];
+  imports = [
+    ./hardware/beelink-ser7-co.nix
+    ./base/developer.nix
+  ];
 
   boot.kernelParams = [ "amd_pstate=active" ];
 
