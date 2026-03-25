@@ -8,9 +8,8 @@
   boot.kernelParams = [
     "pcie_aspm=off"                   # PCIe 전원 관리로 인한 끊김 방지
     "i915.enable_psr=1"               # Intel 패널 셀프 리프레시 활성화
-    "i8042.nopnp"                     # PnP 기능이 문제를 일으킬 때 강제 비활성화
     "pci=nocms"                       # MSI 일부 모델에서 효과가 있는 PCI 설정
-    "psmouse.synaptics_intertouch=0"  # Synaptics 패드일 경우 I2C 대신 PS/2 모드 강제
+    "i2c_designware.disable_ps=1"     # 필수: I2C 컨트롤러의 절전 상태(Power State) 비활성화
   ];
 
   boot.blacklistedKernelModules = [ "nouveau" "nvidia" "nvidia_drm" "nvidia_modeset" ];
@@ -25,9 +24,6 @@
       fsType = "vfat";
       options = [ "fmask=0022" "dmask=0022" ];
     };
-
-  # 절전 설정 (발열 제어)
-  powerManagement.powertop.enable = true;
 
   # NVIDIA Fine Grained Control(정밀 제어): GPU를 미사용중이므로 대기전력 자체를 없애버려 발열 제어
   hardware.nvidia.powerManagement.finegrained = true;
@@ -58,12 +54,15 @@
 
       # 하드디스크 및 장치 절전
       SATA_LINKPWR_ON_BAT = "med_power_with_dipm";
-      USB_AUTOSUSPEND = 1;
+      USB_AUTOSUSPEND = 0;
       USB_EXCLUDE_PHONE = 1; # 폰 연결 시 충전 방해 금지 (선택)
+      USB_DENYLIST = "04f3:2ffa"; # lsusb에서 확인된 Elan Touchscreen을 블랙리스트에 추가
 
       # 배터리 <=> AC 전환간 최적화가 풀리는 현상 방지
       RUNTIME_PM_ON_AC = "auto";
       RUNTIME_PM_ON_BAT = "auto";
+      RUNTIME_PM_DENYLIST = "0000:00:15.0"; # 앞에 0000: 추가
+      RUNTIME_PM_DRIVER_DENYLIST = "i2c_designware";
 
       # 배터리 모드에서도 Wi-Fi 절전 기능을 끕니다. (가장 중요)
       WIFI_PWR_ON_AC = "off";
@@ -71,17 +70,16 @@
 
       # 덮개를 닫았을 때(배터리 모드) 무선 장치를 끄는 기능을 비활성화합니다.
       DEVICES_TO_DISABLE_ON_BAT_NOT_IN_USE = "";
+
+      # VM writeback 해결
+      MAX_LOST_WORK_SECS_ON_BAT = 60;
+      MAX_LOST_WORK_SECS_ON_AC = 15;
     };
   };
 
   services.udev.extraRules = ''
-    # 터치패드 전원 관리 강제 활성화 (자동 절전 방지)
-    # ELAN0305:00 04F3:31FD Touchpad 장치에 대해 절전 기능을 끕니다.
-    ACTION=="add", SUBSYSTEM=="i2c", ATTR{name}=="ELAN0305:00 04F3:31FD Touchpad", ATTR{power/control}="on"
-
-    # 전원 어댑터 상태가 바뀔 때마다 (AC -> BAT, BAT -> AC) powertop 자동 최적화 실행
-    SUBSYSTEM=="power_supply", ATTR{online}=="0", RUN+="${pkgs.powertop}/bin/powertop --auto-tune"
-    SUBSYSTEM=="power_supply", ATTR{online}=="1", RUN+="${pkgs.powertop}/bin/powertop --auto-tune"
+    # KERNEL 이름을 더 확실하게 지정하고, 마지막 규칙임을 명시
+    ACTION=="add|change", SUBSYSTEM=="pci", KERNEL=="0000:00:15.0", ATTR{power/control}="on", OPTIONS+="last_rule"
   '';
 
   services.logind.settings.Login = {
