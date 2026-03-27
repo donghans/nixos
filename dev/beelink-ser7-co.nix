@@ -4,7 +4,10 @@
     ./base/developer.nix
   ];
 
-  boot.kernelParams = [ "amd_pstate=active" ];
+  boot.kernelParams = [
+    "amd_pstate=active" # 주전원 전력공급 시 충분한 성능을 제공하는 세팅
+    # "amd_pstate=passive" # USB-PD 전력공급 시 컴퓨터가 픽하고 꺼지는걸 방지하는 세팅
+  ];
 
   fileSystems."/boot" =
     { device = "/dev/disk/by-uuid/C125-54BB";
@@ -13,6 +16,7 @@
     };
 
   services = {
+    # 주전원 전력공급 시 충분한 성능을 제공하는 세팅
     auto-cpufreq = {
       enable = true;
 
@@ -21,6 +25,19 @@
         turbo = "always";
       };
     };
+
+    # USB-PD 전력공급 시 컴퓨터가 픽하고 꺼지는걸 방지하는 세팅
+    # tlp = {
+    #   enable = true;
+    #   settings = {
+    #     CPU_BOOST_ON_AC = 0;
+
+    #     CPU_SCALING_GOVERNOR_ON_AC = "powersave";
+    #     CPU_ENERGE_PERF_POLICY_ON_AC = "balance_performance";
+
+    #     CPU_SCALING_MAX_FREQ_ON_AC = 3500000;
+    #   };
+    # };
 
     irqbalance.enable = true;
   };
