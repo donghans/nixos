@@ -23,7 +23,7 @@ in {
       "uwsm app -- ${pkgs.hyprpaper}/bin/hyprpaper"
 
       # 클립보드 매니저
-      "uwsm app -- ${wl-paste} --type text --watch ${cliphist} store"
+      "uwsm app -- ${wl-paste} --type text --watch bash -c '${pkgs.cliphist}/bin/cliphist store'"
       "uwsm app -- ${wl-paste} --type image --watch ${cliphist} store"
 
       # 사용자 앱

@@ -5,7 +5,7 @@
     bitwarden-desktop
     bitwarden-cli
 
-    unstable.slack
+    slack
 
     zed-editor
 
