@@ -7,12 +7,13 @@
 
     # 기본 패키지에 사용될 Stable 채널
     nixpkgs.url      =                "github:nixos/nixpkgs/nixos-25.11"; # 1. 패키지 저장소 박제
-    home-manager.url = "github:nix-community/home-manager/release-25.11"; # 2. Home-manager 박제 (채널 대신 여기서 직접 가져옴)
+    nixpkgs-2405.url =                "github:nixos/nixpkgs/nixos-24.05"; # 2. Prisma 5 등 이전 패키지를 사용하기 위한 패키지 저장소
+    home-manager.url = "github:nix-community/home-manager/release-25.11"; # 3. Home-manager 박제 (채널 대신 여기서 직접 가져옴)
 
     home-manager.inputs.nixpkgs.follows = "nixpkgs"; # HM이 시스템과 같은 Nix 패키지 버전을 쓰도록 강제
   };
 
-  outputs = { self, nixpkgs, nixpkgs-unstable, home-manager, ... }@inputs: let
+  outputs = { self, nixpkgs, nixpkgs-2405, nixpkgs-unstable, home-manager, ... }@inputs: let
     stateVersion = "25.11";
 
     myOverlays = [
