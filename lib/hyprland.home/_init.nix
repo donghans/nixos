@@ -8,6 +8,28 @@ in {
   };
 
   wayland.windowManager.hyprland.settings = {
+    "$mainMod" = "SUPER";
+
+    ### INPUT ###
+    input = {
+      kb_layout = "kr";
+      kb_options = "korean:ralt_hangul,korean:rctrl_hanja";
+
+      follow_mouse = 1;
+      sensitivity = 0;
+      touchpad = {
+        natural_scroll = true;
+      };
+    };
+
+    # Device 설정이 필요할 경우 추가할 것
+    # device = [
+    #   {
+    #     name = "epic-mouse-v1";
+    #     sensitivity = -0.5;
+    #   }
+    # ];
+
     exec-once = [
       # 시스템 설정 관련 (uwsm 없이 직접 실행해도 무방한 것들)
       "rfkill unblock bluetooth && bluetoothctl power on"

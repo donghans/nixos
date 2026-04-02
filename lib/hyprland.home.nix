@@ -6,16 +6,16 @@
 
   imports = [
     ./default.home.nix
-    ./hyprland.home/fuzzel.nix
-    ./hyprland.home/hyprland.nix
-      ./hyprland.home/hyprland/bind.nix
-      ./hyprland.home/hyprland/init.nix
-      ./hyprland.home/hyprland/notify.nix
-      ./hyprland.home/hyprland/ui.nix
-    ./hyprland.home/hyprlock.nix
-    ./hyprland.home/kitty.nix
-    ./hyprland.home/mako.nix
-    ./hyprland.home/waybar.nix
+    ./hyprland.home/_init.nix
+    ./hyprland.home/bind.nix
+    ./hyprland.home/notify.nix
+    ./hyprland.home/ui.nix
+    ./hyprland.home/winrule.nix
+    ./hyprland.home/ext/fuzzel.nix
+    ./hyprland.home/ext/hyprlock.nix
+    ./hyprland.home/ext/kitty.nix
+    ./hyprland.home/ext/mako.nix
+    ./hyprland.home/ext/waybar.nix
   ];
 
   home.packages = with pkgs; [

@@ -1,29 +1,5 @@
-{ pkgs, ... }: {
-  wayland.windowManager.hyprland.enable = true;
-
+{ pkgs, lib, ... }: {
   wayland.windowManager.hyprland.settings = {
-    "$mainMod" = "SUPER";
-
-    ### INPUT ###
-    input = {
-      kb_layout = "kr";
-      kb_options = "korean:ralt_hangul,korean:rctrl_hanja";
-
-      follow_mouse = 1;
-      sensitivity = 0;
-      touchpad = {
-        natural_scroll = true;
-      };
-    };
-
-    device = [
-      {
-        name = "epic-mouse-v1";
-        sensitivity = -0.5;
-      }
-    ];
-
-    ### WINDOWS AND WORKSPACES ###
     windowrulev2 = [
       "float, class:.*"
 
@@ -55,6 +31,4 @@
       "rounding 0, class:^(jetbrains-.*)$, title:^(win.*)$"
     ];
   };
-
-  services.hypridle.enable = true; # 보안: 자리를 비우면 화면 잠금 준비 (hypridle)
-}
+};
