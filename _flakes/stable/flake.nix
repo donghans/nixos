@@ -18,34 +18,34 @@
 
     myOverlays = [
       (self: super: {
-        mkUnifiedWrapper = {
+        mkWrapper = {
           pkg,
           name ? "${pkg.name}-wrapped",
           binName ? "*",
           libs ? [],
           env ? {},
           addFlags ? [],
-          prefixPath ? []
+          bins ? []
         }: super.symlinkJoin {
           inherit name;
           paths = [ pkg ];
           nativeBuildInputs = [ super.makeWrapper ];
           postBuild = let
             ldPath = super.lib.makeLibraryPath libs;
-            
-            argsList = 
+
+            argsList =
               (super.lib.optionals (libs != []) [
                 ''--set NIX_LD_LIBRARY_PATH "${ldPath}"''
                 ''--set NIX_LD "${super.stdenv.cc.bintools.dynamicLinker}"''
               ]) ++
-              (super.lib.optionals (prefixPath != []) [
-                ''--prefix PATH : "${super.lib.makeBinPath prefixPath}"''
+              (super.lib.optionals (bins != []) [
+                ''--prefix PATH : "${super.lib.makeBinPath bins}"''
               ]) ++
               (super.lib.mapAttrsToList (k: v: ''--set ${k} "${v}"'') env) ++
               (super.lib.optionals (addFlags != []) [
                 ''--add-flags "${super.lib.concatStringsSep " " addFlags}"''
               ]);
-              
+
             bashArgs = super.lib.concatStringsSep " \\\n  " argsList;
           in ''
             ${super.lib.optionalString (builtins.length argsList > 0) ''
