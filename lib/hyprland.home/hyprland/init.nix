@@ -22,9 +22,8 @@ in {
       "uwsm app -- ${pkgs.waybar}/bin/waybar"
       "uwsm app -- ${pkgs.hyprpaper}/bin/hyprpaper"
 
-      # 클립보드 매니저
-      "uwsm app -- ${wl-paste} --type text --watch bash -c '${pkgs.cliphist}/bin/cliphist store'"
-      "uwsm app -- ${wl-paste} --type image --watch ${cliphist} store"
+      # 클립보드 안정성 및 지속성 (XWayland 브릿지 역할)
+      "uwsm app -- ${pkgs.wl-clip-persist}/bin/wl-clip-persist --clipboard regular"
 
       # 사용자 앱
       "uwsm app -- ${pkgs.tailscale}/bin/tailscale systray"

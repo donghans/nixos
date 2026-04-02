@@ -31,6 +31,8 @@
 
     nemo
 
+    wl-clip-persist
+
     (unstable.vivaldi.override {
       proprietaryCodecs = true;
       vivaldi-ffmpeg-codecs = unstable.vivaldi-ffmpeg-codecs;
