@@ -18,16 +18,49 @@
 
     myOverlays = [
       (self: super: {
-        mkNixLDWrapper = pkg: libs: super.symlinkJoin {
-          name = "${pkg.name}-nix-ld";
+        mkUnifiedWrapper = {
+          pkg,
+          name ? "${pkg.name}-wrapped",
+          binName ? "*",
+          libs ? [],
+          env ? {},
+          addFlags ? [],
+          prefixPath ? []
+        }: super.symlinkJoin {
+          inherit name;
           paths = [ pkg ];
           nativeBuildInputs = [ super.makeWrapper ];
-          postBuild = ''
-            for bin in $out/bin/*; do
-              wrapProgram "$bin" \
-                --set NIX_LD_LIBRARY_PATH "${super.lib.makeLibraryPath libs}" \
-                --set NIX_LD "${super.stdenv.cc.bintools.dynamicLinker}"
-            done
+          postBuild = let
+            ldPath = super.lib.makeLibraryPath libs;
+            
+            argsList = 
+              (super.lib.optionals (libs != []) [
+                ''--set NIX_LD_LIBRARY_PATH "${ldPath}"''
+                ''--set NIX_LD "${super.stdenv.cc.bintools.dynamicLinker}"''
+              ]) ++
+              (super.lib.optionals (prefixPath != []) [
+                ''--prefix PATH : "${super.lib.makeBinPath prefixPath}"''
+              ]) ++
+              (super.lib.mapAttrsToList (k: v: ''--set ${k} "${v}"'') env) ++
+              (super.lib.optionals (addFlags != []) [
+                ''--add-flags "${super.lib.concatStringsSep " " addFlags}"''
+              ]);
+              
+            bashArgs = super.lib.concatStringsSep " \\\n  " argsList;
+          in ''
+            ${super.lib.optionalString (builtins.length argsList > 0) ''
+            if [ "${binName}" = "*" ]; then
+              for bin in $out/bin/*; do
+                if [ -f "$bin" ]; then
+                  wrapProgram "$bin" \
+                    ${bashArgs}
+                fi
+              done
+            else
+              wrapProgram "$out/bin/${binName}" \
+                ${bashArgs}
+            fi
+            ''}
           '';
         };
       })

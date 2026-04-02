@@ -17,9 +17,10 @@
 
     (python312.withPackages (ps: with ps; [ pip virtualenv ]))
 
-    (pkgs.symlinkJoin {
-      name = "fvm-wrapped";
-      paths = [(mkNixLDWrapper fvm [
+    (pkgs.mkUnifiedWrapper {
+      pkg = fvm;
+      binName = "fvm";
+      libs = [
         stdenv.cc.cc zlib fuse3 icu nss openssl curl expat # 필수 기본 라이브러리
 
         libGL glib gtk3 cairo pango atk gdk-pixbuf harfbuzz fontconfig freetype # Flutter GUI / 그래픽 관련
@@ -28,24 +29,15 @@
         # libX11 libXcomposite libXcursor libXdamage libXext libXfixes libXi libXrender libXtst libXrandr libXScrnSaver libxcb libxkbcommon
 
         alsa-lib libpulseaudio dbus libdrm mesa libnotify # 오디오 및 기타 미디어
-      ])];
-      nativeBuildInputs = [ pkgs.makeWrapper ];
-      postBuild = ''
-        wrapProgram $out/bin/fvm \
-        --prefix PATH : "${pkgs.lib.makeBinPath [ unzip ]}" \
-        --set SHELL "/run/current-system/sw/bin/sh"
-      '';
+      ];
+      prefixPath = [ unzip ];
+      env = { SHELL = "/run/current-system/sw/bin/sh"; };
     })
   ] ++ (let
     # IDE 바이너리를 감싸서 옵션을 주입하는 헬퍼 함수
-    wrapIDE = pkg: binName: (pkgs.symlinkJoin {
-      name = "${pkg.name}-wrapped";
-      paths = [ pkg ];
-      nativeBuildInputs = [ pkgs.makeWrapper ];
-      postBuild = ''
-        wrapProgram $out/bin/${binName} \
-        --add-flags "-Dsun.java2d.uiScale=1.0"
-      '';
+    wrapIDE = pkg: binName: (pkgs.mkUnifiedWrapper {
+      inherit pkg binName;
+      addFlags = [ "-Dsun.java2d.uiScale=1.0" ];
     });
   in with unstable; [
     # JetBrains 시리즈
@@ -57,23 +49,19 @@
   ]) ++ (let
     pkgs-2405 = inputs.nixpkgs-2405.legacyPackages.${pkgs.system};
     # Node를 감싸서 옵션을 주입하는 헬퍼 함수
-    wrapNode = pkg: binName: (pkgs.symlinkJoin {
-      name = "${pkg.name}-wrapped";
-      paths = [(mkNixLDWrapper pkg [
-        pkgs-2405.nodePackages.prisma pkgs-2405.prisma-engines stdenv.cc.cc openssl
-      ])];
-      nativeBuildInputs = [ pkgs.makeWrapper ];
-      postBuild = ''
-        wrapProgram $out/bin/${binName} \
-        --prefix PATH : "${pkgs.lib.makeBinPath [ openssl ]}" \
-        --set PNPM_PACKAGE_IMPORT_METHOD "clone" \
-        --set PNPM_STORE_DIR "/home/${metaConfig.username}/.local/share/pnpm/store" \
-        --set PRISMA_QUERY_ENGINE_LIBRARY "${pkgs-2405.prisma-engines}/lib/libquery_engine.node" \
-        --set PRISMA_QUERY_ENGINE_BINARY "${pkgs-2405.prisma-engines}/bin/query-engine" \
-        --set PRISMA_SCHEMA_ENGINE_BINARY "${pkgs-2405.prisma-engines}/bin/schema-engine" \
-        --set PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING "1" \
-        --set PRISMA_CLI_QUERY_ENGINE_TYPE "library"
-      '';
+    wrapNode = pkg: binName: (pkgs.mkUnifiedWrapper {
+      inherit pkg binName;
+      libs = [ pkgs-2405.nodePackages.prisma pkgs-2405.prisma-engines stdenv.cc.cc openssl ];
+      prefixPath = [ openssl ];
+      env = {
+        PNPM_PACKAGE_IMPORT_METHOD = "clone";
+        PNPM_STORE_DIR = "/home/${metaConfig.username}/.local/share/pnpm/store";
+        PRISMA_QUERY_ENGINE_LIBRARY = "${pkgs-2405.prisma-engines}/lib/libquery_engine.node";
+        PRISMA_QUERY_ENGINE_BINARY = "${pkgs-2405.prisma-engines}/bin/query-engine";
+        PRISMA_SCHEMA_ENGINE_BINARY = "${pkgs-2405.prisma-engines}/bin/schema-engine";
+        PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING = "1";
+        PRISMA_CLI_QUERY_ENGINE_TYPE = "library";
+      };
     });
   in with pkgs; [
     (wrapNode nodejs_24 "node")
