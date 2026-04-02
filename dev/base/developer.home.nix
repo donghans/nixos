@@ -1,5 +1,8 @@
 { pkgs, inputs, unstable, lib, metaConfig, ... }: {
-  imports = [ ../../lib/hyprland.home.nix ];
+  imports = [
+    ../../lib/hyprland.home.nix
+    ./shell-yarn.nix
+  ];
 
   home.packages = with pkgs; [
     bitwarden-desktop
@@ -72,7 +75,6 @@
   home.shellAliases = {
     npm = "pnpm";
     npx = "pnpm dlx";
-    yarn = "pnpm";
   };
 
   programs.git.enable = true;
