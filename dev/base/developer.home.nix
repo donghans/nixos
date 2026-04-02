@@ -60,7 +60,9 @@
       libs = [ stdenv.cc.cc ];
       bins = [ prisma_5 openssl ];
       env = {
-        PNPM_PACKAGE_IMPORT_METHOD = "clone"; # btrfs CoW 활용
+        PNPM_PACKAGE_IMPORT_METHOD = "reflink"; # Btrfs CoW를 활용한 용량 및 성능 최적화
+        PNPM_PUBLIC_HOIST_PATTERN = "*"; # Yarn v1/npm 스타일의 호이스팅 모방 (호환성 극대화)
+        PNPM_SHAMEFULLY_HOIST = "true"; # 의존성 내의 의존성까지 모두 호이스팅
         PNPM_STORE_DIR = "/home/${metaConfig.username}/.local/share/pnpm/store";
         PRISMA_QUERY_ENGINE_LIBRARY = "${prisma-engines_5}/lib/libquery_engine.node";
         PRISMA_QUERY_ENGINE_BINARY = "${prisma-engines_5}/bin/query-engine";
