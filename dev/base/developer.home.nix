@@ -66,15 +66,13 @@
       postBuild = ''
         wrapProgram $out/bin/${binName} \
         --prefix PATH : "${pkgs.lib.makeBinPath [ openssl ]}" \
-        # pnpm: Btrfs CoW(reflink) 사용 강제
         --set PNPM_PACKAGE_IMPORT_METHOD "clone" \
-        # pnpm: 저장소 위치 지정
         --set PNPM_STORE_DIR "/home/${metaConfig.username}/.local/share/pnpm/store" \
         --set PRISMA_QUERY_ENGINE_LIBRARY "${pkgs-2405.prisma-engines}/lib/libquery_engine.node" \
         --set PRISMA_QUERY_ENGINE_BINARY "${pkgs-2405.prisma-engines}/bin/query-engine" \
         --set PRISMA_SCHEMA_ENGINE_BINARY "${pkgs-2405.prisma-engines}/bin/schema-engine" \
         --set PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING "1" \
-        --set PRISMA_CLI_QUERY_ENGINE_TYPE "library" # OpenSSL 감지 경고를 줄여줌
+        --set PRISMA_CLI_QUERY_ENGINE_TYPE "library"
       '';
     });
   in with pkgs; [
