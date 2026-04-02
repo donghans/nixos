@@ -44,6 +44,16 @@ if [ -z "$HOST_ID" ]; then
         exit 1
     fi
 else
+    # Host ID 유효성 검사 (_info.json 기준)
+    INFO_JSON="$NIXOS_PATH/dev/_info.json"
+    if [ -f "$INFO_JSON" ]; then
+        # jq를 사용하여 hosts 배열 내에 해당 hostname이 있는지 확인
+        if ! jq -e ".hosts[] | select(.hostname == \"$HOST_ID\")" "$INFO_JSON" > /dev/null; then
+            echo "❌ Error: '$HOST_ID'는 dev/_info.json의 호스트 목록에 존재하지 않습니다."
+            echo "📍 등록된 호스트: $(jq -r '.hosts[].hostname' "$INFO_JSON" | tr '\n' ' ')"
+            exit 1
+        fi
+    fi
     echo "$HOST_ID" > "$ID_FILE"
 fi
 
