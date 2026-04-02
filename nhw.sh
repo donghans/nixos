@@ -30,8 +30,13 @@ done
 
 # 2-1. Clean 로직 처리 (다른 로직 무시하고 즉시 실행 후 종료)
 if [ "$DO_CLEAN" = true ]; then
-    echo "🧹 [nh] Cleaning GC roots (Target: $CLEAN_TARGET, Keep: 3)..."
-    sudo nh clean "$CLEAN_TARGET" --keep 3
+    if [ "$CLEAN_TARGET" = "all" ]; then
+        echo "🧹 [nh] Cleaning GC roots (Target: all, Keep: 3) with sudo..."
+        sudo nh clean all --keep 3
+    else
+        echo "🧹 [nh] Cleaning GC roots (Target: $CLEAN_TARGET, Keep: 3)..."
+        nh clean "$CLEAN_TARGET" --keep 3
+    fi
     exit 0
 fi
 
