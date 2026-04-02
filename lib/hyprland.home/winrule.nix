@@ -31,4 +31,4 @@
       "rounding 0, class:^(jetbrains-.*)$, title:^(win.*)$"
     ];
   };
-};
+}
