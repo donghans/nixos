@@ -2,6 +2,8 @@
   cliphist = "${pkgs.cliphist}/bin/cliphist";
   wl-paste = "${pkgs.wl-clipboard}/bin/wl-paste";
 in {
+  wayland.windowManager.hyprland.enable = true;
+
   wayland.windowManager.hyprland.systemd = {
     enable = true;
     variables = ["--all"];
