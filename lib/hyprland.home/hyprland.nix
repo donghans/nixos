@@ -29,6 +29,18 @@
 
       "nofocus, class:^$, title:^$, xwayland:1, floating:1, fullscreen:0, pinned:0"
 
+      # Authentication Prompts (Gnome Keyring, Polkit)
+      "float, class:^(gcr-prompter)$"
+      "dimaround, class:^(gcr-prompter)$"
+      "center, class:^(gcr-prompter)$"
+      "stayfocused, class:^(gcr-prompter)$"
+      "pin, class:^(gcr-prompter)$"
+
+      "float, class:^(org.gnome.PolkitAgent1.*)$"
+      "dimaround, class:^(org.gnome.PolkitAgent1.*)$"
+      "center, class:^(org.gnome.PolkitAgent1.*)$"
+      "stayfocused, class:^(org.gnome.PolkitAgent1.*)$"
+
       "float, class:hyprland-run"
       "move 20 100%-120, class:hyprland-run"
 
