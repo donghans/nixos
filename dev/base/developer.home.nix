@@ -90,6 +90,10 @@
   programs.git.settings.user.name  = metaConfig.gitName;
   programs.git.settings.user.email = metaConfig.gitEmail;
 
+  xdg.mimeApps.defaultApplications = {
+    "x-scheme-handler/slack" = [ "slack.desktop" ];
+  };
+
   wayland.windowManager.hyprland.settings = {
     input = {
       # 1. 마우스 기본 속도 (-1.0 ~ 1.0, 0이 기본값)

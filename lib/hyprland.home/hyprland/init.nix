@@ -55,15 +55,16 @@ in {
     ELECTRON_OZONE_PLATFORM_HINT = "auto";
   };
 
-  xdg.portal = {
-    enable = true;
-
-    extraPortals = with pkgs; [
+  xdg = {
+    portal.enable = true;
+    portal.extraPortals = with pkgs; [
       xdg-desktop-portal-hyprland # 화면 공유용
       xdg-desktop-portal-gtk      # 파일 선택/테마용
     ];
 
-    config.common.default = [ "hyprland" "gtk" ];
+    portal.config.common.default = [ "hyprland" "gtk" ];
+
+    mimeApps.enable = true;
   };
 
   programs = {
