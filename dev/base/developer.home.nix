@@ -5,35 +5,15 @@
     bitwarden-desktop
     bitwarden-cli
 
-    slack
+    unstable.slack
 
-    zed-editor
+    unstable.zed-editor
 
-    unstable.antigravity
     unstable.claude-code
     unstable.gemini-cli
 
-    jdk21 # Antigravity 요구사항
-
     (python312.withPackages (ps: with ps; [ pip virtualenv ]))
-
-    (pkgs.mkUnifiedWrapper {
-      pkg = fvm;
-      binName = "fvm";
-      libs = [
-        stdenv.cc.cc zlib fuse3 icu nss openssl curl expat # 필수 기본 라이브러리
-
-        libGL glib gtk3 cairo pango atk gdk-pixbuf harfbuzz fontconfig freetype # Flutter GUI / 그래픽 관련
-
-        wayland # X11 / Wayland 관련 (JetBrains와 Hyprland 환경 대응)
-        # libX11 libXcomposite libXcursor libXdamage libXext libXfixes libXi libXrender libXtst libXrandr libXScrnSaver libxcb libxkbcommon
-
-        alsa-lib libpulseaudio dbus libdrm mesa libnotify # 오디오 및 기타 미디어
-      ];
-      prefixPath = [ unzip ];
-      env = { SHELL = "/run/current-system/sw/bin/sh"; };
-    })
-  ] ++ (let
+  ] ++ (let  # ============== Jetbrains IDEs ===============
     # IDE 바이너리를 감싸서 옵션을 주입하는 헬퍼 함수
     wrapIDE = pkg: binName: (pkgs.mkUnifiedWrapper {
       inherit pkg binName;
@@ -46,15 +26,34 @@
     (wrapIDE jetbrains.pycharm "pycharm")
     (wrapIDE jetbrains.webstorm "webstorm")
     (wrapIDE android-studio "android-studio")
-  ]) ++ (let
+  ]) ++ (let # ==================== FVM ====================
+    # FVM 바이너리를 감싸서 옵션 및 라이브러리를 주입하는 헬퍼 함수
+    wrapFVM = pkg: binName: (pkgs.mkUnifiedWrapper {
+      inherit pkg binName;
+      libs = [
+        stdenv.cc.cc zlib fuse3 icu nss openssl curl expat # 필수 기본 라이브러리
+
+        libGL glib gtk3 cairo pango atk gdk-pixbuf harfbuzz fontconfig freetype # Flutter GUI / 그래픽 관련
+
+        wayland # X11 / Wayland 관련 (JetBrains와 Hyprland 환경 대응)
+        # libX11 libXcomposite libXcursor libXdamage libXext libXfixes libXi libXrender libXtst libXrandr libXScrnSaver libxcb libxkbcommon
+
+        alsa-lib libpulseaudio dbus libdrm mesa libnotify # 오디오 및 기타 미디어
+      ];
+      prefixPath = [ unzip ]; # FVM install 시 사용하는 unzip 등록
+      env = { SHELL = "/run/current-system/sw/bin/sh"; }; # FVM이 ~/.bash_profile 읽는것을 방지
+    });
+  in with pkgs; [
+    (wrapFVM fvm "fvm")
+  ]) ++ (let # ========== Node.js / pnpm / Prisma ==========
     pkgs-2405 = inputs.nixpkgs-2405.legacyPackages.${pkgs.system};
-    # Node를 감싸서 옵션을 주입하는 헬퍼 함수
+    # Node를 감싸서 옵션 및 라이브러리를 주입하는 헬퍼 함수
     wrapNode = pkg: binName: (pkgs.mkUnifiedWrapper {
       inherit pkg binName;
       libs = [ pkgs-2405.nodePackages.prisma pkgs-2405.prisma-engines stdenv.cc.cc openssl ];
       prefixPath = [ openssl ];
       env = {
-        PNPM_PACKAGE_IMPORT_METHOD = "clone";
+        PNPM_PACKAGE_IMPORT_METHOD = "clone"; # btrfs CoW 활용
         PNPM_STORE_DIR = "/home/${metaConfig.username}/.local/share/pnpm/store";
         PRISMA_QUERY_ENGINE_LIBRARY = "${pkgs-2405.prisma-engines}/lib/libquery_engine.node";
         PRISMA_QUERY_ENGINE_BINARY = "${pkgs-2405.prisma-engines}/bin/query-engine";
