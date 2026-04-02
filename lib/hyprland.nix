@@ -57,15 +57,4 @@
       emoji = [ "Noto Color Emoji" ];
     };
   };
-
-  xdg.portal = {
-    enable = true;
-
-    extraPortals = with pkgs; [
-      xdg-desktop-portal-hyprland # 화면 공유용
-      xdg-desktop-portal-gtk      # 파일 선택/테마용
-    ];
-
-    config.common.default = [ "hyprland" "gtk" ];
-  };
 }

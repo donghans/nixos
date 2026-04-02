@@ -8,9 +8,8 @@ in {
   };
 
   wayland.windowManager.hyprland.settings = {
-    "exec-once" = [
+    exec-once = [
       # 시스템 설정 관련 (uwsm 없이 직접 실행해도 무방한 것들)
-      "hyprctl setcursor Bibata-Modern-Ice 24"
       "rfkill unblock bluetooth && bluetoothctl power on"
 
       # 필수 서비스 (uwsm app 사용)
@@ -55,6 +54,25 @@ in {
     # 기타 앱 힌트
     ELECTRON_OZONE_PLATFORM_HINT = "auto";
   };
+
+  xdg.portal = {
+    enable = true;
+
+    extraPortals = with pkgs; [
+      xdg-desktop-portal-hyprland # 화면 공유용
+      xdg-desktop-portal-gtk      # 파일 선택/테마용
+    ];
+
+    config.common.default = [ "hyprland" "gtk" ];
+  };
+
+  programs = {
+    bash.enable = true;
+
+    git.settings.credential.helper = "${pkgs.gh}/bin/gh auth git-credential";
+  };
+
+  services.cliphist.enable = true;
 
   services.my-notification-logger.enable = true;
 }

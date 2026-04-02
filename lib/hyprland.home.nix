@@ -39,47 +39,4 @@
       commandLineArgs = [ "--lang=ko" ];
     })
   ];
-
-  programs = {
-    bash.enable = true;
-
-    git.settings.credential.helper = "${pkgs.gh}/bin/gh auth git-credential";
-  };
-
-  services.cliphist.enable = true;
-
-  # 테마 설정 (다크모드 선호)
-  home.pointerCursor = {
-    gtk.enable = true;
-
-    # x11.enable = true; # XWayland 앱들을 위해 필요할 수 있습니다.
-    package = pkgs.bibata-cursors; # 추천하는 깔끔한 커서 테마
-    name = "Bibata-Modern-Ice";
-    size = 24;
-  };
-
-  gtk = {
-    enable = true;
-
-    theme = { name = "Adwaita-dark"; package = pkgs.gnome-themes-extra; };
-    iconTheme = { name = "Papirus-Dark"; package = pkgs.papirus-icon-theme; };
-    cursorTheme = { name = "Bibata-Modern-Ice"; package = pkgs.bibata-cursors; };
-
-    # GTK4 앱들이 다크모드를 인식하게 만드는 핵심 설정
-    gtk3.extraConfig.gtk-application-prefer-dark-theme = 1;
-    gtk4.extraConfig.gtk-application-prefer-dark-theme = 1;
-  };
-
-  qt = {
-    enable = true;
-    platformTheme.name = "gtk"; # GTK 설정을 따라감
-    # style.name = "adwaita-dark";
-    # platformTheme.name = "qt5ct"; # 여기서 선언하면 sessionVariables를 알아서 세팅합니다.
-  };
-
-  dconf.settings = {
-    "org/gnome/desktop/interface" = {
-      color-scheme = "prefer-dark"; # 시스템 전역 다크모드 선호 신호
-    };
-  };
 }
