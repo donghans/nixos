@@ -78,8 +78,8 @@
   };
 
   services.udev.extraRules = ''
-    # KERNEL 이름을 더 확실하게 지정하고, 마지막 규칙임을 명시
-    ACTION=="add|change", SUBSYSTEM=="pci", KERNEL=="0000:00:15.0", ATTR{power/control}="on", OPTIONS+="last_rule"
+    # KERNEL 이름을 더 확실하게 지정
+    ACTION=="add|change", SUBSYSTEM=="pci", KERNEL=="0000:00:15.0", ATTR{power/control}="on"
   '';
 
   services.logind.settings.Login = {
