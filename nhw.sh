@@ -83,15 +83,22 @@ fi
 [ -z "$HOST_ID" ] && HOST_ID="$HOST"
 [ -z "$HOST_ID" ] && echo "❌ Error: Host ID가 필요합니다." && exit 1
 
-INFO_JSON="$NIXOS_PATH/dev/_info.json"
-HOST_CONFIG=$(jq -e ".hosts[] | select(.hostname == \"$HOST_ID\")" "$INFO_JSON" 2>/dev/null)
-[ $? -ne 0 ] && echo "❌ Error: '$HOST_ID'는 등록되지 않은 호스트입니다." && exit 1
-update_env "HOST" "$HOST_ID"
-IS_ROLLING=$(echo "$HOST_CONFIG" | jq -r '.isRolling')
+if [ "$HOST_ID" = "default" ] || [ "$HOST_ID" = "_default" ]; then
+    HOST_ID="_default"
+    IS_ROLLING="false"
+    echo "🎯 Using special host: _default (Common lock for ISO/Templates)"
+else
+    INFO_JSON="$NIXOS_PATH/dev/_info.json"
+    HOST_CONFIG=$(jq -e ".hosts[] | select(.hostname == \"$HOST_ID\")" "$INFO_JSON" 2>/dev/null)
+    [ $? -ne 0 ] && echo "❌ Error: '$HOST_ID'는 등록되지 않은 호스트입니다." && exit 1
+    update_env "HOST" "$HOST_ID"
+    IS_ROLLING=$(echo "$HOST_CONFIG" | jq -r '.isRolling')
+fi
 
 # 4. Lock 파일 결정
 SELECTED_LOCK=""
-STABLE_LOCK="$STABLE_LOCKS_DIR/$HOST_ID.lock"
+HOST_SPECIFIC_LOCK="$STABLE_LOCKS_DIR/$HOST_ID.lock"
+STABLE_LOCK="$HOST_SPECIFIC_LOCK"
 [ ! -f "$STABLE_LOCK" ] && STABLE_LOCK="$STABLE_LOCKS_DIR/_default.lock"
 
 # 인자로 .lock 파일이 들어온 경우 (파일명만 추출하여 rolling/ 내에서 찾음)
@@ -113,8 +120,10 @@ if [ "$ACTION" == "update" ]; then
     cp "$STABLE_LOCK" "$TARGET_LOCK"
     $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
     nix flake update --flake "$FLAKE_DIR"
-    cp "$TARGET_LOCK" "$STABLE_LOCK"
-    echo "✅ Update complete."; exit 0
+    
+    # 업데이트된 내용을 호스트 전용 락 파일로 저장 (없으면 생성됨)
+    cp "$TARGET_LOCK" "$HOST_SPECIFIC_LOCK"
+    echo "✅ Update complete. Saved to $HOST_SPECIFIC_LOCK"; exit 0
 fi
 
 # 5. 빌드 환경 구성
