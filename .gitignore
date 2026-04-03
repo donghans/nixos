@@ -1,7 +1,11 @@
 .current_host
+.current_lock
 
 .env.secrets
 secrets/
 
 result
 GEMINI.md
+
+# Flake Locks
+_flakes/locks.rolling/

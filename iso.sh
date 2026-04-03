@@ -10,8 +10,8 @@ rm -f "${ROOT_PATH}/result"
 
 # 연결할 항목 정의 (이름:원본상대경로:타입)
 ITEMS=(
-    "flake.nix:../_flakes/stable/flake.nix:file"
-    "flake.lock:../_flakes/stable/flake.lock:file"
+    "flake.nix:../_flakes/flake.nix:file"
+    "flake.lock:../_flakes/locks.stable/default.lock:file"
     "_info.json:../dev/_info.json:file"
     "lib:../lib:dir"
 )
