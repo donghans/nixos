@@ -10,12 +10,10 @@ LOCK_FILE_PTR="$NIXOS_PATH/.current_lock"
 FLAKE_DIR="$NIXOS_PATH/_flakes"
 TARGET_LOCK="$FLAKE_DIR/flake.lock"
 
-# [핵심] 모든 락 파일은 루트의 .locks 디렉토리에서 관리됩니다.
+# 모든 락 파일은 루트의 .locks 디렉토리에서 관리됩니다.
 LOCKS_DIR="$NIXOS_PATH/.locks/rolling"
 STABLE_LOCKS_DIR="$NIXOS_PATH/.locks"
 
-# [핵심] iso.sh와 동일하게 임시 하드링크/심볼릭링크를 활용하여 
-# _flakes 디렉토리를 독립적인 빌드 환경으로 구성합니다.
 NH_TARGET="$FLAKE_DIR"
 
 ITEMS=(
@@ -52,7 +50,6 @@ setup_links() {
         else
             ln -sfn "$src" "$TARGET_PATH"
         fi
-        # Nix가 인식하도록 Git index에 등록
         $GIT add -f -N "$TARGET_PATH" 2>/dev/null
     done
 }
@@ -63,7 +60,7 @@ CLEAN_TARGET="user"
 HOST_ID=""
 SCOPE="home"
 ACTION="switch"
-MANUAL_LOCK=""
+INPUT_LOCK=""
 
 for arg in "$@"; do
     case $arg in
@@ -71,7 +68,7 @@ for arg in "$@"; do
         all) CLEAN_TARGET="all" ;;
         os|home) SCOPE="$arg" ;;
         switch|boot|test|update) ACTION="$arg" ;;
-        *.lock) MANUAL_LOCK="$arg" ;;
+        *.lock) INPUT_LOCK="$arg" ;;
         *) HOST_ID="$arg" ;;
     esac
 done
@@ -112,12 +109,30 @@ SELECTED_LOCK=""
 STABLE_LOCK="$STABLE_LOCKS_DIR/$HOST_ID.lock"
 [ ! -f "$STABLE_LOCK" ] && STABLE_LOCK="$STABLE_LOCKS_DIR/_default.lock"
 
-if [ -n "$MANUAL_LOCK" ]; then
-    echo "$MANUAL_LOCK" > "$LOCK_FILE_PTR"
-    echo "📝 Updated .current_lock: $MANUAL_LOCK"
+# 4-1. 입력된 락 파일 경로 지능적 해석
+if [ -n "$INPUT_LOCK" ]; then
+    RESOLVED_LOCK=""
+    # 1) 입력된 경로 그대로 존재하는지 확인
+    if [ -f "$INPUT_LOCK" ]; then
+        RESOLVED_LOCK=$(readlink -f "$INPUT_LOCK")
+    # 2) .locks/ 내에 존재하는지 확인
+    elif [ -f "$STABLE_LOCKS_DIR/$INPUT_LOCK" ]; then
+        RESOLVED_LOCK="$STABLE_LOCKS_DIR/$INPUT_LOCK"
+    # 3) .locks/rolling/ 내에 존재하는지 확인
+    elif [ -f "$LOCKS_DIR/$INPUT_LOCK" ]; then
+        RESOLVED_LOCK="$LOCKS_DIR/$INPUT_LOCK"
+    fi
+
+    if [ -n "$RESOLVED_LOCK" ]; then
+        echo "$RESOLVED_LOCK" > "$LOCK_FILE_PTR"
+        echo "🎯 Pinning lock to: $RESOLVED_LOCK"
+    else
+        echo "❌ Error: Could not find lock file '$INPUT_LOCK'"
+        exit 1
+    fi
 fi
 
-# 4-1. 전용 Update 액션 처리
+# 4-2. 전용 Update 액션 처리
 if [ "$ACTION" == "update" ]; then
     if [ -f "$TARGET_LOCK" ]; then
         echo "❌ Error: Another nhw.sh might be running."
@@ -128,10 +143,12 @@ if [ "$ACTION" == "update" ]; then
 
     echo "🔄 Updating stable lock for $HOST_ID..."
     cp "$STABLE_LOCK" "$TARGET_LOCK"
-    $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
-    nix flake update --flake "$FLAKE_DIR" --commit-lock-file false
-    cp "$TARGET_LOCK" "$STABLE_LOCK"
+    # 락 파일을 Git 추적에서 잠시 제외한 상태에서 업데이트 수행 (자동 커밋 방지)
+    $GIT rm --cached "$TARGET_LOCK" > /dev/null 2>&1
     
+    nix flake update --flake "$FLAKE_DIR"
+    
+    cp "$TARGET_LOCK" "$STABLE_LOCK"
     echo "✅ Update complete."
     exit 0
 fi
@@ -146,15 +163,23 @@ setup_links
 
 if [ -f "$LOCK_FILE_PTR" ]; then
     SELECTED_LOCK=$(cat "$LOCK_FILE_PTR")
-    echo "⚠️  Using PINNED lock: $SELECTED_LOCK"
+    if [ ! -f "$SELECTED_LOCK" ]; then
+        echo "❌ Error: Pinned lock file not found: $SELECTED_LOCK"
+        rm -f "$LOCK_FILE_PTR"
+        exit 1
+    fi
+    echo "⚠️  Using PINNED lock: $(basename $SELECTED_LOCK)"
 elif [ "$IS_ROLLING" == "true" ]; then
     TIMESTAMP=$(date +%Y%m%dT%H%M%S)
     NEW_LOCK="$LOCKS_DIR/$TIMESTAMP.lock"
     echo "🌀 Rolling: Updating unstable..."
     mkdir -p "$LOCKS_DIR"
     cp "$STABLE_LOCK" "$TARGET_LOCK"
-    $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
-    nix flake update --flake "$FLAKE_DIR" nixpkgs-unstable --commit-lock-file false
+    
+    # Git 인식 없이 업데이트를 먼저 하고 나중에 하드링크/교체하는 방식으로 전환
+    # (nix flake update는 파일이 있어도 작동하며, Git 저장소 인식을 피하기 위해 --flake 경로만 명시)
+    nix flake update --flake "$FLAKE_DIR" nixpkgs-unstable
+    
     cp "$TARGET_LOCK" "$NEW_LOCK"
     SELECTED_LOCK="$NEW_LOCK"
     echo "📦 New lock: $(basename $SELECTED_LOCK)"
