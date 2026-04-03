@@ -46,14 +46,14 @@ in {
 
     # 로그아웃하거나 세션이 종료되었을 때 보여줄 기본 화면 (tuigreet)
     default_session = {
-      command = lib.mkForce "${pkgs.greetd.tuigreet}/bin/tuigreet --time --remember --cmd 'uwsm start hyprland-uwsm.desktop'";
+      command = lib.mkForce "${pkgs.tuigreet}/bin/tuigreet --time --remember --cmd 'uwsm start hyprland-uwsm.desktop'";
       user = "greeter";
     };
   };
 
   # 가끔 GDM이나 SDDM이 충돌을 일으킬 수 있으므로 명시적으로 꺼줍니다.
   services.displayManager.sddm.enable = lib.mkForce false;
-  services.xserver.displayManager.gdm.enable = lib.mkForce false;
+  services.displayManager.gdm.enable = lib.mkForce false;
 
   # 3. TTY 자동 로그인도 'nixos'로 변경
   services.getty.autologinUser = lib.mkForce "nixos";
