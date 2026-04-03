@@ -90,8 +90,11 @@
   };
 
   programs.git.enable = true;
-  programs.git.settings.user.name  = metaConfig.gitName;
-  programs.git.settings.user.email = metaConfig.gitEmail;
+  programs.git.settings = {
+    user.name  = metaConfig.gitName;
+    user.email = metaConfig.gitEmail;
+    url."git@github.com:".insteadOf = "https://github.com/";
+  };
 
   xdg.mimeApps.defaultApplications = {
     "x-scheme-handler/slack" = [ "slack.desktop" ];
