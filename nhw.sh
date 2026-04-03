@@ -129,7 +129,7 @@ if [ "$ACTION" == "update" ]; then
     echo "🔄 Updating stable lock for $HOST_ID..."
     cp "$STABLE_LOCK" "$TARGET_LOCK"
     $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
-    nix flake update "$FLAKE_DIR"
+    nix flake update --flake "$FLAKE_DIR" --commit-lock-file false
     cp "$TARGET_LOCK" "$STABLE_LOCK"
     
     echo "✅ Update complete."
@@ -154,7 +154,7 @@ elif [ "$IS_ROLLING" == "true" ]; then
     mkdir -p "$LOCKS_DIR"
     cp "$STABLE_LOCK" "$TARGET_LOCK"
     $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
-    nix flake update "$FLAKE_DIR" nixpkgs-unstable
+    nix flake update --flake "$FLAKE_DIR" nixpkgs-unstable --commit-lock-file false
     cp "$TARGET_LOCK" "$NEW_LOCK"
     SELECTED_LOCK="$NEW_LOCK"
     echo "📦 New lock: $(basename $SELECTED_LOCK)"

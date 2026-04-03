@@ -75,7 +75,7 @@
     hosts = info.hosts;
 
     # [핵심] Home Manager 설정을 만드는 공통 함수
-    getHM = { hostname, system, isLaptop, isISO ? false }: let
+    getHM = { hostname, system, isLaptop, isISO ? false, ... }: let
       pkgs = import nixpkgs {
         inherit system;
         config.allowUnfree = true;
