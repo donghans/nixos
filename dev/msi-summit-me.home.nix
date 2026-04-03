@@ -74,16 +74,16 @@ in {
 
     bindel = [
       # 볼륨 및 밝기 조절 (피드백 포함)
-      ",XF86AudioRaiseVolume, exec, ${volControl}/bin/vol-control up"
-      ",XF86AudioLowerVolume, exec, ${volControl}/bin/vol-control down"
-      ",XF86AudioMute, exec, ${volControl}/bin/vol-control mute"
-      ",XF86MonBrightnessUp, exec, ${brtControl}/bin/brt-control up"
-      ",XF86MonBrightnessDown, exec, ${brtControl}/bin/brt-control down"
+      ", XF86AudioRaiseVolume, exec, ${volControl}/bin/vol-control up"
+      ", XF86AudioLowerVolume, exec, ${volControl}/bin/vol-control down"
+      ", XF86AudioMute, exec, ${volControl}/bin/vol-control mute"
+      ", XF86MonBrightnessUp, exec, ${brtControl}/bin/brt-control up"
+      ", XF86MonBrightnessDown, exec, ${brtControl}/bin/brt-control down"
     ];
 
     bindl = [
-      # 터치패드 토글 (순수 Fn 조합키 인식 강화)
-      ",XF86TouchpadToggle, exec, ${toggleTouchpad}/bin/hypr-toggle-touchpad"
+      # 터치패드 토글
+      "$mainMod CTRL, XF86TouchpadToggle, exec, ${toggleTouchpad}/bin/hypr-toggle-touchpad"
 
       # 덮개 스위치
       ", switch:on:Lid Switch, exec, loginctl lock-session && hyprctl dispatch dpms off && tlp bat"
