@@ -3,20 +3,16 @@
 
   inputs = {
     # 최신 패키지를 위한 Unstable 채널
-    nixpkgs-unstable.url =
-      "github:nixos/nixpkgs/nixos-unstable";
-    nixpkgs-unstable-fallback.url =
-      "github:nixos/nixpkgs/5b2c2d84341b2afb5647081c1386a80d7a8d8605";
+    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
 
     # 기본 패키지에 사용될 Stable 채널
     nixpkgs.url      =                "github:nixos/nixpkgs/nixos-25.11"; # 1. 패키지 저장소 박제
-    nixpkgs-2405.url =                "github:nixos/nixpkgs/nixos-24.05"; # 2. Prisma 5 등 이전 패키지를 사용하기 위한 패키지 저장소
     home-manager.url = "github:nix-community/home-manager/release-25.11"; # 3. Home-manager 박제 (채널 대신 여기서 직접 가져옴)
 
     home-manager.inputs.nixpkgs.follows = "nixpkgs"; # HM이 시스템과 같은 Nix 패키지 버전을 쓰도록 강제
   };
 
-  outputs = { self, nixpkgs, nixpkgs-2405, nixpkgs-unstable, nixpkgs-unstable-fallback, home-manager, ... }@inputs: let
+  outputs = { self, nixpkgs, nixpkgs-unstable, home-manager, ... }@inputs: let
     stateVersion = "25.11";
 
     myOverlays = [
@@ -86,7 +82,27 @@
       };
 
       unstable = import nixpkgs-unstable { inherit system; config.allowUnfree = true; };
-      unstable-fallback = import nixpkgs-unstable-fallback { inherit system; config.allowUnfree = true; };
+
+      # .env 파일에서 특정 키의 값을 읽어오는 간단한 헬퍼
+      getEnv = key: let
+        envFile = ./.env;
+        content = if builtins.pathExists envFile then builtins.readFile envFile else "";
+        lines = nixpkgs.lib.splitString "\n" content;
+        line = nixpkgs.lib.findFirst (l: nixpkgs.lib.hasPrefix "${key}=" l) "" lines;
+      in if line != "" then nixpkgs.lib.removePrefix "${key}=" line else "";
+
+      envRev = getEnv "UNSTABLE_FALLBACK_REV";
+      envSha = getEnv "UNSTABLE_FALLBACK_SHA";
+
+      unstable-fallback = if (envRev != "" && envSha != "") then
+        import (builtins.fetchTarball {
+          url = "https://github.com/nixos/nixpkgs/archive/${envRev}.tar.gz";
+          sha256 = envSha;
+        }) {
+          inherit system;
+          config.allowUnfree = true;
+        }
+      else unstable;
 
       # ISO 부팅일 때만 유저명을 "nixos"로 고정
       hmUser = if isISO then "nixos" else info.username;

@@ -49,26 +49,36 @@
   in with pkgs; [
     (wrapFVM fvm "fvm")
   ]) ++ (let # ========== Node.js / pnpm / Prisma ==========
-    # FIXME pkgs-2405에 묶이게 되면 추후 해당 nixos pkgs repo가 닫히게 될 경우 문제의 여지가 있음, github 등에서 바이너리를 받아와서 해당 nix 패키지 내에 풀든 소스코드를 빌드하든 하면 좋을듯함
-    pkgs-2405 = inputs.nixpkgs-2405.legacyPackages.${pkgs.system};
-    prisma_5 = pkgs-2405.nodePackages.prisma;
-    prisma-engines_5 = pkgs-2405.prisma-engines;
+    # Prisma 엔진을 현재 디렉토리에서 상위로 올라가며 찾는 쉘 스크립트
+    prisma_detection_script = ''
+      curr="$PWD"
+      while [ "$curr" != "/" ]; do
+        if [ -d "$curr/node_modules/@prisma/engines" ]; then
+          export PRISMA_ENGINES_DIR="$curr/node_modules/@prisma/engines"
+          # 플랫폼Suffix(linux-musl 등)가 붙은 엔진 바이너리들을 자동으로 찾습니다.
+          export PRISMA_QUERY_ENGINE_LIBRARY=$(find "$PRISMA_ENGINES_DIR" -name "libquery_engine-*" | head -n 1)
+          export PRISMA_QUERY_ENGINE_BINARY=$(find "$PRISMA_ENGINES_DIR" -name "query-engine-*" | head -n 1)
+          export PRISMA_SCHEMA_ENGINE_BINARY=$(find "$PRISMA_ENGINES_DIR" -name "schema-engine-*" | head -n 1)
+          break
+        fi
+        curr=$(dirname "$curr")
+      done
+    '';
 
     # Node를 감싸서 옵션 및 라이브러리를 주입하는 헬퍼 함수
     wrapNode = pkg: binName: (pkgs.mkWrapper {
       inherit pkg binName;
-      libs = [ stdenv.cc.cc ];
-      bins = [ prisma_5 openssl ];
+      libs = [ stdenv.cc.cc openssl ];
+      bins = [ nodePackages.prisma openssl findutils ];
+      addFlags = [ "--run '${prisma_detection_script}'" ];
       env = {
         PNPM_PACKAGE_IMPORT_METHOD = "reflink"; # Btrfs CoW를 활용한 용량 및 성능 최적화
         PNPM_PUBLIC_HOIST_PATTERN = "*"; # Yarn v1/npm 스타일의 호이스팅 모방 (호환성 극대화)
         PNPM_SHAMEFULLY_HOIST = "true"; # 의존성 내의 의존성까지 모두 호이스팅
         PNPM_STORE_DIR = "/home/${metaConfig.username}/.local/share/pnpm/store";
-        PRISMA_QUERY_ENGINE_LIBRARY = "${prisma-engines_5}/lib/libquery_engine.node";
-        PRISMA_QUERY_ENGINE_BINARY = "${prisma-engines_5}/bin/query-engine";
-        PRISMA_SCHEMA_ENGINE_BINARY = "${prisma-engines_5}/bin/schema-engine";
       };
     });
+
   in with pkgs; [
     (wrapNode nodejs_24 "node")
     (wrapNode pnpm "pnpm")
