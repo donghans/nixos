@@ -10,16 +10,51 @@ LOCK_FILE_PTR="$NIXOS_PATH/.current_lock"
 FLAKE_DIR="$NIXOS_PATH/_flakes"
 TARGET_LOCK="$FLAKE_DIR/flake.lock"
 
-# NH 빌드 대상 정의 (저장소 루트 + dir 옵션)
-NH_TARGET="$NIXOS_PATH?dir=_flakes"
+# [핵심] 모든 락 파일은 루트의 .locks 디렉토리에서 관리됩니다.
+LOCKS_DIR="$NIXOS_PATH/.locks/rolling"
+STABLE_LOCKS_DIR="$NIXOS_PATH/.locks"
 
-# 중복 실행 방지 및 Cleanup 설정
+# [핵심] iso.sh와 동일하게 임시 하드링크/심볼릭링크를 활용하여 
+# _flakes 디렉토리를 독립적인 빌드 환경으로 구성합니다.
+NH_TARGET="$FLAKE_DIR"
+
+ITEMS=(
+    "dev:../dev:dir"
+    "lib:../lib:dir"
+)
+
 cleanup() {
+    echo "🧹 Cleaning up temporary links and lock..."
+    for item in "${ITEMS[@]}"; do
+        IFS=':' read -r name src type <<< "$item"
+        TARGET_PATH="${FLAKE_DIR}/${name}"
+        if [ -e "$TARGET_PATH" ] || [ -L "$TARGET_PATH" ]; then
+            rm -rf "$TARGET_PATH"
+            $GIT rm --cached "$TARGET_PATH" > /dev/null 2>&1
+        fi
+    done
+
     if [ -f "$TARGET_LOCK" ]; then
-        echo "🧹 Cleaning up temporary flake.lock..."
         rm -f "$TARGET_LOCK"
         $GIT rm --cached "$TARGET_LOCK" > /dev/null 2>&1
     fi
+}
+
+setup_links() {
+    echo "🔗 Preparing build environment (linking dev/lib)..."
+    for item in "${ITEMS[@]}"; do
+        IFS=':' read -r name src type <<< "$item"
+        TARGET_PATH="${FLAKE_DIR}/${name}"
+        SOURCE_PATH="${FLAKE_DIR}/${src}"
+
+        if [ "$type" == "file" ]; then
+            ln -f "$SOURCE_PATH" "$TARGET_PATH"
+        else
+            ln -sfn "$src" "$TARGET_PATH"
+        fi
+        # Nix가 인식하도록 Git index에 등록
+        $GIT add -f -N "$TARGET_PATH" 2>/dev/null
+    done
 }
 
 # 2. 인자 분석
@@ -58,14 +93,13 @@ INFO_JSON="$NIXOS_PATH/dev/_info.json"
 [ -z "$HOST_ID" ] && [ -f "$ID_FILE" ] && HOST_ID=$(cat "$ID_FILE")
 
 if [ -z "$HOST_ID" ]; then
-    echo "❌ Error: Host ID를 입력하거나 .current_host 파일이 필요합니다."
+    echo "❌ Error: Host ID가 필요합니다."
     exit 1
 fi
 
 HOST_CONFIG=$(jq -e ".hosts[] | select(.hostname == \"$HOST_ID\")" "$INFO_JSON" 2>/dev/null)
 if [ $? -ne 0 ]; then
-    echo "❌ Error: '$HOST_ID'는 dev/_info.json의 호스트 목록에 존재하지 않습니다."
-    echo "📍 등록된 호스트: $(jq -r '.hosts[].hostname' "$INFO_JSON" | tr '\n' ' ')"
+    echo "❌ Error: '$HOST_ID'는 등록되지 않은 호스트입니다."
     exit 1
 fi
 echo "$HOST_ID" > "$ID_FILE"
@@ -73,73 +107,57 @@ IS_ROLLING=$(echo "$HOST_CONFIG" | jq -r '.isRolling')
 
 # 4. Lock 파일 결정 및 업데이트 로직
 SELECTED_LOCK=""
-LOCKS_DIR="$FLAKE_DIR/locks.rolling"
-STABLE_LOCKS_DIR="$FLAKE_DIR/locks.stable"
 
 # 기본 Stable Lock 선택 (업데이트 베이스)
 STABLE_LOCK="$STABLE_LOCKS_DIR/$HOST_ID.lock"
-[ ! -f "$STABLE_LOCK" ] && STABLE_LOCK="$STABLE_LOCKS_DIR/default.lock"
+[ ! -f "$STABLE_LOCK" ] && STABLE_LOCK="$STABLE_LOCKS_DIR/_default.lock"
 
-# MANUAL_LOCK이 제공되면 .current_lock 갱신
 if [ -n "$MANUAL_LOCK" ]; then
     echo "$MANUAL_LOCK" > "$LOCK_FILE_PTR"
-    echo "📝 Updated .current_lock with manual input: $MANUAL_LOCK"
+    echo "📝 Updated .current_lock: $MANUAL_LOCK"
 fi
 
 # 4-1. 전용 Update 액션 처리
 if [ "$ACTION" == "update" ]; then
     if [ -f "$TARGET_LOCK" ]; then
-        echo "❌ Error: $TARGET_LOCK already exists. Cannot update right now."
+        echo "❌ Error: Another nhw.sh might be running."
         exit 1
     fi
+    trap cleanup EXIT
+    setup_links
 
     echo "🔄 Updating stable lock for $HOST_ID..."
-    # 1. 베이스 락을 타겟 위치에 복사
     cp "$STABLE_LOCK" "$TARGET_LOCK"
-    # 2. Git 인식 시킴 (Nix가 기존 락을 인식하게 하기 위함)
     $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
-    
-    # 3. 전체 업데이트 수행
-    nix flake update --flake "$FLAKE_DIR"
-    
-    # 4. 결과 저장 및 정리
+    nix flake update "$FLAKE_DIR"
     cp "$TARGET_LOCK" "$STABLE_LOCK"
-    $GIT rm --cached "$TARGET_LOCK" > /dev/null 2>&1
-    rm -f "$TARGET_LOCK"
     
-    echo "✅ Update complete. Use 'switch' to apply changes."
+    echo "✅ Update complete."
     exit 0
 fi
 
-# 5. 빌드 환경 구성 (switch, boot, test 등)
+# 5. 빌드 환경 구성
 if [ -f "$TARGET_LOCK" ]; then
-    echo "❌ Error: $TARGET_LOCK already exists. Another nhw.sh might be running."
+    echo "❌ Error: Another nhw.sh might be running."
     exit 1
 fi
 trap cleanup EXIT
+setup_links
 
-# 락 선택 우선순위 및 경고
 if [ -f "$LOCK_FILE_PTR" ]; then
     SELECTED_LOCK=$(cat "$LOCK_FILE_PTR")
-    echo "⚠️  WARNING: You are using a PINNED lock file!"
-    echo "   📍 Path: $SELECTED_LOCK"
+    echo "⚠️  Using PINNED lock: $SELECTED_LOCK"
 elif [ "$IS_ROLLING" == "true" ]; then
     TIMESTAMP=$(date +%Y%m%dT%H%M%S)
     NEW_LOCK="$LOCKS_DIR/$TIMESTAMP.lock"
-    echo "🌀 Rolling: Updating unstable channel..."
+    echo "🌀 Rolling: Updating unstable..."
     mkdir -p "$LOCKS_DIR"
-    
-    # 베이스 락 설치 및 Git 인식
     cp "$STABLE_LOCK" "$TARGET_LOCK"
     $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
-    
-    # Unstable만 업데이트
-    nix flake update --flake "$FLAKE_DIR" nixpkgs-unstable
-    
-    # 결과 아카이브
+    nix flake update "$FLAKE_DIR" nixpkgs-unstable
     cp "$TARGET_LOCK" "$NEW_LOCK"
     SELECTED_LOCK="$NEW_LOCK"
-    echo "📦 New rolling lock created: $(basename $SELECTED_LOCK)"
+    echo "📦 New lock: $(basename $SELECTED_LOCK)"
 else
     SELECTED_LOCK="$STABLE_LOCK"
     echo "⚓ Using stable lock"
@@ -149,17 +167,14 @@ if [ -f "$SELECTED_LOCK" ]; then
     ln -f "$SELECTED_LOCK" "$TARGET_LOCK"
     $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
 else
-    echo "❌ Error: Lock file not found: $SELECTED_LOCK"
+    echo "❌ Error: Lock not found: $SELECTED_LOCK"
     exit 1
 fi
 
-# 6. 빌드 실행 (nh 사용)
-echo "🚀 [nh] Building NixOS for #$HOST_ID (Rolling: $IS_ROLLING) with action $ACTION"
+# 6. 빌드 실행
+echo "🚀 [nh] Building #$HOST_ID with action $ACTION"
 if [ "$SCOPE" == "os" ]; then
-    nh os "$ACTION" "$NH_TARGET" -H "$HOST_ID"
-elif [ "$SCOPE" == "home" ]; then
-    nh home "$ACTION" "$NH_TARGET"
+    nh os "$ACTION" "$FLAKE_DIR" -H "$HOST_ID"
 else
-    echo "❌ Error: Unknown scope: $SCOPE"
-    exit 1
+    nh home "$ACTION" "$FLAKE_DIR"
 fi

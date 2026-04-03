@@ -8,4 +8,4 @@ result
 GEMINI.md
 
 # Flake Locks
-_flakes/locks.rolling/
+.locks/rolling/
