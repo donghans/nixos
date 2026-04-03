@@ -145,9 +145,9 @@ if [ "$ACTION" == "update" ]; then
     cp "$STABLE_LOCK" "$TARGET_LOCK"
     # 락 파일을 Git 추적에서 잠시 제외한 상태에서 업데이트 수행 (자동 커밋 방지)
     $GIT rm --cached "$TARGET_LOCK" > /dev/null 2>&1
-    
+
     nix flake update --flake "$FLAKE_DIR"
-    
+
     cp "$TARGET_LOCK" "$STABLE_LOCK"
     echo "✅ Update complete."
     exit 0
@@ -175,11 +175,11 @@ elif [ "$IS_ROLLING" == "true" ]; then
     echo "🌀 Rolling: Updating unstable..."
     mkdir -p "$LOCKS_DIR"
     cp "$STABLE_LOCK" "$TARGET_LOCK"
-    
+
     # Git 인식 없이 업데이트를 먼저 하고 나중에 하드링크/교체하는 방식으로 전환
     # (nix flake update는 파일이 있어도 작동하며, Git 저장소 인식을 피하기 위해 --flake 경로만 명시)
     nix flake update --flake "$FLAKE_DIR" nixpkgs-unstable
-    
+
     cp "$TARGET_LOCK" "$NEW_LOCK"
     SELECTED_LOCK="$NEW_LOCK"
     echo "📦 New lock: $(basename $SELECTED_LOCK)"

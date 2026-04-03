@@ -1,4 +1,4 @@
-{ pkgs, inputs, unstable, lib, metaConfig, ... }: {
+{ pkgs, inputs, unstable, unstable-fallback, lib, metaConfig, ... }: {
   imports = [
     ../../lib/hyprland.home.nix
     ./shell-yarn.nix
@@ -12,7 +12,7 @@
 
     unstable.zed-editor
 
-    unstable.claude-code
+    unstable-fallback.claude-code
     unstable.gemini-cli
 
     (python312.withPackages (ps: with ps; [ pip virtualenv ]))

@@ -3,7 +3,10 @@
 
   inputs = {
     # 최신 패키지를 위한 Unstable 채널
-    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs-unstable.url =
+      "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs-unstable-fallback.url =
+      "github:nixos/nixpkgs/5b2c2d84341b2afb5647081c1386a80d7a8d8605";
 
     # 기본 패키지에 사용될 Stable 채널
     nixpkgs.url      =                "github:nixos/nixpkgs/nixos-25.11"; # 1. 패키지 저장소 박제
@@ -13,7 +16,7 @@
     home-manager.inputs.nixpkgs.follows = "nixpkgs"; # HM이 시스템과 같은 Nix 패키지 버전을 쓰도록 강제
   };
 
-  outputs = { self, nixpkgs, nixpkgs-2405, nixpkgs-unstable, home-manager, ... }@inputs: let
+  outputs = { self, nixpkgs, nixpkgs-2405, nixpkgs-unstable, nixpkgs-unstable-fallback, home-manager, ... }@inputs: let
     stateVersion = "25.11";
 
     myOverlays = [
@@ -83,6 +86,7 @@
       };
 
       unstable = import nixpkgs-unstable { inherit system; config.allowUnfree = true; };
+      unstable-fallback = import nixpkgs-unstable-fallback { inherit system; config.allowUnfree = true; };
 
       # ISO 부팅일 때만 유저명을 "nixos"로 고정
       hmUser = if isISO then "nixos" else info.username;
@@ -93,7 +97,7 @@
         username = hmUser;
       };
     in {
-      inherit hmUser hmConfig metaConfig unstable pkgs;
+      inherit hmUser hmConfig metaConfig unstable unstable-fallback pkgs;
     };
 
     # 설정 생성 헬퍼 함수
@@ -114,6 +118,7 @@
         inherit inputs;
         metaConfig = h.metaConfig;
         unstable = h.unstable;
+        unstable-fallback = h.unstable-fallback;
       };
 
       modules = mainConfig ++ [{
@@ -131,6 +136,7 @@
             inherit inputs;
             metaConfig = h.metaConfig;
             unstable = h.unstable;
+            unstable-fallback = h.unstable-fallback;
           };
         }
       ];
@@ -162,6 +168,7 @@
           inherit inputs;
           metaConfig = h.metaConfig;
           unstable = h.unstable;
+          unstable-fallback = h.unstable-fallback;
         };
         modules = [ (import h.hmConfig) ];
       };
