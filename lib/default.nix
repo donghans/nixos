@@ -27,6 +27,10 @@
   networking.networkmanager.enable = true;
   networking.hostName = metaConfig.hostname;
 
+  # 부팅 시 네트워크 연결을 기다리지 않도록 설정 (부팅 속도 향상 및 프리징 방지)
+  systemd.services.NetworkManager-wait-online.enable = false;
+  systemd.network.wait-online.enable = false;
+
   time.timeZone = "Asia/Seoul";
   i18n.defaultLocale = "en_US.UTF-8";
   i18n.supportedLocales = [

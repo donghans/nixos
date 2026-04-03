@@ -5,7 +5,7 @@
   ];
 
   # 터치패드 초기화 지연 해결을 위한 시도
-  boot.initrd.availableKernelModules = [ "i2c_hid_acpi" "intel_lpss_pci" ];
+  boot.initrd.availableKernelModules = [ "i2c_hid_acpi" "intel_lpss_pci" "intel_ishtp_hid" "intel_hid" "hid_multitouch" "i2c_i801" ];
   boot.initrd.kernelModules = [ "i2c_hid_acpi" ];
 
   boot.kernelModules = [ "ec_sys" ];
@@ -14,9 +14,16 @@
     "i915.enable_psr=1"               # Intel 패널 셀프 리프레시 활성화
     "pci=nocms"                       # MSI 일부 모델에서 효과가 있는 PCI 설정
     "i2c_designware.disable_ps=1"     # 필수: I2C 컨트롤러의 절전 상태(Power State) 비활성화
+    "psmouse.synaptics_intertouch=1"  # 핵심: 구형 PS/2 대신 I2C/SMBus 사용 강제
+    "i8042.nopnp=1"                   # 핵심: 구형 PS/2 포트 자동 탐색 방지 (충돌 방지)
+    "acpi_osi=Linux"                  # 추가: 메인보드의 윈도우 최적화 설정을 무시하고 리눅스 표준 사용
+    "irqpoll"                         # 추가: 인터럽트 충돌 시 시스템이 하드웨어를 강제로 계속 체크 (프리징 방지)
   ];
 
-  boot.blacklistedKernelModules = [ "nouveau" "nvidia" "nvidia_drm" "nvidia_modeset" ];
+  boot.blacklistedKernelModules = [
+    "nouveau" "nvidia" "nvidia_drm" "nvidia_modeset"
+    "psmouse" # 최신 I2C 터치패드와 충돌하는 구형 드라이버 차단
+  ];
   boot.extraModprobeConfig = ''
     blacklist nouveau
     options nouveau modeset=0
@@ -30,6 +37,10 @@
     };
 
   services.libinput.enable = true;
+
+  # 부팅 시 I2C 버스 간섭을 일으킬 수 있는 서비스 비활성화
+  networking.modemmanager.enable = false;
+  services.fprintd.enable = false; # 지문 인식 초기화 시 프리징 발생 가능성 차단
 
   services.tlp = {
     enable = true;
@@ -64,8 +75,9 @@
       # 배터리 <=> AC 전환간 최적화가 풀리는 현상 방지
       RUNTIME_PM_ON_AC = "auto";
       RUNTIME_PM_ON_BAT = "auto";
-      RUNTIME_PM_DENYLIST = "0000:00:15.0"; # 앞에 0000: 추가
-      RUNTIME_PM_DRIVER_DENYLIST = "i2c_designware";
+      # 터치패드는 절전에서 제외
+      RUNTIME_PM_DENYLIST = "00:12.0 00:15.0";
+      RUNTIME_PM_DRIVER_DENYLIST = "i2c_designware intel_ishtp intel_ishtp_hid intel_lpss_pci";
 
       # 배터리 모드에서도 Wi-Fi 절전 기능을 끕니다. (가장 중요)
       WIFI_PWR_ON_AC = "off";
@@ -79,11 +91,6 @@
       MAX_LOST_WORK_SECS_ON_AC = 15;
     };
   };
-
-  services.udev.extraRules = ''
-    # KERNEL 이름을 더 확실하게 지정
-    ACTION=="add|change", SUBSYSTEM=="pci", KERNEL=="0000:00:15.0", ATTR{power/control}="on"
-  '';
 
   services.logind.settings.Login = {
     # 덮개를 닫았을 때 절전(Suspend) 방지
