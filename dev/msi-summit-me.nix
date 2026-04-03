@@ -5,7 +5,7 @@
   ];
 
   # 터치패드 초기화 지연 해결을 위한 시도
-  boot.initrd.availableKernelModules = [ "i2c_hid_acpi" "i2c_hid_intel" "intel_lpss_pci" ];
+  boot.initrd.availableKernelModules = [ "i2c_hid_acpi" "intel_lpss_pci" ];
   boot.initrd.kernelModules = [ "i2c_hid_acpi" ];
 
   boot.kernelModules = [ "ec_sys" ];
