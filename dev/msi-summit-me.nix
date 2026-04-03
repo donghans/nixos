@@ -4,6 +4,10 @@
     ./base/developer.nix
   ];
 
+  # 터치패드 초기화 지연 해결을 위한 시도
+  boot.initrd.availableKernelModules = [ "i2c_hid_acpi" "i2c_hid_intel" "intel_lpss_pci" ];
+  boot.initrd.kernelModules = [ "i2c_hid_acpi" ];
+
   boot.kernelModules = [ "ec_sys" ];
   boot.kernelParams = [
     "pcie_aspm=off"                   # PCIe 전원 관리로 인한 끊김 방지
@@ -25,8 +29,7 @@
       options = [ "fmask=0022" "dmask=0022" ];
     };
 
-  # NVIDIA Fine Grained Control(정밀 제어): GPU를 미사용중이므로 대기전력 자체를 없애버려 발열 제어
-  hardware.nvidia.powerManagement.finegrained = true;
+  services.libinput.enable = true;
 
   services.tlp = {
     enable = true;
