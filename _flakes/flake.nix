@@ -24,6 +24,7 @@
           libs ? [],
           env ? {},
           addFlags ? [],
+          run ? null,
           bins ? []
         }: super.symlinkJoin {
           inherit name;
@@ -40,9 +41,12 @@
               (super.lib.optionals (bins != []) [
                 ''--prefix PATH : "${super.lib.makeBinPath bins}"''
               ]) ++
-              (super.lib.mapAttrsToList (k: v: ''--set ${k} "${v}"'') env) ++
+              (super.lib.mapAttrsToList (k: v: "--set ${k} ${super.lib.escapeShellArg v}") env) ++
+              (super.lib.optionals (run != null) [
+                "--run ${super.lib.escapeShellArg run}"
+              ]) ++
               (super.lib.optionals (addFlags != []) [
-                ''--add-flags "${super.lib.concatStringsSep " " addFlags}"''
+                "--add-flags ${super.lib.escapeShellArg (super.lib.concatStringsSep " " (map super.lib.escapeShellArg addFlags))}"
               ]);
 
             bashArgs = super.lib.concatStringsSep " \\\n  " argsList;

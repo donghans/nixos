@@ -51,17 +51,17 @@
   ]) ++ (let # ========== Node.js / pnpm / Prisma ==========
     # Prisma 엔진을 현재 디렉토리에서 상위로 올라가며 찾는 쉘 스크립트
     prisma_detection_script = ''
-      curr="$PWD"
-      while [ "$curr" != "/" ]; do
-        if [ -d "$curr/node_modules/@prisma/engines" ]; then
-          export PRISMA_ENGINES_DIR="$curr/node_modules/@prisma/engines"
+      curr="''$PWD"
+      while [ "''$curr" != "/" ]; do
+        if [ -d "''$curr/node_modules/@prisma/engines" ]; then
+          export PRISMA_ENGINES_DIR="''$curr/node_modules/@prisma/engines"
           # 플랫폼Suffix(linux-musl 등)가 붙은 엔진 바이너리들을 자동으로 찾습니다.
-          export PRISMA_QUERY_ENGINE_LIBRARY=$(find "$PRISMA_ENGINES_DIR" -name "libquery_engine-*" | head -n 1)
-          export PRISMA_QUERY_ENGINE_BINARY=$(find "$PRISMA_ENGINES_DIR" -name "query-engine-*" | head -n 1)
-          export PRISMA_SCHEMA_ENGINE_BINARY=$(find "$PRISMA_ENGINES_DIR" -name "schema-engine-*" | head -n 1)
+          export PRISMA_QUERY_ENGINE_LIBRARY=$(find "''$PRISMA_ENGINES_DIR" -name "libquery_engine-*" | head -n 1)
+          export PRISMA_QUERY_ENGINE_BINARY=$(find "''$PRISMA_ENGINES_DIR" -name "query-engine-*" | head -n 1)
+          export PRISMA_SCHEMA_ENGINE_BINARY=$(find "''$PRISMA_ENGINES_DIR" -name "schema-engine-*" | head -n 1)
           break
         fi
-        curr=$(dirname "$curr")
+        curr=$(dirname "''$curr")
       done
     '';
 
@@ -70,7 +70,7 @@
       inherit pkg binName;
       libs = [ stdenv.cc.cc openssl ];
       bins = [ openssl findutils ];
-      addFlags = [ "--run '${prisma_detection_script}'" ];
+      run = prisma_detection_script;
       env = {
         PNPM_PACKAGE_IMPORT_METHOD = "reflink"; # Btrfs CoW를 활용한 용량 및 성능 최적화
         PNPM_PUBLIC_HOIST_PATTERN = "*"; # Yarn v1/npm 스타일의 호이스팅 모방 (호환성 극대화)
