@@ -28,8 +28,6 @@
     xdg-desktop-portal-hyprland
     xdg-utils
 
-    gh
-
     nemo
 
     wl-clip-persist

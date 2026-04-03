@@ -94,7 +94,8 @@ in {
   programs = {
     bash.enable = true;
 
-    git.settings.credential.helper = "${pkgs.gh}/bin/gh auth git-credential";
+    gh.enable = true;
+    git.settings.credential.helper = "!${pkgs.gh}/bin/gh auth git-credential";
   };
 
   services.cliphist.enable = true;
