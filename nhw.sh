@@ -10,6 +10,9 @@ LOCK_FILE_PTR="$NIXOS_PATH/.current_lock"
 FLAKE_DIR="$NIXOS_PATH/_flakes"
 TARGET_LOCK="$FLAKE_DIR/flake.lock"
 
+# NH 빌드 대상 정의 (저장소 루트 + dir 옵션)
+NH_TARGET="$NIXOS_PATH?dir=_flakes"
+
 # 중복 실행 방지 및 Cleanup 설정
 cleanup() {
     if [ -f "$TARGET_LOCK" ]; then
@@ -83,7 +86,7 @@ if [ -n "$MANUAL_LOCK" ]; then
     echo "📝 Updated .current_lock with manual input: $MANUAL_LOCK"
 fi
 
-# 4-1. 전용 Update 액션 처리 (정석적 동작: 업데이트만 수행 후 종료)
+# 4-1. 전용 Update 액션 처리
 if [ "$ACTION" == "update" ]; then
     if [ -f "$TARGET_LOCK" ]; then
         echo "❌ Error: $TARGET_LOCK already exists. Cannot update right now."
@@ -91,9 +94,17 @@ if [ "$ACTION" == "update" ]; then
     fi
 
     echo "🔄 Updating stable lock for $HOST_ID..."
+    # 1. 베이스 락을 타겟 위치에 복사
     cp "$STABLE_LOCK" "$TARGET_LOCK"
-    nix flake update --flake "$FLAKE_DIR" --commit-lock-file false
+    # 2. Git 인식 시킴 (Nix가 기존 락을 인식하게 하기 위함)
+    $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
+    
+    # 3. 전체 업데이트 수행
+    nix flake update --flake "$FLAKE_DIR"
+    
+    # 4. 결과 저장 및 정리
     cp "$TARGET_LOCK" "$STABLE_LOCK"
+    $GIT rm --cached "$TARGET_LOCK" > /dev/null 2>&1
     rm -f "$TARGET_LOCK"
     
     echo "✅ Update complete. Use 'switch' to apply changes."
@@ -112,14 +123,20 @@ if [ -f "$LOCK_FILE_PTR" ]; then
     SELECTED_LOCK=$(cat "$LOCK_FILE_PTR")
     echo "⚠️  WARNING: You are using a PINNED lock file!"
     echo "   📍 Path: $SELECTED_LOCK"
-    echo "   (This ignores the default stable/rolling logic until .current_lock is removed.)"
 elif [ "$IS_ROLLING" == "true" ]; then
     TIMESTAMP=$(date +%Y%m%dT%H%M%S)
     NEW_LOCK="$LOCKS_DIR/$TIMESTAMP.lock"
     echo "🌀 Rolling: Updating unstable channel..."
     mkdir -p "$LOCKS_DIR"
+    
+    # 베이스 락 설치 및 Git 인식
     cp "$STABLE_LOCK" "$TARGET_LOCK"
-    nix flake update --flake "$FLAKE_DIR" nixpkgs-unstable --commit-lock-file false
+    $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
+    
+    # Unstable만 업데이트
+    nix flake update --flake "$FLAKE_DIR" nixpkgs-unstable
+    
+    # 결과 아카이브
     cp "$TARGET_LOCK" "$NEW_LOCK"
     SELECTED_LOCK="$NEW_LOCK"
     echo "📦 New rolling lock created: $(basename $SELECTED_LOCK)"
@@ -139,9 +156,9 @@ fi
 # 6. 빌드 실행 (nh 사용)
 echo "🚀 [nh] Building NixOS for #$HOST_ID (Rolling: $IS_ROLLING) with action $ACTION"
 if [ "$SCOPE" == "os" ]; then
-    nh os "$ACTION" "$FLAKE_DIR" -H "$HOST_ID"
+    nh os "$ACTION" "$NH_TARGET" -H "$HOST_ID"
 elif [ "$SCOPE" == "home" ]; then
-    nh home "$ACTION" "$FLAKE_DIR"
+    nh home "$ACTION" "$NH_TARGET"
 else
     echo "❌ Error: Unknown scope: $SCOPE"
     exit 1

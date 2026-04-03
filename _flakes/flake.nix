@@ -67,7 +67,7 @@
     ];
 
     # 1. 경로 후보 정의
-    primaryInfoPath = ../../dev/_info.json;  # 일반 nh 빌드 시 (flake 위치 기준)
+    primaryInfoPath = ../dev/_info.json;  # 일반 nh 빌드 시 (flake 위치 기준)
     isoInfoPath = ./_info.json;             # iso.sh 빌드 시 (hardlink된 위치 기준)
 
     # 2. 파일 존재 여부에 따라 경로 선택
@@ -94,7 +94,7 @@
 
       # ISO 부팅일 때만 유저명을 "nixos"로 고정
       hmUser = if isISO then "nixos" else info.username;
-      hmConfig = if isISO then ./home.nix else ../../dev/${hostname}.home.nix;
+      hmConfig = if isISO then ./home.nix else ../dev/${hostname}.home.nix;
 
       metaConfig = {
         inherit stateVersion gitName gitEmail hostname isLaptop;
@@ -114,7 +114,7 @@
         ./configuration.nix
       ] else [
         # 일반 호스트는 dev 디렉토리의 파일을 참조
-        ../../dev/${hostInfo.hostname}.nix
+        ../dev/${hostInfo.hostname}.nix
       ];
     in nixpkgs.lib.nixosSystem {
       inherit (hostInfo) system;
