@@ -69,7 +69,7 @@
     wrapNode = pkg: binName: (pkgs.mkWrapper {
       inherit pkg binName;
       libs = [ stdenv.cc.cc openssl ];
-      bins = [ nodePackages.prisma openssl findutils ];
+      bins = [ openssl findutils ];
       addFlags = [ "--run '${prisma_detection_script}'" ];
       env = {
         PNPM_PACKAGE_IMPORT_METHOD = "reflink"; # Btrfs CoW를 활용한 용량 및 성능 최적화

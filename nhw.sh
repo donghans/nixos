@@ -22,16 +22,9 @@ update_env() {
     fi
 }
 
-# .env 로드 및 마이그레이션
+# .env 로드
 if [ -f "$ENV_FILE" ]; then
     set -a; source "$ENV_FILE"; set +a
-fi
-
-# 구버전 파일 마이그레이션 (.current_lock -> PINNED_LOCK)
-if [ -f "$NIXOS_PATH/.current_lock" ]; then
-    PINNED_LOCK=$(cat "$NIXOS_PATH/.current_lock")
-    update_env "PINNED_LOCK" "$PINNED_LOCK"
-    rm -f "$NIXOS_PATH/.current_lock"
 fi
 
 LOCKS_DIR="$NIXOS_PATH/.locks/rolling"
@@ -81,26 +74,16 @@ for arg in "$@"; do
     esac
 done
 
-# 2-1. Clean 처리
 if [ "$DO_CLEAN" = true ]; then
-    if [ "$CLEAN_TARGET" = "all" ]; then
-        sudo nh clean all --keep 3
-    else
-        nh clean "$CLEAN_TARGET" --keep 3
-    fi
+    [ "$CLEAN_TARGET" = "all" ] && sudo nh clean all --keep 3 || nh clean "$CLEAN_TARGET" --keep 3
     exit 0
 fi
 
 # 3. Host ID 로직
-INFO_JSON="$NIXOS_PATH/dev/_info.json"
 [ -z "$HOST_ID" ] && HOST_ID="$HOST"
+[ -z "$HOST_ID" ] && echo "❌ Error: Host ID가 필요합니다." && exit 1
 
-if [ -z "$HOST_ID" ]; then
-    echo "❌ Error: Host ID가 필요합니다. .env에 HOST=... 를 적거나 인자로 전달하세요."
-    exit 1
-fi
-
-# Host 검증 및 저장
+INFO_JSON="$NIXOS_PATH/dev/_info.json"
 HOST_CONFIG=$(jq -e ".hosts[] | select(.hostname == \"$HOST_ID\")" "$INFO_JSON" 2>/dev/null)
 [ $? -ne 0 ] && echo "❌ Error: '$HOST_ID'는 등록되지 않은 호스트입니다." && exit 1
 update_env "HOST" "$HOST_ID"
@@ -111,18 +94,15 @@ SELECTED_LOCK=""
 STABLE_LOCK="$STABLE_LOCKS_DIR/$HOST_ID.lock"
 [ ! -f "$STABLE_LOCK" ] && STABLE_LOCK="$STABLE_LOCKS_DIR/_default.lock"
 
+# 인자로 .lock 파일이 들어온 경우 (파일명만 추출하여 rolling/ 내에서 찾음)
 if [ -n "$INPUT_LOCK" ]; then
-    RESOLVED_LOCK=""
-    [ -f "$INPUT_LOCK" ] && RESOLVED_LOCK=$(readlink -f "$INPUT_LOCK")
-    [ -z "$RESOLVED_LOCK" ] && [ -f "$STABLE_LOCKS_DIR/$INPUT_LOCK" ] && RESOLVED_LOCK="$STABLE_LOCKS_DIR/$INPUT_LOCK"
-    [ -z "$RESOLVED_LOCK" ] && [ -f "$LOCKS_DIR/$INPUT_LOCK" ] && RESOLVED_LOCK="$LOCKS_DIR/$INPUT_LOCK"
-
-    if [ -n "$RESOLVED_LOCK" ]; then
-        update_env "PINNED_LOCK" "$RESOLVED_LOCK"
-        echo "🎯 Pinning lock to: $(basename $RESOLVED_LOCK)"
-        PINNED_LOCK="$RESOLVED_LOCK" # 현재 세션에도 반영
+    LOCK_NAME=$(basename "$INPUT_LOCK")
+    if [ -f "$LOCKS_DIR/$LOCK_NAME" ]; then
+        update_env "PINNED_LOCK" "$LOCK_NAME"
+        echo "🎯 Pinning lock to rolling/$LOCK_NAME"
+        PINNED_LOCK="$LOCK_NAME"
     else
-        echo "❌ Error: Lock file '$INPUT_LOCK' not found."; exit 1
+        echo "❌ Error: Lock '$LOCK_NAME' not found in rolling/"; exit 1
     fi
 fi
 
@@ -140,9 +120,16 @@ fi
 # 5. 빌드 환경 구성
 trap cleanup EXIT; setup_links
 
+# PINNED_LOCK 이 설정되어 있으면 rolling/ 폴더에서 해당 파일 사용
 if [ -n "$PINNED_LOCK" ]; then
-    SELECTED_LOCK="$PINNED_LOCK"
-    [ ! -f "$SELECTED_LOCK" ] && { echo "❌ Warning: Pinned lock not found. Falling back."; update_env "PINNED_LOCK" ""; SELECTED_LOCK=""; }
+    SELECTED_LOCK="$LOCKS_DIR/$PINNED_LOCK"
+    if [ ! -f "$SELECTED_LOCK" ]; then
+        echo "❌ Warning: Pinned lock rolling/$PINNED_LOCK not found. Falling back."
+        update_env "PINNED_LOCK" ""
+        SELECTED_LOCK=""
+    else
+        echo "⚠️  Using PINNED lock: $PINNED_LOCK"
+    fi
 fi
 
 if [ -z "$SELECTED_LOCK" ]; then
