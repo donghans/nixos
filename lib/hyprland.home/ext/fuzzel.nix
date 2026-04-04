@@ -9,6 +9,8 @@
       lines = 40;
       horizontal-pad = 20;
       dpi-aware = "no";
+      show-icons = "yes";
+      icon-theme = "Papirus-Dark";
     };
 
     colors = {
