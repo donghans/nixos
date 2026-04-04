@@ -5,10 +5,27 @@
   ];
 
   # == Boot & Kernel ==
-  boot.kernelParams = [
-    "amd_pstate=active" # (이유: 주전원 공급 시 성능 최적화)
-    # [OPTIONAL] "amd_pstate=passive" (이유: USB-PD 전력 부족 시 강제 종료 방지)
-  ];
+  boot = {
+    consoleLogLevel = 3;
+    kernelParams = [
+      "amd_pstate=active" # (이유: 주전원 공급 시 성능 최적화)
+      "nowatchdog" # (이유: 종료 시 Watchdog0 관련 메시지 방지)
+      "loglevel=3" # (이유: 부팅 시 불필요한 펌웨어/로그 메시지 숨김)
+      # [OPTIONAL] "amd_pstate=passive" (이유: USB-PD 전력 부족 시 강제 종료 방지)
+    ];
+
+    blacklistedKernelModules = ["sp5100_tco"]; # (이유: AMD 하드웨어 Watchdog 드라이버 차단)
+    extraModprobeConfig = ''
+      blacklist sp5100_tco
+    '';
+  };
+
+  # (목적: 종료/재부팅 시 Watchdog 메시지 완전 차단)
+  systemd.settings.Manager = {
+    RuntimeWatchdogSec = "off";
+    RebootWatchdogSec = "off";
+    KExecWatchdogSec = "off";
+  };
 
   fileSystems."/boot" = {
     device = "/dev/disk/by-uuid/C125-54BB";
