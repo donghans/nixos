@@ -86,12 +86,10 @@ nhw clean all
 ## 📂 4. 로그 확인 (Logging)
 
 모든 `nhw` 실행 결과는 `/var/log/nhw/`에 자동으로 기록됩니다.
-- 파일명 형식: `YYYYMMDDTHHMMSS.log`
+- 파일명 형식: `YYYYMMDDTHHMMSS-[target]-[action].log` (예: `20260405T120000-os-switch.log`)
 - 터미널에는 색상이 표시되지만, 저장된 로그 파일은 텍스트 검색이 용이하도록 ANSI 색상 코드가 제거된 순수 텍스트로 저장됩니다.
 
-문제가 발생했을 때 로그 파일의 마지막 부분을 확인하세요.
+문제가 발생했을 때 로그 파일의 마지막 부분을 확인하려면 아래 명령어를 사용하세요.
 ```bash
 tail -f /var/log/nhw/$(ls -t /var/log/nhw/ | head -n 1)
-```
- /var/log/nhw/ | head -n 1)
 ```

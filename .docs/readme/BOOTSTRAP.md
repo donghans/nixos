@@ -2,6 +2,8 @@
 
 이 프로젝트는 **Btrfs 서브볼륨 구조(`@`, `@home`, `@nix`, `@log`)**에 최적화되어 설계되었습니다. 따라서 기존 시스템에서 단순히 설정을 전환하는 것보다, **전용 설치 ISO**를 통해 정해진 구조대로 시스템을 구축하는 것이 가장 안전하고 권장되는 방법입니다.
 
+---
+
 ## 1. 저장소 준비 (Fork & Clone)
 
 이 프로젝트는 본인의 GitHub 계정으로 **Fork**하여 관리하는 것을 전제로 합니다.
@@ -11,6 +13,8 @@
 git clone https://github.com/<your-username>/nixos.git
 cd nixos
 ```
+
+---
 
 ## 2. 초기 설정 수정 (`dev/_info.json`)
 
@@ -36,6 +40,8 @@ cd nixos
 }
 ```
 
+---
+
 ## 3. 새로운 호스트 정의 (템플릿 활용)
 
 설치할 기기에 맞는 설정을 미리 준비해야 합니다.
@@ -46,6 +52,8 @@ cd nixos
     cp dev/.template.home.nix dev/<hostname>.home.nix
     ```
 2.  **내용 수정**: `dev/<hostname>.nix` 파일을 열어 필요한 서비스나 패키지를 수정하세요.
+
+---
 
 ## 4. 나만의 설치 ISO 빌드 및 설치
 
@@ -75,4 +83,3 @@ cd nixos
   - `home.packages` 목록에 필요한 패키지명을 추가하거나, `dev/base/pkgs/` 폴더 내의 특정 언어별 설정 파일을 수정해 보세요.
   - 수정 후에는 `nhw home switch` 명령으로 즉시 반영할 수 있습니다.
 - **심화 구조 이해**: 이 프로젝트의 빌드 격리, 락 전략 등 기술적 내부 구조가 궁금하다면 [HACKING.md](../hacking/_HACKING.md) 문서를 탐독해 보세요.
-
