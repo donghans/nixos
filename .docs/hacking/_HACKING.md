@@ -40,7 +40,7 @@
 
 ```text
 /
-├── core/             # 빌드 엔진 및 Flake 진입점
+├── core/             # Flake 진입점(flake.nix), 빌더 모듈(lib) 및 엔진 스크립트(scripts)
 ├── dev/              # 호스트별 설정 및 메타데이터
 ├── lib/              # 재사용 가능한 기능 모듈
 ├── .docs/            # 문서 저장소 (readme, plan, hacking)

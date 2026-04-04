@@ -24,12 +24,12 @@
 - **동적 활용**: `flake.nix`는 빌드 타임에 이 파일을 읽어 호스트 설정을 실시간으로 생성하고, `nhw.sh`는 런타임에 이를 읽어 빌드 대상 기기를 결정합니다.
 
 ## 3. 로직 코어 레이어 (Logic Core Layer)
-**핵심 경로: `core/flake.nix`**
+**핵심 경로: `core/flake.nix`, `core/lib/`**
 
-시스템 설정의 두뇌에 해당하며, Nix Flake의 강력한 기능을 활용해 복잡한 패키징과 모듈성을 구현합니다.
+시스템 설정의 두뇌에 해당하며, Nix Flake의 강력한 기능을 활용해 복잡한 패키징과 모듈성을 구현합니다. `flake.nix`는 각 모듈을 조립하는 오케스트레이터 역할을 수행합니다.
 
-- **Dynamic Generator**: JSON에 호스트를 추가하는 것만으로 `nixosConfigurations`와 `homeConfigurations`가 자동 생성되는 메타프로그래밍 구조입니다.
-- **Advanced Overlay**: `mkWrapper` 오버레이를 통해 특정 패키지에 런타임 환경 변수, 라이브러리 경로 등을 주입하여 패키지를 래핑하는 로직이 핵심입니다.
+- **Dynamic Generator (`core/lib/builders.nix`)**: JSON 데이터를 기반으로 `nixosConfigurations`와 `homeConfigurations`를 동적으로 생성해내는 메타프로그래밍 구조와 빌더 팩토리입니다.
+- **Advanced Overlay (`core/lib/mk-wrapper.nix`)**: `mkWrapper` 헬퍼를 단독 분리하여, 특정 패키지에 런타임 환경 변수나 라이브러리 경로 등을 주입해 패키지를 래핑하는 로직을 제공합니다.
 
 ## 4. 구성 모듈 레이어 (Library & Config Layer)
 **핵심 경로: `lib/`, `dev/base/`**
