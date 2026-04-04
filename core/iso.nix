@@ -51,7 +51,7 @@ in {
 
     # 로그아웃하거나 세션이 종료되었을 때 보여줄 기본 화면 (tuigreet)
     default_session = {
-      command = lib.mkForce "${pkgs.tuigreet}/bin/tuigreet --time --remember --cmd 'uwsm start hyprland-uwsm.desktop'";
+      command = lib.mkForce "${pkgs.tuigreet}/bin/tuigreet --time --remember --greeting 'Welcome! Login as nixos (no password required)' --cmd 'uwsm start hyprland-uwsm.desktop'";
       user = "greeter";
     };
   };
@@ -69,22 +69,41 @@ in {
   # 5. 환영 메시지 및 가이드 추가
   programs.bash.interactiveShellInit = ''
     if [[ $(tty) == /dev/tty1 || $(tty) == /dev/pts/* ]]; then
-      echo "--------------------------------------------------"
-      echo "🚀 NixOS 커스텀 인스톨러 (Hyprland 환경)"
-      echo "--------------------------------------------------"
-      echo "설치를 시작하려면 아래 명령어를 입력하세요:"
-      echo ""
-      echo "1. 자동 설치 (추천):"
-      echo "   nixos-setup <EFI_PART> <ROOT_PART> <HOSTNAME>"
-      echo ""
-      echo "2. 다른 리포지토리 사용 시:"
-      echo "   NIXOS_REPO=user/repo sudo -E nixos-setup-from-repo <EFI_PART> <ROOT_PART> <HOSTNAME>"
-      echo ""
-      echo "예시 (nvme0n1 기기):"
-      echo "   nixos-setup /dev/nvme0n1p1 /dev/nvme0n1p2 beelink-ser7-co"
-      echo ""
-      echo "TIP: 현재 기본 리포지토리는 '${metaConfig.nixosRepo}'로 설정되어 있습니다."
-      echo "--------------------------------------------------"
+      if [[ "$TERM" == "xterm-kitty" ]]; then
+        echo "--------------------------------------------------"
+        echo "🚀 NixOS 커스텀 인스톨러 (Hyprland 환경)"
+        echo "--------------------------------------------------"
+        echo "설치를 시작하려면 아래 명령어를 입력하세요:"
+        echo ""
+        echo "1. 자동 설치 (추천):"
+        echo "   nixos-setup <EFI_PART> <ROOT_PART> <HOSTNAME>"
+        echo ""
+        echo "2. 다른 리포지토리 사용 시:"
+        echo "   NIXOS_REPO=user/repo sudo -E nixos-setup-from-repo <EFI_PART> <ROOT_PART> <HOSTNAME>"
+        echo ""
+        echo "예시 (nvme0n1 기기):"
+        echo "   nixos-setup /dev/nvme0n1p1 /dev/nvme0n1p2 beelink-ser7-co"
+        echo ""
+        echo "TIP: 현재 기본 리포지토리는 '${metaConfig.nixosRepo}'로 설정되어 있습니다."
+        echo "--------------------------------------------------"
+      else
+        echo "--------------------------------------------------"
+        echo "🚀 NixOS Custom Installer (Hyprland)"
+        echo "--------------------------------------------------"
+        echo "To start the installation, enter the command below:"
+        echo ""
+        echo "1. Automatic Installation (Recommended):"
+        echo "   nixos-setup <EFI_PART> <ROOT_PART> <HOSTNAME>"
+        echo ""
+        echo "2. Using a different repository:"
+        echo "   NIXOS_REPO=user/repo sudo -E nixos-setup-from-repo <EFI_PART> <ROOT_PART> <HOSTNAME>"
+        echo ""
+        echo "Example (nvme0n1 device):"
+        echo "   nixos-setup /dev/nvme0n1p1 /dev/nvme0n1p2 beelink-ser7-co"
+        echo ""
+        echo "TIP: Default repository is set to '${metaConfig.nixosRepo}'."
+        echo "--------------------------------------------------"
+      fi
     fi
   '';
 
