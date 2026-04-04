@@ -21,7 +21,7 @@
     fi
   '';
 in {
-  environment.systemPackages = [ nfd-fix ];
+  environment.systemPackages = [nfd-fix];
 
   # == Zsh Interactive Shell Init ==
   programs.zsh.interactiveShellInit = ''

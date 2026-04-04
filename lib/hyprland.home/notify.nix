@@ -15,7 +15,11 @@ with lib; let
     mkdir -p "$(dirname "${cfg.logPath}")"
 
     # stdbuf -oL을 사용하여 라인 버퍼링 강제 (실시간 기록 핵심)
-    ${pkgs.coreutils}/bin/stdbuf -oL ${pkgs.dbus}/bin/dbus-monitor "interface='org.freedesktop.Notifications',member='Notify'" | \
+    count=0
+    summary=""
+    body=""
+
+    ${pkgs.coreutils}/bin/stdbuf -oL ${pkgs.dbus}/bin/dbus-monitor "interface='org.freedesktop.Notifications',member='Notify',type='method_call'" | \
     while read -r line; do
       if echo "$line" | grep -q "member=Notify"; then
         count=0
