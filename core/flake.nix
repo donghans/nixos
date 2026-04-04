@@ -75,6 +75,7 @@
 
     gitName = info.git.name;
     gitEmail = info.git.email;
+    nixosRepo = info.git.nixosRepo;
     hosts = info.hosts;
 
     # [핵심] Home Manager 설정을 만드는 공통 함수
@@ -199,10 +200,6 @@
         };
         modules = [ (import h.hmConfig) ];
       };
-    }) hosts);
-  };
-}
- };
     }) hosts);
   };
 }

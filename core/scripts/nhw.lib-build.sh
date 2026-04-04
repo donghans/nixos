@@ -71,7 +71,6 @@ prepare_build_dir() {
     mkdir -p "$build_dir"
     
     cp -a "$source_path/core/"* "$build_dir/"
-    # core/scripts 폴더가 루트에 있으면 안되므로 위치 조정 (이미 core/ 내부에 있으므로 정상임)
     cp -a "$source_path/dev" "$build_dir/"
     cp -a "$source_path/lib" "$build_dir/"
     [ -f "$env_file" ] && cp -a "$env_file" "$build_dir/.env"
@@ -79,11 +78,16 @@ prepare_build_dir() {
     ln -sfn "$build_dir" "$source_path/.build"
 }
 
-# 5. 임시 Git 초기화
+# 5. 임시 Git 초기화 (Nix Dirty 경고 차단을 위해 커밋까지 수행)
 init_tmp_git() {
     local build_dir=$1
-    git -C "$build_dir" init >/dev/null 2>&1
+    if [ ! -d "$build_dir/.git" ]; then
+        git -C "$build_dir" init >/dev/null 2>&1
+        git -C "$build_dir" config user.email "nhw@tmp.repo" >/dev/null 2>&1
+        git -C "$build_dir" config user.name "nhw-bot" >/dev/null 2>&1
+    fi
     git -C "$build_dir" add -A >/dev/null 2>&1
+    git -C "$build_dir" commit -m "temp: build environment" >/dev/null 2>&1
 }
 
 # 6. Lock 파일 역동기화 알림/처리
@@ -93,5 +97,19 @@ finalize_lock_sync() {
     if [ "$lock_changed" = true ]; then
         echo -e "\n[nhw:notice] Lock file updated: $target_lock_path"
         echo "   Please review and commit the changes."
+    fi
+}
+
+# 7. 원본 레포지토리 Git 상태 체크 (정밀 수정)
+check_origin_git_status() {
+    local origin_path=$1
+    if [ -d "$origin_path/.git" ]; then
+        # --porcelain 옵션은 변경 사항이 없으면 아예 아무것도 출력하지 않음
+        local status_out
+        status_out=$(git -C "$origin_path" status --porcelain 2>/dev/null)
+        if [ -n "$status_out" ]; then
+            echo -e "\n[nhw:notice] 원본 레포지토리에 커밋되지 않은 변경 사항이 있습니다."
+            echo "   기록을 남기려면 'git add' 및 'commit'을 진행해 주세요."
+        fi
     fi
 }

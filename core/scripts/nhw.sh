@@ -17,6 +17,9 @@ STABLE_LOCKS_DIR="$NIXOS_PATH/.locks"
 
 cleanup() {
     echo "[nhw] Cleaning up..."
+    # 원본 레포지토리의 미커밋 변경 사항 알림
+    check_origin_git_status "$NIXOS_PATH"
+    
     # fix-unstable의 경우 HOST_SPECIFIC_LOCK이 설정되지 않았을 수 있으므로 체크
     [ -n "$HOST_SPECIFIC_LOCK" ] && finalize_lock_sync "$LOCK_CHANGED" "$HOST_SPECIFIC_LOCK"
 }
