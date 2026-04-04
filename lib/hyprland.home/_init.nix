@@ -1,4 +1,8 @@
-{pkgs, ...}: {
+{
+  pkgs,
+  lib,
+  ...
+}: {
   wayland.windowManager.hyprland.enable = true;
 
   wayland.windowManager.hyprland.systemd = {
@@ -15,7 +19,15 @@
       kb_options = "korean:ralt_hangul,korean:rctrl_hanja";
 
       follow_mouse = 1;
-      sensitivity = 0;
+
+      # 1. 마우스 기본 속도 (-1.0 ~ 1.0, 0이 기본값)
+      sensitivity = lib.mkForce 1;
+
+      # 2. 마우스 가속 프로필
+      # "flat"으로 설정하면 가속이 꺼지고 일정한 속도로 움직입니다 (개발자분들이 선호함)
+      # "adaptive"가 기본 가속 모드입니다.
+      accel_profile = "adaptive";
+
       touchpad = {
         natural_scroll = true;
       };
