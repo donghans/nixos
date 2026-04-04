@@ -18,9 +18,13 @@ apply_lock_strategy() {
         init_tmp_git "$tmp_build_dir"
 
         if [ -f "$target_lock" ]; then
+            log_exec "nix" ">"
             nix flake update --flake "$tmp_build_dir" nixpkgs-unstable
+            log_exec "nix" "<"
         else
+            log_exec "nix" ">"
             nix flake update --flake "$tmp_build_dir"
+            log_exec "nix" "<"
         fi
         
         if [ ! -f "$final_source_lock" ] || ! cmp -s "$final_source_lock" "$target_lock"; then

@@ -14,13 +14,12 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Formatting Helper (Category based Coloring)
+# Formatting Helper
 log_msg() {
     local category=$1
     local msg=$2
     local cat_color=$NC
 
-    # Determine color based on category
     case "$category" in
         Init)    cat_color=$CYAN ;;
         Task)    cat_color=$PURPLE ;;
@@ -32,11 +31,22 @@ log_msg() {
         *)       cat_color=$NC ;;
     esac
 
-    # NHW is always Cyan, Category is specific, Msg is default
+    # Format: NHW [9-char-category] | [msg]
     printf "${CYAN}NHW${NC} ${cat_color}%-9s${NC} | %s\n" "$category" "$msg"
 }
 
-# 1. Setup Logging
+# Command Execution Helper (Aligned with | marker)
+log_exec() {
+    local cmd_name=$1 # e.g., nh, nix, nom
+    local state=$2    # > or <
+    local msg=$3      # description
+    local cat_color=$BLUE
+    
+    # Matches NHW's aligned format: NHW Exec cmd > description
+    printf "${CYAN}NHW${NC} ${cat_color}Exec %-4s${NC} %s %s\n" "$cmd_name" "$state" "$msg"
+}
+
+# 1. Setup Logging (Clean YYYYMMDDTHHMMSS.log format)
 setup_logging() {
     local timestamp=$1
     local user_name=$USER
@@ -56,7 +66,8 @@ setup_logging() {
         fi
     fi
 
-    LOG_FILE="$LOG_DIR/nhw_${timestamp}.log"
+    # Removed 'nhw_' prefix as requested
+    LOG_FILE="$LOG_DIR/${timestamp}.log"
     exec > >(tee -a >(sed 's/\x1b\[[0-9;]*m//g' > "$LOG_FILE")) 2>&1
     return 0
 }
@@ -65,7 +76,7 @@ setup_logging() {
 acquire_lock() {
     exec 9> "$LOCK_FILE"
     if ! flock -n 9; then
-        log_msg "Error" "another build process is already running." >&2
+        log_msg "Error" "another build process is already running." "$RED" >&2
         exit 1
     fi
 }
@@ -99,7 +110,7 @@ determine_host_info() {
     local host_id="$input_host"
     [ -z "$host_id" ] && host_id="$HOST"
     if [ -z "$host_id" ]; then
-        log_msg "Error" "host id is required." >&2
+        log_msg "Error" "host id is required."
         exit 1
     fi
 
@@ -108,7 +119,7 @@ determine_host_info() {
     else
         local host_config=$(jq -e ".hosts[] | select(.hostname == \"$host_id\")" "$info_json" 2>/dev/null)
         if [ $? -ne 0 ]; then
-            log_msg "Error" "'$host_id' is not a registered host." >&2
+            log_msg "Error" "'$host_id' is not a registered host."
             exit 1
         fi
         update_env_file "$env_file" "HOST" "$host_id"

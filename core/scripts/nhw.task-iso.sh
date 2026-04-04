@@ -4,8 +4,10 @@ run_iso_task() {
     log_msg "Task" "starting ISO image build process..."
     cd "$TMP_BUILD_DIR" || exit 1
     
+    log_exec "nom" ">"
     nom build ".#nixosConfigurations.custom-iso.config.system.build.isoImage" \
       --extra-experimental-features "nix-command flakes" --impure --print-build-logs
+    log_exec "nom" "<"
 
     if [ -L "$TMP_BUILD_DIR/result" ]; then
         ISO_FILE=$(readlink -f "$TMP_BUILD_DIR/result/iso/"*.iso)

@@ -17,9 +17,9 @@ log_msg "Init" "NHW: [NixOS Helper](https://github.com/viperML/nh) Wrapper"
 ENV_FILE="$NIXOS_PATH/.env"
 [ -f "$ENV_FILE" ] && { set -a; source "$ENV_FILE"; set +a; }
 
-# Logging Setup
-TIMESTAMP_FILE=$(date +%Y%m%d_%H%M%S)
-setup_logging "$TIMESTAMP_FILE"
+# Logging Setup (YYYYMMDDTHHMMSS.log format)
+LOG_TIMESTAMP=$(date +%Y%m%dT%H%M%S)
+setup_logging "$LOG_TIMESTAMP"
 
 acquire_lock
 
@@ -28,7 +28,7 @@ cleanup() {
     END_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
     DURATION=$((END_TIME_RAW - START_TIME_RAW))
     
-    echo ""
+    # 📊 Summary
     log_msg "Summary" "Started:  $START_TIME_STR"
     log_msg "Summary" "Finished: $END_TIME_STR"
     log_msg "Summary" "Duration: ${DURATION}s"
@@ -64,7 +64,9 @@ done
 # 4. Routing
 if [ "$DO_CLEAN" = true ]; then
     log_msg "Init" "Action:   cleanup"
+    log_exec "nh" ">"
     [ "$CLEAN_TARGET" = "all" ] && sudo nh clean all --keep 3 || nh clean "$CLEAN_TARGET" --keep 3
+    log_exec "nh" "<"
     exit 0
 fi
 

@@ -5,7 +5,9 @@ run_update_task() {
     [ -f "$HOST_SPECIFIC_LOCK" ] && cp "$HOST_SPECIFIC_LOCK" "$TARGET_LOCK"
     init_tmp_git "$TMP_BUILD_DIR"
 
+    log_exec "nix" ">"
     nix flake update --flake "$TMP_BUILD_DIR"
+    log_exec "nix" "<"
 
     if [ ! -f "$HOST_SPECIFIC_LOCK" ] || ! cmp -s "$HOST_SPECIFIC_LOCK" "$TARGET_LOCK"; then
         cp "$TARGET_LOCK" "$HOST_SPECIFIC_LOCK"
