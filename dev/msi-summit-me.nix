@@ -10,7 +10,6 @@
     initrd.availableKernelModules = ["i2c_hid_acpi" "intel_lpss_pci" "intel_ishtp_hid" "intel_hid" "hid_multitouch" "i2c_i801"];
     initrd.kernelModules = ["i2c_hid_acpi"];
 
-    consoleLogLevel = 3; # (이유: 에러 이상의 중요 로그만 콘솔에 노출)
     kernelModules = ["ec_sys"];
     kernelParams = [
       "pcie_aspm=off" # (이유: PCIe 전원 관리로 인한 끊김 방지)
@@ -19,10 +18,6 @@
       "i2c_designware.disable_ps=1" # (이유: I2C 컨트롤러 절전 비활성화)
       "psmouse.synaptics_intertouch=1" # (이유: 구형 PS/2 대신 I2C/SMBus 사용 강제)
       "i8042.nopnp=1" # (이유: 구형 PS/2 포트 자동 탐색 충돌 방지)
-      "acpi_osi=Linux" # (이유: 윈도우 최적화 설정 무시)
-      "irqpoll" # (이유: 인터럽트 충돌 시 시스템 프리징 방지)
-      "nowatchdog" # (이유: 종료 시 Watchdog0 관련 메시지 및 지연 방지)
-      "loglevel=3" # (이유: 부팅 시 불필요한 iwlwifi 등 펌웨어 경고 숨김)
     ];
 
     blacklistedKernelModules = [
@@ -31,21 +26,12 @@
       "nvidia_drm"
       "nvidia_modeset"
       "psmouse" # (이유: 최신 I2C 터치패드와 충돌하는 구형 드라이버 차단)
-      "iTCO_wdt" # (이유: 인텔 하드웨어 Watchdog 드라이버 차단)
     ];
     extraModprobeConfig = ''
       blacklist nouveau
       options nouveau modeset=0
       options ec_sys write_support=1
-      blacklist iTCO_wdt
     '';
-  };
-
-  # (목적: 종료/재부팅 시 Watchdog 메시지 완전 차단)
-  systemd.settings.Manager = {
-    RuntimeWatchdogSec = "off";
-    RebootWatchdogSec = "off";
-    KExecWatchdogSec = "off";
   };
 
   fileSystems."/boot" = {

@@ -44,9 +44,17 @@
     '';
 
     interactiveShellInit = ''
-      # == Autosuggestions Tab Binding ==
-      # (목적: 탭 키를 누르면 제안 내용을 즉시 수락하여 자동 완성)
-      bindkey '^I' autosuggest-accept
+      # == Smart Tab Binding ==
+      # (목적: 제안이 있으면 Tab으로 즉시 수락, 없으면 표준 자동완성 실행)
+      _smart_tab() {
+        if [[ -n "$POSTDISPLAY" ]]; then
+          zle autosuggest-accept
+        else
+          zle expand-or-complete
+        fi
+      }
+      zle -N _smart_tab
+      bindkey '^I' _smart_tab
 
       # == Zsh Tab Completion Menu Selection ==
       zstyle ':completion:*' menu select
@@ -59,6 +67,26 @@
       alias ls='ls --color=auto'
       alias grep='grep --color=auto'
     '';
+  };
+
+  # == Boot & System Logs / Watchdog ==
+  boot = {
+    consoleLogLevel = 3;
+    kernelParams = [
+      "nowatchdog"
+      "loglevel=3"
+      "acpi_osi=Linux" # (이유: 리눅스 최적화 ACPI 설정 및 윈도우 전용 로직 우회)
+      "irqpoll" # (이유: 인터럽트 충돌 방지 및 하드웨어 응답성 향상)
+    ];
+    # AMD 및 Intel 하드웨어 Watchdog 드라이버 차단
+    blacklistedKernelModules = ["sp5100_tco" "iTCO_wdt"];
+  };
+
+  # (목적: 종료/재부팅 시 Watchdog 메시지 완전 차단 및 지연 방지)
+  systemd.settings.Manager = {
+    RuntimeWatchdogSec = "off";
+    RebootWatchdogSec = "off";
+    KExecWatchdogSec = "off";
   };
 
   nix = {
