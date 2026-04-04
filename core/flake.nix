@@ -152,6 +152,11 @@
             exec /home/${info.username}/nixos/core/scripts/nhw.sh "$@"
           '')
         ];
+
+        # [nhw] 로그 디렉터리 생성 및 유저 권한 부여
+        systemd.tmpfiles.rules = [
+          "d /var/log/nhw 0775 ${info.username} users -"
+        ];
       }] ++ [
         home-manager.nixosModules.home-manager {
           home-manager.useGlobalPkgs = true;

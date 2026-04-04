@@ -1,19 +1,76 @@
 #!/usr/bin/env bash
 
-# 공통 상수 정의
+# Constants
 TMP_BUILD_DIR="/tmp/nixos-build"
 LOCK_FILE="/tmp/nixos-build.lock"
+LOG_DIR="/var/log/nhw"
 
-# 1. 중복 실행 방지 락
+# ANSI Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Formatting Helper (Category based Coloring)
+log_msg() {
+    local category=$1
+    local msg=$2
+    local cat_color=$NC
+
+    # Determine color based on category
+    case "$category" in
+        Init)    cat_color=$CYAN ;;
+        Task)    cat_color=$PURPLE ;;
+        Summary) cat_color=$NC ;;
+        Done|Success) cat_color=$GREEN ;;
+        Error)   cat_color=$RED ;;
+        Notice|Warn)  cat_color=$YELLOW ;;
+        Prep)    cat_color=$CYAN ;;
+        *)       cat_color=$NC ;;
+    esac
+
+    # NHW is always Cyan, Category is specific, Msg is default
+    printf "${CYAN}NHW${NC} ${cat_color}%-9s${NC} | %s\n" "$category" "$msg"
+}
+
+# 1. Setup Logging
+setup_logging() {
+    local timestamp=$1
+    local user_name=$USER
+    
+    if [ ! -d "$LOG_DIR" ] || [ ! -w "$LOG_DIR" ]; then
+        log_msg "Notice" "log directory permission issue detected."
+        read -rp "$(printf "${YELLOW}%-13s${NC} | setup log directory with sudo? (Y/n): " "NHW Question")" CONFIRM
+        
+        if [[ "$CONFIRM" =~ ^[Yy]$ ]] || [ -z "$CONFIRM" ]; then
+            sudo mkdir -p "$LOG_DIR"
+            sudo chown -R "$user_name:users" "$LOG_DIR"
+            sudo chmod -R 775 "$LOG_DIR"
+            log_msg "Init" "log directory prepared."
+        else
+            log_msg "Init" "logging disabled for this session."
+            return 1
+        fi
+    fi
+
+    LOG_FILE="$LOG_DIR/nhw_${timestamp}.log"
+    exec > >(tee -a >(sed 's/\x1b\[[0-9;]*m//g' > "$LOG_FILE")) 2>&1
+    return 0
+}
+
+# 2. Acquire Lock
 acquire_lock() {
     exec 9> "$LOCK_FILE"
     if ! flock -n 9; then
-        echo "[nhw:error] 다른 빌드 작업이 이미 진행 중입니다." >&2
+        log_msg "Error" "another build process is already running." >&2
         exit 1
     fi
 }
 
-# 2. .env 업데이트 유틸리티
+# 3. Update .env Utility
 update_env_file() {
     local env_path=$1
     local key=$2
@@ -27,7 +84,7 @@ update_env_file() {
     fi
 }
 
-# 3. 호스트 정보 결정 함수
+# 4. Determine Host Info
 determine_host_info() {
     local scope=$1
     local input_host=$2
@@ -42,7 +99,7 @@ determine_host_info() {
     local host_id="$input_host"
     [ -z "$host_id" ] && host_id="$HOST"
     if [ -z "$host_id" ]; then
-        echo "[nhw:error] Host ID가 필요합니다. (nhw <host_id> ...)" >&2
+        log_msg "Error" "host id is required." >&2
         exit 1
     fi
 
@@ -51,7 +108,7 @@ determine_host_info() {
     else
         local host_config=$(jq -e ".hosts[] | select(.hostname == \"$host_id\")" "$info_json" 2>/dev/null)
         if [ $? -ne 0 ]; then
-            echo "[nhw:error] '$host_id'는 등록되지 않은 호스트입니다." >&2
+            log_msg "Error" "'$host_id' is not a registered host." >&2
             exit 1
         fi
         update_env_file "$env_file" "HOST" "$host_id"
@@ -60,13 +117,13 @@ determine_host_info() {
     fi
 }
 
-# 4. 격리된 빌드 디렉토리 준비
+# 5. Prepare Build Dir
 prepare_build_dir() {
     local source_path=$1
     local build_dir=$2
     local env_file=$3
 
-    echo "[nhw] Preparing isolated build environment in $build_dir..."
+    log_msg "Task" "preparing isolated environment..."
     rm -rf "$build_dir"
     mkdir -p "$build_dir"
     
@@ -78,7 +135,7 @@ prepare_build_dir() {
     ln -sfn "$build_dir" "$source_path/.build"
 }
 
-# 5. 임시 Git 초기화 (Nix Dirty 경고 차단을 위해 커밋까지 수행)
+# 6. Init Tmp Git
 init_tmp_git() {
     local build_dir=$1
     if [ ! -d "$build_dir/.git" ]; then
@@ -90,26 +147,31 @@ init_tmp_git() {
     git -C "$build_dir" commit -m "temp: build environment" >/dev/null 2>&1
 }
 
-# 6. Lock 파일 역동기화 알림/처리
+# 7. Finalize Lock Sync
 finalize_lock_sync() {
     local lock_changed=$1
     local target_lock_path=$2
     if [ "$lock_changed" = true ]; then
-        echo -e "\n[nhw:notice] Lock file updated: $target_lock_path"
-        echo "   Please review and commit the changes."
+        log_msg "Notice" "lock file updated: $target_lock_path"
+        log_msg "Notice" "please review and commit changes."
     fi
 }
 
-# 7. 원본 레포지토리 Git 상태 체크 (정밀 수정)
+# 8. Git Status Check
 check_origin_git_status() {
     local origin_path=$1
     if [ -d "$origin_path/.git" ]; then
-        # --porcelain 옵션은 변경 사항이 없으면 아예 아무것도 출력하지 않음
         local status_out
         status_out=$(git -C "$origin_path" status --porcelain 2>/dev/null)
         if [ -n "$status_out" ]; then
-            echo -e "\n[nhw:notice] 원본 레포지토리에 커밋되지 않은 변경 사항이 있습니다."
-            echo "   기록을 남기려면 'git add' 및 'commit'을 진행해 주세요."
+            log_msg "Notice" "uncommitted changes found in repository."
+            log_msg "Notice" "consider committing to save history."
         fi
     fi
+}
+
+# 9. Log Rotation
+rotate_logs() {
+    mkdir -p "$LOG_DIR" 2>/dev/null
+    ls -t "$LOG_DIR"/*.log 2>/dev/null | tail -n +31 | xargs rm -f 2>/dev/null
 }
