@@ -56,7 +56,7 @@ IS_SUCCESS=false
 
 handle_signal() {
     local sig="${1:-UNKNOWN}"
-    log_msg "Error" "작업이 사용자에 의해 강제 중단되었습니다. ($sig)"
+    log_msg "Error" "Process interrupted by user. ($sig)"
     exit 130
 }
 
@@ -69,7 +69,7 @@ cleanup() {
     DURATION=$((END_TIME_RAW - START_TIME_RAW))
 
     if [ "$IS_SUCCESS" != true ]; then
-        log_msg "Error" "작업이 비정상 종료되었습니다. 임시 빌드 참조를 제거합니다."
+        log_msg "Error" "Process terminated abnormally. Removing temporary build reference."
         [ -L "$NIXOS_PATH/.build" ] && rm -f "$NIXOS_PATH/.build" || true
     fi
 
@@ -91,13 +91,13 @@ trap cleanup EXIT
 # 4. Routing
 if [ "$DO_CLEAN" = true ]; then
     log_msg "Init" "Action:   cleanup"
-    log_exec "nh" ">"
+    log_exec "nh" ">" "nh clean $CLEAN_TARGET"
     if [ "$CLEAN_TARGET" = "all" ]; then
         sudo nh clean all --keep 3 || true
     else
         nh clean "$CLEAN_TARGET" --keep 3 || true
     fi
-    log_exec "nh" "<"
+    log_exec "nh" "<" "nh clean $CLEAN_TARGET"
     IS_SUCCESS=true
     exit 0
 fi

@@ -79,16 +79,16 @@ echo ""
 read -rp "$(printf "${YELLOW}%-13s${NC} | format boot partition($BOOT_PART)? (y/N): " "ISO Question")" FORMAT_BOOT
 if [[ "$FORMAT_BOOT" =~ ^[Yy]$ ]]; then
     log_msg "Disk" "formatting boot partition (fat32)..."
-    log_exec "disk" ">"
+    log_exec "disk" ">" "mkfs.fat"
     mkfs.fat -F 32 -n boot "$BOOT_PART"
-    log_exec "disk" "<"
+    log_exec "disk" "<" "mkfs.fat"
 else
     log_msg "Disk" "skipping boot partition format."
 fi
 
 # 2. Btrfs Format & Subvolume
 log_msg "Disk" "formatting root and creating subvolumes..."
-log_exec "disk" ">"
+log_exec "disk" ">" "mkfs.btrfs"
 mkfs.btrfs -L nixos -f "$ROOT_PART"
 
 mount "$ROOT_PART" /mnt
@@ -97,19 +97,19 @@ btrfs subvolume create /mnt/@home
 btrfs subvolume create /mnt/@nix
 btrfs subvolume create /mnt/@log
 umount /mnt
-log_exec "disk" "<"
+log_exec "disk" "<" "mkfs.btrfs"
 
 # 3. Mount
 export MOUNT_OPTS="noatime,compress=zstd,space_cache=v2"
 log_msg "Mount" "mounting partitions with optimal options..."
-log_exec "disk" ">"
+log_exec "disk" ">" "mount"
 mount -o subvol=@,"${MOUNT_OPTS}" "$ROOT_PART" /mnt
 mkdir -p /mnt/{home,nix,var/log,boot}
 mount -o subvol=@home,"${MOUNT_OPTS}" "$ROOT_PART" /mnt/home
 mount -o subvol=@nix,"${MOUNT_OPTS}" "$ROOT_PART" /mnt/nix
 mount -o subvol=@log,"${MOUNT_OPTS}" "$ROOT_PART" /mnt/var/log
 mount "$BOOT_PART" /mnt/boot
-log_exec "disk" "<"
+log_exec "disk" "<" "mount"
 
 # 4. Git Clone
 if [ -z "${NIXOS_REPO:-}" ]; then
@@ -118,9 +118,9 @@ if [ -z "${NIXOS_REPO:-}" ]; then
 fi
 
 log_msg "Git" "cloning repository from github.com/$NIXOS_REPO ..."
-log_exec "git" ">"
+log_exec "git" ">" "git clone"
 git clone "https://github.com/$NIXOS_REPO.git" /mnt/etc/nixos
-log_exec "git" "<"
+log_exec "git" "<" "git clone"
 
 # 5. Metadata Extraction
 INFO_JSON="/mnt/etc/nixos/dev/_info.json"
@@ -140,9 +140,9 @@ echo "$HOST" > /mnt/etc/nixos/.current_host
 
 # 7. Install
 log_msg "Install" "starting nixos-install for #$HOST ..."
-log_exec "nix" ">"
+log_exec "nix" ">" "nixos-install"
 nixos-install --flake "/mnt/etc/nixos/core#$HOST"
-log_exec "nix" "<"
+log_exec "nix" "<" "nixos-install"
 
 # 8. Post-processing
 log_msg "Done" "running post-installation tasks for user: $USERNAME ..."
