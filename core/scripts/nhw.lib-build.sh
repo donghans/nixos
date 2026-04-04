@@ -8,7 +8,7 @@ LOCK_FILE="/tmp/nixos-build.lock"
 acquire_lock() {
     exec 9> "$LOCK_FILE"
     if ! flock -n 9; then
-        echo "❌ Error: 다른 빌드 스크립트가 이미 실행 중입니다." >&2
+        echo "[nhw:error] 다른 빌드 작업이 이미 진행 중입니다." >&2
         exit 1
     fi
 }
@@ -42,7 +42,7 @@ determine_host_info() {
     local host_id="$input_host"
     [ -z "$host_id" ] && host_id="$HOST"
     if [ -z "$host_id" ]; then
-        echo "❌ Error: Host ID가 필요합니다. (또는 .env의 HOST 변수 확인)" >&2
+        echo "[nhw:error] Host ID가 필요합니다. (nhw <host_id> ...)" >&2
         exit 1
     fi
 
@@ -51,7 +51,7 @@ determine_host_info() {
     else
         local host_config=$(jq -e ".hosts[] | select(.hostname == \"$host_id\")" "$info_json" 2>/dev/null)
         if [ $? -ne 0 ]; then
-            echo "❌ Error: '$host_id'는 등록되지 않은 호스트입니다." >&2
+            echo "[nhw:error] '$host_id'는 등록되지 않은 호스트입니다." >&2
             exit 1
         fi
         update_env_file "$env_file" "HOST" "$host_id"
@@ -66,11 +66,12 @@ prepare_build_dir() {
     local build_dir=$2
     local env_file=$3
 
-    echo "🔗 Preparing isolated build environment in $build_dir..."
+    echo "[nhw] Preparing isolated build environment in $build_dir..."
     rm -rf "$build_dir"
     mkdir -p "$build_dir"
     
     cp -a "$source_path/core/"* "$build_dir/"
+    # core/scripts 폴더가 루트에 있으면 안되므로 위치 조정 (이미 core/ 내부에 있으므로 정상임)
     cp -a "$source_path/dev" "$build_dir/"
     cp -a "$source_path/lib" "$build_dir/"
     [ -f "$env_file" ] && cp -a "$env_file" "$build_dir/.env"
@@ -90,7 +91,7 @@ finalize_lock_sync() {
     local lock_changed=$1
     local target_lock_path=$2
     if [ "$lock_changed" = true ]; then
-        echo -e "\n📝 [Notice] Lock file has been updated: $target_lock_path"
+        echo -e "\n[nhw:notice] Lock file updated: $target_lock_path"
         echo "   Please review and commit the changes."
     fi
 }

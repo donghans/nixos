@@ -5,8 +5,7 @@ run_fix_task() {
     local pkg_names=("$@")
     
     if [ ${#pkg_names[@]} -eq 0 ]; then
-        echo "❌ Error: 복구할 패키지 이름을 입력해주세요."
-        echo "   Usage: ./nhw.sh fix-unstable [pkg1] [pkg2] ..."
+        echo "[nhw:error] 복구할 패키지 이름을 입력해주세요. (nhw fix-unstable [pkg1] [pkg2] ...)"
         exit 1
     fi
 
@@ -15,7 +14,7 @@ run_fix_task() {
     local final_rev=""
     local final_date=""
 
-    echo "🔍 Searching for the safest common stable commit for: ${pkg_names[*]} ..."
+    echo "[nhw:task] Searching for the safest common stable commit for: ${pkg_names[*]} ..."
 
     for pkg_name in "${pkg_names[@]}"; do
         echo "   - Processing '$pkg_name'..."
@@ -50,30 +49,30 @@ run_fix_task() {
     done
 
     if [ -z "$final_rev" ]; then
-        echo "❌ Error: 유효한 커밋을 찾지 못했습니다."
+        echo "[nhw:error] 유효한 커밋을 찾지 못했습니다."
         exit 1
     fi
 
-    echo "🎯 Selected safest common REV: $final_rev ($final_date)"
+    echo "[nhw] Selected safest common REV: $final_rev ($final_date)"
     
     # SRI Hash 계산
     local tarball_url="https://github.com/${repo}/archive/${final_rev}.tar.gz"
     local sha256=$(nix-prefetch-url --unpack "$tarball_url" 2>/dev/null)
     local sri_hash=$(nix hash to-sri --type sha256 "$sha256")
 
-    # .env 업데이트 (lib-build.sh의 함수 활용)
+    # .env 업데이트 (nhw.lib-build.sh의 함수 활용)
     update_env_file "$ENV_FILE" "UNSTABLE_FALLBACK_REV" "$final_rev"
     update_env_file "$ENV_FILE" "UNSTABLE_FALLBACK_SHA" "$sri_hash"
 
-    echo -e "\n✨ Successfully updated UNSTABLE_FALLBACK in .env"
+    echo -e "\n[nhw] Successfully updated UNSTABLE_FALLBACK in .env"
     echo "   REV: $final_rev"
     echo "   SHA: $sri_hash"
 }
 
 # 직접 실행 시 리다이렉트
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    echo "⚠️  직접 실행 감지: nhw.sh fix-unstable 환경으로 전환합니다..."
-    exec "$(dirname "$0")/../../nhw.sh" fix-unstable "$@"
+    echo "[nhw:notice] Redirecting to nhw fix-unstable..."
+    exec nhw fix-unstable "$@"
 fi
 
 # nhw.sh에서 넘겨준 나머지 인자들(패키지명)을 함수로 전달

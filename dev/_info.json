@@ -1,7 +1,8 @@
 {
   "username": "donghans",
   "git": {
-    "name": "donghans",
+    "nixosRepo": "donghans/nixos",
+    "name": "신동한",
     "email": "78710114+donghans@users.noreply.github.com"
   },
   "hosts": [

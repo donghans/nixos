@@ -11,8 +11,8 @@
       pkgs.util-linux # mount, umount 등
     ];
 
-    # iso/setup.sh 파일을 읽어와서 본문으로 사용
-    text = builtins.readFile ./setup.sh;
+    # core/scripts/iso.setup.sh 파일을 읽어와서 본문으로 사용
+    text = builtins.readFile ./scripts/iso.setup.sh;
   };
 in {
   imports = [ ./lib/hyprland.nix ];
@@ -61,6 +61,28 @@ in {
   # 4. sudo 권한 강화 (패스워드 묻지 않음)
   security.sudo.wheelNeedsPassword = false;
 
+  # 5. 환영 메시지 및 가이드 추가
+  programs.bash.interactiveShellInit = ''
+    if [[ $(tty) == /dev/tty1 || $(tty) == /dev/pts/* ]]; then
+      echo "--------------------------------------------------"
+      echo "🚀 NixOS 커스텀 인스톨러 (Hyprland 환경)"
+      echo "--------------------------------------------------"
+      echo "설치를 시작하려면 아래 명령어를 입력하세요:"
+      echo ""
+      echo "1. 자동 설치 (추천):"
+      echo "   nixos-setup <EFI_PART> <ROOT_PART> <HOSTNAME>"
+      echo ""
+      echo "2. 다른 리포지토리 사용 시:"
+      echo "   NIXOS_REPO=user/repo sudo -E nixos-setup-from-repo <EFI_PART> <ROOT_PART> <HOSTNAME>"
+      echo ""
+      echo "예시 (nvme0n1 기기):"
+      echo "   nixos-setup /dev/nvme0n1p1 /dev/nvme0n1p2 beelink-ser7-co"
+      echo ""
+      echo "TIP: 현재 기본 리포지토리는 '${metaConfig.nixosRepo}'로 설정되어 있습니다."
+      echo "--------------------------------------------------"
+    fi
+  '';
+
   # ISO에 기본적으로 포함하고 싶은 도구들
   environment.systemPackages = with pkgs; [
     parted
@@ -71,8 +93,8 @@ in {
   ];
 
   environment.shellAliases = {
-    # GH_USER를 미리 박아둔 단축어
     # 이제 터미널에서 'nixos-setup'만 치면 파라미터 입력 단계로 바로 넘어갑니다.
-    nixos-setup = "GH_USER=${metaConfig.gitName} sudo -E nixos-setup-from-repo";
+    # NIXOS_REPO 환경변수를 통해 setup 스크립트에 전달합니다.
+    nixos-setup = "NIXOS_REPO=${metaConfig.nixosRepo} sudo -E nixos-setup-from-repo";
   };
 }

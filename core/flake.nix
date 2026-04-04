@@ -113,7 +113,7 @@
       hmConfig = if isISO then ./iso.home.nix else ./dev/${hostname}.home.nix;
 
       metaConfig = {
-        inherit stateVersion gitName gitEmail hostname isLaptop;
+        inherit stateVersion gitName gitEmail nixosRepo hostname isLaptop;
         username = hmUser;
       };
     in {
@@ -144,6 +144,13 @@
       modules = mainConfig ++ [{
         nixpkgs.overlays = myOverlays;
         nixpkgs.config.allowUnfree = true;
+        
+        # [nhw] 시스템 어디서든 nhw 명령어를 사용할 수 있도록 등록
+        environment.systemPackages = [
+          (nixpkgs.legacyPackages.${hostInfo.system}.writeShellScriptBin "nhw" ''
+            exec /home/${info.username}/nixos/core/scripts/nhw.sh "$@"
+          '')
+        ];
       }] ++ [
         home-manager.nixosModules.home-manager {
           home-manager.useGlobalPkgs = true;
@@ -192,6 +199,10 @@
         };
         modules = [ (import h.hmConfig) ];
       };
+    }) hosts);
+  };
+}
+ };
     }) hosts);
   };
 }

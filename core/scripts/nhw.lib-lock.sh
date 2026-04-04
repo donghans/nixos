@@ -12,7 +12,7 @@ apply_lock_strategy() {
 
     # Rolling 여부에 따른 처리
     if [ "$is_rolling" == "true" ]; then
-        echo "🌀 Rolling: Updating unstable only..."
+        echo "[nhw:lock] Rolling: Updating unstable only..."
         [ -f "$final_source_lock" ] && cp "$final_source_lock" "$target_lock"
         
         # Git 상태 초기화 (nix flake update를 위해 필요)
@@ -29,14 +29,14 @@ apply_lock_strategy() {
         if [ ! -f "$final_source_lock" ] || ! cmp -s "$final_source_lock" "$target_lock"; then
             cp "$target_lock" "$final_source_lock"
             LOCK_CHANGED=true
-            echo "✨ Lock file updated"
+            echo "[nhw:lock] Lock file updated"
         fi
     else
         # Stable: 기존 락 파일이 반드시 있어야 함
         if [ -f "$final_source_lock" ]; then
             cp "$final_source_lock" "$target_lock"
         else
-            echo "❌ Error: Lock not found ($final_source_lock)."; exit 1
+            echo "[nhw:error] Lock not found ($final_source_lock)."; exit 1
         fi
     fi
 }
