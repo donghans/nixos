@@ -1,9 +1,16 @@
 #!/usr/bin/env nix-shell
 #!nix-shell -i bash -p nix-output-monitor git
 
-# 1. 경로 설정
+# 1. 중복 실행 방지 락
+exec 9> "/tmp/nixos-build.lock"
+if ! flock -n 9; then
+    echo "❌ Error: 다른 빌드 스크립트(nhw.sh 또는 iso.sh)가 이미 실행 중입니다."
+    exit 1
+fi
+
+# 2. 경로 설정
 ROOT_PATH=$(dirname $(readlink -f "$0"))
-TARGET_DIR="${ROOT_PATH}/_iso"
+TMP_BUILD_DIR="/tmp/nixos-build"
 STABLE_LOCKS_DIR="${ROOT_PATH}/.locks"
 ROLLING_LOCK="${STABLE_LOCKS_DIR}/_rolling.lock"
 
@@ -14,72 +21,54 @@ if [ ! -f "$ROLLING_LOCK" ]; then
     exit 1
 fi
 
-# [중요] 이전 빌드 결과물 제거 (성공 여부 오판 방지)
-rm -f "${ROOT_PATH}/result"
-
-# 연결할 항목 정의 (이름:원본상대경로:타입)
-ITEMS=(
-    "flake.nix:../_flakes/flake.nix:file"
-    "flake.lock:../.locks/_rolling.lock:file"
-    "dev:../dev:dir"
-    "lib:../lib:dir"
-)
-
-# 2. Cleanup 함수
+# 3. Cleanup 함수
 cleanup() {
     echo ""
     echo "🧹 빌드 환경 정리 중..."
-    for item in "${ITEMS[@]}"; do
-        IFS=':' read -r name src type <<< "$item"
-        TARGET_PATH="${TARGET_DIR}/${name}"
-
-        if [ -e "$TARGET_PATH" ] || [ -L "$TARGET_PATH" ]; then
-            echo "  - 제거: $name"
-            rm -rf "$TARGET_PATH"
-            git -C "$ROOT_PATH" rm --cached "$TARGET_PATH" > /dev/null 2>&1
-        fi
-    done
+    # tmpfs 위에서 작업하므로 별도의 git index 정리가 불필요합니다.
 }
-
 trap cleanup EXIT
 
-# 3. 링크 생성
-echo "🔗 빌드용 임시 환경 구성 중 (하드 링크 활용)..."
-mkdir -p "$TARGET_DIR"
+# 4. 빌드 환경 구성
+echo "🔗 임시 빌드 환경 구성 중 ($TMP_BUILD_DIR)..."
+rm -rf "$TMP_BUILD_DIR"
+mkdir -p "$TMP_BUILD_DIR"
 
-for item in "${ITEMS[@]}"; do
-    IFS=':' read -r name src type <<< "$item"
-    TARGET_PATH="${TARGET_DIR}/${name}"
-    SOURCE_PATH="${TARGET_DIR}/${src}"
+cp -a "$ROOT_PATH/core/"* "$TMP_BUILD_DIR/"
+cp -a "$ROOT_PATH/dev" "$TMP_BUILD_DIR/"
+cp -a "$ROOT_PATH/lib" "$TMP_BUILD_DIR/"
+cp "$ROLLING_LOCK" "$TMP_BUILD_DIR/flake.lock"
 
-    if [ "$type" == "file" ]; then
-        # 파일은 하드 링크로 생성 (원본과 동일하게 취급됨)
-        ln "$SOURCE_PATH" "$TARGET_PATH"
-        echo "  - 하드 링크 생성: $name"
-    else
-        # 디렉터리는 어쩔 수 없이 심볼릭 링크 사용
-        ln -sfn "$src" "$TARGET_PATH"
-        echo "  - 심볼릭 링크 생성: $name"
-    fi
+# 사용자가 쉽게 접근할 수 있도록 .build 심볼릭 링크 갱신
+ln -sfn "$TMP_BUILD_DIR" "$ROOT_PATH/.build"
 
-    # Nix 인지용 Git 추가
-    git -C "$ROOT_PATH" add -f -N "$TARGET_PATH" 2>/dev/null
-done
+# Git 레포지토리 초기화 (Nix Flake의 필수 요구사항 우회)
+git -C "$TMP_BUILD_DIR" init >/dev/null 2>&1
+git -C "$TMP_BUILD_DIR" add -A >/dev/null 2>&1
 
-# 4. 빌드 실행
+# 5. 빌드 실행
 echo "🚀 커스텀 ISO 빌드 시작"
-
-nom build "git+file://${ROOT_PATH}?dir=_iso#nixosConfigurations.custom-iso.config.system.build.isoImage" \
+# 임시 빌드 폴더 내에서 실행하여 원본 프로젝트를 더럽히지 않음
+cd "$TMP_BUILD_DIR" || exit 1
+nom build ".#nixosConfigurations.custom-iso.config.system.build.isoImage" \
   --extra-experimental-features "nix-command flakes" \
   --impure \
   --print-build-logs
 
-# 5. 결과 확인 (현재 디렉터리의 result 링크 존재 여부 확인)
-if [ -L "${ROOT_PATH}/result" ]; then
-  ISO_FILE=$(readlink -f "${ROOT_PATH}/result/iso/*.iso")
+# 6. 결과 확인 및 처리
+if [ -L "$TMP_BUILD_DIR/result" ]; then
+  # Nix Store에 생성된 ISO 파일의 실제 경로 추적
+  ISO_FILE=$(readlink -f "$TMP_BUILD_DIR/result/iso/"*.iso)
+  ISO_NAME=$(basename "$ISO_FILE")
+  
+  echo "📦 ISO 파일 추출 중..."
+  # result 심볼릭 링크 대신 실제 파일을 임시 폴더 최상단으로 복사
+  cp "$ISO_FILE" "$TMP_BUILD_DIR/"
+  rm -f "$TMP_BUILD_DIR/result"
+  
   echo "--------------------------------------------------"
   echo "✅ 빌드 성공!"
-  echo "📍 ISO 위치: $ISO_FILE"
+  echo "📍 ISO 위치: $ROOT_PATH/.build/$ISO_NAME"
   echo "--------------------------------------------------"
 else
   echo "--------------------------------------------------"

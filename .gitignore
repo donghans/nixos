@@ -5,3 +5,6 @@ GEMINI.md
 
 # Flake Locks
 .locks/rolling/
+
+.build
+/tmp/nixos-build

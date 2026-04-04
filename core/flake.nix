@@ -110,7 +110,7 @@
 
       # ISO 부팅일 때만 유저명을 "nixos"로 고정
       hmUser = if isISO then "nixos" else info.username;
-      hmConfig = if isISO then ./home.nix else ./dev/${hostname}.home.nix;
+      hmConfig = if isISO then ./iso.home.nix else ./dev/${hostname}.home.nix;
 
       metaConfig = {
         inherit stateVersion gitName gitEmail hostname isLaptop;
@@ -127,7 +127,7 @@
 
       mainConfig = if isISO then [ # 호스트별 디렉토리 경로 동적 지정
         "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-graphical-base.nix"
-        ./configuration.nix
+        ./iso.nix
       ] else [
         # 일반 호스트는 dev 디렉토리의 파일을 참조
         ./dev/${hostInfo.hostname}.nix
