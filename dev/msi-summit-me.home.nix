@@ -1,8 +1,4 @@
-{
-  pkgs,
-  lib,
-  ...
-}: {
+{lib, ...}: {
   # == Home Configuration ==
   imports = [./base/developer.home.nix];
 
