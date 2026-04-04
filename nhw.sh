@@ -45,6 +45,11 @@ cleanup() {
         [ -e "$TARGET_PATH" ] || [ -L "$TARGET_PATH" ] && rm -rf "$TARGET_PATH" && $GIT rm --cached "$TARGET_PATH" > /dev/null 2>&1
     done
     [ -f "$TARGET_LOCK" ] && rm -f "$TARGET_LOCK" && $GIT rm --cached "$TARGET_LOCK" > /dev/null 2>&1
+
+    if [ "$LOCK_CHANGED" = true ]; then
+        echo -e "\n📝 [Notice] Lock file has been updated: $HOST_SPECIFIC_LOCK"
+        echo "   Please review and commit the changes."
+    fi
 }
 
 setup_links() {
@@ -62,7 +67,7 @@ setup_links() {
 }
 
 # 2. 인자 분석
-DO_CLEAN=false; CLEAN_TARGET="user"; HOST_ID=""; SCOPE="home"; ACTION="switch"; INPUT_LOCK=""
+DO_CLEAN=false; CLEAN_TARGET="user"; HOST_ID=""; SCOPE="home"; ACTION="switch"; INPUT_LOCK=""; LOCK_CHANGED=false
 for arg in "$@"; do
     case $arg in
         clean) DO_CLEAN=true ;;
@@ -97,9 +102,12 @@ fi
 
 # 4. Lock 파일 결정
 SELECTED_LOCK=""
-HOST_SPECIFIC_LOCK="$STABLE_LOCKS_DIR/$HOST_ID.lock"
+if [ "$IS_ROLLING" == "true" ]; then
+    HOST_SPECIFIC_LOCK="$STABLE_LOCKS_DIR/_rolling.lock"
+else
+    HOST_SPECIFIC_LOCK="$STABLE_LOCKS_DIR/$HOST_ID.lock"
+fi
 STABLE_LOCK="$HOST_SPECIFIC_LOCK"
-[ ! -f "$STABLE_LOCK" ] && STABLE_LOCK="$STABLE_LOCKS_DIR/_default.lock"
 
 # 인자로 .lock 파일이 들어온 경우 (파일명만 추출하여 rolling/ 내에서 찾음)
 if [ -n "$INPUT_LOCK" ]; then
@@ -116,14 +124,20 @@ fi
 # 4-2. Update 액션
 if [ "$ACTION" == "update" ]; then
     trap cleanup EXIT; setup_links
-    echo "🔄 Updating stable lock for $HOST_ID..."
-    cp "$STABLE_LOCK" "$TARGET_LOCK"
+    echo "🔄 Updating lock for $HOST_ID..."
+    
+    [ -f "$STABLE_LOCK" ] && cp "$STABLE_LOCK" "$TARGET_LOCK"
     $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
     nix flake update --flake "$FLAKE_DIR"
     
-    # 업데이트된 내용을 호스트 전용 락 파일로 저장 (없으면 생성됨)
-    cp "$TARGET_LOCK" "$HOST_SPECIFIC_LOCK"
-    echo "✅ Update complete. Saved to $HOST_SPECIFIC_LOCK"; exit 0
+    if [ ! -f "$STABLE_LOCK" ] || ! cmp -s "$STABLE_LOCK" "$TARGET_LOCK"; then
+        cp "$TARGET_LOCK" "$HOST_SPECIFIC_LOCK"
+        LOCK_CHANGED=true
+        echo "✅ Update complete. Saved to $HOST_SPECIFIC_LOCK"
+    else
+        echo "ℹ️ No changes in flake.lock"
+    fi
+    exit 0
 fi
 
 # 5. 빌드 환경 구성
@@ -143,15 +157,24 @@ fi
 
 if [ -z "$SELECTED_LOCK" ]; then
     if [ "$IS_ROLLING" == "true" ]; then
-        TIMESTAMP=$(date +%Y%m%dT%H%M%S)
-        NEW_LOCK="$LOCKS_DIR/$TIMESTAMP.lock"
         echo "🌀 Rolling: Updating unstable only..."
-        mkdir -p "$LOCKS_DIR"
-        cp "$STABLE_LOCK" "$TARGET_LOCK"
+        [ -f "$STABLE_LOCK" ] && cp "$STABLE_LOCK" "$TARGET_LOCK"
         $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
-        nix flake update --flake "$FLAKE_DIR" nixpkgs-unstable
-        cp "$TARGET_LOCK" "$NEW_LOCK"
-        SELECTED_LOCK="$NEW_LOCK"
+        
+        if [ -f "$TARGET_LOCK" ]; then
+            nix flake update --flake "$FLAKE_DIR" nixpkgs-unstable
+        else
+            nix flake update --flake "$FLAKE_DIR"
+        fi
+        
+        if [ ! -f "$STABLE_LOCK" ] || ! cmp -s "$STABLE_LOCK" "$TARGET_LOCK"; then
+            cp "$TARGET_LOCK" "$HOST_SPECIFIC_LOCK"
+            LOCK_CHANGED=true
+            echo "✨ _rolling.lock updated"
+        else
+            echo "ℹ️ No changes in nixpkgs-unstable"
+        fi
+        SELECTED_LOCK="$HOST_SPECIFIC_LOCK"
     else
         SELECTED_LOCK="$STABLE_LOCK"
         echo "⚓ Using stable lock"
@@ -159,8 +182,11 @@ if [ -z "$SELECTED_LOCK" ]; then
 fi
 
 if [ -f "$SELECTED_LOCK" ]; then
-    ln -f "$SELECTED_LOCK" "$TARGET_LOCK"
-    $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
+    # SELECTED_LOCK이 TARGET_LOCK과 다른 경우에만 (예: PINNED나 stable 사용 시) 링크 생성
+    if [ ! -f "$TARGET_LOCK" ] || ! cmp -s "$SELECTED_LOCK" "$TARGET_LOCK"; then
+        ln -f "$SELECTED_LOCK" "$TARGET_LOCK"
+        $GIT add -f -N "$TARGET_LOCK" 2>/dev/null
+    fi
 else
     echo "❌ Error: Lock not found."; exit 1
 fi

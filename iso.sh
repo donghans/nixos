@@ -4,6 +4,15 @@
 # 1. 경로 설정
 ROOT_PATH=$(dirname $(readlink -f "$0"))
 TARGET_DIR="${ROOT_PATH}/_iso"
+STABLE_LOCKS_DIR="${ROOT_PATH}/.locks"
+ROLLING_LOCK="${STABLE_LOCKS_DIR}/_rolling.lock"
+
+# _rolling.lock 존재 여부 확인
+if [ ! -f "$ROLLING_LOCK" ]; then
+    echo "❌ Error: _rolling.lock이 존재하지 않습니다."
+    echo "   './nhw.sh <host_id> update' 또는 rolling 호스트를 대상으로 ./nhw.sh를 실행하여 락 파일을 먼저 생성해 주세요."
+    exit 1
+fi
 
 # [중요] 이전 빌드 결과물 제거 (성공 여부 오판 방지)
 rm -f "${ROOT_PATH}/result"
@@ -11,7 +20,7 @@ rm -f "${ROOT_PATH}/result"
 # 연결할 항목 정의 (이름:원본상대경로:타입)
 ITEMS=(
     "flake.nix:../_flakes/flake.nix:file"
-    "flake.lock:../.locks/_default.lock:file"
+    "flake.lock:../.locks/_rolling.lock:file"
     "dev:../dev:dir"
     "lib:../lib:dir"
 )
