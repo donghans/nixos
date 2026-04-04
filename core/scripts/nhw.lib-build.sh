@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # Constants
+# shellcheck disable=SC2034
 TMP_BUILD_DIR="/tmp/nixos-build"
 LOCK_FILE="/tmp/nixos-build.lock"
 LOG_DIR="/var/log/nhw"
@@ -117,13 +118,14 @@ determine_host_info() {
     if [[ "$host_id" =~ ^_?default$ ]]; then
         echo "_default false"
     else
-        local host_config=$(jq -e ".hosts[] | select(.hostname == \"$host_id\")" "$info_json" 2>/dev/null)
-        if [ $? -ne 0 ]; then
+        local host_config
+        if ! host_config=$(jq -e ".hosts[] | select(.hostname == \"$host_id\")" "$info_json" 2>/dev/null); then
             log_msg "Error" "'$host_id' is not a registered host."
             exit 1
         fi
         update_env_file "$env_file" "HOST" "$host_id"
-        local is_rolling=$(echo "$host_config" | jq -r '.isRolling')
+        local is_rolling
+        is_rolling=$(echo "$host_config" | jq -r '.isRolling')
         echo "$host_id $is_rolling"
     fi
 }
@@ -184,5 +186,6 @@ check_origin_git_status() {
 # 9. Log Rotation
 rotate_logs() {
     mkdir -p "$LOG_DIR" 2>/dev/null
-    ls -t "$LOG_DIR"/*.log 2>/dev/null | tail -n +31 | xargs rm -f 2>/dev/null
+    # shellcheck disable=SC2012
+    ls -t "$LOG_DIR"/*.log 2>/dev/null | tail -n +31 | xargs rm -f 2>/dev/null || true
 }

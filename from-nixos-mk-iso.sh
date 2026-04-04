@@ -3,7 +3,7 @@
 
 set -e
 
-SCRIPT_DIR=$(dirname $(readlink -f "$0"))
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
 # 터미널 색상
 CYAN='\033[0;36m'

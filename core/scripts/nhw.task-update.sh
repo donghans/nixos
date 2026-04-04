@@ -11,6 +11,7 @@ run_update_task() {
 
     if [ ! -f "$HOST_SPECIFIC_LOCK" ] || ! cmp -s "$HOST_SPECIFIC_LOCK" "$TARGET_LOCK"; then
         cp "$TARGET_LOCK" "$HOST_SPECIFIC_LOCK"
+        # shellcheck disable=SC2034
         LOCK_CHANGED=true
         log_msg "Done" "update complete. saved to $HOST_SPECIFIC_LOCK"
     else

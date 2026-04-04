@@ -1,51 +1,28 @@
 #!/usr/bin/env nix-shell
-#!nix-shell -i bash -p nh jq nix-output-monitor git
+#!nix-shell -i bash -p nh jq nix-output-monitor git dotenv-cli
+# shellcheck disable=SC1008,SC1091
+set -euo pipefail
 
-# 1. Initialization
+# 1. Initialization & Argument Parsing
 START_TIME_RAW=$(date +%s)
 START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
-SCRIPT_DIR=$(dirname $(readlink -f "$0"))
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 NIXOS_PATH=$(readlink -f "$SCRIPT_DIR/../..")
+
+# .env Load (dotenv-cli를 활용한 RCE 안전 환경 재귀 호출)
+ENV_FILE="$NIXOS_PATH/.env"
+if [ -f "$ENV_FILE" ] && [ -z "${NHW_DOTENV_LOADED:-}" ]; then
+    export NHW_DOTENV_LOADED=1
+    exec dotenv -e "$ENV_FILE" -- "$0" "${@:-}"
+fi
 
 source "$SCRIPT_DIR/nhw.lib-build.sh"
 source "$SCRIPT_DIR/nhw.lib-lock.sh"
 
-# 2. Init Messages
-log_msg "Init" "NHW: [NixOS Helper](https://github.com/viperML/nh) Wrapper"
-
-# .env Load
-ENV_FILE="$NIXOS_PATH/.env"
-[ -f "$ENV_FILE" ] && { set -a; source "$ENV_FILE"; set +a; }
-
-# Logging Setup (YYYYMMDDTHHMMSS.log format)
-LOG_TIMESTAMP=$(date +%Y%m%dT%H%M%S)
-setup_logging "$LOG_TIMESTAMP"
-
-acquire_lock
-
-cleanup() {
-    END_TIME_RAW=$(date +%s)
-    END_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
-    DURATION=$((END_TIME_RAW - START_TIME_RAW))
-
-    # 📊 Summary
-    log_msg "Summary" "Started:  $START_TIME_STR"
-    log_msg "Summary" "Finished: $END_TIME_STR"
-    log_msg "Summary" "Duration: ${DURATION}s"
-    log_msg "Summary" "Log File: ${LOG_FILE:-disabled}"
-
-    check_origin_git_status "$NIXOS_PATH"
-    [ -n "$HOST_SPECIFIC_LOCK" ] && finalize_lock_sync "$LOCK_CHANGED" "$HOST_SPECIFIC_LOCK"
-
-    rotate_logs
-}
-trap cleanup EXIT
-
-# 3. Argument Parsing
 DO_CLEAN=false; CLEAN_TARGET="user"; HOST_ARG=""; SCOPE="home"; ACTION="switch"; LOCK_CHANGED=false
 EXTRA_ARGS=()
 
-for arg in "$@"; do
+for arg in "${@:-}"; do
     case $arg in
         clean) DO_CLEAN=true ;;
         all) CLEAN_TARGET="all" ;;
@@ -61,36 +38,111 @@ for arg in "$@"; do
     esac
 done
 
+# 2. Init Messages & Logging Setup
+log_msg "Init" "NHW: [NixOS Helper](https://github.com/viperML/nh) Wrapper"
+
+# Structured Logging Setup (YYYYMMDDTHHMMSS-[scope]-[action].log format)
+LOG_TIMESTAMP=$(date +%Y%m%dT%H%M%S)
+if [ "$DO_CLEAN" = true ]; then
+    setup_logging "${LOG_TIMESTAMP}-clean-${CLEAN_TARGET}"
+else
+    setup_logging "${LOG_TIMESTAMP}-${SCOPE}-${ACTION}"
+fi
+
+acquire_lock
+
+# 3. Advanced Trap & State Management
+IS_SUCCESS=false
+
+handle_signal() {
+    local sig="${1:-UNKNOWN}"
+    log_msg "Error" "작업이 사용자에 의해 강제 중단되었습니다. ($sig)"
+    exit 130
+}
+
+trap 'handle_signal SIGINT' INT
+trap 'handle_signal SIGTERM' TERM
+
+cleanup() {
+    END_TIME_RAW=$(date +%s)
+    END_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
+    DURATION=$((END_TIME_RAW - START_TIME_RAW))
+
+    if [ "$IS_SUCCESS" != true ]; then
+        log_msg "Error" "작업이 비정상 종료되었습니다. 임시 빌드 참조를 제거합니다."
+        [ -L "$NIXOS_PATH/.build" ] && rm -f "$NIXOS_PATH/.build" || true
+    fi
+
+    # 📊 Summary
+    log_msg "Summary" "Started:  $START_TIME_STR"
+    log_msg "Summary" "Finished: $END_TIME_STR"
+    log_msg "Summary" "Duration: ${DURATION}s"
+    log_msg "Summary" "Log File: ${LOG_FILE:-disabled}"
+
+    check_origin_git_status "$NIXOS_PATH"
+    if [ -n "${HOST_SPECIFIC_LOCK:-}" ]; then
+        finalize_lock_sync "$LOCK_CHANGED" "$HOST_SPECIFIC_LOCK"
+    fi
+
+    rotate_logs
+}
+trap cleanup EXIT
+
 # 4. Routing
 if [ "$DO_CLEAN" = true ]; then
     log_msg "Init" "Action:   cleanup"
     log_exec "nh" ">"
-    [ "$CLEAN_TARGET" = "all" ] && sudo nh clean all --keep 3 || nh clean "$CLEAN_TARGET" --keep 3
+    if [ "$CLEAN_TARGET" = "all" ]; then
+        sudo nh clean all --keep 3 || true
+    else
+        nh clean "$CLEAN_TARGET" --keep 3 || true
+    fi
     log_exec "nh" "<"
+    IS_SUCCESS=true
     exit 0
 fi
 
 if [ "$SCOPE" == "fix-unstable" ]; then
     log_msg "Init" "Action:   fix-unstable"
     source "$SCRIPT_DIR/nhw.task-fix.sh"
+    IS_SUCCESS=true
     exit 0
 fi
 
 # Determine Host
 STABLE_LOCKS_DIR="$NIXOS_PATH/.locks"
-read -r HOST_ID IS_ROLLING <<< "$(determine_host_info "$SCOPE" "$HOST_ARG" "$ENV_FILE" "$NIXOS_PATH/dev/_info.json")"
-[ $? -ne 0 ] && exit 1
+
+# set -e 환경에서는 서브쉘 에러가 튕길 수 있으므로 임시로 +e 적용
+set +e
+HOST_INFO_RAW=$(determine_host_info "$SCOPE" "$HOST_ARG" "$ENV_FILE" "$NIXOS_PATH/dev/_info.json")
+DETERMINE_EXIT_CODE=$?
+set -e
+
+if [ $DETERMINE_EXIT_CODE -ne 0 ] || [ -z "$HOST_INFO_RAW" ]; then
+    exit 1
+fi
+
+read -r HOST_ID IS_ROLLING <<< "$HOST_INFO_RAW"
 
 TARGET_LOCK="$TMP_BUILD_DIR/flake.lock"
-[ "$IS_ROLLING" == "true" ] && HOST_SPECIFIC_LOCK="$STABLE_LOCKS_DIR/_rolling.lock" || HOST_SPECIFIC_LOCK="$STABLE_LOCKS_DIR/$HOST_ID.lock"
+if [ "$IS_ROLLING" == "true" ]; then
+    HOST_SPECIFIC_LOCK="$STABLE_LOCKS_DIR/_rolling.lock"
+else
+    HOST_SPECIFIC_LOCK="$STABLE_LOCKS_DIR/$HOST_ID.lock"
+fi
 
 # Print Configuration Info
 log_msg "Init" "Action:   $SCOPE $ACTION"
 log_msg "Init" "Target:   $HOST_ID"
-log_msg "Init" "Mode:     $([ "$IS_ROLLING" == "true" ] && echo "rolling" || echo "stable")"
+if [ "$IS_ROLLING" == "true" ]; then
+    log_msg "Init" "Mode:     rolling"
+else
+    log_msg "Init" "Mode:     stable"
+fi
 
 if [ "$SCOPE" == "check" ]; then
     source "$SCRIPT_DIR/nhw.task-check.sh"
+    IS_SUCCESS=true
     exit 0
 fi
 
@@ -107,3 +159,6 @@ else
         source "$SCRIPT_DIR/nhw.task-nh.sh"
     fi
 fi
+
+# 모든 과정이 문제없이 완료됨
+IS_SUCCESS=true

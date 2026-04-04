@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # core/scripts/nhw.task-check.sh
 # 프로젝트 코드 무결성 검증 및 안티패턴 정리 통합 태스크
 
@@ -25,8 +26,24 @@ run_check_task() {
     # 25.11 등 버전 숫자에 상관없이 nixpkgs.url의 정렬을 강제로 복원합니다.
     sed -i 's/nixpkgs.url = "/nixpkgs.url      =                "/' "$NIXOS_PATH/core/flake.nix"
 
-    # 5. Integrity Verification (nix flake check)
-    log_msg "Task" "5단계: 빌드 무결성 최종 검증 (nix flake check)"
+    # 5. Shellcheck (Shell Script Analysis)
+    log_msg "Task" "5단계: 쉘 스크립트 정적 분석 (shellcheck)"
+    log_exec "nix" ">" "shellcheck"
+    # 정적 분석기가 발견하는 에러로 인해 스크립트가 죽지 않고 메시지를 보여줄 수 있도록 일시적 +e 적용
+    set +e
+    nix-shell -p shellcheck --run "shellcheck $NIXOS_PATH/core/scripts/*.sh $NIXOS_PATH/from-nixos-mk-iso.sh"
+    SHELLCHECK_RESULT=$?
+    set -e
+    
+    if [ $SHELLCHECK_RESULT -ne 0 ]; then
+        log_exec "nix" "<" "failed"
+        log_msg "Error" "Shellcheck 검사 실패! 스크립트의 문법적 위험 요소를 수정하세요."
+        exit 1
+    fi
+    log_exec "nix" "<" "done"
+
+    # 6. Integrity Verification (nix flake check)
+    log_msg "Task" "6단계: 빌드 무결성 최종 검증 (nix flake check)"
     TMP_VERIFY_DIR="/tmp/nhw-verify-$(date +%s)"
     mkdir -p "$TMP_VERIFY_DIR"
 

@@ -5,6 +5,7 @@ apply_lock_strategy() {
     local is_rolling=$1
     local stable_lock_path=$2
     local target_lock=$3
+    # shellcheck disable=SC2034
     local stable_locks_dir=$4
     local tmp_build_dir=$5
 
@@ -29,6 +30,7 @@ apply_lock_strategy() {
         
         if [ ! -f "$final_source_lock" ] || ! cmp -s "$final_source_lock" "$target_lock"; then
             cp "$target_lock" "$final_source_lock"
+            # shellcheck disable=SC2034
             LOCK_CHANGED=true
             log_msg "Lock" "lock file updated"
         fi
