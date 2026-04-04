@@ -3,6 +3,8 @@
   metaConfig,
   ...
 }: {
+  imports = [./nfd/_init.nix];
+
   # == User & Nix Engine ==
   users.users.${metaConfig.username} = {
     isNormalUser = true;
