@@ -36,6 +36,7 @@ Home Manager 설정을 적용합니다.
 ### 특수 기능
 - `nhw iso`: `custom-iso` 타겟을 빌드하여 나만의 설치 미디어를 생성합니다.
 - `nhw fix-unstable [pkg1] [pkg2]`: Unstable 채널에서 빌드 실패하는 특정 패키지를 이전 정상 시점으로 하향 조정(Fallback)합니다.
+  - **중요**: 이 기능을 통해 고정된 패키지를 사용하려면 Nix 설정 파일(`*.nix`)에서 해당 패키지를 `unstable.<pkgName>` 대신 **`unstable-fallback.<pkgName>`**으로 참조해야 합니다.
 
 ---
 
@@ -52,6 +53,11 @@ nhw os test
 최신 버전의 패키지가 깨져서 전체 시스템 빌드가 실패하는 상황입니다.
 ```bash
 nhw fix-unstable python311Packages.tensorflow
+# 이후 설정 파일(*.nix) 상단 파라미터에 unstable-fallback을 추가하고 패키지 참조를 변경합니다:
+# { pkgs, unstable, unstable-fallback, ... }: {
+#   environment.systemPackages = [ unstable-fallback.python311Packages.tensorflow ]; # 시스템 패키지
+#   home.packages = [ unstable-fallback.some-package ];                             # 홈 매니저 패키지
+# }
 nhw os switch
 ```
 - 내부적으로 TensorFlow의 이전 정상 커밋을 찾아 고정(Pin)하므로, 나머지 시스템은 최신 상태를 유지하면서 문제만 해결할 수 있습니다.
