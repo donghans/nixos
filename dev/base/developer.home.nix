@@ -7,9 +7,10 @@
 }: {
   imports = [
     ../../lib/hyprland.home.nix
+    ../../lib/devbox.home/_init.nix
     ./pkgs/fvm.nix
-    ./pkgs/node.nix
     ./pkgs/jetbrains.nix
+    ./pkgs/node.nix
     ./pkgs/python.nix
   ];
 

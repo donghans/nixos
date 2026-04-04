@@ -1,0 +1,25 @@
+{
+  "packages": [
+    "fvm@latest",
+    "unzip",
+    "glib",
+    "libGL"
+  ],
+  "init_hook": [
+    "export LD_LIBRARY_PATH=$DEVBOX_PROJECT_ROOT/.devbox/nix/profile/default/lib:$LD_LIBRARY_PATH",
+    "echo \"💙 Flutter/FVM Environment Active (Library Path Injected)\""
+  ],
+  "scripts": {
+    "setup-all": [
+      "devbox generate direnv",
+      "mkdir -p .git/info",
+      "echo '.devbox/' >> .git/info/exclude",
+      "echo 'devbox.json' >> .git/info/exclude",
+      "echo 'devbox.lock' >> .git/info/exclude",
+      "echo '.direnv/' >> .git/info/exclude",
+      "echo '.envrc' >> .git/info/exclude",
+      "direnv allow",
+      "echo '✅ Done! Environment hidden and direnv enabled.'"
+    ]
+  }
+}
