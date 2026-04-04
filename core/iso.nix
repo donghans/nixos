@@ -22,6 +22,9 @@
 in {
   imports = [./lib/hyprland.nix];
 
+  # Plymouth 비활성화 (부팅 시 로그 확인 위함)
+  boot.plymouth.enable = lib.mkForce false;
+
   # 부트로더 대기 시간 0초 (바로 부팅)
   boot.loader.timeout = lib.mkForce 0;
 
