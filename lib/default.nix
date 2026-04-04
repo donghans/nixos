@@ -31,6 +31,10 @@
     hostName = metaConfig.hostname;
   };
 
+  # == File Management Infrastructure ==
+  services.gvfs.enable = true; # (목적: 휴지통, SMB, 스마트폰 연결 지원)
+  services.udisks2.enable = true; # (목적: 저장장치 마운트 관리 기반)
+
   # (목적: 부팅 시 온라인 대기 비활성화로 부팅 속도 향상)
   systemd.services.NetworkManager-wait-online.enable = false;
   systemd.network.wait-online.enable = false;
