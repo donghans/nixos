@@ -19,20 +19,20 @@ fi
 source "$SCRIPT_DIR/nhw.lib-build.sh"
 source "$SCRIPT_DIR/nhw.lib-lock.sh"
 
-DO_CLEAN=false; CLEAN_TARGET="user"; HOST_ARG=""; SCOPE="home"; ACTION="switch"; LOCK_CHANGED=false
+DO_CLEAN=false; CLEAN_TARGET="user"; TARGET_HOST=""; TARGET_PROFILE="home"; ACTION="switch"; LOCK_CHANGED=false
 EXTRA_ARGS=()
 
 for arg in "${@:-}"; do
     case $arg in
         clean) DO_CLEAN=true ;;
         all) CLEAN_TARGET="all" ;;
-        os|home|iso|fix-unstable|check) SCOPE="$arg" ;;
+        os|home|iso|fix-unstable|check) TARGET_PROFILE="$arg" ;;
         switch|boot|test|update) ACTION="$arg" ;;
         *)
-            if [ "$SCOPE" == "fix-unstable" ]; then
+            if [ "$TARGET_PROFILE" == "fix-unstable" ]; then
                 EXTRA_ARGS+=("$arg")
             else
-                HOST_ARG="$arg"
+                TARGET_HOST="$arg"
             fi
             ;;
     esac
@@ -41,12 +41,12 @@ done
 # 2. Init Messages & Logging Setup
 log_msg "Init" "NHW: [NixOS Helper](https://github.com/viperML/nh) Wrapper"
 
-# Structured Logging Setup (YYYYMMDDTHHMMSS-[scope]-[action].log format)
+# Structured Logging Setup (YYYYMMDDTHHMMSS-[target_profile]-[action].log format)
 LOG_TIMESTAMP=$(date +%Y%m%dT%H%M%S)
 if [ "$DO_CLEAN" = true ]; then
     setup_logging "${LOG_TIMESTAMP}-clean-${CLEAN_TARGET}"
 else
-    setup_logging "${LOG_TIMESTAMP}-${SCOPE}-${ACTION}"
+    setup_logging "${LOG_TIMESTAMP}-${TARGET_PROFILE}-${ACTION}"
 fi
 
 acquire_lock
@@ -102,7 +102,7 @@ if [ "$DO_CLEAN" = true ]; then
     exit 0
 fi
 
-if [ "$SCOPE" == "fix-unstable" ]; then
+if [ "$TARGET_PROFILE" == "fix-unstable" ]; then
     log_msg "Init" "Action:   fix-unstable"
     source "$SCRIPT_DIR/nhw.task-fix.sh"
     IS_SUCCESS=true
@@ -110,11 +110,11 @@ if [ "$SCOPE" == "fix-unstable" ]; then
 fi
 
 # Determine Host
-STABLE_LOCKS_DIR="$NIXOS_PATH/.locks"
+LOCK_STORE_DIR="$NIXOS_PATH/.locks"
 
 # set -e 환경에서는 서브쉘 에러가 튕길 수 있으므로 임시로 +e 적용
 set +e
-HOST_INFO_RAW=$(determine_host_info "$SCOPE" "$HOST_ARG" "$ENV_FILE" "$NIXOS_PATH/dev/_info.json")
+HOST_INFO_RAW=$(determine_host_info "$TARGET_PROFILE" "$TARGET_HOST" "$ENV_FILE" "$NIXOS_PATH/dev/_info.json")
 DETERMINE_EXIT_CODE=$?
 set -e
 
@@ -126,13 +126,13 @@ read -r HOST_ID IS_ROLLING <<< "$HOST_INFO_RAW"
 
 TARGET_LOCK="$TMP_BUILD_DIR/flake.lock"
 if [ "$IS_ROLLING" == "true" ]; then
-    HOST_SPECIFIC_LOCK="$STABLE_LOCKS_DIR/_rolling.lock"
+    HOST_SPECIFIC_LOCK="$LOCK_STORE_DIR/_rolling.lock"
 else
-    HOST_SPECIFIC_LOCK="$STABLE_LOCKS_DIR/$HOST_ID.lock"
+    HOST_SPECIFIC_LOCK="$LOCK_STORE_DIR/$HOST_ID.lock"
 fi
 
 # Print Configuration Info
-log_msg "Init" "Action:   $SCOPE $ACTION"
+log_msg "Init" "Action:   $TARGET_PROFILE $ACTION"
 log_msg "Init" "Target:   $HOST_ID"
 if [ "$IS_ROLLING" == "true" ]; then
     log_msg "Init" "Mode:     rolling"
@@ -140,7 +140,7 @@ else
     log_msg "Init" "Mode:     stable"
 fi
 
-if [ "$SCOPE" == "check" ]; then
+if [ "$TARGET_PROFILE" == "check" ]; then
     source "$SCRIPT_DIR/nhw.task-check.sh"
     IS_SUCCESS=true
     exit 0
@@ -152,8 +152,8 @@ prepare_build_dir "$NIXOS_PATH" "$TMP_BUILD_DIR" "$ENV_FILE"
 if [ "$ACTION" == "update" ]; then
     source "$SCRIPT_DIR/nhw.task-update.sh"
 else
-    apply_lock_strategy "$IS_ROLLING" "$HOST_SPECIFIC_LOCK" "$TARGET_LOCK" "$STABLE_LOCKS_DIR" "$TMP_BUILD_DIR"
-    if [ "$SCOPE" == "iso" ]; then
+    apply_lock_strategy "$IS_ROLLING" "$HOST_SPECIFIC_LOCK" "$TARGET_LOCK" "$LOCK_STORE_DIR" "$TMP_BUILD_DIR"
+    if [ "$TARGET_PROFILE" == "iso" ]; then
         source "$SCRIPT_DIR/nhw.task-iso.sh"
     else
         source "$SCRIPT_DIR/nhw.task-nh.sh"

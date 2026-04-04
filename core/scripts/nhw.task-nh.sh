@@ -6,7 +6,7 @@ run_nh_task() {
     log_msg "Task" "building configuration for #$HOST_ID..."
     
     log_exec "nh" ">"
-    if [ "$SCOPE" == "os" ]; then
+    if [ "$TARGET_PROFILE" == "os" ]; then
         nh os "$ACTION" "$TMP_BUILD_DIR" -H "$HOST_ID"
     else
         nh home "$ACTION" "$TMP_BUILD_DIR"

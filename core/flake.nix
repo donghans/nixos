@@ -20,7 +20,7 @@
   } @ inputs: let
     stateVersion = "25.11";
 
-    myOverlays = [
+    customOverlays = [
       (_self: super: {
         mkWrapper = {
           pkg,
@@ -78,15 +78,15 @@
     # == Metadata Import ==
     # (목적: 격리 빌드 시 제공되는 단일 진실 공급원 로드)
     infoPath = ./dev/_info.json;
-    info = builtins.fromJSON (builtins.readFile infoPath);
+    workspaceMeta = builtins.fromJSON (builtins.readFile infoPath);
 
-    gitName = info.git.name;
-    gitEmail = info.git.email;
-    inherit (info.git) nixosRepo;
-    inherit (info) hosts;
+    gitName = workspaceMeta.git.name;
+    gitEmail = workspaceMeta.git.email;
+    inherit (workspaceMeta.git) nixosRepo;
+    inherit (workspaceMeta) hosts;
 
     # == Common HM Generator ==
-    getHM = {
+    mkHostContext = {
       hostname,
       system,
       isLaptop,
@@ -97,7 +97,7 @@
       pkgs = import nixpkgs {
         inherit system;
         config.allowUnfree = true;
-        overlays = myOverlays;
+        overlays = customOverlays;
       };
 
       unstable = import nixpkgs-unstable {
@@ -138,7 +138,7 @@
       hmUser =
         if isISO
         then "nixos"
-        else info.username;
+        else workspaceMeta.username;
       hmConfig =
         if isISO
         then ./iso.home.nix
@@ -155,7 +155,7 @@
     # == Host Generator ==
     mkHost = hostInfo: let
       isISO = hostInfo.isISO or false;
-      h = getHM (hostInfo // {inherit isISO;});
+      hostCtx = mkHostContext (hostInfo // {inherit isISO;});
 
       mainConfig =
         if isISO
@@ -171,28 +171,28 @@
         inherit (hostInfo) system;
         specialArgs = {
           inherit inputs;
-          inherit (h) metaConfig;
-          inherit (h) unstable;
-          inherit (h) unstable-fallback;
+          inherit (hostCtx) metaConfig;
+          inherit (hostCtx) unstable;
+          inherit (hostCtx) unstable-fallback;
         };
 
         modules =
           mainConfig
           ++ [
             {
-              nixpkgs.overlays = myOverlays;
+              nixpkgs.overlays = customOverlays;
               nixpkgs.config.allowUnfree = true;
 
               # (목적: 전역 관리 CLI 'nhw' 시스템 등록)
               environment.systemPackages = [
                 (nixpkgs.legacyPackages.${hostInfo.system}.writeShellScriptBin "nhw" ''
-                  exec /home/${info.username}/nixos/core/scripts/nhw.sh "$@"
+                  exec /home/${workspaceMeta.username}/nixos/core/scripts/nhw.sh "$@"
                 '')
               ];
 
               # (목적: nhw 로그 디렉터리 생성 및 쓰기 권한 부여)
               systemd.tmpfiles.rules = [
-                "d /var/log/nhw 0775 ${info.username} users -"
+                "d /var/log/nhw 0775 ${workspaceMeta.username} users -"
               ];
             }
           ]
@@ -204,12 +204,12 @@
 
               # (목적: 기존 설정과 충돌 시 파일 백업 생성)
               home-manager.backupFileExtension = "backup";
-              home-manager.users.${h.hmUser} = import h.hmConfig;
+              home-manager.users.${hostCtx.hmUser} = import hostCtx.hmConfig;
               home-manager.extraSpecialArgs = {
                 inherit inputs;
-                inherit (h) metaConfig;
-                inherit (h) unstable;
-                inherit (h) unstable-fallback;
+                inherit (hostCtx) metaConfig;
+                inherit (hostCtx) unstable;
+                inherit (hostCtx) unstable-fallback;
               };
             }
           ];
@@ -218,9 +218,9 @@
     # == Output: NixOS Configurations ==
     nixosConfigurations =
       (nixpkgs.lib.genAttrs
-        (map (h: h.hostname) hosts)
+        (map (hostCtx: hostCtx.hostname) hosts)
         (name: let
-          hostInfo = builtins.head (builtins.filter (h: h.hostname == name) hosts);
+          hostInfo = builtins.head (builtins.filter (hostCtx: hostCtx.hostname == name) hosts);
         in
           mkHost hostInfo))
       // {
@@ -234,18 +234,18 @@
 
     # == Output: Home Configurations ==
     homeConfigurations = builtins.listToAttrs (map (hostInfo: let
-        h = getHM hostInfo;
+        hostCtx = mkHostContext hostInfo;
       in {
-        name = "${h.metaConfig.username}@${hostInfo.hostname}";
+        name = "${hostCtx.metaConfig.username}@${hostInfo.hostname}";
         value = home-manager.lib.homeManagerConfiguration {
-          inherit (h) pkgs;
+          inherit (hostCtx) pkgs;
           extraSpecialArgs = {
             inherit inputs;
-            inherit (h) metaConfig;
-            inherit (h) unstable;
-            inherit (h) unstable-fallback;
+            inherit (hostCtx) metaConfig;
+            inherit (hostCtx) unstable;
+            inherit (hostCtx) unstable-fallback;
           };
-          modules = [(import h.hmConfig)];
+          modules = [(import hostCtx.hmConfig)];
         };
       })
       hosts);

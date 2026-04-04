@@ -33,7 +33,7 @@
   '';
 
   # 볼륨 조절 및 알림 스크립트
-  volControl = pkgs.writeShellScriptBin "vol-control" ''
+  volumeControl = pkgs.writeShellScriptBin "vol-control" ''
     case $1 in
       up) wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+ ;;
       down) wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- ;;
@@ -46,7 +46,7 @@
   '';
 
   # 밝기 조절 및 알림 스크립트
-  brtControl = pkgs.writeShellScriptBin "brt-control" ''
+  brightnessControl = pkgs.writeShellScriptBin "brt-control" ''
     case $1 in
       up) brightnessctl set 5%+ ;;
       down) brightnessctl set 5%- ;;
@@ -80,11 +80,11 @@ in {
     # == Keybindings ==
     bindel = [
       # (목적: 하드웨어 미디어 키 조절 및 알림 피드백)
-      ", XF86AudioRaiseVolume, exec, ${volControl}/bin/vol-control up"
-      ", XF86AudioLowerVolume, exec, ${volControl}/bin/vol-control down"
-      ", XF86AudioMute, exec, ${volControl}/bin/vol-control mute"
-      ", XF86MonBrightnessUp, exec, ${brtControl}/bin/brt-control up"
-      ", XF86MonBrightnessDown, exec, ${brtControl}/bin/brt-control down"
+      ", XF86AudioRaiseVolume, exec, ${volumeControl}/bin/vol-control up"
+      ", XF86AudioLowerVolume, exec, ${volumeControl}/bin/vol-control down"
+      ", XF86AudioMute, exec, ${volumeControl}/bin/vol-control mute"
+      ", XF86MonBrightnessUp, exec, ${brightnessControl}/bin/brt-control up"
+      ", XF86MonBrightnessDown, exec, ${brightnessControl}/bin/brt-control down"
     ];
 
     bindl = [

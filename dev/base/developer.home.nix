@@ -88,7 +88,7 @@
     ++ (let
       # == Node.js / pnpm / Prisma ==
       # (목적: Prisma 엔진 로컬 탐색 쉘 스크립트)
-      prisma_detection_script = ''
+      prismaDetectionScript = ''
         curr="''$PWD"
         while [ "''$curr" != "/" ]; do
           if [ -d "''$curr/node_modules/@prisma/engines" ]; then
@@ -108,7 +108,7 @@
         inherit pkg binName;
         libs = [stdenv.cc.cc openssl];
         bins = [openssl findutils];
-        run = prisma_detection_script;
+        run = prismaDetectionScript;
         env = {
           PNPM_PACKAGE_IMPORT_METHOD = "reflink"; # (이유: Btrfs CoW 활용 성능 최적화)
           PNPM_PUBLIC_HOIST_PATTERN = "*";

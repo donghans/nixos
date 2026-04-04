@@ -98,12 +98,12 @@ update_env_file() {
 
 # 4. Determine Host Info
 determine_host_info() {
-    local scope=$1
+    local target_profile=$1
     local input_host=$2
     local env_file=$3
     local info_json=$4
 
-    if [ "$scope" == "iso" ]; then
+    if [ "$target_profile" == "iso" ]; then
         echo "nixos-iso true"
         return
     fi

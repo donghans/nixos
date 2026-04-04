@@ -9,7 +9,7 @@ run_fix_task() {
     fi
 
     local repo="NixOS/nixpkgs"
-    local oldest_timestamp=9999999999
+    local earliest_timestamp=9999999999
     local final_rev=""
     local final_date=""
 
@@ -31,21 +31,21 @@ run_fix_task() {
 
         local commits
         commits=$(curl -s "https://api.github.com/repos/${repo}/commits?path=${search_path}&sha=nixos-unstable")
-        local good_commit
-        good_commit=$(echo "$commits" | jq -r '.[1].sha') 
+        local safe_fallback_commit
+        safe_fallback_commit=$(echo "$commits" | jq -r '.[1].sha') 
         local commit_date
         commit_date=$(echo "$commits" | jq -r '.[1].commit.committer.date')
         local timestamp
         timestamp=$(date -d "$commit_date" +%s)
 
-        if [ -z "$good_commit" ] || [ "$good_commit" == "null" ]; then
+        if [ -z "$safe_fallback_commit" ] || [ "$safe_fallback_commit" == "null" ]; then
             log_msg "Warn" "history not found for '$pkg_name'. skipping."
             continue
         fi
 
-        if [ "$timestamp" -lt "$oldest_timestamp" ]; then
-            oldest_timestamp=$timestamp
-            final_rev=$good_commit
+        if [ "$timestamp" -lt "$earliest_timestamp" ]; then
+            earliest_timestamp=$timestamp
+            final_rev=$safe_fallback_commit
             final_date=$commit_date
         fi
     done
