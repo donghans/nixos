@@ -25,13 +25,12 @@ in {
   # 부트로더 대기 시간 0초 (바로 부팅)
   boot.loader.timeout = lib.mkForce 0;
 
-  # 커널 파라미터에서 부팅을 조용하게 만드는 요소들 제거
+  # 커널 파라미터에서 부팅을 조용하게 만드는 요소들 제거 및 노트북 마우스 호환성 향상
   boot.kernelParams = [
     "console=tty1" # 로그가 출력될 터미널 지정
+    "irqpoll" # IRQ 폴링 활성화 (노트북 터치패드 등 해결)
+    "acpi_osi=Linux" # 리눅스 최적화 ACPI 설정
   ];
-
-  # 혹시 graphical-base 모듈에 의해 Plymouth가 켜져 있다면 강제로 끕니다.
-  boot.plymouth.enable = lib.mkForce false;
 
   # 1. 'nixos' 기본 유저 활용 및 패스워드 생략 설정
   users.users.nixos = {
@@ -40,18 +39,21 @@ in {
   };
 
   # 2. 그래픽 환경 자동 로그인 설정
-  # 기존 tuigreet 설정을 아래와 같이 덮어씁니다.
   services.greetd.settings = {
     # [핵심] 부팅 시 자동으로 실행될 세션
     initial_session = {
-      # uwsm을 사용한다면 아래와 같이 실행하는 것이 가장 정확합니다.
       command = "uwsm start hyprland-uwsm.desktop";
       user = "nixos";
     };
 
     # 로그아웃하거나 세션이 종료되었을 때 보여줄 기본 화면 (tuigreet)
     default_session = {
-      command = lib.mkForce "${pkgs.tuigreet}/bin/tuigreet --time --remember --greeting 'Welcome! Login as nixos (no password required)' --cmd 'uwsm start hyprland-uwsm.desktop'";
+      command = lib.mkForce (
+        "${pkgs.tuigreet}/bin/tuigreet "
+        + "--time "
+        + "--greeting 'Welcome! Login as nixos (no password required)' "
+        + "--cmd 'uwsm start hyprland-uwsm.desktop'"
+      );
       user = "greeter";
     };
   };
@@ -60,8 +62,9 @@ in {
   services.displayManager.sddm.enable = lib.mkForce false;
   services.displayManager.gdm.enable = lib.mkForce false;
 
-  # 3. TTY 자동 로그인도 'nixos'로 변경
+  # 3. TTY 자동 로그인도 'nixos'로 변경 및 모든 TTY 적용 보장
   services.getty.autologinUser = lib.mkForce "nixos";
+  services.getty.extraArgs = [ "--autologin" "nixos" ];
 
   # 4. sudo 권한 강화 (패스워드 묻지 않음)
   security.sudo.wheelNeedsPassword = false;
@@ -79,7 +82,8 @@ in {
         echo "   nixos-setup <EFI_PART> <ROOT_PART> <HOSTNAME>"
         echo ""
         echo "2. 다른 리포지토리 사용 시:"
-        echo "   NIXOS_REPO=user/repo sudo -E nixos-setup-from-repo <EFI_PART> <ROOT_PART> <HOSTNAME>"
+        echo "   NIXOS_REPO=user/repo sudo -E \\"
+        echo "   nixos-setup-from-repo <EFI_PART> <ROOT_PART> <HOSTNAME>"
         echo ""
         echo "예시 (nvme0n1 기기):"
         echo "   nixos-setup /dev/nvme0n1p1 /dev/nvme0n1p2 beelink-ser7-co"
@@ -96,7 +100,8 @@ in {
         echo "   nixos-setup <EFI_PART> <ROOT_PART> <HOSTNAME>"
         echo ""
         echo "2. Using a different repository:"
-        echo "   NIXOS_REPO=user/repo sudo -E nixos-setup-from-repo <EFI_PART> <ROOT_PART> <HOSTNAME>"
+        echo "   NIXOS_REPO=user/repo sudo -E \\"
+        echo "   nixos-setup-from-repo <EFI_PART> <ROOT_PART> <HOSTNAME>"
         echo ""
         echo "Example (nvme0n1 device):"
         echo "   nixos-setup /dev/nvme0n1p1 /dev/nvme0n1p2 beelink-ser7-co"

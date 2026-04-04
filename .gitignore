@@ -1,4 +1,6 @@
 .build
+.iso
 .env
-
+result
+*.log
 GEMINI.md

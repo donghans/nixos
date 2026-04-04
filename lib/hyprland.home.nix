@@ -44,4 +44,33 @@
       commandLineArgs = ["--lang=ko"];
     })
   ];
+
+  # == Hide Clutter in Application Menu ==
+  # (목적: 사용 빈도가 낮거나 배경에서 실행되는 도구들의 실행 아이콘을 숨겨 메뉴를 정리)
+  xdg.desktopEntries = {
+    "blueman-adapters" = {
+      name = "Bluetooth Adapters (Hidden)";
+      noDisplay = true;
+    };
+    "org.fcitx.Fcitx5" = {
+      name = "Fcitx 5 (Hidden)";
+      noDisplay = true;
+    };
+    "org.fcitx.fcitx5-migrator" = {
+      name = "Fcitx 5 Migration Wizard (Hidden)";
+      noDisplay = true;
+    };
+    "kbd-layout-viewer5" = {
+      name = "Keyboard Layout Viewer (Hidden)";
+      noDisplay = true;
+    };
+    "nixos-manual" = {
+      name = "NixOS Manual (Hidden)";
+      noDisplay = true;
+    };
+    "uuctl" = {
+      name = "UWSM Control (Hidden)";
+      noDisplay = true;
+    };
+  };
 }

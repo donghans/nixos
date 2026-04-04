@@ -19,6 +19,7 @@
     enable = true;
     enableCompletion = true;
     autosuggestions.enable = true;
+    autosuggestions.highlightStyle = "fg=8";
     syntaxHighlighting.enable = true;
 
     # == Syntax Highlighting Customization ==
@@ -43,6 +44,10 @@
     '';
 
     interactiveShellInit = ''
+      # == Autosuggestions Tab Binding ==
+      # (목적: 탭 키를 누르면 제안 내용을 즉시 수락하여 자동 완성)
+      bindkey '^I' autosuggest-accept
+
       # == Zsh Tab Completion Menu Selection ==
       zstyle ':completion:*' menu select
 
