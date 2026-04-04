@@ -21,6 +21,7 @@
         invert = true;
         show_tabs = false;
         enter_accept = true;
+        exit_mode = "return-query";
       };
     };
   };
