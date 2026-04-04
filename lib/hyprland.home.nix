@@ -13,6 +13,7 @@
     ./default.home.nix
     ./hyprland.home/_init.nix
     ./hyprland.home/bind.nix
+    ./hyprland.home/bind.hwctl.nix
     ./hyprland.home/notify.nix
     ./hyprland.home/ui.nix
     ./hyprland.home/winrule.nix
