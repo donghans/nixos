@@ -43,21 +43,4 @@
       fcitx5-gtk
     ];
   };
-
-  fonts = {
-    packages = with pkgs; [
-      nanum
-      nanum-gothic-coding
-      noto-fonts-cjk-sans
-      noto-fonts-cjk-serif
-      noto-fonts-color-emoji
-    ];
-
-    fontconfig.defaultFonts = {
-      serif = ["NanumMyeongjo" "Noto Serif CJK KR"];
-      sansSerif = ["NanumGothic" "Noto Sans CJK KR"];
-      monospace = ["NanumGothicCoding"];
-      emoji = ["Noto Color Emoji"];
-    };
-  };
 }

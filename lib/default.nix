@@ -35,6 +35,36 @@
   services.gvfs.enable = true; # (목적: 휴지통, SMB, 스마트폰 연결 지원)
   services.udisks2.enable = true; # (목적: 저장장치 마운트 관리 기반)
 
+  # == TTY Unicode & Font Support ==
+  services.kmscon = {
+    enable = true;
+    hwRender = true; # (이유: 하드웨어 가속 활용)
+    fonts = [
+      {
+        name = "NanumGothicCoding";
+        package = pkgs.nanum-gothic-coding;
+      }
+    ];
+    extraConfig = "font-size=14"; # (이유: TTY 가독성 향상)
+  };
+
+  fonts = {
+    packages = with pkgs; [
+      nanum
+      nanum-gothic-coding
+      noto-fonts-cjk-sans
+      noto-fonts-cjk-serif
+      noto-fonts-color-emoji
+    ];
+
+    fontconfig.defaultFonts = {
+      serif = ["NanumMyeongjo" "Noto Serif CJK KR"];
+      sansSerif = ["NanumGothic" "Noto Sans CJK KR"];
+      monospace = ["NanumGothicCoding"];
+      emoji = ["Noto Color Emoji"];
+    };
+  };
+
   # (목적: 부팅 시 온라인 대기 비활성화로 부팅 속도 향상)
   systemd.services.NetworkManager-wait-online.enable = false;
   systemd.network.wait-online.enable = false;
