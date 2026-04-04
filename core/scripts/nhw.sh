@@ -45,6 +45,8 @@ log_msg "Init" "NHW: [NixOS Helper](https://github.com/viperML/nh) Wrapper"
 LOG_TIMESTAMP=$(date +%Y%m%dT%H%M%S)
 if [ "$DO_CLEAN" = true ]; then
     setup_logging "${LOG_TIMESTAMP}-clean-${CLEAN_TARGET}"
+elif [[ "$TARGET_PROFILE" =~ ^(check|fix-unstable|iso)$ ]]; then
+    setup_logging "${LOG_TIMESTAMP}-${TARGET_PROFILE}"
 else
     setup_logging "${LOG_TIMESTAMP}-${TARGET_PROFILE}-${ACTION}"
 fi
@@ -132,7 +134,11 @@ else
 fi
 
 # Print Configuration Info
-log_msg "Init" "Action:   $TARGET_PROFILE $ACTION"
+if [[ "$TARGET_PROFILE" =~ ^(check|fix-unstable|iso)$ ]]; then
+    log_msg "Init" "Action:   $TARGET_PROFILE"
+else
+    log_msg "Init" "Action:   $TARGET_PROFILE $ACTION"
+fi
 log_msg "Init" "Target:   $HOST_ID"
 if [ "$IS_ROLLING" == "true" ]; then
     log_msg "Init" "Mode:     rolling"
