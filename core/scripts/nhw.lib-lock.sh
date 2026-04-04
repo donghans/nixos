@@ -20,11 +20,14 @@ apply_lock_strategy() {
 
         if [ -f "$target_lock" ]; then
             log_exec "nix" ">" "nix flake update nixpkgs-unstable"
-            nix flake update --flake "$tmp_build_dir" nixpkgs-unstable
+            (cd "$tmp_build_dir" && nix flake update nixpkgs-unstable --refresh)
+            # 스테이징을 다시 해주어야 이후 nh os switch 과정에서 Nix가 변경된 락 파일을 인식함
+            git -C "$tmp_build_dir" add -A >/dev/null 2>&1
             log_exec "nix" "<" "nix flake update nixpkgs-unstable"
         else
             log_exec "nix" ">" "nix flake update"
-            nix flake update --flake "$tmp_build_dir"
+            (cd "$tmp_build_dir" && nix flake update --refresh)
+            git -C "$tmp_build_dir" add -A >/dev/null 2>&1
             log_exec "nix" "<" "nix flake update"
         fi
         
