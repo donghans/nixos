@@ -108,6 +108,14 @@
     intel-media-driver
     libva-vdpau-driver
     libvdpau-va-gl
+
+    # == MSI Special Hardware Controls ==
+    (writeShellScriptBin "turbo-on" ''
+      echo -en '\x80' | sudo dd of="/sys/kernel/debug/ec/ec0/io" bs=1 seek=152 count=1 conv=notrunc 2>/dev/null
+    '')
+    (writeShellScriptBin "turbo-off" ''
+      echo -en '\x04' | sudo dd of="/sys/kernel/debug/ec/ec0/io" bs=1 seek=152 count=1 conv=notrunc 2>/dev/null
+    '')
   ];
 
   # (이유: Tailscale 등 이중 NAT 환경에서 Vivaldi 동기화 타임아웃 회피)
