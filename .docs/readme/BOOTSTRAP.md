@@ -27,10 +27,10 @@ cd nixos
   "hosts": [
     { 
       "hostname": "my-machine", // 기기 이름
-      "system": "x86_64-linux", 
-      "isLaptop": true, 
-      "isRolling": true,
-      "ramGb": 16 // 스왑 파일 크기 결정 (GB)
+      "system": "x86_64-linux", // 현재 x86_64 시스템만 테스트해봤습니다. 다른게 되는진 잘 모르겠네요.
+      "isLaptop": false, // 랩탑의 경우 배터리 표시 등이 필요하므로 랩탑에선 true를 권장합니다.
+      "isRolling": true, // 데일리 머신으로써 사용할 경우 unstable 패키지의 최신 버전 사용을 위해 true로 할 수 있습니다.
+      "ramGb": 16 // 물리 스왑으로 tmpfs의 크기를 늘리고싶을 경우, 해당 기기의 실제 메모리 크기를 GB로 넣어두면 정상동작을 보장합니다. 필요없다면 빼주세요.
     }
   ]
 }
