@@ -79,7 +79,7 @@
     hosts = info.hosts;
 
     # [핵심] Home Manager 설정을 만드는 공통 함수
-    getHM = { hostname, system, isLaptop, isISO ? false, ... }: let
+    getHM = { hostname, system, isLaptop, ramGb ? null, isISO ? false, ... }: let
       pkgs = import nixpkgs {
         inherit system;
         config.allowUnfree = true;
@@ -114,7 +114,7 @@
       hmConfig = if isISO then ./iso.home.nix else ./dev/${hostname}.home.nix;
 
       metaConfig = {
-        inherit stateVersion gitName gitEmail nixosRepo hostname isLaptop;
+        inherit stateVersion gitName gitEmail nixosRepo hostname isLaptop ramGb;
         username = hmUser;
       };
     in {

@@ -10,13 +10,15 @@
       "hostname": "beelink-ser7-co",
       "system": "x86_64-linux",
       "isLaptop": false,
-      "isRolling": true
+      "isRolling": true,
+      "ramGb": 32
     },
     {
       "hostname": "msi-summit-me",
       "system": "x86_64-linux",
       "isLaptop": true,
-      "isRolling": true
+      "isRolling": true,
+      "ramGb": 32
     }
   ]
 }
