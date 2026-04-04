@@ -7,6 +7,51 @@
   users.users.${metaConfig.username} = {
     isNormalUser = true;
     extraGroups = ["wheel" "networkmanager"];
+    shell = pkgs.zsh;
+  };
+
+  # (목적: root 계정에서도 편리한 관리 환경 제공)
+  users.defaultUserShell = pkgs.zsh;
+
+  programs.zsh = {
+    enable = true;
+    enableCompletion = true;
+    autosuggestions.enable = true;
+    syntaxHighlighting.enable = true;
+
+    # == Syntax Highlighting Customization ==
+    # (이유: 플러그인 로드 후 실행되도록 하단에 배치하여 'invalid subscript range' 오류 방지)
+    promptInit = ''
+      zsh-newuser-install() { : }
+
+      # == Custom Styles (Must be defined after plugin load or handled safely) ==
+      # NixOS의 programs.zsh.enableSyntaxHighlighting은 /etc/zshrc 마지막에 로드되므로
+      # 여기에 직접 스타일을 정의하면 오류가 날 수 있습니다.
+      # 따라서 훅(hook)을 사용하거나 로드 여부를 체크하여 안전하게 설정합니다.
+      typeset -gA ZSH_HIGHLIGHT_STYLES
+      ZSH_HIGHLIGHT_STYLES[command]='none'
+      ZSH_HIGHLIGHT_STYLES[precommand]='none'
+      ZSH_HIGHLIGHT_STYLES[alias]='none'
+      ZSH_HIGHLIGHT_STYLES[builtin]='none'
+      ZSH_HIGHLIGHT_STYLES[function]='none'
+      ZSH_HIGHLIGHT_STYLES[commandseparator]='none'
+      ZSH_HIGHLIGHT_STYLES[path]='none'
+      ZSH_HIGHLIGHT_STYLES[path_prefix]='none'
+      ZSH_HIGHLIGHT_STYLES[unknown-token]='fg=red,bold'
+    '';
+
+    interactiveShellInit = ''
+      # == Zsh Tab Completion Menu Selection ==
+      zstyle ':completion:*' menu select
+
+      # == Prompt Setup (Bash Style with User/Root Colors & Bold) ==
+      PROMPT=$'\n%B%F{%(#.red.green)}[%n@%m:%~]%(!.#.$) %f%b'
+
+      # == Enable Colors for commands ==
+      export CLICOLOR=1
+      alias ls='ls --color=auto'
+      alias grep='grep --color=auto'
+    '';
   };
 
   nix = {

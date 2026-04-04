@@ -67,7 +67,7 @@ in {
   security.sudo.wheelNeedsPassword = false;
 
   # 5. 환영 메시지 및 가이드 추가
-  programs.bash.interactiveShellInit = ''
+  programs.zsh.interactiveShellInit = lib.mkAfter ''
     if [[ $(tty) == /dev/tty1 || $(tty) == /dev/pts/* ]]; then
       if [[ "$TERM" == "xterm-kitty" ]]; then
         echo "--------------------------------------------------"

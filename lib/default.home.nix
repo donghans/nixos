@@ -6,6 +6,23 @@
 }: {
   programs = {
     home-manager.enable = true;
+    zsh.enable = true; # (목적: 사용자별 .zshrc를 생성하여 초기 설치 메시지 차단)
+    atuin = {
+      enable = true;
+      settings = {
+        search = {
+          filters = ["host" "directory"];
+        };
+        filter_mode = "host";
+        filter_mode_shell_up_key_binding = "host";
+        style = "compact";
+        inline_height = 30;
+        max_preview_height = 20;
+        invert = true;
+        show_tabs = false;
+        enter_accept = true;
+      };
+    };
   };
 
   home.username = lib.mkDefault metaConfig.username;
