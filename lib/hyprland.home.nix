@@ -22,6 +22,7 @@
     ./hyprland.home/ext/kitty.nix
     ./hyprland.home/ext/mako.nix
     ./hyprland.home/ext/waybar.nix
+    ./vivaldi.home/_init.nix
   ];
 
   home.packages = with pkgs; [
@@ -37,14 +38,7 @@
     nemo
 
     wl-clip-persist
-
-    (unstable.vivaldi.override {
-      proprietaryCodecs = true;
-      inherit (unstable) vivaldi-ffmpeg-codecs;
-      commandLineArgs = ["--lang=ko"];
-    })
   ];
-
   # == Hide Clutter in Application Menu ==
   # (목적: 사용 빈도가 낮거나 배경에서 실행되는 도구들의 실행 아이콘을 숨겨 메뉴를 정리)
   xdg.desktopEntries = {
