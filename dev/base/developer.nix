@@ -1,5 +1,5 @@
 # 1. 함수의 시작: 시스템 구성에 필요한 도구들을 인자로 받습니다.
-{ config, metaConfig, ... }: {
+{ metaConfig, ... }: {
   imports = [
     ./_filesystem.nix
     ../../lib/hyprland.nix

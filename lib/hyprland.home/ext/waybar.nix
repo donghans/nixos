@@ -1,4 +1,4 @@
-{ pkgs, metaConfig, ... }: {
+{ metaConfig, ... }: {
   programs.waybar.enable = true;
 
   # waybar/config 내용

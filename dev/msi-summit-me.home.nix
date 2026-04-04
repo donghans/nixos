@@ -1,4 +1,4 @@
-{ pkgs, unstable, lib, metaConfig, ... }: let
+{ pkgs, lib, ... }: let
   # 터치패드 토글 스크립트 (모든 터치패드 장치 순회 처리)
   toggleTouchpad = pkgs.writeShellScriptBin "hypr-toggle-touchpad" ''
     # 터치패드 키워드가 포함된 모든 장치 추출

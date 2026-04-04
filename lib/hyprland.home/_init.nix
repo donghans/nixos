@@ -1,7 +1,4 @@
-{ pkgs, config, notifyLog, ... }: let
-  cliphist = "${pkgs.cliphist}/bin/cliphist";
-  wl-paste = "${pkgs.wl-clipboard}/bin/wl-paste";
-in {
+{ pkgs, ... }: {
   wayland.windowManager.hyprland.enable = true;
 
   wayland.windowManager.hyprland.systemd = {

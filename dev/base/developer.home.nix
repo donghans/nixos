@@ -1,4 +1,4 @@
-{ pkgs, inputs, unstable, unstable-fallback, lib, metaConfig, ... }: {
+{ pkgs, unstable, unstable-fallback, lib, metaConfig, ... }: {
   imports = [
     ../../lib/hyprland.home.nix
     ./shell-yarn.nix

@@ -1,4 +1,4 @@
-{ pkgs, lib, metaConfig, ... }: {
+{ lib, metaConfig, ... }: {
   programs = {
     home-manager.enable = true;
   };

@@ -12,11 +12,11 @@
     home-manager.inputs.nixpkgs.follows = "nixpkgs"; # HM이 시스템과 같은 Nix 패키지 버전을 쓰도록 강제
   };
 
-  outputs = { self, nixpkgs, nixpkgs-unstable, home-manager, ... }@inputs: let
+  outputs = { nixpkgs, nixpkgs-unstable, home-manager, ... }@inputs: let
     stateVersion = "25.11";
 
     myOverlays = [
-      (self: super: {
+      (_self: super: {
         mkWrapper = {
           pkg,
           name ? "${pkg.name}-wrapped",

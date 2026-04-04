@@ -1,4 +1,4 @@
-{ pkgs, unstable, lib, metaConfig, ... }: {
+{ ... }: {
   imports = [ ./base/developer.home.nix ];
 
   # 시간이 흘렀을 때 자동 잠금

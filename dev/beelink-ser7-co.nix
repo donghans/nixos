@@ -1,4 +1,4 @@
-{ config, ... }: {
+{ ... }: {
   imports = [
     ./hardware/beelink-ser7-co.nix
     ./base/developer.nix

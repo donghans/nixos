@@ -1,4 +1,4 @@
-{ config, lib, pkgs, metaConfig, ... }: {
+{ lib, pkgs, metaConfig, ... }: {
   # 부트 로더 (rEFInd가 찾을 수 있도록 최소한으로 설정)
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
