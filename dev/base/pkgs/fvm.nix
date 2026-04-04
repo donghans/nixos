@@ -30,10 +30,18 @@
       libnotify
     ];
     bins = with pkgs; [unzip openssl curl libnotify dbus glib xdg-utils];
-    env = {SHELL = "/run/current-system/sw/bin/sh";}; # (이유: FVM이 ~/.bash_profile 읽는 것을 방지)
+    env = {
+      SHELL = "/run/current-system/sw/bin/sh"; # (이유: FVM이 ~/.bash_profile 읽는 것을 방지)
+      FVM_HOME = "$HOME/.fvm"; # (목적: HOME 디렉터리 정리를 위해 숨김 폴더 사용)
+    };
   });
 in {
   home.packages = [
     (wrapFVM pkgs.fvm "fvm")
   ];
+
+  # 터미널 환경에서도 FVM_HOME을 인식하도록 설정
+  home.sessionVariables = {
+    FVM_HOME = "$HOME/.fvm";
+  };
 }
