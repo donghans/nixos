@@ -157,7 +157,10 @@ init_tmp_git() {
         git -C "$build_dir" config user.name "nhw-bot" >/dev/null 2>&1
     fi
     git -C "$build_dir" add -A >/dev/null 2>&1
-    git -C "$build_dir" commit -m "temp: build environment" >/dev/null 2>&1
+    # Only commit if there are changes to avoid exit 1 under set -e
+    if ! git -C "$build_dir" diff --staged --quiet; then
+        git -C "$build_dir" commit -m "temp: build environment" >/dev/null 2>&1
+    fi
 }
 
 # 7. Finalize Lock Sync
