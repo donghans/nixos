@@ -1,5 +1,10 @@
-{ pkgs, lib, metaConfig, ... }: {
-  imports = [ ./lib/hyprland.home.nix ];
+{
+  pkgs,
+  lib,
+  metaConfig,
+  ...
+}: {
+  imports = [./lib/hyprland.home.nix];
 
   home.username = "nixos";
   home.homeDirectory = "/home/nixos";
@@ -9,7 +14,7 @@
   ];
 
   programs.git.enable = true;
-  programs.git.settings.user.name  = metaConfig.gitName;
+  programs.git.settings.user.name = metaConfig.gitName;
   programs.git.settings.user.email = metaConfig.gitEmail;
 
   wayland.windowManager.hyprland.settings = {

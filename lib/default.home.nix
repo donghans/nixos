@@ -1,4 +1,8 @@
-{ lib, metaConfig, ... }: {
+{
+  lib,
+  metaConfig,
+  ...
+}: {
   programs = {
     home-manager.enable = true;
   };
@@ -6,7 +10,6 @@
   home.username = lib.mkDefault metaConfig.username;
   home.homeDirectory = lib.mkDefault "/home/${metaConfig.username}";
 
-  # 이 버전은 Home Manager가 처음 설치된 시점의 상태를 정의합니다.
-  # 업데이트 시 이 값을 굳이 바꿀 필요는 없으며, 호환성을 위한 지표입니다.
+  # (주의: Home Manager 최초 설치 시점의 호환성 지표)
   home.stateVersion = metaConfig.stateVersion;
 }

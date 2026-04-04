@@ -1,4 +1,10 @@
-{ pkgs, lib, config, ... }: with lib; let
+{
+  pkgs,
+  lib,
+  config,
+  ...
+}:
+with lib; let
   cfg = config.services.my-notification-logger;
 
   # 로그 기록용 스크립트 분리
@@ -49,8 +55,8 @@ in {
     systemd.user.services.my-notification-logger = {
       Unit = {
         Description = "Notification Logger Service";
-        After = [ "graphical-session-pre.target" ];
-        PartOf = [ "graphical-session.target" ];
+        After = ["graphical-session-pre.target"];
+        PartOf = ["graphical-session.target"];
       };
       Service = {
         ExecStart = "${logger-script}";
@@ -58,13 +64,13 @@ in {
         RestartSec = 3;
       };
       Install = {
-        WantedBy = [ "graphical-session.target" ];
+        WantedBy = ["graphical-session.target"];
       };
     };
 
     # 2. Logrotate 설정 (기존과 동일)
     systemd.user.services.notify-logrotate = {
-      Unit = { Description = "Rotate notification logs"; };
+      Unit = {Description = "Rotate notification logs";};
       Service = {
         ExecStart = let
           logrotateConf = pkgs.writeText "notify-logrotate.conf" ''
@@ -82,12 +88,12 @@ in {
     };
 
     systemd.user.timers.notify-logrotate = {
-      Unit = { Description = "Daily rotation of notification logs"; };
+      Unit = {Description = "Daily rotation of notification logs";};
       Timer = {
         OnCalendar = "daily";
         Persistent = true;
       };
-      Install = { WantedBy = [ "timers.target" ]; };
+      Install = {WantedBy = ["timers.target"];};
     };
   };
 }

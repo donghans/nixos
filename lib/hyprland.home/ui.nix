@@ -1,6 +1,10 @@
-{ pkgs, lib, ... }: {
+{
+  pkgs,
+  lib,
+  ...
+}: {
   wayland.windowManager.hyprland.settings = {
-    monitor = lib.mkDefault [ ",preferred,auto,1" ];
+    monitor = lib.mkDefault [",preferred,auto,1"];
 
     general = {
       gaps_in = 0;
@@ -53,9 +57,18 @@
   gtk = {
     enable = true;
 
-    theme = { name = "Adwaita-dark"; package = pkgs.gnome-themes-extra; };
-    iconTheme = { name = "Papirus-Dark"; package = pkgs.papirus-icon-theme; };
-    cursorTheme = { name = "Bibata-Modern-Ice"; package = pkgs.bibata-cursors; };
+    theme = {
+      name = "Adwaita-dark";
+      package = pkgs.gnome-themes-extra;
+    };
+    iconTheme = {
+      name = "Papirus-Dark";
+      package = pkgs.papirus-icon-theme;
+    };
+    cursorTheme = {
+      name = "Bibata-Modern-Ice";
+      package = pkgs.bibata-cursors;
+    };
 
     # GTK4 앱들이 다크모드를 인식하게 만드는 핵심 설정
     gtk3.extraConfig.gtk-application-prefer-dark-theme = 1;

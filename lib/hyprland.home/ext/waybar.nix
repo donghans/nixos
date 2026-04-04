@@ -1,4 +1,4 @@
-{ metaConfig, ... }: {
+{metaConfig, ...}: {
   programs.waybar.enable = true;
 
   # waybar/config 내용
@@ -12,11 +12,16 @@
     margin-left = 0;
     margin-right = 0;
 
-    modules-left = [ "hyprland/workspaces" "hyprland/submap" ];
-    modules-center = [ "hyprland/window" ];
-    modules-right = [ "tray" ]
-    ++ (if metaConfig.isLaptop then [ "battery" ] else [ ])
-    ++ [ "clock" ];
+    modules-left = ["hyprland/workspaces" "hyprland/submap"];
+    modules-center = ["hyprland/window"];
+    modules-right =
+      ["tray"]
+      ++ (
+        if metaConfig.isLaptop
+        then ["battery"]
+        else []
+      )
+      ++ ["clock"];
 
     "hyprland/workspaces" = {
       format = "{name}";

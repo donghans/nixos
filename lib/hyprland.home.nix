@@ -1,4 +1,9 @@
-{ pkgs, unstable, config, ... }: {
+{
+  pkgs,
+  unstable,
+  config,
+  ...
+}: {
   _module.args = {
     hyprTerm = "${pkgs.kitty}/bin/kitty";
     notifyLog = "${config.home.homeDirectory}/.local/share/notify_logs/history.log";
@@ -34,8 +39,8 @@
 
     (unstable.vivaldi.override {
       proprietaryCodecs = true;
-      vivaldi-ffmpeg-codecs = unstable.vivaldi-ffmpeg-codecs;
-      commandLineArgs = [ "--lang=ko" ];
+      inherit (unstable) vivaldi-ffmpeg-codecs;
+      commandLineArgs = ["--lang=ko"];
     })
   ];
 }

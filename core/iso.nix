@@ -1,4 +1,9 @@
-{ pkgs, lib, metaConfig, ... }: let
+{
+  pkgs,
+  lib,
+  metaConfig,
+  ...
+}: let
   # 1. setup.sh를 ISO 시스템의 bin 폴더에 넣기 위한 '패키지' 생성
   nixos-setup-from-repo-script = pkgs.writeShellApplication {
     name = "nixos-setup-from-repo"; # 실행될 명령어 이름
@@ -15,14 +20,14 @@
     text = builtins.readFile ./scripts/iso.setup.sh;
   };
 in {
-  imports = [ ./lib/hyprland.nix ];
+  imports = [./lib/hyprland.nix];
 
   # 부트로더 대기 시간 0초 (바로 부팅)
   boot.loader.timeout = lib.mkForce 0;
 
   # 커널 파라미터에서 부팅을 조용하게 만드는 요소들 제거
   boot.kernelParams = [
-    "console=tty1"        # 로그가 출력될 터미널 지정
+    "console=tty1" # 로그가 출력될 터미널 지정
   ];
 
   # 혹시 graphical-base 모듈에 의해 Plymouth가 켜져 있다면 강제로 끕니다.

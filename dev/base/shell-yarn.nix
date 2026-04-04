@@ -1,4 +1,4 @@
-{ pkgs, ... }: let
+{pkgs, ...}: let
   yarn-pnpm-wrapper = pkgs.writeShellScriptBin "yarn" ''
     # 1. yarn.lock이 있는 프로젝트인지 확인
     if [ -f "yarn.lock" ]; then
@@ -33,5 +33,5 @@
     fi
   '';
 in {
-  home.packages = [ yarn-pnpm-wrapper ];
+  home.packages = [yarn-pnpm-wrapper];
 }

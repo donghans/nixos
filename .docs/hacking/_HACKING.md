@@ -8,7 +8,7 @@
 프로젝트를 구성하는 4개의 핵심 레이어에 대한 상세 분석입니다.
 👉 [**ARCHITECTURE.md 자세히 보기**](./ARCHITECTURE.md)
 
-- **CLI Engine**: `nhw.sh`와 태스크 스크립트 구조.
+- **CLI Engine**: `nhw.sh`와 태스크 스크립트 구조 (Update, Fix, Check 등).
 - **Metadata**: JSON 기반의 데이터 중심 설계.
 - **Logic Core**: Flake 기반 동적 호스트 생성.
 - **Modules**: 공통 라이브러리 및 베이스 설정.

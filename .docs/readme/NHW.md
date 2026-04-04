@@ -10,13 +10,18 @@
 nhw [scope] [action] [hostname]
 ```
 
-- **`scope`**: 작업 범위 (`os`, `home`, `iso`, `fix-unstable`)
+- **`scope`**: 작업 범위 (`os`, `home`, `iso`, `fix-unstable`, `check`)
 - **`action`**: 수행할 동작 (`switch`, `boot`, `test`, `update`)
 - **`hostname`**: 대상 기기 이름 (생략 시 현재 기기 혹은 기본값 사용)
 
 ---
 
 ## ⚙️ 2. 주요 명령어 상세
+
+### 무결성 및 품질 관리 (`check`)
+프로젝트 전체의 코드를 정돈하고 빌드 가능 여부를 사전에 검증합니다.
+- `nhw check`: 안티패턴 수정(`statix`), 코드 포맷팅(`alejandra`), 빌드 무결성(`nix flake check`)을 한 번에 수행합니다.
+- **주의**: `flake.nix`의 특정 띄어쓰기 정렬을 유지하기 위한 예외 처리 로직이 포함되어 있습니다.
 
 ### 시스템 설정 관리 (`os`)
 기존 `nixos-rebuild`를 대체하며, 빌드 격리 환경에서 안전하게 수행됩니다.
@@ -87,4 +92,6 @@ nhw clean all
 문제가 발생했을 때 로그 파일의 마지막 부분을 확인하세요.
 ```bash
 tail -f /var/log/nhw/$(ls -t /var/log/nhw/ | head -n 1)
+```
+ /var/log/nhw/ | head -n 1)
 ```

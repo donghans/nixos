@@ -27,7 +27,7 @@ cleanup() {
     END_TIME_RAW=$(date +%s)
     END_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
     DURATION=$((END_TIME_RAW - START_TIME_RAW))
-    
+
     # 📊 Summary
     log_msg "Summary" "Started:  $START_TIME_STR"
     log_msg "Summary" "Finished: $END_TIME_STR"
@@ -36,7 +36,7 @@ cleanup() {
 
     check_origin_git_status "$NIXOS_PATH"
     [ -n "$HOST_SPECIFIC_LOCK" ] && finalize_lock_sync "$LOCK_CHANGED" "$HOST_SPECIFIC_LOCK"
-    
+
     rotate_logs
 }
 trap cleanup EXIT
@@ -49,9 +49,9 @@ for arg in "$@"; do
     case $arg in
         clean) DO_CLEAN=true ;;
         all) CLEAN_TARGET="all" ;;
-        os|home|iso|fix-unstable) SCOPE="$arg" ;;
+        os|home|iso|fix-unstable|check) SCOPE="$arg" ;;
         switch|boot|test|update) ACTION="$arg" ;;
-        *) 
+        *)
             if [ "$SCOPE" == "fix-unstable" ]; then
                 EXTRA_ARGS+=("$arg")
             else
@@ -88,6 +88,11 @@ TARGET_LOCK="$TMP_BUILD_DIR/flake.lock"
 log_msg "Init" "Action:   $SCOPE $ACTION"
 log_msg "Init" "Target:   $HOST_ID"
 log_msg "Init" "Mode:     $([ "$IS_ROLLING" == "true" ] && echo "rolling" || echo "stable")"
+
+if [ "$SCOPE" == "check" ]; then
+    source "$SCRIPT_DIR/nhw.task-check.sh"
+    exit 0
+fi
 
 # 5. Execution
 prepare_build_dir "$NIXOS_PATH" "$TMP_BUILD_DIR" "$ENV_FILE"

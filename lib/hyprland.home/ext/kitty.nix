@@ -1,4 +1,4 @@
-{ ... }: {
+_: {
   programs.kitty.enable = true;
 
   # 폰트 설정 (pkgs에서 폰트 패키지를 가져오는 것이 좋습니다)

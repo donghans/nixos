@@ -1,4 +1,8 @@
-{ pkgs, lib, ... }: let
+{
+  pkgs,
+  lib,
+  ...
+}: let
   # 터치패드 토글 스크립트 (모든 터치패드 장치 순회 처리)
   toggleTouchpad = pkgs.writeShellScriptBin "hypr-toggle-touchpad" ''
     # 터치패드 키워드가 포함된 모든 장치 추출
@@ -52,7 +56,8 @@
     ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:brightness -h int:value:"$BRT" -u low "Brightness" "$BRT%"
   '';
 in {
-  imports = [ ./base/developer.home.nix ];
+  # == Home Configuration ==
+  imports = [./base/developer.home.nix];
 
   home.packages = with pkgs; [
     brightnessctl
@@ -72,8 +77,9 @@ in {
       disable_while_typing = true;
     };
 
+    # == Keybindings ==
     bindel = [
-      # 볼륨 및 밝기 조절 (피드백 포함)
+      # (목적: 하드웨어 미디어 키 조절 및 알림 피드백)
       ", XF86AudioRaiseVolume, exec, ${volControl}/bin/vol-control up"
       ", XF86AudioLowerVolume, exec, ${volControl}/bin/vol-control down"
       ", XF86AudioMute, exec, ${volControl}/bin/vol-control mute"
@@ -82,10 +88,9 @@ in {
     ];
 
     bindl = [
-      # 터치패드 토글
+      # (목적: 하드웨어 특수 스위치 및 덮개 동작 정의)
       "$mainMod CTRL, XF86TouchpadToggle, exec, ${toggleTouchpad}/bin/hypr-toggle-touchpad"
 
-      # 덮개 스위치
       ", switch:on:Lid Switch, exec, loginctl lock-session && hyprctl dispatch dpms off && tlp bat"
       ", switch:off:Lid Switch, exec, hyprctl dispatch dpms on && tlp start"
     ];

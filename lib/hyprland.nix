@@ -1,11 +1,12 @@
-{ pkgs, ... }: {
-  imports = [ ./default.nix ];
+{pkgs, ...}: {
+  imports = [./default.nix];
 
-  services.greetd.enable = true;
-
-  services.greetd.settings.default_session = {
-    command = "${pkgs.tuigreet}/bin/tuigreet --time --cmd 'uwsm start hyprland-uwsm.desktop'";
-    user = "greeter";
+  services.greetd = {
+    enable = true;
+    settings.default_session = {
+      command = "${pkgs.tuigreet}/bin/tuigreet --time --cmd 'uwsm start hyprland-uwsm.desktop'";
+      user = "greeter";
+    };
   };
 
   systemd.services.greetd.serviceConfig = {
@@ -18,21 +19,24 @@
     TTYVTDisallocate = true;
   };
 
-  programs.uwsm.enable = true; # uwsm 활성화 (Hyprland 세션 관리용)
-  programs.hyprland.enable = true;
-  programs.hyprland.withUWSM = true;
+  programs = {
+    uwsm.enable = true; # uwsm 활성화 (Hyprland 세션 관리용)
+    hyprland.enable = true;
+    hyprland.withUWSM = true;
+  };
 
-  security.polkit.enable = true;
+  security = {
+    polkit.enable = true;
+    # PAM을 통해 로그인 시 Keyring 자동 해제
+    pam.services.login.enableGnomeKeyring = true;
+    pam.services.greetd.enableGnomeKeyring = true;
+  };
   services.gnome.gnome-keyring.enable = true;
 
-  # PAM을 통해 로그인 시 Keyring 자동 해제
-  security.pam.services.login.enableGnomeKeyring = true;
-  security.pam.services.greetd.enableGnomeKeyring = true;
-
+  # == Input Method & Fonts ==
   i18n.inputMethod = {
     enable = true;
     type = "fcitx5";
-
     fcitx5.waylandFrontend = true;
     fcitx5.addons = with pkgs; [
       fcitx5-hangul
@@ -44,17 +48,16 @@
     packages = with pkgs; [
       nanum
       nanum-gothic-coding
-
-      noto-fonts-cjk-sans    # 핵심: 한중일 Sans (추천)
-      noto-fonts-cjk-serif   # 핵심: 한중일 Serif
+      noto-fonts-cjk-sans
+      noto-fonts-cjk-serif
       noto-fonts-color-emoji
     ];
 
     fontconfig.defaultFonts = {
-      serif = [ "NanumMyeongjo" "Noto Serif CJK KR" ];
-      sansSerif = [ "NanumGothic" "Noto Sans CJK KR" ];
-      monospace = [ "NanumGothicCoding" ];
-      emoji = [ "Noto Color Emoji" ];
+      serif = ["NanumMyeongjo" "Noto Serif CJK KR"];
+      sansSerif = ["NanumGothic" "Noto Sans CJK KR"];
+      monospace = ["NanumGothicCoding"];
+      emoji = ["Noto Color Emoji"];
     };
   };
 }

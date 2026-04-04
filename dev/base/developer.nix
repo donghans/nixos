@@ -1,10 +1,10 @@
-# 1. 함수의 시작: 시스템 구성에 필요한 도구들을 인자로 받습니다.
-{ metaConfig, ... }: {
+{metaConfig, ...}: {
   imports = [
     ./_filesystem.nix
     ../../lib/hyprland.nix
   ];
 
+  # == System Services ==
   services.tailscale.enable = true;
 
   virtualisation.docker = {
@@ -13,10 +13,10 @@
   };
 
   programs.adb.enable = true;
-  networking.firewall.allowedUDPPorts = [ 5353 ]; # ADB 기기 검색(mDNS)
+  networking.firewall.allowedUDPPorts = [5353]; # (이유: mDNS 기반 ADB 기기 검색)
 
-  # 사용자 계정
+  # == User Accounts ==
   users.users.${metaConfig.username} = {
-    extraGroups = [ "adbusers" "docker" ];
+    extraGroups = ["adbusers" "docker"];
   };
 }

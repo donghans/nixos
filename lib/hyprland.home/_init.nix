@@ -1,4 +1,4 @@
-{ pkgs, ... }: {
+{pkgs, ...}: {
   wayland.windowManager.hyprland.enable = true;
 
   wayland.windowManager.hyprland.systemd = {
@@ -21,69 +21,53 @@
       };
     };
 
-    # Device 설정이 필요할 경우 추가할 것
-    # device = [
-    #   {
-    #     name = "epic-mouse-v1";
-    #     sensitivity = -0.5;
-    #   }
-    # ];
+    # [OPTIONAL] 특정 하드웨어 전용 설정
+    # device = [ { name = "epic-mouse-v1"; sensitivity = -0.5; } ];
 
     exec-once = [
-      # 시스템 설정 관련 (uwsm 없이 직접 실행해도 무방한 것들)
+      # == System Services ==
       "rfkill unblock bluetooth && bluetoothctl power on"
 
-      # 필수 서비스 (uwsm app 사용)
+      # == UI & App Services (via UWSM) ==
       "uwsm app -- fcitx5"
       "uwsm app -- ${pkgs.hyprpolkitagent}/libexec/hyprpolkitagent"
       "uwsm app -- ${pkgs.networkmanagerapplet}/bin/nm-applet"
-
-      # UI 및 배경화면 (분리 실행 권장)
       "uwsm app -- ${pkgs.waybar}/bin/waybar"
       "uwsm app -- ${pkgs.hyprpaper}/bin/hyprpaper"
-
-      # 클립보드 안정성 및 지속성 (XWayland 브릿지 역할)
       "uwsm app -- ${pkgs.wl-clip-persist}/bin/wl-clip-persist --clipboard regular"
-
-      # 사용자 앱
       "uwsm app -- ${pkgs.tailscale}/bin/tailscale systray"
     ];
   };
 
   home.sessionVariables = {
-    # 커서 설정
+    # == Environment Variables ==
     XCURSOR_SIZE = "24";
     HYPRCURSOR_SIZE = "24";
     XCURSOR_THEME = "Bibata-Modern-Ice";
 
-    # 입력기 (Fcitx5)
-    GTK_IM_MODULE = ""; # GTK4부터는 비워두는 것이 권장됩니다.
+    GTK_IM_MODULE = ""; # (주의: GTK4부터는 공백 권장)
     QT_IM_MODULE = "fcitx";
     XMODIFIERS = "@im=fcitx";
     SDL_IM_MODULE = "fcitx";
     INPUT_METHOD = "fcitx";
 
-    # 테마 및 플랫폼
     GTK_THEME = "Adwaita-dark";
-    QT_QPA_PLATFORM = "wayland;xcb"; # xcb fallback 추가 권장
+    QT_QPA_PLATFORM = "wayland;xcb";
 
-    # 데스크탑 환경 식별
     XDG_CURRENT_DESKTOP = "Hyprland";
     XDG_SESSION_TYPE = "wayland";
     XDG_SESSION_DESKTOP = "Hyprland";
-
-    # 기타 앱 힌트
     ELECTRON_OZONE_PLATFORM_HINT = "auto";
   };
 
   xdg = {
     portal.enable = true;
     portal.extraPortals = with pkgs; [
-      xdg-desktop-portal-hyprland # 화면 공유용
-      xdg-desktop-portal-gtk      # 파일 선택/테마용
+      xdg-desktop-portal-hyprland
+      xdg-desktop-portal-gtk
     ];
 
-    portal.config.common.default = [ "hyprland" "gtk" ];
+    portal.config.common.default = ["hyprland" "gtk"];
 
     mimeApps.enable = true;
   };
