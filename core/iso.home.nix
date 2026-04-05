@@ -1,9 +1,5 @@
-{
-  pkgs,
-  metaConfig,
-  ...
-}: {
-  imports = [./lib/hyprland.home.nix];
+{pkgs, ...}: {
+  imports = [./lib/_base/hyprland.home.nix];
 
   home.username = "nixos";
   home.homeDirectory = "/home/nixos";
@@ -11,10 +7,6 @@
   home.packages = with pkgs; [
     zed-editor
   ];
-
-  programs.git.enable = true;
-  programs.git.settings.user.name = metaConfig.gitName;
-  programs.git.settings.user.email = metaConfig.gitEmail;
 
   # == Hide Default Application Icons ==
   # (목적: 메뉴에서 firefox와 xterm을 가려서 커스텀 인스톨러 느낌을 강화)

@@ -40,9 +40,9 @@
 ---
 
 ## 4. 구성 모듈 레이어 (Library & Config Layer)
-**핵심 경로: `lib/`, `dev/base/`**
+**핵심 경로: `lib/`, `dev/base.dev.nix`**
 
 실제 시스템의 살점이 되는 부분입니다.
 
-- **Base Components (`dev/base/`)**: 파일시스템 마운트 규칙, 개발자 기본 환경, 유틸리티 등 모든 기기가 예외 없이 상속받는 **핵심 모듈**입니다.
-- **Functional Modules (`lib/`)**: Hyprland, Waybar 등 기능 단위로 조각난 설정들입니다. 개별 호스트 설정(`dev/<hostname>.nix`)에서 필요한 것만 골라 담는(**Mix-in**) 방식으로 구성됩니다.
+- **Base Components (`lib/_base/`, `dev/base.dev.nix`)**: 시스템 기반 모듈과 파일시스템 마운트 규칙 등 모든 기기가 공통으로 상속받는 **핵심 모듈**입니다.
+- **Functional Modules (`lib/`)**: Hyprland, 개발 환경(`developer.home/`) 등 기능 단위로 조각난 설정들입니다. 개별 호스트 설정(`dev/<hostname>/configuration.nix`)에서 필요한 것만 골라 담는(**Mix-in**) 방식으로 구성됩니다.

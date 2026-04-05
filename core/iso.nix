@@ -20,7 +20,7 @@
     text = builtins.readFile ./scripts/iso.setup.sh;
   };
 in {
-  imports = [./lib/hyprland.nix];
+  imports = [./lib/_base/hyprland.nix];
 
   # Plymouth 비활성화 (부팅 시 로그 확인 위함)
   boot.plymouth.enable = lib.mkForce false;

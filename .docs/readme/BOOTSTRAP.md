@@ -31,10 +31,10 @@ cd nixos
   "hosts": [
     { 
       "hostname": "my-machine", // 기기 이름
-      "system": "x86_64-linux", // 현재 x86_64 시스템만 테스트해봤습니다. 다른게 되는진 잘 모르겠네요.
+      "system": "x86_64-linux", // 현재 x86_64 시스템만 테스트해봤습니다.
       "isLaptop": false, // 랩탑의 경우 배터리 표시 등이 필요하므로 랩탑에선 true를 권장합니다.
       "isRolling": true, // 데일리 머신으로써 사용할 경우 unstable 패키지의 최신 버전 사용을 위해 true로 할 수 있습니다.
-      "ramGb": 16 // 물리 스왑으로 tmpfs의 크기를 늘리고싶을 경우, 해당 기기의 실제 메모리 크기를 GB로 넣어두면 정상동작을 보장합니다. 필요없다면 빼주세요.
+      "ramGb": 16 // 물리 스왑 설정 및 tmpfs 크기 자동 계산을 위해 실제 메모리 크기(GB)를 입력합니다.
     }
   ]
 }
@@ -46,12 +46,13 @@ cd nixos
 
 설치할 기기에 맞는 설정을 미리 준비해야 합니다.
 
-1.  **설정 파일 복사**:
+1.  **설정 폴더 생성 및 템플릿 복사**:
     ```bash
-    cp dev/.template.nix dev/<hostname>.nix
-    cp dev/.template.home.nix dev/<hostname>.home.nix
+    mkdir -p dev/<hostname>
+    cp dev/.template/configuration.nix dev/<hostname>/configuration.nix
+    cp dev/.template/home.nix dev/<hostname>/home.nix
     ```
-2.  **내용 수정**: `dev/<hostname>.nix` 파일을 열어 필요한 서비스나 패키지를 수정하세요.
+2.  **내용 수정**: `dev/<hostname>/configuration.nix` 파일을 열어 필요한 서비스나 패키지를 수정하세요.
 
 ---
 
@@ -67,7 +68,7 @@ cd nixos
 - 이 ISO로 부팅하면 터미널에 **한글 안내 메시지**가 나타납니다.
 - 안내에 따라 `nixos-setup` 명령어를 실행하면 다음과 같은 작업이 자동으로 진행됩니다:
   1. **Btrfs 파티셔닝**: `@`, `@home`, `@nix`, `@log` 서브볼륨 자동 생성 및 최적 옵션 마운트.
-  2. **하드웨어 감지**: `nixos-generate-config`를 실행하여 해당 기기의 하드웨어 설정을 `dev/hardware/<hostname>.nix` 경로에 자동으로 저장합니다.
+  2. **하드웨어 감지**: `nixos-generate-config`를 실행하여 해당 기기의 하드웨어 설정을 `dev/<hostname>/_hardware.nix` 경로에 자동으로 저장합니다.
   3. **자동 설치**: `dev/_info.json`에 정의된 저장소를 다시 클론하고 시스템을 빌드합니다.
 
 설치가 완료되고 재부팅하면, 전역 명령어 `nhw`를 통해 시스템을 관리할 수 있습니다.
@@ -79,7 +80,7 @@ cd nixos
 시스템 설치를 성공적으로 마치셨나요? 이제 본인만의 환경으로 커스터마이징할 차례입니다.
 
 - **시스템 관리 익히기**: `nhw` 도구의 상세한 사용법과 업데이트, 청소 방법 등은 [NHW.md](./NHW.md) 가이드를 참조하세요.
-- **개발 환경 구성**: `dev/base/developer.home.nix` 파일을 수정하여 본인에게 필요한 패키지를 추가할 수 있습니다.
-  - `home.packages` 목록에 필요한 패키지명을 추가하거나, `dev/base/pkgs/` 폴더 내의 특정 언어별 설정 파일을 수정해 보세요.
+- **개발 환경 구성**: `lib/developer.home.nix` 파일을 수정하여 본인에게 필요한 패키지를 추가할 수 있습니다.
+  - `home.packages` 목록에 필요한 패키지명을 추가하거나, `lib/developer.home/` 폴더 내의 특정 언어별 설정 파일을 수정해 보세요.
   - 수정 후에는 `nhw home switch` 명령으로 즉시 반영할 수 있습니다.
 - **심화 구조 이해**: 이 프로젝트의 빌드 격리, 락 전략 등 기술적 내부 구조가 궁금하다면 [HACKING.md](../hacking/_HACKING.md) 문서를 탐독해 보세요.

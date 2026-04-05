@@ -1,6 +1,6 @@
 {lib, ...}: {
   # == Home Configuration ==
-  imports = [./base/developer.home.nix];
+  imports = [../../lib/developer.home.nix];
 
   wayland.windowManager.hyprland = {
     touchpadToggleKey = "$mainMod CTRL, XF86TouchpadToggle";

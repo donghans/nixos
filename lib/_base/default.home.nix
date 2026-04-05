@@ -4,30 +4,29 @@
   metaConfig,
   ...
 }: {
+  imports = [
+    ./default.home/atuin.nix
+    ./default.home/zsh.nix
+  ];
+
   programs = {
     home-manager.enable = true;
-    zsh.enable = true; # (목적: 사용자별 .zshrc를 생성하여 초기 설치 메시지 차단)
-    atuin = {
+    git = {
       enable = true;
       settings = {
-        search = {
-          filters = ["host" "directory"];
-        };
-        filter_mode = "host";
-        filter_mode_shell_up_key_binding = "host";
-        style = "compact";
-        inline_height = 30;
-        max_preview_height = 20;
-        invert = true;
-        show_tabs = false;
-        enter_accept = true;
-        exit_mode = "return-query";
+        user.name = metaConfig.gitName;
+        user.email = metaConfig.gitEmail;
+        url."git@github.com:".insteadOf = "https://github.com/";
       };
     };
   };
 
   home.username = lib.mkDefault metaConfig.username;
-  home.homeDirectory = lib.mkDefault "/home/${metaConfig.username}";
+  home.homeDirectory = lib.mkDefault (
+    if metaConfig.username == "root"
+    then "/root"
+    else "/home/${metaConfig.username}"
+  );
 
   # == File Management Helpers ==
   services.udiskie.enable = true; # (목적: USB 자동 마운트 및 트레이 알림)

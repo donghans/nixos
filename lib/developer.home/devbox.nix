@@ -7,7 +7,7 @@
       exit 1
     fi
 
-    TEMPLATE_DIR="$HOME/nixos/lib/devbox.home/templates"
+    TEMPLATE_DIR="$HOME/nixos/lib/developer.home/devbox"
     TARGET_TEMPLATE="$TEMPLATE_DIR/$TYPE.json"
 
     if [ ! -f "$TARGET_TEMPLATE" ]; then

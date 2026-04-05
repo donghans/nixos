@@ -1,7 +1,7 @@
 {metaConfig, ...}: {
   imports = [
-    ./_filesystem.nix
-    ../../lib/hyprland.nix
+    ../dev/base.dev.nix
+    ./_base/hyprland.nix
   ];
 
   # == System Services ==

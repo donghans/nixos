@@ -1,8 +1,4 @@
-{
-  pkgs,
-  unstable,
-  ...
-}: {
+{unstable, ...}: {
   home.packages = [
     ((unstable.vivaldi.override {
         proprietaryCodecs = true;

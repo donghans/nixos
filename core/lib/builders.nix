@@ -63,7 +63,7 @@
     homeConfig =
       if isISO
       then ../iso.home.nix
-      else ../dev/${hostname}.home.nix;
+      else ../dev/${hostname}/home.nix;
 
     metaConfig = {
       inherit (workspaceMeta) gitName gitEmail nixosRepo stateVersion;
@@ -86,7 +86,7 @@
         ../iso.nix
       ]
       else [
-        ../dev/${hostInfo.hostname}.nix
+        ../dev/${hostInfo.hostname}/configuration.nix
       ];
   in
     nixpkgs.lib.nixosSystem {
@@ -127,6 +127,7 @@
             # (목적: 기존 설정과 충돌 시 파일 백업 생성)
             home-manager.backupFileExtension = "backup";
             home-manager.users.${hostCtx.homeUser} = import hostCtx.homeConfig;
+            home-manager.users.root = import ../lib/_base/default.home.nix;
             home-manager.extraSpecialArgs = {
               inherit inputs;
               inherit (hostCtx) metaConfig;

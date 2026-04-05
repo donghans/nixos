@@ -60,21 +60,36 @@
       };
 
     # == Output: Home Configurations ==
-    homeConfigurations = builtins.listToAttrs (map (hostInfo: let
+    homeConfigurations = builtins.listToAttrs (nixpkgs.lib.concatMap (hostInfo: let
         hostCtx = mkHostContext hostInfo;
-      in {
-        name = "${hostCtx.metaConfig.username}@${hostInfo.hostname}";
-        value = home-manager.lib.homeManagerConfiguration {
-          inherit (hostCtx) pkgs;
-          extraSpecialArgs = {
-            inherit inputs;
-            inherit (hostCtx) metaConfig;
-            inherit (hostCtx) unstable;
-            inherit (hostCtx) unstable-fallback;
+      in [
+        {
+          name = "${hostCtx.metaConfig.username}@${hostInfo.hostname}";
+          value = home-manager.lib.homeManagerConfiguration {
+            inherit (hostCtx) pkgs;
+            extraSpecialArgs = {
+              inherit inputs;
+              inherit (hostCtx) metaConfig;
+              inherit (hostCtx) unstable;
+              inherit (hostCtx) unstable-fallback;
+            };
+            modules = [(import hostCtx.homeConfig)];
           };
-          modules = [(import hostCtx.homeConfig)];
-        };
-      })
+        }
+        {
+          name = "root@${hostInfo.hostname}";
+          value = home-manager.lib.homeManagerConfiguration {
+            inherit (hostCtx) pkgs;
+            extraSpecialArgs = {
+              inherit inputs;
+              metaConfig = hostCtx.metaConfig // {username = "root";};
+              inherit (hostCtx) unstable;
+              inherit (hostCtx) unstable-fallback;
+            };
+            modules = [(import ../lib/_base/default.home.nix)];
+          };
+        }
+      ])
       hosts);
   };
 }

@@ -26,8 +26,8 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 ## 3. Expansion Phase (모듈 확장)
 호스트 설정을 구성하는 수많은 파일이 하나로 합쳐지는 단계입니다.
 
-1.  **Host Specific Loading**: `dev/<hostname>.nix`가 먼저 로드됩니다.
-2.  **Inheritance**: 베이스 모듈(`dev/base/`)과 기기별 자동 감지된 하드웨어 설정(`dev/hardware/`)이 순차적으로 임포트됩니다.
+1.  **Host Specific Loading**: `dev/<hostname>/configuration.nix`가 먼저 로드됩니다.
+2.  **Inheritance**: 베이스 설정(`dev/base.dev.nix`)과 기기별 자동 감지된 하드웨어 설정(`dev/<hostname>/_hardware.nix`)이 순차적으로 임포트됩니다.
 3.  **Mix-in**: 라이브러리 폴더(`lib/`)의 기능별 설정들이 활성화됩니다.
 
 ---

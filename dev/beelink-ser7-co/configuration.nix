@@ -1,7 +1,7 @@
 {...}: {
   imports = [
-    ./hardware/beelink-ser7-co.nix
-    ./base/developer.nix
+    ./_hardware.nix
+    ../../lib/developer.nix
   ];
 
   # == Boot & Kernel ==

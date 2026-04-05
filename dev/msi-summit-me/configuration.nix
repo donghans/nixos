@@ -1,7 +1,7 @@
 {pkgs, ...}: {
   imports = [
-    ./hardware/msi-summit-me.nix
-    ./base/developer.nix
+    ./_hardware.nix
+    ../../lib/developer.nix
   ];
 
   # == Boot & Kernel ==

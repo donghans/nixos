@@ -1,5 +1,8 @@
 {pkgs, ...}: {
-  imports = [./default.nix];
+  imports = [
+    ./default.nix
+    ./hyprland/custom-notify-logger.nix
+  ];
 
   services.greetd = {
     enable = true;
