@@ -81,6 +81,7 @@ in {
       missingok = true;
       notifempty = true;
       create = "0644 root root";
+      su = "root root";
     };
   };
 }

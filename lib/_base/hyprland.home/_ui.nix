@@ -8,10 +8,15 @@
       "col.inactive_border" = "rgba(595959aa)";
     };
 
-    dwindle = {
-      pseudotile = true;
-      preserve_split = true;
+    decoration = {
+      rounding = 0;
+      active_opacity = 1.0;
+      inactive_opacity = 0.75;
+      shadow.enabled = false;
+      blur.enabled = false;
     };
+
+    animations.enabled = "no";
 
     misc = {
       force_default_wallpaper = -1;
@@ -58,7 +63,7 @@
     enable = true;
     platformTheme.name = "gtk"; # GTK 설정을 따라감
     # style.name = "adwaita-dark";
-    # platformTheme.name = "qt5ct"; # 여기서 선언하면 sessionVariables를 알아서 세팅합니다.
+    # platformTheme.name = "qt5ct"; # 여기서 선언하면 sessionVariables를 알아서 세팅 합니다.
   };
 
   dconf.settings = {

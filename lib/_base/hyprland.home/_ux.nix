@@ -8,18 +8,19 @@
       layout = "dwindle";
     };
 
-    misc = {
-      always_follow_on_dnd = true;
-      focus_on_activate = true;
-    };
-
     dwindle = {
       pseudotile = true;
       preserve_split = true;
     };
+
+    misc = {
+      always_follow_on_dnd = true;
+      focus_on_activate = true;
+    };
   };
 
   wayland.windowManager.hyprland.settings.windowrulev2 = [
+    # 모든 창을 기본적으로 플로팅
     "float, class:.*"
 
     "nofocus, class:^$, title:^$, xwayland:1, floating:1, fullscreen:0, pinned:0"
