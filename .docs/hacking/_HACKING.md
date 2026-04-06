@@ -40,9 +40,17 @@
 
 ```text
 /
-├── core/             # Flake 진입점(flake.nix), 빌더 모듈(lib) 및 엔진 스크립트(scripts)
-├── hosts/            # 호스트별 설정(폴더 단위), 하드웨어 프로필 및 메타데이터
-├── mods/             # 도메인별 기능 모듈 (sys, gui, devel) 및 공유 데이터
+├── core/             # Flake 진입점(flake.nix), 빌더(lib/), 엔진 스크립트(scripts/)
+│   └── lib/          # builders.nix, workspace-options.nix, mk-wrapper.nix
+├── hosts/            # 호스트별 설정(폴더 단위), 하드웨어 프로필, 전역 메타데이터
+│   ├── _info.json    # SSOT 메타데이터 (username, repo, 호스트 목록)
+│   └── base.dev.nix  # Btrfs/ZRAM 공통 스토리지 설정 (sys 도메인이 포함)
+├── mods/             # Mods 프레임워크 (4개 레이어)
+│   ├── sys/          # 시스템 기반 (base, fonts, vfs, services, utils)
+│   ├── gui/          # GUI 환경 (core 번들, apps, utils)
+│   ├── devel/        # 개발 도구 (toolchains, jetbrains, apps)
+│   ├── _preset/      # 구성 레시피 + Strict Governance assertions
+│   └── _data/        # 정적 데이터 (devbox 템플릿 등)
 ├── .docs/            # 문서 저장소 (readme, plan, hacking)
 └── .locks/           # 시스템 안정성을 위한 락 파일 관리
 ```

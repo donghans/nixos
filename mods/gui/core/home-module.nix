@@ -89,10 +89,6 @@ in {
         mimeApps.enable = true;
       };
 
-      programs = {
-        gh.enable = true;
-      };
-
       services.cliphist.enable = true;
     })
   ];

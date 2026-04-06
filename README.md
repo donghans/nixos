@@ -6,23 +6,55 @@
 
 ## 🚀 주요 특징
 
-- **모듈형 설계**: 하드웨어 설정, 시스템 공통 설정, 사용자별 설정을 분리하여 코드 재사용성을 높였습니다.
-- **격리된 빌드 환경**: 모든 빌드는 `/tmp/nixos-build` (tmpfs)에서 안전하게 격리되어 수행되므로, 작업 도중 오류가 발생하더라도 사용자의 Git 트리를 더럽히지 않습니다.
-- **시스템 통합 도구 (`nhw`)**: `nh`(nix-helper)를 기반으로 한 전역 명령어 `nhw`를 통해 시스템 업데이트, 전환, ISO 빌드, 패키지 복구 등 모든 작업을 어디서든 수행할 수 있습니다.
-- **전문적인 인터페이스**: 정렬된 로그 포맷과 실행 마커(`Exec > / <`)를 통해 작업 단계를 직관적으로 추적하며, 모든 실행 결과는 `/var/log/nhw/`에 자동으로 기록됩니다.
-- **유연한 락(Lock) 관리**: `isRolling=true` 기기들은 `_rolling.lock`을 공유하며, Stable 기기들은 개별 `<hostname>.lock`으로 안정성을 유지합니다.
+- **Mods Framework**: 모든 설정을 `sys` / `gui` / `devel` 세 도메인으로 격리하고, 명시적 `enable` 옵션을 통해 기능을 선택합니다.
+- **워크스테이션 프리셋**: `mods._preset.workstation.enable = true` 하나로 개발 환경 전체(tailscale, docker, bluetooth, GUI, 개발 도구)를 일괄 활성화합니다. 이후 호스트별 앱만 선택하면 됩니다.
+- **Absolute SSOT**: `hosts/_info.json` 의 메타데이터를 `config.workspace.*` 전역 옵션으로 승격하여 어떤 모듈에서든 `config.workspace.username` 등으로 즉시 접근합니다.
+- **Strict Governance**: `mods.gui.enable` 또는 `mods.devel.enable`을 사용하려면 반드시 프리셋을 통해야 합니다. 미선언 도메인 활성화는 빌드 타임 에러로 차단됩니다.
+- **격리된 빌드 환경**: 모든 빌드는 `/tmp/nixos-build` (tmpfs)에서 안전하게 격리되어 수행됩니다.
+- **시스템 통합 도구 (`nhw`)**: `nhw`를 통해 시스템 업데이트, 전환, ISO 빌드, 패키지 복구 등 모든 작업을 수행합니다.
 
 ---
 
 ## 📂 프로젝트 구조
 
-- `core/`: 시스템 빌드의 핵심 진입점(`flake.nix`) 및 관련 스크립트들이 통합된 디렉터리입니다.
-  - `lib/`: Flake 기반 시스템 생성을 돕는 빌더 팩토리와 커스텀 오버레이(`mk-wrapper.nix`) 모듈이 위치합니다.
-  - `scripts/`: 시스템 관리 도구 `nhw`의 핵심 로직과 ISO 설치 스크립트(`iso.setup.sh`)가 위치합니다.
-- `dev/`: 호스트별 개별 설정(`dev/<hostname>/`)과 사용자 메타데이터(`_info.json`), 그리고 템플릿(`dev/.template/`)이 담겨 있습니다.
-- `lib/`: 시스템 공통 모듈(`lib/_base/`)과 개발자 환경(`lib/developer.home/`) 등 재사용 가능한 기능들이 정의되어 있습니다.
-- `.locks/`: 시스템 안정성을 보장하는 락 파일들(`_rolling.lock`, `<hostname>.lock`)을 관리합니다.
-- `.build/`: 빌드 시 생성되는 임시 심볼릭 링크로, 완료된 ISO 파일 등을 쉽게 확인할 수 있습니다.
+```
+nixos/
+├── core/               # 프레임워크 엔진
+│   ├── flake.nix       # 메인 진입점
+│   ├── lib/            # 빌더(builders.nix), SSOT 옵션(workspace-options.nix)
+│   └── scripts/        # nhw 관리 CLI
+├── mods/               # 재사용 가능한 기능 모듈
+│   ├── sys/            # 시스템 기반 (base, fonts, vfs, services, utils)
+│   ├── gui/            # GUI 환경 (Hyprland 번들, apps, utils)
+│   ├── devel/          # 개발 도구 (toolchains, jetbrains, android)
+│   └── _preset/        # 구성 레시피 (workstation 프리셋 + 거버넌스 assertion)
+├── hosts/              # 호스트별 고유 설정
+│   ├── _info.json      # 전역 호스트 메타데이터 (SSOT)
+│   └── <hostname>/     # configuration.nix, home.nix, _hardware.nix
+└── .locks/             # Flake lock 파일 (Rolling/Stable 전략)
+```
+
+---
+
+## 🛠️ 호스트 설정 방법
+
+```nix
+# hosts/<hostname>/configuration.nix 예시
+{...}: {
+  imports = [./_hardware.nix];
+
+  # 1. 워크스테이션 프리셋 활성화 (sys.base + services + gui + devel)
+  mods._preset.workstation.enable = true;
+
+  # 2. 호스트별 앱 선택
+  mods.gui.apps.vivaldi.enable = true;
+  mods.gui.apps.slack.enable = true;
+  mods.devel.jetbrains.android-studio.enable = true;
+
+  # 3. 호스트 하드웨어 설정
+  boot.kernelParams = [ "..." ];
+}
+```
 
 ---
 
@@ -48,4 +80,4 @@
 
 ## 💡 주요 개념 및 고급 가이드
 
-이 프로젝트의 내부 작동 방식(빌드 격리, 락 전략 등)이 궁금하거나, 시스템을 깊게 커스텀하고 싶은 고급 사용자는 [HACKING.md](./.docs/hacking/_HACKING.md) 파일을 참조하세요.
+이 프로젝트의 내부 작동 방식(빌드 격리, 락 전략, Mods Framework 아키텍처 등)이 궁금하거나, 시스템을 깊게 커스텀하고 싶은 고급 사용자는 [HACKING.md](./.docs/hacking/_HACKING.md) 파일을 참조하세요.

@@ -51,12 +51,6 @@ with lib; let
         fi
       done
     }
-
-    # == Key Bindings (Fix Ctrl+Arrow keys word-wise movement) ==
-    bindkey "^[[1;5C" forward-word
-    bindkey "^[[1;5D" backward-word
-    bindkey "^[[1;3C" forward-word
-    bindkey "^[[1;3D" backward-word
   '';
 in {
   config = mkIf cfg.enable (
@@ -67,7 +61,7 @@ in {
     }
     else {
       home.packages = [nfd-fix];
-      programs.zsh.initExtra = zshInit;
+      programs.zsh.initContent = zshInit;
     }
   );
 }

@@ -53,6 +53,12 @@
         export CLICOLOR=1
         alias ls='ls --color=auto'
         alias grep='grep --color=auto'
+
+        # == Key Bindings (Ctrl+Arrow: 단어 단위 이동) ==
+        bindkey "^[[1;5C" forward-word
+        bindkey "^[[1;5D" backward-word
+        bindkey "^[[1;3C" forward-word
+        bindkey "^[[1;3D" backward-word
       ''
     ];
   };

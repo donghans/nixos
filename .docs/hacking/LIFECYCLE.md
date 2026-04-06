@@ -26,9 +26,10 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 ## 3. Expansion Phase (모듈 확장)
 호스트 설정을 구성하는 수많은 파일이 하나로 합쳐지는 단계입니다.
 
-1.  **Host Specific Loading**: `hosts/<hostname>/configuration.nix`가 먼저 로드됩니다.
-2.  **Inheritance**: 베이스 설정(`hosts/base.dev.nix`)과 기기별 자동 감지된 하드웨어 설정(`hosts/<hostname>/_hardware.nix`)이 순차적으로 임포트됩니다.
-3.  **Mix-in**: 모듈 프레임워크 폴더(`mods/`)의 기능별 설정들이 활성화됩니다.
+1.  **Host Specific Loading**: `hosts/<hostname>/configuration.nix`가 먼저 로드됩니다. 대부분의 호스트는 `mods._preset.workstation.enable = true`로 공통 환경을 활성화하고 앱만 추가 선택합니다.
+2.  **Inheritance**: 기기별 자동 감지된 하드웨어 설정(`hosts/<hostname>/_hardware.nix`)이 임포트됩니다. Btrfs/ZRAM 스토리지 공통 설정(`hosts/base.dev.nix`)은 `mods/sys/base/default.nix`를 통해 sys 도메인에서 포함됩니다.
+3.  **Mix-in**: `mods/default.nix`를 통해 sys, gui, devel, _preset 네 도메인이 모두 로드됩니다. 각 모듈은 `mkIf cfg.enable`로 enable된 항목만 실제 설정에 기여합니다.
+4.  **Governance Check**: `_preset/workstation.nix`의 `assertions`가 평가되어 잘못된 직접 도메인 활성화가 있으면 빌드 전 즉시 오류를 발생시킵니다.
 
 ---
 

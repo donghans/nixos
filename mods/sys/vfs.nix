@@ -15,8 +15,16 @@ in {
       services.udisks2.enable = true;
     }
     else {
+      services.udiskie.enable = true; # (목적: USB 자동 마운트 및 트레이 알림)
+
       home.packages = with pkgs; [trash-cli];
-      # aliases could be moved here if they exist
+
+      home.shellAliases = {
+        tp = "trash-put";
+        tl = "trash-list";
+        tr = "trash-restore";
+        te = "trash-empty";
+      };
     }
   );
 }

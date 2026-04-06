@@ -32,7 +32,18 @@ Unstable 채널 사용자의 최대 고민인 '빌드 실패'를 자동화로 �
 
 ---
 
-## 4. 동적 오버레이 팩토리 (mkWrapper)
+## 4. Strict Governance (워크스테이션 프리셋 거버넌스)
+선언되지 않은 기능이 몰래 시스템에 들어오는 "설정 드리프트"를 빌드 타임에 차단합니다.
+
+- **문제**: `mods.gui.enable = true`를 호스트별로 각자 선언하면, 어떤 호스트에 어떤 기능이 활성화됐는지 추적이 어려워집니다.
+- **해결**: `mods/_preset/workstation.nix`에 두 가지 `assertions`를 내장합니다.
+  1. `mods.gui.enable → _preset.workstation.enable` — GUI 도메인은 반드시 프리셋을 통해서만 활성화 가능
+  2. `mods.devel.enable → _preset.workstation.enable` — devel 도메인도 동일
+- **효과**: 호스트 파일에서 `mods._preset.workstation.enable = true` 한 줄로 검증된 전체 환경이 활성화됩니다. 단발성 직접 활성화 시도는 빌드 오류로 즉시 발각됩니다.
+
+---
+
+## 5. 동적 오버레이 팩토리 (mkWrapper)
 복잡한 의존성 문제를 선언적으로 해결합니다.
 
 - **기능**: 패키지의 소스 코드를 수정하지 않고도, 실행 파일에 필요한 환경 변수(`PATH`, `LD_LIBRARY_PATH` 등)를 주입하거나 래핑(Wrapping)할 수 있는 헬퍼 함수입니다.

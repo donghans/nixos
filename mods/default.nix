@@ -3,5 +3,6 @@
     ./sys/default.nix
     ./gui/default.nix
     ./devel/default.nix
+    ./_preset/default.nix
   ];
 }

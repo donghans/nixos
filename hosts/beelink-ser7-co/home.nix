@@ -7,12 +7,13 @@ _: {
     }
   ];
 
-  mods.sys.base.enable = true;
-  mods.gui.enable = true;
+  # == 프리셋: 워크스테이션 전체 도메인 활성화 ==
+  mods._preset.workstation.enable = true;
+
+  # == 호스트별 앱 선택 ==
   mods.gui.apps.vivaldi.enable = true;
   mods.gui.apps.slack.enable = true;
   mods.gui.apps.bitwarden.enable = true;
   mods.gui.utils.notifications_logger.enable = true;
-  mods.devel.enable = true;
   mods.devel.jetbrains.android-studio.enable = true;
 }

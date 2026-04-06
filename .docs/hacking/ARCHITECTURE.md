@@ -43,8 +43,13 @@
 ## 4. 모듈 프레임워크 레이어 (Mods Layer)
 **핵심 경로: `mods/`**
 
-실제 시스템의 살점이 되는 부분이며, 새롭게 개편된 **Mods 프레임워크**입니다.
+실제 시스템의 살점이 되는 부분이며, **Mods 프레임워크** 기반으로 설계되었습니다.
 
 - **Domain-Driven Design**: `sys`, `gui`, `devel`로 도메인을 분리하여 응집도를 높였습니다.
-- **Opt-in Mods System**: `mods.<domain>.<feature>.enable` 옵션을 통해 기능 활성화 여부를 결정하며, `isNixOS` 플래그를 통해 NixOS와 Home Manager 양측의 구성을 스마트하게 처리합니다.
+  - `mods/sys/`: 시스템 기반 — `base`(부팅/네트워크/Zsh/Git), `fonts`, `vfs`, `services`(bluetooth/tailscale/docker), `utils/nfd`
+  - `mods/gui/`: GUI 환경 — `core`(Hyprland 번들), `apps`(vivaldi/slack/bitwarden), `utils/notifications_logger`
+  - `mods/devel/`: 개발 도구 — `toolchains`(node/python/fvm/devbox), `apps`(llm-cli/zed), `jetbrains`(android-studio 포함)
+- **Opt-in Mods System**: 모든 `mods.<domain>.<feature>.enable`은 `false`에서 시작합니다. `isNixOS` 플래그를 통해 NixOS와 Home Manager 양측의 구성을 단일 파일에서 분기 처리합니다(Dual-Context).
+- **워크스테이션 프리셋 (`mods/_preset/`)**: `mods._preset.workstation.enable = true` 하나로 sys+services+gui+devel 전체를 일괄 활성화하는 레시피입니다. 호스트 파일에서는 이 프리셋을 활성화하고 앱만 추가로 선택합니다.
+- **Strict Governance**: `workstation.nix`에 `assertions`가 내장되어 있어 `mods.gui.enable` 또는 `mods.devel.enable`을 프리셋 없이 직접 설정하면 빌드 타임 에러로 차단됩니다. 미선언 도메인 활성화를 원천 봉쇄합니다.
 - **Shared Data (`mods/_data/`)**: `devbox` 설정 등 정적 템플릿과 메타데이터를 분리 관리하여 로직의 순수성을 유지합니다.

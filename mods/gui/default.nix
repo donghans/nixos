@@ -1,4 +1,10 @@
-{isNixOS ? false, ...}: {
+{
+  lib,
+  config,
+  isNixOS ? false,
+  ...
+}:
+with lib; {
   imports =
     [
       ./apps/vivaldi.nix
@@ -17,7 +23,7 @@
       else []
     );
 
-  config = {
+  config = mkIf config.mods.gui.enable {
     mods.sys.fonts.enable = true;
     mods.sys.vfs.enable = true;
   };

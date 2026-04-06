@@ -5,7 +5,6 @@
 }: {
   imports = [
     ./os/_optimize.nix
-    ./os/nfd.nix
   ];
 
   # == User & Nix Engine ==
@@ -15,10 +14,8 @@
     shell = pkgs.zsh;
   };
 
-  # (목적: root 계정에서도 편리한 관리 환경 제공)
+  # (목적: root 포함 모든 계정에 Zsh 적용; 상세 설정은 Home Manager에서 처리)
   users.defaultUserShell = pkgs.zsh;
-
-  # 시스템 레벨에서는 Zsh를 사용 가능하게만 설정 (상세 설정은 Home Manager에서 처리)
   programs.zsh.enable = true;
 
   nix = {
@@ -43,36 +40,6 @@
     hostName = config.workspace.hostname;
   };
 
-  # == TTY Unicode & Font Support ==
-  services.kmscon = {
-    enable = true;
-    hwRender = true; # (이유: 하드웨어 가속 활용)
-    fonts = [
-      {
-        name = "NanumGothicCoding";
-        package = pkgs.nanum-gothic-coding;
-      }
-    ];
-    extraConfig = "font-size=14"; # (이유: TTY 가독성 향상)
-  };
-
-  fonts = {
-    packages = with pkgs; [
-      nanum
-      nanum-gothic-coding
-      noto-fonts-cjk-sans
-      noto-fonts-cjk-serif
-      noto-fonts-color-emoji
-    ];
-
-    fontconfig.defaultFonts = {
-      serif = ["NanumMyeongjo" "Noto Serif CJK KR"];
-      sansSerif = ["NanumGothic" "Noto Sans CJK KR"];
-      monospace = ["NanumGothicCoding"];
-      emoji = ["Noto Color Emoji"];
-    };
-  };
-
   time.timeZone = "Asia/Seoul";
   i18n.defaultLocale = "en_US.UTF-8";
   i18n.supportedLocales = [
@@ -80,7 +47,6 @@
     "ko_KR.UTF-8/UTF-8"
   ];
 
-  # 어디에서든 최소한 이 패키지들은 필요하다고 판단됨
   environment.systemPackages = with pkgs; [
     git
     nano
@@ -89,6 +55,5 @@
     htop
   ];
 
-  # 이 설정 파일의 버전 (건드리지 마세요)
   system.stateVersion = config.workspace.stateVersion;
 }
