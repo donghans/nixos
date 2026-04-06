@@ -6,7 +6,7 @@
   inherit (inputs) nixpkgs nixpkgs-unstable home-manager;
 
   # == Common Host Context Generator ==
-  mkHostContext = {
+  mkHostContext = hostInfo @ {
     hostname,
     system,
     isLaptop,
@@ -66,9 +66,10 @@
       else ../dev/${hostname}/home.nix;
 
     metaConfig = {
-      inherit (workspaceMeta) gitName gitEmail nixosRepo stateVersion;
+      inherit (workspaceMeta) gitName gitEmail nixosRepo;
       inherit hostname isLaptop ramGb;
       username = homeUser;
+      stateVersion = hostInfo.stateVersion or workspaceMeta.stateVersion;
     };
   in {
     inherit homeUser homeConfig metaConfig unstable unstable-fallback pkgs;

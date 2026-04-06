@@ -26,13 +26,14 @@
     # (목적: 격리 빌드 시 제공되는 단일 진실 공급원 로드)
     infoPath = ./dev/_info.json;
     workspaceMetaRaw = builtins.fromJSON (builtins.readFile infoPath);
+    defaultStateVersion = "25.11"; # 기본 버전
     workspaceMeta =
       workspaceMetaRaw
       // {
         gitName = workspaceMetaRaw.git.name;
         gitEmail = workspaceMetaRaw.git.email;
         inherit (workspaceMetaRaw.git) nixosRepo;
-        stateVersion = "25.11";
+        stateVersion = workspaceMetaRaw.stateVersion or defaultStateVersion;
       };
     inherit (workspaceMeta) hosts;
 
