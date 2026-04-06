@@ -5,8 +5,8 @@ _: {
     kernelParams = [
       "nowatchdog"
       "loglevel=3"
+      "pcie_aspm=off" # (이유: PCIe 전원 관리로 인한 인터럽트 지연 및 충돌 방지)
       "acpi_osi=Linux" # (이유: 리눅스 최적화 ACPI 설정 및 윈도우 전용 로직 우회)
-      "irqpoll" # (이유: 인터럽트 충돌 방지 및 하드웨어 응답성 향상)
     ];
     # AMD 및 Intel 하드웨어 Watchdog 드라이버 차단
     blacklistedKernelModules = ["sp5100_tco" "iTCO_wdt"];

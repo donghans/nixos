@@ -12,9 +12,9 @@
 
     kernelModules = ["ec_sys"];
     kernelParams = [
-      "pcie_aspm=off" # (이유: PCIe 전원 관리로 인한 끊김 방지)
       "i915.enable_psr=1"
       "pci=nocrs" # (이유: ACPI 리소스 할당 충돌 방지 및 Firmware Bug 메시지 완화)
+      "irqpoll" # (이유: 노트북 터치패드 인터럽트 충돌 방지 및 하드웨어 응답성 향상)
       "i2c_designware.disable_ps=1" # (이유: I2C 컨트롤러 절전 비활성화)
       "psmouse.synaptics_intertouch=1" # (이유: 구형 PS/2 대신 I2C/SMBus 사용 강제)
       "i8042.nopnp=1" # (이유: 구형 PS/2 포트 자동 탐색 충돌 방지)
