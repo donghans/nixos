@@ -8,6 +8,12 @@
     inherit pkg binName;
     addFlags = ["-Dsun.java2d.uiScale=1.0"];
 
+    # (목적: 커서 크기 고정 - XWayland 환경 대응)
+    env = {
+      XCURSOR_SIZE = "24";
+      HYPRCURSOR_SIZE = "24";
+    };
+
     # (목적: HOME 디렉터리 클러터링 방지 및 프로젝트 경로 강제 지정)
     run = ''
       PRJ_PARENT="$HOME/JetbrainsProjects"
