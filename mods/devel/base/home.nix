@@ -1,0 +1,34 @@
+# [working-refactor] 해당 구문은 before-refactor/lib/developer.home.nix 에 있었음
+# [working-refactor] 해당 구문은 after-refactor/... 로 들어가야 함
+{
+  pkgs,
+  unstable,
+  unstable-fallback,
+  ...
+}: {
+  # [working-refactor] 해당 파일은 실제 /tmp/nixos-build/<경로> 로 이동 후 nhw에 의해 임시 경로에서 실행됩니다.
+  imports = [
+    ../../gui/base/home.nix
+    ./home/devbox.nix
+    ./home/fvm.nix
+    ./home/jetbrains.nix
+    ./home/node.nix
+    ./home/python.nix
+  ];
+
+  # == Common Development Packages ==
+  home.packages = with pkgs; [
+    bitwarden-desktop
+    bitwarden-cli
+
+    unstable.slack
+    unstable.zed-editor
+
+    unstable-fallback.claude-code
+    unstable.gemini-cli
+  ];
+
+  xdg.mimeApps.defaultApplications = {
+    "x-scheme-handler/slack" = ["slack.desktop"];
+  };
+}

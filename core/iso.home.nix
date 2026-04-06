@@ -1,5 +1,5 @@
 {pkgs, ...}: {
-  imports = [./lib/_base/hyprland.home.nix];
+  imports = [./mods/gui/base/home.nix];
 
   home.username = "nixos";
   home.homeDirectory = "/home/nixos";

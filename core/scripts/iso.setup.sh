@@ -123,7 +123,7 @@ git clone "https://github.com/$NIXOS_REPO.git" /mnt/etc/nixos
 log_exec "git" "<" "git clone"
 
 # 5. Metadata Extraction
-INFO_JSON="/mnt/etc/nixos/dev/_info.json"
+INFO_JSON="/mnt/etc/nixos/hosts/_info.json"
 if [ ! -f "$INFO_JSON" ]; then
     log_msg "Error" "could not find $INFO_JSON in the cloned repository."
     exit 1
@@ -133,8 +133,8 @@ USERNAME=$(jq -r '.username' "$INFO_JSON")
 # 6. Hardware Config
 log_msg "Config" "generating hardware-configuration.nix ..."
 nixos-generate-config --root /mnt --no-filesystems
-mkdir -p /mnt/etc/nixos/dev/hardware
-mv /mnt/etc/nixos/hardware-configuration.nix "/mnt/etc/nixos/dev/hardware/$HOST.nix"
+mkdir -p /mnt/etc/nixos/hosts/hardware
+mv /mnt/etc/nixos/hardware-configuration.nix "/mnt/etc/nixos/hosts/hardware/$HOST.nix"
 rm -f /mnt/etc/nixos/configuration.nix
 echo "$HOST" > /mnt/etc/nixos/.current_host
 

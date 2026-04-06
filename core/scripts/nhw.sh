@@ -116,7 +116,7 @@ LOCK_STORE_DIR="$NIXOS_PATH/.locks"
 
 # set -e 환경에서는 서브쉘 에러가 튕길 수 있으므로 임시로 +e 적용
 set +e
-HOST_INFO_RAW=$(determine_host_info "$TARGET_PROFILE" "$TARGET_HOST" "$ENV_FILE" "$NIXOS_PATH/dev/_info.json")
+HOST_INFO_RAW=$(determine_host_info "$TARGET_PROFILE" "$TARGET_HOST" "$ENV_FILE" "$NIXOS_PATH/hosts/_info.json")
 DETERMINE_EXIT_CODE=$?
 set -e
 

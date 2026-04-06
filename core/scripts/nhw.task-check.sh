@@ -49,8 +49,8 @@ run_check_task() {
 
     # Copy necessary sources
     cp -a "$NIXOS_PATH/core/"* "$TMP_VERIFY_DIR/"
-    cp -a "$NIXOS_PATH/dev" "$TMP_VERIFY_DIR/"
-    cp -a "$NIXOS_PATH/lib" "$TMP_VERIFY_DIR/"
+    cp -a "$NIXOS_PATH/hosts" "$TMP_VERIFY_DIR/"
+    cp -a "$NIXOS_PATH/mods" "$TMP_VERIFY_DIR/"
 
     # Use the determined host's lock file for verification
     if [ -f "$HOST_SPECIFIC_LOCK" ]; then

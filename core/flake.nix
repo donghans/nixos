@@ -1,3 +1,5 @@
+# [working-refactor] 해당 구문은 before-refactor/flake.nix 에 있었음
+# [working-refactor] 해당 구문은 after-refactor/... 로 들어가야 함
 {
   description = "Modular NixOS Framework: A data-driven orchestrator for multi-host and ISO configurations.";
 
@@ -24,7 +26,7 @@
 
     # == Metadata Import ==
     # (목적: 격리 빌드 시 제공되는 단일 진실 공급원 로드)
-    infoPath = ./dev/_info.json;
+    infoPath = ./hosts/_info.json;
     workspaceMetaRaw = builtins.fromJSON (builtins.readFile infoPath);
     defaultStateVersion = "25.11"; # 기본 버전
     workspaceMeta =
@@ -87,7 +89,7 @@
               inherit (hostCtx) unstable;
               inherit (hostCtx) unstable-fallback;
             };
-            modules = [(import ../lib/_base/default.home.nix)];
+            modules = [(import ./mods/sys/base/home.nix)];
           };
         }
       ])
