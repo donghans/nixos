@@ -14,6 +14,7 @@ _: {
         path = "screenshot";
         blur_passes = 2; # 미니멀한 느낌을 위해 블러를 조금 더 높였습니다.
         blur_size = 4;
+        brightness = 0.5; # 배경을 50% 어둡게 설정 (흰색 글씨 대비 향상)
       }
     ];
 
