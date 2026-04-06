@@ -15,20 +15,4 @@
     ./home/node.nix
     ./home/python.nix
   ];
-
-  # == Common Development Packages ==
-  home.packages = with pkgs; [
-    bitwarden-desktop
-    bitwarden-cli
-
-    unstable.slack
-    unstable.zed-editor
-
-    unstable-fallback.claude-code
-    unstable.gemini-cli
-  ];
-
-  xdg.mimeApps.defaultApplications = {
-    "x-scheme-handler/slack" = ["slack.desktop"];
-  };
 }

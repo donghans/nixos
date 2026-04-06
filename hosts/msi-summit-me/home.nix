@@ -3,7 +3,6 @@
 {lib, ...}: {
   # == Home Configuration ==
   # [working-refactor] 해당 파일은 실제 /tmp/nixos-build/<경로> 로 이동 후 nhw에 의해 임시 경로에서 실행됩니다.
-  imports = [../../mods/devel/base/default.nix];
 
   wayland.windowManager.hyprland = {
     touchpadToggleKey = "$mainMod CTRL, XF86TouchpadToggle";
@@ -19,7 +18,18 @@
         natural_scroll = true;
         tap-to-click = true;
         disable_while_typing = true;
-      };
-    };
-  };
+    
+  
+
+
+  
+     mods.sys.base.enable = true;
+     mods.gui.enable = true;
+     mods.gui.apps.vivaldi.enable = true;
+     mods.gui.apps.slack.enable = true;
+     mods.gui.apps.bitwarden.enable = true;
+     mods.gui.utils.notifications_logger.enable = true;
+     mods.devel.enable = true;
+     mods.devel.jetbrains.android-studio.enable = true;
+
 }

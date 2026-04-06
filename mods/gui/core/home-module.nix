@@ -11,7 +11,6 @@
 
   # [working-refactor] 해당 파일은 실제 /tmp/nixos-build/<경로> 로 이동 후 nhw에 의해 임시 경로에서 실행됩니다.
   imports = [
-    ../../sys/base/home.nix
     ./home/_bind.nix
     ./home/_bind.hwctl.nix
     ./home/_session.nix
@@ -21,7 +20,7 @@
     ./home/hyprlock.nix
     ./home/kitty.nix
     ./home/mako.nix
-    ./home/vivaldi.nix
+
     ./home/waybar.nix
   ];
 

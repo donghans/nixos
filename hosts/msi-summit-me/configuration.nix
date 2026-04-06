@@ -4,7 +4,6 @@
   # [working-refactor] 해당 파일은 실제 /tmp/nixos-build/<경로> 로 이동 후 nhw에 의해 임시 경로에서 실행됩니다.
   imports = [
     ./_hardware.nix
-    ../../mods/devel/base/default.nix
   ];
 
   # == Boot & Kernel ==
@@ -35,13 +34,13 @@
       options nouveau modeset=0
       options ec_sys write_support=1
     '';
-  };
+
 
   fileSystems."/boot" = {
     device = "/dev/disk/by-label/ESP";
     fsType = "vfat";
     options = ["fmask=0022" "dmask=0022"];
-  };
+
 
   services.libinput.enable = true;
 
@@ -90,8 +89,8 @@
 
       MAX_LOST_WORK_SECS_ON_BAT = 60;
       MAX_LOST_WORK_SECS_ON_AC = 15;
-    };
-  };
+  
+
 
   # == Power Management & Interfaces ==
   services.logind.settings.Login = {
@@ -100,7 +99,7 @@
     HandleLidSwitchExternalPower = "ignore";
     HandleLidSwitchDocked = "ignore";
     IdleAction = "ignore";
-  };
+
 
   # (목적: Wi-Fi 네트워크 절전 방지)
   networking.networkmanager.wifi.powersave = false;
@@ -122,5 +121,16 @@
   # (이유: Tailscale 등 이중 NAT 환경에서 Vivaldi 동기화 타임아웃 회피)
   networking.interfaces = {
     wlo1.mtu = 1400;
-  };
+
+
+  
+     mods.sys.base.enable = true;
+     mods.gui.enable = true;
+     mods.gui.apps.vivaldi.enable = true;
+     mods.gui.apps.slack.enable = true;
+     mods.gui.apps.bitwarden.enable = true;
+     mods.gui.utils.notifications_logger.enable = true;
+     mods.devel.enable = true;
+     mods.devel.jetbrains.android-studio.enable = true;
+
 }

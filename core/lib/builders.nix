@@ -127,6 +127,7 @@
           {
             home-manager.sharedModules = [
               ./workspace-options.nix
+              ../mods/default.nix
               {workspace = hostCtx.metaConfig;}
             ];
             home-manager.useGlobalPkgs = true;

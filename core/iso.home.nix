@@ -1,5 +1,5 @@
 {pkgs, ...}: {
-  imports = [./mods/gui/base/home.nix];
+  imports = [];
 
   home.username = "nixos";
   home.homeDirectory = "/home/nixos";
@@ -20,4 +20,8 @@
       noDisplay = true;
     };
   };
+
+  mods.sys.base.enable = true;
+  mods.gui.enable = true;
+  mods.gui.apps.vivaldi.enable = true;
 }

@@ -20,7 +20,7 @@
     text = builtins.readFile ./scripts/iso.setup.sh;
   };
 in {
-  imports = [./mods/gui/base/os.nix];
+  imports = [];
 
   # Plymouth 비활성화 (부팅 시 로그 확인 위함)
   boot.plymouth.enable = lib.mkForce false;
@@ -120,4 +120,8 @@ in {
     # NIXOS_REPO 환경변수를 통해 setup 스크립트에 전달합니다.
     nixos-setup = "NIXOS_REPO=${metaConfig.nixosRepo} sudo -E nixos-setup-from-repo";
   };
+
+  mods.sys.base.enable = true;
+  mods.gui.enable = true;
+  mods.gui.apps.vivaldi.enable = true;
 }

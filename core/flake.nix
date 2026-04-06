@@ -7,7 +7,7 @@
     # == Input Channels ==
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
 
-    nixpkgs.url      =                "github:nixos/nixpkgs/nixos-25.11";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
     home-manager.url = "github:nix-community/home-manager/release-25.11";
 
     # (목적: HM이 시스템과 동일한 Nixpkgs 버전을 사용하도록 강제)
@@ -94,7 +94,7 @@
             modules = [
               ./lib/workspace-options.nix
               {workspace = hostCtx.metaConfig // {username = "root";};}
-              (import ./mods/sys/base/home.nix)
+              (import ./mods/sys/default.nix)
             ];
           };
         }
