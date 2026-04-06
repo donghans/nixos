@@ -140,9 +140,20 @@ prepare_build_dir() {
     rm -rf "$build_dir"
     mkdir -p "$build_dir"
     
+    # Copy essential directories for flake build
+    cp -a "$source_path/core" "$build_dir/"
+    cp -a "$source_path/hosts" "$build_dir/"
+    cp -a "$source_path/mods" "$build_dir/"
+    
+    # Copy flake.nix to root of build directory (it's inside core/ but nix expects it at root or via path)
+    # However, our builders.nix and imports expect the current structure.
+    # We need to copy flake.nix and other files from core/ to root if we want to run 'nix build' there.
+    # OR we keep core/ as is and use 'nix build .#host'
+    
+    # Current structure expectation: flake.nix is in core/
+    # But for ease of use, we copy everything from core/* to root.
     cp -a "$source_path/core/"* "$build_dir/"
-    cp -a "$source_path/dev" "$build_dir/"
-    cp -a "$source_path/lib" "$build_dir/"
+    
     [ -f "$env_file" ] && cp -a "$env_file" "$build_dir/.env"
     
     ln -sfn "$build_dir" "$source_path/.build"

@@ -1,5 +1,3 @@
-# [working-refactor] 해당 구문은 before-refactor/lib/developer.home/jetbrains.nix 에 있었음
-# [working-refactor] 해당 구문은 after-refactor/... 로 들어가야 함
 {
   pkgs,
   unstable,
@@ -62,6 +60,5 @@ in {
     (wrapJetbrainsPackage jetbrains.datagrip "datagrip")
     (wrapJetbrainsPackage jetbrains.pycharm "pycharm")
     (wrapJetbrainsPackage jetbrains.webstorm "webstorm")
-    (wrapJetbrainsPackage android-studio "android-studio")
   ];
 }

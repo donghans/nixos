@@ -41,8 +41,8 @@
 ```text
 /
 ├── core/             # Flake 진입점(flake.nix), 빌더 모듈(lib) 및 엔진 스크립트(scripts)
-├── dev/              # 호스트별 설정(폴더 단위), 템플릿 및 메타데이터
-├── lib/              # 시스템 공통 모듈 및 개발/기능 환경
+├── hosts/            # 호스트별 설정(폴더 단위), 하드웨어 프로필 및 메타데이터
+├── mods/             # 도메인별 기능 모듈 (sys, gui, devel) 및 공유 데이터
 ├── .docs/            # 문서 저장소 (readme, plan, hacking)
 └── .locks/           # 시스템 안정성을 위한 락 파일 관리
 ```

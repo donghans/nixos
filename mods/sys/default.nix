@@ -1,4 +1,4 @@
-{isNixOS ? false, ...} @ args: {
+args: {
   imports = [
     (import ./base/default.nix args)
   ];

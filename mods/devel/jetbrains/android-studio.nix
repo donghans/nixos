@@ -13,7 +13,6 @@ in {
     if isNixOS
     then {
       # (목적: 물리 기기에서 Android 실기기 디버깅을 위한 udev 및 방화벽 허용)
-      services.udev.packages = [pkgs.android-udev-rules];
       networking.firewall = {
         allowedTCPPorts = [5555]; # ADB over Network
         allowedUDPPorts = [5353]; # mDNS / Local Discovery

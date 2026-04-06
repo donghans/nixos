@@ -1,5 +1,3 @@
-# [working-refactor] 해당 구문은 before-refactor/lib/_base/hyprland.home/_bind.nix 에 있었음
-# [working-refactor] 해당 구문은 after-refactor/... 로 들어가야 함
 {pkgs, ...}: let
   # 모니터 스왑 스크립트 정의
   swapMonitors = pkgs.writeShellScriptBin "hypr-swap-monitors" ''

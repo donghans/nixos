@@ -1,5 +1,3 @@
-# [working-refactor] 해당 구문은 before-refactor/flake.nix 에 있었음
-# [working-refactor] 해당 구문은 after-refactor/... 로 들어가야 함
 {
   description = "Modular NixOS Framework: A data-driven orchestrator for multi-host and ISO configurations.";
 
@@ -77,7 +75,12 @@
               inherit (hostCtx) unstable;
               inherit (hostCtx) unstable-fallback;
             };
-            modules = [(import hostCtx.homeConfig)];
+            modules = [
+              ./lib/workspace-options.nix
+              {workspace = hostCtx.metaConfig;}
+              ./mods/default.nix
+              (import hostCtx.homeConfig)
+            ];
           };
         }
         {

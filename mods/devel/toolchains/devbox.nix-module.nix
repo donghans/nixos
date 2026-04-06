@@ -1,5 +1,3 @@
-# [working-refactor] 해당 구문은 before-refactor/lib/developer.home/devbox.nix 에 있었음
-# [working-refactor] 해당 구문은 after-refactor/... 로 들어가야 함
 {pkgs, ...}: let
   # (목적: 템플릿 복사 및 초기화를 한 번에 수행하는 통합 헬퍼)
   devbox-setup = pkgs.writeShellScriptBin "devbox-setup" ''

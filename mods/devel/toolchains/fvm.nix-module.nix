@@ -1,5 +1,3 @@
-# [working-refactor] 해당 구문은 before-refactor/lib/developer.home/fvm.nix 에 있었음
-# [working-refactor] 해당 구문은 after-refactor/... 로 들어가야 함
 {pkgs, ...}: let
   # (목적: FVM 바이너리에 동적 링킹 필수 라이브러리 주입)
   wrapFVM = pkg: binName: (pkgs.mkWrapper {

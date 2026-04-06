@@ -1,5 +1,3 @@
-# [working-refactor] 해당 구문은 before-refactor/lib/_base/hyprland/custom-notify-logger.nix 에 있었음
-# [working-refactor] 해당 구문은 after-refactor/... 로 들어가야 함
 {
   pkgs,
   lib,
@@ -81,17 +79,34 @@ in {
     )
     // {
       # 2. 사용자별 시스템디 서비스 등록
-      systemd.user.services.custom-notify-logger = {
-        description = "Notification Logger Service";
-        wantedBy = ["graphical-session.target"];
-        after = ["graphical-session-pre.target"];
-        partOf = ["graphical-session.target"];
-        serviceConfig = {
-          ExecStart = "${logger-script}";
-          Restart = "always"; # 죽으면 다시 살림
-          RestartSec = 3;
+      systemd.user.services.custom-notify-logger =
+        if isNixOS
+        then {
+          description = "Notification Logger Service";
+          wantedBy = ["graphical-session.target"];
+          after = ["graphical-session-pre.target"];
+          partOf = ["graphical-session.target"];
+          serviceConfig = {
+            ExecStart = "${logger-script}";
+            Restart = "always"; # 죽으면 다시 살림
+            RestartSec = 3;
+          };
+        }
+        else {
+          Unit = {
+            Description = "Notification Logger Service";
+            After = ["graphical-session-pre.target"];
+            PartOf = ["graphical-session.target"];
+          };
+          Install = {
+            WantedBy = ["graphical-session.target"];
+          };
+          Service = {
+            ExecStart = "${logger-script}";
+            Restart = "always";
+            RestartSec = 3;
+          };
         };
-      };
     }
   );
 }

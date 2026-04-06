@@ -2,12 +2,16 @@
   config,
   lib,
   pkgs,
+  isNixOS ? false,
   ...
 }:
-with lib; let
-  cfg = config.mods.gui.apps.bitwarden;
-in {
-  config = mkIf cfg.enable {
-    home.packages = with pkgs; [bitwarden-desktop bitwarden-cli];
-  };
-}
+if isNixOS
+then {}
+else
+  with lib; let
+    cfg = config.mods.gui.apps.bitwarden;
+  in {
+    config = mkIf cfg.enable {
+      home.packages = with pkgs; [bitwarden-desktop bitwarden-cli];
+    };
+  }

@@ -1,5 +1,3 @@
-# [working-refactor] 해당 구문은 before-refactor/lib/_base/default.home/zsh.nix 에 있었음
-# [working-refactor] 해당 구문은 after-refactor/... 로 들어가야 함
 {lib, ...}: {
   programs.zsh = {
     enable = true; # (목적: 사용자별 .zshrc를 생성하여 초기 설치 메시지 차단)

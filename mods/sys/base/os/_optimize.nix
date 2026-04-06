@@ -1,5 +1,3 @@
-# [working-refactor] 해당 구문은 before-refactor/lib/_base/default/_optimize.nix 에 있었음
-# [working-refactor] 해당 구문은 after-refactor/... 로 들어가야 함
 _: {
   # == Boot & System Logs / Watchdog ==
   boot = {

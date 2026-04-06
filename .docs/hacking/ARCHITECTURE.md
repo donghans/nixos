@@ -20,7 +20,7 @@
 ---
 
 ## 2. 메타데이터 레이어 (Metadata Layer)
-**핵심 경로: `dev/_info.json`**
+**핵심 경로: `hosts/_info.json`**
 
 코드와 데이터를 분리하여, 사용자가 `nix` 언어를 깊게 알지 못해도 시스템 구성을 관리할 수 있게 합니다.
 
@@ -35,14 +35,16 @@
 시스템 설정의 두뇌에 해당하며, Nix Flake의 강력한 기능을 활용해 복잡한 패키징과 모듈성을 구현합니다.
 
 - **Dynamic Generator (`core/lib/builders.nix`)**: JSON 데이터를 기반으로 `nixosConfigurations`와 `homeConfigurations`를 동적으로 생성해내는 **메타프로그래밍 구조**와 빌더 팩토리입니다.
+- **SSOT Options (`core/lib/workspace-options.nix`)**: `config.workspace` 및 `config.mods`를 선언하여 전역 설정과 기능 모듈(Mods)의 통합 옵션을 제공합니다.
 - **Advanced Overlay (`core/lib/mk-wrapper.nix`)**: `mkWrapper` 헬퍼를 단독 분리하여, 특정 패키지에 런타임 환경 변수나 라이브러리 경로 등을 주입해 패키지를 래핑하는 로직을 제공합니다.
 
 ---
 
-## 4. 구성 모듈 레이어 (Library & Config Layer)
-**핵심 경로: `lib/`, `dev/base.dev.nix`**
+## 4. 모듈 프레임워크 레이어 (Mods Layer)
+**핵심 경로: `mods/`**
 
-실제 시스템의 살점이 되는 부분입니다.
+실제 시스템의 살점이 되는 부분이며, 새롭게 개편된 **Mods 프레임워크**입니다.
 
-- **Base Components (`lib/_base/`, `dev/base.dev.nix`)**: 시스템 기반 모듈과 파일시스템 마운트 규칙 등 모든 기기가 공통으로 상속받는 **핵심 모듈**입니다.
-- **Functional Modules (`lib/`)**: Hyprland, 개발 환경(`developer.home/`) 등 기능 단위로 조각난 설정들입니다. 개별 호스트 설정(`dev/<hostname>/configuration.nix`)에서 필요한 것만 골라 담는(**Mix-in**) 방식으로 구성됩니다.
+- **Domain-Driven Design**: `sys`, `gui`, `devel`로 도메인을 분리하여 응집도를 높였습니다.
+- **Opt-in Mods System**: `mods.<domain>.<feature>.enable` 옵션을 통해 기능 활성화 여부를 결정하며, `isNixOS` 플래그를 통해 NixOS와 Home Manager 양측의 구성을 스마트하게 처리합니다.
+- **Shared Data (`mods/_data/`)**: `devbox` 설정 등 정적 템플릿과 메타데이터를 분리 관리하여 로직의 순수성을 유지합니다.

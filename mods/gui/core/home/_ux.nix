@@ -1,5 +1,3 @@
-# [working-refactor] 해당 구문은 before-refactor/lib/_base/hyprland.home/_ux.nix 에 있었음
-# [working-refactor] 해당 구문은 after-refactor/... 로 들어가야 함
 {lib, ...}: {
   wayland.windowManager.hyprland.settings = {
     monitor = lib.mkDefault [",preferred,auto,1"];
