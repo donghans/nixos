@@ -7,7 +7,7 @@
 
 ### 2. Data Injection: `config.workspace`
 `specialArgs` 대신 전역 옵션을 사용합니다.
-*   **Implementation**: `core/lib/builders.nix`에서 `_info.json` 데이터를 `options.workspace`로 정의하고 주입합니다.
+*   **Implementation**: `core/lib/builders.nix`에서 `_info.json` 데이터를 수용할 `options.workspace` 구조를 정의하고, 값을 `config.workspace`에 주입합니다.
 *   **Usage**: 어떤 모듈에서든 `config.workspace.username` 등으로 데이터에 즉시 접근합니다.
 
 ### 3. Presets & Strictness (`mods/_preset/`)

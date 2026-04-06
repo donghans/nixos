@@ -2,9 +2,10 @@
 
 ### 1. `mods.sys` (System Infrastructure)
 *   **`base`**: Btrfs, ZRAM, SSD, Locales, Zsh + Atuin.
-*   **`utils.nfd.enable`**: NFD (macOS) 한글 파일명 교정 유틸리티 (`nfd-fix`, `nfd-ls`).
+*   **`utils`**:
+    *   **`nfd`**: NFD (macOS) 한글 파일명 교정 유틸리티 (`nfd-fix`, `nfd-ls`).
 *   **`vfs`**: GVFS, Udisks2 (OS) + Trash-cli, Aliases (Home).
-*   **`services`**: `bluetooth` (triggers Blueman if GUI on), `tailscale`, `docker` (OS daemon + user group), `nfd` (Nix Filter Daemon).
+*   **`services`**: `bluetooth` (triggers Blueman if GUI on), `tailscale`, `docker` (OS daemon + user group).
 
 ### 2. `mods.gui` (User Experience)
 *   **`enable` (DE Bundle)**: 
@@ -13,7 +14,8 @@
     *   **Files**: Nemo + Udiskie.
     *   **Logic**: Automatically enables `mods.sys.fonts.enable` and `mods.sys.vfs.enable`.
 *   **`apps`**: `vivaldi`, `slack`, `bitwarden`.
-*   **`utils.notifications.logger.enable`**: 커스텀 알림 기록 서비스.
+*   **`utils`**:
+    *   **`notifications.logger`**: 커스텀 알림 기록 서비스 (`custom-notify-logger`).
 
 ### 3. `mods.devel` (Developer Workshop)
 *   **`enable` (Master Switch)**: Sets defaults for all devel sub-mods.
