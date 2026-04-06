@@ -103,7 +103,9 @@
       modules =
         mainConfig
         ++ [
+          ./workspace-options.nix
           {
+            workspace = hostCtx.metaConfig;
             nixpkgs.overlays = customOverlays;
             nixpkgs.config.allowUnfree = true;
 
@@ -123,6 +125,10 @@
         ++ [
           home-manager.nixosModules.home-manager
           {
+            home-manager.sharedModules = [
+              ./workspace-options.nix
+              {workspace = hostCtx.metaConfig;}
+            ];
             home-manager.useGlobalPkgs = true;
             home-manager.useUserPackages = true;
 

@@ -1,6 +1,6 @@
 # [working-refactor] 해당 구문은 before-refactor/lib/_base/hyprland.home/waybar.nix 에 있었음
 # [working-refactor] 해당 구문은 after-refactor/... 로 들어가야 함
-{metaConfig, ...}: {
+{config, ...}: {
   programs.waybar.enable = true;
 
   # waybar/config 내용
@@ -19,7 +19,7 @@
     modules-right =
       ["tray"]
       ++ (
-        if metaConfig.isLaptop
+        if config.workspace.isLaptop
         then ["battery"]
         else []
       )

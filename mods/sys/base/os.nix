@@ -2,7 +2,7 @@
 # [working-refactor] 해당 구문은 after-refactor/... 로 들어가야 함
 {
   pkgs,
-  metaConfig,
+  config,
   ...
 }: {
   # [working-refactor] 해당 파일은 실제 /tmp/nixos-build/<경로> 로 이동 후 nhw에 의해 임시 경로에서 실행됩니다.
@@ -12,7 +12,7 @@
   ];
 
   # == User & Nix Engine ==
-  users.users.${metaConfig.username} = {
+  users.users.${config.workspace.username} = {
     isNormalUser = true;
     extraGroups = ["wheel" "networkmanager"];
     shell = pkgs.zsh;
@@ -43,12 +43,8 @@
   # == Networking & Localization ==
   networking = {
     networkmanager.enable = true;
-    hostName = metaConfig.hostname;
+    hostName = config.workspace.hostname;
   };
-
-  # == File Management Infrastructure ==
-  services.gvfs.enable = true; # (목적: 휴지통, SMB, 스마트폰 연결 지원)
-  services.udisks2.enable = true; # (목적: 저장장치 마운트 관리 기반)
 
   # == TTY Unicode & Font Support ==
   services.kmscon = {
@@ -97,5 +93,5 @@
   ];
 
   # 이 설정 파일의 버전 (건드리지 마세요)
-  system.stateVersion = metaConfig.stateVersion;
+  system.stateVersion = config.workspace.stateVersion;
 }

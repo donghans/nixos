@@ -3,7 +3,7 @@
 {
   pkgs,
   lib,
-  metaConfig,
+  config,
   ...
 }: {
   # [working-refactor] 해당 파일은 실제 /tmp/nixos-build/<경로> 로 이동 후 nhw에 의해 임시 경로에서 실행됩니다.
@@ -17,18 +17,18 @@
     git = {
       enable = true;
       settings = {
-        user.name = metaConfig.gitName;
-        user.email = metaConfig.gitEmail;
+        user.name = config.workspace.gitName;
+        user.email = config.workspace.gitEmail;
         url."git@github.com:".insteadOf = "https://github.com/";
       };
     };
   };
 
-  home.username = lib.mkDefault metaConfig.username;
+  home.username = lib.mkDefault config.workspace.username;
   home.homeDirectory = lib.mkDefault (
-    if metaConfig.username == "root"
+    if config.workspace.username == "root"
     then "/root"
-    else "/home/${metaConfig.username}"
+    else "/home/${config.workspace.username}"
   );
 
   # == File Management Helpers ==
@@ -47,5 +47,5 @@
   };
 
   # (주의: Home Manager 최초 설치 시점의 호환성 지표)
-  home.stateVersion = metaConfig.stateVersion;
+  home.stateVersion = config.workspace.stateVersion;
 }

@@ -1,6 +1,14 @@
 {isNixOS ? false, ...}: {
   imports =
-    (
+    [
+      ../fonts.nix
+      ../vfs.nix
+      ../utils/nfd.nix
+      ../services/bluetooth.nix
+      ../services/docker.nix
+      ../services/tailscale.nix
+    ]
+    ++ (
       if isNixOS
       then [./os.nix]
       else []

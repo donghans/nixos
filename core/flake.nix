@@ -71,6 +71,7 @@
           value = home-manager.lib.homeManagerConfiguration {
             inherit (hostCtx) pkgs;
             extraSpecialArgs = {
+              isNixOS = false;
               inherit inputs;
               inherit (hostCtx) metaConfig;
               inherit (hostCtx) unstable;
@@ -84,12 +85,17 @@
           value = home-manager.lib.homeManagerConfiguration {
             inherit (hostCtx) pkgs;
             extraSpecialArgs = {
+              isNixOS = false;
               inherit inputs;
               metaConfig = hostCtx.metaConfig // {username = "root";};
               inherit (hostCtx) unstable;
               inherit (hostCtx) unstable-fallback;
             };
-            modules = [(import ./mods/sys/base/home.nix)];
+            modules = [
+              ./lib/workspace-options.nix
+              {workspace = hostCtx.metaConfig // {username = "root";};}
+              (import ./mods/sys/base/home.nix)
+            ];
           };
         }
       ])

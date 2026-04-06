@@ -4,3 +4,5 @@
 result
 *.log
 GEMINI.md
+
+.before_refactor

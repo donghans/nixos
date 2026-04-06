@@ -3,7 +3,7 @@
 {
   lib,
   pkgs,
-  metaConfig,
+  config,
   ...
 }: {
   # == Boot & Kernel ==
@@ -64,10 +64,10 @@
   };
 
   # 물리적 스왑 파일 설정 (ramGb 메타데이터가 있을 때만 동적으로 생성)
-  swapDevices = lib.optionals (metaConfig ? ramGb && metaConfig.ramGb != null) [
+  swapDevices = lib.optionals (config.workspace ? ramGb && config.workspace.ramGb != null) [
     {
       device = "/var/lib/swapfile";
-      size = metaConfig.ramGb * 1024;
+      size = config.workspace.ramGb * 1024;
       priority = 10;
     }
   ];
@@ -95,7 +95,7 @@
   boot.tmp = {
     useTmpfs = lib.mkDefault true;
     tmpfsSize =
-      if (metaConfig ? ramGb && metaConfig.ramGb != null)
+      if (config.workspace ? ramGb && config.workspace.ramGb != null)
       then "150%"
       else "50%";
   };
@@ -115,13 +115,6 @@
 
   # (선택사항) btrbk 설정
   # services.btrbk.instances."local" = { ... };
-
-  hardware.bluetooth = {
-    enable = true;
-    powerOnBoot = true;
-  };
-
-  services.blueman.enable = true;
 
   hardware.graphics.enable = true;
   hardware.graphics.enable32Bit = true;
