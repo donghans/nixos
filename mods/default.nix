@@ -1,4 +1,4 @@
-{isNixOS ? false, ...}: {
+{...}: {
   imports = [
     ./sys/default.nix
     ./gui/default.nix

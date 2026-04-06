@@ -4,6 +4,7 @@
   pkgs,
   lib,
   config,
+  isNixOS ? false,
   ...
 }:
 with lib; let
@@ -55,35 +56,42 @@ in {
     };
   };
 
-  config = mkIf cfg.enable {
-    # 1. 전역 로그 디렉터리 생성 (다중 사용자 환경 지원을 위해 Sticky Bit 적용)
-    systemd.tmpfiles.rules = [
-      "d /var/log/notify-logger 1777 root root -"
-    ];
+  config = mkIf cfg.enable (
+    (
+      if isNixOS
+      then {
+        # 1. 전역 로그 디렉터리 생성 (다중 사용자 환경 지원을 위해 Sticky Bit 적용)
+        systemd.tmpfiles.rules = [
+          "d /var/log/notify-logger 1777 root root -"
+        ];
 
-    # 2. 사용자별 시스템디 서비스 등록 (NixOS 레벨에서도 systemd.user.services 정의 가능)
-    systemd.user.services.custom-notify-logger = {
-      description = "Notification Logger Service";
-      wantedBy = ["graphical-session.target"];
-      after = ["graphical-session-pre.target"];
-      partOf = ["graphical-session.target"];
-      serviceConfig = {
-        ExecStart = "${logger-script}";
-        Restart = "always"; # 죽으면 다시 살림
-        RestartSec = 3;
+        # 3. 전역 Logrotate 설정 (NixOS 레벨)
+        services.logrotate.settings."custom-notify-logger" = {
+          files = "/var/log/notify-logger/history-*.log";
+          frequency = "daily";
+          rotate = 30;
+          delaycompress = true;
+          missingok = true;
+          notifempty = true;
+          create = "0644 root root";
+          su = "root root";
+        };
+      }
+      else {}
+    )
+    // {
+      # 2. 사용자별 시스템디 서비스 등록
+      systemd.user.services.custom-notify-logger = {
+        description = "Notification Logger Service";
+        wantedBy = ["graphical-session.target"];
+        after = ["graphical-session-pre.target"];
+        partOf = ["graphical-session.target"];
+        serviceConfig = {
+          ExecStart = "${logger-script}";
+          Restart = "always"; # 죽으면 다시 살림
+          RestartSec = 3;
+        };
       };
-    };
-
-    # 3. 전역 Logrotate 설정 (NixOS 레벨)
-    services.logrotate.settings."custom-notify-logger" = {
-      files = "/var/log/notify-logger/history-*.log";
-      frequency = "daily";
-      rotate = 30;
-      delaycompress = true;
-      missingok = true;
-      notifempty = true;
-      create = "0644 root root";
-      su = "root root";
-    };
-  };
+    }
+  );
 }

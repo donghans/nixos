@@ -8,5 +8,5 @@ with lib; let
   cfg = config.mods.devel;
   modCfg = config.mods.devel.node;
 in {
-  config = mkIf (cfg.enable || modCfg.enable) (import ./node-module.nix args);
+  config = mkIf (cfg.enable || modCfg.enable) (import ./node.nix-module.nix args);
 }

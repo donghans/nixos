@@ -104,6 +104,7 @@
         mainConfig
         ++ [
           ./workspace-options.nix
+          ../mods/default.nix
           {
             workspace = hostCtx.metaConfig;
             nixpkgs.overlays = customOverlays;

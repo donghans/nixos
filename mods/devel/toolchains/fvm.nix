@@ -8,5 +8,5 @@ with lib; let
   cfg = config.mods.devel;
   modCfg = config.mods.devel.fvm;
 in {
-  config = mkIf (cfg.enable || modCfg.enable) (import ./fvm-module.nix args);
+  config = mkIf (cfg.enable || modCfg.enable) (import ./fvm.nix-module.nix args);
 }
