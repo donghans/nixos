@@ -17,6 +17,6 @@ else
       (mkIf modCfg.enable {
         mods.devel.jetbrains.android-studio.enable = mkDefault true;
       })
-      (mkIf modCfg.enable (import ./jetbrains.nix-module.nix (args // {inherit pkgs;})))
+      (mkIf modCfg.enable (import ./jetbrains.home.nix (args // {inherit pkgs;})))
     ];
   }

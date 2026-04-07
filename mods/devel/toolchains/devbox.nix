@@ -12,5 +12,5 @@ else
     cfg = config.mods.devel;
     modCfg = config.mods.devel.devbox;
   in {
-    config = mkIf (cfg.enable || modCfg.enable) (import ./devbox.nix-module.nix (args // {inherit pkgs;}));
+    config = mkIf (cfg.enable || modCfg.enable) (import ./devbox.home.nix (args // {inherit pkgs;}));
   }

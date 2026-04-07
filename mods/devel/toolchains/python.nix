@@ -12,5 +12,5 @@ else
     cfg = config.mods.devel;
     modCfg = config.mods.devel.python;
   in {
-    config = mkIf (cfg.enable || modCfg.enable) (import ./python.nix-module.nix (args // {inherit pkgs;}));
+    config = mkIf (cfg.enable || modCfg.enable) (import ./python.home.nix (args // {inherit pkgs;}));
   }
