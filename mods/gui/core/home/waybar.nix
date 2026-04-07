@@ -1,4 +1,13 @@
-{config, ...}: {
+{
+  pkgs,
+  config,
+  ...
+}: {
+  # waybar 세션 시작
+  wayland.windowManager.hyprland.settings.exec-once = [
+    "uwsm app -- ${pkgs.waybar}/bin/waybar"
+  ];
+
   programs.waybar.enable = true;
 
   # waybar/config 내용

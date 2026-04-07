@@ -11,10 +11,13 @@ with lib; {
       ./apps/slack.nix
       ./apps/bitwarden.nix
       ./utils/notifications_logger.nix
+      ./core/fcitx.nix
+      ./core/polkit.nix
+      ./core/xdg.nix
     ]
     ++ (
       if isNixOS
-      then [./core/os.nix]
+      then [./core/os.nix ./greeter]
       else []
     )
     ++ (

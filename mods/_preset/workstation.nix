@@ -42,6 +42,7 @@ in {
 
       # == Tier 2: 서비스 ==
       mods.sys.services.bluetooth.enable = true;
+      mods.sys.services.networkmanager.enable = true;
       mods.sys.services.tailscale.enable = true;
       mods.sys.services.docker.enable = true;
 

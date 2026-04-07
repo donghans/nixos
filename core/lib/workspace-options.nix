@@ -45,6 +45,7 @@ with lib; {
         fonts.enable = mkEnableOption "CJK and Nerd Fonts";
         services = {
           bluetooth.enable = mkEnableOption "Bluetooth support";
+          networkmanager.enable = mkEnableOption "NetworkManager (nmcli + nm-applet)";
           tailscale.enable = mkEnableOption "Tailscale Mesh VPN";
           docker.enable = mkEnableOption "Docker Daemon and tools";
         };

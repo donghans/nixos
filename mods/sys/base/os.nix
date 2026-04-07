@@ -5,12 +5,16 @@
 }: {
   imports = [
     ./os/_optimize.nix
+    ./os/_boot.nix
+    ./os/_disk.nix
+    ./os/_swap.nix
   ];
 
   # == User & Nix Engine ==
   users.users.${config.workspace.username} = {
     isNormalUser = true;
-    extraGroups = ["wheel" "networkmanager"];
+    extraGroups = ["wheel"];
+    # (참고: networkmanager 그룹은 mods.sys.services.networkmanager.nix에서 추가됨)
     shell = pkgs.zsh;
   };
 
@@ -35,10 +39,8 @@
   };
 
   # == Networking & Localization ==
-  networking = {
-    networkmanager.enable = true;
-    hostName = config.workspace.hostname;
-  };
+  # (참고: networkmanager.enable은 mods.sys.services.networkmanager.nix에서 처리)
+  networking.hostName = config.workspace.hostname;
 
   time.timeZone = "Asia/Seoul";
   i18n.defaultLocale = "en_US.UTF-8";
