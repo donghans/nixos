@@ -107,7 +107,7 @@ in {
           delaycompress = true;
           missingok = true;
           notifempty = true;
-          create = "0644 root root";
+          nocreate = true;
           su = "root root";
         };
       }
