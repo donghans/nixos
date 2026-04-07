@@ -36,42 +36,5 @@ with lib; {
         description = "NixOS/Home-Manager state version";
       };
     };
-
-    mods = {
-      sys = {
-        base.enable = mkEnableOption "System Base (Zsh, Atuin, Git, CLI Tools)";
-        utils.nfd.enable = mkEnableOption "NFD macOS filename fix tools";
-        vfs.enable = mkEnableOption "Virtual File Systems (GVFS, Udisks2, trash-cli)";
-        fonts.enable = mkEnableOption "CJK and Nerd Fonts";
-        services = {
-          bluetooth.enable = mkEnableOption "Bluetooth support";
-          networkmanager.enable = mkEnableOption "NetworkManager (nmcli + nm-applet)";
-          tailscale.enable = mkEnableOption "Tailscale Mesh VPN";
-          docker.enable = mkEnableOption "Docker Daemon and tools";
-        };
-      };
-      gui = {
-        enable = mkEnableOption "GUI Bundle (Hyprland, Waybar, etc)";
-        apps = {
-          vivaldi.enable = mkEnableOption "Vivaldi Browser";
-          slack.enable = mkEnableOption "Slack";
-          bitwarden.enable = mkEnableOption "Bitwarden";
-        };
-        utils.notifications_logger.enable = mkEnableOption "Custom Notification Logger";
-      };
-      devel = {
-        enable = mkEnableOption "Master switch for developer workshop";
-        node.enable = mkEnableOption "Node.js toolchain";
-        python.enable = mkEnableOption "Python toolchain";
-        fvm.enable = mkEnableOption "Flutter Version Management";
-        devbox.enable = mkEnableOption "Devbox global profile";
-        llm-cli.enable = mkEnableOption "LLM CLI tools";
-        zed.enable = mkEnableOption "Zed editor";
-        jetbrains = {
-          enable = mkEnableOption "Jetbrains common configs";
-          android-studio.enable = mkEnableOption "Android Studio (ADB, UDP 5353)";
-        };
-      };
-    };
   };
 }

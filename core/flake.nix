@@ -107,6 +107,8 @@
       presetMods = allPresets.${resolved.preset}.mods;
       mergedMods = nixpkgs.lib.recursiveUpdate presetMods resolved.mods;
       modsModule = {mods = toConfig mergedMods;};
+      # root는 sys 모듈만 사용하므로 gui/devel 설정 제외
+      rootModsModule = {mods = toConfig (builtins.removeAttrs mergedMods ["gui" "devel"]);};
       coverageModule = {
         options,
         lib,
@@ -117,7 +119,7 @@
           presetName = resolved.preset;
           presetsJsonPath = ./presets.json;
         };
-    in {inherit resolved perHostMeta modsModule coverageModule;};
+    in {inherit resolved perHostMeta modsModule rootModsModule coverageModule;};
   in {
     # == Output: NixOS Configurations ==
     nixosConfigurations =
@@ -146,7 +148,7 @@
     # == Output: Home Configurations ==
     homeConfigurations = builtins.listToAttrs (nixpkgs.lib.concatMap (name: let
         h = mkPerHostBindings name;
-        inherit (h) resolved perHostMeta modsModule coverageModule;
+        inherit (h) resolved perHostMeta modsModule rootModsModule coverageModule;
         hostCtx = mkHostContext (resolved // {workspaceMeta = perHostMeta;});
       in [
         {
@@ -181,7 +183,8 @@
             modules = [
               ./lib/workspace-options.nix
               {workspace = hostCtx.metaConfig // {username = "root";};}
-              modsModule
+              # gui/devel 설정 제외한 modsModule (옵션 선언은 mods/default.nix가 담당)
+              rootModsModule
               ({
                 options,
                 lib,
@@ -191,10 +194,10 @@
                   inherit lib options;
                   presetName = resolved.preset;
                   presetsJsonPath = ./presets.json;
-                  # root는 sys 모듈만 로드하므로 gui/devel 커버리지 제외
+                  # root는 sys 모듈만 활성화하므로 gui/devel 커버리지 제외
                   excludePrefixes = ["mods.gui" "mods.devel"];
                 })
-              (import ./mods/sys/default.nix)
+              ./mods/default.nix
             ];
           };
         }

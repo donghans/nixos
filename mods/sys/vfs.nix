@@ -8,6 +8,7 @@
 with lib; let
   cfg = config.mods.sys.vfs;
 in {
+  options.mods.sys.vfs.enable = mkEnableOption "Virtual File Systems (GVFS, Udisks2, trash-cli)";
   config = mkIf cfg.enable (
     if isNixOS
     then {

@@ -53,6 +53,7 @@ with lib; let
     }
   '';
 in {
+  options.mods.sys.utils.nfd.enable = mkEnableOption "NFD macOS filename fix tools";
   config = mkIf cfg.enable (
     if isNixOS
     then {

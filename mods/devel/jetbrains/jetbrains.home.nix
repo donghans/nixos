@@ -1,5 +1,7 @@
 {
   pkgs,
+  lib,
+  config,
   unstable,
   ...
 }: let
@@ -61,10 +63,7 @@
       # JetBrains 설정 디렉터리 탐색 (버전별 폴더 대응)
       CONFIG_BASE="$HOME/.config/JetBrains"
       if [ -d "$CONFIG_BASE" ]; then
-        # 해당 제품군의 모든 버전 설정 폴더를 순회하며 기본 경로 패치
         for cfg in "$CONFIG_BASE/"*; do
-          # 폴더명이 해당 제품으로 시작하는지 확인 (예: WebStorm2024.1)
-          # dirname의 결과물 중 제품명과 매칭되는 것만 처리 (대소문자 무시)
           case "$(basename "$cfg")" in
             *[Ii][Dd][Ee][Aa]*|*[Ww][Ee][Bb][Ss][Tt][Oo][Rr][Mm]*|*[Dd][Aa][Tt][Aa][Gg][Rr][Ii][Pp]*|*[Pp][Yy][Cc][Hh][Aa][Rr][Mm]*|*[Aa][Nn][Dd][Rr][Oo][Ii][Dd]*)
               GEN_XML="$cfg/options/ide.general.xml"
@@ -77,11 +76,13 @@
       fi
     '';
   });
+
+  jb = config.mods.devel.jetbrains;
 in {
-  home.packages = with unstable; [
-    (wrapJetbrainsPackage jetbrains.idea "idea")
-    (wrapJetbrainsPackage jetbrains.datagrip "datagrip")
-    (wrapJetbrainsPackage jetbrains.pycharm "pycharm")
-    (wrapJetbrainsPackage jetbrains.webstorm "webstorm")
-  ];
+  home.packages =
+    lib.optionals jb.idea.enable [(wrapJetbrainsPackage unstable.jetbrains.idea "idea")]
+    ++ lib.optionals jb.webstorm.enable [(wrapJetbrainsPackage unstable.jetbrains.webstorm "webstorm")]
+    ++ lib.optionals jb.pycharm.enable [(wrapJetbrainsPackage unstable.jetbrains.pycharm "pycharm")]
+    ++ lib.optionals jb.datagrip.enable [(wrapJetbrainsPackage unstable.jetbrains.datagrip "datagrip")]
+    ++ lib.optionals jb.android-studio.enable [(wrapJetbrainsPackage unstable.android-studio "android-studio")];
 }

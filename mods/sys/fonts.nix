@@ -8,6 +8,7 @@
 with lib; let
   cfg = config.mods.sys.fonts;
 in {
+  options.mods.sys.fonts.enable = mkEnableOption "CJK and Nerd Fonts";
   config = mkIf cfg.enable (
     if isNixOS
     then {

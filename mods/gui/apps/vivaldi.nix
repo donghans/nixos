@@ -5,48 +5,51 @@
   isNixOS ? false,
   ...
 }:
-if isNixOS
-then {}
-else
-  with lib; let
-    cfg = config.mods.gui.apps.vivaldi;
-  in {
-    config = mkIf cfg.enable {
-      home.packages = [
-        ((unstable.vivaldi.override {
-            proprietaryCodecs = true;
-            inherit (unstable) vivaldi-ffmpeg-codecs;
-            commandLineArgs = ["--lang=ko"];
-          }).overrideAttrs (old: {
-            postInstall =
-              (old.postInstall or "")
-              + ''
-                # 초기 설정 스킵 및 다크 테마, 좌측 탭 설정
-                cat <<EOF > $out/opt/vivaldi/initial-config.json
-                {
-                  "preferences": {
-                    "vivaldi": {
-                      "welcome_page_shown": true,
-                      "tabs": { "bar_position": 2 },
-                      "themes": { "current": "Vivaldi Dark" }
+with lib; let
+  cfg = config.mods.gui.apps.vivaldi;
+in
+  {options.mods.gui.apps.vivaldi.enable = mkEnableOption "Vivaldi Browser";}
+  // (
+    if isNixOS
+    then {}
+    else {
+      config = mkIf cfg.enable {
+        home.packages = [
+          ((unstable.vivaldi.override {
+              proprietaryCodecs = true;
+              inherit (unstable) vivaldi-ffmpeg-codecs;
+              commandLineArgs = ["--lang=ko"];
+            }).overrideAttrs (old: {
+              postInstall =
+                (old.postInstall or "")
+                + ''
+                  # 초기 설정 스킵 및 다크 테마, 좌측 탭 설정
+                  cat <<EOF > $out/opt/vivaldi/initial-config.json
+                  {
+                    "preferences": {
+                      "vivaldi": {
+                        "welcome_page_shown": true,
+                        "tabs": { "bar_position": 2 },
+                        "themes": { "current": "Vivaldi Dark" }
+                      }
                     }
                   }
-                }
-                EOF
+                  EOF
 
-                # Chromium 기반 초기 설정 UI 스킵
-                cat <<EOF > $out/opt/vivaldi/initial_preferences
-                {
-                  "distribution": {
-                    "skip_first_run_ui": true,
-                    "show_welcome_page": false,
-                    "import_bookmarks": false,
-                    "import_history": false
+                  # Chromium 기반 초기 설정 UI 스킵
+                  cat <<EOF > $out/opt/vivaldi/initial_preferences
+                  {
+                    "distribution": {
+                      "skip_first_run_ui": true,
+                      "show_welcome_page": false,
+                      "import_bookmarks": false,
+                      "import_history": false
+                    }
                   }
-                }
-                EOF
-              '';
-          }))
-      ];
-    };
-  }
+                  EOF
+                '';
+            }))
+        ];
+      };
+    }
+  )

@@ -1,4 +1,9 @@
-{isNixOS ? false, ...}: {
+{
+  lib,
+  isNixOS ? false,
+  ...
+}:
+with lib; {
   imports =
     [
       ./fonts.nix
@@ -16,4 +21,6 @@
         else ./base/home.nix
       )
     ];
+
+  options.mods.sys.base.enable = mkEnableOption "System Base (Zsh, Atuin, Git, CLI Tools)";
 }

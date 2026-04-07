@@ -5,13 +5,16 @@
   isNixOS ? false,
   ...
 }:
-if isNixOS
-then {}
-else
-  with lib; let
-    cfg = config.mods.gui.apps.bitwarden;
-  in {
-    config = mkIf cfg.enable {
-      home.packages = with pkgs; [bitwarden-desktop bitwarden-cli];
-    };
-  }
+with lib; let
+  cfg = config.mods.gui.apps.bitwarden;
+in
+  {options.mods.gui.apps.bitwarden.enable = mkEnableOption "Bitwarden";}
+  // (
+    if isNixOS
+    then {}
+    else {
+      config = mkIf cfg.enable {
+        home.packages = with pkgs; [bitwarden-desktop bitwarden-cli];
+      };
+    }
+  )
