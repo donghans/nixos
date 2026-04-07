@@ -16,71 +16,75 @@ cd nixos
 
 ---
 
-## 2. 초기 설정 수정 (`dev/_info.json`)
+## 2. 전역 메타데이터 수정 (`hosts/base.toml`)
 
-설치 스크립트는 이 파일의 정보를 읽어 GitHub에서 소스 코드를 가져오고 유저를 생성합니다.
+저장소 전체에 공통으로 적용되는 사용자 정보를 선언합니다.
 
-```json
-{
-  "username": "linux_user", // 생성할 유저명
-  "git": {
-    "name": "Your Name",
-    "email": "your@email.com",
-    "nixosRepo": "<your-username>/nixos" // 설치 시 클론할 저장소 경로
-  },
-  "hosts": [
-    { 
-      "hostname": "my-machine", // 기기 이름
-      "system": "x86_64-linux", // 현재 x86_64 시스템만 테스트해봤습니다.
-      "isLaptop": false, // 랩탑의 경우 배터리 표시 등이 필요하므로 랩탑에선 true를 권장합니다.
-      "isRolling": true, // 데일리 머신으로써 사용할 경우 unstable 패키지의 최신 버전 사용을 위해 true로 할 수 있습니다.
-      "ramGb": 16 // 물리 스왑 설정 및 tmpfs 크기 자동 계산을 위해 실제 메모리 크기(GB)를 입력합니다.
-    }
-  ]
-}
+```toml
+# hosts/base.toml
+username = "your_username"   # 생성할 유저명
+system   = "x86_64-linux"    # 현재 x86_64 시스템만 테스트됨
+
+[git]
+name  = "Your Name"
+email = "your@email.com"
+repo  = "<your-username>/nixos"  # 설치 시 클론할 저장소 경로
 ```
 
 ---
 
-## 3. 새로운 호스트 정의 (템플릿 활용)
+## 3. 새로운 호스트 정의
 
-설치할 기기에 맞는 설정을 미리 준비해야 합니다.
+설치할 기기에 맞는 설정 폴더를 준비합니다.
 
-1.  **설정 폴더 생성 및 템플릿 복사**:
-    ```bash
-    mkdir -p dev/<hostname>
-    cp dev/.template/configuration.nix dev/<hostname>/configuration.nix
-    cp dev/.template/home.nix dev/<hostname>/home.nix
-    ```
-2.  **내용 수정**: `dev/<hostname>/configuration.nix` 파일을 열어 필요한 서비스나 패키지를 수정하세요.
+### 3-1. 호스트 메타데이터 (`hosts/<hostname>/host.toml`)
+
+```toml
+# hosts/<hostname>/host.toml
+isLaptop = false   # 랩탑이면 true (배터리 표시, 터치패드 등 자동 적용)
+ramGb    = 16      # 물리 메모리 크기(GB) — 스왑·tmpfs 크기 자동 계산에 사용
+preset   = "workstation"
+
+# 프리셋 기본값에서 변경할 mods만 기재합니다.
+[mods.devel]
+fvm = true
+```
+
+### 3-2. 호스트별 설정 파일
+
+```bash
+mkdir -p hosts/<hostname>
+```
+
+기존 호스트(`hosts/beelink-ser7-co/`, `hosts/msi-summit-me/`)의 `configuration.nix`와 `home.nix`를 참고하여 하드웨어 부팅 파라미터, 서비스 등 호스트 고유 설정을 작성합니다. 하드웨어 프로필(`_hardware.nix`)은 설치 시 자동으로 생성됩니다.
 
 ---
 
 ## 4. 나만의 설치 ISO 빌드 및 설치
 
-프로젝트 루트의 스크립트를 사용하여 커스텀 ISO를 만듭니다.
+`nhw` CLI로 커스텀 ISO를 빌드합니다.
 
 ```bash
-./from-nixos-mk-iso.sh
+nhw iso
 ```
 
-- 빌드가 완료되면 `.build/` 폴더에 ISO 파일이 생성됩니다.
+- 빌드가 완료되면 `.build/` 심볼릭 링크가 가리키는 디렉터리에 ISO 파일이 생성됩니다.
 - 이 ISO로 부팅하면 터미널에 **한글 안내 메시지**가 나타납니다.
-- 안내에 따라 `nixos-setup` 명령어를 실행하면 다음과 같은 작업이 자동으로 진행됩니다:
+- 안내에 따라 `nixos-setup` 명령어를 실행하면 다음 작업이 자동으로 진행됩니다:
   1. **Btrfs 파티셔닝**: `@`, `@home`, `@nix`, `@log` 서브볼륨 자동 생성 및 최적 옵션 마운트.
-  2. **하드웨어 감지**: `nixos-generate-config`를 실행하여 해당 기기의 하드웨어 설정을 `dev/<hostname>/_hardware.nix` 경로에 자동으로 저장합니다.
-  3. **자동 설치**: `dev/_info.json`에 정의된 저장소를 다시 클론하고 시스템을 빌드합니다.
+  2. **하드웨어 감지**: `nixos-generate-config`를 실행하여 해당 기기의 하드웨어 설정을 `hosts/<hostname>/_hardware.nix` 경로에 자동으로 저장합니다.
+  3. **자동 설치**: `hosts/base.toml`에 정의된 저장소를 클론하고 시스템을 빌드합니다.
 
 설치가 완료되고 재부팅하면, 전역 명령어 `nhw`를 통해 시스템을 관리할 수 있습니다.
 
 ---
 
-## 🏃 5. 다음으로 해볼 것 (Next Steps)
+## 5. 다음으로 해볼 것 (Next Steps)
 
 시스템 설치를 성공적으로 마치셨나요? 이제 본인만의 환경으로 커스터마이징할 차례입니다.
 
 - **시스템 관리 익히기**: `nhw` 도구의 상세한 사용법과 업데이트, 청소 방법 등은 [NHW.md](./NHW.md) 가이드를 참조하세요.
-- **개발 환경 구성**: `lib/developer.home.nix` 파일을 수정하여 본인에게 필요한 패키지를 추가할 수 있습니다.
-  - `home.packages` 목록에 필요한 패키지명을 추가하거나, `lib/developer.home/` 폴더 내의 특정 언어별 설정 파일을 수정해 보세요.
+- **개발 환경 구성**: `mods/devel/` 하위 파일을 수정하여 본인에게 필요한 개발 도구를 추가할 수 있습니다.
+  - `host.toml`의 `[mods.devel]` 섹션에 `toolchain = true` 형식으로 활성화합니다.
   - 수정 후에는 `nhw home switch` 명령으로 즉시 반영할 수 있습니다.
 - **심화 구조 이해**: 이 프로젝트의 빌드 격리, 락 전략 등 기술적 내부 구조가 궁금하다면 [HACKING.md](../hacking/_HACKING.md) 문서를 탐독해 보세요.

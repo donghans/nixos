@@ -7,7 +7,7 @@
 ## 🚀 주요 특징
 
 - **Mods Framework**: 모든 설정을 `sys` / `gui` / `devel` 세 도메인으로 격리하고, 명시적 `enable` 옵션을 통해 기능을 선택합니다.
-- **TOML 기반 SSOT**: `hosts/base.toml`과 `hosts/<hostname>/host.toml`에 메타데이터를 선언합니다. `nhw resolve`가 이를 `resolved.json`으로 변환하여 flake.nix에 주입합니다.
+- **TOML 설정 원본**: `hosts/base.toml`과 `hosts/<hostname>/host.toml`에 메타데이터를 선언합니다. `nhw resolve`가 이를 `resolved.json`으로 변환하여 flake.nix에 주입합니다.
 - **워크스테이션 프리셋**: `mods/_preset/workstation.toml`에 정의된 개발 환경 전체(tailscale, docker, bluetooth, GUI, 개발 도구)가 자동으로 적용됩니다. 호스트별 추가 설정만 `host.toml`에 기재하면 됩니다.
 - **Mods Coverage Check**: 빌드 시 프리셋에 선언된 옵션과 workspace-options에 등록된 옵션을 대조하여, 누락된 항목을 빌드 타임 에러로 알립니다.
 - **격리된 빌드 환경**: 모든 빌드는 `/tmp/nixos-build` (tmpfs)에서 안전하게 격리되어 수행됩니다.
@@ -21,7 +21,7 @@
 nixos/
 ├── core/               # 프레임워크 엔진
 │   ├── flake.nix       # 메인 진입점
-│   ├── lib/            # 빌더(builders.nix), SSOT 옵션(workspace-options.nix)
+│   ├── lib/            # 빌더(builders.nix), 옵션 선언(workspace-options.nix)
 │   └── scripts/        # nhw 관리 CLI (nhw.sh, nhw.resolve.py 등)
 ├── mods/               # 재사용 가능한 기능 모듈
 │   ├── sys/            # 시스템 기반 (base, fonts, vfs, services, utils)
@@ -30,7 +30,7 @@ nixos/
 │   └── _preset/        # 구성 레시피 (workstation.toml 등)
 ├── hosts/              # 호스트별 고유 설정
 │   ├── base.toml       # 전역 메타데이터 (username, git, system)
-│   └── <hostname>/     # host.toml, configuration.nix, home.nix, hardware/
+│   └── <hostname>/     # host.toml, configuration.nix, home.nix, _hardware.nix
 └── .locks/             # Flake lock 파일 (Rolling/Stable 전략)
 ```
 
@@ -52,7 +52,7 @@ fvm = true
 ```nix
 # hosts/<hostname>/configuration.nix 예시
 {...}: {
-  imports = [../../hosts/hardware/<hostname>.nix];
+  imports = [./_hardware.nix];
 
   # 호스트 하드웨어 설정
   boot.kernelParams = [ "..." ];

@@ -28,7 +28,7 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 호스트 설정을 구성하는 수많은 파일이 하나로 합쳐지는 단계입니다.
 
 1.  **Host Specific Loading**: `hosts/<hostname>/configuration.nix`가 먼저 로드됩니다. 프리셋 mods는 flake.nix가 `resolved.json`과 `presets.json`을 병합하여 `modsModule`로 주입합니다.
-2.  **Inheritance**: 기기별 하드웨어 설정(`hosts/hardware/<hostname>.nix`)이 임포트됩니다. Btrfs/ZRAM 스토리지 공통 설정은 `mods/sys/base/default.nix`를 통해 sys 도메인에서 포함됩니다.
+2.  **Inheritance**: 기기별 하드웨어 설정(`hosts/<hostname>/_hardware.nix`)이 임포트됩니다. Btrfs/ZRAM 스토리지 공통 설정은 `mods/sys/base/default.nix`를 통해 sys 도메인에서 포함됩니다.
 3.  **Mix-in**: `mods/default.nix`를 통해 sys, gui, devel 세 도메인이 모두 로드됩니다. 각 모듈은 `mkIf cfg.enable`로 enable된 항목만 실제 설정에 기여합니다.
 4.  **Coverage Check**: flake.nix가 주입한 `coverageModule`(`mk-preset.nix` 기반)의 `assertions`가 평가되어 프리셋에 누락된 옵션이 있으면 즉시 오류를 발생시킵니다.
 

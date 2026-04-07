@@ -24,9 +24,22 @@
 
 코드와 데이터를 분리하여, 사용자가 `nix` 언어를 깊게 알지 못해도 시스템 구성을 관리할 수 있게 합니다.
 
-- **TOML 소스**: `base.toml`(전역: username, git, system), `host.toml`(호스트: isLaptop, ramGb, preset, mods 오버라이드), `_preset/*.toml`(프리셋 mods 정의 + explicitOptional)을 TOML로 선언합니다.
+- **TOML 설정 원본**: `base.toml`(전역: username, git, system), `host.toml`(호스트: isLaptop, ramGb, preset, mods 오버라이드), `_preset/*.toml`(프리셋 mods 정의 + explicitOptional)을 TOML로 선언합니다.
 - **Resolver (`nhw.resolve.py`)**: `nhw` 빌드 시 TOML 소스를 읽어 `presets.json`(프리셋 mods + explicitOptional)과 `resolved.json`(호스트별 merged 데이터)을 생성합니다. flake.nix는 이 JSON 파일을 읽어 빌드합니다.
 - **직접 nix 실행 금지**: `flake.nix`는 `resolved.json`이 없으면 명시적 오류를 발생시킵니다. 항상 `nhw`를 통해 빌드하세요.
+
+**리졸브 우선순위** — 병합은 2단계로 진행됩니다.
+
+- 1단계(Python): base.toml + host.toml + preset.toml → `resolved.json` / `presets.json` 생성
+- 2단계(Nix): flake.nix가 `presets.json`(프리셋 mods)에 `resolved.json`(host 오버라이드)을 덮어씌워 최종 병합
+
+| 필드 | 우선순위 |
+|------|---------|
+| `username`, `git.*` | base.toml 고정 (오버라이드 불가) |
+| `system` | host.toml → base.toml |
+| `isLaptop`, `ramGb`, `preset` | host.toml 필수 선언 |
+| `stateVersion` | host.toml → preset → `null` (rolling) |
+| `mods.*` | preset 기본값 위에 host.toml 오버라이드를 Nix 단계에서 병합 |
 
 ---
 
@@ -36,7 +49,7 @@
 시스템 설정의 두뇌에 해당하며, Nix Flake의 강력한 기능을 활용해 복잡한 패키징과 모듈성을 구현합니다.
 
 - **Dynamic Generator (`core/lib/builders.nix`)**: JSON 데이터를 기반으로 `nixosConfigurations`와 `homeConfigurations`를 동적으로 생성해내는 **메타프로그래밍 구조**와 빌더 팩토리입니다.
-- **SSOT Options (`core/lib/workspace-options.nix`)**: `config.workspace` 및 `config.mods`를 선언하여 전역 설정과 기능 모듈(Mods)의 통합 옵션을 제공합니다.
+- **옵션 선언부 (`core/lib/workspace-options.nix`)**: `config.workspace` 및 `config.mods`를 선언하여 전역 설정과 기능 모듈(Mods)의 통합 옵션을 제공합니다.
 - **Advanced Overlay (`core/lib/mk-wrapper.nix`)**: `mkWrapper` 헬퍼를 단독 분리하여, 특정 패키지에 런타임 환경 변수나 라이브러리 경로 등을 주입해 패키지를 래핑하는 로직을 제공합니다.
 
 ---
