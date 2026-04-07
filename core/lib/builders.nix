@@ -13,13 +13,13 @@
     ...
   }: let
     pkgs = import nixpkgs {
-      inherit system;
+      localSystem = system;
       config.allowUnfree = true;
       overlays = customOverlays;
     };
 
     unstable = import nixpkgs-unstable {
-      inherit system;
+      localSystem = system;
       config.allowUnfree = true;
     };
 
@@ -47,7 +47,7 @@
           url = "https://github.com/nixos/nixpkgs/archive/${envRev}.tar.gz";
           sha256 = envSha;
         }) {
-          inherit system;
+          localSystem = system;
           config.allowUnfree = true;
         }
       else unstable;
