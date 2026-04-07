@@ -33,7 +33,6 @@ in {
       xdg = {
         portal.enable = true;
         portal.extraPortals = with pkgs; [
-          xdg-desktop-portal-hyprland
           xdg-desktop-portal-gtk
         ];
         portal.config.common.default = ["hyprland" "gtk"];
