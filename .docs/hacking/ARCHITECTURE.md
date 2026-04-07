@@ -35,7 +35,7 @@
 
 | 필드 | 우선순위 |
 |------|---------|
-| `username`, `git.*` | base.toml 고정 (오버라이드 불가) |
+| `username`, `git.*` | host.toml 오버라이드 가능 (기본값: base.toml) |
 | `system` | host.toml → base.toml |
 | `isLaptop`, `ramGb`, `preset` | host.toml 필수 선언 |
 | `stateVersion` | host.toml → preset → `null` (rolling) |
