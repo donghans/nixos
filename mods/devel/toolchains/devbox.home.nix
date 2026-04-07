@@ -1,4 +1,8 @@
-{pkgs, ...}: let
+{
+  pkgs,
+  config,
+  ...
+}: let
   # (목적: 템플릿 복사 및 초기화를 한 번에 수행하는 통합 헬퍼)
   devbox-setup = pkgs.writeShellScriptBin "devbox-setup" ''
     TYPE="''${1:-}"
@@ -7,7 +11,7 @@
       exit 1
     fi
 
-    TEMPLATE_DIR="$HOME/nixos/mods/_data/devbox/devbox"
+    TEMPLATE_DIR="${config.home.homeDirectory}/${builtins.baseNameOf config.workspace.nixosRepo}/mods/_data/devbox/devbox"
     TARGET_TEMPLATE="$TEMPLATE_DIR/$TYPE.json"
 
     if [ ! -f "$TARGET_TEMPLATE" ]; then

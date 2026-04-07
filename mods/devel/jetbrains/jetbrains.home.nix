@@ -3,6 +3,35 @@
   unstable,
   ...
 }: let
+  # (목적: XML 파서로 defaultProjectLocation attribute 안전하게 패치)
+  patchXml = pkgs.writeText "patch-jetbrains-xml.py" ''
+    import sys, xml.etree.ElementTree as ET
+    path, target = sys.argv[1], sys.argv[2]
+    tree = ET.parse(path)
+    root = tree.getroot()
+
+    # GeneralSettings 컴포넌트만 대상으로 처리
+    comp = next((c for c in root.findall("component") if c.get("name") == "GeneralSettings"), None)
+    if comp is None:
+        sys.exit(0)
+
+    # 기존 항목 탐색 (name= 또는 key= 속성 모두 허용)
+    entry = next(
+        (child for child in comp if child.get("name") == "defaultProjectLocation" or child.get("key") == "defaultProjectLocation"),
+        None,
+    )
+    if entry is not None:
+        entry.set("value", target)
+    else:
+        opt = ET.SubElement(comp, "option")
+        opt.set("name", "defaultProjectLocation")
+        opt.set("value", target)
+
+    if hasattr(ET, "indent"):
+        ET.indent(tree)
+    tree.write(path, encoding="unicode", xml_declaration=False)
+  '';
+
   # (목적: 프로젝트 경로 정규화 및 UI 스케일 주입 래퍼)
   wrapJetbrainsPackage = pkg: binName: (pkgs.mkWrapper {
     inherit pkg binName;
@@ -40,13 +69,7 @@
             *[Ii][Dd][Ee][Aa]*|*[Ww][Ee][Bb][Ss][Tt][Oo][Rr][Mm]*|*[Dd][Aa][Tt][Aa][Gg][Rr][Ii][Pp]*|*[Pp][Yy][Cc][Hh][Aa][Rr][Mm]*|*[Aa][Nn][Dd][Rr][Oo][Ii][Dd]*)
               GEN_XML="$cfg/options/ide.general.xml"
               if [ -f "$GEN_XML" ]; then
-                if grep -q "defaultProjectLocation" "$GEN_XML"; then
-                  # 기존 설정이 있으면 치환
-                  sed -i "s|name=\"defaultProjectLocation\" value=\"[^\"]*\"|name=\"defaultProjectLocation\" value=\"$TARGET_DIR\"|" "$GEN_XML"
-                else
-                  # 설정이 없으면 component 태그 닫기 전에 삽입
-                  sed -i "s|</component>|  <entry key=\"defaultProjectLocation\" value=\"$TARGET_DIR\" />\n    </component>|" "$GEN_XML"
-                fi
+                ${pkgs.python3}/bin/python3 ${patchXml} "$GEN_XML" "$TARGET_DIR"
               fi
               ;;
           esac

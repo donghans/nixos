@@ -23,11 +23,12 @@ in {
         XDG_SESSION_DESKTOP = "Hyprland";
       };
 
-      home.packages = with pkgs; [
-        xdg-desktop-portal-gtk
-        xdg-desktop-portal-hyprland
-        xdg-utils
-      ];
+      # FIXME: FileChooser가 안 뜨면 아래 주석을 해제할 것
+      # home.packages = with pkgs; [
+      #   xdg-desktop-portal-gtk
+      #   xdg-desktop-portal-hyprland
+      # ];
+      home.packages = [pkgs.xdg-utils];
 
       xdg = {
         portal.enable = true;

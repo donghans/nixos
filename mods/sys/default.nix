@@ -9,14 +9,11 @@
       ./services/networkmanager.nix
       ./services/tailscale.nix
     ]
-    ++ (
-      if isNixOS
-      then [./base/os.nix]
-      else []
-    )
-    ++ (
-      if !isNixOS
-      then [./base/home.nix]
-      else []
-    );
+    ++ [
+      (
+        if isNixOS
+        then ./base/os.nix
+        else ./base/home.nix
+      )
+    ];
 }

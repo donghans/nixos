@@ -38,7 +38,8 @@
       exit 1
     fi
 
-    STATUS_FILE="/tmp/touchpad_enabled"
+    STATUS_FILE="$HOME/.local/state/hypr/touchpad_enabled"
+    mkdir -p "$(dirname "$STATUS_FILE")"
     [ ! -f "$STATUS_FILE" ] && echo "true" > "$STATUS_FILE"
     CURRENT_STATUS=$(cat "$STATUS_FILE")
 

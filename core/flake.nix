@@ -89,35 +89,41 @@
       inherit inputs customOverlays;
     };
     inherit (builders) mkHost mkHostContext;
+
+    # == Per-host 공통 바인딩 헬퍼 (nixosConfigurations + homeConfigurations 공유) ==
+    mkPerHostBindings = name: let
+      resolved = allResolved.${name};
+      perHostMeta =
+        workspaceMeta
+        // {
+          inherit (resolved) hostname isLaptop;
+          # stateVersion null(rolling) 시 현행 stable 버전으로 폴백
+          stateVersion =
+            if resolved.stateVersion == null
+            then "25.11"
+            else resolved.stateVersion;
+          ramGb = resolved.ramGb or null;
+        };
+      presetMods = allPresets.${resolved.preset}.mods;
+      mergedMods = nixpkgs.lib.recursiveUpdate presetMods resolved.mods;
+      modsModule = {mods = toConfig mergedMods;};
+      coverageModule = {
+        options,
+        lib,
+        ...
+      }:
+        import ./lib/mk-preset.nix {
+          inherit lib options;
+          presetName = resolved.preset;
+          presetsJsonPath = ./presets.json;
+        };
+    in {inherit resolved perHostMeta modsModule coverageModule;};
   in {
     # == Output: NixOS Configurations ==
     nixosConfigurations =
       (nixpkgs.lib.genAttrs hostNames (name: let
-        resolved = allResolved.${name};
-        perHostMeta =
-          workspaceMeta
-          // {
-            inherit (resolved) hostname isLaptop;
-            # stateVersion null(rolling) 시 현행 stable 버전으로 폴백
-            stateVersion =
-              if resolved.stateVersion == null
-              then "25.11"
-              else resolved.stateVersion;
-            ramGb = resolved.ramGb or null;
-          };
-        presetMods = allPresets.${resolved.preset}.mods;
-        mergedMods = nixpkgs.lib.recursiveUpdate presetMods resolved.mods;
-        modsModule = {mods = toConfig mergedMods;};
-        coverageModule = {
-          options,
-          lib,
-          ...
-        }:
-          import ./lib/mk-preset.nix {
-            inherit lib options;
-            presetName = resolved.preset;
-            presetsJsonPath = ./presets.json;
-          };
+        h = mkPerHostBindings name;
+        inherit (h) resolved perHostMeta modsModule coverageModule;
       in
         mkHost (resolved
           // {
@@ -139,31 +145,8 @@
 
     # == Output: Home Configurations ==
     homeConfigurations = builtins.listToAttrs (nixpkgs.lib.concatMap (name: let
-        resolved = allResolved.${name};
-        perHostMeta =
-          workspaceMeta
-          // {
-            inherit (resolved) hostname isLaptop;
-            # stateVersion null(rolling) 시 현행 stable 버전으로 폴백
-            stateVersion =
-              if resolved.stateVersion == null
-              then "25.11"
-              else resolved.stateVersion;
-            ramGb = resolved.ramGb or null;
-          };
-        presetMods = allPresets.${resolved.preset}.mods;
-        mergedMods = nixpkgs.lib.recursiveUpdate presetMods resolved.mods;
-        modsModule = {mods = toConfig mergedMods;};
-        coverageModule = {
-          options,
-          lib,
-          ...
-        }:
-          import ./lib/mk-preset.nix {
-            inherit lib options;
-            presetName = resolved.preset;
-            presetsJsonPath = ./presets.json;
-          };
+        h = mkPerHostBindings name;
+        inherit (h) resolved perHostMeta modsModule coverageModule;
         hostCtx = mkHostContext (resolved // {workspaceMeta = perHostMeta;});
       in [
         {
