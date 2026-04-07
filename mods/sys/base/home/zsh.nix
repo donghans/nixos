@@ -54,11 +54,11 @@
         alias ls='ls --color=auto'
         alias grep='grep --color=auto'
 
-        # == Key Bindings (Ctrl+Arrow: 단어 단위 이동) ==
-        bindkey "^[[1;5C" forward-word
-        bindkey "^[[1;5D" backward-word
-        bindkey "^[[1;3C" forward-word
-        bindkey "^[[1;3D" backward-word
+        # == Key Bindings (단어 단위 이동: Ctrl+Arrow + Alt+Arrow 모두 허용) ==
+        bindkey "^[[1;5C" forward-word   # Ctrl+Right
+        bindkey "^[[1;5D" backward-word  # Ctrl+Left
+        bindkey "^[[1;3C" forward-word   # Alt+Right (터미널 종류에 따라 Ctrl 대신 Alt로 전달됨)
+        bindkey "^[[1;3D" backward-word  # Alt+Left
       ''
     ];
   };

@@ -1,51 +1,36 @@
-{pkgs, ...}: {
+{pkgs, ...}: let
+  # 공통 Btrfs 마운트 옵션 (subvol만 마운트 포인트별로 다름)
+  btrfsOpts = subvol: [
+    "subvol=${subvol}"
+    "compress=zstd:3" # 압축 수준 3 (성능과 압축률의 최적 지점)
+    "noatime" # 파일 읽을 때마다 시간을 기록하지 않음 (SSD 성능 향상)
+    "discard=async" # 백그라운드에서 TRIM 실행 (Linux 5.6+ 권장)
+    "space_cache=v2" # 최신 공간 캐시 알고리즘
+  ];
+in {
   # == Btrfs 파일시스템 ==
   fileSystems."/" = {
     device = "/dev/disk/by-label/nixos";
     fsType = "btrfs";
-    options = [
-      "subvol=@"
-      "compress=zstd:3" # 압축 수준 3 (성능과 압축률의 최적 지점)
-      "noatime" # 파일 읽을 때마다 시간을 기록하지 않음 (SSD 성능 향상)
-      "discard=async" # 백그라운드에서 TRIM 실행 (Linux 5.6+ 권장)
-      "space_cache=v2" # 최신 공간 캐시 알고리즘
-    ];
+    options = btrfsOpts "@";
   };
 
   fileSystems."/home" = {
     device = "/dev/disk/by-label/nixos";
     fsType = "btrfs";
-    options = [
-      "subvol=@home"
-      "compress=zstd:3"
-      "noatime"
-      "discard=async"
-      "space_cache=v2"
-    ];
+    options = btrfsOpts "@home";
   };
 
   fileSystems."/nix" = {
     device = "/dev/disk/by-label/nixos";
     fsType = "btrfs";
-    options = [
-      "subvol=@nix"
-      "compress=zstd:3"
-      "noatime"
-      "discard=async"
-      "space_cache=v2"
-    ];
+    options = btrfsOpts "@nix";
   };
 
   fileSystems."/var/log" = {
     device = "/dev/disk/by-label/nixos";
     fsType = "btrfs";
-    options = [
-      "subvol=@log"
-      "compress=zstd:3"
-      "noatime"
-      "discard=async"
-      "space_cache=v2"
-    ];
+    options = btrfsOpts "@log";
   };
 
   # == Btrfs 유지보수 서비스 ==

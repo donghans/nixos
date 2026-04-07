@@ -62,6 +62,8 @@ in {
       )
       ++ (
         # Focus arrows
+        # (주의: substring 0 1은 Hyprland movefocus 방향 약어를 추출하는 트릭
+        #  "left"→"l", "right"→"r", "up"→"u", "down"→"d" — 모두 첫 글자가 방향 약어와 일치)
         builtins.concatMap (key: [
           "$mainMod, ${key}, movefocus, ${builtins.substring 0 1 key}"
           "$mainMod, ${key}, alterzorder, top"
