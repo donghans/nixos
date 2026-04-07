@@ -134,7 +134,7 @@
         # ISO는 resolved.json 없이 직접 호출 (host.toml 없는 특수 케이스)
         custom-iso = mkHost {
           hostname = "nixos-iso";
-          system = "x86_64-linux";
+          system = "x86_64-linux"; # mkHost 내부에서 nixpkgs.hostPlatform 모듈로 전달됨
           isLaptop = false;
           isISO = true;
           workspaceMeta = workspaceMeta // {stateVersion = "25.11";};

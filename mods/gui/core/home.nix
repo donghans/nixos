@@ -13,7 +13,7 @@ with lib; let
       url = "https://github.com/NixOS/nixpkgs/archive/38eccbbf297c.tar.gz";
       sha256 = "1w5zkgqhgi9b9zwsaz64vlhf9rcb5dmjz0mb05vgx7l5ycb851dj";
     }) {
-      inherit (pkgs) system;
+      localSystem = pkgs.stdenv.hostPlatform.system;
       config.allowUnfree = true;
     };
 in {
