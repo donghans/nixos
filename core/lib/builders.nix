@@ -92,7 +92,6 @@
       ];
   in
     nixpkgs.lib.nixosSystem {
-      inherit (hostInfo) system;
       specialArgs = {
         isNixOS = true;
         inherit inputs;
@@ -102,7 +101,8 @@
       };
 
       modules =
-        mainConfig
+        [{ nixpkgs.hostPlatform = hostInfo.system; }]
+        ++ mainConfig
         ++ [
           ./workspace-options.nix
           ../mods/default.nix
