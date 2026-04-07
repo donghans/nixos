@@ -1,5 +1,5 @@
 #!/usr/bin/env nix-shell
-#!nix-shell -i bash -p nh jq nix-output-monitor git dotenv-cli
+#!nix-shell -i bash -p nh nvd jq nix-output-monitor git dotenv-cli deadnix statix alejandra shellcheck
 # shellcheck disable=SC1008,SC1091
 set -euo pipefail
 
@@ -20,6 +20,8 @@ source "$SCRIPT_DIR/nhw.lib-build.sh"
 source "$SCRIPT_DIR/nhw.lib-lock.sh"
 
 DO_CLEAN=false; CLEAN_TARGET="user"; TARGET_HOST=""; TARGET_PROFILE="home"; ACTION="switch"; LOCK_CHANGED=false
+# shellcheck disable=SC2034  # sourced scripts (nhw.task-check.sh) 에서 사용
+CHECK_DEEP=false
 EXTRA_ARGS=()
 
 for arg in "${@:-}"; do
@@ -27,7 +29,10 @@ for arg in "${@:-}"; do
         clean) DO_CLEAN=true ;;
         all) CLEAN_TARGET="all" ;;
         os|home|iso|fix-unstable|check) TARGET_PROFILE="$arg" ;;
-        switch|boot|test|update) ACTION="$arg" ;;
+        switch|boot|test|build|update) ACTION="$arg" ;;
+        --deep|deep)
+            # shellcheck disable=SC2034
+            CHECK_DEEP=true ;;
         *)
             if [ "$TARGET_PROFILE" == "fix-unstable" ]; then
                 EXTRA_ARGS+=("$arg")
@@ -38,10 +43,10 @@ for arg in "${@:-}"; do
     esac
 done
 
-# 2. Init Messages & Logging Setup
-log_msg "Init" "NHW: [NixOS Helper](https://github.com/viperML/nh) Wrapper"
-
-# Structured Logging Setup (YYYYMMDDTHHMMSS-[target_profile]-[action].log format)
+# 2. Logging Setup
+# fd 3: 원본 터미널 stdout 보존 (setup_logging의 exec 리디렉션 이전에 저장)
+# nhw.task-nh.sh에서 nom 출력을 로그 파이프가 아닌 실제 터미널로 보낼 때 사용
+exec 3>&1
 LOG_TIMESTAMP=$(date +%Y%m%dT%H%M%S)
 if [ "$DO_CLEAN" = true ]; then
     setup_logging "${LOG_TIMESTAMP}-clean-${CLEAN_TARGET}"
@@ -54,13 +59,55 @@ fi
 acquire_lock
 
 # Resolver: JSON_DIR에 resolved.json + presets.json 생성 (determine_host_info가 읽음)
-log_msg "Prep" "Resolving host metadata..."
+# Init 블록보다 먼저 실행하여 호스트 정보를 확보 (출력은 Init 이후에 표시)
 mkdir -p "$JSON_DIR"
-log_exec "py" ">" "nhw.resolve.py"
-python3 "$SCRIPT_DIR/nhw.resolve.py" "$NIXOS_PATH" "$JSON_DIR"
-log_exec "py" "<" "nhw.resolve.py"
+python3 "$SCRIPT_DIR/nhw.resolve.py" "$NIXOS_PATH" "$JSON_DIR" >/dev/null
 
-# 3. Advanced Trap & State Management
+# Host 결정 (clean/fix-unstable은 불필요)
+LOCK_STORE_DIR="$NIXOS_PATH/.locks"
+HOST_ID=""; IS_ROLLING=""; HOST_SPECIFIC_LOCK=""
+if [ "$DO_CLEAN" != true ] && [ "$TARGET_PROFILE" != "fix-unstable" ]; then
+    set +e
+    HOST_INFO_RAW=$(determine_host_info "$TARGET_PROFILE" "$TARGET_HOST" "$ENV_FILE")
+    DETERMINE_EXIT_CODE=$?
+    set -e
+    if [ $DETERMINE_EXIT_CODE -ne 0 ] || [ -z "$HOST_INFO_RAW" ]; then exit 1; fi
+    read -r HOST_ID IS_ROLLING <<< "$HOST_INFO_RAW"
+    if [ "$IS_ROLLING" == "true" ]; then
+        HOST_SPECIFIC_LOCK="$LOCK_STORE_DIR/_rolling.lock"
+    else
+        HOST_SPECIFIC_LOCK="$LOCK_STORE_DIR/$HOST_ID.lock"
+    fi
+fi
+
+# 3. Init Block (배너 + Action/Target/Mode 를 최상단에 표시)
+log_msg "Init" "NHW: [NixOS Helper](https://github.com/viperML/nh) Wrapper"
+
+# Action 레이블
+if [ "$DO_CLEAN" = true ]; then
+    log_msg "Init" "Action:   cleanup"
+elif [ "$TARGET_PROFILE" = "fix-unstable" ]; then
+    log_msg "Init" "Action:   fix-unstable"
+elif [ "$TARGET_PROFILE" = "check" ] && [ "$CHECK_DEEP" = true ]; then
+    log_msg "Init" "Action:   check --deep"
+elif [[ "$TARGET_PROFILE" =~ ^(check|iso)$ ]]; then
+    log_msg "Init" "Action:   $TARGET_PROFILE"
+else
+    log_msg "Init" "Action:   $TARGET_PROFILE $ACTION"
+fi
+
+# Target: 특정 호스트에 종속된 작업에만 표시
+# 숨김: clean, fix-unstable, iso, check --deep
+if [ -n "$HOST_ID" ] && [ "$TARGET_PROFILE" != "iso" ] && ! { [ "$TARGET_PROFILE" = "check" ] && [ "$CHECK_DEEP" = true ]; }; then
+    log_msg "Init" "Target:   $HOST_ID"
+    if [ "$IS_ROLLING" == "true" ]; then
+        log_msg "Init" "Mode:     rolling"
+    else
+        log_msg "Init" "Mode:     stable"
+    fi
+fi
+
+# 4. Advanced Trap & State Management
 IS_SUCCESS=false
 
 handle_signal() {
@@ -97,9 +144,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# 4. Routing
+# 5. Routing
 if [ "$DO_CLEAN" = true ]; then
-    log_msg "Init" "Action:   cleanup"
     log_exec "nh" ">" "nh clean $CLEAN_TARGET"
     if [ "$CLEAN_TARGET" = "all" ]; then
         sudo nh clean all --keep 3 || true
@@ -112,46 +158,12 @@ if [ "$DO_CLEAN" = true ]; then
 fi
 
 if [ "$TARGET_PROFILE" == "fix-unstable" ]; then
-    log_msg "Init" "Action:   fix-unstable"
     source "$SCRIPT_DIR/nhw.task-fix.sh"
     IS_SUCCESS=true
     exit 0
 fi
 
-# Determine Host
-LOCK_STORE_DIR="$NIXOS_PATH/.locks"
-
-# set -e 환경에서는 서브쉘 에러가 튕길 수 있으므로 임시로 +e 적용
-set +e
-HOST_INFO_RAW=$(determine_host_info "$TARGET_PROFILE" "$TARGET_HOST" "$ENV_FILE")
-DETERMINE_EXIT_CODE=$?
-set -e
-
-if [ $DETERMINE_EXIT_CODE -ne 0 ] || [ -z "$HOST_INFO_RAW" ]; then
-    exit 1
-fi
-
-read -r HOST_ID IS_ROLLING <<< "$HOST_INFO_RAW"
-
 TARGET_LOCK="$TMP_BUILD_DIR/flake.lock"
-if [ "$IS_ROLLING" == "true" ]; then
-    HOST_SPECIFIC_LOCK="$LOCK_STORE_DIR/_rolling.lock"
-else
-    HOST_SPECIFIC_LOCK="$LOCK_STORE_DIR/$HOST_ID.lock"
-fi
-
-# Print Configuration Info
-if [[ "$TARGET_PROFILE" =~ ^(check|fix-unstable|iso)$ ]]; then
-    log_msg "Init" "Action:   $TARGET_PROFILE"
-else
-    log_msg "Init" "Action:   $TARGET_PROFILE $ACTION"
-fi
-log_msg "Init" "Target:   $HOST_ID"
-if [ "$IS_ROLLING" == "true" ]; then
-    log_msg "Init" "Mode:     rolling"
-else
-    log_msg "Init" "Mode:     stable"
-fi
 
 if [ "$TARGET_PROFILE" == "check" ]; then
     source "$SCRIPT_DIR/nhw.task-check.sh"
@@ -159,7 +171,7 @@ if [ "$TARGET_PROFILE" == "check" ]; then
     exit 0
 fi
 
-# 5. Execution
+# 6. Execution
 prepare_build_dir "$NIXOS_PATH" "$TMP_BUILD_DIR" "$ENV_FILE"
 
 if [ "$ACTION" == "update" ]; then

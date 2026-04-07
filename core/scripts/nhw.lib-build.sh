@@ -205,6 +205,39 @@ check_origin_git_status() {
     fi
 }
 
+# 10. Prepare Verify Dir (check 전용 격리 환경)
+# .git은 보존하여 Nix git 기반 eval 캐시 활용:
+#   - 내용 변경 없으면 init_tmp_git이 커밋 안 함 → 같은 커밋 해시 → Nix 캐시 히트
+#   - 내용 변경 시 새 커밋 → 새 해시 → 캐시 미스 (정상 동작)
+prepare_verify_dir() {
+    local source_path=$1
+    local verify_dir=$2
+    local json_dir=$3
+    local lock_file="${4:-}"  # flake.lock 경로 (커밋 전에 포함시켜야 캐시 키 안정)
+
+    # .git은 유지하고 나머지만 초기화 (삭제된 파일도 반영)
+    if [ -d "$verify_dir" ]; then
+        find "$verify_dir" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+    else
+        mkdir -p "$verify_dir"
+    fi
+
+    cp -a "$source_path/core" "$verify_dir/"
+    cp -a "$source_path/hosts" "$verify_dir/"
+    cp -a "$source_path/mods" "$verify_dir/"
+    cp -a "$source_path/core/"* "$verify_dir/"  # flake.nix를 루트에 노출
+
+    cp -a "$json_dir/resolved.json" "$verify_dir/"
+    cp -a "$json_dir/presets.json" "$verify_dir/"
+
+    # lock file을 커밋 전에 포함 → 내용 불변 시 같은 커밋 해시 → Nix eval 캐시 히트
+    if [ -n "$lock_file" ] && [ -f "$lock_file" ]; then
+        cp "$lock_file" "$verify_dir/flake.lock"
+    fi
+
+    init_tmp_git "$verify_dir"
+}
+
 # 9. Log Rotation
 rotate_logs() {
     mkdir -p "$LOG_DIR" 2>/dev/null

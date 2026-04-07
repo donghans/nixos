@@ -1,4 +1,5 @@
 .build
+.verify
 .env
 GEMINI.md
 

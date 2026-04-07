@@ -1,4 +1,8 @@
-{pkgs, ...}: let
+{
+  pkgs,
+  config,
+  ...
+}: let
   # 모니터 스왑 스크립트 정의
   swapMonitors = pkgs.writeShellScriptBin "hypr-swap-monitors" ''
     # jq로 현재 포커스된 모니터와 첫 번째 비포커스 모니터를 명확히 추출
@@ -26,7 +30,7 @@ in {
         "$mainMod, F, togglefloating,"
         "$mainMod, P, exec, ${fuzzel}"
         "$mainMod, V, exec, ${cliphist} list | ${fuzzel} --dmenu | ${cliphist} decode | ${wl-copy}"
-        "$mainMod, N, exec, ls -tr /var/log/notify-logger/history-$USER.log* 2>/dev/null | xargs -r zcat -f | tac | ${fuzzel} --dmenu --width 150 --placeholder \"Search 30-day History...\""
+        "$mainMod, N, exec, ls -tr ${config.services.custom-notify-logger.logDir}/history-$USER.log* 2>/dev/null | xargs -r zcat -f | tac | ${fuzzel} --dmenu --width 150 --placeholder \"Search 30-day History...\""
         "$mainMod, L, exec, hyprlock"
         "$mainMod, Hangul, exec, systemctl --user restart app-org.fcitx.Fcitx5@autostart"
 

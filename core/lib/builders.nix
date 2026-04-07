@@ -101,7 +101,7 @@
       };
 
       modules =
-        [{ nixpkgs.hostPlatform = hostInfo.system; }]
+        [{nixpkgs.hostPlatform = hostInfo.system;}]
         ++ mainConfig
         ++ [
           ./workspace-options.nix

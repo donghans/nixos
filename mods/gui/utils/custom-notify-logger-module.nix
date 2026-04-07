@@ -8,42 +8,73 @@
 with lib; let
   cfg = config.services.custom-notify-logger;
 
-  # 로그 기록용 스크립트 분리
-  logger-script = pkgs.writeShellScript "custom-notify-logger-script" ''
-    set -euo pipefail
+  logger-script = pkgs.writers.writePython3 "custom-notify-logger-script" {} ''
+    import datetime
+    import os
+    import re
+    import subprocess
 
-    # systemd --user 환경에서는 $USER 변수가 주입됨
-    LOG_DIR="/var/log/notify-logger"
-    LOG_PATH="$LOG_DIR/history-''${USER}.log"
+    log_dir = os.environ["LOG_DIR"]
+    user = os.environ.get("USER", "unknown")
+    log_path = os.path.join(log_dir, f"history-{user}.log")
 
-    # stdbuf -oL을 사용하여 라인 버퍼링 강제 (실시간 기록 핵심)
-    count=0
-    summary=""
-    body=""
 
-    ${pkgs.coreutils}/bin/stdbuf -oL ${pkgs.dbus}/bin/dbus-monitor "interface='org.freedesktop.Notifications',member='Notify',type='method_call'" | \
-    while read -r line; do
-      if echo "$line" | grep -q "member=Notify"; then
-        count=0
-        summary=""
-        body=""
-      fi
+    def parse_string_value(line):
+        m = re.match(r'\s+string "(.*)"$', line)
+        return m.group(1) if m else None
 
-      if echo "$line" | grep -q 'string "'; then
-        count=$((count + 1))
-        content=$(echo "$line" | sed 's/.*string "\(.*\)".*/\1/')
 
-        if [ $count -eq 3 ]; then
-          summary="$content"
-        elif [ $count -eq 4 ]; then
-          body="$content"
-          if [ -n "$summary" ]; then
-            echo "[$(date +'%Y-%m-%d %H:%M:%S')] [$summary] $body" >> "$LOG_PATH"
-            count=99
-          fi
-        fi
-      fi
-    done
+    # stdbuf -oL: 라인 버퍼링 강제 (실시간 기록 핵심)
+    # fmt: off
+    _stdbuf = "${pkgs.coreutils}/bin/stdbuf"  # noqa: E501
+    _dbus_mon = "${pkgs.dbus}/bin/dbus-monitor"  # noqa: E501
+    # fmt: on
+    _dbus_filter = (
+        "interface='org.freedesktop.Notifications',"
+        "member='Notify',type='method_call'"
+    )
+    proc = subprocess.Popen(
+        [_stdbuf, "-oL", _dbus_mon, _dbus_filter],
+        stdout=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+
+    strings_in_block = []
+    in_notify_block = False
+
+    for raw_line in proc.stdout:
+        line = raw_line.rstrip("\n")
+
+        if "member=Notify" in line:
+            strings_in_block = []
+            in_notify_block = True
+            continue
+
+        if not in_notify_block:
+            continue
+
+        # 들여쓰기 없는 라인 = 새 메시지 헤더 → 블록 종료
+        if line and not line[0].isspace():
+            in_notify_block = False
+            strings_in_block = []
+            continue
+
+        val = parse_string_value(line)
+        if val is not None:
+            strings_in_block.append(val)
+
+            # dbus Notify 시그니처:
+            # s(0:app_name) s(1:app_icon) u(skip) s(2:summary) s(3:body) ...
+            # uint32/array/dict 라인은 parse_string_value가 None 반환 → 자동 무시
+            if len(strings_in_block) == 4:
+                summary, body = strings_in_block[2], strings_in_block[3]
+                if summary:
+                    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    with open(log_path, "a", encoding="utf-8") as f:
+                        f.write(f"[{ts}] [{summary}] {body}\n")
+                in_notify_block = False
+                strings_in_block = []
   '';
 in {
   options.services.custom-notify-logger = {
@@ -52,20 +83,25 @@ in {
       default = true;
       description = "Notification Logger Service를 활성화합니다.";
     };
+    logDir = mkOption {
+      type = types.str;
+      default = "/var/log/notify-logger";
+      description = "알림 로그 파일이 저장될 디렉터리 경로.";
+    };
   };
 
   config = mkIf cfg.enable (
     (
       if isNixOS
       then {
-        # 1. 전역 로그 디렉터리 생성 (다중 사용자 환경 지원을 위해 Sticky Bit 적용)
+        # 전역 로그 디렉터리 생성 (다중 사용자 환경 지원을 위해 Sticky Bit 적용)
         systemd.tmpfiles.rules = [
-          "d /var/log/notify-logger 1777 root root -"
+          "d ${cfg.logDir} 1777 root root -"
         ];
 
-        # 3. 전역 Logrotate 설정 (NixOS 레벨)
+        # 전역 Logrotate 설정 (NixOS 레벨)
         services.logrotate.settings."custom-notify-logger" = {
-          files = "/var/log/notify-logger/history-*.log";
+          files = "${cfg.logDir}/history-*.log";
           frequency = "daily";
           rotate = 30;
           delaycompress = true;
@@ -78,7 +114,7 @@ in {
       else {}
     )
     // {
-      # 2. 사용자별 시스템디 서비스 등록
+      # 사용자별 systemd 서비스 등록
       systemd.user.services.custom-notify-logger =
         if isNixOS
         then {
@@ -88,8 +124,9 @@ in {
           partOf = ["graphical-session.target"];
           serviceConfig = {
             ExecStart = "${logger-script}";
-            Restart = "always"; # 죽으면 다시 살림
+            Restart = "always";
             RestartSec = 3;
+            Environment = ["LOG_DIR=${cfg.logDir}"];
           };
         }
         else {
@@ -105,6 +142,7 @@ in {
             ExecStart = "${logger-script}";
             Restart = "always";
             RestartSec = 3;
+            Environment = ["LOG_DIR=${cfg.logDir}"];
           };
         };
     }
