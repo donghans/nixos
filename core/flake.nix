@@ -75,7 +75,7 @@
     # == 호스트명 자동탐색: resolved.json 키 목록 ==
     hostNames = builtins.attrNames allResolved;
 
-    # == 공통 workspaceMeta (base.json 데이터는 모든 호스트 동일) ==
+    # == 공통 workspaceMeta (base.toml 데이터는 모든 호스트 동일) ==
     anyResolved = allResolved.${builtins.head hostNames};
     workspaceMeta = {
       inherit (anyResolved) username git;
@@ -109,13 +109,12 @@
         mergedMods = nixpkgs.lib.recursiveUpdate presetMods resolved.mods;
         modsModule = {mods = toConfig mergedMods;};
         coverageModule = {
-          config,
           options,
           lib,
           ...
         }:
           import ./lib/mk-preset.nix {
-            inherit lib config options;
+            inherit lib options;
             presetName = resolved.preset;
             presetsJsonPath = ./presets.json;
           };
@@ -126,7 +125,7 @@
             extraModules = [modsModule coverageModule];
           })))
       // {
-        # ISO는 resolved.json 없이 직접 호출 (host.json 없는 특수 케이스)
+        # ISO는 resolved.json 없이 직접 호출 (host.toml 없는 특수 케이스)
         custom-iso = mkHost {
           hostname = "nixos-iso";
           system = "x86_64-linux";
@@ -156,13 +155,12 @@
         mergedMods = nixpkgs.lib.recursiveUpdate presetMods resolved.mods;
         modsModule = {mods = toConfig mergedMods;};
         coverageModule = {
-          config,
           options,
           lib,
           ...
         }:
           import ./lib/mk-preset.nix {
-            inherit lib config options;
+            inherit lib options;
             presetName = resolved.preset;
             presetsJsonPath = ./presets.json;
           };
@@ -200,6 +198,19 @@
             modules = [
               ./lib/workspace-options.nix
               {workspace = hostCtx.metaConfig // {username = "root";};}
+              modsModule
+              ({
+                options,
+                lib,
+                ...
+              }:
+                import ./lib/mk-preset.nix {
+                  inherit lib options;
+                  presetName = resolved.preset;
+                  presetsJsonPath = ./presets.json;
+                  # root는 sys 모듈만 로드하므로 gui/devel 커버리지 제외
+                  excludePrefixes = ["mods.gui" "mods.devel"];
+                })
               (import ../mods/sys/default.nix)
             ];
           };

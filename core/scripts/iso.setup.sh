@@ -123,12 +123,12 @@ git clone "https://github.com/$NIXOS_REPO.git" /mnt/etc/nixos
 log_exec "git" "<" "git clone"
 
 # 5. Metadata Extraction
-INFO_JSON="/mnt/etc/nixos/hosts/_info.json"
-if [ ! -f "$INFO_JSON" ]; then
-    log_msg "Error" "could not find $INFO_JSON in the cloned repository."
+BASE_TOML="/mnt/etc/nixos/hosts/base.toml"
+if [ ! -f "$BASE_TOML" ]; then
+    log_msg "Error" "could not find $BASE_TOML in the cloned repository."
     exit 1
 fi
-USERNAME=$(jq -r '.username' "$INFO_JSON")
+USERNAME=$(python3 -c "import tomllib; print(tomllib.load(open('$BASE_TOML','rb'))['username'])")
 
 # 6. Hardware Config
 log_msg "Config" "generating hardware-configuration.nix ..."

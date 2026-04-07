@@ -55,7 +55,9 @@ acquire_lock
 
 # Resolver: NIXOS_PATH/resolved.json 생성 (determine_host_info가 읽음)
 log_msg "Prep" "Resolving host metadata..."
+log_exec "py" ">" "nhw.resolve.py"
 python3 "$SCRIPT_DIR/nhw.resolve.py"
+log_exec "py" "<" "nhw.resolve.py"
 
 # 3. Advanced Trap & State Management
 IS_SUCCESS=false

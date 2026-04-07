@@ -43,11 +43,11 @@ for entry in sorted(os.listdir(presets_dir)):
         "mods": preset_data.get("mods", {}),
         "explicitOptional": preset_data.get("explicitOptional", {}).get("paths", []),
     }
-    print(f"[resolve] preset:{preset_name}  stateVersion={state_version}")
+    print(f"preset:{preset_name}  stateVersion={state_version}")
 
 presets_path = os.path.join(target_path, "presets.json")
 write_json(presets_path, all_presets)
-print(f"[resolve] → {presets_path}")
+print(f"→ {presets_path}")
 
 # == resolved.json 생성 ==
 # hosts/base.toml + hosts/<hostname>/host.toml + preset → resolved.json
@@ -90,8 +90,8 @@ for entry in sorted(os.listdir(hosts_dir)):
         "isRolling": is_rolling,
         "mods": mods,
     }
-    print(f"[resolve] {entry}  stateVersion={state_version}  isRolling={is_rolling}")
+    print(f"{entry}  stateVersion={state_version}  isRolling={is_rolling}")
 
 resolved_path = os.path.join(target_path, "resolved.json")
 write_json(resolved_path, all_resolved)
-print(f"[resolve] → {resolved_path}")
+print(f"→ {resolved_path}")

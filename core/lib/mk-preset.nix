@@ -10,10 +10,12 @@
 #     };
 {
   lib,
-  config,
   options,
   presetName,
   presetsJsonPath,
+  # 커버리지 체크에서 제외할 mods 경로 접두사 목록
+  # (예: root@hostname는 gui/devel 옵션을 선언하지 않음)
+  excludePrefixes ? [],
 }:
 with lib; let
   presetsRaw = builtins.fromJSON (builtins.readFile presetsJsonPath);
@@ -68,12 +70,15 @@ with lib; let
   in
     any (p: presetCoveredSet ? ${p}) ancestorEnables;
 
+  isExcluded = opt: any (prefix: hasPrefix "${prefix}." opt) excludePrefixes;
+
   uncovered =
     filter (
       opt:
         !(presetCoveredSet ? ${opt})
         && !(isAncestorCovered opt)
         && !(elem opt explicitOptional)
+        && !(isExcluded opt)
     )
     declaredOptions;
 in {

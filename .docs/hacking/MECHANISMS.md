@@ -32,14 +32,14 @@ Unstable 채널 사용자의 최대 고민인 '빌드 실패'를 자동화로 �
 
 ---
 
-## 4. Strict Governance (워크스테이션 프리셋 거버넌스)
-선언되지 않은 기능이 몰래 시스템에 들어오는 "설정 드리프트"를 빌드 타임에 차단합니다.
+## 4. Mods Coverage Check (프리셋 커버리지 검증)
+`workspace-options.nix`에 새 옵션이 추가될 때 프리셋 선언에서 누락되는 것을 빌드 타임에 감지합니다.
 
-- **문제**: `mods.gui.enable = true`를 호스트별로 각자 선언하면, 어떤 호스트에 어떤 기능이 활성화됐는지 추적이 어려워집니다.
-- **해결**: `mods/_preset/workstation.nix`에 두 가지 `assertions`를 내장합니다.
-  1. `mods.gui.enable → _preset.workstation.enable` — GUI 도메인은 반드시 프리셋을 통해서만 활성화 가능
-  2. `mods.devel.enable → _preset.workstation.enable` — devel 도메인도 동일
-- **효과**: 호스트 파일에서 `mods._preset.workstation.enable = true` 한 줄로 검증된 전체 환경이 활성화됩니다. 단발성 직접 활성화 시도는 빌드 오류로 즉시 발각됩니다.
+- **문제**: `workspace-options.nix`에 새 `enable` 옵션을 추가하면서 프리셋 TOML에 해당 항목을 기재하지 않으면, 신규 기능이 의도치 않게 모든 호스트에서 비활성화 상태로 방치됩니다.
+- **해결**: `core/lib/mk-preset.nix`가 호스트별로 주입되어 두 목록을 대조합니다.
+  1. **presetCovered**: `presets.json`에서 읽은 preset mods의 `.enable` 경로 목록
+  2. **declaredOptions**: `options.mods`를 재귀 탐색하여 찾은 선언된 `.enable` 옵션 목록
+- **효과**: 두 목록의 차집합(`uncovered`)이 비어 있지 않으면 빌드 타임 오류를 발생시킵니다. 의도적으로 프리셋 외부에서 관리되는 옵션(예: `gui/default.nix`가 내부적으로 활성화하는 `sys.fonts`, `sys.vfs`)은 프리셋 TOML의 `[explicitOptional]`에 등록하면 체크에서 제외됩니다.
 
 ---
 

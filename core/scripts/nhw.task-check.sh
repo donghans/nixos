@@ -54,7 +54,9 @@ run_check_task() {
 
     # Resolve host JSON files → TMP_VERIFY_DIR/resolved.json
     log_msg "Task" "Step 6a: Resolving host JSON files"
+    log_exec "py" ">" "nhw.resolve.py"
     python3 "$SCRIPT_DIR/nhw.resolve.py" "$TMP_VERIFY_DIR"
+    log_exec "py" "<" "nhw.resolve.py"
 
     # Use the determined host's lock file for verification
     if [ -f "$HOST_SPECIFIC_LOCK" ]; then

@@ -20,12 +20,13 @@
 ---
 
 ## 2. 메타데이터 레이어 (Metadata Layer)
-**핵심 경로: `hosts/_info.json`**
+**핵심 경로: `hosts/base.toml`, `hosts/<hostname>/host.toml`, `mods/_preset/*.toml`**
 
 코드와 데이터를 분리하여, 사용자가 `nix` 언어를 깊게 알지 못해도 시스템 구성을 관리할 수 있게 합니다.
 
-- **중앙 설정**: 사용자 계정명, Git 저장소 주소, 호스트별 하드웨어 특성을 **JSON으로 선언**합니다.
-- **동적 활용**: `flake.nix`는 빌드 타임에 이 파일을 읽어 호스트 설정을 실시간으로 생성하고, `nhw.sh`는 런타임에 이를 읽어 빌드 대상 기기를 결정합니다.
+- **TOML 소스**: `base.toml`(전역: username, git, system), `host.toml`(호스트: isLaptop, ramGb, preset, mods 오버라이드), `_preset/*.toml`(프리셋 mods 정의 + explicitOptional)을 TOML로 선언합니다.
+- **Resolver (`nhw.resolve.py`)**: `nhw` 빌드 시 TOML 소스를 읽어 `presets.json`(프리셋 mods + explicitOptional)과 `resolved.json`(호스트별 merged 데이터)을 생성합니다. flake.nix는 이 JSON 파일을 읽어 빌드합니다.
+- **직접 nix 실행 금지**: `flake.nix`는 `resolved.json`이 없으면 명시적 오류를 발생시킵니다. 항상 `nhw`를 통해 빌드하세요.
 
 ---
 
@@ -50,6 +51,6 @@
   - `mods/gui/`: GUI 환경 — `core`(Hyprland 번들), `apps`(vivaldi/slack/bitwarden), `utils/notifications_logger`
   - `mods/devel/`: 개발 도구 — `toolchains`(node/python/fvm/devbox), `apps`(llm-cli/zed), `jetbrains`(android-studio 포함)
 - **Opt-in Mods System**: 모든 `mods.<domain>.<feature>.enable`은 `false`에서 시작합니다. `isNixOS` 플래그를 통해 NixOS와 Home Manager 양측의 구성을 단일 파일에서 분기 처리합니다(Dual-Context).
-- **워크스테이션 프리셋 (`mods/_preset/`)**: `mods._preset.workstation.enable = true` 하나로 sys+services+gui+devel 전체를 일괄 활성화하는 레시피입니다. 호스트 파일에서는 이 프리셋을 활성화하고 앱만 추가로 선택합니다.
-- **Strict Governance**: `workstation.nix`에 `assertions`가 내장되어 있어 `mods.gui.enable` 또는 `mods.devel.enable`을 프리셋 없이 직접 설정하면 빌드 타임 에러로 차단됩니다. 미선언 도메인 활성화를 원천 봉쇄합니다.
+- **워크스테이션 프리셋 (`mods/_preset/`)**: `workstation.toml`에 sys+services+gui+devel 전체 mods를 선언합니다. flake.nix가 이를 읽어 호스트별 mods와 병합하여 적용합니다. `host.toml`에는 프리셋 기본값에서 변경할 항목만 기재합니다.
+- **Mods Coverage Check**: flake.nix가 호스트별로 `mk-preset.nix` 기반 coverageModule을 주입합니다. 프리셋 TOML에 누락된 옵션이 있으면 빌드 타임 오류를 발생시킵니다.
 - **Shared Data (`mods/_data/`)**: `devbox` 설정 등 정적 템플릿과 메타데이터를 분리 관리하여 로직의 순수성을 유지합니다.
