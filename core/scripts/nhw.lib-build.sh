@@ -3,6 +3,7 @@
 # Constants
 # shellcheck disable=SC2034
 TMP_BUILD_DIR="/tmp/nixos-build"
+JSON_DIR="/tmp/nhw-json"
 LOCK_FILE="/tmp/nixos-build.lock"
 LOG_DIR="/var/log/nhw"
 
@@ -117,7 +118,7 @@ determine_host_info() {
     if [[ "$host_id" =~ ^_?default$ ]]; then
         echo "_default false"
     else
-        local resolved_path="$NIXOS_PATH/resolved.json"
+        local resolved_path="$JSON_DIR/resolved.json"
         if [ ! -f "$resolved_path" ]; then
             log_msg "Error" "resolved.json not found. resolver may have failed."
             exit 1
@@ -159,9 +160,9 @@ prepare_build_dir() {
     
     [ -f "$env_file" ] && cp -a "$env_file" "$build_dir/.env"
 
-    # resolved.json + presets.json 복사 (flake.nix가 TMP_BUILD_DIR에서 읽음)
-    cp -a "$source_path/resolved.json" "$build_dir/"
-    cp -a "$source_path/presets.json" "$build_dir/"
+    # resolved.json + presets.json 복사 (JSON_DIR → build_dir, flake.nix가 읽음)
+    cp -a "$JSON_DIR/resolved.json" "$build_dir/"
+    cp -a "$JSON_DIR/presets.json" "$build_dir/"
 
     ln -sfn "$build_dir" "$source_path/.build"
 }

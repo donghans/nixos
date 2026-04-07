@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # core/scripts/nhw.resolve.py
-# TOML 소스 파일 → resolved.json + presets.json (TARGET_DIR 루트에 생성)
+# TOML 소스 파일 → resolved.json + presets.json (OUT_DIR 루트에 생성)
 #
 # 사용법:
-#   python3 nhw.resolve.py              # NIXOS_PATH 기준 (nhw 내부 호출)
-#   python3 nhw.resolve.py /tmp/dir     # 지정 디렉토리 기준 (task-check.sh 등)
+#   python3 nhw.resolve.py              # NIXOS_PATH 기준 읽기/쓰기 (레거시)
+#   python3 nhw.resolve.py /tmp/dir     # 지정 디렉토리 기준 읽기/쓰기 (task-check.sh 등)
+#   python3 nhw.resolve.py /src /out    # /src에서 읽고 /out에 생성 (nhw 내부 호출)
 #
 # 생성 파일:
 #   resolved.json  — 호스트별 merged 데이터 (flake.nix, nhw.lib-build.sh 사용)
@@ -17,7 +18,14 @@ import tomllib
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 src_path = os.path.normpath(os.path.join(script_dir, "../.."))
-target_path = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else src_path
+if len(sys.argv) == 3:
+    src_path = os.path.abspath(sys.argv[1])
+    target_path = os.path.abspath(sys.argv[2])
+elif len(sys.argv) == 2:
+    src_path = os.path.abspath(sys.argv[1])
+    target_path = src_path
+else:
+    target_path = src_path
 
 
 def write_json(path, data):
@@ -26,7 +34,7 @@ def write_json(path, data):
 
 # == presets.json 생성 ==
 # mods/_preset/*.toml → presets.json (Nix가 읽는 JSON 형식)
-presets_dir = f"{target_path}/mods/_preset"
+presets_dir = f"{src_path}/mods/_preset"
 all_presets = {}
 
 for entry in sorted(os.listdir(presets_dir)):
@@ -51,10 +59,10 @@ print(f"→ {presets_path}")
 
 # == resolved.json 생성 ==
 # hosts/base.toml + hosts/<hostname>/host.toml + preset → resolved.json
-with open(f"{target_path}/hosts/base.toml", "rb") as f:
+with open(f"{src_path}/hosts/base.toml", "rb") as f:
     base = tomllib.load(f)
 
-hosts_dir = f"{target_path}/hosts"
+hosts_dir = f"{src_path}/hosts"
 all_resolved = {}
 
 for entry in sorted(os.listdir(hosts_dir)):

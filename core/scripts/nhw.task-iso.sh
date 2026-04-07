@@ -12,17 +12,11 @@ run_iso_task() {
         if [ -L "$TMP_BUILD_DIR/result" ]; then
             ISO_FILE=$(readlink -f "$TMP_BUILD_DIR/result/iso/"*.iso)
             ISO_NAME=$(basename "$ISO_FILE")
-            
-            # Create persistent .iso directory in project root
-            mkdir -p "$NIXOS_PATH/.iso"
-            
-            # Copy to both temp (for .build/ reference) and persistent .iso/
+
             cp "$ISO_FILE" "$TMP_BUILD_DIR/"
-            cp "$ISO_FILE" "$NIXOS_PATH/.iso/"
-            
             rm -f "$TMP_BUILD_DIR/result"
-            log_msg "Done" "ISO successfully created: .iso/$ISO_NAME"
-            log_msg "Done" "You can find it in: $NIXOS_PATH/.iso/$ISO_NAME"
+            log_msg "Done" "ISO successfully created: $ISO_NAME"
+            log_msg "Done" "You can find it in: $NIXOS_PATH/.build/$ISO_NAME"
         else
             log_msg "Error" "ISO build failed: result link not found."
             exit 1

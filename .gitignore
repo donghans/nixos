@@ -1,10 +1,5 @@
 .build
-.iso
 .env
-result
-*.log
 GEMINI.md
-resolved.json
-presets.json
 
 .before_refactor

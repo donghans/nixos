@@ -53,10 +53,11 @@ fi
 
 acquire_lock
 
-# Resolver: NIXOS_PATH/resolved.json 생성 (determine_host_info가 읽음)
+# Resolver: JSON_DIR에 resolved.json + presets.json 생성 (determine_host_info가 읽음)
 log_msg "Prep" "Resolving host metadata..."
+mkdir -p "$JSON_DIR"
 log_exec "py" ">" "nhw.resolve.py"
-python3 "$SCRIPT_DIR/nhw.resolve.py"
+python3 "$SCRIPT_DIR/nhw.resolve.py" "$NIXOS_PATH" "$JSON_DIR"
 log_exec "py" "<" "nhw.resolve.py"
 
 # 3. Advanced Trap & State Management
