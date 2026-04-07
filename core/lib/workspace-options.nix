@@ -72,11 +72,6 @@ with lib; {
           android-studio.enable = mkEnableOption "Android Studio (ADB, UDP 5353)";
         };
       };
-
-      # == Presets: 완성된 구성 레시피 ==
-      _preset = {
-        workstation.enable = mkEnableOption "워크스테이션 프리셋 (sys+services+gui+devel 일괄 활성화)";
-      };
     };
   };
 }

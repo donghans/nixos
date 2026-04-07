@@ -15,8 +15,14 @@ in {
       environment.pathsToLink = ["/share/applications" "/share/xdg-desktop-portal"];
     })
 
-    # == Home Manager: XDG Portal 설정 ==
+    # == Home Manager: XDG Portal 설정 + 세션 식별 변수 ==
     (optionalAttrs (!isNixOS) {
+      home.sessionVariables = {
+        XDG_CURRENT_DESKTOP = "Hyprland";
+        XDG_SESSION_TYPE = "wayland";
+        XDG_SESSION_DESKTOP = "Hyprland";
+      };
+
       home.packages = with pkgs; [
         xdg-desktop-portal-gtk
         xdg-desktop-portal-hyprland

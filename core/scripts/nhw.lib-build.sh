@@ -101,7 +101,6 @@ determine_host_info() {
     local target_profile=$1
     local input_host=$2
     local env_file=$3
-    local info_json=$4
 
     if [ "$target_profile" == "iso" ]; then
         echo "nixos-iso true"
@@ -118,14 +117,18 @@ determine_host_info() {
     if [[ "$host_id" =~ ^_?default$ ]]; then
         echo "_default false"
     else
-        local host_config
-        if ! host_config=$(jq -e ".hosts[] | select(.hostname == \"$host_id\")" "$info_json" 2>/dev/null); then
+        local resolved_path="$NIXOS_PATH/resolved.json"
+        if [ ! -f "$resolved_path" ]; then
+            log_msg "Error" "resolved.json not found. resolver may have failed."
+            exit 1
+        fi
+        if ! jq -e ".\"$host_id\"" "$resolved_path" > /dev/null 2>&1; then
             log_msg "Error" "'$host_id' is not a registered host."
             exit 1
         fi
         update_env_file "$env_file" "HOST" "$host_id"
         local is_rolling
-        is_rolling=$(echo "$host_config" | jq -r '.isRolling')
+        is_rolling=$(jq -r ".\"$host_id\".isRolling" "$resolved_path")
         echo "$host_id $is_rolling"
     fi
 }
@@ -155,7 +158,11 @@ prepare_build_dir() {
     cp -a "$source_path/core/"* "$build_dir/"
     
     [ -f "$env_file" ] && cp -a "$env_file" "$build_dir/.env"
-    
+
+    # resolved.json + presets.json 복사 (flake.nix가 TMP_BUILD_DIR에서 읽음)
+    cp -a "$source_path/resolved.json" "$build_dir/"
+    cp -a "$source_path/presets.json" "$build_dir/"
+
     ln -sfn "$build_dir" "$source_path/.build"
 }
 

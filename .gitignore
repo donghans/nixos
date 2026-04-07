@@ -4,5 +4,7 @@
 result
 *.log
 GEMINI.md
+resolved.json
+presets.json
 
 .before_refactor

@@ -21,7 +21,5 @@
     };
   };
 
-  # == 프리셋: 워크스테이션 (그래픽 인스톨러 환경) ==
-  mods._preset.workstation.enable = true;
-  mods.gui.apps.vivaldi.enable = true; # (목적: ISO 내 브라우저 접근 제공)
+  # (프리셋 mods는 flake.nix의 custom-iso extraModules에서 주입)
 }

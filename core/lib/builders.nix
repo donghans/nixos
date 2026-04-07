@@ -1,6 +1,5 @@
 {
   inputs,
-  workspaceMeta,
   customOverlays,
 }: let
   inherit (inputs) nixpkgs nixpkgs-unstable home-manager;
@@ -10,8 +9,7 @@
     hostname,
     system,
     isLaptop,
-    ramGb ? null,
-    isISO ? false,
+    workspaceMeta,
     ...
   }: let
     pkgs = import nixpkgs {
@@ -55,6 +53,7 @@
       else unstable;
 
     # (목적: ISO 환경에서는 'nixos' 기본 유저 강제 사용)
+    isISO = hostInfo.isISO or false;
     homeUser =
       if isISO
       then "nixos"
@@ -67,9 +66,10 @@
 
     metaConfig = {
       inherit (workspaceMeta) gitName gitEmail nixosRepo;
-      inherit hostname isLaptop ramGb;
+      inherit hostname isLaptop;
       username = homeUser;
-      stateVersion = hostInfo.stateVersion or workspaceMeta.stateVersion;
+      ramGb = hostInfo.ramGb or null;
+      stateVersion = workspaceMeta.stateVersion or "25.11";
     };
   in {
     inherit homeUser homeConfig metaConfig unstable unstable-fallback pkgs;
@@ -78,6 +78,7 @@
   # == Host Generator ==
   mkHost = hostInfo: let
     isISO = hostInfo.isISO or false;
+    extraModules = hostInfo.extraModules or [];
     hostCtx = mkHostContext (hostInfo // {inherit isISO;});
 
     mainConfig =
@@ -113,24 +114,27 @@
             # (목적: 전역 관리 CLI 'nhw' 시스템 등록)
             environment.systemPackages = [
               (nixpkgs.legacyPackages.${hostInfo.system}.writeShellScriptBin "nhw" ''
-                exec /home/${workspaceMeta.username}/nixos/core/scripts/nhw.sh "$@"
+                exec /home/${hostCtx.metaConfig.username}/nixos/core/scripts/nhw.sh "$@"
               '')
             ];
 
             # (목적: nhw 로그 디렉터리 생성 및 쓰기 권한 부여)
             systemd.tmpfiles.rules = [
-              "d /var/log/nhw 0775 ${workspaceMeta.username} users -"
+              "d /var/log/nhw 0775 ${hostCtx.metaConfig.username} users -"
             ];
           }
         ]
+        ++ extraModules
         ++ [
           home-manager.nixosModules.home-manager
           {
-            home-manager.sharedModules = [
-              ./workspace-options.nix
-              ../mods/default.nix
-              {workspace = hostCtx.metaConfig;}
-            ];
+            home-manager.sharedModules =
+              [
+                ./workspace-options.nix
+                ../mods/default.nix
+                {workspace = hostCtx.metaConfig;}
+              ]
+              ++ extraModules;
             home-manager.useGlobalPkgs = true;
             home-manager.useUserPackages = true;
 

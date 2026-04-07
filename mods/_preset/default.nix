@@ -1,3 +1,1 @@
-{...}: {
-  imports = [./workstation.nix];
-}
+_: {}

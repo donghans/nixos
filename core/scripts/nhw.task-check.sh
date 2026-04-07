@@ -52,6 +52,10 @@ run_check_task() {
     cp -a "$NIXOS_PATH/hosts" "$TMP_VERIFY_DIR/"
     cp -a "$NIXOS_PATH/mods" "$TMP_VERIFY_DIR/"
 
+    # Resolve host JSON files → TMP_VERIFY_DIR/resolved.json
+    log_msg "Task" "Step 6a: Resolving host JSON files"
+    python3 "$SCRIPT_DIR/nhw.resolve.py" "$TMP_VERIFY_DIR"
+
     # Use the determined host's lock file for verification
     if [ -f "$HOST_SPECIFIC_LOCK" ]; then
         cp "$HOST_SPECIFIC_LOCK" "$TMP_VERIFY_DIR/flake.lock"

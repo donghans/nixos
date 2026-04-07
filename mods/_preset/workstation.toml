@@ -1,0 +1,35 @@
+# stateVersion 미지정 → isRolling = true (nhw가 rolling lock 사용)
+# stateVersion = "25.11" 처럼 명시 → isRolling = false (호스트별 lock 사용)
+
+[mods.sys]
+base = true
+
+[mods.sys.utils]
+nfd = true
+
+[mods.sys.services]
+bluetooth      = true
+networkmanager = true
+tailscale      = true
+docker         = true
+
+[mods.gui]
+enable = true
+
+[mods.gui.apps]
+vivaldi   = true
+slack     = true
+bitwarden = true
+
+[mods.gui.utils]
+notifications_logger = true
+
+[mods.devel]
+enable = true
+
+[mods.devel.jetbrains]
+android-studio = true
+
+[explicitOptional]
+# gui/default.nix가 gui.enable 시 크로스-도메인으로 자동 활성화
+paths = ["mods.sys.fonts.enable", "mods.sys.vfs.enable"]

@@ -9,8 +9,14 @@ if isNixOS
 then {}
 else
   with lib; let
-    cfg = config.mods.devel;
     modCfg = config.mods.devel.jetbrains;
   in {
-    config = mkIf (cfg.enable || modCfg.enable) (import ./jetbrains.nix-module.nix (args // {inherit pkgs;}));
+    # == jetbrains.enable 마스터 스위치: android-studio 기본값 활성화 ==
+    # (사용자는 `lib.mkForce false`로 비활성화 가능)
+    config = mkMerge [
+      (mkIf modCfg.enable {
+        mods.devel.jetbrains.android-studio.enable = mkDefault true;
+      })
+      (mkIf modCfg.enable (import ./jetbrains.nix-module.nix (args // {inherit pkgs;})))
+    ];
   }
