@@ -161,7 +161,7 @@
             modules = [
               ./lib/workspace-options.nix
               {workspace = hostCtx.metaConfig;}
-              ../mods/default.nix
+              ./mods/default.nix
               modsModule
               coverageModule
               (import hostCtx.homeConfig)
@@ -194,7 +194,7 @@
                   # root는 sys 모듈만 로드하므로 gui/devel 커버리지 제외
                   excludePrefixes = ["mods.gui" "mods.devel"];
                 })
-              (import ../mods/sys/default.nix)
+              (import ./mods/sys/default.nix)
             ];
           };
         }
