@@ -11,8 +11,10 @@ nhw [scope] [action] [hostname]
 ```
 
 - **`scope`**: 작업 범위 (`os`, `home`, `iso`, `fix-unstable`, `check`)
-- **`action`**: 수행할 동작 (`switch`, `boot`, `test`, `update`)
+- **`action`**: 수행할 동작 (`switch`, `boot`, `test`, `build`, `update`)
 - **`hostname`**: 대상 기기 이름 (생략 시 현재 기기 혹은 기본값 사용)
+
+> **참고**: 인수 순서는 자유롭습니다. `nhw os switch beelink-ser7-co`와 `nhw beelink-ser7-co switch os`는 동일하게 동작합니다.
 
 ---
 
@@ -20,18 +22,27 @@ nhw [scope] [action] [hostname]
 
 ### 무결성 및 품질 관리 (`check`)
 프로젝트 전체의 코드를 정돈하고 빌드 가능 여부를 사전에 검증합니다.
-- `nhw check`: 안티패턴 수정(`statix`), 코드 포맷팅(`alejandra`), 빌드 무결성(`nix flake check`)을 한 번에 수행합니다.
-- **주의**: `flake.nix`의 특정 띄어쓰기 정렬을 유지하기 위한 예외 처리 로직이 포함되어 있습니다.
+- `nhw check`: 아래 단계를 순서대로 수행합니다.
+  1. `deadnix` — 미사용 코드 탐지
+  2. `statix fix` — 안티패턴 자동 수정
+  3. `alejandra` — 코드 포맷팅
+  4. `flake.nix` 예외처리 (특정 spacing 복원)
+  5. `shellcheck` — 셸 스크립트 정적 분석
+  6. `nix eval` — 현재 호스트에 대해 빌드 가능 여부를 빠르게 검증
+- `nhw check --deep`: 6단계를 `nix flake check`로 교체하여 **전체 호스트**를 완전히 검사합니다. 시간이 오래 걸리지만 CI 수준의 완전한 검증을 제공합니다.
+- **참고**: `flake.nix`의 특정 띄어쓰기 정렬을 유지하기 위한 예외 처리 로직이 포함되어 있습니다.
 
 ### 시스템 설정 관리 (`os`)
 기존 `nixos-rebuild`를 대체하며, 빌드 격리 환경에서 안전하게 수행됩니다.
 - `nhw os switch`: 설정을 즉시 적용하고 부팅 메뉴에 추가합니다. (가장 많이 사용)
 - `nhw os boot`: 다음 부팅 시 적용되도록 설정만 합니다.
-- `nhw os test`: 현재 세션에만 임시로 설정을 적용합니다. (테스트용)
+- `nhw os test`: 현재 세션에만 임시로 설정을 적용합니다. (재부팅 시 원복)
+- `nhw os build`: 빌드만 수행하고 새 세대를 생성하지 않습니다. 빌드 캐시 워밍업 또는 설정 오류 사전 확인에 유용합니다.
 
 ### 사용자 설정 관리 (`home`)
 Home Manager 설정을 적용합니다.
 - `nhw home switch`: 유저 도구, 테마, 앱 설정 등을 즉시 반영합니다.
+- `nhw home build`: 홈 설정을 빌드만 수행합니다. (`os build`와 동일한 목적)
 
 ### 시스템 업데이트 및 관리
 - `nhw update`: `flake.lock`의 모든 입력을 최신 버전으로 업데이트합니다. (Rolling 호스트는 `_rolling.lock` 업데이트)

@@ -3,6 +3,11 @@
 
 set -e
 
+# ANSI Colors
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
 # 1. 프로젝트 경로 설정
 PROJECT_ROOT=$(dirname "$(readlink -f "$0")")
 NHW_PATH="$PROJECT_ROOT/core/scripts/nhw.sh"

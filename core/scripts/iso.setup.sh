@@ -133,8 +133,8 @@ USERNAME=$(python3 -c "import tomllib; print(tomllib.load(open('$BASE_TOML','rb'
 # 6. Hardware Config
 log_msg "Config" "generating hardware-configuration.nix ..."
 nixos-generate-config --root /mnt --no-filesystems
-mkdir -p /mnt/etc/nixos/hosts/hardware
-mv /mnt/etc/nixos/hardware-configuration.nix "/mnt/etc/nixos/hosts/hardware/$HOST.nix"
+mkdir -p "/mnt/etc/nixos/hosts/$HOST"
+mv /mnt/etc/nixos/hardware-configuration.nix "/mnt/etc/nixos/hosts/$HOST/_hardware.nix"
 rm -f /mnt/etc/nixos/configuration.nix
 echo "$HOST" > /mnt/etc/nixos/.current_host
 

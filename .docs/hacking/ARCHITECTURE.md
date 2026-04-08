@@ -11,11 +11,13 @@
 
 - **`nhw.sh` (Dispatcher)**:
   - **역할**: 모든 명령의 통합 입구이자 빌드 오케스트레이터입니다.
-  - **특징**: `nix-shell` 쉬뱅을 사용하여 `nh`, `jq`, `nom` 등의 도구가 없어도 시스템을 부트스트랩할 수 있도록 설계되었습니다. 로깅(`YYYYMMDDTHHMMSS.log`)과 세션 락(`flock`)을 독점적으로 관리합니다.
+  - **특징**: `nix-shell` 쉬뱅을 사용하여 `nh`, `jq`, `nom` 등의 도구가 없어도 시스템을 부트스트랩할 수 있도록 설계되었습니다. 로깅(`YYYYMMDDTHHMMSS-[scope]-[action].log`, 예: `20260405T120000-os-switch.log`)과 세션 락(`flock`)을 독점적으로 관리합니다.
 - **Task & Lib**:
   - **`nhw.lib-build.sh`**: `/tmp` 기반 격리 빌드 환경 구축 로직.
   - **`nhw.lib-lock.sh`**: 기기 특성(`isRolling`)에 따른 유연한 락 파일 관리 로직.
+  - **`nhw.resolve.py`**: TOML 소스(`base.toml`, `host.toml`, `_preset/*.toml`)를 읽어 Nix가 사용할 `resolved.json`과 `presets.json`을 생성하는 메타데이터 변환기.
   - **`nhw.task-*.sh`**: 실제 비즈니스 로직(빌드, 업데이트, 복구 등)을 수행하는 모듈형 스크립트.
+  - **`iso.setup.sh`**: ISO 부팅 환경에서 실행되는 설치 스크립트. `nixos-setup-from-repo` 명령으로 노출되며, 파티셔닝(EFI+Btrfs), 저장소 클론, 하드웨어 감지, `nixos-install`, 후처리(저장소 이동 및 심볼릭 링크)를 순서대로 수행합니다.
 
 ---
 

@@ -76,7 +76,7 @@ fvm = true
 - **커스텀 ISO 빌드:** `nhw iso` (결과물은 `.build/` 폴더에 생성됨)
 - **시스템 업데이트:** `nhw update`
 - **깨진 패키지 복구:** `nhw fix-unstable [pkg1] [pkg2] ...`
-- **무결성 및 스타일 점검:** `nhw check` (안티패턴 정리, 포맷팅, 빌드 검증)
+- **무결성 및 스타일 점검:** `nhw check` (deadnix, 안티패턴 정리, 포맷팅, shellcheck, 빌드 검증)
 - **시스템 정리:** `nhw clean [all]`
 
 ---

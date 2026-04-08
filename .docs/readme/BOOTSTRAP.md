@@ -26,9 +26,9 @@ username = "your_username"   # 생성할 유저명
 system   = "x86_64-linux"    # 현재 x86_64 시스템만 테스트됨
 
 [git]
-name  = "Your Name"
-email = "your@email.com"
-repo  = "<your-username>/nixos"  # 설치 시 클론할 저장소 경로
+name      = "Your Name"
+email     = "your@email.com"
+nixosRepo = "<your-username>/nixos"  # 설치 시 클론할 저장소 경로
 ```
 
 ---
@@ -68,12 +68,28 @@ mkdir -p hosts/<hostname>
 nhw iso
 ```
 
-- 빌드가 완료되면 `.build/` 심볼릭 링크가 가리키는 디렉터리에 ISO 파일이 생성됩니다.
-- 이 ISO로 부팅하면 터미널에 **한글 안내 메시지**가 나타납니다.
-- 안내에 따라 `nixos-setup` 명령어를 실행하면 다음 작업이 자동으로 진행됩니다:
-  1. **Btrfs 파티셔닝**: `@`, `@home`, `@nix`, `@log` 서브볼륨 자동 생성 및 최적 옵션 마운트.
-  2. **하드웨어 감지**: `nixos-generate-config`를 실행하여 해당 기기의 하드웨어 설정을 `hosts/<hostname>/_hardware.nix` 경로에 자동으로 저장합니다.
-  3. **자동 설치**: `hosts/base.toml`에 정의된 저장소를 클론하고 시스템을 빌드합니다.
+빌드가 완료되면 `.build/` 심볼릭 링크가 가리키는 디렉터리에 ISO 파일이 생성됩니다. 이 ISO로 부팅하면 터미널에 안내 메시지가 나타납니다.
+
+안내에 따라 아래 명령어를 실행하면 설치가 자동으로 진행됩니다:
+
+```bash
+# 기본 설치 (EFI 파티션, 루트 파티션, 호스트명 지정)
+nixos-setup <EFI_PART> <ROOT_PART> <HOSTNAME>
+
+# 예시 (nvme0n1 기기)
+nixos-setup /dev/nvme0n1p1 /dev/nvme0n1p2 beelink-ser7-co
+
+# 다른 저장소로 설치할 경우
+NIXOS_REPO=user/nixos sudo -E nixos-setup-from-repo <EFI_PART> <ROOT_PART> <HOSTNAME>
+```
+
+설치 스크립트가 순서대로 수행하는 작업:
+1. **EFI 파티션 포맷**: FAT32 포맷 여부를 확인 후 진행합니다.
+2. **Btrfs 파티셔닝**: `@`, `@home`, `@nix`, `@log` 서브볼륨 자동 생성 및 최적 옵션 마운트.
+3. **저장소 클론**: `hosts/base.toml`의 `nixosRepo`에 설정된 GitHub 저장소를 `/mnt/etc/nixos`에 클론합니다.
+4. **하드웨어 감지**: `nixos-generate-config`를 실행하여 해당 기기의 하드웨어 설정을 `hosts/<hostname>/_hardware.nix` 경로에 자동으로 저장합니다.
+5. **시스템 빌드**: `nixos-install --flake "/mnt/etc/nixos/core#<hostname>"`으로 시스템을 빌드하고 설치합니다.
+6. **후처리**: 저장소를 `~/nixos`로 이동하고 `/etc/nixos`에서 심볼릭 링크를 생성합니다.
 
 설치가 완료되고 재부팅하면, 전역 명령어 `nhw`를 통해 시스템을 관리할 수 있습니다.
 
