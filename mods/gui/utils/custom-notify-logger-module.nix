@@ -90,61 +90,59 @@ in {
     };
   };
 
-  config = mkIf cfg.enable (
-    (
-      if isNixOS
-      then {
-        # 전역 로그 디렉터리 생성 (다중 사용자 환경 지원을 위해 Sticky Bit 적용)
-        systemd.tmpfiles.rules = [
-          "d ${cfg.logDir} 1777 root root -"
-        ];
+  config = mkIf cfg.enable (mkMerge [
+    # == NixOS: 시스템 레벨 디렉터리 생성 + Logrotate + 서비스 등록 ==
+    (optionalAttrs isNixOS {
+      # 전역 로그 디렉터리 생성 (다중 사용자 환경 지원을 위해 Sticky Bit 적용)
+      systemd.tmpfiles.rules = [
+        "d ${cfg.logDir} 1777 root root -"
+      ];
 
-        # 전역 Logrotate 설정 (NixOS 레벨)
-        services.logrotate.settings."custom-notify-logger" = {
-          files = "${cfg.logDir}/history-*.log";
-          frequency = "daily";
-          rotate = 30;
-          delaycompress = true;
-          missingok = true;
-          notifempty = true;
-          nocreate = true;
-          su = "root root";
+      # 전역 Logrotate 설정 (NixOS 레벨)
+      services.logrotate.settings."custom-notify-logger" = {
+        files = "${cfg.logDir}/history-*.log";
+        frequency = "daily";
+        rotate = 30;
+        delaycompress = true;
+        missingok = true;
+        notifempty = true;
+        nocreate = true;
+        su = "root root";
+      };
+
+      # NixOS systemd 모듈: 플랫 키 구조
+      systemd.user.services.custom-notify-logger = {
+        description = "Notification Logger Service";
+        wantedBy = ["graphical-session.target"];
+        after = ["graphical-session-pre.target"];
+        partOf = ["graphical-session.target"];
+        serviceConfig = {
+          ExecStart = "${logger-script}";
+          Restart = "always";
+          RestartSec = 3;
+          Environment = ["LOG_DIR=${cfg.logDir}"];
         };
-      }
-      else {}
-    )
-    // {
-      # 사용자별 systemd 서비스 등록
-      systemd.user.services.custom-notify-logger =
-        if isNixOS
-        then {
-          description = "Notification Logger Service";
-          wantedBy = ["graphical-session.target"];
-          after = ["graphical-session-pre.target"];
-          partOf = ["graphical-session.target"];
-          serviceConfig = {
-            ExecStart = "${logger-script}";
-            Restart = "always";
-            RestartSec = 3;
-            Environment = ["LOG_DIR=${cfg.logDir}"];
-          };
-        }
-        else {
-          Unit = {
-            Description = "Notification Logger Service";
-            After = ["graphical-session-pre.target"];
-            PartOf = ["graphical-session.target"];
-          };
-          Install = {
-            WantedBy = ["graphical-session.target"];
-          };
-          Service = {
-            ExecStart = "${logger-script}";
-            Restart = "always";
-            RestartSec = 3;
-            Environment = ["LOG_DIR=${cfg.logDir}"];
-          };
+      };
+    })
+
+    # == Home Manager: 사용자 서비스 등록 (섹션별 중첩 키 구조) ==
+    (optionalAttrs (!isNixOS) {
+      systemd.user.services.custom-notify-logger = {
+        Unit = {
+          Description = "Notification Logger Service";
+          After = ["graphical-session-pre.target"];
+          PartOf = ["graphical-session.target"];
         };
-    }
-  );
+        Install = {
+          WantedBy = ["graphical-session.target"];
+        };
+        Service = {
+          ExecStart = "${logger-script}";
+          Restart = "always";
+          RestartSec = 3;
+          Environment = ["LOG_DIR=${cfg.logDir}"];
+        };
+      };
+    })
+  ]);
 }

@@ -8,11 +8,6 @@
     ++ (
       if isNixOS
       then [./os.nix ./greeter.nix]
-      else []
-    )
-    ++ (
-      if !isNixOS
-      then [./home.nix]
-      else []
+      else [./home.nix]
     );
 }

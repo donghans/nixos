@@ -9,9 +9,8 @@ with lib; let
 in
   {options.mods.sys.services.docker.enable = mkEnableOption "Docker Daemon and tools";}
   // (
-    if !isNixOS
-    then {}
-    else {
+    if isNixOS
+    then {
       config = mkIf cfg.enable {
         virtualisation.docker = {
           enable = true;
@@ -20,4 +19,5 @@ in
         users.users.${config.workspace.username}.extraGroups = ["docker"];
       };
     }
+    else {}
   )

@@ -18,16 +18,13 @@ in {
       ./jetbrains/default.nix
       ./jetbrains/android-studio.nix
     ]
-    ++ (
-      if isNixOS
-      then [./base/os.nix]
-      else []
-    )
-    ++ (
-      if !isNixOS
-      then [./base/home.nix]
-      else []
-    );
+    ++ [
+      (
+        if isNixOS
+        then ./base/os.nix
+        else ./base/home.nix
+      )
+    ];
 
   options.mods.devel.enable = mkEnableOption "Master switch for developer workshop";
 
