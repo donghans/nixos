@@ -13,6 +13,7 @@ in {
     if isNixOS
     then {
       services.headscale.enable = true;
+      services.headscale.settings.dns.base_domain = "server.local";
     }
     else {}
   );

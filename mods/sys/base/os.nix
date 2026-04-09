@@ -5,6 +5,7 @@
 }: {
   imports = [
     ./os/_optimize.nix
+    ./os/_server-optimize.nix
     ./os/_boot.nix
     ./os/_disk.nix
     ./os/_swap.nix

@@ -40,5 +40,5 @@ paths = [
   "mods.sys.services.caddy.enable",
   "mods.sys.services.cockpit.enable",
   "mods.sys.services.frp.enable",
-  "mods.sys.serverMode.enable"
+  "mods.sys.server.enable"
 ]

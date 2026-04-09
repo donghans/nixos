@@ -28,5 +28,5 @@ with lib; {
     ];
 
   options.mods.sys.base.enable = mkEnableOption "System Base (Zsh, Atuin, Git, CLI Tools)";
-  options.mods.sys.serverMode.enable = mkEnableOption "Server-optimized Kernel/Network settings";
+  options.mods.sys.server.enable = mkEnableOption "Server-optimized Kernel/Network settings";
 }

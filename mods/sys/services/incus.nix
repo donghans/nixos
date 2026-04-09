@@ -15,6 +15,7 @@ in {
       virtualisation.incus.enable = true;
       virtualisation.incus.ui.enable = true;
       networking.firewall.allowedTCPPorts = [8443];
+      networking.nftables.enable = true;
     }
     else {}
   );

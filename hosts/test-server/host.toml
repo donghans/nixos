@@ -1,4 +1,4 @@
-preset = "server-nix"
+preset = "server"
 username = "donghans"
 system = "x86_64-linux"
 hostname = "test-server"
