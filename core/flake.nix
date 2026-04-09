@@ -149,6 +149,22 @@
             })
           ];
         };
+
+        custom-iso-aarch64 = mkHost {
+          hostname = "nixos-iso";
+          system = "aarch64-linux";
+          type = "desktop";
+          isISO = true;
+          workspaceMeta = workspaceMeta // {stateVersion = "25.11";};
+          extraModules = [
+            {mods = toConfig allPresets.iso.mods;}
+            ({options, lib, ...}: import ./lib/mk-preset.nix {
+              inherit lib options;
+              presetName = "iso";
+              presetsJsonPath = ./presets.json;
+            })
+          ];
+        };
       };
 
     # == Output: Home Configurations ==

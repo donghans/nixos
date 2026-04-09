@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 
 run_iso_task() {
-    log_msg "Task" "starting ISO image build process..."
+    local iso_target="custom-iso"
+    if [ "${ISO_ARCH:-x86_64}" = "aarch64" ]; then
+        iso_target="custom-iso-aarch64"
+    fi
+
+    log_msg "Task" "starting ISO image build process... [${ISO_ARCH:-x86_64}]"
     cd "$TMP_BUILD_DIR" || exit 1
-    
+
     log_exec "nom" ">" "nom build iso"
-    if nom build ".#nixosConfigurations.custom-iso.config.system.build.isoImage" \
+    if nom build ".#nixosConfigurations.${iso_target}.config.system.build.isoImage" \
       --extra-experimental-features "nix-command flakes" --impure --print-build-logs; then
         log_exec "nom" "<" "nom build iso"
 

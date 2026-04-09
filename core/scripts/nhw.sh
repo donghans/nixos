@@ -20,6 +20,7 @@ source "$SCRIPT_DIR/nhw.lib-build.sh"
 source "$SCRIPT_DIR/nhw.lib-lock.sh"
 
 DO_CLEAN=false; CLEAN_TARGET="user"; TARGET_HOST=""; TARGET_PROFILE="home"; ACTION="switch"; LOCK_CHANGED=false
+ISO_ARCH="x86_64"
 # shellcheck disable=SC2034  # sourced scripts (nhw.task-check.sh) 에서 사용
 CHECK_DEEP=false
 EXTRA_ARGS=()
@@ -28,6 +29,7 @@ for arg in "${@:-}"; do
     case $arg in
         clean) DO_CLEAN=true ;;
         all) CLEAN_TARGET="all" ;;
+        arm) ISO_ARCH="aarch64" ;;
         os|home|iso|fix-unstable|check) TARGET_PROFILE="$arg" ;;
         switch|boot|test|build|update) ACTION="$arg" ;;
         --deep|deep)
@@ -51,7 +53,11 @@ LOG_TIMESTAMP=$(date +%Y%m%dT%H%M%S)
 if [ "$DO_CLEAN" = true ]; then
     setup_logging "${LOG_TIMESTAMP}-clean-${CLEAN_TARGET}"
 elif [[ "$TARGET_PROFILE" =~ ^(check|fix-unstable|iso)$ ]]; then
-    setup_logging "${LOG_TIMESTAMP}-${TARGET_PROFILE}"
+    if [ "$TARGET_PROFILE" = "iso" ]; then
+        setup_logging "${LOG_TIMESTAMP}-iso-${ISO_ARCH}"
+    else
+        setup_logging "${LOG_TIMESTAMP}-${TARGET_PROFILE}"
+    fi
 else
     setup_logging "${LOG_TIMESTAMP}-${TARGET_PROFILE}-${ACTION}"
 fi
@@ -91,7 +97,11 @@ elif [ "$TARGET_PROFILE" = "fix-unstable" ]; then
 elif [ "$TARGET_PROFILE" = "check" ] && [ "$CHECK_DEEP" = true ]; then
     log_msg "Init" "Action:   check --deep"
 elif [[ "$TARGET_PROFILE" =~ ^(check|iso)$ ]]; then
-    log_msg "Init" "Action:   $TARGET_PROFILE"
+    if [ "$TARGET_PROFILE" = "iso" ]; then
+        log_msg "Init" "Action:   iso [${ISO_ARCH}]"
+    else
+        log_msg "Init" "Action:   $TARGET_PROFILE"
+    fi
 else
     log_msg "Init" "Action:   $TARGET_PROFILE $ACTION"
 fi

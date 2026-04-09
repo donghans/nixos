@@ -1,11 +1,13 @@
 {
   config,
+  pkgs,
   lib,
   ...
 }:
 lib.mkIf config.mods.sys.server.enable {
   boot = {
-    kernelParams = [
+    # (이유: intel_iommu/iommu=pt는 x86 전용 — ARM은 arm-smmu로 별도 처리)
+    kernelParams = lib.optionals pkgs.stdenv.hostPlatform.isx86_64 [
       "intel_iommu=on" # 가상화 하드웨어 가속
       "iommu=pt"
     ];
