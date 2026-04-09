@@ -139,8 +139,15 @@
           isLaptop = false;
           isISO = true;
           workspaceMeta = workspaceMeta // {stateVersion = "25.11";};
-          # ISO는 resolver를 거치지 않으므로 workstation 프리셋을 직접 주입
-          extraModules = [{mods = toConfig allPresets.workstation.mods;}];
+          # ISO는 resolver를 거치지 않으므로 iso 프리셋을 직접 주입
+          extraModules = [
+            {mods = toConfig allPresets.iso.mods;}
+            ({options, lib, ...}: import ./lib/mk-preset.nix {
+              inherit lib options;
+              presetName = "iso";
+              presetsJsonPath = ./presets.json;
+            })
+          ];
         };
       };
 

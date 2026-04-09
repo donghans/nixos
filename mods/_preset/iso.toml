@@ -1,0 +1,39 @@
+# ISO Preset — GUI 설치 환경 (Hyprland + kitty + Firefox)
+# Firefox는 installation-cd-graphical-base.nix가 자동 포함
+stateVersion = "25.11"
+
+[mods.sys]
+base       = true
+serverMode = false
+
+[mods.sys.utils]
+nfd = false
+
+[mods.sys.services]
+bluetooth      = false
+networkmanager = true
+tailscale      = false
+docker         = false
+incus          = false
+headscale      = false
+caddy          = false
+cockpit        = false
+frp            = false
+
+[mods.gui]
+enable = true
+
+[mods.gui.apps]
+vivaldi   = false
+slack     = false
+bitwarden = false
+
+[mods.devel]
+enable = false
+
+[explicitOptional]
+# gui.enable 활성화 시 gui/default.nix가 크로스-도메인으로 자동 설정
+paths = [
+  "mods.sys.fonts.enable",
+  "mods.sys.vfs.enable"
+]
