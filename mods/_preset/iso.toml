@@ -1,6 +1,6 @@
 # ISO Preset — GUI 설치 환경 (Hyprland + kitty + Firefox)
 # Firefox는 installation-cd-graphical-base.nix가 자동 포함
-stateVersion = "25.11"
+# stateVersion 미지정 (ISO는 영구 상태 없음 — rolling fallback 적용)
 
 [mods.sys]
 base       = true
