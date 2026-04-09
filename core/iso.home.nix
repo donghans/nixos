@@ -9,7 +9,7 @@
   ];
 
   # == Hide Default Application Icons ==
-  # (목적: 메뉴에서 firefox와 xterm을 가려서 커스텀 인스톨러 느낌을 강화)
+  # (목적: 메뉴에서 xterm을 가려서 커스텀 인스톨러 느낌을 강화)
   xdg.desktopEntries = {
     xterm = {
       name = "XTerm (Hidden)";
