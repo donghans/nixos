@@ -102,11 +102,25 @@ cd nixos
 
 > nhw가 아직 설치되지 않아도 `nix-shell` 쉬뱅을 통해 필요한 도구를 자동으로 가져옵니다.
 
-빌드 완료 후 `.build/` 폴더의 ISO 파일을 USB에 구워 부팅하면, kitty 터미널에 설치 안내가 자동으로 표시됩니다:
+빌드 완료 후 `.build/` 폴더의 ISO 파일을 USB에 구워 부팅하면, kitty 터미널에 설치 안내가 자동으로 표시됩니다.
+(터미널을 닫았거나 추가로 열어야 할 경우: `Super + P` → kitty 검색)
 
 ```bash
 nixos-setup /dev/nvme0n1p1 /dev/nvme0n1p2 myhostname
 ```
+
+> **기본 단축키 (Hyprland)**
+>
+> | 단축키 | 동작 |
+> |--------|------|
+> | `Super + P` | 앱 런처 (fuzzel) — kitty 등 앱 실행 |
+> | `Super + Q` | 현재 창 닫기 |
+> | `Super + F` | 플로팅 모드 토글 |
+> | `Super + L` | 화면 잠금 (hyprlock) |
+> | `Super + 1~0` | 워크스페이스 1~10 이동 |
+> | `Super + Shift + Q` | Hyprland 종료 (로그인 화면으로 이동) |
+>
+> `Super`는 키보드의 Windows/Command 키입니다. 전체 단축키는 `mods/gui/core/home/_bind.nix`를 참고하세요.
 
 ---
 
