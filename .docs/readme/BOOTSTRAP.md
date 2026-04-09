@@ -119,6 +119,8 @@ nixos-setup /dev/nvme0n1p1 /dev/nvme0n1p2 myhostname
 > | `Super + L` | 화면 잠금 (hyprlock) |
 > | `Super + 1~0` | 워크스페이스 1~10 이동 |
 > | `Super + Shift + Q` | Hyprland 종료 (로그인 화면으로 이동) |
+> | `Super + 마우스 좌클릭 드래그` | 창 이동 |
+> | `Super + 마우스 우클릭 드래그` | 창 크기 조절 |
 >
 > `Super`는 키보드의 Windows/Command 키입니다. 전체 단축키는 `mods/gui/core/home/_bind.nix`를 참고하세요.
 
