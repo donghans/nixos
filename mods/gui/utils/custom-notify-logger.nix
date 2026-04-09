@@ -6,7 +6,7 @@
   ...
 }:
 with lib; let
-  cfg = config.mods.gui.utils.notifications_logger;
+  cfg = config.mods.gui.utils.custom-notify-logger;
   svcCfg = config.services.custom-notify-logger;
 
   logger-script = pkgs.writers.writePython3 "custom-notify-logger-script" {} ''
@@ -17,7 +17,7 @@ with lib; let
 
     log_dir = os.environ["LOG_DIR"]
     user = os.environ.get("USER", "unknown")
-    log_path = os.path.join(log_dir, f"history-{user}.log")
+    log_path = os.path.join(log_dir, f"{user}.log")
 
 
     def parse_string_value(line):
@@ -79,16 +79,16 @@ with lib; let
   '';
 in {
   options = {
-    mods.gui.utils.notifications_logger.enable = mkEnableOption "Custom Notification Logger";
+    mods.gui.utils.custom-notify-logger.enable = mkEnableOption "Custom Notification Logger";
     services.custom-notify-logger = {
       enable = mkOption {
         type = types.bool;
-        default = true;
+        default = false;
         description = "Notification Logger Service를 활성화합니다.";
       };
       logDir = mkOption {
         type = types.str;
-        default = "/var/log/notify-logger";
+        default = "/var/log/custom-notify-logger";
         description = "알림 로그 파일이 저장될 디렉터리 경로.";
       };
     };
@@ -109,7 +109,7 @@ in {
 
         # 전역 Logrotate 설정 (NixOS 레벨)
         services.logrotate.settings."custom-notify-logger" = {
-          files = "${svcCfg.logDir}/history-*.log";
+          files = "${svcCfg.logDir}/*.log";
           frequency = "daily";
           rotate = 30;
           delaycompress = true;

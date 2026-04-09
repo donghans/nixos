@@ -1,4 +1,4 @@
-{ pkgs, ... }: let
+{pkgs, ...}: let
   # (목적: XML 파서로 defaultProjectLocation attribute 안전하게 패치)
   patchXml = pkgs.writeText "patch-jetbrains-xml.py" ''
     import sys, xml.etree.ElementTree as ET
@@ -70,4 +70,4 @@
       fi
     '';
   });
-in { inherit wrapJetbrainsPackage; }
+in {inherit wrapJetbrainsPackage;}

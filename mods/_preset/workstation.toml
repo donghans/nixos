@@ -22,14 +22,6 @@ frp            = false
 [mods.gui]
 enable = true
 
-[mods.gui.apps]
-vivaldi   = true
-slack     = true
-bitwarden = true
-
-[mods.gui.utils]
-notifications_logger = true
-
 [mods.devel]
 enable = true
 
