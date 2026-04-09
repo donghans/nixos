@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  unstable,
   isNixOS ? false,
   ...
 }:
@@ -9,6 +10,7 @@ with lib; let
   cfg = config.mods.devel;
   modCfg = config.mods.devel.jetbrains.android-studio;
   enabled = cfg.enable || modCfg.enable;
+  jbLib = import ./_lib.jetbrains.nix {inherit pkgs;};
 in
   {options.mods.devel.jetbrains.android-studio.enable = mkEnableOption "Android Studio (ADB, UDP 5353)";}
   // (
@@ -23,9 +25,9 @@ in
     }
     else {
       config = mkIf enabled {
-        # (참고: android-studio 패키지는 jetbrains.home.nix의 wrapJetbrainsPackage로 설치됨)
-        home.packages = with pkgs; [
-          android-tools # (목적: adb, fastboot 등 SDK 커맨드라인 툴)
+        home.packages = [
+          pkgs.android-tools # (목적: adb, fastboot 등 SDK 커맨드라인 툴)
+          (jbLib.wrapJetbrainsPackage unstable.android-studio "android-studio")
         ];
       };
     }

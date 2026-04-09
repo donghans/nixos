@@ -1,10 +1,4 @@
-{
-  pkgs,
-  lib,
-  config,
-  unstable,
-  ...
-}: let
+{ pkgs, ... }: let
   # (목적: XML 파서로 defaultProjectLocation attribute 안전하게 패치)
   patchXml = pkgs.writeText "patch-jetbrains-xml.py" ''
     import sys, xml.etree.ElementTree as ET
@@ -76,13 +70,4 @@
       fi
     '';
   });
-
-  jb = config.mods.devel.jetbrains;
-in {
-  home.packages =
-    lib.optionals jb.idea.enable [(wrapJetbrainsPackage unstable.jetbrains.idea "idea")]
-    ++ lib.optionals jb.webstorm.enable [(wrapJetbrainsPackage unstable.jetbrains.webstorm "webstorm")]
-    ++ lib.optionals jb.pycharm.enable [(wrapJetbrainsPackage unstable.jetbrains.pycharm "pycharm")]
-    ++ lib.optionals jb.datagrip.enable [(wrapJetbrainsPackage unstable.jetbrains.datagrip "datagrip")]
-    ++ lib.optionals jb.android-studio.enable [(wrapJetbrainsPackage unstable.android-studio "android-studio")];
-}
+in { inherit wrapJetbrainsPackage; }

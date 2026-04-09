@@ -6,18 +6,11 @@
 }:
 with lib; let
   cfg = config.mods.devel;
+  inherit (import ../_lib.nix {inherit lib;}) importDir;
 in {
   imports =
-    [
-      ./toolchains/node.nix
-      ./toolchains/python.nix
-      ./toolchains/fvm.nix
-      ./toolchains/devbox.nix
-      ./apps/llm-cli.nix
-      ./apps/zed.nix
-      ./jetbrains/default.nix
-      ./jetbrains/android-studio.nix
-    ]
+    importDir ./toolchains
+    ++ importDir ./apps
     ++ [
       (
         if isNixOS

@@ -3,22 +3,16 @@
   isNixOS ? false,
   ...
 }:
-with lib; {
+with lib; let
+  inherit (import ../_lib.nix {inherit lib;}) importDir;
+in {
   imports =
     [
       ./fonts.nix
       ./vfs.nix
-      ./utils/nfd.nix
-      ./services/bluetooth.nix
-      ./services/docker.nix
-      ./services/networkmanager.nix
-      ./services/tailscale.nix
-      ./services/incus.nix
-      ./services/headscale.nix
-      ./services/caddy.nix
-      ./services/cockpit.nix
-      ./services/frp.nix
     ]
+    ++ importDir ./utils
+    ++ importDir ./services
     ++ [
       (
         if isNixOS

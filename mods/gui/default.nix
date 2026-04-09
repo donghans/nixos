@@ -3,14 +3,13 @@
   config,
   ...
 }:
-with lib; {
-  imports = [
-    ./core
-    ./apps/vivaldi.nix
-    ./apps/slack.nix
-    ./apps/bitwarden.nix
-    ./utils/notifications_logger.nix
-  ];
+with lib; let
+  inherit (import ../_lib.nix {inherit lib;}) importDir;
+in {
+  imports =
+    [./core]
+    ++ importDir ./apps
+    ++ importDir ./utils;
 
   options.mods.gui.enable = mkEnableOption "GUI Bundle (Hyprland, Waybar, etc)";
 
