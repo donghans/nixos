@@ -13,6 +13,11 @@ with lib; {
       ./services/docker.nix
       ./services/networkmanager.nix
       ./services/tailscale.nix
+      ./services/incus.nix
+      ./services/headscale.nix
+      ./services/caddy.nix
+      ./services/cockpit.nix
+      ./services/frp.nix
     ]
     ++ [
       (
@@ -23,4 +28,5 @@ with lib; {
     ];
 
   options.mods.sys.base.enable = mkEnableOption "System Base (Zsh, Atuin, Git, CLI Tools)";
+  options.mods.sys.serverMode.enable = mkEnableOption "Server-optimized Kernel/Network settings";
 }

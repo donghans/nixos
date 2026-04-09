@@ -1,0 +1,10 @@
+preset = "server-nix"
+username = "donghans"
+system = "x86_64-linux"
+hostname = "test-server"
+ramGb = 32
+stateVersion = "25.11"
+isNixOS = true
+isLaptop = false
+enabledMods = []
+disabledMods = []
