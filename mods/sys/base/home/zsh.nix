@@ -54,11 +54,26 @@
         alias ls='ls --color=auto'
         alias grep='grep --color=auto'
 
-        # == Key Bindings (단어 단위 이동: Ctrl+Arrow + Alt+Arrow 모두 허용) ==
-        bindkey "^[[1;5C" forward-word   # Ctrl+Right
-        bindkey "^[[1;5D" backward-word  # Ctrl+Left
-        bindkey "^[[1;3C" forward-word   # Alt+Right (터미널 종류에 따라 Ctrl 대신 Alt로 전달됨)
-        bindkey "^[[1;3D" backward-word  # Alt+Left
+        # == LLM CLI Compatibility (Gemini Home/End Fix) ==
+        # (목적: Node.js 기반 CLI가 xterm-kitty 시퀀스를 인식 못할 때 표준 xterm으로 강제)
+        if command -v gemini-cli >/dev/null 2>&1; then
+          alias gemini='TERM=xterm-256color gemini-cli'
+        fi
+
+        # == Key Bindings (단어 단위 이동 및 홈/엔드) ==
+        # (목적: 다양한 터미널 환경에서 일관된 키 동작 보장)
+        bindkey "^[[H" beginning-of-line      # Home (Standard)
+        bindkey "^[[F" end-of-line            # End (Standard)
+        bindkey "^[OH" beginning-of-line      # Home (Alternative)
+        bindkey "^[OF" end-of-line            # End (Alternative)
+        bindkey "^[[1~" beginning-of-line     # Home (Xterm)
+        bindkey "^[[4~" end-of-line           # End (Xterm)
+        bindkey "^[[3~" delete-char           # Delete (Standard)
+
+        bindkey "^[[1;5C" forward-word        # Ctrl+Right
+        bindkey "^[[1;5D" backward-word       # Ctrl+Left
+        bindkey "^[[1;3C" forward-word        # Alt+Right (Meta+Right)
+        bindkey "^[[1;3D" backward-word       # Alt+Left (Meta+Left)
       ''
     ];
   };
