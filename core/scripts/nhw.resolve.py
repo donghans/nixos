@@ -16,6 +16,19 @@ import os
 import sys
 import tomllib
 
+
+def detect_ram_gb():
+    """물리 RAM 크기를 /proc/meminfo에서 읽어 GB 단위로 반환 (ceil)."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    kb = int(line.split()[1])
+                    return (kb + 1048575) // 1048576  # ceil to GB
+    except Exception:
+        pass
+    return None
+
 script_dir = os.path.dirname(os.path.abspath(__file__))
 src_path = os.path.normpath(os.path.join(script_dir, "../.."))
 if len(sys.argv) == 3:
@@ -86,11 +99,18 @@ for entry in sorted(os.listdir(hosts_dir)):
     for k, v in host.get("mods", {}).items():
         mods[k] = v
 
+    # ramGb: /proc/meminfo에서 자동 감지 (host.toml 입력 무시)
+    # swap을 직접 지정하려면 swapGb를 사용하세요.
+    ram_gb = detect_ram_gb()
+
     all_resolved[entry] = {
         "hostname": entry,
         "system": host.get("system", base["system"]),
         "type": host["type"],
-        "ramGb": host.get("ramGb"),
+        "ramGb": ram_gb,
+        "swapGb": host.get("swapGb"),       # None → Nix 기본값 적용 (ceil(ramGb*0.75))
+        "tmpfsSize": host.get("tmpfsSize"),  # None → Nix 기본값 적용 ("100%")
+        "zramPercent": host.get("zramPercent"),  # None → Nix 기본값 적용 (50)
         "preset": preset_name,
         "username": host.get("username", base["username"]),
         "git": {**base.get("git", {}), **host.get("git", {})},

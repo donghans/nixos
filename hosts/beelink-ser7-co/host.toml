@@ -1,3 +1,2 @@
-type = "desktop"
-ramGb    = 32
-preset   = "workstation"
+type   = "desktop"
+preset = "workstation"

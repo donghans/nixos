@@ -41,7 +41,6 @@ nixos/
 ```toml
 # hosts/<hostname>/host.toml 예시
 type   = "desktop"
-ramGb  = 32
 preset = "workstation"
 
 # 프리셋 기본값에서 변경할 항목만 기재

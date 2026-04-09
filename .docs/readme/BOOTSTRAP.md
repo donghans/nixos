@@ -36,12 +36,16 @@ nixosRepo = "<your-username>/nixos"  # 설치 스크립트가 클론할 저장�
 
 ```toml
 type   = "desktop"    # desktop, laptop, server, rpi
-ramGb  = 16
 preset = "workstation"
 
 # 프리셋 기본값에서 변경할 항목만 기재합니다.
 [mods.devel]
 fvm = true
+
+# 선택적 오버라이드 (기본값: 자동 감지/계산)
+# swapGb      = 24    # swap 파일 크기 (GB). 기본: ceil(ramGb × 0.75)
+# tmpfsSize   = "100%" # /tmp tmpfs 상한. 기본: "100%"
+# zramPercent = 50    # ZRAM 풀 크기 (물리 RAM의 %). 기본: 50
 ```
 
 기존 호스트(`hosts/beelink-ser7-co/`, `hosts/msi-summit-me/`)의 `configuration.nix`와 `home.nix`를 참고하여 하드웨어 부팅 파라미터 등을 작성합니다. 하드웨어 프로필(`_hardware.nix`)은 설치 시 자동 생성됩니다.

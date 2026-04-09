@@ -68,7 +68,10 @@
       inherit (workspaceMeta) gitName gitEmail nixosRepo;
       inherit hostname type;
       username = homeUser;
-      ramGb = hostInfo.ramGb or null;
+      ramGb       = hostInfo.ramGb       or null;
+      swapGb      = hostInfo.swapGb      or null;
+      tmpfsSize   = hostInfo.tmpfsSize   or null;
+      zramPercent = hostInfo.zramPercent or null;
       stateVersion = workspaceMeta.stateVersion or "25.11";
     };
   in {

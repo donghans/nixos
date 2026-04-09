@@ -1,3 +1,2 @@
-type = "laptop"
-ramGb    = 32
-preset   = "workstation"
+type   = "laptop"
+preset = "workstation"

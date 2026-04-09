@@ -101,7 +101,10 @@
             if resolved.stateVersion == null
             then "25.11"
             else resolved.stateVersion;
-          ramGb = resolved.ramGb or null;
+          ramGb       = resolved.ramGb       or null;
+          swapGb      = resolved.swapGb      or null;
+          tmpfsSize   = resolved.tmpfsSize   or null;
+          zramPercent = resolved.zramPercent or null;
         };
       presetMods = allPresets.${resolved.preset}.mods;
       mergedMods = nixpkgs.lib.recursiveUpdate presetMods resolved.mods;

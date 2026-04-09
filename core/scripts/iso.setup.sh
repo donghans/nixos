@@ -122,7 +122,15 @@ log_exec "git" ">" "git clone"
 git clone "https://github.com/$NIXOS_REPO.git" /mnt/etc/nixos
 log_exec "git" "<" "git clone"
 
-# 5. Metadata Extraction
+# 5. Resolve Metadata (설치 대상 하드웨어 기반 resolved.json 생성)
+# (목적: /proc/meminfo에서 실제 RAM을 감지하여 swap/tmpfs 크기를 올바르게 설정)
+log_msg "Config" "generating resolved.json from target hardware..."
+log_exec "py" ">" "nhw.resolve.py"
+python3 /mnt/etc/nixos/core/scripts/nhw.resolve.py \
+    /mnt/etc/nixos /mnt/etc/nixos
+log_exec "py" "<" "nhw.resolve.py"
+
+# 6. Metadata Extraction
 BASE_TOML="/mnt/etc/nixos/hosts/base.toml"
 if [ ! -f "$BASE_TOML" ]; then
     log_msg "Error" "could not find $BASE_TOML in the cloned repository."
@@ -130,7 +138,7 @@ if [ ! -f "$BASE_TOML" ]; then
 fi
 USERNAME=$(python3 -c "import tomllib; print(tomllib.load(open('$BASE_TOML','rb'))['username'])")
 
-# 6. Hardware Config
+# 7. Hardware Config
 log_msg "Config" "generating hardware-configuration.nix ..."
 nixos-generate-config --root /mnt --no-filesystems
 mkdir -p "/mnt/etc/nixos/hosts/$HOST"
@@ -138,13 +146,13 @@ mv /mnt/etc/nixos/hardware-configuration.nix "/mnt/etc/nixos/hosts/$HOST/_hardwa
 rm -f /mnt/etc/nixos/configuration.nix
 echo "$HOST" > /mnt/etc/nixos/.current_host
 
-# 7. Install
+# 8. Install
 log_msg "Install" "starting nixos-install for #$HOST ..."
 log_exec "nix" ">" "nixos-install"
 nixos-install --flake "/mnt/etc/nixos/core#$HOST"
 log_exec "nix" "<" "nixos-install"
 
-# 8. Post-processing
+# 9. Post-processing
 log_msg "Done" "running post-installation tasks for user: $USERNAME ..."
 mkdir -p "/mnt/home/$USERNAME/"
 mv /mnt/etc/nixos "/mnt/home/$USERNAME/nixos"
