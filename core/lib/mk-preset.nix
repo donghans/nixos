@@ -26,13 +26,13 @@ with lib; let
   # {"sys": {"base": true}}         → ["mods.sys.base.enable"]
   # {"gui": {"enable": true, ...}}  → ["mods.gui.enable", ...]
   jsonToPaths = prefix: val:
-    if builtins.isBool val && val
+    if builtins.isBool val
     then ["${prefix}.enable"]
     else if isAttrs val
     then
       concatLists (mapAttrsToList (
           k: v:
-            if k == "enable" && builtins.isBool v && v
+            if k == "enable" && builtins.isBool v
             then ["${prefix}.enable"]
             else jsonToPaths "${prefix}.${k}" v
         )

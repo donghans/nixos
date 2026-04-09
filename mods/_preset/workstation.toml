@@ -3,6 +3,7 @@
 
 [mods.sys]
 base = true
+server = false
 
 [mods.sys.utils]
 nfd = true
@@ -12,6 +13,11 @@ bluetooth      = true
 networkmanager = true
 tailscale      = true
 docker         = true
+incus          = false
+headscale      = false
+caddy          = false
+cockpit        = false
+frp            = false
 
 [mods.gui]
 enable = true
@@ -27,18 +33,9 @@ notifications_logger = true
 [mods.devel]
 enable = true
 
-[mods.devel.jetbrains]
-android-studio = true
-
 [explicitOptional]
 # gui/default.nix가 gui.enable 시 크로스-도메인으로 자동 활성화
 paths = [
   "mods.sys.fonts.enable",
-  "mods.sys.vfs.enable",
-  "mods.sys.services.incus.enable",
-  "mods.sys.services.headscale.enable",
-  "mods.sys.services.caddy.enable",
-  "mods.sys.services.cockpit.enable",
-  "mods.sys.services.frp.enable",
-  "mods.sys.server.enable"
+  "mods.sys.vfs.enable"
 ]

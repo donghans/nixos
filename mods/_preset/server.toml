@@ -3,6 +3,11 @@
 [mods.sys]
 base = true
 server = true
+fonts = true
+vfs = true
+
+[mods.sys.utils]
+nfd = true
 
 [mods.sys.services]
 networkmanager = true
@@ -12,30 +17,11 @@ headscale      = true
 caddy          = true
 cockpit        = true
 frp            = true
+bluetooth      = false
+docker         = false
 
-[explicitOptional]
-paths = [
-  "mods.devel.devbox.enable",
-  "mods.devel.enable",
-  "mods.devel.fvm.enable",
-  "mods.devel.jetbrains.android-studio.enable",
-  "mods.devel.jetbrains.datagrip.enable",
-  "mods.devel.jetbrains.enable",
-  "mods.devel.jetbrains.idea.enable",
-  "mods.devel.jetbrains.pycharm.enable",
-  "mods.devel.jetbrains.webstorm.enable",
-  "mods.devel.llm-cli.enable",
-  "mods.devel.node.enable",
-  "mods.devel.python.enable",
-  "mods.devel.zed.enable",
-  "mods.gui.apps.bitwarden.enable",
-  "mods.gui.apps.slack.enable",
-  "mods.gui.apps.vivaldi.enable",
-  "mods.gui.enable",
-  "mods.gui.utils.notifications_logger.enable",
-  "mods.sys.fonts.enable",
-  "mods.sys.services.bluetooth.enable",
-  "mods.sys.services.docker.enable",
-  "mods.sys.utils.nfd.enable",
-  "mods.sys.vfs.enable"
-]
+[mods.gui]
+enable = false
+
+[mods.devel]
+enable = false

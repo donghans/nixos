@@ -23,16 +23,15 @@
     ];
 
     # == toConfig: resolved.mods JSON → Nix module attrs ==
-    # builtins.isBool 체크: statix가 `if val`로 단순화하여 attrset에서 오류 나는 것 방지
     toConfig = val:
-      if builtins.isBool val && val
-      then {enable = true;}
+      if builtins.isBool val
+      then {enable = val;}
       else if builtins.isAttrs val
       then
         nixpkgs.lib.mapAttrs (
           k: v:
-            if k == "enable" && builtins.isBool v && v
-            then true
+            if k == "enable" && builtins.isBool v
+            then v
             else toConfig v
         )
         val
