@@ -89,7 +89,7 @@ for entry in sorted(os.listdir(hosts_dir)):
     all_resolved[entry] = {
         "hostname": entry,
         "system": host.get("system", base["system"]),
-        "isLaptop": host["isLaptop"],
+        "type": host["type"],
         "ramGb": host.get("ramGb"),
         "preset": preset_name,
         "username": host.get("username", base["username"]),

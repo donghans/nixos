@@ -22,9 +22,9 @@ with lib; {
         type = types.str;
         description = "System hostname";
       };
-      isLaptop = mkOption {
-        type = types.bool;
-        description = "Is this a laptop device?";
+      type = mkOption {
+        type = types.enum ["desktop" "laptop" "server" "rpi"];
+        description = "Device type: desktop, laptop, server, rpi";
       };
       ramGb = mkOption {
         type = types.nullOr types.int;

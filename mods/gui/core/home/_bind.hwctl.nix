@@ -85,13 +85,13 @@ in {
           ", XF86AudioLowerVolume, exec, ${volumeControl}/bin/vol-control down"
           ", XF86AudioMute, exec, ${volumeControl}/bin/vol-control mute"
         ]
-        ++ lib.optionals config.workspace.isLaptop [
+        ++ lib.optionals (config.workspace.type == "laptop") [
           ", XF86MonBrightnessUp, exec, ${brightnessControl}/bin/brt-control up"
           ", XF86MonBrightnessDown, exec, ${brightnessControl}/bin/brt-control down"
         ];
 
       # == Laptop Specific Bindings ==
-      bindl = lib.mkIf config.workspace.isLaptop [
+      bindl = lib.mkIf (config.workspace.type == "laptop") [
         # 터치패드 토글 (설정된 키 사용)
         "${config.wayland.windowManager.hyprland.touchpadToggleKey}, exec, ${toggleTouchpad}/bin/hypr-toggle-touchpad"
 

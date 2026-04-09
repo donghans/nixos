@@ -26,7 +26,7 @@
     modules-right =
       ["tray"]
       ++ (
-        if config.workspace.isLaptop
+        if config.workspace.type == "laptop"
         then ["battery"]
         else []
       )

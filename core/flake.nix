@@ -95,7 +95,7 @@
       perHostMeta =
         workspaceMeta
         // {
-          inherit (resolved) hostname isLaptop;
+          inherit (resolved) hostname type;
           # stateVersion null(rolling) 시 현행 stable 버전으로 폴백
           stateVersion =
             if resolved.stateVersion == null
@@ -136,7 +136,7 @@
         custom-iso = mkHost {
           hostname = "nixos-iso";
           system = "x86_64-linux"; # mkHost 내부에서 nixpkgs.hostPlatform 모듈로 전달됨
-          isLaptop = false;
+          type = "desktop";
           isISO = true;
           workspaceMeta = workspaceMeta // {stateVersion = "25.11";};
           # ISO는 resolver를 거치지 않으므로 iso 프리셋을 직접 주입

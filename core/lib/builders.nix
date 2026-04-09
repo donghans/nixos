@@ -8,7 +8,7 @@
   mkHostContext = hostInfo @ {
     hostname,
     system,
-    isLaptop,
+    type,
     workspaceMeta,
     ...
   }: let
@@ -66,7 +66,7 @@
 
     metaConfig = {
       inherit (workspaceMeta) gitName gitEmail nixosRepo;
-      inherit hostname isLaptop;
+      inherit hostname type;
       username = homeUser;
       ramGb = hostInfo.ramGb or null;
       stateVersion = workspaceMeta.stateVersion or "25.11";
