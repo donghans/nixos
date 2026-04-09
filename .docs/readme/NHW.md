@@ -50,7 +50,8 @@ Home Manager 설정을 적용합니다.
 - `nhw clean all`: 시스템 전체(Sudo 권한 포함)의 오래된 세대를 정리합니다.
 
 ### 특수 기능
-- `nhw iso`: `custom-iso` 타겟을 빌드하여 나만의 설치 미디어를 생성합니다.
+- `nhw iso`: `custom-iso` 타겟(x86_64)을 빌드하여 나만의 설치 미디어를 생성합니다.
+- `nhw iso arm`: `custom-iso-aarch64` 타겟(aarch64)을 빌드합니다.
 - `nhw fix-unstable [pkg1] [pkg2]`: Unstable 채널에서 빌드 실패하는 특정 패키지를 이전 정상 시점으로 하향 조정(Fallback)합니다.
   - **중요**: 이 기능을 통해 고정된 패키지를 사용하려면 Nix 설정 파일(`*.nix`)에서 해당 패키지를 `unstable.<pkgName>` 대신 **`unstable-fallback.<pkgName>`**으로 참조해야 합니다.
 
@@ -97,7 +98,7 @@ nhw clean all
 ## 📂 4. 로그 확인 (Logging)
 
 모든 `nhw` 실행 결과는 `/var/log/nhw/`에 자동으로 기록됩니다.
-- 파일명 형식: `YYYYMMDDTHHMMSS-[target]-[action].log` (예: `20260405T120000-os-switch.log`)
+- 파일명 형식: `YYYYMMDDTHHMMSS-[target]-[action].log` (예: `20260405T120000-os-switch.log`, ISO는 `20260405T120000-iso-x86_64.log` 또는 `iso-aarch64.log`)
 - 터미널에는 색상이 표시되지만, 저장된 로그 파일은 텍스트 검색이 용이하도록 ANSI 색상 코드가 제거된 순수 텍스트로 저장됩니다.
 
 문제가 발생했을 때 로그 파일의 마지막 부분을 확인하려면 아래 명령어를 사용하세요.

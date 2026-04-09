@@ -26,7 +26,7 @@
 
 코드와 데이터를 분리하여, 사용자가 `nix` 언어를 깊게 알지 못해도 시스템 구성을 관리할 수 있게 합니다.
 
-- **TOML 설정 원본**: `base.toml`(전역: username, git, system), `host.toml`(호스트: isLaptop, ramGb, preset, mods 오버라이드), `_preset/*.toml`(프리셋 mods 정의 + explicitOptional)을 TOML로 선언합니다.
+- **TOML 설정 원본**: `base.toml`(전역: username, git, system), `host.toml`(호스트: type, ramGb, preset, mods 오버라이드), `_preset/*.toml`(프리셋 mods 정의 + explicitOptional)을 TOML로 선언합니다.
 - **Resolver (`nhw.resolve.py`)**: `nhw` 빌드 시 TOML 소스를 읽어 `presets.json`(프리셋 mods + explicitOptional)과 `resolved.json`(호스트별 merged 데이터)을 생성합니다. flake.nix는 이 JSON 파일을 읽어 빌드합니다.
 - **직접 nix 실행 금지**: `flake.nix`는 `resolved.json`이 없으면 명시적 오류를 발생시킵니다. 항상 `nhw`를 통해 빌드하세요.
 
@@ -39,7 +39,7 @@
 |------|---------|
 | `username`, `git.*` | host.toml 오버라이드 가능 (기본값: base.toml) |
 | `system` | host.toml → base.toml |
-| `isLaptop`, `ramGb`, `preset` | host.toml 필수 선언 |
+| `type`, `ramGb`, `preset` | host.toml 필수 선언 |
 | `stateVersion` | host.toml → preset → `null` (rolling) |
 | `mods.*` | preset 기본값 위에 host.toml 오버라이드를 Nix 단계에서 병합 |
 
@@ -63,9 +63,9 @@
 
 - **Domain-Driven Design**: `sys`, `gui`, `devel`로 도메인을 분리하여 응집도를 높였습니다.
   - `mods/sys/`: 시스템 기반 — `base`(부팅/네트워크/Zsh/Git), `fonts`, `vfs`, `services`(bluetooth/tailscale/docker), `utils/nfd`
-  - `mods/gui/`: GUI 환경 — `core`(Hyprland 번들), `apps`(vivaldi/slack/bitwarden), `utils/notifications_logger`
+  - `mods/gui/`: GUI 환경 — `core`(Hyprland 번들), `apps`(vivaldi/slack/bitwarden), `utils/custom-notify-logger`
   - `mods/devel/`: 개발 도구 — `toolchains`(node/python/fvm/devbox), `apps`(llm-cli/zed), `jetbrains`(android-studio 포함)
 - **Opt-in Mods System**: 모든 `mods.<domain>.<feature>.enable`은 `false`에서 시작합니다. `isNixOS` 플래그를 통해 NixOS와 Home Manager 양측의 구성을 단일 파일에서 분기 처리합니다(Dual-Context).
-- **워크스테이션 프리셋 (`mods/_preset/`)**: `workstation.toml`에 sys+services+gui+devel 전체 mods를 선언합니다. flake.nix가 이를 읽어 호스트별 mods와 병합하여 적용합니다. `host.toml`에는 프리셋 기본값에서 변경할 항목만 기재합니다.
-- **Mods Coverage Check**: flake.nix가 호스트별로 `mk-preset.nix` 기반 coverageModule을 주입합니다. 프리셋 TOML에 누락된 옵션이 있으면 빌드 타임 오류를 발생시킵니다.
+- **프리셋 시스템 (`mods/_preset/`)**: `workstation.toml`(개발 환경), `server.toml`(서버 환경), `iso.toml`(설치 미디어) 등 용도별 프리셋이 정의되어 있습니다. flake.nix가 이를 읽어 호스트별 mods와 병합하여 적용합니다. `host.toml`에는 프리셋 기본값에서 변경할 항목만 기재합니다.
+- **Mods Coverage Check**: flake.nix가 호스트별로 `mk-preset.nix` 기반 coverageModule을 주입합니다. ISO(`custom-iso`, `custom-iso-aarch64`) 빌드도 포함하여 프리셋 TOML에 누락된 옵션이 있으면 빌드 타임 오류를 발생시킵니다.
 - **Shared Data (`mods/_data/`)**: `devbox` 설정 등 정적 템플릿과 메타데이터를 분리 관리하여 로직의 순수성을 유지합니다.

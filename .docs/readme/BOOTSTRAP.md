@@ -23,7 +23,7 @@ cd nixos
 ```toml
 # hosts/base.toml
 username = "your_username"   # 생성할 유저명
-system   = "x86_64-linux"    # 현재 x86_64 시스템만 테스트됨
+system   = "x86_64-linux"    # x86_64 기본값; ARM 호스트는 host.toml에서 system = "aarch64-linux"로 오버라이드
 
 [git]
 name      = "Your Name"
@@ -41,9 +41,9 @@ nixosRepo = "<your-username>/nixos"  # 설치 시 클론할 저장소 경로
 
 ```toml
 # hosts/<hostname>/host.toml
-isLaptop = false   # 랩탑이면 true (배터리 표시, 터치패드 등 자동 적용)
-ramGb    = 16      # 물리 메모리 크기(GB) — 스왑·tmpfs 크기 자동 계산에 사용
-preset   = "workstation"
+type   = "desktop"    # device type: desktop, laptop, server, rpi
+ramGb  = 16           # 물리 메모리 크기(GB) — 스왑·tmpfs 크기 자동 계산에 사용
+preset = "workstation"
 
 # 프리셋 기본값에서 변경할 mods만 기재합니다.
 [mods.devel]
@@ -65,7 +65,8 @@ mkdir -p hosts/<hostname>
 `nhw` CLI로 커스텀 ISO를 빌드합니다.
 
 ```bash
-nhw iso
+nhw iso          # x86_64 ISO 빌드
+nhw iso arm      # aarch64 (ARM) ISO 빌드
 ```
 
 빌드가 완료되면 `.build/` 심볼릭 링크가 가리키는 디렉터리에 ISO 파일이 생성됩니다. 이 ISO로 부팅하면 터미널에 안내 메시지가 나타납니다.
