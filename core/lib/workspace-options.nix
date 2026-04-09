@@ -29,7 +29,7 @@ with lib; {
       ramGb = mkOption {
         type = types.nullOr types.int;
         default = null;
-        description = "RAM size in GB (auto-detected from /proc/meminfo if not set in host.toml)";
+        description = "RAM size in GB. Auto-detected from /proc/meminfo by nhw.resolve.py. Not configurable via host.toml.";
       };
       swapGb = mkOption {
         type = types.nullOr types.int;

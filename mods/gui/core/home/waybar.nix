@@ -1,10 +1,11 @@
 {
   pkgs,
   config,
+  lib,
   ...
 }: {
   # waybar 세션 시작
-  wayland.windowManager.hyprland.settings.exec-once = [
+  wayland.windowManager.hyprland.settings.exec-once = lib.mkOrder 900 [
     "uwsm app -- ${pkgs.waybar}/bin/waybar"
   ];
 

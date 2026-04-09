@@ -1,3 +1,4 @@
+# 인터랙션 설정: 입력, 레이아웃, 윈도우 룰, 앱 메뉴 정리
 {lib, ...}: {
   wayland.windowManager.hyprland.settings = {
     monitor = lib.mkDefault [",preferred,auto,1"];

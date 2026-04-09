@@ -4,7 +4,7 @@
   ...
 }: let
   cfg = config.workspace;
-  ramGb = cfg.ramGb; # resolve.py에서 /proc/meminfo 자동 감지
+  inherit (cfg) ramGb; # resolve.py에서 /proc/meminfo 자동 감지
 
   # swapGb: 명시 오버라이드 > ceil(ramGb * 0.75) > null (swap 없음)
   # ceil(n * 3/4) = (n * 3 + 3) / 4  (정수 ceil 나눗셈)
@@ -50,6 +50,6 @@ in {
   # (목적: nhw 빌드 등 대용량 임시 파일을 RAM에서 처리 — swap이 초과분을 흡수)
   boot.tmp = {
     useTmpfs = lib.mkDefault true;
-    tmpfsSize = tmpfsSize;
+    inherit tmpfsSize;
   };
 }

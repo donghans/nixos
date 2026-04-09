@@ -8,6 +8,7 @@ with lib; let
   cfg = config.mods.gui;
   # Hyprland 0.52.1 pipe FD 누수 버그픽스 (v0.54.0에서 수정됨)
   # 수정 커밋: c92fb5e8 (orphan transfers), b8fc0def (INCR), 1761909b (pipe check)
+  # TODO: nixpkgs가 Hyprland 0.54.0+ 를 안정 채널에 포함하면 아래 커스텀 fetch 제거 가능
   nixpkgs-for-hyprland-bugfix =
     import (builtins.fetchTarball {
       url = "https://github.com/NixOS/nixpkgs/archive/38eccbbf297c.tar.gz";

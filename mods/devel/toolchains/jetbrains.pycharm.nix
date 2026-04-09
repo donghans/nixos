@@ -1,21 +1,13 @@
 {
-  config,
-  lib,
   pkgs,
   unstable,
+  config,
+  lib,
   isNixOS ? false,
   ...
 }:
-with lib; let
-  jbLib = import ./_lib.jetbrains.nix {inherit pkgs;};
-in
-  {options.mods.devel.jetbrains.pycharm.enable = mkEnableOption "PyCharm";}
-  // (
-    if isNixOS
-    then {}
-    else {
-      config = mkIf config.mods.devel.jetbrains.pycharm.enable {
-        home.packages = [(jbLib.wrapJetbrainsPackage unstable.jetbrains.pycharm "pycharm")];
-      };
-    }
-  )
+(import ./_lib.jetbrains.nix {inherit pkgs;}).mkJetbrainsModule {
+  ideName = "pycharm";
+  ideLabel = "PyCharm";
+  pkgAttr = unstable.jetbrains.pycharm;
+} {inherit config lib isNixOS;}

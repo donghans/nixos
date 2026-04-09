@@ -1,6 +1,7 @@
 {
   lib,
   config,
+  pkgs,
   ...
 }:
 with lib; let
@@ -9,7 +10,7 @@ in {
   config = mkIf cfg.enable {
     # (목적: Wayland/GPU 가속을 위한 그래픽 드라이버 활성화)
     hardware.graphics.enable = true;
-    hardware.graphics.enable32Bit = true;
+    hardware.graphics.enable32Bit = pkgs.stdenv.hostPlatform.isx86_64;
 
     programs = {
       uwsm.enable = true;

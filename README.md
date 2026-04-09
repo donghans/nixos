@@ -7,7 +7,7 @@
 ## 🚀 주요 특징
 
 - **Mods Framework**: 모든 설정을 `sys` / `gui` / `devel` 세 도메인으로 격리하고, 명시적 `enable` 옵션을 통해 기능을 선택합니다.
-- **TOML 설정 원본**: `hosts/base.toml`과 `hosts/<hostname>/host.toml`에 메타데이터를 선언합니다. `nhw resolve`가 이를 `resolved.json`으로 변환하여 flake.nix에 주입합니다.
+- **TOML 설정 원본**: `hosts/base.toml`과 `hosts/<hostname>/host.toml`에 메타데이터를 선언합니다. `nhw` 실행 시 내부적으로 이를 `resolved.json`으로 변환하여 flake.nix에 주입합니다.
 - **프리셋 시스템**: `mods/_preset/`에 workstation, server, iso 등 다양한 프리셋이 정의되어 있습니다. `host.toml`에 `preset = "workstation"` 한 줄로 해당 환경 전체(tailscale, docker, bluetooth, GUI, 개발 도구 등)가 자동 적용되며, 호스트별 변경 항목만 추가로 기재하면 됩니다.
 - **Mods Coverage Check**: 빌드 시 프리셋에 선언된 옵션과 workspace-options에 등록된 옵션을 대조하여, 누락된 항목을 빌드 타임 에러로 알립니다.
 - **격리된 빌드 환경**: 모든 빌드는 `/tmp/nixos-build` (tmpfs)에서 안전하게 격리되어 수행됩니다.

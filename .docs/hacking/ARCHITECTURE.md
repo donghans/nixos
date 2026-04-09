@@ -42,7 +42,7 @@
 | `type`, `preset` | host.toml 필수 선언 |
 | `ramGb` | 자동 감지 (`/proc/meminfo`), host.toml 입력 무시 |
 | `swapGb`, `tmpfsSize`, `zramPercent` | 선택적 오버라이드 (기본값: 자동 계산) |
-| `stateVersion` | host.toml → preset → `null` (rolling) |
+| `stateVersion` | host.toml 명시 → preset 선언 → `base.toml rollingStateVersion` (rolling 폴백, 항상 non-null) |
 | `mods.*` | preset 기본값 위에 host.toml 오버라이드를 Nix 단계에서 병합 |
 
 ---

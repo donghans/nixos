@@ -21,7 +21,7 @@ in {
     else
       mkIf config.mods.gui.enable {
         # HM 사이드: GUI 활성화 시 Hyprland 세션에서 블루투스 언블록 및 전원 ON
-        wayland.windowManager.hyprland.settings.exec-once = [
+        wayland.windowManager.hyprland.settings.exec-once = mkOrder 100 [
           "rfkill unblock bluetooth && bluetoothctl power on"
         ];
       }

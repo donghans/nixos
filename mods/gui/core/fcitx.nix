@@ -24,7 +24,7 @@ in {
 
     # == Home Manager: 세션 실행 + 환경 변수 ==
     (optionalAttrs (!isNixOS) {
-      wayland.windowManager.hyprland.settings.exec-once = [
+      wayland.windowManager.hyprland.settings.exec-once = mkOrder 500 [
         "uwsm app -- fcitx5"
       ];
 

@@ -1,3 +1,4 @@
+# 시각 설정: 간격, 테두리, 투명도, 그림자, 애니메이션
 _: {
   # == Hyprland Compositor 설정 ==
   wayland.windowManager.hyprland.settings = {

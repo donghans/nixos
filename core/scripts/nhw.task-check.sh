@@ -16,22 +16,19 @@ run_check_task() {
     log_exec "nix" "<" "statix fix"
 
     # 3. Code Formatting (alejandra)
-    log_msg "Task" "Step 3: Formatting code (alejandra)"
+    # (목적: core/flake.nix는 inputs 정렬이 의도적이므로 포맷 대상 제외)
+    log_msg "Task" "Step 3: Formatting code (alejandra, excluding core/flake.nix)"
     log_exec "nix" ">" "alejandra"
-    alejandra -q "$NIXOS_PATH"
+    find "$NIXOS_PATH" -name "*.nix" ! -path "$NIXOS_PATH/core/flake.nix" -print0 \
+        | xargs -0 alejandra -q
     log_exec "nix" "<" "alejandra"
 
-    # 4. Exception Handling (flake.nix spacing)
-    log_msg "Task" "Step 4: Special exception handling (flake.nix spacing)"
-    # Restore spacing for nixpkgs.url regardless of the version number
-    sed -i 's/nixpkgs.url = "/nixpkgs.url      =                "/' "$NIXOS_PATH/core/flake.nix"
-
-    # 5. Shellcheck (Shell Script Analysis)
-    log_msg "Task" "Step 5: Shell script static analysis (shellcheck)"
+    # 4. Shellcheck (Shell Script Analysis)
+    log_msg "Task" "Step 4: Shell script static analysis (shellcheck)"
     log_exec "nix" ">" "shellcheck"
     # Temporarily set +e so shellcheck errors don't crash the script immediately
     set +e
-    shellcheck "$NIXOS_PATH/core/scripts/"*.sh "$NIXOS_PATH/from-nixos-mk-iso.sh"
+    shellcheck "$NIXOS_PATH/core/scripts/"*.sh "$NIXOS_PATH/bootstrap.sh"
     SHELLCHECK_RESULT=$?
     set -e
 
@@ -42,7 +39,7 @@ run_check_task() {
     fi
     log_exec "nix" "<" "shellcheck"
 
-    # 6. Integrity Verification
+    # 5. Integrity Verification
     # 기본: 현재 호스트만 nix eval (빠름)
     # --deep: 전체 호스트 nix flake check + eval 캐시 (.verify git 기반)
     VERIFY_DIR="$NIXOS_PATH/.verify"
@@ -55,7 +52,7 @@ run_check_task() {
     prepare_verify_dir "$NIXOS_PATH" "$VERIFY_DIR" "$JSON_DIR" "$HOST_SPECIFIC_LOCK"
 
     if [ "$CHECK_DEEP" = true ]; then
-        log_msg "Task" "Step 6: Full integrity check via nix flake check (all hosts)"
+        log_msg "Task" "Step 5: Full integrity check via nix flake check (all hosts)"
         log_exec "nix" ">" "nix flake check"
         if nix flake check "$VERIFY_DIR" "${NIX_EVAL_FLAGS[@]}"; then
             log_exec "nix" "<" "nix flake check"
@@ -66,7 +63,7 @@ run_check_task() {
             exit 1
         fi
     else
-        log_msg "Task" "Step 6: Integrity check via nix eval (nixosConfigurations.${HOST_ID})"
+        log_msg "Task" "Step 5: Integrity check via nix eval (nixosConfigurations.${HOST_ID})"
         EVAL_FAILED=false
 
         log_exec "nix" ">" "nixosConfigurations.${HOST_ID}"
@@ -82,7 +79,7 @@ run_check_task() {
 
         # 현재 호스트에 속한 homeConfigurations (*@HOST_ID) 순회
         HOME_HOSTS=$(nix eval "${VERIFY_DIR}#homeConfigurations" \
-            --apply "cfgs: builtins.concatStringsSep \"\n\" (builtins.filter (k: builtins.match (\".*@${HOST_ID}\") k != null) (builtins.attrNames cfgs))" \
+            --apply "cfgs: let s = \"@${HOST_ID}\"; n = builtins.stringLength s; in builtins.concatStringsSep \"\n\" (builtins.filter (k: let l = builtins.stringLength k; in l >= n && builtins.substring (l - n) n k == s) (builtins.attrNames cfgs))" \
             --raw \
             --extra-experimental-features 'nix-command flakes')
 

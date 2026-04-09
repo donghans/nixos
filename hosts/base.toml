@@ -1,5 +1,6 @@
-system   = "x86_64-linux"
-username = "donghans"
+system              = "x86_64-linux"
+username            = "donghans"
+rollingStateVersion = "25.11"
 
 [git]
 name     = "신동한"

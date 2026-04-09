@@ -15,7 +15,8 @@ run_iso_task() {
         log_exec "nom" "<" "nom build iso"
 
         if [ -L "$TMP_BUILD_DIR/result" ]; then
-            ISO_FILE=$(readlink -f "$TMP_BUILD_DIR/result/iso/"*.iso)
+            ISO_FILE=$(find "$TMP_BUILD_DIR/result/iso/" -maxdepth 1 -name '*.iso' -print -quit)
+            ISO_FILE=$(readlink -f "$ISO_FILE")
             ISO_NAME=$(basename "$ISO_FILE")
 
             cp "$ISO_FILE" "$TMP_BUILD_DIR/"

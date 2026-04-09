@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 # [iso:setup] NixOS Installation Script
 # This script is wrapped by nixos-setup-from-repo.
@@ -136,7 +137,11 @@ if [ ! -f "$BASE_TOML" ]; then
     log_msg "Error" "could not find $BASE_TOML in the cloned repository."
     exit 1
 fi
-USERNAME=$(python3 -c "import tomllib; print(tomllib.load(open('$BASE_TOML','rb'))['username'])")
+USERNAME=$(BASE_TOML="$BASE_TOML" python3 -c "import tomllib, os; print(tomllib.load(open(os.environ['BASE_TOML'],'rb'))['username'])")
+if [ -z "$USERNAME" ]; then
+    log_msg "Error" "failed to extract username from $BASE_TOML"
+    exit 1
+fi
 
 # 7. Hardware Config
 log_msg "Config" "generating hardware-configuration.nix ..."
@@ -157,7 +162,7 @@ log_msg "Done" "running post-installation tasks for user: $USERNAME ..."
 mkdir -p "/mnt/home/$USERNAME/"
 mv /mnt/etc/nixos "/mnt/home/$USERNAME/nixos"
 
-nixos-enter --root /mnt --command "chown -R 1000:100 /home/$USERNAME/nixos"
+nixos-enter --root /mnt --command "chown -R $USERNAME:users /home/$USERNAME/nixos"
 nixos-enter --root /mnt --command "ln -sfn /home/$USERNAME/nixos /etc/nixos"
 
 echo ""

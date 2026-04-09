@@ -12,6 +12,7 @@
     runtimeInputs = [
       pkgs.jq
       pkgs.git
+      pkgs.python3
       pkgs.btrfs-progs
       pkgs.util-linux # mount, umount 등
     ];

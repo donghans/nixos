@@ -70,4 +70,25 @@
       fi
     '';
   });
-in {inherit wrapJetbrainsPackage;}
+  mkJetbrainsModule = {
+    ideName,
+    ideLabel,
+    pkgAttr,
+  }: {
+    config,
+    lib,
+    isNixOS ? false,
+    ...
+  }:
+    with lib;
+      {options.mods.devel.jetbrains.${ideName}.enable = mkEnableOption ideLabel;}
+      // (
+        if isNixOS
+        then {}
+        else {
+          config = mkIf config.mods.devel.jetbrains.${ideName}.enable {
+            home.packages = [(wrapJetbrainsPackage pkgAttr ideName)];
+          };
+        }
+      );
+in {inherit wrapJetbrainsPackage mkJetbrainsModule;}

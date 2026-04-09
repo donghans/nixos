@@ -75,6 +75,8 @@ print(f"→ {presets_path}")
 with open(f"{src_path}/hosts/base.toml", "rb") as f:
     base = tomllib.load(f)
 
+rolling_state_version = base["rollingStateVersion"]
+
 hosts_dir = f"{src_path}/hosts"
 all_resolved = {}
 
@@ -87,12 +89,24 @@ for entry in sorted(os.listdir(hosts_dir)):
     with open(host_toml_path, "rb") as f:
         host = tomllib.load(f)
 
+    if "type" not in host:
+        print(f"Error: '{host_toml_path}' 에 'type' 필드가 없습니다.", file=sys.stderr)
+        print(f"       가능한 값: desktop, laptop, server, rpi", file=sys.stderr)
+        sys.exit(1)
+    if "preset" not in host:
+        print(f"Error: '{host_toml_path}' 에 'preset' 필드가 없습니다.", file=sys.stderr)
+        print(f"       사용 가능한 프리셋: {', '.join(sorted(all_presets.keys()))}", file=sys.stderr)
+        sys.exit(1)
     preset_name = host["preset"]
+    if preset_name not in all_presets:
+        print(f"Error: '{host_toml_path}' 의 preset='{preset_name}' 이 존재하지 않습니다.", file=sys.stderr)
+        print(f"       사용 가능한 프리셋: {', '.join(sorted(all_presets.keys()))}", file=sys.stderr)
+        sys.exit(1)
     preset = all_presets[preset_name]
 
-    # stateVersion: host.toml 명시 > preset.stateVersion > None (rolling)
-    state_version = host.get("stateVersion", preset["stateVersion"])
-    is_rolling = state_version is None
+    # stateVersion: host.toml 명시 > preset.stateVersion > base.toml rollingStateVersion
+    state_version = host.get("stateVersion", preset["stateVersion"]) or rolling_state_version
+    is_rolling = host.get("stateVersion") is None and preset["stateVersion"] is None
 
     # mods: host.toml 오버라이드만 (프리셋 mods는 flake.nix가 presets.json에서 병합)
     mods = {}
@@ -114,7 +128,8 @@ for entry in sorted(os.listdir(hosts_dir)):
         "preset": preset_name,
         "username": host.get("username", base["username"]),
         "git": {**base.get("git", {}), **host.get("git", {})},
-        "stateVersion": state_version,
+        "stateVersion": state_version,       # 항상 non-null (rolling 시 rollingStateVersion 폴백)
+        "rollingStateVersion": rolling_state_version,
         "isRolling": is_rolling,
         "mods": mods,
     }

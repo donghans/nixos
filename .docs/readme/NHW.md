@@ -54,6 +54,7 @@ Home Manager 설정을 적용합니다.
 - `nhw iso arm`: `custom-iso-aarch64` 타겟(aarch64)을 빌드합니다.
 - `nhw fix-unstable [pkg1] [pkg2]`: Unstable 채널에서 빌드 실패하는 특정 패키지를 이전 정상 시점으로 하향 조정(Fallback)합니다.
   - **중요**: 이 기능을 통해 고정된 패키지를 사용하려면 Nix 설정 파일(`*.nix`)에서 해당 패키지를 `unstable.<pkgName>` 대신 **`unstable-fallback.<pkgName>`**으로 참조해야 합니다.
+  - 내부 동작 및 `.env` 파일 형식은 [핵심 메커니즘 문서](../.docs/hacking/MECHANISMS.md#3-지능형-패키지-복구-fallback-system)를 참고하세요.
 
 ---
 

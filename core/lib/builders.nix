@@ -37,8 +37,8 @@
       then nixpkgs.lib.removePrefix "${key}=" line
       else "";
 
-    envRev = getEnv "UNSTABLE_FALLBACK_REV";
-    envSha = getEnv "UNSTABLE_FALLBACK_SHA";
+    envRev = getEnv "NIX_UNSTABLE_FALLBACK_REV";
+    envSha = getEnv "NIX_UNSTABLE_FALLBACK_SHA";
 
     unstable-fallback =
       if (envRev != "" && envSha != "")
@@ -68,11 +68,11 @@
       inherit (workspaceMeta) gitName gitEmail nixosRepo;
       inherit hostname type;
       username = homeUser;
-      ramGb       = hostInfo.ramGb       or null;
-      swapGb      = hostInfo.swapGb      or null;
-      tmpfsSize   = hostInfo.tmpfsSize   or null;
+      ramGb = hostInfo.ramGb       or null;
+      swapGb = hostInfo.swapGb      or null;
+      tmpfsSize = hostInfo.tmpfsSize   or null;
       zramPercent = hostInfo.zramPercent or null;
-      stateVersion = workspaceMeta.stateVersion or "25.11";
+      inherit (workspaceMeta) stateVersion;
     };
   in {
     inherit homeUser homeConfig metaConfig unstable unstable-fallback pkgs;

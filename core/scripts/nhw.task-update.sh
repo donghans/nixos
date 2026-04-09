@@ -27,4 +27,3 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 fi
 
 run_update_task
-exit 0

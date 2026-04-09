@@ -33,7 +33,7 @@
     #   settings = {
     #     CPU_BOOST_ON_AC = 0;
     #     CPU_SCALING_GOVERNOR_ON_AC = "powersave";
-    #     CPU_ENERGE_PERF_POLICY_ON_AC = "balance_performance";
+    #     CPU_ENERGY_PERF_POLICY_ON_AC = "balance_performance";
     #     CPU_SCALING_MAX_FREQ_ON_AC = 3500000;
     #   };
     # };

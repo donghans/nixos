@@ -1,7 +1,11 @@
-{pkgs, ...}: {
+{
+  pkgs,
+  lib,
+  ...
+}: {
   # == 커서 테마 ==
   # Hyprland 커서 초기화
-  wayland.windowManager.hyprland.settings.exec-once = [
+  wayland.windowManager.hyprland.settings.exec-once = lib.mkOrder 900 [
     "hyprctl setcursor Bibata-Modern-Ice 24"
   ];
 

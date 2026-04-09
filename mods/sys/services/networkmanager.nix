@@ -19,7 +19,7 @@ in {
     else
       mkIf config.mods.gui.enable {
         # HM 사이드: GUI 활성화 시 nm-applet 트레이 실행
-        wayland.windowManager.hyprland.settings.exec-once = [
+        wayland.windowManager.hyprland.settings.exec-once = mkOrder 500 [
           "uwsm app -- ${pkgs.networkmanagerapplet}/bin/nm-applet"
         ];
       }

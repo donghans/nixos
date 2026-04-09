@@ -23,7 +23,7 @@ in {
     # == Home Manager: Polkit 인증 에이전트 ==
     # (목적: Wayland 환경에서 권한 상승 다이얼로그 처리)
     (optionalAttrs (!isNixOS) {
-      wayland.windowManager.hyprland.settings.exec-once = [
+      wayland.windowManager.hyprland.settings.exec-once = mkOrder 100 [
         "uwsm app -- ${pkgs.hyprpolkitagent}/libexec/hyprpolkitagent"
       ];
       home.packages = [pkgs.hyprpolkitagent];

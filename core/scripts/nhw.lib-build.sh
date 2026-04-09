@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2153
 
 # Constants
 # shellcheck disable=SC2034
@@ -78,23 +79,31 @@ setup_logging() {
 acquire_lock() {
     exec 9> "$LOCK_FILE"
     if ! flock -n 9; then
-        log_msg "Error" "another build process is already running." "$RED" >&2
+        log_msg "Error" "another build process is already running." >&2
         exit 1
     fi
 }
 
-# 3. Update .env Utility
+# 3. Update .env Utility (순수 bash — sed 구분자/정규식 문제 회피)
 update_env_file() {
-    local env_path=$1
-    local key=$2
-    local value=$3
+    local env_path=$1 key=$2 value=$3
     if [ ! -f "$env_path" ]; then
         echo "$key=$value" > "$env_path"
-    elif grep -q "^$key=" "$env_path"; then
-        sed -i "s|^$key=.*|$key=$value|" "$env_path"
-    else
-        echo "$key=$value" >> "$env_path"
+        return
     fi
+    local updated=false
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ "$line" == "${key}="* ]]; then
+            echo "$key=$value"
+            updated=true
+        else
+            echo "$line"
+        fi
+    done < "$env_path" > "${env_path}.tmp"
+    if [ "$updated" = false ]; then
+        echo "$key=$value" >> "${env_path}.tmp"
+    fi
+    mv "${env_path}.tmp" "$env_path"
 }
 
 # 4. Determine Host Info
@@ -109,29 +118,28 @@ determine_host_info() {
     fi
 
     local host_id="$input_host"
-    [ -z "$host_id" ] && host_id="$HOST"
+    # $NHW_LAST_HOST는 .env에서 로드된 값 (nhw.sh 시작 시 주입).
+    # 명령행에서 호스트를 명시하면 update_env_file()이 .env에 NHW_LAST_HOST를 기록하고,
+    # 다음 실행 시 호스트를 생략하면 이 값을 재사용 → "마지막 빌드 대상 유지" 동작.
+    [ -z "$host_id" ] && host_id="$NHW_LAST_HOST"
     if [ -z "$host_id" ]; then
         log_msg "Error" "host id is required."
         exit 1
     fi
 
-    if [[ "$host_id" =~ ^_?default$ ]]; then
-        echo "_default false"
-    else
-        local resolved_path="$JSON_DIR/resolved.json"
-        if [ ! -f "$resolved_path" ]; then
-            log_msg "Error" "resolved.json not found. resolver may have failed."
-            exit 1
-        fi
-        if ! jq -e ".\"$host_id\"" "$resolved_path" > /dev/null 2>&1; then
-            log_msg "Error" "'$host_id' is not a registered host."
-            exit 1
-        fi
-        update_env_file "$env_file" "HOST" "$host_id"
-        local is_rolling
-        is_rolling=$(jq -r ".\"$host_id\".isRolling" "$resolved_path")
-        echo "$host_id $is_rolling"
+    local resolved_path="$JSON_DIR/resolved.json"
+    if [ ! -f "$resolved_path" ]; then
+        log_msg "Error" "resolved.json not found. resolver may have failed."
+        exit 1
     fi
+    if ! jq -e ".\"$host_id\"" "$resolved_path" > /dev/null 2>&1; then
+        log_msg "Error" "'$host_id' is not a registered host."
+        exit 1
+    fi
+    update_env_file "$env_file" "NHW_LAST_HOST" "$host_id"
+    local is_rolling
+    is_rolling=$(jq -r ".\"$host_id\".isRolling" "$resolved_path")
+    echo "$host_id $is_rolling"
 }
 
 # 5. Prepare Build Dir
@@ -216,6 +224,10 @@ prepare_verify_dir() {
     local lock_file="${4:-}"  # flake.lock 경로 (커밋 전에 포함시켜야 캐시 키 안정)
 
     # .git은 유지하고 나머지만 초기화 (삭제된 파일도 반영)
+    if [ -z "$verify_dir" ]; then
+        log_msg "Error" "verify_dir is empty. aborting."
+        exit 1
+    fi
     if [ -d "$verify_dir" ]; then
         find "$verify_dir" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
     else
@@ -238,9 +250,82 @@ prepare_verify_dir() {
     init_tmp_git "$verify_dir"
 }
 
-# 9. Log Rotation
+# 9. Resolve Log Name (nhw.sh의 실행 컨텍스트에 맞는 로그 파일명 반환)
+resolve_log_name() {
+    if [ "$DO_CLEAN" = true ]; then
+        echo "${LOG_TIMESTAMP}-clean-${CLEAN_TARGET}"
+    elif [ "$TARGET_PROFILE" = "iso" ]; then
+        echo "${LOG_TIMESTAMP}-iso-${ISO_ARCH}"
+    elif [[ "$TARGET_PROFILE" =~ ^(check|fix-unstable)$ ]]; then
+        echo "${LOG_TIMESTAMP}-${TARGET_PROFILE}"
+    else
+        echo "${LOG_TIMESTAMP}-${TARGET_PROFILE}-${ACTION}"
+    fi
+}
+
+# 10. Print Init Banner (실행 시작 시 Action/Target/Mode 출력)
+print_init_banner() {
+    log_msg "Init" "NHW: [NixOS Helper](https://github.com/viperML/nh) Wrapper"
+
+    if [ "$DO_CLEAN" = true ]; then
+        log_msg "Init" "Action:   cleanup"
+    elif [ "$TARGET_PROFILE" = "fix-unstable" ]; then
+        log_msg "Init" "Action:   fix-unstable"
+    elif [ "$TARGET_PROFILE" = "check" ] && [ "$CHECK_DEEP" = true ]; then
+        log_msg "Init" "Action:   check --deep"
+    elif [ "$TARGET_PROFILE" = "iso" ]; then
+        log_msg "Init" "Action:   iso [${ISO_ARCH}]"
+    elif [ "$TARGET_PROFILE" = "check" ]; then
+        log_msg "Init" "Action:   check"
+    else
+        log_msg "Init" "Action:   $TARGET_PROFILE $ACTION"
+    fi
+
+    if [ -n "$HOST_ID" ] && [ "$TARGET_PROFILE" != "iso" ] && \
+       ! { [ "$TARGET_PROFILE" = "check" ] && [ "$CHECK_DEEP" = true ]; }; then
+        log_msg "Init" "Target:   $HOST_ID"
+        if [ "$IS_ROLLING" == "true" ]; then
+            log_msg "Init" "Mode:     rolling"
+        else
+            log_msg "Init" "Mode:     stable"
+        fi
+    fi
+}
+
+# 11. Signal Handler
+handle_signal() {
+    local sig="${1:-UNKNOWN}"
+    log_msg "Error" "Process interrupted by user. ($sig)"
+    exit 130
+}
+
+# 12. Cleanup (EXIT trap 핸들러 — 실행 요약 및 후처리)
+cleanup() {
+    END_TIME_RAW=$(date +%s)
+    END_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
+    DURATION=$((END_TIME_RAW - START_TIME_RAW))
+
+    if [ "$IS_SUCCESS" != true ]; then
+        log_msg "Error" "Process terminated abnormally. Removing temporary build reference."
+        [ -L "$NIXOS_PATH/.build" ] && rm -f "$NIXOS_PATH/.build" || true
+    fi
+
+    log_msg "Summary" "Started:  $START_TIME_STR"
+    log_msg "Summary" "Finished: $END_TIME_STR"
+    log_msg "Summary" "Duration: ${DURATION}s"
+    log_msg "Summary" "Log File: ${LOG_FILE:-disabled}"
+
+    check_origin_git_status "$NIXOS_PATH"
+    if [ -n "${HOST_SPECIFIC_LOCK:-}" ]; then
+        finalize_lock_sync "$LOCK_CHANGED" "$HOST_SPECIFIC_LOCK"
+    fi
+
+    rotate_logs
+}
+
+# 13. Log Rotation
 rotate_logs() {
     mkdir -p "$LOG_DIR" 2>/dev/null
-    # shellcheck disable=SC2012
-    ls -t "$LOG_DIR"/*.log 2>/dev/null | tail -n +31 | xargs rm -f 2>/dev/null || true
+    find "$LOG_DIR" -maxdepth 1 -name '*.log' -type f -printf '%T@\t%p\0' 2>/dev/null \
+        | sort -rzn | tail -z -n +31 | cut -z -f2- | xargs -0 rm -f 2>/dev/null || true
 }

@@ -89,6 +89,7 @@ ensure_tools() {
         log Info "누락된 도구: ${missing[*]}"
         log Step "nix-shell로 도구를 확보한 뒤 재실행합니다..."
         export BOOTSTRAP_IN_NIX_SHELL=1
+        # $* is intentional — nix-shell --run takes a single string argument
         exec nix-shell -p git python3 btrfs-progs util-linux \
             --run "bash $(readlink -f "$0") install $*"
     fi
@@ -102,9 +103,9 @@ resolve_repo() {
     if [ ! -f "$BASE_TOML" ]; then
         die "hosts/base.toml을 찾을 수 없습니다. 저장소 루트에서 실행하거나 NIXOS_REPO 환경변수를 설정하세요."
     fi
-    NIXOS_REPO=$(python3 -c "
-import tomllib, sys
-with open('$BASE_TOML', 'rb') as f:
+    NIXOS_REPO=$(BASE_TOML="$BASE_TOML" python3 -c "
+import tomllib, os
+with open(os.environ['BASE_TOML'], 'rb') as f:
     d = tomllib.load(f)
 print(d.get('git', {}).get('nixosRepo', ''))
 ")
@@ -126,13 +127,13 @@ collect_install_args() {
     fi
 
     if [ -z "$efi" ]; then
-        read -rp "$(printf "${CYAN}Bootstrap Input${NC} | EFI 파티션 경로 (예: /dev/nvme0n1p1): ")" efi
+        read -rp "$(printf '%s' "${CYAN}Bootstrap Input${NC} | EFI 파티션 경로 (예: /dev/nvme0n1p1): ")" efi
     fi
     if [ -z "$root" ]; then
-        read -rp "$(printf "${CYAN}Bootstrap Input${NC} | 루트 파티션 경로 (예: /dev/nvme0n1p2): ")" root
+        read -rp "$(printf '%s' "${CYAN}Bootstrap Input${NC} | 루트 파티션 경로 (예: /dev/nvme0n1p2): ")" root
     fi
     if [ -z "$host" ]; then
-        read -rp "$(printf "${CYAN}Bootstrap Input${NC} | 호스트명 (hosts/ 폴더 이름): ")" host
+        read -rp "$(printf '%s' "${CYAN}Bootstrap Input${NC} | 호스트명 (hosts/ 폴더 이름): ")" host
     fi
 
     [ -n "$efi" ]  || die "EFI 파티션 경로가 입력되지 않았습니다."

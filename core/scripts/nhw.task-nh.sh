@@ -13,7 +13,7 @@ _log_nvd_diff() {
     profile_dir=$(dirname "$profile_path")
     profile_name=$(basename "$profile_path")
     link_name=$(readlink "$profile_path")
-    cur_num=$(echo "$link_name" | grep -oP '\d+(?=-link)')
+    cur_num=$(echo "$link_name" | grep -oE '[0-9]+-link' | grep -oE '[0-9]+')
     prev_num=$(( cur_num - 1 ))
     prev_path="$profile_dir/${profile_name}-${prev_num}-link"
 

@@ -19,8 +19,9 @@ cd nixos
 
 ```toml
 # hosts/base.toml
-username = "your_username"
-system   = "x86_64-linux"    # ARM 호스트는 host.toml에서 system = "aarch64-linux"로 오버라이드
+username            = "your_username"
+system              = "x86_64-linux"    # ARM 호스트는 host.toml에서 system = "aarch64-linux"로 오버라이드
+rollingStateVersion = "25.11"           # stateVersion 미지정 호스트의 폴백 버전 (채널 업그레이드 시 여기만 수정)
 
 [git]
 name      = "Your Name"
@@ -42,7 +43,8 @@ preset = "workstation"
 [mods.devel]
 fvm = true
 
-# 선택적 오버라이드 (기본값: 자동 감지/계산)
+# ramGb는 /proc/meminfo에서 자동 감지됩니다 (host.toml 입력 불가).
+# swap/tmpfs/zram은 ramGb를 기반으로 자동 계산되며, 필요 시 아래에서 오버라이드 가능합니다.
 # swapGb      = 24    # swap 파일 크기 (GB). 기본: ceil(ramGb × 0.75)
 # tmpfsSize   = "100%" # /tmp tmpfs 상한. 기본: "100%"
 # zramPercent = 50    # ZRAM 풀 크기 (물리 RAM의 %). 기본: 50
@@ -54,21 +56,15 @@ fvm = true
 
 ## 4. (선택) 설치 전 설정 검증
 
-기기에 실제로 설치하기 전에 설정이 올바른지 빌드로 확인할 수 있습니다.
+기기에 실제로 설치하기 전에 설정이 올바른지 빌드로 확인할 수 있습니다. nhw가 설치된 기존 NixOS 환경에서 실행하세요.
 
 ```bash
-nhw <hostname> os build
+nhw <hostname> os build    # NixOS 시스템 설정 빌드 검증
+nhw <hostname> home build  # Home Manager 설정 빌드 검증
+nhw check                  # 포맷팅 + 린트 + eval 통합 검증
 ```
 
-**VM으로 런타임 동작 확인:**
-```bash
-nh os build-vm
-# 또는
-nix build .#nixosConfigurations.<hostname>.config.system.build.vm
-./result/bin/run-*-vm
-```
-
-> **참고**: VM은 패키지 구성·서비스 동작 등 config 레벨 검증에 활용합니다. Btrfs 서브볼륨 구조(`@`, `@home`)는 VM 디스크(qcow2)와 무관하며, 실제 디스크 설정은 설치 스크립트가 처리합니다.
+> **참고**: 이 명령들은 `nhw`가 설치된 환경(기존 NixOS 호스트)에서만 실행 가능합니다. 첫 설치 시에는 이 단계를 건너뛰어도 됩니다.
 
 ---
 

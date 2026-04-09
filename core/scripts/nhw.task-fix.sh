@@ -18,10 +18,18 @@ run_fix_task() {
     for pkg_name in "${pkg_names[@]}"; do
         echo "   - processing '$pkg_name'..."
         
-        local search_path
-        search_path=$(curl -s "https://api.github.com/search/code?q=filename:package.nix+path:pkgs/by-name/**/${pkg_name}+repo:${repo}" | jq -r '.items[0].path')
+        local search_path api_result
+        api_result=$(gh api "search/code?q=filename:package.nix+path:pkgs/by-name/**/${pkg_name}+repo:${repo}") || {
+            log_msg "Warn" "GitHub API failed for '$pkg_name'. skipping."
+            continue
+        }
+        search_path=$(echo "$api_result" | jq -r '.items[0].path')
         if [ "$search_path" == "null" ] || [ -z "$search_path" ]; then
-            search_path=$(curl -s "https://api.github.com/search/code?q=filename:default.nix+${pkg_name}+path:pkgs/**+repo:${repo}" | jq -r '.items[0].path')
+            api_result=$(gh api "search/code?q=filename:default.nix+${pkg_name}+path:pkgs/**+repo:${repo}") || {
+                log_msg "Warn" "GitHub API failed for '$pkg_name'. skipping."
+                continue
+            }
+            search_path=$(echo "$api_result" | jq -r '.items[0].path')
         fi
 
         if [ "$search_path" == "null" ] || [ -z "$search_path" ]; then
@@ -30,18 +38,23 @@ run_fix_task() {
         fi
 
         local commits
-        commits=$(curl -s "https://api.github.com/repos/${repo}/commits?path=${search_path}&sha=nixos-unstable")
+        commits=$(gh api "repos/${repo}/commits?path=${search_path}&sha=nixos-unstable") || {
+            log_msg "Warn" "GitHub API failed for commits of '$pkg_name'. skipping."
+            continue
+        }
         local safe_fallback_commit
-        safe_fallback_commit=$(echo "$commits" | jq -r '.[1].sha') 
+        safe_fallback_commit=$(echo "$commits" | jq -r '.[1].sha // empty')
         local commit_date
-        commit_date=$(echo "$commits" | jq -r '.[1].commit.committer.date')
-        local timestamp
-        timestamp=$(date -d "$commit_date" +%s)
+        commit_date=$(echo "$commits" | jq -r '.[1].commit.committer.date // empty')
 
-        if [ -z "$safe_fallback_commit" ] || [ "$safe_fallback_commit" == "null" ]; then
+        if [ -z "$safe_fallback_commit" ] || [ -z "$commit_date" ]; then
             log_msg "Warn" "history not found for '$pkg_name'. skipping."
             continue
         fi
+
+        # Requires GNU date (coreutils)
+        local timestamp
+        timestamp=$(date -d "$commit_date" +%s)
 
         if [ "$timestamp" -lt "$earliest_timestamp" ]; then
             earliest_timestamp=$timestamp
@@ -59,14 +72,20 @@ run_fix_task() {
     
     local tarball_url="https://github.com/${repo}/archive/${final_rev}.tar.gz"
     local sha256
-    sha256=$(nix-prefetch-url --unpack "$tarball_url" 2>/dev/null || true)
+    sha256=$(nix-prefetch-url --unpack "$tarball_url" 2>/dev/null) || {
+        log_msg "Error" "failed to prefetch tarball."
+        exit 1
+    }
     local sri_hash
-    sri_hash=$(nix hash to-sri --type sha256 "$sha256" || true)
+    sri_hash=$(nix hash to-sri --type sha256 "$sha256") || {
+        log_msg "Error" "failed to compute SRI hash."
+        exit 1
+    }
 
-    update_env_file "$ENV_FILE" "UNSTABLE_FALLBACK_REV" "$final_rev"
-    update_env_file "$ENV_FILE" "UNSTABLE_FALLBACK_SHA" "$sri_hash"
+    update_env_file "$ENV_FILE" "NIX_UNSTABLE_FALLBACK_REV" "$final_rev"
+    update_env_file "$ENV_FILE" "NIX_UNSTABLE_FALLBACK_SHA" "$sri_hash"
 
-    log_msg "Done" "UNSTABLE_FALLBACK updated in .env"
+    log_msg "Done" "NIX_UNSTABLE_FALLBACK updated in .env"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
