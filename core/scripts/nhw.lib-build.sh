@@ -3,9 +3,9 @@
 
 # Constants
 # shellcheck disable=SC2034
-TMP_BUILD_DIR="/tmp/nixos-build"
+TMP_BUILD_DIR="$NIXOS_PATH/.build"
 JSON_DIR="/tmp/nhw-json"
-LOCK_FILE="/tmp/nixos-build.lock"
+LOCK_FILE="/tmp/nhw-build.lock"
 LOG_DIR="/var/log/nhw"
 
 # ANSI Colors
@@ -147,10 +147,24 @@ prepare_build_dir() {
     local source_path=$1
     local build_dir=$2
     local env_file=$3
+    local lock_file="${4:-}"
 
     log_msg "Task" "preparing isolated environment..."
-    rm -rf "$build_dir"
-    mkdir -p "$build_dir"
+    
+    if [ -z "$build_dir" ]; then
+        log_msg "Error" "build_dir is empty. aborting."
+        exit 1
+    fi
+    
+    if [ -L "$build_dir" ]; then
+        rm -f "$build_dir"
+    fi
+
+    if [ -d "$build_dir" ]; then
+        find "$build_dir" -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '*.iso' ! -name 'result*' ! -name 'flake.lock' -exec rm -rf {} +
+    else
+        mkdir -p "$build_dir"
+    fi
     
     # Copy essential directories for flake build
     cp -a "$source_path/core" "$build_dir/"
@@ -172,7 +186,11 @@ prepare_build_dir() {
     cp -a "$JSON_DIR/resolved.json" "$build_dir/"
     cp -a "$JSON_DIR/presets.json" "$build_dir/"
 
-    ln -sfn "$build_dir" "$source_path/.build"
+    if [ -n "$lock_file" ] && [ -f "$lock_file" ]; then
+        cp "$lock_file" "$build_dir/flake.lock"
+    fi
+
+    init_tmp_git "$build_dir"
 }
 
 # 6. Init Tmp Git
@@ -211,43 +229,6 @@ check_origin_git_status() {
             log_msg "Notice" "consider committing to save history."
         fi
     fi
-}
-
-# 10. Prepare Verify Dir (check 전용 격리 환경)
-# .git은 보존하여 Nix git 기반 eval 캐시 활용:
-#   - 내용 변경 없으면 init_tmp_git이 커밋 안 함 → 같은 커밋 해시 → Nix 캐시 히트
-#   - 내용 변경 시 새 커밋 → 새 해시 → 캐시 미스 (정상 동작)
-prepare_verify_dir() {
-    local source_path=$1
-    local verify_dir=$2
-    local json_dir=$3
-    local lock_file="${4:-}"  # flake.lock 경로 (커밋 전에 포함시켜야 캐시 키 안정)
-
-    # .git은 유지하고 나머지만 초기화 (삭제된 파일도 반영)
-    if [ -z "$verify_dir" ]; then
-        log_msg "Error" "verify_dir is empty. aborting."
-        exit 1
-    fi
-    if [ -d "$verify_dir" ]; then
-        find "$verify_dir" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
-    else
-        mkdir -p "$verify_dir"
-    fi
-
-    cp -a "$source_path/core" "$verify_dir/"
-    cp -a "$source_path/hosts" "$verify_dir/"
-    cp -a "$source_path/mods" "$verify_dir/"
-    cp -a "$source_path/core/"* "$verify_dir/"  # flake.nix를 루트에 노출
-
-    cp -a "$json_dir/resolved.json" "$verify_dir/"
-    cp -a "$json_dir/presets.json" "$verify_dir/"
-
-    # lock file을 커밋 전에 포함 → 내용 불변 시 같은 커밋 해시 → Nix eval 캐시 히트
-    if [ -n "$lock_file" ] && [ -f "$lock_file" ]; then
-        cp "$lock_file" "$verify_dir/flake.lock"
-    fi
-
-    init_tmp_git "$verify_dir"
 }
 
 # 9. Resolve Log Name (nhw.sh의 실행 컨텍스트에 맞는 로그 파일명 반환)
@@ -306,8 +287,7 @@ cleanup() {
     DURATION=$((END_TIME_RAW - START_TIME_RAW))
 
     if [ "$IS_SUCCESS" != true ]; then
-        log_msg "Error" "Process terminated abnormally. Removing temporary build reference."
-        [ -L "$NIXOS_PATH/.build" ] && rm -f "$NIXOS_PATH/.build" || true
+        log_msg "Error" "Process terminated abnormally."
     fi
 
     log_msg "Summary" "Started:  $START_TIME_STR"

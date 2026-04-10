@@ -54,7 +54,7 @@
           nhw os switch            # apply NixOS system config
           nhw check                # run full integrity checks
 
-        WHY: nhw copies sources to /tmp/nixos-build/, resolves
+        WHY: nhw copies sources to .build/, resolves
         host metadata into resolved.json, then invokes nix from
         that isolated directory. Skipping nhw breaks this step.
         ============================================================
