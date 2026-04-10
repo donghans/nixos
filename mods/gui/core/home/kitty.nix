@@ -22,15 +22,11 @@ _: {
       shell_integration = "disabled";
     };
 
-    # 마우스 및 키 매핑
+    # 마우스 매핑 (extraConfig를 사용하거나 키워드 매핑이 필요할 수 있음)
+    # kitty의 특수 매핑은 문자열 그대로 전달하는 것이 가장 확실합니다.
     extraConfig = ''
       mouse_map middle release ungrabbed no_op
       mouse_map right press ungrabbed paste_from_clipboard
-
-      # == Home/End Key Compatibility Fix ==
-      # (목적: Node.js/Gemini CLI 등에서 Home/End가 기호로 출력되는 문제 해결)
-      map home send_text all \x1b[H
-      map end send_text all \x1b[F
     '';
   };
 }
