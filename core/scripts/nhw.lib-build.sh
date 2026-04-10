@@ -136,7 +136,7 @@ determine_host_info() {
         log_msg "Error" "'$host_id' is not a registered host."
         exit 1
     fi
-    update_env_file "$env_file" "NHW_LAST_HOST" "$host_id"
+    [ -n "$env_file" ] && update_env_file "$env_file" "NHW_LAST_HOST" "$host_id"
     local is_rolling
     is_rolling=$(jq -r ".\"$host_id\".isRolling" "$resolved_path")
     echo "$host_id $is_rolling"

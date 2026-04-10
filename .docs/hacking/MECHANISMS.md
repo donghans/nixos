@@ -28,9 +28,9 @@ Unstable 채널 사용자의 최대 고민인 '빌드 실패'를 자동화로 �
   1. 깨진 패키지의 히스토리를 GitHub API로 추적합니다.
   2. 가장 최근에 빌드가 성공했던 시점의 커밋 해시를 찾아냅니다.
   3. 해당 해시와 SHA256을 프로젝트 루트 **`.env`**에 기록합니다.
-- **`.env` 파일 형식** (git 추적 제외, `nhw fix-unstable`이 자동 생성):
+- **`.env` 파일 형식** (git 추적 제외):
   ```bash
-  NHW_LAST_HOST=<마지막으로 빌드한 호스트명>         # nhw가 관리
+  NHW_LAST_HOST=<마지막으로 빌드한 호스트명>         # switch/test/boot 시 nhw가 기록 (check/build는 기록 안 함)
   NIX_UNSTABLE_FALLBACK_REV=<nixpkgs 커밋 해시>    # nhw fix-unstable이 관리
   NIX_UNSTABLE_FALLBACK_SHA=<sha256 해시>          # nhw fix-unstable이 관리
   ```
@@ -45,12 +45,16 @@ Unstable 채널 사용자의 최대 고민인 '빌드 실패'를 자동화로 �
 - **해결**: `core/lib/mk-preset.nix`가 호스트별로 주입되어 두 목록을 대조합니다. 일반 호스트뿐 아니라 ISO 빌드(`custom-iso`, `custom-iso-aarch64`)도 coverageModule 대상에 포함됩니다.
   1. **presetCovered**: `presets.json`에서 읽은 preset mods의 `.enable` 경로 목록
   2. **declaredOptions**: `options.mods`를 재귀 탐색하여 찾은 선언된 `.enable` 옵션 목록
-- **효과**: 두 목록의 차집합(`uncovered`)이 비어 있지 않으면 빌드 타임 오류를 발생시킵니다. 의도적으로 프리셋 외부에서 관리되는 옵션(예: `gui/default.nix`가 내부적으로 활성화하는 `sys.fonts`, `sys.vfs`)은 프리셋 TOML의 `[explicitOptional]`에 등록하면 체크에서 제외됩니다.
+- **효과**: 두 가지 검사를 수행하며, 하나라도 실패하면 빌드 타임 오류를 발생시킵니다.
+  1. **누락 검사**: `declaredOptions`에 있지만 `presetCovered`에 없는 옵션(`uncovered`)이 존재하면 오류.
+  2. **형제 완전성 검사**: 같은 그룹(공통 부모, 예: `mods.gui.apps`) 내 옵션 중 하나라도 preset에 명시했다면 같은 그룹의 나머지 옵션도 전부 명시해야 합니다. 의도적으로 관리하는 그룹임을 선언하는 일관성 정책입니다.
+- 의도적으로 프리셋 외부에서 관리되는 옵션(예: `gui/default.nix`가 내부적으로 활성화하는 `sys.fonts`, `sys.vfs`)은 프리셋 TOML의 `[explicitOptional]`에 등록하면 체크에서 제외됩니다.
 
 ---
 
-## 5. 동적 오버레이 팩토리 (mkWrapper)
-복잡한 의존성 문제를 선언적으로 해결합니다.
+## 5. 오버레이 시스템 (Overlay System)
+복잡한 패키지 의존성 문제를 선언적으로 해결합니다.
 
-- **기능**: 패키지의 소스 코드를 수정하지 않고도, 실행 파일에 필요한 환경 변수(`PATH`, `LD_LIBRARY_PATH` 등)를 주입하거나 래핑(Wrapping)할 수 있는 헬퍼 함수입니다.
-- **사례**: 특정 라이브러리 경로가 필요한 바이너리 앱이나, 특정 환경 변수 하에서만 동작해야 하는 스크립트들을 전역적으로 관리할 때 사용됩니다.
+- **`mkWrapper` (`core/lib/mk-wrapper.nix`)**: 패키지의 소스 코드를 수정하지 않고도, 실행 파일에 필요한 환경 변수(`PATH`, `LD_LIBRARY_PATH` 등)를 주입하거나 래핑(Wrapping)할 수 있는 범용 헬퍼 함수입니다.
+- **`*.overlay.nix` 자동 탐색**: `mods/` 하위 어디든 `<name>.overlay.nix` 파일을 두면 `flake.outputs.nix`가 `lib.filesystem.listFilesRecursive`로 자동 탐색하여 `customOverlays`에 추가합니다. 특정 패키지를 nixpkgs overlay로 패치할 때 사용합니다. `mods/_lib.nix`의 `importDir`은 이 파일을 home-manager 모듈로 로드하지 않도록 자동 제외합니다.
+  - **사례**: `swappy.overlay.nix` — nixpkgs swappy 래퍼에서 `wl-clipboard`가 PATH에 없어 복사 버튼이 실패하는 문제를 `postFixup`으로 수정.

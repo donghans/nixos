@@ -81,6 +81,39 @@ with lib; let
         && !(isExcluded opt)
     )
     declaredOptions;
+
+  # == 형제 옵션 완전성 검사 ==
+  # 하나라도 명시 시 같은 그룹(공통 부모) 전체를 명시해야 함
+  getGroup = path: let
+    parts = splitString "." path;
+  in
+    concatStringsSep "." (take (length parts - 2) parts);
+
+  checkableOptions =
+    filter (
+      opt:
+        !(isExcluded opt) && !(elem opt explicitOptional)
+    )
+    declaredOptions;
+
+  groupedOptions = groupBy getGroup checkableOptions;
+
+  incompleteGroups =
+    filterAttrs (
+      _group: members: let
+        explicitCount = length (filter (m: presetCoveredSet ? ${m}) members);
+      in
+        length members > 1 && explicitCount > 0 && explicitCount < length members
+    )
+    groupedOptions;
+
+  incompleteMessages =
+    mapAttrsToList (
+      group: members: let
+        missing = filter (m: !(presetCoveredSet ? ${m})) members;
+      in "${group}: 누락 → ${concatStringsSep ", " missing}"
+    )
+    incompleteGroups;
 in {
   config.assertions = [
     # == Coverage Check: 새 mods 항목 누락 감지 ==
@@ -90,6 +123,16 @@ in {
         [Mods Coverage] workspace-options에 선언됐으나 preset에 없는 옵션:
           ${concatStringsSep "\n  " uncovered}
         → ${presetName}.toml에 추가하거나,
+          의도적 제외라면 ${presetName}.toml의 [explicitOptional] paths에 추가하세요.
+      '';
+    }
+    # == Sibling Coverage Check: 형제 옵션 완전성 검사 ==
+    {
+      assertion = incompleteGroups == {};
+      message = ''
+        [Mods Coverage] 형제 옵션 일부만 명시됨 (하나라도 명시 시 그룹 전체 명시 필요):
+          ${concatStringsSep "\n  " incompleteMessages}
+        → ${presetName}.toml에 누락된 형제 옵션을 추가하거나,
           의도적 제외라면 ${presetName}.toml의 [explicitOptional] paths에 추가하세요.
       '';
     }

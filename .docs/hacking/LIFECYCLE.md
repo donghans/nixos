@@ -20,7 +20,7 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 
 1.  **Metadata Parsing**: `flake.nix`가 `resolved.json`과 `presets.json`을 읽어 모든 호스트 설정을 AttrSet으로 생성합니다.
 2.  **Package Set Construction**: `nixpkgs`, `unstable`, 그리고 `.env`에 명시된 `unstable-fallback`을 조합하여 기기에 최적화된 패키지 세트를 구성합니다.
-3.  **Overlay Application**: `mkWrapper` 등 프로젝트 고유의 패키지 수정 로직이 이 단계에서 적용됩니다.
+3.  **Overlay Application**: `mkWrapper`(범용 래핑 헬퍼)와 `mods/` 하위에서 자동 탐색된 `*.overlay.nix` 파일들이 이 단계에서 적용됩니다.
 
 ---
 
@@ -30,7 +30,7 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 1.  **Host Specific Loading**: `hosts/<hostname>/configuration.nix`가 먼저 로드됩니다. 프리셋 mods는 flake.nix가 `resolved.json`과 `presets.json`을 병합하여 `modsModule`로 주입합니다.
 2.  **Inheritance**: 기기별 하드웨어 설정(`hosts/<hostname>/_hardware.nix`)이 임포트됩니다. Btrfs/ZRAM 스토리지 공통 설정은 `mods/sys/base/default.nix`를 통해 sys 도메인에서 포함됩니다.
 3.  **Mix-in**: `mods/default.nix`를 통해 sys, gui, devel 세 도메인이 모두 로드됩니다. 각 모듈은 `mkIf cfg.enable`로 enable된 항목만 실제 설정에 기여합니다.
-4.  **Coverage Check**: flake.nix가 주입한 `coverageModule`(`mk-preset.nix` 기반)의 `assertions`가 평가되어 프리셋에 누락된 옵션이 있으면 즉시 오류를 발생시킵니다.
+4.  **Coverage Check**: flake.nix가 주입한 `coverageModule`(`mk-preset.nix` 기반)의 `assertions`가 평가됩니다. ① 선언됐지만 preset에 없는 누락 옵션, ② 같은 그룹 내 일부만 명시된 형제 완전성 위반 중 하나라도 감지되면 즉시 오류를 발생시킵니다.
 
 ---
 

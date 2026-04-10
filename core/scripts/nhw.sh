@@ -59,8 +59,12 @@ python3 "$SCRIPT_DIR/nhw.resolve.py" "$NIXOS_PATH" "$JSON_DIR" >/dev/null
 LOCK_STORE_DIR="$NIXOS_PATH/.locks"
 HOST_ID=""; IS_ROLLING=""; HOST_SPECIFIC_LOCK=""
 if [ "$DO_CLEAN" != true ] && [ "$TARGET_PROFILE" != "fix-unstable" ]; then
+    _PERSIST_ENV=""
+    if [[ "$TARGET_PROFILE" != "check" && ( "$ACTION" == "switch" || "$ACTION" == "test" || "$ACTION" == "boot" ) ]]; then
+        _PERSIST_ENV="$ENV_FILE"
+    fi
     set +e
-    HOST_INFO_RAW=$(determine_host_info "$TARGET_PROFILE" "$TARGET_HOST" "$ENV_FILE")
+    HOST_INFO_RAW=$(determine_host_info "$TARGET_PROFILE" "$TARGET_HOST" "$_PERSIST_ENV")
     DETERMINE_EXIT_CODE=$?
     set -e
     if [ $DETERMINE_EXIT_CODE -ne 0 ] || [ -z "$HOST_INFO_RAW" ]; then exit 1; fi
