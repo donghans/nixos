@@ -50,7 +50,7 @@ in {
         PartOf = ["graphical-session.target"];
       };
       Service = {
-        ExecStart = "${pkgs.wl-clipboard}/bin/wl-paste --watch --type text/plain;charset=utf-8 ${pkgs.cliphist}/bin/cliphist store";
+        ExecStart = "${pkgs.wl-clipboard}/bin/wl-paste --type text/plain --watch ${pkgs.cliphist}/bin/cliphist store";
         Restart = "on-failure";
         RestartSec = 2;
       };

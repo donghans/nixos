@@ -6,7 +6,8 @@
     isImportable = n:
       lib.hasSuffix ".nix" n
       && !lib.hasPrefix "_" n
-      && !lib.hasSuffix ".home.nix" n;
+      && !lib.hasSuffix ".home.nix" n
+      && !lib.hasSuffix ".overlay.nix" n;
     files =
       builtins.filter isImportable
       (builtins.attrNames (lib.filterAttrs (_: v: v == "regular") contents));
