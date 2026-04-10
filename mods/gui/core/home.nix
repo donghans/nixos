@@ -30,6 +30,7 @@ in {
     ./home/hyprpaper.nix
     ./home/kitty.nix
     ./home/mako.nix
+    ./home/swappy.nix
     ./home/waybar.nix
     ./home/wl-clip.nix
   ];
