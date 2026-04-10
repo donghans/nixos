@@ -16,7 +16,7 @@ with lib; let
       exit 1
     fi
 
-    TEMPLATE_DIR="${config.home.homeDirectory}/${builtins.baseNameOf config.workspace.nixosRepo}/mods/_data/devbox/devbox"
+    TEMPLATE_DIR="${config.home.homeDirectory}/${builtins.baseNameOf config.workspace.nixosRepo}/mods/_data/devbox"
     TARGET_TEMPLATE="$TEMPLATE_DIR/$TYPE.json"
 
     if [ ! -f "$TARGET_TEMPLATE" ]; then
