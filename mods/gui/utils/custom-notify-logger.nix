@@ -104,7 +104,7 @@ in {
       (optionalAttrs isNixOS {
         # 전역 로그 디렉터리 생성 (Sticky Bit + 실행 권한만 부여 → 타 사용자 파일 목록 열람 차단)
         systemd.tmpfiles.rules = [
-          "d ${svcCfg.logDir} 1733 root root -"
+          "d ${svcCfg.logDir} 1777 root root -"
         ];
 
         # 전역 Logrotate 설정 (NixOS 레벨)
