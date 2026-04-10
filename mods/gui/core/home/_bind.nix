@@ -17,7 +17,7 @@
   # 사용되는 명령어의 파일 경로 정의
   grim = "${pkgs.grim}/bin/grim";
   slurp = "${pkgs.slurp}/bin/slurp";
-  swappy = "${pkgs.swappy}/bin/swappy";
+  satty = "${pkgs.satty}/bin/satty";
   cliphist = "${pkgs.cliphist}/bin/cliphist";
   fuzzel = "${pkgs.fuzzel}/bin/fuzzel";
   wl-copy = "${pkgs.wl-clipboard}/bin/wl-copy";
@@ -50,7 +50,7 @@ in {
         "$mainMod SHIFT, mouse:274, exec, ${swapMonitors}/bin/hypr-swap-monitors"
 
         # Misc
-        ", Print, exec, ${grim} -g \"$(${slurp})\" - | ${swappy} -f -"
+        ", Print, exec, ${grim} -g \"$(${slurp})\" - | ${satty} --filename -"
       ]
       ++ (
         # Workspace N

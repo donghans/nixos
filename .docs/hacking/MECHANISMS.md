@@ -57,4 +57,4 @@ Unstable 채널 사용자의 최대 고민인 '빌드 실패'를 자동화로 �
 
 - **`mkWrapper` (`core/lib/mk-wrapper.nix`)**: 패키지의 소스 코드를 수정하지 않고도, 실행 파일에 필요한 환경 변수(`PATH`, `LD_LIBRARY_PATH` 등)를 주입하거나 래핑(Wrapping)할 수 있는 범용 헬퍼 함수입니다.
 - **`*.overlay.nix` 자동 탐색**: `mods/` 하위 어디든 `<name>.overlay.nix` 파일을 두면 `flake.outputs.nix`가 `lib.filesystem.listFilesRecursive`로 자동 탐색하여 `customOverlays`에 추가합니다. 특정 패키지를 nixpkgs overlay로 패치할 때 사용합니다. `mods/_lib.nix`의 `importDir`은 이 파일을 home-manager 모듈로 로드하지 않도록 자동 제외합니다.
-  - **사례**: `swappy.overlay.nix` — nixpkgs swappy 래퍼에서 `wl-clipboard`가 PATH에 없어 복사 버튼이 실패하는 문제를 `postFixup`으로 수정.
+  - **사례**: 특정 패키지가 런타임에 필요한 외부 바이너리를 PATH에 포함하지 않을 경우, `postFixup`에서 `wrapProgram`으로 주입.
