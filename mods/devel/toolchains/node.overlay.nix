@@ -2,6 +2,7 @@
 _final: prev: let
   # == Prisma & Node Wrapper Logic ==
   # Prisma 엔진을 현재 디렉토리에서 상위로 올라가며 찾는 쉘 스크립트
+  # (참고: Nix ''...'' 문자열에서 ''$ 는 쉘 변수 $ 의 이스케이프 → 출력 시 $VAR 로 확장)
   prismaDetectionScript = ''
     curr="''$PWD"
     while [ "''$curr" != "/" ]; do

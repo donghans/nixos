@@ -26,11 +26,9 @@ nhw [scope] [action] [hostname]
   1. `deadnix` — 미사용 코드 탐지
   2. `statix fix` — 안티패턴 자동 수정
   3. `alejandra` — 코드 포맷팅
-  4. `flake.nix` 예외처리 (특정 spacing 복원)
-  5. `shellcheck` — 셸 스크립트 정적 분석
-  6. `nix eval` — 현재 호스트에 대해 빌드 가능 여부를 빠르게 검증
-- `nhw check --deep`: 6단계를 `nix flake check`로 교체하여 **전체 호스트**를 완전히 검사합니다. 시간이 오래 걸리지만 CI 수준의 완전한 검증을 제공합니다.
-- **참고**: `flake.nix`의 특정 띄어쓰기 정렬을 유지하기 위한 예외 처리 로직이 포함되어 있습니다.
+  4. `shellcheck` — 셸 스크립트 정적 분석
+  5. `nix eval` — 현재 호스트에 대해 빌드 가능 여부를 빠르게 검증
+- `nhw check --deep`: 5단계를 `nix flake check`로 교체하여 **전체 호스트**를 완전히 검사합니다. 시간이 오래 걸리지만 CI 수준의 완전한 검증을 제공합니다.
 - **참고**: `nhw check`는 `.env`의 `NHW_LAST_HOST`를 갱신하지 않습니다. 호스트 기록은 `switch`/`test`/`boot` 시에만 이루어집니다.
 
 ### 시스템 설정 관리 (`os`)

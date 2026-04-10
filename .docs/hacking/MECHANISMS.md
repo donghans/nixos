@@ -55,6 +55,13 @@ Unstable 채널 사용자의 최대 고민인 '빌드 실패'를 자동화로 �
 ## 5. 오버레이 시스템 (Overlay System)
 복잡한 패키지 의존성 문제를 선언적으로 해결합니다.
 
-- **`mkWrapper` (`core/lib/mk-wrapper.nix`)**: 패키지의 소스 코드를 수정하지 않고도, 실행 파일에 필요한 환경 변수(`PATH`, `LD_LIBRARY_PATH` 등)를 주입하거나 래핑(Wrapping)할 수 있는 범용 헬퍼 함수입니다.
-- **`*.overlay.nix` 자동 탐색**: `mods/` 하위 어디든 `<name>.overlay.nix` 파일을 두면 `flake.outputs.nix`가 `lib.filesystem.listFilesRecursive`로 자동 탐색하여 `customOverlays`에 추가합니다. 특정 패키지를 nixpkgs overlay로 패치할 때 사용합니다. `mods/_lib.nix`의 `importDir`은 이 파일을 home-manager 모듈로 로드하지 않도록 자동 제외합니다.
-  - **사례**: 특정 패키지가 런타임에 필요한 외부 바이너리를 PATH에 포함하지 않을 경우, `postFixup`에서 `wrapProgram`으로 주입.
+- **`mkWrapper` (`core/lib/mk-wrapper.nix`)**: 패키지의 소스 코드를 수정하지 않고도, 실행 파일에 필요한 환경 변수(`PATH`, `LD_LIBRARY_PATH` 등)를 주입하거나 래핑(Wrapping)할 수 있는 범용 헬퍼 함수입니다. `pkg`, `binName`을 기본으로 받으며 `libs`(LD_LIBRARY_PATH), `bins`(PATH), `env`(환경변수), `run`(실행 전 쉘 훅), `addFlags`(인수 추가)를 선택적으로 조합할 수 있습니다.
+- **`*.overlay.nix` 자동 탐색**: `mods/` 하위 어디든 `<name>.overlay.nix` 파일을 두면 `flake.outputs.nix`가 `lib.filesystem.listFilesRecursive`로 자동 탐색하여 `customOverlays`에 추가합니다. 특정 패키지를 nixpkgs overlay로 패치할 때 사용하며, 관련 모듈 옆에 위치하여 locality를 유지합니다. `mods/_lib.nix`의 `importDir`은 이 파일을 home-manager 모듈로 로드하지 않도록 자동 제외합니다.
+
+**현재 등록된 overlay 목록** (`mods/devel/toolchains/`):
+
+| 파일 | 노출 attrset | 역할 |
+|------|-------------|------|
+| `jetbrains.overlay.nix` | `pkgs.jetbrains-wrapped.{idea,webstorm,pycharm,datagrip,android-studio}` | UI 스케일 고정(`-Dsun.java2d.uiScale=1.0`), XWayland 커서 크기 고정, 프로젝트 디렉터리 자동 생성 및 `ide.general.xml` 패치 |
+| `node.overlay.nix` | `pkgs.node-wrapped`, `pkgs.pnpm-wrapped`, `pkgs.pnpm-yarn-wrapper` | OpenSSL 라이브러리 주입, Prisma 엔진 자동 탐색(`$PWD` 상위 순회), `yarn` → `pnpm` 호환 래퍼 |
+| `fvm.overlay.nix` | `pkgs.fvm-wrapped` | Flutter 런타임 동적 링킹 라이브러리 전체 주입(GTK3, Mesa, Wayland 등 30여 개) |

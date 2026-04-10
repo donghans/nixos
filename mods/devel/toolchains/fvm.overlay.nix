@@ -1,8 +1,9 @@
 # FVM (Flutter Version Management) Overlay
-_final: prev: let
+_final: prev: {
   # (목적: FVM 바이너리에 동적 링킹 필수 라이브러리 주입)
-  wrapFVM = pkg: binName: (prev.mkWrapper {
-    inherit pkg binName;
+  fvm-wrapped = prev.mkWrapper {
+    pkg = prev.fvm;
+    binName = "fvm";
     libs = with prev; [
       stdenv.cc.cc
       zlib
@@ -34,7 +35,5 @@ _final: prev: let
     env = {
       SHELL = "/run/current-system/sw/bin/sh"; # (이유: FVM이 ~/.bash_profile 읽는 것을 방지)
     };
-  });
-in {
-  fvm-wrapped = wrapFVM prev.fvm "fvm";
+  };
 }

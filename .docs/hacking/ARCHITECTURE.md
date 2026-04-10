@@ -55,8 +55,8 @@
 - **Dynamic Generator (`core/lib/builders.nix`)**: JSON 데이터를 기반으로 `nixosConfigurations`와 `homeConfigurations`를 동적으로 생성해내는 **메타프로그래밍 구조**와 빌더 팩토리입니다.
 - **옵션 선언부 (`core/lib/workspace-options.nix`)**: `config.workspace` 및 `config.mods`를 선언하여 전역 설정과 기능 모듈(Mods)의 통합 옵션을 제공합니다.
 - **Overlay System**:
-  - **`core/lib/mk-wrapper.nix`**: `mkWrapper` 헬퍼. 패키지에 런타임 환경 변수, 라이브러리 경로 등을 주입합니다.
-  - **`mods/**/*.overlay.nix`** (자동 탐색): `flake.outputs.nix`가 `mods/` 하위에서 `*.overlay.nix` 파일을 재귀 탐색하여 `customOverlays`에 자동 추가합니다. nixpkgs 패키지를 overlay로 직접 패치할 때 사용하며, 관련 모듈 옆에 위치하여 locality를 유지합니다.
+  - **`core/lib/mk-wrapper.nix`**: `mkWrapper` 헬퍼. 패키지에 런타임 환경 변수, 라이브러리 경로(`libs`), PATH 바이너리(`bins`), 환경변수(`env`), 실행 전 쉘 훅(`run`), 추가 인수(`addFlags`) 등을 조합하여 주입합니다.
+  - **`mods/**/*.overlay.nix`** (자동 탐색): `flake.outputs.nix`가 `mods/` 하위에서 `*.overlay.nix` 파일을 재귀 탐색하여 `customOverlays`에 자동 추가합니다. nixpkgs 패키지를 overlay로 직접 패치할 때 사용하며, 관련 모듈 옆에 위치하여 locality를 유지합니다. 현재 `mods/devel/toolchains/`에 `jetbrains.overlay.nix`, `node.overlay.nix`, `fvm.overlay.nix` 3개가 등록되어 있습니다.
 
 ---
 

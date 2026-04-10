@@ -42,6 +42,7 @@ _final: prev: let
     };
 
     # (목적: HOME 디렉터리 클러터링 방지 및 프로젝트 경로 강제 지정)
+    # (참고: ${binName} 은 Nix 빌드 타임 보간 — 래퍼마다 해당 IDE 이름으로 치환됨)
     run = ''
       PRJ_PARENT="$HOME/JetbrainsProjects"
       case "${binName}" in
@@ -50,7 +51,7 @@ _final: prev: let
         datagrip)       PRJ_NAME="DataGripProjects" ;;
         pycharm)        PRJ_NAME="PyCharmProjects" ;;
         android-studio) PRJ_NAME="AndroidStudioProjects" ;;
-        *)              PRJ_NAME="''${binName}Projects" ;;
+        *)              PRJ_NAME="${binName}Projects" ;;
       esac
 
       TARGET_DIR="$PRJ_PARENT/$PRJ_NAME"
