@@ -10,7 +10,7 @@ server     = false
 nfd = false
 
 [mods.sys.services]
-bluetooth      = false
+bluetooth      = true
 networkmanager = true
 tailscale      = false
 docker         = false
