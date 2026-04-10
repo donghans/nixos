@@ -1,7 +1,6 @@
 {
   config,
   lib,
-  pkgs,
   unstable,
   unstable-fallback,
   isNixOS ? false,
@@ -20,26 +19,30 @@ with lib; let
 
   # gemini-cli: enableKittyKeyboardProtocol() 함수 본문을 no-op으로 교체
   gemini = unstable.gemini-cli.overrideAttrs (old: {
-    postInstall = (old.postInstall or "") + ''
-      substituteInPlace $out/share/gemini-cli/chunk-KLFFCKY4.js \
-        --replace-fail \
-        'function enableKittyKeyboardProtocol() {
-  writeToStdout("\x1B[>1u");
-}' \
-        'function enableKittyKeyboardProtocol() {
-  /* patched: kitty keyboard protocol disabled to fix Home/End on Wayland */
-}'
-    '';
+    postInstall =
+      (old.postInstall or "")
+      + ''
+              substituteInPlace $out/share/gemini-cli/chunk-KLFFCKY4.js \
+                --replace-fail \
+                'function enableKittyKeyboardProtocol() {
+          writeToStdout("\x1B[>1u");
+        }' \
+                'function enableKittyKeyboardProtocol() {
+          /* patched: kitty keyboard protocol disabled to fix Home/End on Wayland */
+        }'
+      '';
   });
 
   # claude-code: Xd6(kitty enable 시퀀스 변수)를 빈 문자열로 교체
   claude = unstable-fallback.claude-code.overrideAttrs (old: {
-    postInstall = (old.postInstall or "") + ''
-      substituteInPlace $out/lib/node_modules/@anthropic-ai/claude-code/cli.js \
-        --replace-fail \
-        'Xd6=cz(">1u")' \
-        'Xd6=""'
-    '';
+    postInstall =
+      (old.postInstall or "")
+      + ''
+        substituteInPlace $out/lib/node_modules/@anthropic-ai/claude-code/cli.js \
+          --replace-fail \
+          'Xd6=cz(">1u")' \
+          'Xd6=""'
+      '';
   });
 in
   {options.mods.devel.llm-cli.enable = mkEnableOption "LLM CLI tools";}

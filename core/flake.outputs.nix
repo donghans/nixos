@@ -5,12 +5,15 @@
 } @ inputs: let
   # == Overlays ==
   # *.overlay.nix 파일을 mods/ 하위에서 자동 탐색하여 customOverlays에 추가
-  overlayFiles = builtins.filter
+  overlayFiles =
+    builtins.filter
     (f: nixpkgs.lib.hasSuffix ".overlay.nix" (toString f))
-    (nixpkgs.lib.filesystem.listFilesRecursive ../mods);
-  customOverlays = [
-    (import ./lib/mk-wrapper.nix)
-  ] ++ map import overlayFiles;
+    (nixpkgs.lib.filesystem.listFilesRecursive ./mods);
+  customOverlays =
+    [
+      (import ./lib/mk-wrapper.nix)
+    ]
+    ++ map import overlayFiles;
 
   # == toConfig: resolved.mods JSON → Nix module attrs ==
   toConfig = val:
