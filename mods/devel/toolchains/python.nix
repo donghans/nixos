@@ -4,16 +4,24 @@
   pkgs,
   isNixOS ? false,
   ...
-} @ args:
+}:
 with lib; let
-  cfg = config.mods.devel;
   modCfg = config.mods.devel.python;
+  pythonEnv = pkgs.python312.withPackages (ps:
+    with ps; [
+      pip
+      virtualenv
+    ]);
 in
-  {options.mods.devel.python.enable = mkEnableOption "Python toolchain";}
+  {
+    options.mods.devel.python.enable = mkEnableOption "Python toolchain";
+  }
   // (
     if isNixOS
     then {}
     else {
-      config = mkIf (cfg.enable || modCfg.enable) (import ./python.home.nix (args // {inherit pkgs;}));
+      config = mkIf modCfg.enable {
+        home.packages = [pythonEnv];
+      };
     }
   )

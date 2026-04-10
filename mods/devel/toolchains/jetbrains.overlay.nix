@@ -1,6 +1,8 @@
-{pkgs, ...}: let
+# JetBrains IDE Overlay
+# 목적: 모든 JetBrains IDE 패키지에 대해 UI 스케일링, 커서 크기 고정 및 프로젝트 경로 자동 설정을 적용한 래퍼(Wrapper)를 생성합니다.
+_final: prev: let
   # (목적: XML 파서로 defaultProjectLocation attribute 안전하게 패치)
-  patchXml = pkgs.writeText "patch-jetbrains-xml.py" ''
+  patchXml = prev.writeText "patch-jetbrains-xml.py" ''
     import sys, xml.etree.ElementTree as ET
     path, target = sys.argv[1], sys.argv[2]
     tree = ET.parse(path)
@@ -29,7 +31,7 @@
   '';
 
   # (목적: 프로젝트 경로 정규화 및 UI 스케일 주입 래퍼)
-  wrapJetbrainsPackage = pkg: binName: (pkgs.mkWrapper {
+  wrapJetbrainsPackage = pkg: binName: (prev.mkWrapper {
     inherit pkg binName;
     addFlags = ["-Dsun.java2d.uiScale=1.0"];
 
@@ -62,7 +64,7 @@
             *[Ii][Dd][Ee][Aa]*|*[Ww][Ee][Bb][Ss][Tt][Oo][Rr][Mm]*|*[Dd][Aa][Tt][Aa][Gg][Rr][Ii][Pp]*|*[Pp][Yy][Cc][Hh][Aa][Rr][Mm]*|*[Aa][Nn][Dd][Rr][Oo][Ii][Dd]*)
               GEN_XML="$cfg/options/ide.general.xml"
               if [ -f "$GEN_XML" ]; then
-                ${pkgs.python3}/bin/python3 ${patchXml} "$GEN_XML" "$TARGET_DIR"
+                ${prev.python3}/bin/python3 ${patchXml} "$GEN_XML" "$TARGET_DIR"
               fi
               ;;
           esac
@@ -70,25 +72,14 @@
       fi
     '';
   });
-  mkJetbrainsModule = {
-    ideName,
-    ideLabel,
-    pkgAttr,
-  }: {
-    config,
-    lib,
-    isNixOS ? false,
-    ...
-  }:
-    with lib;
-      {options.mods.devel.jetbrains.${ideName}.enable = mkEnableOption ideLabel;}
-      // (
-        if isNixOS
-        then {}
-        else {
-          config = mkIf config.mods.devel.jetbrains.${ideName}.enable {
-            home.packages = [(wrapJetbrainsPackage pkgAttr ideName)];
-          };
-        }
-      );
-in {inherit wrapJetbrainsPackage mkJetbrainsModule;}
+in {
+  # 래핑된 JetBrains 패키지 세트를 생성하여 노출합니다.
+  jetbrains-wrapped = {
+    idea = wrapJetbrainsPackage prev.jetbrains.idea "idea";
+    webstorm = wrapJetbrainsPackage prev.jetbrains.webstorm "webstorm";
+    pycharm = wrapJetbrainsPackage prev.jetbrains.pycharm "pycharm";
+    datagrip = wrapJetbrainsPackage prev.jetbrains.datagrip "datagrip";
+    # Android Studio는 jetbrains 네임스페이스가 아닐 수 있으므로 직접 참조
+    android-studio = wrapJetbrainsPackage prev.android-studio "android-studio";
+  };
+}

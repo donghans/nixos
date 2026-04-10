@@ -1,8 +1,5 @@
-{
-  pkgs,
-  config,
-  ...
-}: let
+# Node.js & Tooling Overlay
+_final: prev: let
   # == Prisma & Node Wrapper Logic ==
   # Prisma 엔진을 현재 디렉토리에서 상위로 올라가며 찾는 쉘 스크립트
   prismaDetectionScript = ''
@@ -20,21 +17,15 @@
   '';
 
   # (목적: Node 환경에 Prisma 탐색 및 PNPM 글로벌 최적화 변수 주입)
-  wrapNode = pkg: binName: (pkgs.mkWrapper {
+  wrapNode = pkg: binName: (prev.mkWrapper {
     inherit pkg binName;
-    libs = with pkgs; [stdenv.cc.cc openssl];
-    bins = with pkgs; [openssl findutils];
+    libs = with prev; [stdenv.cc.cc openssl];
+    bins = with prev; [openssl findutils];
     run = prismaDetectionScript;
-    env = {
-      PNPM_PACKAGE_IMPORT_METHOD = "reflink"; # (이유: Btrfs CoW 활용 성능 최적화)
-      PNPM_PUBLIC_HOIST_PATTERN = "*";
-      PNPM_SHAMEFULLY_HOIST = "true"; # (이유: 패키지 호이스팅 호환성 극대화)
-      PNPM_STORE_DIR = "/home/${config.workspace.username}/.local/share/pnpm/store";
-    };
   });
 
   # (목적: yarn 명령어를 pnpm으로 대리 실행하는 호환성 래퍼)
-  yarnPnpmWrapper = pkgs.writeShellScriptBin "yarn" ''
+  yarnPnpmWrapper = prev.writeShellScriptBin "yarn" ''
     if [ -f "yarn.lock" ]; then
       if [ -d ".git" ]; then
         EXCLUDE_FILE=".git/info/exclude"
@@ -58,14 +49,7 @@
     fi
   '';
 in {
-  home.packages = [
-    (wrapNode pkgs.nodejs_24 "node")
-    (wrapNode pkgs.pnpm "pnpm")
-    yarnPnpmWrapper
-  ];
-
-  home.shellAliases = {
-    npm = "pnpm";
-    npx = "pnpm dlx";
-  };
+  node-wrapped = wrapNode prev.nodejs_24 "node";
+  pnpm-wrapped = wrapNode prev.pnpm "pnpm";
+  pnpm-yarn-wrapper = yarnPnpmWrapper;
 }
