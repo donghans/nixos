@@ -21,6 +21,7 @@ in {
     mods.gui.apps.vivaldi.enable = mkDefault true;
     mods.gui.apps.slack.enable = mkDefault true;
     mods.gui.apps.bitwarden.enable = mkDefault true;
+    mods.gui.apps.speedcrunch.enable = mkDefault true;
     mods.gui.utils.custom-notify-logger.enable = mkDefault true;
   };
 }
