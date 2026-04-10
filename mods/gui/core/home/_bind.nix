@@ -3,6 +3,14 @@
   config,
   ...
 }: let
+  # 사용되는 명령어의 파일 경로 정의
+  grim = "${pkgs.grim}/bin/grim";
+  slurp = "${pkgs.slurp}/bin/slurp";
+  satty = "${pkgs.satty}/bin/satty";
+  cliphist = "${pkgs.cliphist}/bin/cliphist";
+  fuzzel = "${pkgs.fuzzel}/bin/fuzzel";
+  wl-copy = "${pkgs.wl-clipboard}/bin/wl-copy";
+
   # 모니터 스왑 스크립트 정의
   swapMonitors = pkgs.writeShellScriptBin "hypr-swap-monitors" ''
     # jq로 현재 포커스된 모니터와 첫 번째 비포커스 모니터를 명확히 추출
@@ -14,13 +22,13 @@
     if [ -n "$FOCUSED" ] && [ -n "$TARGET" ]; then hyprctl dispatch swapactiveworkspaces "$FOCUSED" "$TARGET"; fi
   '';
 
-  # 사용되는 명령어의 파일 경로 정의
-  grim = "${pkgs.grim}/bin/grim";
-  slurp = "${pkgs.slurp}/bin/slurp";
-  satty = "${pkgs.satty}/bin/satty";
-  cliphist = "${pkgs.cliphist}/bin/cliphist";
-  fuzzel = "${pkgs.fuzzel}/bin/fuzzel";
-  wl-copy = "${pkgs.wl-clipboard}/bin/wl-copy";
+  # 현재 창 캡쳐 스크립트 정의
+  captureActiveWindow = pkgs.writeShellScriptBin "hypr-capture-active" ''
+    GEOM=$(hyprctl activewindow -j | ${pkgs.jq}/bin/jq -r 'select(.address != null) | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"')
+    if [ -n "$GEOM" ]; then
+      ${grim} -g "$GEOM" - | ${satty} --filename -
+    fi
+  '';
 in {
   wayland.windowManager.hyprland.settings = {
     bind =
@@ -51,6 +59,8 @@ in {
 
         # Misc
         ", Print, exec, ${grim} -g \"$(${slurp})\" - | ${satty} --filename -"
+        "CTRL, Print, exec, ${captureActiveWindow}/bin/hypr-capture-active"
+        "SHIFT, Print, exec, ${grim} - | ${satty} --filename -"
       ]
       ++ (
         # Workspace N
