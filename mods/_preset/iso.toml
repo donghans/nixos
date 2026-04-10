@@ -24,9 +24,10 @@ frp            = false
 enable = true
 
 [mods.gui.apps]
-vivaldi   = false
-slack     = false
-bitwarden = false
+vivaldi      = false
+slack        = false
+bitwarden    = false
+speedcrunch  = true
 
 [mods.devel]
 enable = false
