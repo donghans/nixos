@@ -190,13 +190,29 @@ mv /mnt/etc/nixos/hardware-configuration.nix "/mnt/etc/nixos/hosts/$HOST/_hardwa
 rm -f /mnt/etc/nixos/configuration.nix
 echo "$HOST" > /mnt/etc/nixos/.current_host
 
-# 13. Install
+# 13. Prepare .build/ Environment
+# (목적: nhw와 동일한 격리 환경 구성 — core/flake.nix의 import 경로가 .build/ 루트 기준이므로
+#         /mnt/etc/nixos/core를 직접 flake로 지정하면 core/core/flake.outputs.nix를 찾아 실패)
+log_msg "Config" "preparing .build/ environment for nixos-install..."
+BUILD_DIR="/mnt/etc/nixos/.build"
+mkdir -p "$BUILD_DIR"
+cp -a /mnt/etc/nixos/core "$BUILD_DIR/"
+cp -a /mnt/etc/nixos/hosts "$BUILD_DIR/"
+cp -a /mnt/etc/nixos/mods "$BUILD_DIR/"
+cp /mnt/etc/nixos/core/flake.nix "$BUILD_DIR/flake.nix"
+cp /mnt/etc/nixos/resolved.json "$BUILD_DIR/"
+cp /mnt/etc/nixos/presets.json "$BUILD_DIR/"
+for _lf in "/mnt/etc/nixos/.locks/$HOST.lock" "/mnt/etc/nixos/.locks/_rolling.lock"; do
+    [ -f "$_lf" ] && cp "$_lf" "$BUILD_DIR/flake.lock" && break
+done
+
+# 14. Install
 log_msg "Install" "starting nixos-install for #$HOST ..."
 log_exec "nix" ">" "nixos-install"
-nixos-install --flake "/mnt/etc/nixos/core#$HOST"
+nixos-install --flake "/mnt/etc/nixos/.build#$HOST"
 log_exec "nix" "<" "nixos-install"
 
-# 14. Post-processing
+# 15. Post-processing
 log_msg "Done" "running post-installation tasks for user: $USERNAME ..."
 mkdir -p "/mnt/home/$USERNAME/"
 mv /mnt/etc/nixos "/mnt/home/$USERNAME/nixos"
