@@ -42,10 +42,22 @@ run_fix_task() {
             log_msg "Warn" "GitHub API failed for commits of '$pkg_name'. skipping."
             continue
         }
-        local safe_fallback_commit
-        safe_fallback_commit=$(echo "$commits" | jq -r '.[1].sha // empty')
-        local commit_date
-        commit_date=$(echo "$commits" | jq -r '.[1].commit.committer.date // empty')
+
+        local commit_count
+        commit_count=$(echo "$commits" | jq 'length')
+
+        local safe_fallback_commit commit_date
+        if [ "$commit_count" -ge 2 ]; then
+            safe_fallback_commit=$(echo "$commits" | jq -r '.[1].sha')
+            commit_date=$(echo "$commits" | jq -r '.[1].commit.committer.date')
+        elif [ "$commit_count" -eq 1 ]; then
+            log_msg "Warn" "'$pkg_name' has only 1 commit — using it as-is."
+            safe_fallback_commit=$(echo "$commits" | jq -r '.[0].sha')
+            commit_date=$(echo "$commits" | jq -r '.[0].commit.committer.date')
+        else
+            log_msg "Warn" "no commits found for '$pkg_name'. skipping."
+            continue
+        fi
 
         if [ -z "$safe_fallback_commit" ] || [ -z "$commit_date" ]; then
             log_msg "Warn" "history not found for '$pkg_name'. skipping."

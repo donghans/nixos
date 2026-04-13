@@ -29,6 +29,10 @@
 - **TOML 설정 원본**: `base.toml`(전역: username, git, system, 파티션 경로 기본값), `host.toml`(호스트: type, preset, mods 오버라이드, 선택적 메모리/파티션 오버라이드), `_preset/*.toml`(프리셋 mods 정의 + explicitOptional)을 TOML로 선언합니다.
 - **Resolver (`nhw.resolve.py`)**: `nhw` 빌드 시 TOML 소스를 읽어 `presets.json`(프리셋 mods + explicitOptional)과 `resolved.json`(호스트별 merged 데이터)을 생성합니다. flake.nix는 이 JSON 파일을 읽어 빌드합니다.
 - **직접 nix 실행 금지**: `flake.nix`는 `resolved.json`이 없으면 명시적 오류를 발생시킵니다. 항상 `nhw`를 통해 빌드하세요.
+- **호스트별 Nix 파일 (`hosts/<hostname>/`)**: TOML로 표현하기 어려운 하드웨어 고유 설정을 직접 작성하는 공간입니다.
+  - `configuration.nix`: 커널 파라미터, 하드웨어 모듈 등 NixOS 시스템 레벨 설정.
+  - `home.nix`: 해당 기기에서만 필요한 Home Manager 설정. 예: 디스플레이 배열(`monitor`), 터치패드/리드스위치 동작, 절전 타이머 등 하드웨어에 종속된 개인화 로직.
+  - `_hardware.nix`: `nixos-generate-config`로 생성되는 하드웨어 스캔 결과.
 
 **리졸브 우선순위** — 병합은 2단계로 진행됩니다.
 
