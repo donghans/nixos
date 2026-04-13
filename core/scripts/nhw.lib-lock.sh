@@ -5,9 +5,7 @@ apply_lock_strategy() {
     local is_rolling=$1
     local stable_lock_path=$2
     local target_lock=$3
-    # shellcheck disable=SC2034
-    local LOCK_STORE_DIR=$4
-    local build_dir=$5
+    local build_dir=$4
 
     local final_source_lock="$stable_lock_path"
 

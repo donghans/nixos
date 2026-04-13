@@ -54,6 +54,19 @@ with lib; {
         type = types.str;
         description = "Boot (FAT32) partition device path (e.g. /dev/disk/by-label/boot or /dev/disk/by-uuid/...)";
       };
+      timeZone = mkOption {
+        type = types.str;
+        description = "System timezone (e.g. \"Asia/Seoul\"). Default: base.toml timeZone.";
+      };
+      defaultLocale = mkOption {
+        type = types.str;
+        description = "Primary system locale (e.g. \"en_US.UTF-8\"). Default: base.toml defaultLocale.";
+      };
+      extraLocale = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "Additional locale to include in supportedLocales (e.g. \"ko_KR.UTF-8\"). Null to disable.";
+      };
       stateVersion = mkOption {
         type = types.str;
         description = "NixOS/Home-Manager state version";

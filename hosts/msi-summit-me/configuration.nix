@@ -3,6 +3,12 @@
     ./_hardware.nix
   ];
 
+  # == Clock ==
+  # (목적: 듀얼부팅 시 윈도우 시간 깨짐 방지)
+  # Linux는 기본적으로 하드웨어 클럭을 UTC로 다루지만, Windows는 로컬 시간으로 읽음.
+  # 이 설정으로 Linux도 하드웨어 클럭을 로컬 시간으로 취급하여 양쪽 시간이 일치함.
+  time.hardwareClockInLocalTime = true;
+
   # == Boot & Kernel ==
   # (목적: 터치패드 초기화 지연 방지 및 I2C 충돌 해결)
   boot = {

@@ -72,8 +72,11 @@
       swapGb = hostInfo.swapGb      or null;
       tmpfsSize = hostInfo.tmpfsSize   or null;
       zramPercent = hostInfo.zramPercent or null;
-      inherit (hostInfo) diskDevice;
-      inherit (hostInfo) bootDevice;
+      diskDevice = hostInfo.diskDevice    or workspaceMeta.diskDevice;
+      bootDevice = hostInfo.bootDevice    or workspaceMeta.bootDevice;
+      timeZone = hostInfo.timeZone      or workspaceMeta.timeZone;
+      defaultLocale = hostInfo.defaultLocale or workspaceMeta.defaultLocale;
+      extraLocale = hostInfo.extraLocale   or workspaceMeta.extraLocale or null;
       inherit (workspaceMeta) stateVersion;
     };
   in {

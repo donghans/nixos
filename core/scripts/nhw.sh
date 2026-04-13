@@ -109,7 +109,7 @@ prepare_build_dir "$NIXOS_PATH" "$BUILD_DIR" "$ENV_FILE"
 if [ "$ACTION" == "update" ]; then
     source "$SCRIPT_DIR/nhw.task-update.sh"
 else
-    apply_lock_strategy "$IS_ROLLING" "$HOST_SPECIFIC_LOCK" "$TARGET_LOCK" "$LOCK_STORE_DIR" "$BUILD_DIR"
+    apply_lock_strategy "$IS_ROLLING" "$HOST_SPECIFIC_LOCK" "$TARGET_LOCK" "$BUILD_DIR"
     if [ "$TARGET_PROFILE" == "iso" ]; then
         source "$SCRIPT_DIR/nhw.task-iso.sh"
     else

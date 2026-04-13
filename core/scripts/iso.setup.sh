@@ -47,8 +47,6 @@ log_exec() {
 }
 
 # 2. Initialization
-# shellcheck disable=SC2034
-REAL_CMD="nixos-setup-from-repo"
 SHORT_CMD="nixos-setup"
 
 BOOT_PART=$1

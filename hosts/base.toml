@@ -3,6 +3,9 @@ username            = "donghans"
 rollingStateVersion = "25.11"
 diskDevice          = "/dev/disk/by-label/nixos"
 bootDevice          = "/dev/disk/by-label/boot"
+timeZone            = "Asia/Seoul"
+defaultLocale       = "en_US.UTF-8"
+extraLocale         = "ko_KR.UTF-8"
 
 [git]
 name     = "신동한"

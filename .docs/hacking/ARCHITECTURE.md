@@ -67,7 +67,7 @@
 실제 시스템의 살점이 되는 부분이며, **Mods 프레임워크** 기반으로 설계되었습니다.
 
 - **Domain-Driven Design**: `sys`, `gui`, `devel`로 도메인을 분리하여 응집도를 높였습니다.
-  - `mods/sys/`: 시스템 기반 — `base`(부팅/네트워크/Zsh/Git), `fonts`, `vfs`, `services`(bluetooth/tailscale/docker), `utils/nfd`
+  - `mods/sys/`: 시스템 기반 — `base`(부팅/네트워크/Zsh/Git), `fonts`, `vfs`, `services`(bluetooth/tailscale/docker/networkmanager 등), `utils/nfd`
   - `mods/gui/`: GUI 환경 — `core`(Hyprland 번들), `apps`(vivaldi/slack/bitwarden/speedcrunch), `utils/custom-notify-logger`
   - `mods/devel/`: 개발 도구 — `toolchains`(node/python/fvm/devbox), `apps`(llm-cli/zed), `jetbrains`(android-studio 포함)
 - **Opt-in Mods System**: 모든 `mods.<domain>.<feature>.enable`은 `false`에서 시작합니다. `isNixOS` 플래그를 통해 NixOS와 Home Manager 양측의 구성을 단일 파일에서 분기 처리합니다(Dual-Context).

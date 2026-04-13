@@ -1,5 +1,6 @@
 {
   pkgs,
+  lib,
   config,
   ...
 }: {
@@ -43,12 +44,12 @@
   # (참고: networkmanager.enable은 mods.sys.services.networkmanager.nix에서 처리)
   networking.hostName = config.workspace.hostname;
 
-  time.timeZone = "Asia/Seoul";
-  i18n.defaultLocale = "en_US.UTF-8";
-  i18n.supportedLocales = [
-    "en_US.UTF-8/UTF-8"
-    "ko_KR.UTF-8/UTF-8"
-  ];
+  time.timeZone = config.workspace.timeZone;
+  i18n.defaultLocale = config.workspace.defaultLocale;
+  i18n.supportedLocales =
+    ["${config.workspace.defaultLocale}/UTF-8"]
+    ++ lib.optional (config.workspace.extraLocale != null)
+    "${config.workspace.extraLocale}/UTF-8";
 
   environment.systemPackages = with pkgs; [
     git
