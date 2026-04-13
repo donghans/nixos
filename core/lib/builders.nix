@@ -72,6 +72,8 @@
       swapGb = hostInfo.swapGb      or null;
       tmpfsSize = hostInfo.tmpfsSize   or null;
       zramPercent = hostInfo.zramPercent or null;
+      inherit (hostInfo) diskDevice;
+      inherit (hostInfo) bootDevice;
       inherit (workspaceMeta) stateVersion;
     };
   in {

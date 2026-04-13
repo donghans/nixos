@@ -22,6 +22,8 @@ cd nixos
 username            = "your_username"
 system              = "x86_64-linux"    # ARM 호스트는 host.toml에서 system = "aarch64-linux"로 오버라이드
 rollingStateVersion = "25.11"           # stateVersion 미지정 호스트의 폴백 버전 (채널 업그레이드 시 여기만 수정)
+diskDevice          = "/dev/disk/by-label/nixos"  # Btrfs 루트 파티션 장치 경로
+bootDevice          = "/dev/disk/by-label/boot"   # EFI 파티션 장치 경로 (host.toml에서 오버라이드 가능)
 
 [git]
 name      = "Your Name"
@@ -48,6 +50,11 @@ fvm = true
 # swapGb      = 24    # swap 파일 크기 (GB). 기본: ceil(ramGb × 0.75)
 # tmpfsSize   = "100%" # /tmp tmpfs 상한. 기본: "100%"
 # zramPercent = 50    # ZRAM 풀 크기 (물리 RAM의 %). 기본: 50
+
+# 파티션 경로 (기본값은 base.toml 참조, 기기마다 다를 경우에만 기재)
+# bootDevice = "/dev/disk/by-label/ESP"          # 레이블이 다른 경우
+# bootDevice = "/dev/disk/by-uuid/XXXX-XXXX"     # 기존 파티션을 UUID로 참조하는 경우
+# diskDevice = "/dev/disk/by-label/custom-label" # Btrfs 레이블이 다른 경우
 ```
 
 기존 호스트(`hosts/beelink-ser7-co/`, `hosts/msi-summit-me/`)의 `configuration.nix`와 `home.nix`를 참고하여 하드웨어 부팅 파라미터 등을 작성합니다. 하드웨어 프로필(`_hardware.nix`)은 설치 시 자동 생성됩니다.

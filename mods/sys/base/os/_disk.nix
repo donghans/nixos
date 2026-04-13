@@ -1,4 +1,8 @@
-{pkgs, ...}: let
+{
+  pkgs,
+  config,
+  ...
+}: let
   # 공통 Btrfs 마운트 옵션 (subvol만 마운트 포인트별로 다름)
   btrfsOpts = subvol: [
     "subvol=${subvol}"
@@ -8,27 +12,34 @@
     "space_cache=v2" # 최신 공간 캐시 알고리즘
   ];
 in {
+  # == Boot 파티션 ==
+  fileSystems."/boot" = {
+    device = config.workspace.bootDevice;
+    fsType = "vfat";
+    options = ["fmask=0022" "dmask=0022"];
+  };
+
   # == Btrfs 파일시스템 ==
   fileSystems."/" = {
-    device = "/dev/disk/by-label/nixos";
+    device = config.workspace.diskDevice;
     fsType = "btrfs";
     options = btrfsOpts "@";
   };
 
   fileSystems."/home" = {
-    device = "/dev/disk/by-label/nixos";
+    device = config.workspace.diskDevice;
     fsType = "btrfs";
     options = btrfsOpts "@home";
   };
 
   fileSystems."/nix" = {
-    device = "/dev/disk/by-label/nixos";
+    device = config.workspace.diskDevice;
     fsType = "btrfs";
     options = btrfsOpts "@nix";
   };
 
   fileSystems."/var/log" = {
-    device = "/dev/disk/by-label/nixos";
+    device = config.workspace.diskDevice;
     fsType = "btrfs";
     options = btrfsOpts "@log";
   };

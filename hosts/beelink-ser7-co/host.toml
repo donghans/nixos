@@ -1,2 +1,3 @@
-type   = "desktop"
-preset = "workstation"
+type       = "desktop"
+preset     = "workstation"
+bootDevice = "/dev/disk/by-uuid/C125-54BB"

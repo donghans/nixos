@@ -41,7 +41,7 @@ log_exec() {
     local state=$2    # > or <
     local msg=$3
     local cat_color=$BLUE
-    
+
     # Matches NHW's aligned format: ISO Exec cmd > description
     printf "${PURPLE}ISO${NC} ${cat_color}Exec %-4s${NC} %s %s\n" "$cmd_name" "$state" "$msg"
 }
@@ -76,21 +76,68 @@ log_msg "Init" "Target:   Boot($BOOT_PART), Root($ROOT_PART)"
 log_msg "Init" "Hostname: $HOST"
 echo ""
 
-# 1. Boot Partition Format
+# 3. Ensure NIXOS_REPO is known before clone
+# (목적: clone 전에 레포 주소 확보 — 레이블 추출을 위해 먼저 clone 필요)
+if [ -z "${NIXOS_REPO:-}" ]; then
+    log_msg "Notice" "nixos_repo environment variable is not defined."
+    read -rp "$(printf "${YELLOW}%-13s${NC} | enter repository (e.g. user/nixos): " "ISO Input")" NIXOS_REPO
+fi
+
+# 4. Git Clone (임시 경로 — 레이블 추출 후 최종 위치로 이동)
+REPO_TMP="/tmp/nixos-setup-repo"
+rm -rf "$REPO_TMP"
+log_msg "Git" "cloning repository from github.com/$NIXOS_REPO ..."
+log_exec "git" ">" "git clone"
+git clone "https://github.com/$NIXOS_REPO.git" "$REPO_TMP"
+log_exec "git" "<" "git clone"
+
+# 5. Read Disk Labels from TOML
+# (목적: base.toml + host.toml에서 diskDevice/bootDevice를 읽어 레이블 추출)
+# (by-label 경로에서만 레이블 추출. UUID 등 다른 형식이면 기본값 사용)
+read -r BOOT_LABEL DISK_LABEL <<< "$(HOST="$HOST" REPO_TMP="$REPO_TMP" python3 - <<'PYEOF'
+import tomllib, os
+
+repo = os.environ['REPO_TMP']
+host = os.environ['HOST']
+
+with open(f'{repo}/hosts/base.toml', 'rb') as f:
+    base = tomllib.load(f)
+
+host_path = f'{repo}/hosts/{host}/host.toml'
+host_data = {}
+if os.path.exists(host_path):
+    with open(host_path, 'rb') as f:
+        host_data = tomllib.load(f)
+
+boot_dev = host_data.get('bootDevice', base['bootDevice'])
+disk_dev = host_data.get('diskDevice', base['diskDevice'])
+
+def extract_label(path):
+    prefix = '/dev/disk/by-label/'
+    return path[len(prefix):] if path.startswith(prefix) else ''
+
+print(extract_label(boot_dev), extract_label(disk_dev))
+PYEOF
+)"
+BOOT_LABEL="${BOOT_LABEL:-boot}"
+DISK_LABEL="${DISK_LABEL:-nixos}"
+log_msg "Config" "disk labels: boot=$BOOT_LABEL, root=$DISK_LABEL"
+
+# 6. Boot Partition Format
 read -rp "$(printf "${YELLOW}%-13s${NC} | format boot partition($BOOT_PART)? (y/N): " "ISO Question")" FORMAT_BOOT
 if [[ "$FORMAT_BOOT" =~ ^[Yy]$ ]]; then
-    log_msg "Disk" "formatting boot partition (fat32)..."
+    log_msg "Disk" "formatting boot partition (fat32, label=$BOOT_LABEL)..."
     log_exec "disk" ">" "mkfs.fat"
-    mkfs.fat -F 32 -n boot "$BOOT_PART"
+    mkfs.fat -F 32 -n "$BOOT_LABEL" "$BOOT_PART"
     log_exec "disk" "<" "mkfs.fat"
 else
     log_msg "Disk" "skipping boot partition format."
 fi
 
-# 2. Btrfs Format & Subvolume
-log_msg "Disk" "formatting root and creating subvolumes..."
+# 7. Btrfs Format & Subvolume
+log_msg "Disk" "formatting root (label=$DISK_LABEL) and creating subvolumes..."
 log_exec "disk" ">" "mkfs.btrfs"
-mkfs.btrfs -L nixos -f "$ROOT_PART"
+mkfs.btrfs -L "$DISK_LABEL" -f "$ROOT_PART"
 
 mount "$ROOT_PART" /mnt
 btrfs subvolume create /mnt/@
@@ -100,7 +147,7 @@ btrfs subvolume create /mnt/@log
 umount /mnt
 log_exec "disk" "<" "mkfs.btrfs"
 
-# 3. Mount
+# 8. Mount
 export MOUNT_OPTS="noatime,compress=zstd,space_cache=v2"
 log_msg "Mount" "mounting partitions with optimal options..."
 log_exec "disk" ">" "mount"
@@ -112,18 +159,12 @@ mount -o subvol=@log,"${MOUNT_OPTS}" "$ROOT_PART" /mnt/var/log
 mount "$BOOT_PART" /mnt/boot
 log_exec "disk" "<" "mount"
 
-# 4. Git Clone
-if [ -z "${NIXOS_REPO:-}" ]; then
-    log_msg "Notice" "nixos_repo environment variable is not defined."
-    read -rp "$(printf "${YELLOW}%-13s${NC} | enter repository (e.g. user/nixos): " "ISO Input")" NIXOS_REPO
-fi
+# 9. Move Cloned Repo to Final Location
+log_msg "Git" "moving repository to /mnt/etc/nixos ..."
+mkdir -p /mnt/etc
+mv "$REPO_TMP" /mnt/etc/nixos
 
-log_msg "Git" "cloning repository from github.com/$NIXOS_REPO ..."
-log_exec "git" ">" "git clone"
-git clone "https://github.com/$NIXOS_REPO.git" /mnt/etc/nixos
-log_exec "git" "<" "git clone"
-
-# 5. Resolve Metadata (설치 대상 하드웨어 기반 resolved.json 생성)
+# 10. Resolve Metadata (설치 대상 하드웨어 기반 resolved.json 생성)
 # (목적: /proc/meminfo에서 실제 RAM을 감지하여 swap/tmpfs 크기를 올바르게 설정)
 log_msg "Config" "generating resolved.json from target hardware..."
 log_exec "py" ">" "nhw.resolve.py"
@@ -131,7 +172,7 @@ python3 /mnt/etc/nixos/core/scripts/nhw.resolve.py \
     /mnt/etc/nixos /mnt/etc/nixos
 log_exec "py" "<" "nhw.resolve.py"
 
-# 6. Metadata Extraction
+# 11. Metadata Extraction
 BASE_TOML="/mnt/etc/nixos/hosts/base.toml"
 if [ ! -f "$BASE_TOML" ]; then
     log_msg "Error" "could not find $BASE_TOML in the cloned repository."
@@ -143,7 +184,7 @@ if [ -z "$USERNAME" ]; then
     exit 1
 fi
 
-# 7. Hardware Config
+# 12. Hardware Config
 log_msg "Config" "generating hardware-configuration.nix ..."
 nixos-generate-config --root /mnt --no-filesystems
 mkdir -p "/mnt/etc/nixos/hosts/$HOST"
@@ -151,13 +192,13 @@ mv /mnt/etc/nixos/hardware-configuration.nix "/mnt/etc/nixos/hosts/$HOST/_hardwa
 rm -f /mnt/etc/nixos/configuration.nix
 echo "$HOST" > /mnt/etc/nixos/.current_host
 
-# 8. Install
+# 13. Install
 log_msg "Install" "starting nixos-install for #$HOST ..."
 log_exec "nix" ">" "nixos-install"
 nixos-install --flake "/mnt/etc/nixos/core#$HOST"
 log_exec "nix" "<" "nixos-install"
 
-# 9. Post-processing
+# 14. Post-processing
 log_msg "Done" "running post-installation tasks for user: $USERNAME ..."
 mkdir -p "/mnt/home/$USERNAME/"
 mv /mnt/etc/nixos "/mnt/home/$USERNAME/nixos"

@@ -1,6 +1,8 @@
 system              = "x86_64-linux"
 username            = "donghans"
 rollingStateVersion = "25.11"
+diskDevice          = "/dev/disk/by-label/nixos"
+bootDevice          = "/dev/disk/by-label/boot"
 
 [git]
 name     = "신동한"

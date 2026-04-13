@@ -26,7 +26,7 @@
 
 코드와 데이터를 분리하여, 사용자가 `nix` 언어를 깊게 알지 못해도 시스템 구성을 관리할 수 있게 합니다.
 
-- **TOML 설정 원본**: `base.toml`(전역: username, git, system), `host.toml`(호스트: type, preset, mods 오버라이드, 선택적 메모리 오버라이드), `_preset/*.toml`(프리셋 mods 정의 + explicitOptional)을 TOML로 선언합니다.
+- **TOML 설정 원본**: `base.toml`(전역: username, git, system, 파티션 경로 기본값), `host.toml`(호스트: type, preset, mods 오버라이드, 선택적 메모리/파티션 오버라이드), `_preset/*.toml`(프리셋 mods 정의 + explicitOptional)을 TOML로 선언합니다.
 - **Resolver (`nhw.resolve.py`)**: `nhw` 빌드 시 TOML 소스를 읽어 `presets.json`(프리셋 mods + explicitOptional)과 `resolved.json`(호스트별 merged 데이터)을 생성합니다. flake.nix는 이 JSON 파일을 읽어 빌드합니다.
 - **직접 nix 실행 금지**: `flake.nix`는 `resolved.json`이 없으면 명시적 오류를 발생시킵니다. 항상 `nhw`를 통해 빌드하세요.
 
@@ -39,6 +39,7 @@
 |------|---------|
 | `username`, `git.*` | host.toml 오버라이드 가능 (기본값: base.toml) |
 | `system` | host.toml → base.toml |
+| `diskDevice`, `bootDevice` | host.toml → base.toml (파티션 경로. 레이블·UUID 모두 가능) |
 | `type`, `preset` | host.toml 필수 선언 |
 | `ramGb` | 자동 감지 (`/proc/meminfo`), host.toml 입력 무시 |
 | `swapGb`, `tmpfsSize`, `zramPercent` | 선택적 오버라이드 (기본값: 자동 계산) |

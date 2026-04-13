@@ -46,6 +46,14 @@ with lib; {
         default = null;
         description = "ZRAM pool size as percentage of physical RAM. Default: 50.";
       };
+      diskDevice = mkOption {
+        type = types.str;
+        description = "Btrfs root partition device path (e.g. /dev/disk/by-label/nixos)";
+      };
+      bootDevice = mkOption {
+        type = types.str;
+        description = "Boot (FAT32) partition device path (e.g. /dev/disk/by-label/boot or /dev/disk/by-uuid/...)";
+      };
       stateVersion = mkOption {
         type = types.str;
         description = "NixOS/Home-Manager state version";

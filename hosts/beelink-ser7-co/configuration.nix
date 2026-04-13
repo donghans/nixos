@@ -11,12 +11,6 @@
     ];
   };
 
-  fileSystems."/boot" = {
-    device = "/dev/disk/by-uuid/C125-54BB";
-    fsType = "vfat";
-    options = ["fmask=0022" "dmask=0022"];
-  };
-
   # == Services & Networking ==
   services = {
     auto-cpufreq = {

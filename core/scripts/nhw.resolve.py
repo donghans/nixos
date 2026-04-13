@@ -125,6 +125,8 @@ for entry in sorted(os.listdir(hosts_dir)):
         "swapGb": host.get("swapGb"),       # None → Nix 기본값 적용 (ceil(ramGb*0.75))
         "tmpfsSize": host.get("tmpfsSize"),  # None → Nix 기본값 적용 ("100%")
         "zramPercent": host.get("zramPercent"),  # None → Nix 기본값 적용 (50)
+        "diskDevice": host.get("diskDevice", base["diskDevice"]),
+        "bootDevice": host.get("bootDevice", base["bootDevice"]),
         "preset": preset_name,
         "username": host.get("username", base["username"]),
         "git": {**base.get("git", {}), **host.get("git", {})},
