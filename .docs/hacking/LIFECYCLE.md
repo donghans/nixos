@@ -9,9 +9,8 @@
 
 1.  **Input Parsing**: 사용자의 명령(예: `os switch`)을 해석하고 대상 호스트의 `isRolling` 여부를 확인합니다.
 2.  **Resolve**: `nhw.resolve.py`가 `hosts/base.toml`, `hosts/<hostname>/host.toml`, `mods/_preset/*.toml`을 읽어 `presets.json`(프리셋 mods + explicitOptional)과 `resolved.json`(호스트별 merged 데이터)을 생성합니다.
-3.  **Tmpfs Isolation**: `/tmp/nixos-build` 디렉터리를 생성하고 소스 파일(presets.json, resolved.json 포함)을 복사합니다. 하드디스크가 아닌 **RAM 디스크**를 사용하므로 I/O 속도가 빠르고 메인 저장소를 오염시키지 않습니다.
-4.  **Lock Injection**: 대상 기기의 특성에 맞는 락 파일(`.locks/_rolling.lock` 또는 `<hostname>.lock`)을 격리 디렉터리의 `flake.lock`으로 주입합니다.
-5.  **Ephemeral Git Commit**: Nix Flake은 Git에 추적되는 파일만 빌드에 포함합니다. `nhw`는 격리된 공간에서 즉석으로 `git init`과 `commit`을 수행하여, **저장되지 않은(Dirty) 파일들도 즉시 빌드**될 수 있게 처리합니다.
+3.  **Build Isolation**: 레포 내 `.build/` 디렉터리에 소스 파일을 물리 복사합니다. `.build/`는 메인 레포의 `.gitignore`에 등록되어 있고 자체 `.git`이 없습니다. nix는 `path:` 모드로 호출되어 git 추적 여부를 확인하지 않고 해당 디렉터리를 store에 직접 복사하여 순수(pure) 평가를 수행합니다. 커밋하지 않은 실험적인 코드도 즉시 테스트할 수 있습니다.
+4.  **Lock Injection**: 대상 기기의 특성에 맞는 락 파일(`.locks/_rolling.lock` 또는 `<hostname>.lock`)을 `.build/flake.lock`으로 주입합니다. `flake.lock`은 `.build/` 안에만 존재하며 메인 레포에 커밋되지 않습니다.
 
 ---
 

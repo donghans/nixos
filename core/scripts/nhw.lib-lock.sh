@@ -7,7 +7,7 @@ apply_lock_strategy() {
     local target_lock=$3
     # shellcheck disable=SC2034
     local LOCK_STORE_DIR=$4
-    local tmp_build_dir=$5
+    local build_dir=$5
 
     local final_source_lock="$stable_lock_path"
 
@@ -15,19 +15,14 @@ apply_lock_strategy() {
     if [ "$is_rolling" == "true" ]; then
         log_msg "Lock" "rolling: updating nixpkgs-unstable..."
         [ -f "$final_source_lock" ] && cp "$final_source_lock" "$target_lock"
-        
-        init_tmp_git "$tmp_build_dir"
 
         if [ -f "$target_lock" ]; then
             log_exec "nix" ">" "nix flake update nixpkgs-unstable"
-            (cd "$tmp_build_dir" && nix flake update nixpkgs-unstable --refresh)
-            # 스테이징을 다시 해주어야 이후 nh os switch 과정에서 Nix가 변경된 락 파일을 인식함
-            git -C "$tmp_build_dir" add -A >/dev/null 2>&1
+            (cd "$build_dir" && nix flake update nixpkgs-unstable --refresh --flake "path:.")
             log_exec "nix" "<" "nix flake update nixpkgs-unstable"
         else
             log_exec "nix" ">" "nix flake update"
-            (cd "$tmp_build_dir" && nix flake update --refresh)
-            git -C "$tmp_build_dir" add -A >/dev/null 2>&1
+            (cd "$build_dir" && nix flake update --refresh --flake "path:.")
             log_exec "nix" "<" "nix flake update"
         fi
         

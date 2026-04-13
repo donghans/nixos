@@ -19,7 +19,7 @@
 명령어 입력부터 시스템 적용까지의 단계별 프로세스입니다.
 👉 [**LIFECYCLE.md 자세히 보기**](./LIFECYCLE.md)
 
-- **Orchestration**: 격리 환경 구축 및 임시 Git 처리.
+- **Orchestration**: 소스 물리 복사 및 `path:` 모드 격리 환경 구축.
 - **Evaluation**: Flake 평가 및 패키지 구성.
 - **Expansion**: 모듈 상속 및 믹스인 과정.
 - **Application**: 최종 빌드 및 시스템 전환.

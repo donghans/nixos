@@ -96,7 +96,7 @@ if [ "$TARGET_PROFILE" == "fix-unstable" ]; then
     IS_SUCCESS=true; exit 0
 fi
 
-TARGET_LOCK="$TMP_BUILD_DIR/flake.lock"
+TARGET_LOCK="$BUILD_DIR/flake.lock"
 
 if [ "$TARGET_PROFILE" == "check" ]; then
     source "$SCRIPT_DIR/nhw.task-check.sh"
@@ -104,12 +104,12 @@ if [ "$TARGET_PROFILE" == "check" ]; then
 fi
 
 # 7. Execution
-prepare_build_dir "$NIXOS_PATH" "$TMP_BUILD_DIR" "$ENV_FILE"
+prepare_build_dir "$NIXOS_PATH" "$BUILD_DIR" "$ENV_FILE"
 
 if [ "$ACTION" == "update" ]; then
     source "$SCRIPT_DIR/nhw.task-update.sh"
 else
-    apply_lock_strategy "$IS_ROLLING" "$HOST_SPECIFIC_LOCK" "$TARGET_LOCK" "$LOCK_STORE_DIR" "$TMP_BUILD_DIR"
+    apply_lock_strategy "$IS_ROLLING" "$HOST_SPECIFIC_LOCK" "$TARGET_LOCK" "$LOCK_STORE_DIR" "$BUILD_DIR"
     if [ "$TARGET_PROFILE" == "iso" ]; then
         source "$SCRIPT_DIR/nhw.task-iso.sh"
     else

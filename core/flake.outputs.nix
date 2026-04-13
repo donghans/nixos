@@ -8,7 +8,7 @@
   overlayFiles =
     builtins.filter
     (f: nixpkgs.lib.hasSuffix ".overlay.nix" (toString f))
-    (nixpkgs.lib.filesystem.listFilesRecursive ./mods);
+    (nixpkgs.lib.filesystem.listFilesRecursive ../mods);
   customOverlays =
     [
       (import ./lib/mk-wrapper.nix)
@@ -33,7 +33,7 @@
   # == resolved.json 로드 ==
   # (목적: AI 및 직접 nix 실행 방지용 명시적 에러)
   allResolved =
-    if !(builtins.pathExists ./resolved.json)
+    if !(builtins.pathExists ../resolved.json)
     then
       throw ''
         ============================================================
@@ -59,13 +59,13 @@
         that isolated directory. Skipping nhw breaks this step.
         ============================================================
       ''
-    else builtins.fromJSON (builtins.readFile ./resolved.json);
+    else builtins.fromJSON (builtins.readFile ../resolved.json);
 
   # == presets.json 로드 ==
   allPresets =
-    if !(builtins.pathExists ./presets.json)
+    if !(builtins.pathExists ../presets.json)
     then throw "ERROR: presets.json not found. Run nhw to generate it."
-    else builtins.fromJSON (builtins.readFile ./presets.json);
+    else builtins.fromJSON (builtins.readFile ../presets.json);
 
   # == 호스트명 자동탐색: resolved.json 키 목록 ==
   hostNames = builtins.attrNames allResolved;
@@ -105,7 +105,7 @@
           import ./lib/mk-preset.nix {
             inherit lib options;
             presetName = "iso";
-            presetsJsonPath = ./presets.json;
+            presetsJsonPath = ../presets.json;
           })
       ];
     };
@@ -137,7 +137,7 @@
       import ./lib/mk-preset.nix {
         inherit lib options;
         presetName = resolved.preset;
-        presetsJsonPath = ./presets.json;
+        presetsJsonPath = ../presets.json;
       };
   in {inherit resolved perHostMeta modsModule rootModsModule coverageModule;};
 in {
@@ -176,7 +176,7 @@ in {
           modules = [
             ./lib/workspace-options.nix
             {workspace = hostCtx.metaConfig;}
-            ./mods/default.nix
+            ../mods/default.nix
             modsModule
             coverageModule
             (import hostCtx.homeConfig)
@@ -206,11 +206,11 @@ in {
               import ./lib/mk-preset.nix {
                 inherit lib options;
                 presetName = resolved.preset;
-                presetsJsonPath = ./presets.json;
+                presetsJsonPath = ../presets.json;
                 # root는 sys 모듈만 활성화하므로 gui/devel 커버리지 제외
                 excludePrefixes = ["mods.gui" "mods.devel"];
               })
-            ./mods/default.nix
+            ../mods/default.nix
           ];
         };
       }

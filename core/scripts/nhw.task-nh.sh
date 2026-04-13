@@ -25,35 +25,34 @@ _log_nvd_diff() {
 }
 
 run_nh_task() {
-    init_tmp_git "$TMP_BUILD_DIR"
-
     log_msg "Task" "building configuration for #$HOST_ID..."
 
     # build: result 심볼릭 링크 불필요 (빌드 테스트/캐시 히트 목적)
     # -d never: nh 내장 diff 비활성화 (nvd diff로 로그에 별도 기록)
     # nh 출력은 fd 3(원본 터미널)으로만 보냄 → 로그에 기록 안 됨
     # 실패 시 nix build --print-build-logs로 상세 오류만 로그에 기록
+    # path: prefix: .build/가 git 레포 내에 있어 git 추적 여부 확인을 우회
     NH_EXTRA=()
     [ "$ACTION" == "build" ] && NH_EXTRA=("--" "--no-link")
 
     log_exec "nh" ">" "nh $TARGET_PROFILE $ACTION"
     if [ "$TARGET_PROFILE" == "os" ]; then
-        if ! nh os "$ACTION" "$TMP_BUILD_DIR" -H "$HOST_ID" -d never "${NH_EXTRA[@]}" >&3 2>&3; then
+        if ! nh os "$ACTION" "path:$BUILD_DIR" -H "$HOST_ID" -d never "${NH_EXTRA[@]}" >&3 2>&3; then
             log_exec "nh" "<" "nh $TARGET_PROFILE $ACTION"
             log_msg "Error" "Build failed. Re-running with full build logs..."
             nix build --print-build-logs \
-                "${TMP_BUILD_DIR}#nixosConfigurations.${HOST_ID}.config.system.build.toplevel" \
+                "path:${BUILD_DIR}#nixosConfigurations.${HOST_ID}.config.system.build.toplevel" \
                 --extra-experimental-features 'nix-command flakes' || true
             exit 1
         fi
         log_exec "nh" "<" "nh $TARGET_PROFILE $ACTION"
         _log_nvd_diff "/nix/var/nix/profiles/system" "os"
     else
-        if ! nh home "$ACTION" "$TMP_BUILD_DIR" -d never "${NH_EXTRA[@]}" >&3 2>&3; then
+        if ! nh home "$ACTION" "path:$BUILD_DIR" -d never "${NH_EXTRA[@]}" >&3 2>&3; then
             log_exec "nh" "<" "nh $TARGET_PROFILE $ACTION"
             log_msg "Error" "Build failed. Re-running with full build logs..."
             nix build --print-build-logs \
-                "${TMP_BUILD_DIR}#homeConfigurations.\"${USER}@${HOST_ID}\".activationPackage" \
+                "path:${BUILD_DIR}#homeConfigurations.\"${USER}@${HOST_ID}\".activationPackage" \
                 --extra-experimental-features 'nix-command flakes' || true
             exit 1
         fi

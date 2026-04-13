@@ -3,12 +3,9 @@
 run_update_task() {
     log_msg "Task" "attempting to update flake.lock for $HOST_ID..."
     [ -f "$HOST_SPECIFIC_LOCK" ] && cp "$HOST_SPECIFIC_LOCK" "$TARGET_LOCK"
-    init_tmp_git "$TMP_BUILD_DIR"
 
     log_exec "nix" ">" "nix flake update"
-    (cd "$TMP_BUILD_DIR" && nix flake update --refresh)
-    # 스테이징을 해주어야 이후 cmp 비교 등이 정확함
-    git -C "$TMP_BUILD_DIR" add -A >/dev/null 2>&1
+    (cd "$BUILD_DIR" && nix flake update --refresh --flake "path:.")
     log_exec "nix" "<" "nix flake update"
 
     if [ ! -f "$HOST_SPECIFIC_LOCK" ] || ! cmp -s "$HOST_SPECIFIC_LOCK" "$TARGET_LOCK"; then

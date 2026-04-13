@@ -7,20 +7,20 @@ run_iso_task() {
     fi
 
     log_msg "Task" "starting ISO image build process... [${ISO_ARCH:-x86_64}]"
-    cd "$TMP_BUILD_DIR" || exit 1
+    cd "$BUILD_DIR" || exit 1
 
     log_exec "nom" ">" "nom build iso"
     if nom build ".#nixosConfigurations.${iso_target}.config.system.build.isoImage" \
       --extra-experimental-features "nix-command flakes" --impure --print-build-logs; then
         log_exec "nom" "<" "nom build iso"
 
-        if [ -L "$TMP_BUILD_DIR/result" ]; then
-            ISO_FILE=$(find "$TMP_BUILD_DIR/result/iso/" -maxdepth 1 -name '*.iso' -print -quit)
+        if [ -L "$BUILD_DIR/result" ]; then
+            ISO_FILE=$(find "$BUILD_DIR/result/iso/" -maxdepth 1 -name '*.iso' -print -quit)
             ISO_FILE=$(readlink -f "$ISO_FILE")
             ISO_NAME=$(basename "$ISO_FILE")
 
-            cp "$ISO_FILE" "$TMP_BUILD_DIR/"
-            rm -f "$TMP_BUILD_DIR/result"
+            cp "$ISO_FILE" "$BUILD_DIR/"
+            rm -f "$BUILD_DIR/result"
             log_msg "Done" "ISO successfully created: $ISO_NAME"
             log_msg "Done" "You can find it in: $NIXOS_PATH/.build/$ISO_NAME"
         else

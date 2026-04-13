@@ -25,7 +25,7 @@
 
     # .env 파일에서 특정 키의 값을 읽어오는 간단한 헬퍼
     getEnv = key: let
-      envFile = ../.env;
+      envFile = ../../.env;
       content =
         if builtins.pathExists envFile
         then builtins.readFile envFile
@@ -62,7 +62,7 @@
     homeConfig =
       if isISO
       then ../iso.home.nix
-      else ../hosts/${hostname}/home.nix;
+      else ../../hosts/${hostname}/home.nix;
 
     metaConfig = {
       inherit (workspaceMeta) gitName gitEmail nixosRepo;
@@ -91,7 +91,7 @@
         ../iso.nix
       ]
       else [
-        ../hosts/${hostInfo.hostname}/configuration.nix
+        ../../hosts/${hostInfo.hostname}/configuration.nix
       ];
   in
     nixpkgs.lib.nixosSystem {
@@ -108,7 +108,7 @@
         ++ mainConfig
         ++ [
           ./workspace-options.nix
-          ../mods/default.nix
+          ../../mods/default.nix
           {
             workspace = hostCtx.metaConfig;
             nixpkgs.overlays = customOverlays;
@@ -134,7 +134,7 @@
             home-manager.sharedModules =
               [
                 ./workspace-options.nix
-                ../mods/default.nix
+                ../../mods/default.nix
                 {workspace = hostCtx.metaConfig;}
               ]
               ++ extraModules;
@@ -144,7 +144,7 @@
             # (목적: 기존 설정과 충돌 시 파일 백업 생성)
             home-manager.backupFileExtension = "backup";
             home-manager.users.${hostCtx.homeUser} = import hostCtx.homeConfig;
-            home-manager.users.root = import ../mods/sys/base/home.nix;
+            home-manager.users.root = import ../../mods/sys/base/home.nix;
             home-manager.extraSpecialArgs = {
               isNixOS = false;
               inherit inputs;

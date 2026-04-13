@@ -42,7 +42,6 @@ run_check_task() {
     # 5. Integrity Verification
     # 기본: 현재 호스트만 nix eval (빠름)
     # --deep: 전체 호스트 nix flake check + eval 캐시 (.build git 기반)
-    BUILD_DIR="$NIXOS_PATH/.build"
     NIX_EVAL_FLAGS=(--allow-import-from-derivation --extra-experimental-features 'nix-command flakes')
 
     # 공통: build 환경 준비 (양쪽 모드 동일)
@@ -54,7 +53,7 @@ run_check_task() {
     if [ "$CHECK_DEEP" = true ]; then
         log_msg "Task" "Step 5: Full integrity check via nix flake check (all hosts)"
         log_exec "nix" ">" "nix flake check"
-        if nix flake check "$BUILD_DIR" "${NIX_EVAL_FLAGS[@]}"; then
+        if nix flake check "path:$BUILD_DIR" "${NIX_EVAL_FLAGS[@]}"; then
             log_exec "nix" "<" "nix flake check"
             log_msg "Done" "All verifications passed successfully!"
         else
@@ -67,7 +66,7 @@ run_check_task() {
         EVAL_FAILED=false
 
         log_exec "nix" ">" "nixosConfigurations.${HOST_ID}"
-        if nix eval "${BUILD_DIR}#nixosConfigurations.${HOST_ID}.config.system.build.toplevel" \
+        if nix eval "path:${BUILD_DIR}#nixosConfigurations.${HOST_ID}.config.system.build.toplevel" \
             --apply "drv: drv.drvPath" \
             "${NIX_EVAL_FLAGS[@]}"; then
             log_exec "nix" "<" "nixosConfigurations.${HOST_ID}"
@@ -78,7 +77,7 @@ run_check_task() {
         fi
 
         # 현재 호스트에 속한 homeConfigurations (*@HOST_ID) 순회
-        HOME_HOSTS=$(nix eval "${BUILD_DIR}#homeConfigurations" \
+        HOME_HOSTS=$(nix eval "path:${BUILD_DIR}#homeConfigurations" \
             --apply "cfgs: let s = \"@${HOST_ID}\"; n = builtins.stringLength s; in builtins.concatStringsSep \"\n\" (builtins.filter (k: let l = builtins.stringLength k; in l >= n && builtins.substring (l - n) n k == s) (builtins.attrNames cfgs))" \
             --raw \
             --extra-experimental-features 'nix-command flakes')
@@ -86,7 +85,7 @@ run_check_task() {
         while IFS= read -r host; do
             [ -z "$host" ] && continue
             log_exec "nix" ">" "homeConfigurations.${host}"
-            if nix eval "${BUILD_DIR}#homeConfigurations.\"${host}\".activationPackage" \
+            if nix eval "path:${BUILD_DIR}#homeConfigurations.\"${host}\".activationPackage" \
                 --apply "pkg: pkg.drvPath" \
                 "${NIX_EVAL_FLAGS[@]}"; then
                 log_exec "nix" "<" "homeConfigurations.${host}"

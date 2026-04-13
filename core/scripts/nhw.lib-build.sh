@@ -3,9 +3,9 @@
 
 # Constants
 # shellcheck disable=SC2034
-TMP_BUILD_DIR="$NIXOS_PATH/.build"
+BUILD_DIR="$NIXOS_PATH/.build"
 JSON_DIR="/tmp/nhw-json"
-LOCK_FILE="/tmp/nhw-build.lock"
+SESSION_LOCK="/tmp/nhw-build.lock"
 LOG_DIR="/var/log/nhw"
 
 # ANSI Colors
@@ -77,7 +77,7 @@ setup_logging() {
 
 # 2. Acquire Lock
 acquire_lock() {
-    exec 9> "$LOCK_FILE"
+    exec 9> "$SESSION_LOCK"
     if ! flock -n 9; then
         log_msg "Error" "another build process is already running." >&2
         exit 1
@@ -150,62 +150,38 @@ prepare_build_dir() {
     local lock_file="${4:-}"
 
     log_msg "Task" "preparing isolated environment..."
-    
+
     if [ -z "$build_dir" ]; then
         log_msg "Error" "build_dir is empty. aborting."
         exit 1
     fi
-    
+
     if [ -L "$build_dir" ]; then
         rm -f "$build_dir"
     fi
 
     if [ -d "$build_dir" ]; then
-        find "$build_dir" -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '*.iso' ! -name 'result*' ! -name 'flake.lock' -exec rm -rf {} +
+        find "$build_dir" -mindepth 1 -maxdepth 1 ! -name '*.iso' ! -name 'result*' ! -name 'flake.lock' -exec rm -rf {} +
     else
         mkdir -p "$build_dir"
     fi
-    
-    # Copy essential directories for flake build
+
+    # core/는 디렉터리 그대로 복사, flake.nix만 루트에 단독 배치
     cp -a "$source_path/core" "$build_dir/"
     cp -a "$source_path/hosts" "$build_dir/"
     cp -a "$source_path/mods" "$build_dir/"
-    
-    # Copy flake.nix to root of build directory (it's inside core/ but nix expects it at root or via path)
-    # However, our builders.nix and imports expect the current structure.
-    # We need to copy flake.nix and other files from core/ to root if we want to run 'nix build' there.
-    # OR we keep core/ as is and use 'nix build .#host'
-    
-    # Current structure expectation: flake.nix is in core/
-    # But for ease of use, we copy everything from core/* to root.
-    cp -a "$source_path/core/"* "$build_dir/"
-    
+    cp "$source_path/core/flake.nix" "$build_dir/flake.nix"
+
     [ -f "$env_file" ] && cp -a "$env_file" "$build_dir/.env"
 
-    # resolved.json + presets.json 복사 (JSON_DIR → build_dir, flake.nix가 읽음)
-    cp -a "$JSON_DIR/resolved.json" "$build_dir/"
-    cp -a "$JSON_DIR/presets.json" "$build_dir/"
+    # resolved.json + presets.json (JSON_DIR → build_dir 루트)
+    cp "$JSON_DIR/resolved.json" "$build_dir/"
+    cp "$JSON_DIR/presets.json" "$build_dir/"
 
     if [ -n "$lock_file" ] && [ -f "$lock_file" ]; then
         cp "$lock_file" "$build_dir/flake.lock"
     fi
-
-    init_tmp_git "$build_dir"
-}
-
-# 6. Init Tmp Git
-init_tmp_git() {
-    local build_dir=$1
-    if [ ! -d "$build_dir/.git" ]; then
-        git -C "$build_dir" init >/dev/null 2>&1
-        git -C "$build_dir" config user.email "nhw@tmp.repo" >/dev/null 2>&1
-        git -C "$build_dir" config user.name "nhw-bot" >/dev/null 2>&1
-    fi
-    git -C "$build_dir" add -A >/dev/null 2>&1
-    # Only commit if there are changes to avoid exit 1 under set -e
-    if ! git -C "$build_dir" diff --staged --quiet; then
-        git -C "$build_dir" commit -m "temp: build environment" >/dev/null 2>&1
-    fi
+    # nix는 path: 모드로 호출 — git 추적 없이 BUILD_DIR을 store에 직접 복사하여 순수 평가
 }
 
 # 7. Finalize Lock Sync
