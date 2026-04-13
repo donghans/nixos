@@ -69,11 +69,13 @@ with lib; let
             # s(0:app_name) s(1:app_icon) u(skip) s(2:summary) s(3:body) ...
             # uint32/array/dict 라인은 parse_string_value가 None 반환 → 자동 무시
             if len(strings_in_block) == 4:
-                summary, body = strings_in_block[2], strings_in_block[3]
+                app_name = strings_in_block[0]
+                summary = strings_in_block[2]
+                body = strings_in_block[3]
                 if summary:
                     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     with open(log_path, "a", encoding="utf-8") as f:
-                        f.write(f"[{ts}] [{summary}] {body}\n")
+                        f.write(f"[{ts}] [{app_name}] [{summary}] {body}\n")
                 in_notify_block = False
                 strings_in_block = []
   '';
