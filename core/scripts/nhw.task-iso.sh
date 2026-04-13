@@ -6,23 +6,30 @@ run_iso_task() {
         iso_target="custom-iso-aarch64"
     fi
 
-    log_msg "Task" "starting ISO image build process... [${ISO_ARCH:-x86_64}]"
-    cd "$BUILD_DIR" || exit 1
+    # (목적: GC 루트를 tmpfs(/tmp)에 두어 재부팅 후 자동 소멸.
+    #         ISO 실체는 nix store에 유지되며 GC 루트 소멸 후 nhw clean 시 함께 정리됨.
+    #         .build/에는 nix store 경로로의 심볼릭링크만 생성 — 파일 복사 없음.)
+    local gc_root_dir="/tmp/nhw-iso"
+    local gc_root="$gc_root_dir/result"
 
+    log_msg "Task" "starting ISO image build process... [${ISO_ARCH:-x86_64}]"
+
+    mkdir -p "$gc_root_dir"
     log_exec "nom" ">" "nom build iso"
-    if nom build ".#nixosConfigurations.${iso_target}.config.system.build.isoImage" \
-      --extra-experimental-features "nix-command flakes" --impure --print-build-logs; then
+    if nom build "path:$BUILD_DIR#nixosConfigurations.${iso_target}.config.system.build.isoImage" \
+      --extra-experimental-features "nix-command flakes" --impure --print-build-logs \
+      --out-link "$gc_root"; then
         log_exec "nom" "<" "nom build iso"
 
-        if [ -L "$BUILD_DIR/result" ]; then
-            ISO_FILE=$(find "$BUILD_DIR/result/iso/" -maxdepth 1 -name '*.iso' -print -quit)
+        if [ -L "$gc_root" ]; then
+            ISO_FILE=$(find "$gc_root/iso/" -maxdepth 1 -name '*.iso' -print -quit)
             ISO_FILE=$(readlink -f "$ISO_FILE")
             ISO_NAME=$(basename "$ISO_FILE")
 
-            cp "$ISO_FILE" "$BUILD_DIR/"
-            rm -f "$BUILD_DIR/result"
+            ln -sf "$ISO_FILE" "$BUILD_DIR/$ISO_NAME"
             log_msg "Done" "ISO successfully created: $ISO_NAME"
-            log_msg "Done" "You can find it in: $NIXOS_PATH/.build/$ISO_NAME"
+            log_msg "Done" "Store path: $ISO_FILE"
+            log_msg "Done" "Symlink: $NIXOS_PATH/.build/$ISO_NAME"
         else
             log_msg "Error" "ISO build failed: result link not found."
             exit 1

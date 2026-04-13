@@ -161,6 +161,8 @@ prepare_build_dir() {
     fi
 
     if [ -d "$build_dir" ]; then
+        # 댕글링 *.iso 심볼릭링크 제거 (재부팅 후 /tmp 초기화로 대상 파일이 사라진 경우)
+        find "$build_dir" -mindepth 1 -maxdepth 1 -name '*.iso' -type l ! -e -exec rm -f {} +
         find "$build_dir" -mindepth 1 -maxdepth 1 ! -name '*.iso' ! -name 'result*' ! -name 'flake.lock' -exec rm -rf {} +
     else
         mkdir -p "$build_dir"
