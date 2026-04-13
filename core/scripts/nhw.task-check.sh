@@ -42,7 +42,7 @@ run_check_task() {
     # 5. Integrity Verification
     # 기본: 현재 호스트만 nix eval (빠름)
     # --deep: 전체 호스트 nix flake check + eval 캐시 (.build git 기반)
-    NIX_EVAL_FLAGS=(--allow-import-from-derivation --extra-experimental-features 'nix-command flakes')
+    NIX_EVAL_FLAGS=(--allow-import-from-derivation "${NIX_FLAKE_FLAGS[@]}")
 
     # 공통: build 환경 준비 (양쪽 모드 동일)
     if [ -f "$HOST_SPECIFIC_LOCK" ]; then
@@ -80,7 +80,7 @@ run_check_task() {
         HOME_HOSTS=$(nix eval "path:${BUILD_DIR}#homeConfigurations" \
             --apply "cfgs: let s = \"@${HOST_ID}\"; n = builtins.stringLength s; in builtins.concatStringsSep \"\n\" (builtins.filter (k: let l = builtins.stringLength k; in l >= n && builtins.substring (l - n) n k == s) (builtins.attrNames cfgs))" \
             --raw \
-            --extra-experimental-features 'nix-command flakes')
+            "${NIX_FLAKE_FLAGS[@]}")
 
         while IFS= read -r host; do
             [ -z "$host" ] && continue

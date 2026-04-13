@@ -17,7 +17,7 @@ run_iso_task() {
     mkdir -p "$gc_root_dir"
     log_exec "nom" ">" "nom build iso"
     if nom build "path:$BUILD_DIR#nixosConfigurations.${iso_target}.config.system.build.isoImage" \
-      --extra-experimental-features "nix-command flakes" --impure --print-build-logs \
+      "${NIX_FLAKE_FLAGS[@]}" --impure --print-build-logs \
       --out-link "$gc_root"; then
         log_exec "nom" "<" "nom build iso"
 

@@ -16,11 +16,11 @@ apply_lock_strategy() {
 
         if [ -f "$target_lock" ]; then
             log_exec "nix" ">" "nix flake update nixpkgs-unstable"
-            (cd "$build_dir" && nix flake update nixpkgs-unstable --refresh --flake "path:.")
+            nix flake update nixpkgs-unstable --refresh --flake "path:$build_dir"
             log_exec "nix" "<" "nix flake update nixpkgs-unstable"
         else
             log_exec "nix" ">" "nix flake update"
-            (cd "$build_dir" && nix flake update --refresh --flake "path:.")
+            nix flake update --refresh --flake "path:$build_dir"
             log_exec "nix" "<" "nix flake update"
         fi
         

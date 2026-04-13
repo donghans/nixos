@@ -42,7 +42,7 @@ run_nh_task() {
             log_msg "Error" "Build failed. Re-running with full build logs..."
             nix build --print-build-logs \
                 "path:${BUILD_DIR}#nixosConfigurations.${HOST_ID}.config.system.build.toplevel" \
-                --extra-experimental-features 'nix-command flakes' || true
+                "${NIX_FLAKE_FLAGS[@]}" || true
             exit 1
         fi
         log_exec "nh" "<" "nh $TARGET_PROFILE $ACTION"
@@ -53,7 +53,7 @@ run_nh_task() {
             log_msg "Error" "Build failed. Re-running with full build logs..."
             nix build --print-build-logs \
                 "path:${BUILD_DIR}#homeConfigurations.\"${USER}@${HOST_ID}\".activationPackage" \
-                --extra-experimental-features 'nix-command flakes' || true
+                "${NIX_FLAKE_FLAGS[@]}" || true
             exit 1
         fi
         log_exec "nh" "<" "nh $TARGET_PROFILE $ACTION"

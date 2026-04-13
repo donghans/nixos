@@ -7,6 +7,7 @@ BUILD_DIR="$NIXOS_PATH/.build"
 JSON_DIR="/tmp/nhw-json"
 SESSION_LOCK="/tmp/nhw-build.lock"
 LOG_DIR="/var/log/nhw"
+NIX_FLAKE_FLAGS=(--extra-experimental-features 'nix-command flakes')
 
 # ANSI Colors
 RED='\033[0;31m'
@@ -162,7 +163,8 @@ prepare_build_dir() {
 
     if [ -d "$build_dir" ]; then
         # 댕글링 *.iso 심볼릭링크 제거 (재부팅 후 /tmp 초기화로 대상 파일이 사라진 경우)
-        find "$build_dir" -mindepth 1 -maxdepth 1 -name '*.iso' -type l ! -e -exec rm -f {} +
+        # (-xtype l: 심볼릭링크를 역참조했을 때도 l 타입 → 대상이 존재하지 않는 댕글링 링크)
+        find "$build_dir" -mindepth 1 -maxdepth 1 -name '*.iso' -xtype l -exec rm -f {} +
         find "$build_dir" -mindepth 1 -maxdepth 1 ! -name '*.iso' ! -name 'result*' ! -name 'flake.lock' -exec rm -rf {} +
     else
         mkdir -p "$build_dir"
