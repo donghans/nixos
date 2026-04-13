@@ -61,7 +61,39 @@ fvm = true
 
 ---
 
-## 4. (선택) 설치 전 설정 검증
+## 4. 프리셋 (`mods/_preset/`)
+
+`preset` 필드에 지정한 이름에 따라 기본 mods 활성화 여부가 결정됩니다.
+
+| 프리셋 | 설명 | GUI | 개발 환경 | 서버 서비스 |
+|--------|------|-----|-----------|------------|
+| `workstation` | 데스크탑/랩탑 기본 (Hyprland + 개발 도구) | ✅ | ✅ | ❌ |
+| `server` | 헤드리스 서버 (GUI 없음, 서버 서비스 중심) | ❌ | ❌ | ✅ |
+
+### workstation 프리셋
+
+GUI(Hyprland), 개발 도구(`mods.devel`), Bluetooth, Docker, Tailscale, NetworkManager가 기본 활성화됩니다. `stateVersion` 미지정 시 rolling 채널을 사용합니다.
+
+### server 프리셋
+
+GUI와 개발 도구는 비활성화됩니다. 다음 서비스가 기본 활성화됩니다:
+
+| 서비스 | 설명 |
+|--------|------|
+| `networkmanager` | 네트워크 관리 |
+| `tailscale` | VPN 메시 네트워크 |
+| `incus` | LXC/VM 컨테이너 |
+| `headscale` | Tailscale 컨트롤 서버 |
+| `caddy` | 리버스 프록시 |
+| `cockpit` | 웹 기반 서버 관리 UI |
+| `frp` | Fast Reverse Proxy (내부망 노출) |
+
+host.toml의 `[mods.sys.services]` 섹션에서 개별 서비스를 `false`로 비활성화하거나 추가 서비스를 켤 수 있습니다.
+
+---
+
+## 5. (선택) 설치 전 설정 검증
+
 
 기기에 실제로 설치하기 전에 설정이 올바른지 빌드로 확인할 수 있습니다. nhw가 설치된 기존 NixOS 환경에서 실행하세요.
 

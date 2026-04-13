@@ -165,7 +165,7 @@ prepare_build_dir() {
         # 댕글링 *.iso 심볼릭링크 제거 (재부팅 후 /tmp 초기화로 대상 파일이 사라진 경우)
         # (-xtype l: 심볼릭링크를 역참조했을 때도 l 타입 → 대상이 존재하지 않는 댕글링 링크)
         find "$build_dir" -mindepth 1 -maxdepth 1 -name '*.iso' -xtype l -exec rm -f {} +
-        find "$build_dir" -mindepth 1 -maxdepth 1 ! -name '*.iso' ! -name 'result*' ! -name 'flake.lock' -exec rm -rf {} +
+        find "$build_dir" -mindepth 1 -maxdepth 1 ! -name '*.iso' ! -name 'flake.lock' -exec rm -rf {} +
     else
         mkdir -p "$build_dir"
     fi
@@ -275,6 +275,7 @@ cleanup() {
     log_msg "Summary" "Duration: ${DURATION}s"
     log_msg "Summary" "Log File: ${LOG_FILE:-disabled}"
 
+    rm -f "$NIXOS_PATH"/result "$NIXOS_PATH"/result-*
     check_origin_git_status "$NIXOS_PATH"
     if [ -n "${HOST_SPECIFIC_LOCK:-}" ]; then
         finalize_lock_sync "$LOCK_CHANGED" "$HOST_SPECIFIC_LOCK"

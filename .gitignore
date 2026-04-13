@@ -1,3 +1,4 @@
 .build
 .env
 GEMINI.md
+__pycache__/
