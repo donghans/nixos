@@ -76,7 +76,7 @@ fvm = true
 - **시스템 업데이트:** `nixup update`
 - **깨진 패키지 복구:** `nixup fix [pkg1] [pkg2] ...`
 - **무결성 및 스타일 점검:** `nixup check` (deadnix, 안티패턴 정리, 포맷팅, shellcheck, 빌드 검증)
-- **시스템 정리:** `nixup clean [--all]`
+- **시스템 정리:** `nixup clean [--all] [--keep=N]`
 
 ---
 

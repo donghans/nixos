@@ -45,9 +45,10 @@ Home Manager 설정을 적용합니다.
 
 ### 시스템 업데이트 및 관리
 - `nixup update`: `flake.lock`의 모든 입력을 최신 버전으로 업데이트합니다. (Rolling 호스트는 `_rolling.lock` 업데이트)
-- `nixup clean`: 오래된 세대를 정리하여 디스크 공간을 확보합니다. (기본값: 최근 3개 보존)
-- `nixup clean --all`: 시스템 전체(Sudo 권한 포함)의 오래된 세대를 정리합니다.
-- `nixup clean --keep=N`: 남길 세대 수를 지정합니다. (예: `--keep=5`)
+- `nixup clean [--all] [--keep=N]`: 오래된 세대를 정리하여 디스크 공간을 확보합니다.
+  - 기본값: 사용자 홈 영역만, 최근 3세대 보존
+  - `--all`: 시스템 프로필(sudo 필요) + 전체 GC 포함
+  - `--keep=N`: 보존 세대 수 지정 (기본 3). `--all`과 함께 사용 가능. 예: `nixup clean --all --keep=5`
 
 ### 특수 기능
 - `nixup iso`: `custom-iso` 타겟(x86_64)을 빌드하여 나만의 설치 미디어를 생성합니다.

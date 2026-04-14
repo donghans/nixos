@@ -1,0 +1,130 @@
+.TH NIXUP 1 "" "" "User Commands"
+.SH NAME
+nixup \- NixOS update utility
+.SH SYNOPSIS
+.B nixup
+[\fISUBCOMMAND\fR] [\fIHOST\fR] [\fIFLAGS\fR]
+.br
+.B nixup help
+[\fISUBCOMMAND\fR]
+.SH DESCRIPTION
+\fBnixup\fR is an integrated NixOS management CLI that wraps \fBnix\fR commands
+with build isolation, automatic logging, lock-file strategy, and package
+recovery logic.
+.PP
+All builds are performed in an isolated \fI.build/\fR directory (physical copy,
+no git tracking) and invoked with \fBpath:\fR mode to enable testing of
+uncommitted changes.
+.SH SUBCOMMANDS
+.TP
+.B os
+Build and activate NixOS system configuration (default when no subcommand is given).
+.TP
+.B home
+Build and activate Home Manager configuration.
+.TP
+.B check
+Run code integrity checks in order: deadnix, statix fix, alejandra,
+shellcheck, nix eval. With \fB--deep\fR, replaces nix eval with nix flake check
+to validate all hosts.
+.TP
+.B update
+Update flake.lock inputs. Rolling hosts update \fI.locks/_rolling.lock\fR;
+stable hosts update \fI.locks/<hostname>.lock\fR.
+.TP
+.B clean
+Delete old Nix generations to free disk space.
+Default: user home profile only, keep last 3 generations.
+.TP
+.B iso
+Build a custom installation ISO image. Result is symlinked into \fI.build/\fR.
+.TP
+.B fix
+Search for the last working commit of a broken unstable package and pin it
+to \fI.env\fR. Reference the pinned package as \fBunstable-fallback.<pkgName>\fR
+in \fI*.nix\fR files.
+.TP
+.B help
+Show help. Pass a subcommand name to see subcommand-specific help.
+.SH FLAGS
+.SS os / home
+.TP
+.B \-d, \-\-dry\-run
+Build only; do not create a new generation or activate.
+.TP
+.B \-t, \-\-activate
+Activate immediately without registering a new generation (test mode).
+Reverts on reboot.
+.TP
+.B \-n, \-\-next\-boot
+Schedule activation for the next boot.
+.SS check
+.TP
+.B \-\-deep
+Replace \fBnix eval\fR with \fBnix flake check\fR to validate all hosts.
+Note: does not update NIXUP_LAST_HOST.
+.SS clean
+.TP
+.B \-a, \-\-all
+Include system profile (requires sudo) and run a full \fBnix-store --gc\fR.
+.TP
+.BI \-\-keep= N
+Number of generations to keep (default: 3).
+Can be combined with \fB--all\fR.
+.SS iso
+.TP
+.B \-\-arm
+Build aarch64 target instead of the default x86_64.
+.SS Global
+.TP
+.B \-h, \-\-help
+Show help. Use after a subcommand to see subcommand-specific help.
+.SH EXAMPLES
+.PP
+Apply OS configuration to the current host:
+.PP
+.nf
+    nixup
+    nixup os
+.fi
+.PP
+Apply configuration to a specific host:
+.PP
+.nf
+    nixup os my-host
+.fi
+.PP
+Dry-run home configuration:
+.PP
+.nf
+    nixup home --dry-run
+.fi
+.PP
+Clean all old generations system-wide, keeping last 5:
+.PP
+.nf
+    nixup clean --all --keep=5
+.fi
+.PP
+Show subcommand help:
+.PP
+.nf
+    nixup clean --help
+    nixup help clean
+.fi
+.SH FILES
+.TP
+.I .env
+Environment variables: NIXUP_LAST_HOST, NIX_UNSTABLE_FALLBACK_REV/SHA.
+Located in the repository root.
+.TP
+.I .locks/
+Per-host and rolling flake.lock files (\fI_rolling.lock\fR, \fI<hostname>.lock\fR).
+.TP
+.I /var/log/nixup/
+Session logs (\fIYYYYMMDDTHHMMSS.log\fR). Build logs (\fI*.nom-build.log\fR) are
+kept only on failure and auto-deleted on success. Last 30 logs are retained.
+.SH SEE ALSO
+.BR nixos-rebuild (8),
+.BR home-manager (1),
+.BR nix (1)

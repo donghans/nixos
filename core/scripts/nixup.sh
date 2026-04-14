@@ -18,6 +18,8 @@ fi
 
 source "$SCRIPT_DIR/nixup.lib-build.sh"
 source "$SCRIPT_DIR/nixup.lib-lock.sh"
+source "$SCRIPT_DIR/nixup.lib-help.sh"
+_nixup_maybe_help "$@"
 
 # 2. Argument Parsing
 DO_CLEAN=false; CLEAN_TARGET="user"; CLEAN_KEEP=3
@@ -61,6 +63,7 @@ for arg in "${@:-}"; do
         -n|--next-boot) ACTION="boot" ;;
         -d|--dry-run)   ACTION="build" ;;
         --keep=*)       CLEAN_KEEP="${arg#--keep=}" ;;
+        --help|-h)      print_help_subcmd "$TARGET_PROFILE"; exit 0 ;;
         -*)
             log_msg "Error" "unknown flag: $arg"
             exit 1 ;;

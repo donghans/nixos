@@ -119,10 +119,17 @@
             nixpkgs.overlays = customOverlays;
             nixpkgs.config.allowUnfree = true;
 
-            # (목적: 전역 관리 CLI 'nixup' 시스템 등록)
-            environment.systemPackages = [
-              (nixpkgs.legacyPackages.${hostInfo.system}.writeShellScriptBin "nixup" ''
+            # (목적: 전역 관리 CLI 'nixup' 시스템 등록 + man 페이지 설치)
+            environment.systemPackages = let
+              pkgs' = nixpkgs.legacyPackages.${hostInfo.system};
+            in [
+              (pkgs'.writeShellScriptBin "nixup" ''
                 exec /home/${hostCtx.metaConfig.username}/nixos/core/scripts/nixup.sh "$@"
+              '')
+              (pkgs'.runCommand "nixup-man" {} ''
+                mkdir -p $out/share/man/man1
+                cp ${../scripts/nixup.1} $out/share/man/man1/nixup.1
+                gzip $out/share/man/man1/nixup.1
               '')
             ];
 
