@@ -100,14 +100,15 @@ nixup clean --all
 ## 4. 로그 확인 (Logging)
 
 모든 `nixup` 실행 결과는 `/var/log/nixup/`에 자동으로 기록됩니다.
-- 파일명 형식: `YYYYMMDDTHHMMSS-[target]-[action].log` (예: `20260405T120000-os-switch.log`, ISO는 `20260405T120000-iso-x86_64.log`)
-- 빌드 로그는 별도로 `YYYYMMDDTHHMMSS-build.log`에 nix 원시 출력이 저장됩니다. 빌드 실패 시 재실행 없이 이 파일을 바로 확인할 수 있습니다.
+- 파일명 형식: `YYYYMMDDTHHMMSS.log` (예: `20260405T120000.log`)
+- 빌드 실패 시에만 `YYYYMMDDTHHMMSS.nom-build.log`가 추가로 생성됩니다. 성공 시에는 자동으로 삭제됩니다.
 - 터미널에는 nom 색상 출력이 표시되지만, 저장된 로그 파일은 ANSI 색상 코드가 제거된 순수 텍스트로 저장됩니다.
+- 로그는 최근 30개까지 자동으로 보관됩니다.
 
 ```bash
 # 최근 로그 확인
-tail -f /var/log/nixup/$(ls -t /var/log/nixup/ | head -n 1)
+tail -f /var/log/nixup/$(ls -t /var/log/nixup/*.log | head -n 1)
 
 # 빌드 실패 시 빌드 로그 확인
-cat /var/log/nixup/*-build.log
+cat /var/log/nixup/*.nom-build.log
 ```

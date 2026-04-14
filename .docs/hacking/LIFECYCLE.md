@@ -36,6 +36,7 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 ## 4. Application Phase (최종 적용)
 빌드된 명세를 실제 시스템에 반영하는 마지막 단계입니다.
 
-1.  **Build Monitor**: **`nom` (nix-output-monitor)**을 통해 빌드 진행 상황을 시각화합니다.
-2.  **Switching**: **`nh` (nix-helper)**가 최종 결과물을 현재 구동 중인 시스템의 `/nix/store`에 올리고, 필요한 심볼릭 링크를 교체하여 설정을 활성화합니다.
-3.  **Logging & Sync**: 모든 과정은 로그 파일로 기록되며, 성공 시 락 파일 변경 사항 등을 사용자에게 보고합니다.
+1.  **Build Monitor**: **`nom --json`** 필터 모드로 빌드 진행 상황을 시각화합니다. `nix build`의 stderr(`@nix` JSON)를 `nom`이 파싱하여 의존성 그래프를 터미널에 렌더링합니다. nom의 출력은 fd3(로깅 파이프라인 설정 전에 저장한 원본 터미널 fd)으로 직접 전달되어 세션 로그를 오염시키지 않습니다.
+2.  **Switching**: **`nix-env -p /nix/var/nix/profiles/system --set`**으로 새 세대를 등록하고, **`switch-to-configuration`**으로 서비스·심볼릭 링크를 활성화합니다. `test` 액션은 세대 등록 없이 즉시 활성화, `build` 액션은 빌드만 수행합니다.
+3.  **NVD Diff**: 빌드 전/후 store path를 비교하여 실제로 변경된 경우에만 **`nvd diff`**로 패키지 변경 내역을 출력합니다. 동일한 store path라면 `no package changes`만 표시합니다.
+4.  **Logging & Sync**: 모든 과정은 `YYYYMMDDTHHMMSS.log`에 기록됩니다. 빌드 실패 시에만 `YYYYMMDDTHHMMSS.nom-build.log`가 보존됩니다. 성공 시 락 파일 변경 사항 등을 사용자에게 보고합니다.
