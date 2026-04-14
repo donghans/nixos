@@ -86,9 +86,9 @@ python3 -B "$SCRIPT_DIR/nixup.resolve.py" "$NIXOS_PATH" "$JSON_DIR" >/dev/null
 
 LOCK_STORE_DIR="$NIXOS_PATH/.locks"
 HOST_ID=""; IS_ROLLING=""; HOST_SPECIFIC_LOCK=""
-if [ "$DO_CLEAN" != true ] && [ "$TARGET_PROFILE" != "fix-unstable" ] && [ "$TARGET_PROFILE" != "update" ]; then
+if [ "$DO_CLEAN" != true ] && [ "$TARGET_PROFILE" != "fix-unstable" ]; then
     _PERSIST_ENV=""
-    if [[ "$TARGET_PROFILE" != "check" && ( "$ACTION" == "switch" || "$ACTION" == "test" || "$ACTION" == "boot" ) ]]; then
+    if [[ "$TARGET_PROFILE" != "check" && "$TARGET_PROFILE" != "update" && ( "$ACTION" == "switch" || "$ACTION" == "test" || "$ACTION" == "boot" ) ]]; then
         _PERSIST_ENV="$ENV_FILE"
     fi
     set +e

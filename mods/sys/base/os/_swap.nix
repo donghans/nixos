@@ -47,7 +47,7 @@ in {
   };
 
   # == tmpfs (/tmp) ==
-  # (목적: nhw 빌드 등 대용량 임시 파일을 RAM에서 처리 — swap이 초과분을 흡수)
+  # (목적: nixup 빌드 등 대용량 임시 파일을 RAM에서 처리 — swap이 초과분을 흡수)
   boot.tmp = {
     useTmpfs = lib.mkDefault true;
     inherit tmpfsSize;

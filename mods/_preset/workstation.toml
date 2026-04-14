@@ -1,4 +1,4 @@
-# stateVersion 미지정 → isRolling = true (nhw가 rolling lock 사용)
+# stateVersion 미지정 → isRolling = true (nixup이 rolling lock 사용)
 # stateVersion = "25.11" 처럼 명시 → isRolling = false (호스트별 lock 사용)
 
 [mods.sys]

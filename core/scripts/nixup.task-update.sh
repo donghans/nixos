@@ -5,7 +5,7 @@ run_update_task() {
     [ -f "$HOST_SPECIFIC_LOCK" ] && cp "$HOST_SPECIFIC_LOCK" "$TARGET_LOCK"
 
     log_exec "nix" ">" "nix flake update"
-    (cd "$BUILD_DIR" && nix flake update --refresh --flake "path:.")
+    nix flake update --refresh --flake "path:$BUILD_DIR"
     log_exec "nix" "<" "nix flake update"
 
     if [ ! -f "$HOST_SPECIFIC_LOCK" ] || ! cmp -s "$HOST_SPECIFIC_LOCK" "$TARGET_LOCK"; then

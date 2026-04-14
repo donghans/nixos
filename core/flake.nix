@@ -12,7 +12,7 @@
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  # (목적: nhw는 빌드 시 이 파일을 .build/flake.nix(루트)로 복사하므로,
+  # (목적: nixup은 빌드 시 이 파일을 .build/flake.nix(루트)로 복사하므로,
   #         ./core/flake.outputs.nix는 .build/core/flake.outputs.nix를 가리킨다.
   #         원본 위치(core/flake.nix)에서 보면 경로가 이상해 보이지만 의도된 설계임.)
   outputs = inputs: (import ./core/flake.outputs.nix) inputs;
