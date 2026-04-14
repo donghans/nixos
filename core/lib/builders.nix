@@ -119,16 +119,16 @@
             nixpkgs.overlays = customOverlays;
             nixpkgs.config.allowUnfree = true;
 
-            # (목적: 전역 관리 CLI 'nhw' 시스템 등록)
+            # (목적: 전역 관리 CLI 'nixup' 시스템 등록)
             environment.systemPackages = [
-              (nixpkgs.legacyPackages.${hostInfo.system}.writeShellScriptBin "nhw" ''
-                exec /home/${hostCtx.metaConfig.username}/nixos/core/scripts/nhw.sh "$@"
+              (nixpkgs.legacyPackages.${hostInfo.system}.writeShellScriptBin "nixup" ''
+                exec /home/${hostCtx.metaConfig.username}/nixos/core/scripts/nixup.sh "$@"
               '')
             ];
 
-            # (목적: nhw 로그 디렉터리 생성 및 쓰기 권한 부여)
+            # (목적: nixup 로그 디렉터리 생성 및 쓰기 권한 부여)
             systemd.tmpfiles.rules = [
-              "d /var/log/nhw 0775 ${hostCtx.metaConfig.username} users -"
+              "d /var/log/nixup 0775 ${hostCtx.metaConfig.username} users -"
             ];
           }
         ]

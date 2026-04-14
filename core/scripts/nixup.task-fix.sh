@@ -101,8 +101,8 @@ run_fix_task() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    log_msg "Notice" "redirecting to nhw fix-unstable..."
-    exec nhw fix-unstable "$@"
+    log_msg "Notice" "redirecting to nixup fix..."
+    exec nixup fix "$@"
 fi
 
 run_fix_task "${EXTRA_ARGS[@]}"

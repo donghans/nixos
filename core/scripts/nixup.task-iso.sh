@@ -7,9 +7,9 @@ run_iso_task() {
     fi
 
     # (목적: GC 루트를 tmpfs(/tmp)에 두어 재부팅 후 자동 소멸.
-    #         ISO 실체는 nix store에 유지되며 GC 루트 소멸 후 nhw clean 시 함께 정리됨.
+    #         ISO 실체는 nix store에 유지되며 GC 루트 소멸 후 nixup clean 시 함께 정리됨.
     #         .build/에는 nix store 경로로의 심볼릭링크만 생성 — 파일 복사 없음.)
-    local gc_root_dir="/tmp/nhw-iso"
+    local gc_root_dir="/tmp/nixup-iso"
     local gc_root="$gc_root_dir/result"
 
     log_msg "Task" "starting ISO image build process... [${ISO_ARCH:-x86_64}]"
@@ -42,8 +42,8 @@ run_iso_task() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    log_msg "Notice" "redirecting to nhw dispatcher..."
-    exec nhw iso
+    log_msg "Notice" "redirecting to nixup dispatcher..."
+    exec nixup iso
 fi
 
 run_iso_task

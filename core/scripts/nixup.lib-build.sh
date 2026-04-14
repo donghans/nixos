@@ -4,9 +4,9 @@
 # Constants
 # shellcheck disable=SC2034
 BUILD_DIR="$NIXOS_PATH/.build"
-JSON_DIR="/tmp/nhw-json"
-SESSION_LOCK="/tmp/nhw-build.lock"
-LOG_DIR="/var/log/nhw"
+JSON_DIR="/tmp/nixup-json"
+SESSION_LOCK="/tmp/nixup-build.lock"
+LOG_DIR="/var/log/nixup"
 NIX_FLAKE_FLAGS=(--extra-experimental-features 'nix-command flakes')
 
 # ANSI Colors
@@ -32,33 +32,34 @@ log_msg() {
         Error)   cat_color=$RED ;;
         Notice|Warn)  cat_color=$YELLOW ;;
         Prep)    cat_color=$CYAN ;;
+        Lock)    cat_color=$YELLOW ;;
         *)       cat_color=$NC ;;
     esac
 
-    # Format: NHW [9-char-category] | [msg]
-    printf "${CYAN}NHW${NC} ${cat_color}%-9s${NC} | %s\n" "$category" "$msg"
+    # Format: NIXUP [9-char-category] | [msg]
+    printf "${CYAN}NIXUP${NC} ${cat_color}%-9s${NC} | %s\n" "$category" "$msg"
 }
 
 # Command Execution Helper (Aligned with | marker)
 log_exec() {
-    local cmd_name=$1 # e.g., nh, nix, nom
+    local cmd_name=$1 # e.g., nix, nom
     local state=$2    # > or <
     local msg=$3      # description
     local cat_color=$BLUE
-    
-    # Matches NHW's aligned format: NHW Exec cmd > description
-    printf "${CYAN}NHW${NC} ${cat_color}Exec %-4s${NC} %s %s\n" "$cmd_name" "$state" "$msg"
+
+    # Matches NIXUP's aligned format: NIXUP Exec cmd > description
+    printf "${CYAN}NIXUP${NC} ${cat_color}Exec %-4s${NC} %s %s\n" "$cmd_name" "$state" "$msg"
 }
 
 # 1. Setup Logging (Clean YYYYMMDDTHHMMSS.log format)
 setup_logging() {
     local timestamp=$1
     local user_name=$USER
-    
+
     if [ ! -d "$LOG_DIR" ] || [ ! -w "$LOG_DIR" ]; then
         log_msg "Notice" "log directory permission issue detected."
-        read -rp "$(printf "${YELLOW}%-13s${NC} | setup log directory with sudo? (Y/n): " "NHW Question")" CONFIRM
-        
+        read -rp "$(printf "${YELLOW}%-15s${NC} | setup log directory with sudo? (Y/n): " "NIXUP Question")" CONFIRM
+
         if [[ "$CONFIRM" =~ ^[Yy]$ ]] || [ -z "$CONFIRM" ]; then
             sudo mkdir -p "$LOG_DIR"
             sudo chown -R "$user_name:users" "$LOG_DIR"
@@ -70,7 +71,6 @@ setup_logging() {
         fi
     fi
 
-    # Removed 'nhw_' prefix as requested
     LOG_FILE="$LOG_DIR/${timestamp}.log"
     exec > >(tee -a >(sed 's/\x1b\[[0-9;]*m//g' > "$LOG_FILE")) 2>&1
     return 0
@@ -119,10 +119,10 @@ determine_host_info() {
     fi
 
     local host_id="$input_host"
-    # $NHW_LAST_HOST는 .env에서 로드된 값 (nhw.sh 시작 시 주입).
-    # 명령행에서 호스트를 명시하면 update_env_file()이 .env에 NHW_LAST_HOST를 기록하고,
+    # $NIXUP_LAST_HOST는 .env에서 로드된 값 (nixup.sh 시작 시 주입).
+    # 명령행에서 호스트를 명시하면 update_env_file()이 .env에 NIXUP_LAST_HOST를 기록하고,
     # 다음 실행 시 호스트를 생략하면 이 값을 재사용 → "마지막 빌드 대상 유지" 동작.
-    [ -z "$host_id" ] && host_id="$NHW_LAST_HOST"
+    [ -z "$host_id" ] && host_id="$NIXUP_LAST_HOST"
     if [ -z "$host_id" ]; then
         log_msg "Error" "host id is required."
         exit 1
@@ -137,7 +137,7 @@ determine_host_info() {
         log_msg "Error" "'$host_id' is not a registered host."
         exit 1
     fi
-    [ -n "$env_file" ] && update_env_file "$env_file" "NHW_LAST_HOST" "$host_id"
+    [ -n "$env_file" ] && update_env_file "$env_file" "NIXUP_LAST_HOST" "$host_id"
     local is_rolling
     is_rolling=$(jq -r ".\"$host_id\".isRolling" "$resolved_path")
     echo "$host_id $is_rolling"
@@ -211,35 +211,42 @@ check_origin_git_status() {
     fi
 }
 
-# 9. Resolve Log Name (nhw.sh의 실행 컨텍스트에 맞는 로그 파일명 반환)
+# 9. Resolve Log Name
+# 메인 로그: 타임스탬프만 (20260414T210920.log)
+# 서브 로그: 타임스탬프.타입.log (예: 20260414T210920.nom-build.log)
 resolve_log_name() {
-    if [ "$DO_CLEAN" = true ]; then
-        echo "${LOG_TIMESTAMP}-clean-${CLEAN_TARGET}"
-    elif [ "$TARGET_PROFILE" = "iso" ]; then
-        echo "${LOG_TIMESTAMP}-iso-${ISO_ARCH}"
-    elif [[ "$TARGET_PROFILE" =~ ^(check|fix-unstable)$ ]]; then
-        echo "${LOG_TIMESTAMP}-${TARGET_PROFILE}"
-    else
-        echo "${LOG_TIMESTAMP}-${TARGET_PROFILE}-${ACTION}"
-    fi
+    echo "$LOG_TIMESTAMP"
 }
 
 # 10. Print Init Banner (실행 시작 시 Action/Target/Mode 출력)
 print_init_banner() {
-    log_msg "Init" "NHW: [NixOS Helper](https://github.com/viperML/nh) Wrapper"
+    log_msg "Init" "NixOS update utility"
 
     if [ "$DO_CLEAN" = true ]; then
-        log_msg "Init" "Action:   cleanup"
+        log_msg "Init" "Command:  nix-env --delete-generations (keep: $CLEAN_KEEP)"
     elif [ "$TARGET_PROFILE" = "fix-unstable" ]; then
-        log_msg "Init" "Action:   fix-unstable"
+        log_msg "Init" "Command:  nix flake update <input>"
+    elif [ "$TARGET_PROFILE" = "update" ]; then
+        log_msg "Init" "Command:  nix flake update"
     elif [ "$TARGET_PROFILE" = "check" ] && [ "$CHECK_DEEP" = true ]; then
-        log_msg "Init" "Action:   check --deep"
+        log_msg "Init" "Command:  nix flake check"
     elif [ "$TARGET_PROFILE" = "iso" ]; then
-        log_msg "Init" "Action:   iso [${ISO_ARCH}]"
+        log_msg "Init" "Command:  nix build .#nixos-iso [${ISO_ARCH}]"
     elif [ "$TARGET_PROFILE" = "check" ]; then
-        log_msg "Init" "Action:   check"
-    else
-        log_msg "Init" "Action:   $TARGET_PROFILE $ACTION"
+        log_msg "Init" "Command:  nix eval"
+    elif [ "$TARGET_PROFILE" = "os" ]; then
+        case "$ACTION" in
+            switch) log_msg "Init" "Command:  nixos-rebuild switch" ;;
+            boot)   log_msg "Init" "Command:  nixos-rebuild boot" ;;
+            test)   log_msg "Init" "Command:  nixos-rebuild test" ;;
+            build)  log_msg "Init" "Command:  nixos-rebuild build" ;;
+        esac
+    elif [ "$TARGET_PROFILE" = "home" ]; then
+        case "$ACTION" in
+            switch) log_msg "Init" "Command:  home-manager switch" ;;
+            test)   log_msg "Init" "Command:  home-manager build --dry-run" ;;
+            build)  log_msg "Init" "Command:  home-manager build" ;;
+        esac
     fi
 
     if [ -n "$HOST_ID" ] && [ "$TARGET_PROFILE" != "iso" ] && \

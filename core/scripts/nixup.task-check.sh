@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# core/scripts/nhw.task-check.sh
+# core/scripts/nixup.task-check.sh
 # Integrated task for project code integrity verification and anti-pattern cleanup
 
 run_check_task() {
@@ -104,10 +104,10 @@ run_check_task() {
     fi
 }
 
-# Redirect to nhw dispatcher when run standalone
+# Redirect to nixup dispatcher when run standalone
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    log_msg "Notice" "redirecting to nhw dispatcher..."
-    exec nhw check "$@"
+    log_msg "Notice" "redirecting to nixup dispatcher..."
+    exec nixup check "$@"
 fi
 
 run_check_task

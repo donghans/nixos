@@ -19,8 +19,8 @@ run_update_task() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    log_msg "Notice" "redirecting to nhw update..."
-    exec nhw update
+    log_msg "Notice" "redirecting to nixup update..."
+    exec nixup update
 fi
 
 run_update_task

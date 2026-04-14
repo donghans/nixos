@@ -40,7 +40,7 @@
         ERROR: resolved.json not found.
 
         This flake CANNOT be evaluated directly with nix commands.
-        It requires nhw to prepare an isolated build environment
+        It requires nixup to prepare an isolated build environment
         and generate resolved.json before nix is invoked.
 
         DO NOT run these directly — they will always fail:
@@ -49,14 +49,14 @@
           nixos-rebuild switch --flake .#<hostname>
           home-manager switch --flake .#<user>@<hostname>
 
-        Use nhw instead:
-          nhw home switch          # apply home-manager config
-          nhw os switch            # apply NixOS system config
-          nhw check                # run full integrity checks
+        Use nixup instead:
+          nixup home               # apply home-manager config
+          nixup os                 # apply NixOS system config
+          nixup check              # run full integrity checks
 
-        WHY: nhw copies sources to .build/, resolves
+        WHY: nixup copies sources to .build/, resolves
         host metadata into resolved.json, then invokes nix from
-        that isolated directory. Skipping nhw breaks this step.
+        that isolated directory. Skipping nixup breaks this step.
         ============================================================
       ''
     else builtins.fromJSON (builtins.readFile ../resolved.json);
@@ -64,7 +64,7 @@
   # == presets.json 로드 ==
   allPresets =
     if !(builtins.pathExists ../presets.json)
-    then throw "ERROR: presets.json not found. Run nhw to generate it."
+    then throw "ERROR: presets.json not found. Run nixup to generate it."
     else builtins.fromJSON (builtins.readFile ../presets.json);
 
   # == 호스트명 자동탐색: resolved.json 키 목록 ==

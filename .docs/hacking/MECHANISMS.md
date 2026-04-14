@@ -33,9 +33,9 @@ Unstable 채널 사용자의 최대 고민인 '빌드 실패'를 자동화로 �
   3. 해당 해시와 SHA256을 프로젝트 루트 **`.env`**에 기록합니다.
 - **`.env` 파일 형식** (git 추적 제외):
   ```bash
-  NHW_LAST_HOST=<마지막으로 빌드한 호스트명>         # switch/test/boot 시 nhw가 기록 (check/build는 기록 안 함)
-  NIX_UNSTABLE_FALLBACK_REV=<nixpkgs 커밋 해시>    # nhw fix-unstable이 관리
-  NIX_UNSTABLE_FALLBACK_SHA=<sha256 해시>          # nhw fix-unstable이 관리
+  NIXUP_LAST_HOST=<마지막으로 빌드한 호스트명>        # switch/--activate/--next-boot 시 nixup이 기록 (check/--dry-run은 기록 안 함)
+  NIX_UNSTABLE_FALLBACK_REV=<nixpkgs 커밋 해시>    # nixup fix가 관리
+  NIX_UNSTABLE_FALLBACK_SHA=<sha256 해시>          # nixup fix가 관리
   ```
 - **적용**: `flake.nix`의 빌더가 `.env`를 감지하여 `unstable-fallback` 패키지 세트를 해당 커밋 기준으로 구성합니다. 전체 시스템은 최신 상태로 유지하면서 **문제 있는 특정 패키지만 안전한 구버전**으로 내려서 빌드합니다.
 

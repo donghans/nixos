@@ -7,11 +7,11 @@
 ## 🚀 주요 특징
 
 - **Mods Framework**: 모든 설정을 `sys` / `gui` / `devel` 세 도메인으로 격리하고, 명시적 `enable` 옵션을 통해 기능을 선택합니다.
-- **TOML 설정 원본**: `hosts/base.toml`과 `hosts/<hostname>/host.toml`에 메타데이터를 선언합니다. `nhw` 실행 시 내부적으로 이를 `resolved.json`으로 변환하여 flake.nix에 주입합니다.
+- **TOML 설정 원본**: `hosts/base.toml`과 `hosts/<hostname>/host.toml`에 메타데이터를 선언합니다. `nixup` 실행 시 내부적으로 이를 `resolved.json`으로 변환하여 flake.nix에 주입합니다.
 - **프리셋 시스템**: `mods/_preset/`에 workstation, server, iso 등 다양한 프리셋이 정의되어 있습니다. `host.toml`에 `preset = "workstation"` 한 줄로 해당 환경 전체(tailscale, docker, bluetooth, GUI, 개발 도구 등)가 자동 적용되며, 호스트별 변경 항목만 추가로 기재하면 됩니다.
 - **Mods Coverage Check**: 빌드 시 프리셋에 선언된 옵션과 workspace-options에 등록된 옵션을 대조하여, 누락된 항목을 빌드 타임 에러로 알립니다.
 - **격리된 빌드 환경**: 모든 빌드는 `.build` 경로 내에 격리된 Git 저장소를 구성하여 안전하게 수행됩니다.
-- **시스템 통합 도구 (`nhw`)**: `nhw`를 통해 시스템 업데이트, 전환, ISO 빌드, 패키지 복구 등 모든 작업을 수행합니다.
+- **시스템 통합 도구 (`nixup`)**: `nixup`을 통해 시스템 업데이트, 전환, ISO 빌드, 패키지 복구 등 모든 작업을 수행합니다.
 
 ---
 
@@ -22,7 +22,7 @@ nixos/
 ├── core/               # 프레임워크 엔진
 │   ├── flake.nix       # 메인 진입점
 │   ├── lib/            # 빌더(builders.nix), 옵션 선언(workspace-options.nix)
-│   └── scripts/        # nhw 관리 CLI (nhw.sh, nhw.resolve.py 등)
+│   └── scripts/        # nixup 관리 CLI (nixup.sh, nixup.resolve.py 등)
 ├── mods/               # 재사용 가능한 기능 모듈
 │   ├── sys/            # 시스템 기반 (base, fonts, vfs, services, utils)
 │   ├── gui/            # GUI 환경 (Hyprland 번들, apps, utils)
@@ -66,17 +66,17 @@ fvm = true
 
 ---
 
-## 🛠️ 프로젝트 관리 (`nhw`)
+## 🛠️ 프로젝트 관리 (`nixup`)
 
-시스템이 설치된 후에는 프로젝트 경로와 상관없이 터미널 어디서든 `nhw` 명령어를 사용할 수 있습니다. 구체적인 명령어 사용법과 활용 사례는 [NHW.md](./.docs/readme/NHW.md) 가이드를 참조하세요.
+시스템이 설치된 후에는 프로젝트 경로와 상관없이 터미널 어디서든 `nixup` 명령어를 사용할 수 있습니다. 구체적인 명령어 사용법과 활용 사례는 [NIXUP.md](./.docs/readme/NIXUP.md) 가이드를 참조하세요.
 
-- **OS 설정 적용:** `nhw [host_id] os switch`
-- **Home Manager 적용:** `nhw [host_id] home switch`
-- **커스텀 ISO 빌드:** `nhw iso` (x86_64) / `nhw iso arm` (aarch64) — 결과물은 `.build/` 폴더에 생성됨
-- **시스템 업데이트:** `nhw update`
-- **깨진 패키지 복구:** `nhw fix-unstable [pkg1] [pkg2] ...`
-- **무결성 및 스타일 점검:** `nhw check` (deadnix, 안티패턴 정리, 포맷팅, shellcheck, 빌드 검증)
-- **시스템 정리:** `nhw clean [all]`
+- **OS 설정 적용:** `nixup [os] [host_id]`
+- **Home Manager 적용:** `nixup home [host_id]`
+- **커스텀 ISO 빌드:** `nixup iso` (x86_64) / `nixup iso --arm` (aarch64) — 결과물은 `.build/` 폴더에 생성됨
+- **시스템 업데이트:** `nixup update`
+- **깨진 패키지 복구:** `nixup fix [pkg1] [pkg2] ...`
+- **무결성 및 스타일 점검:** `nixup check` (deadnix, 안티패턴 정리, 포맷팅, shellcheck, 빌드 검증)
+- **시스템 정리:** `nixup clean [--all]`
 
 ---
 

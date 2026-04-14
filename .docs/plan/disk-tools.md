@@ -74,8 +74,8 @@ disk-tools = true
 ```
 
 ## Verification & Testing (For Later)
-1. Run `nhw check` to validate the syntax, run formatting, and ensure the Flake evaluates successfully for the current host profile.
-2. Run `nhw os switch` to apply the changes to the current host.
+1. Run `nixup check` to validate the syntax, run formatting, and ensure the Flake evaluates successfully for the current host profile.
+2. Run `nixup os` to apply the changes to the current host.
 3. Test the commands manually in a new shell:
    - Run `duf` and `dust`.
    - Run `dsize` and `dfx` aliases to ensure they work properly.

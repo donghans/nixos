@@ -25,7 +25,7 @@ NC='\033[0m'
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 SETUP_SCRIPT="$SCRIPT_DIR/core/scripts/iso.setup.sh"
-NHW_SCRIPT="$SCRIPT_DIR/core/scripts/nhw.sh"
+NIXUP_SCRIPT="$SCRIPT_DIR/core/scripts/nixup.sh"
 BASE_TOML="$SCRIPT_DIR/hosts/base.toml"
 
 log() {
@@ -55,14 +55,14 @@ show_help() {
     echo ""
     echo "    build-iso [--arm]"
     echo "        커스텀 NixOS 설치 ISO를 빌드합니다."
-    echo "        nhw가 없어도 nix-shell을 통해 자동 실행됩니다."
+    echo "        nixup이 없어도 nix-shell을 통해 자동 실행됩니다."
     echo ""
     echo "  현재 환경:"
 
-    if command -v nhw &>/dev/null; then
-        log Ok   "nhw 설치됨 — build-iso 또는 일반 관리 모두 가능"
+    if command -v nixup &>/dev/null; then
+        log Ok   "nixup 설치됨 — build-iso 또는 일반 관리 모두 가능"
     elif command -v nix &>/dev/null; then
-        log Info "nix 있음, nhw 없음 — build-iso 가능 (nix-shell 자동 사용)"
+        log Info "nix 있음, nixup 없음 — build-iso 가능 (nix-shell 자동 사용)"
     else
         log Warn "nix 없음 — install 모드만 권장 (표준 live 환경으로 보임)"
     fi
@@ -168,15 +168,15 @@ cmd_build_iso() {
         [ "$arg" = "--arm" ] && arm=1
     done
 
-    [ -f "$NHW_SCRIPT" ] || die "nhw 스크립트를 찾을 수 없습니다: $NHW_SCRIPT"
+    [ -f "$NIXUP_SCRIPT" ] || die "nixup 스크립트를 찾을 수 없습니다: $NIXUP_SCRIPT"
 
     cd "$SCRIPT_DIR"
     if [ "$arm" = "1" ]; then
         log Step "aarch64 커스텀 ISO 빌드를 시작합니다..."
-        exec "$NHW_SCRIPT" iso arm
+        exec "$NIXUP_SCRIPT" iso --arm
     else
         log Step "x86_64 커스텀 ISO 빌드를 시작합니다..."
-        exec "$NHW_SCRIPT" iso
+        exec "$NIXUP_SCRIPT" iso
     fi
 }
 

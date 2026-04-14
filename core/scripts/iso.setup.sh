@@ -42,7 +42,7 @@ log_exec() {
     local msg=$3
     local cat_color=$BLUE
 
-    # Matches NHW's aligned format: ISO Exec cmd > description
+    # Matches NIXUP's aligned format: ISO Exec cmd > description
     printf "${PURPLE}ISO${NC} ${cat_color}Exec %-4s${NC} %s %s\n" "$cmd_name" "$state" "$msg"
 }
 
@@ -165,10 +165,10 @@ mv "$REPO_TMP" /mnt/etc/nixos
 # 10. Resolve Metadata (설치 대상 하드웨어 기반 resolved.json 생성)
 # (목적: /proc/meminfo에서 실제 RAM을 감지하여 swap/tmpfs 크기를 올바르게 설정)
 log_msg "Config" "generating resolved.json from target hardware..."
-log_exec "py" ">" "nhw.resolve.py"
-python3 /mnt/etc/nixos/core/scripts/nhw.resolve.py \
+log_exec "py" ">" "nixup.resolve.py"
+python3 /mnt/etc/nixos/core/scripts/nixup.resolve.py \
     /mnt/etc/nixos /mnt/etc/nixos
-log_exec "py" "<" "nhw.resolve.py"
+log_exec "py" "<" "nixup.resolve.py"
 
 # 11. Metadata Extraction
 BASE_TOML="/mnt/etc/nixos/hosts/base.toml"
@@ -191,7 +191,7 @@ rm -f /mnt/etc/nixos/configuration.nix
 echo "$HOST" > /mnt/etc/nixos/.current_host
 
 # 13. Prepare .build/ Environment
-# (목적: nhw와 동일한 격리 환경 구성 — core/flake.nix의 import 경로가 .build/ 루트 기준이므로
+# (목적: nixup과 동일한 격리 환경 구성 — core/flake.nix의 import 경로가 .build/ 루트 기준이므로
 #         /mnt/etc/nixos/core를 직접 flake로 지정하면 core/core/flake.outputs.nix를 찾아 실패)
 log_msg "Config" "preparing .build/ environment for nixos-install..."
 BUILD_DIR="/mnt/etc/nixos/.build"

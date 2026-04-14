@@ -95,15 +95,15 @@ host.toml의 `[mods.sys.services]` 섹션에서 개별 서비스를 `false`로 �
 ## 5. (선택) 설치 전 설정 검증
 
 
-기기에 실제로 설치하기 전에 설정이 올바른지 빌드로 확인할 수 있습니다. nhw가 설치된 기존 NixOS 환경에서 실행하세요.
+기기에 실제로 설치하기 전에 설정이 올바른지 빌드로 확인할 수 있습니다. nixup이 설치된 기존 NixOS 환경에서 실행하세요.
 
 ```bash
-nhw <hostname> os build    # NixOS 시스템 설정 빌드 검증
-nhw <hostname> home build  # Home Manager 설정 빌드 검증
-nhw check                  # 포맷팅 + 린트 + eval 통합 검증
+nixup os <hostname> --dry-run    # NixOS 시스템 설정 빌드 검증
+nixup home <hostname> --dry-run  # Home Manager 설정 빌드 검증
+nixup check                      # 포맷팅 + 린트 + eval 통합 검증
 ```
 
-> **참고**: 이 명령들은 `nhw`가 설치된 환경(기존 NixOS 호스트)에서만 실행 가능합니다. 첫 설치 시에는 이 단계를 건너뛰어도 됩니다.
+> **참고**: 이 명령들은 `nixup`이 설치된 환경(기존 NixOS 호스트)에서만 실행 가능합니다. 첫 설치 시에는 이 단계를 건너뛰어도 됩니다.
 
 ---
 
@@ -139,7 +139,7 @@ cd nixos
 ./bootstrap.sh build-iso --arm  # aarch64
 ```
 
-> nhw가 아직 설치되지 않아도 `nix-shell` 쉬뱅을 통해 필요한 도구를 자동으로 가져옵니다.
+> nixup이 아직 설치되지 않아도 `nix-shell` 쉬뱅을 통해 필요한 도구를 자동으로 가져옵니다.
 
 빌드 완료 후 `.build/` 폴더의 ISO 파일을 USB에 구워 부팅하면, kitty 터미널에 설치 안내가 자동으로 표시됩니다.
 (터미널을 닫았거나 추가로 열어야 할 경우: `Super + P` → kitty 검색)
@@ -167,8 +167,8 @@ nixos-setup /dev/nvme0n1p1 /dev/nvme0n1p2 myhostname
 
 ## 6. 다음으로 해볼 것 (Next Steps)
 
-설치가 완료되고 재부팅하면 `nhw` 명령어를 통해 시스템을 관리할 수 있습니다.
+설치가 완료되고 재부팅하면 `nixup` 명령어를 통해 시스템을 관리할 수 있습니다.
 
-- **시스템 관리 익히기**: [NHW.md](./NHW.md)
-- **개발 환경 구성**: `host.toml`의 `[mods.devel]` 섹션에 도구를 활성화하고 `nhw home switch`
+- **시스템 관리 익히기**: [NIXUP.md](./NIXUP.md)
+- **개발 환경 구성**: `host.toml`의 `[mods.devel]` 섹션에 도구를 활성화하고 `nixup home`
 - **심화 구조 이해**: [HACKING.md](../hacking/_HACKING.md)
