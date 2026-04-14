@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 
 run_iso_task() {
+    # (목적: aarch64 호스트에서의 ISO 빌드는 비효율적이므로 명시적으로 차단)
+    local current_arch
+    current_arch=$(uname -m)
+    if [ "$current_arch" = "aarch64" ]; then
+        log_msg "Error" "ISO build is not supported on aarch64 hosts."
+        log_msg "Error" "Please run 'nixup iso' from an x86_64 machine."
+        exit 1
+    fi
+
     local iso_target="custom-iso"
     if [ "${ISO_ARCH:-x86_64}" = "aarch64" ]; then
         iso_target="custom-iso-aarch64"

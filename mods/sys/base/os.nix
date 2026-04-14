@@ -40,6 +40,12 @@
     };
   };
 
+  # (목적: x86_64 호스트에서 aarch64 크로스 빌드 지원.
+  #         QEMU binfmt_misc 커널 등록 및 nix.settings.extra-platforms 자동 추가.)
+  boot.binfmt.emulatedSystems = lib.mkIf (pkgs.stdenv.hostPlatform.system == "x86_64-linux") [
+    "aarch64-linux"
+  ];
+
   # == Networking & Localization ==
   # (참고: networkmanager.enable은 mods.sys.services.networkmanager.nix에서 처리)
   networking.hostName = config.workspace.hostname;
