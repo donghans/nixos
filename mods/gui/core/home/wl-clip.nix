@@ -20,12 +20,14 @@ with lib; let
   x11ClipboardBridge = pkgs.writeShellScript "x11-clipboard-bridge" ''
     PREV=""
     while ${pkgs.clipnotify}/bin/clipnotify; do
-      CONTENT=$(${pkgs.xclip}/bin/xclip -selection clipboard -o -target UTF8_STRING 2>/dev/null \
-             || ${pkgs.xclip}/bin/xclip -selection clipboard -o -target STRING 2>/dev/null \
-             || true)
-      if [ -n "$CONTENT" ] && [ "$CONTENT" != "$PREV" ]; then
-        PREV="$CONTENT"
-        printf '%s' "$CONTENT" | ${pkgs.wl-clipboard}/bin/wl-copy
+      # xclip의 종료 상태를 확인하여 텍스트 복사 성공 여부 판별
+      if CONTENT=$(${pkgs.xclip}/bin/xclip -selection clipboard -o -target UTF8_STRING 2>/dev/null \
+                || ${pkgs.xclip}/bin/xclip -selection clipboard -o -target STRING 2>/dev/null); then
+        # 빈 문자열이라도 이전과 내용이 다르다면 wl-copy로 발행 (JetBrains 빈 라인 ANR 방지)
+        if [ "$CONTENT" != "$PREV" ]; then
+          PREV="$CONTENT"
+          echo -n "$CONTENT" | ${pkgs.wl-clipboard}/bin/wl-copy
+        fi
       fi
     done
   '';
