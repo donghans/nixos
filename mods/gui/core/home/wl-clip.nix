@@ -19,13 +19,18 @@ with lib; let
   #        wl-clip-persist 없이도 JetBrains 종료 후에도 클립보드 유지.
   x11ClipboardBridge = pkgs.writeShellScript "x11-clipboard-bridge" ''
     PREV=""
+    echo "Clipboard bridge started, waiting for events..."
     while ${pkgs.clipnotify}/bin/clipnotify; do
-      # xclip의 종료 상태를 확인하여 텍스트 복사 성공 여부 판별
-      if CONTENT=$(${pkgs.xclip}/bin/xclip -selection clipboard -o -target UTF8_STRING 2>/dev/null \
-                || ${pkgs.xclip}/bin/xclip -selection clipboard -o -target STRING 2>/dev/null); then
-        # 빈 문자열이라도 이전과 내용이 다르다면 wl-copy로 발행 (JetBrains 빈 라인 ANR 방지)
+      # 클립보드 소유권 변경 후 안정화를 위해 짧게 대기 (루프 방지 및 JetBrains 대응)
+      sleep 0.1
+
+      # xclip에 타임아웃을 적용하여 교착 상태 방지
+      if CONTENT=$(${pkgs.coreutils}/bin/timeout 0.5s ${pkgs.xclip}/bin/xclip -selection clipboard -o -target UTF8_STRING 2>/dev/null \
+                || ${pkgs.coreutils}/bin/timeout 0.5s ${pkgs.xclip}/bin/xclip -selection clipboard -o -target STRING 2>/dev/null); then
+        
         if [ "$CONTENT" != "$PREV" ]; then
           PREV="$CONTENT"
+          echo "Updating Wayland clipboard (len=''${#CONTENT})"
           echo -n "$CONTENT" | ${pkgs.wl-clipboard}/bin/wl-copy
         fi
       fi
