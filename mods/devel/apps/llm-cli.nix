@@ -52,6 +52,17 @@ in
     else {
       config = mkIf (cfg.enable || modCfg.enable) {
         home.packages = [claude gemini];
+
+        # Gemini CLI 지침 (기존 메모리 동기화 및 전역 원칙 강제)
+        home.file.".gemini/GEMINI.md" = {
+          text = ''
+            # Gemini Added Memories
+            - Answer in korean.
+            - 코드 수정은 최소한으로, git diff 확인을 통해 잘못 수정된것은 정정할 것
+            - md 등의 문서가 길어진다면 분리해서 작성할 것
+          '';
+          force = true; # 기존 파일이 있더라도 Nix 관리 하에 둠
+        };
       };
     }
   )
