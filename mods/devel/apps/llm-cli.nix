@@ -18,18 +18,18 @@ with lib; let
   # kmscon(TTY)은 해당 프로토콜을 지원하지 않아 정상 동작.
 
   # gemini-cli: enableKittyKeyboardProtocol() 함수 본문을 no-op으로 교체
+  # chunk 파일명은 빌드마다 해시가 바뀌므로 grep으로 동적 탐색
   gemini = unstable.gemini-cli.overrideAttrs (old: {
     postInstall =
       (old.postInstall or "")
       + ''
-              substituteInPlace $out/share/gemini-cli/chunk-KLFFCKY4.js \
-                --replace-fail \
-                'function enableKittyKeyboardProtocol() {
-          writeToStdout("\x1B[>1u");
-        }' \
-                'function enableKittyKeyboardProtocol() {
-          /* patched: kitty keyboard protocol disabled to fix Home/End on Wayland */
-        }'
+        target=$(grep -rl 'enableKittyKeyboardProtocol' $out/share/gemini-cli/ || true)
+        if [ -n "$target" ]; then
+          sed -i 's/writeToStdout("\\x1B\[>1u")//g' $target
+          echo "patched: kitty keyboard protocol disabled in $target"
+        else
+          echo "WARNING: enableKittyKeyboardProtocol not found in gemini-cli bundle, skipping patch"
+        fi
       '';
   });
 
