@@ -30,6 +30,36 @@ _final: prev: let
     tree.write(path, encoding="unicode", xml_declaration=False)
   '';
 
+  # (목적: workspace XML의 bash/sh shell 오버라이드를 zsh로 교체)
+  # (이유: JetBrains 터미널 shell이 프로젝트별로 bash로 고정되면 zsh 기반 atuin/syntax-highlighting 등이 동작하지 않음)
+  patchTerminalShell = prev.writeText "patch-terminal-shell.py" ''
+    import sys, xml.etree.ElementTree as ET
+    path, shell_path = sys.argv[1], sys.argv[2]
+    try:
+        tree = ET.parse(path)
+    except Exception:
+        sys.exit(0)
+    root = tree.getroot()
+    changed = False
+    for tabs_comp in root.findall("component[@name='TerminalTabsStorage']"):
+        for tab in tabs_comp.iter("TerminalSessionPersistedTab"):
+            shell_cmd = tab.find("option[@name='shellCommand']")
+            if shell_cmd is None:
+                continue
+            children = list(shell_cmd)
+            if not children:
+                continue
+            first = children[0]
+            val = first.get("value", "")
+            if val and val.startswith("/") and val != shell_path:
+                first.set("value", shell_path)
+                changed = True
+    if changed:
+        if hasattr(ET, "indent"):
+            ET.indent(tree)
+        tree.write(path, encoding="unicode", xml_declaration=False)
+  '';
+
   # (목적: 프로젝트 경로 정규화 및 UI 스케일 주입 래퍼)
   wrapJetbrainsPackage = pkg: binName: (prev.mkWrapper {
     inherit pkg binName;
@@ -71,6 +101,17 @@ _final: prev: let
           esac
         done
       fi
+
+      # (목적: workspace 파일의 bash/sh shell 오버라이드를 zsh로 교체)
+      # (이유: JetBrains와 Android Studio 모두 커버 — Google 디렉터리도 함께 탐색)
+      _ZSH="/run/current-system/sw/bin/zsh"
+      for _base in "$HOME/.config/JetBrains" "$HOME/.config/Google"; do
+        [ -d "$_base" ] || continue
+        for _ws in "$_base"/*/workspace/*.xml; do
+          [ -f "$_ws" ] || continue
+          ${prev.python3}/bin/python3 ${patchTerminalShell} "$_ws" "$_ZSH"
+        done
+      done
     '';
   });
 in {
