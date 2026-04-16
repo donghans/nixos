@@ -8,6 +8,89 @@
 with lib; let
   cfg = config.mods.sys.services."incus-win11";
 
+  # 첫 로그인 시 실행되는 디블로팅 스크립트
+  # - 불필요한 AppX 패키지 제거
+  # - 불필요 서비스 비활성화
+  # - 절전·화면꺼짐 비활성화
+  # - 텔레메트리 비활성화
+  debloatScript = pkgs.writeText "debloat.ps1" ''
+    # AppX 패키지 제거
+    $remove = @(
+      "Microsoft.Xbox*",
+      "Microsoft.GamingApp",
+      "Microsoft.XboxGameOverlay",
+      "Microsoft.XboxGamingOverlay",
+      "Microsoft.XboxIdentityProvider",
+      "Microsoft.XboxSpeechToTextOverlay",
+      "Microsoft.MicrosoftSolitaireCollection",
+      "Microsoft.ZuneMusic",
+      "Microsoft.ZuneVideo",
+      "Microsoft.WindowsMaps",
+      "Microsoft.BingWeather",
+      "Microsoft.BingNews",
+      "Microsoft.People",
+      "Microsoft.SkypeApp",
+      "Microsoft.Teams",
+      "MicrosoftTeams",
+      "Microsoft.MicrosoftOfficeHub",
+      "Microsoft.WindowsFeedbackHub",
+      "Microsoft.GetHelp",
+      "Microsoft.Getstarted",
+      "Microsoft.YourPhone",
+      "Clipchamp.Clipchamp",
+      "Microsoft.WindowsCommunicationsApps",
+      "Microsoft.OutlookForWindows"
+    )
+    foreach ($app in $remove) {
+      Get-AppxPackage -Name $app -AllUsers -ErrorAction SilentlyContinue |
+        Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue
+      Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue |
+        Where-Object DisplayName -like $app |
+        Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue
+    }
+
+    # 서비스 비활성화
+    $svcs = @(
+      "SysMain",          # Superfetch
+      "WSearch",          # Windows Search 인덱싱
+      "Spooler",          # 프린터 스풀러
+      "Fax",
+      "DiagTrack",        # 원격 측정
+      "dmwappushservice", # 원격 측정
+      "lfsvc",            # 위치
+      "MapsBroker",
+      "WbioSrvc",         # 생체인식
+      "WerSvc",           # 오류 보고
+      "XblAuthManager", "XblGameSave", "XboxNetApiSvc", "XboxGipSvc",
+      "DoSvc",            # 배달 최적화
+      "icssvc",           # 모바일 핫스팟
+      "wisvc"             # Windows Insider
+    )
+    foreach ($s in $svcs) {
+      Set-Service -Name $s -StartupType Disabled -ErrorAction SilentlyContinue
+      Stop-Service -Name $s -Force -ErrorAction SilentlyContinue
+    }
+
+    # 절전·화면꺼짐 비활성화 (호스트 OS에서 절전 관리)
+    powercfg /change standby-timeout-ac 0
+    powercfg /change standby-timeout-dc 0
+    powercfg /change hibernate-timeout-ac 0
+    powercfg /change hibernate-timeout-dc 0
+    powercfg /change monitor-timeout-ac 0
+    powercfg /change monitor-timeout-dc 0
+    powercfg /h off
+
+    # 텔레메트리 비활성화
+    reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f
+
+    # 작업표시줄 위젯·채팅 제거
+    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarDa /t REG_DWORD /d 0 /f
+    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarMn /t REG_DWORD /d 0 /f
+
+    # Windows Update 수동으로 변경
+    Set-Service -Name wuauserv -StartupType Manual -ErrorAction SilentlyContinue
+  '';
+
   # autounattend.xml + vioscsi 드라이버를 하나의 ISO에 통합
   # → 드라이브가 하나만 추가되어 문자 밀림 현상 없음
   #
@@ -64,6 +147,26 @@ with lib; let
                     <Enabled>true</Enabled>
                     <Username>PC</Username>
                 </AutoLogon>
+                <FirstLogonCommands>
+                    <!-- 1. debloat.ps1을 C:\로 복사 (USB 드라이브 문자가 유동적이므로 탐색) -->
+                    <SynchronousCommand wcm:action="add">
+                        <Order>1</Order>
+                        <CommandLine>cmd /c for %d in (D E F G H) do if exist %d:\debloat.ps1 copy /Y %d:\debloat.ps1 C:\debloat.ps1</CommandLine>
+                        <RequiresUserInput>false</RequiresUserInput>
+                    </SynchronousCommand>
+                    <!-- 2. virtio-win guest tools 설치 (QXL 디스플레이, SPICE 에이전트, netkvm 네트워크) -->
+                    <SynchronousCommand wcm:action="add">
+                        <Order>2</Order>
+                        <CommandLine>cmd /c for %d in (D E F G H) do if exist %d:\virtio-win-guest-tools.exe %d:\virtio-win-guest-tools.exe /S /norestart</CommandLine>
+                        <RequiresUserInput>false</RequiresUserInput>
+                    </SynchronousCommand>
+                    <!-- 3. 디블로팅: 불필요 앱 제거, 서비스 비활성화, 절전 끄기 -->
+                    <SynchronousCommand wcm:action="add">
+                        <Order>3</Order>
+                        <CommandLine>powershell -ExecutionPolicy Bypass -NonInteractive -File C:\debloat.ps1</CommandLine>
+                        <RequiresUserInput>false</RequiresUserInput>
+                    </SynchronousCommand>
+                </FirstLogonCommands>
             </component>
         </settings>
     </unattend>
@@ -72,9 +175,13 @@ with lib; let
   setupIso = pkgs.runCommand "win11-setup.iso" {nativeBuildInputs = [pkgs.cdrkit];} ''
     mkdir -p iso/vioscsi/w11/amd64
     cp ${unattendXml} iso/autounattend.xml
+    cp ${debloatScript} iso/debloat.ps1
+    # vioscsi: Windows PE에서 가상 디스크 인식용
     cp ${pkgs.virtio-win}/vioscsi/w11/amd64/vioscsi.inf iso/vioscsi/w11/amd64/
     cp ${pkgs.virtio-win}/vioscsi/w11/amd64/vioscsi.sys iso/vioscsi/w11/amd64/
     cp ${pkgs.virtio-win}/vioscsi/w11/amd64/vioscsi.cat iso/vioscsi/w11/amd64/
+    # virtio-win-guest-tools: FirstLogonCommands에서 설치 (QXL, SPICE 에이전트, netkvm 등 일괄)
+    cp ${pkgs.virtio-win}/virtio-win-guest-tools.exe iso/
     genisoimage -output $out -volid "SETUP" -J -joliet-long iso
   '';
 in {
@@ -89,6 +196,8 @@ in {
           config = {
             "limits.cpu" = "4";
             "limits.memory" = "8GiB";
+            # SPICE 동적 해상도는 virtio-win-guest-tools의 SPICE VDAgent가 처리
+            # (Incus가 qemu.conf에서 디스플레이 장치를 자체 설정하므로 qxl-vga 직접 추가 불필요)
             "raw.qemu" = "-device usb-tablet -boot menu=on,splash-time=5000";
             "security.secureboot" = "false";
           };
