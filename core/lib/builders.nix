@@ -119,6 +119,11 @@
             nixpkgs.overlays = customOverlays;
             nixpkgs.config.allowUnfree = true;
 
+            # (목적: mkWrapper의 NIX_LD/NIX_LD_LIBRARY_PATH가 실제로 동작하기 위한 전제조건)
+            # (이유: NixOS에 /lib64/ld-linux-x86-64.so.2 stub이 없으면 외부 바이너리가 실행 불가.
+            #        라이브러리 버전은 programs.nix-ld.libraries가 아닌 mkWrapper libs로 프로그램별 관리.)
+            programs.nix-ld.enable = true;
+
             # (목적: 전역 관리 CLI 'nixup' 시스템 등록 + man 페이지 설치)
             environment.systemPackages = let
               pkgs' = nixpkgs.legacyPackages.${hostInfo.system};
