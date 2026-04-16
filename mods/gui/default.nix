@@ -23,5 +23,6 @@ in {
     mods.gui.apps.bitwarden.enable = mkDefault true;
     mods.gui.apps.speedcrunch.enable = mkDefault true;
     mods.gui.utils.custom-notify-logger.enable = mkDefault true;
+    mods.gui.apps."incus-viewer".enable = mkDefault true;
   };
 }
