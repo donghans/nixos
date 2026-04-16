@@ -71,13 +71,15 @@ with lib; let
       Stop-Service -Name $s -Force -ErrorAction SilentlyContinue
     }
 
-    # 절전·화면꺼짐 비활성화 (호스트 OS에서 절전 관리)
+    # 절전·화면꺼짐·하드디스크 자동끄기 비활성화 (호스트 OS에서 절전 관리)
     powercfg /change standby-timeout-ac 0
     powercfg /change standby-timeout-dc 0
     powercfg /change hibernate-timeout-ac 0
     powercfg /change hibernate-timeout-dc 0
     powercfg /change monitor-timeout-ac 0
     powercfg /change monitor-timeout-dc 0
+    powercfg /change disk-timeout-ac 0
+    powercfg /change disk-timeout-dc 0
     powercfg /h off
 
     # 텔레메트리 비활성화
@@ -190,6 +192,12 @@ in {
   config = mkIf cfg.enable (
     if isNixOS
     then {
+      assertions = [
+        {
+          assertion = config.mods.sys.services.incus.enable;
+          message = "mods.sys.services.incus-win11는 mods.sys.services.incus.enable = true 가 필요합니다";
+        }
+      ];
       virtualisation.incus.preseed.profiles = [
         {
           name = "win11";
