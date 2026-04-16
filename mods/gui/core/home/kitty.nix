@@ -16,7 +16,7 @@ _: {
 
       background_opacity = "0.95";
       window_padding_width = 0;
-      confirm_os_window_close = 0;
+      confirm_os_window_close = -1;
 
       cursor_shape = "beam";
       shell_integration = "disabled";
