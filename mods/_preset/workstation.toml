@@ -14,6 +14,7 @@ networkmanager = true
 tailscale      = true
 docker         = true
 incus          = true
+incus-win11    = true
 headscale      = false
 caddy          = false
 cockpit        = false

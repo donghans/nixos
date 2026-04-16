@@ -13,6 +13,7 @@ nfd = true
 networkmanager = true
 tailscale      = true
 incus          = true
+incus-win11    = false
 headscale      = true
 caddy          = true
 cockpit        = true
