@@ -19,6 +19,9 @@ in {
       users.users.${config.workspace.username}.extraGroups = ["incus-admin"];
 
       virtualisation.incus.preseed = {
+        config = {
+          "core.https_address" = ":8443";
+        };
         networks = [
           {
             name = "incusbr0";
