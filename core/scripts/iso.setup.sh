@@ -256,10 +256,16 @@ for _lf in "/mnt/etc/nixos/.locks/$HOST.lock" "/mnt/etc/nixos/.locks/_rolling.lo
 done
 
 # 15. Install
+# --no-root-passwd: root 패스워드 설정 생략 (NixOS 설정에서 잠금 예정)
 log_msg "Install" "starting nixos-install for #$HOST ..."
 log_exec "nix" ">" "nixos-install"
-nixos-install --flake "$BUILD_DIR#$HOST"
+nixos-install --no-root-passwd --flake "$BUILD_DIR#$HOST"
 log_exec "nix" "<" "nixos-install"
+
+# 15-B. Set user password
+log_msg "Install" "setting password for user '$USERNAME' ..."
+nixos-enter --root /mnt -c \
+    "/nix/var/nix/profiles/system/sw/bin/passwd $USERNAME"
 
 # 16. Post-processing
 log_msg "Done" "running post-installation tasks for user: $USERNAME ..."

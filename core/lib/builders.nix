@@ -138,6 +138,11 @@
               '')
             ];
 
+            # (목적: root 계정 잠금 — 패스워드 인증으로 직접 로그인 불가)
+            # (ISO는 installation-cd-graphical-base.nix가 initialHashedPassword=""를 설정하므로 제외)
+            # (wheel 그룹을 통해 sudo는 계속 사용 가능)
+            users.users.root.hashedPassword = nixpkgs.lib.mkIf (!isISO) "!";
+
             # (목적: nixup 로그 디렉터리 생성 및 쓰기 권한 부여)
             systemd.tmpfiles.rules = [
               "d /var/log/nixup 0775 ${hostCtx.metaConfig.username} users -"
