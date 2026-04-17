@@ -18,6 +18,19 @@ in {
       # nixos-fw의 기본 정책이 drop이라 VM→호스트 트래픽(DHCP 등)도 차단됨
       networking.firewall.trustedInterfaces = ["incusbr0"];
       networking.nftables.enable = true;
+      # (목적: VM→인터넷 TLS 핸드셰이크 타임아웃 방지)
+      # NAT 브릿지 통과 시 MTU 불일치로 큰 패킷(TLS ClientHello 등)이 드롭됨.
+      # SYN 패킷의 MSS를 PMTU에 맞게 클램프하여 패킷 단편화 문제를 해결.
+      networking.nftables.tables.mss-clamp = {
+        family = "ip";
+        content = ''
+          chain forward {
+            type filter hook forward priority mangle;
+            iifname "incusbr0" tcp flags syn tcp option maxseg size set rt mtu
+            oifname "incusbr0" tcp flags syn tcp option maxseg size set rt mtu
+          }
+        '';
+      };
       # VM이 IPv6 RA를 브리지로 보낼 때 호스트 IPv6 라우팅이 바뀌는 것을 방지
       # (RA를 수락하면 Tailscale 등 호스트 IPv6 연결이 끊김)
       boot.kernel.sysctl."net.ipv6.conf.incusbr0.accept_ra" = 0;
