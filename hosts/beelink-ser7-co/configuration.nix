@@ -35,9 +35,4 @@
     irqbalance.enable = true;
   };
 
-  # (이유: Tailscale 등 이중 NAT 환경에서 Vivaldi 동기화 타임아웃 회피)
-  networking.interfaces = {
-    enp1s0.mtu = 1400; # 유선
-    wlp2s0.mtu = 1400; # 무선
-  };
 }

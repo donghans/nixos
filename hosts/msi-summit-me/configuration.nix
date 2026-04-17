@@ -115,8 +115,4 @@
     '')
   ];
 
-  # (이유: Tailscale 등 이중 NAT 환경에서 Vivaldi 동기화 타임아웃 회피)
-  networking.interfaces = {
-    wlo1.mtu = 1400;
-  };
 }
