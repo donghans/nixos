@@ -130,6 +130,7 @@ for entry in sorted(os.listdir(hosts_dir)):
         "timeZone":      host.get("timeZone",      base["timeZone"]),
         "defaultLocale": host.get("defaultLocale", base["defaultLocale"]),
         "extraLocale":   host.get("extraLocale",   base.get("extraLocale")),  # None → null
+        "nixCacheAddr":  host.get("nixCacheAddr",  base.get("nixCacheAddr", "")),
         "preset": preset_name,
         "username": host.get("username", base["username"]),
         "git": {**base.get("git", {}), **host.get("git", {})},

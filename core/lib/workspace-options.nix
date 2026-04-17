@@ -71,6 +71,11 @@ with lib; {
         type = types.str;
         description = "NixOS/Home-Manager state version";
       };
+      nixCacheAddr = mkOption {
+        type = types.str;
+        default = "";
+        description = "Nix 바이너리 캐시 프록시 서버 주소 (예: 192.168.1.10:7070). 비어있으면 클라이언트 substituter 설정 없음.";
+      };
     };
   };
 }

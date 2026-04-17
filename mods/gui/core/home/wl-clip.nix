@@ -27,7 +27,7 @@ with lib; let
       # xclip에 타임아웃을 적용하여 교착 상태 방지
       if CONTENT=$(${pkgs.coreutils}/bin/timeout 0.5s ${pkgs.xclip}/bin/xclip -selection clipboard -o -target UTF8_STRING 2>/dev/null \
                 || ${pkgs.coreutils}/bin/timeout 0.5s ${pkgs.xclip}/bin/xclip -selection clipboard -o -target STRING 2>/dev/null); then
-        
+
         if [ "$CONTENT" != "$PREV" ]; then
           PREV="$CONTENT"
           echo "Updating Wayland clipboard (len=''${#CONTENT})"

@@ -18,8 +18,9 @@ headscale      = true
 caddy          = true
 cockpit        = true
 frp            = true
-bluetooth      = false
-docker         = false
+bluetooth        = false
+docker           = false
+nix-cache-proxy  = false
 
 [mods.gui]
 enable = false

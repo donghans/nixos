@@ -74,19 +74,19 @@ with lib; let
     terminal = false;
   };
 in
-{options.mods.gui.apps."incus-vm".enable = mkEnableOption "Incus VM";}
-// (
-  if isNixOS
-  then {
-    config = mkIf cfg.enable {
-      assertions = [
-        {
-          assertion = config.mods.sys.services.incus.enable;
-          message = "mods.gui.apps.incus-vm는 mods.sys.services.incus.enable = true 가 필요합니다";
-        }
-      ];
-      environment.systemPackages = [spiceViewerScript spiceViewerDesktop];
-    };
-  }
-  else {}
-)
+  {options.mods.gui.apps."incus-vm".enable = mkEnableOption "Incus VM";}
+  // (
+    if isNixOS
+    then {
+      config = mkIf cfg.enable {
+        assertions = [
+          {
+            assertion = config.mods.sys.services.incus.enable;
+            message = "mods.gui.apps.incus-vm는 mods.sys.services.incus.enable = true 가 필요합니다";
+          }
+        ];
+        environment.systemPackages = [spiceViewerScript spiceViewerDesktop];
+      };
+    }
+    else {}
+  )

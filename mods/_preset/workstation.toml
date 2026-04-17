@@ -15,10 +15,11 @@ tailscale      = true
 docker         = true
 incus          = true
 incus-win11    = true
-headscale      = false
-caddy          = false
-cockpit        = false
-frp            = false
+headscale        = false
+caddy            = false
+cockpit          = false
+frp              = false
+nix-cache-proxy  = false
 
 [mods.gui]
 enable = true

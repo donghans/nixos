@@ -76,6 +76,7 @@
     inherit (anyResolved) username git rollingStateVersion;
     inherit (anyResolved) timeZone defaultLocale extraLocale;
     inherit (anyResolved) diskDevice bootDevice;
+    inherit (anyResolved) nixCacheAddr;
     gitName = anyResolved.git.name;
     gitEmail = anyResolved.git.email;
     inherit (anyResolved.git) nixosRepo;
