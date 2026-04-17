@@ -1,8 +1,11 @@
 {
   pkgs,
   lib,
+  config,
   ...
-}: {
+}:
+# (목적: GUI 비활성 환경에서 gtk/pointerCursor 설정이 dconf에 접근하는 것을 차단)
+lib.mkIf config.mods.gui.enable {
   # == 커서 테마 ==
   # Hyprland 커서 초기화
   wayland.windowManager.hyprland.settings.exec-once = lib.mkOrder 900 [

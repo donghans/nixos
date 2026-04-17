@@ -1,4 +1,13 @@
-{pkgs, ...}: {
+{
+  pkgs,
+  lib,
+  config,
+  ...
+}:
+# (목적: mods.gui.enable이 false인 서버/헤드리스 환경에서 dconf 접근 시도를 차단)
+# (이유: gtk.enable=true와 dconf.settings는 HM 활성화 시 dconf 데몬에 접속하려 하는데,
+#        GUI 없는 환경에서는 dconf 서비스가 없어 home-manager 서비스가 실패함)
+lib.mkIf config.mods.gui.enable {
   # == GTK 다크모드 ==
   gtk = {
     enable = true;
