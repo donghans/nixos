@@ -193,8 +193,11 @@ echo "$HOST" > /mnt/etc/nixos/.current_host
 # 13. Prepare .build/ Environment
 # (목적: nixup과 동일한 격리 환경 구성 — core/flake.nix의 import 경로가 .build/ 루트 기준이므로
 #         /mnt/etc/nixos/core를 직접 flake로 지정하면 core/core/flake.outputs.nix를 찾아 실패)
+# (주의: /mnt/etc/nixos 안에 두면 해당 git repo의 미추적 파일로 인식되어 nixos-install 실패.
+#         /tmp/nixos-build 처럼 git repo 바깥에 두면 Nix가 git을 전혀 참조하지 않음)
 log_msg "Config" "preparing .build/ environment for nixos-install..."
-BUILD_DIR="/mnt/etc/nixos/.build"
+BUILD_DIR="/tmp/nixos-build"
+rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 cp -a /mnt/etc/nixos/core "$BUILD_DIR/"
 cp -a /mnt/etc/nixos/hosts "$BUILD_DIR/"
@@ -207,11 +210,9 @@ for _lf in "/mnt/etc/nixos/.locks/$HOST.lock" "/mnt/etc/nixos/.locks/_rolling.lo
 done
 
 # 14. Install
-# path: 스킴 사용 — nixup 전체가 동일한 방식으로 호출함 (nixup.lib-build.sh 참고)
-# path: 없이 bare 경로를 쓰면 Nix가 git 추적 파일만 평가해 .build/ 를 볼 수 없음
 log_msg "Install" "starting nixos-install for #$HOST ..."
 log_exec "nix" ">" "nixos-install"
-nixos-install --flake "path:/mnt/etc/nixos/.build#$HOST"
+nixos-install --flake "$BUILD_DIR#$HOST"
 log_exec "nix" "<" "nixos-install"
 
 # 15. Post-processing
