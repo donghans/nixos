@@ -118,8 +118,8 @@ NixOS 공식 ISO를 USB에 구워 부팅한 뒤:
 nix-shell -p git --run "git clone https://github.com/<your-username>/nixos"
 
 cd nixos
-./bootstrap.sh install                                          # 대화형 (파티션 입력 안내)
-./bootstrap.sh install /dev/nvme0n1p1 /dev/nvme0n1p2 myhostname  # 또는 직접 지정
+./bootstrap.sh install                                           # 대화형 (파티션 입력 안내)
+./bootstrap.sh install /dev/nvme0n1p1 /dev/nvme0n1p2 myhostname   # 또는 직접 지정
 ```
 
 `bootstrap.sh install`이 자동으로 처리하는 것:
@@ -145,7 +145,15 @@ cd nixos
 (터미널을 닫았거나 추가로 열어야 할 경우: `Super + P` → kitty 검색)
 
 ```bash
-nixos-setup /dev/nvme0n1p1 /dev/nvme0n1p2 myhostname
+nixup-install /dev/nvme0n1p1 /dev/nvme0n1p2 myhostname
+```
+
+`<hostname>`에 레포에 없는 새 이름을 지정하면, 설치 도중 프리셋(workstation/server)을 물어보고 `host.toml` · `configuration.nix` · `home.nix`를 자동 생성합니다. 하드웨어 프로필(`_hardware.nix`)은 기존과 동일하게 자동 감지됩니다.
+
+다른 리포지토리에서 설치하거나 `NIXOS_REPO`를 직접 지정하려면:
+
+```bash
+NIXOS_REPO=user/repo sudo -E nixup-install /dev/nvme0n1p1 /dev/nvme0n1p2 myhostname
 ```
 
 > **기본 단축키 (Hyprland)**

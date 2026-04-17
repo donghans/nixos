@@ -5,8 +5,8 @@
   ...
 }: let
   # 1. setup.sh를 ISO 시스템의 bin 폴더에 넣기 위한 '패키지' 생성
-  nixos-setup-from-repo-script = pkgs.writeShellApplication {
-    name = "nixos-setup-from-repo"; # 실행될 명령어 이름
+  nixup-install-script = pkgs.writeShellApplication {
+    name = "nixup-install"; # 실행될 명령어 이름
 
     # 스크립트 실행에 필요한 패키지들을 런타임에 보장
     runtimeInputs = [
@@ -74,14 +74,17 @@ in {
         echo "설치를 시작하려면 아래 명령어를 입력하세요:"
         echo ""
         echo "1. 자동 설치 (추천):"
-        echo "   nixos-setup <EFI_PART> <ROOT_PART> <HOSTNAME>"
+        echo "   nixup-install <EFI_PART> <ROOT_PART> <HOSTNAME>"
+        echo ""
+        echo "   HOSTNAME이 레포에 없으면 프리셋(workstation/server)을 물어보고"
+        echo "   host.toml / configuration.nix / home.nix를 자동 생성합니다."
         echo ""
         echo "2. 다른 리포지토리 사용 시:"
         echo "   NIXOS_REPO=user/repo sudo -E \\"
-        echo "   nixos-setup-from-repo <EFI_PART> <ROOT_PART> <HOSTNAME>"
+        echo "   nixup-install <EFI_PART> <ROOT_PART> <HOSTNAME>"
         echo ""
         echo "예시 (nvme0n1 기기):"
-        echo "   nixos-setup /dev/nvme0n1p1 /dev/nvme0n1p2 beelink-ser7-co"
+        echo "   nixup-install /dev/nvme0n1p1 /dev/nvme0n1p2 beelink-ser7-co"
         echo ""
         echo "TIP: 현재 기본 리포지토리는 '${metaConfig.nixosRepo}'로 설정되어 있습니다."
         echo "--------------------------------------------------"
@@ -92,14 +95,17 @@ in {
         echo "To start the installation, enter the command below:"
         echo ""
         echo "1. Automatic Installation (Recommended):"
-        echo "   nixos-setup <EFI_PART> <ROOT_PART> <HOSTNAME>"
+        echo "   nixup-install <EFI_PART> <ROOT_PART> <HOSTNAME>"
+        echo ""
+        echo "   If HOSTNAME does not exist in the repo, you will be prompted for"
+        echo "   a preset (workstation/server) and the profile will be auto-created."
         echo ""
         echo "2. Using a different repository:"
         echo "   NIXOS_REPO=user/repo sudo -E \\"
-        echo "   nixos-setup-from-repo <EFI_PART> <ROOT_PART> <HOSTNAME>"
+        echo "   nixup-install <EFI_PART> <ROOT_PART> <HOSTNAME>"
         echo ""
         echo "Example (nvme0n1 device):"
-        echo "   nixos-setup /dev/nvme0n1p1 /dev/nvme0n1p2 beelink-ser7-co"
+        echo "   nixup-install /dev/nvme0n1p1 /dev/nvme0n1p2 beelink-ser7-co"
         echo ""
         echo "TIP: Default repository is set to '${metaConfig.nixosRepo}'."
         echo "--------------------------------------------------"
@@ -192,12 +198,12 @@ in {
     disko # 만약 disko를 쓰신다면 유용합니다
     pciutils # lspci로 하드웨어 확인
     usbutils # lsusb
-    nixos-setup-from-repo-script
+    nixup-install-script
   ];
 
   environment.shellAliases = {
     # 이제 터미널에서 'nixos-setup'만 치면 파라미터 입력 단계로 바로 넘어갑니다.
     # NIXOS_REPO 환경변수를 통해 setup 스크립트에 전달합니다.
-    nixos-setup = "NIXOS_REPO=${metaConfig.nixosRepo} sudo -E nixos-setup-from-repo";
+    nixup-install = "NIXOS_REPO=${metaConfig.nixosRepo} sudo -E nixup-install";
   };
 }

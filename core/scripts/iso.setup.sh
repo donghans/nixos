@@ -47,7 +47,7 @@ log_exec() {
 }
 
 # 2. Initialization
-SHORT_CMD="nixos-setup"
+SHORT_CMD="nixup-install"
 
 BOOT_PART=$1
 ROOT_PART=$2
@@ -175,7 +175,40 @@ log_msg "Git" "moving repository to /mnt/etc/nixos ..."
 mkdir -p /mnt/etc
 mv "$REPO_TMP" /mnt/etc/nixos
 
-# 10. Resolve Metadata (설치 대상 하드웨어 기반 resolved.json 생성)
+# 10. New Host Profile Creation
+# (목적: 레포에 없는 신규 호스트면 host.toml + 최소 nix 파일 자동 생성)
+# (주의: resolve.py 실행 전에 생성해야 새 호스트명이 resolved.json에 포함됨)
+HOST_DIR="/mnt/etc/nixos/hosts/$HOST"
+if [ ! -d "$HOST_DIR" ]; then
+    log_msg "Notice" "host profile '$HOST' not found — creating new profile..."
+
+    # preset 선택 (workstation / server)
+    read -rp "$(printf "${YELLOW}%-13s${NC} | select preset (workstation/server) [workstation]: " "ISO Input")" _PRESET_INPUT
+    _PRESET="${_PRESET_INPUT:-workstation}"
+
+    # preset 유효성 검사
+    if [[ "$_PRESET" != "workstation" && "$_PRESET" != "server" ]]; then
+        log_msg "Error" "unknown preset '$_PRESET'. use workstation or server."
+        exit 1
+    fi
+
+    mkdir -p "$HOST_DIR"
+
+    # host.toml 생성
+    printf 'type = "desktop"\npreset = "%s"\n' "$_PRESET" > "$HOST_DIR/host.toml"
+
+    # 최소 configuration.nix — 하드웨어 임포트만
+    printf '{...}: {\n  imports = [./_hardware.nix];\n}\n' > "$HOST_DIR/configuration.nix"
+
+    # 최소 home.nix — 빈 모듈
+    printf '_: {}\n' > "$HOST_DIR/home.nix"
+
+    log_msg "Config" "created host profile: $HOST (preset=$_PRESET)"
+else
+    log_msg "Config" "using existing host profile: $HOST"
+fi
+
+# 11. Resolve Metadata (설치 대상 하드웨어 기반 resolved.json 생성)
 # (목적: /proc/meminfo에서 실제 RAM을 감지하여 swap/tmpfs 크기를 올바르게 설정)
 log_msg "Config" "generating resolved.json from target hardware..."
 log_exec "py" ">" "nixup.resolve.py"
@@ -183,7 +216,7 @@ python3 /mnt/etc/nixos/core/scripts/nixup.resolve.py \
     /mnt/etc/nixos /mnt/etc/nixos
 log_exec "py" "<" "nixup.resolve.py"
 
-# 11. Metadata Extraction
+# 12. Metadata Extraction
 BASE_TOML="/mnt/etc/nixos/hosts/base.toml"
 if [ ! -f "$BASE_TOML" ]; then
     log_msg "Error" "could not find $BASE_TOML in the cloned repository."
@@ -195,7 +228,7 @@ if [ -z "$USERNAME" ]; then
     exit 1
 fi
 
-# 12. Hardware Config
+# 13. Hardware Config
 log_msg "Config" "generating hardware-configuration.nix ..."
 nixos-generate-config --root /mnt --no-filesystems
 mkdir -p "/mnt/etc/nixos/hosts/$HOST"
@@ -203,7 +236,7 @@ mv /mnt/etc/nixos/hardware-configuration.nix "/mnt/etc/nixos/hosts/$HOST/_hardwa
 rm -f /mnt/etc/nixos/configuration.nix
 echo "$HOST" > /mnt/etc/nixos/.current_host
 
-# 13. Prepare .build/ Environment
+# 14. Prepare .build/ Environment
 # (목적: nixup과 동일한 격리 환경 구성 — core/flake.nix의 import 경로가 .build/ 루트 기준이므로
 #         /mnt/etc/nixos/core를 직접 flake로 지정하면 core/core/flake.outputs.nix를 찾아 실패)
 # (주의: /mnt/etc/nixos 안에 두면 해당 git repo의 미추적 파일로 인식되어 nixos-install 실패.
@@ -222,13 +255,13 @@ for _lf in "/mnt/etc/nixos/.locks/$HOST.lock" "/mnt/etc/nixos/.locks/_rolling.lo
     [ -f "$_lf" ] && cp "$_lf" "$BUILD_DIR/flake.lock" && break
 done
 
-# 14. Install
+# 15. Install
 log_msg "Install" "starting nixos-install for #$HOST ..."
 log_exec "nix" ">" "nixos-install"
 nixos-install --flake "$BUILD_DIR#$HOST"
 log_exec "nix" "<" "nixos-install"
 
-# 15. Post-processing
+# 16. Post-processing
 log_msg "Done" "running post-installation tasks for user: $USERNAME ..."
 mkdir -p "/mnt/home/$USERNAME/"
 mv /mnt/etc/nixos "/mnt/home/$USERNAME/nixos"
