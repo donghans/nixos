@@ -207,9 +207,11 @@ for _lf in "/mnt/etc/nixos/.locks/$HOST.lock" "/mnt/etc/nixos/.locks/_rolling.lo
 done
 
 # 14. Install
+# path: 스킴 사용 — nixup 전체가 동일한 방식으로 호출함 (nixup.lib-build.sh 참고)
+# path: 없이 bare 경로를 쓰면 Nix가 git 추적 파일만 평가해 .build/ 를 볼 수 없음
 log_msg "Install" "starting nixos-install for #$HOST ..."
 log_exec "nix" ">" "nixos-install"
-nixos-install --flake "/mnt/etc/nixos/.build#$HOST"
+nixos-install --flake "path:/mnt/etc/nixos/.build#$HOST"
 log_exec "nix" "<" "nixos-install"
 
 # 15. Post-processing

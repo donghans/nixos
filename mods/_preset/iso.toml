@@ -29,7 +29,7 @@ vivaldi       = false
 slack         = false
 bitwarden     = false
 speedcrunch   = true
-incus-viewer  = false
+incus-vm      = false
 
 [mods.devel]
 enable = false
