@@ -2,7 +2,6 @@
   config,
   lib,
   unstable,
-  unstable-fallback,
   isNixOS ? false,
   ...
 }:
@@ -33,15 +32,20 @@ with lib; let
       '';
   });
 
-  # claude-code: Xd6(kitty enable 시퀀스 변수)를 빈 문자열로 교체
-  claude = unstable-fallback.claude-code.overrideAttrs (old: {
+  # claude-code: kitty keyboard protocol enable 시퀀스를 빈 문자열로 교체
+  # ">1u"는 CSI > 1 u (kitty keyboard protocol enable) 페이로드.
+  # 변수명(Xd6, yo6 등)·함수명(cz, NA 등)은 빌드마다 바뀌므로 grep으로 동적 탐색.
+  claude = unstable.claude-code.overrideAttrs (old: {
     postInstall =
       (old.postInstall or "")
       + ''
-        substituteInPlace $out/lib/node_modules/@anthropic-ai/claude-code/cli.js \
-          --replace-fail \
-          'Xd6=cz(">1u")' \
-          'Xd6=""'
+        target="$out/lib/node_modules/@anthropic-ai/claude-code/cli.js"
+        if grep -q '">1u"' "$target" 2>/dev/null; then
+          sed -i 's/\([A-Za-z0-9_$]\{1,8\}\)=\([A-Za-z0-9_$]\{1,8\}\)(">1u")/\1=""/g' "$target"
+          echo "patched: kitty keyboard protocol disabled in claude-code"
+        else
+          echo "WARNING: kitty keyboard protocol pattern not found in claude-code, skipping patch"
+        fi
       '';
   });
 in
