@@ -167,7 +167,9 @@ mkdir -p /mnt/{home,nix,var/log,boot}
 mount -o subvol=@home,"${MOUNT_OPTS}" "$ROOT_PART" /mnt/home
 mount -o subvol=@nix,"${MOUNT_OPTS}" "$ROOT_PART" /mnt/nix
 mount -o subvol=@log,"${MOUNT_OPTS}" "$ROOT_PART" /mnt/var/log
-mount "$BOOT_PART" /mnt/boot
+# fmask=0137,dmask=0027: EFI 파티션을 root만 쓰기 가능하게 마운트
+# (world-accessible 마운트 시 systemd-boot random seed 보안 경고 발생)
+mount -o fmask=0137,dmask=0027 "$BOOT_PART" /mnt/boot
 log_exec "disk" "<" "mount"
 
 # 9. Move Cloned Repo to Final Location
@@ -259,7 +261,8 @@ done
 # --no-root-passwd: root 패스워드 설정 생략 (NixOS 설정에서 잠금 예정)
 log_msg "Install" "starting nixos-install for #$HOST ..."
 log_exec "nix" ">" "nixos-install"
-nixos-install --no-root-passwd --flake "$BUILD_DIR#$HOST"
+# HOME=/root: sudo -E로 실행 시 nixos 유저의 $HOME이 넘어오면 "not owned by you" 경고 발생
+HOME=/root nixos-install --no-root-passwd --flake "$BUILD_DIR#$HOST"
 log_exec "nix" "<" "nixos-install"
 
 # 15-B. Set user password
