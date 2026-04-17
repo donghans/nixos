@@ -13,6 +13,9 @@ in {
     if isNixOS
     then {
       services.tailscale.enable = true;
+      # nixos-fw의 기본 정책이 drop이라 tailscale0 인터페이스에서 오는
+      # 트래픽도 차단됨 → 노드 간 접근이 안 되므로 trusted로 지정
+      networking.firewall.trustedInterfaces = ["tailscale0"];
     }
     else
       mkIf config.mods.gui.enable {
