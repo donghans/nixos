@@ -81,7 +81,16 @@ if [ -z "${NIXOS_REPO:-}" ]; then
     read -rp "$(printf "${YELLOW}%-13s${NC} | enter repository (e.g. user/nixos): " "ISO Input")" NIXOS_REPO
 fi
 
-# 4. Git Clone (임시 경로 — 레이블 추출 후 최종 위치로 이동)
+# 4. Cleanup Previous Attempt
+# 재시도 시 이전 마운트가 남아있으면 mkfs.*가 "contains a mounted filesystem"으로 실패함
+# swapoff → 역순 umount (boot → log → nix → home → /) 후 /mnt 자체 해제
+if mountpoint -q /mnt 2>/dev/null; then
+    log_msg "Mount" "cleaning up previous mounts under /mnt ..."
+    swapoff -a 2>/dev/null || true
+    umount -R /mnt 2>/dev/null || umount -lR /mnt 2>/dev/null || true
+fi
+
+# Git Clone (임시 경로 — 레이블 추출 후 최종 위치로 이동)
 REPO_TMP="/tmp/nixos-setup-repo"
 rm -rf "$REPO_TMP"
 log_msg "Git" "cloning repository from github.com/$NIXOS_REPO ..."
@@ -133,17 +142,21 @@ else
 fi
 
 # 7. Btrfs Format & Subvolume
-log_msg "Disk" "formatting root (label=$DISK_LABEL) and creating subvolumes..."
-log_exec "disk" ">" "mkfs.btrfs"
-mkfs.btrfs -L "$DISK_LABEL" -f "$ROOT_PART"
-
-mount "$ROOT_PART" /mnt
-btrfs subvolume create /mnt/@
-btrfs subvolume create /mnt/@home
-btrfs subvolume create /mnt/@nix
-btrfs subvolume create /mnt/@log
-umount /mnt
-log_exec "disk" "<" "mkfs.btrfs"
+read -rp "$(printf "${YELLOW}%-13s${NC} | format root partition($ROOT_PART)? (y/N): " "ISO Question")" FORMAT_ROOT
+if [[ "$FORMAT_ROOT" =~ ^[Yy]$ ]]; then
+    log_msg "Disk" "formatting root (label=$DISK_LABEL) and creating subvolumes..."
+    log_exec "disk" ">" "mkfs.btrfs"
+    mkfs.btrfs -L "$DISK_LABEL" -f "$ROOT_PART"
+    mount "$ROOT_PART" /mnt
+    btrfs subvolume create /mnt/@
+    btrfs subvolume create /mnt/@home
+    btrfs subvolume create /mnt/@nix
+    btrfs subvolume create /mnt/@log
+    umount /mnt
+    log_exec "disk" "<" "mkfs.btrfs"
+else
+    log_msg "Disk" "skipping root format — using existing btrfs and subvolumes."
+fi
 
 # 8. Mount
 export MOUNT_OPTS="noatime,compress=zstd,space_cache=v2"
