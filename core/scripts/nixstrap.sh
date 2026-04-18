@@ -49,8 +49,6 @@ log_exec() {
 # 2. Initialization
 SHORT_CMD="nixstrap"
 
-HOST=${1:-}
-
 # Welcome Message
 log_msg "Init" "NixOS Installer"
 
@@ -63,69 +61,112 @@ show_usage() {
 
 # ===========================================================================
 # PHASE 1: GATHER ALL INPUT
-# All interactive prompts are collected here before any execution begins.
+# Questions are organized into functions so the review loop can re-invoke
+# any individual section without re-running the whole script.
 # ===========================================================================
 
-# 3. Ensure NIXOS_REPO is known before clone
-# (목적: clone 전에 레포 주소 확보 — 레이블 추출을 위해 먼저 clone 필요)
-if [ -z "${NIXOS_REPO:-}" ]; then
-    log_msg "Notice" "nixos_repo environment variable is not defined."
-    read -rp "$(printf "${YELLOW}%-13s${NC} | enter repository (e.g. user/nixos): " "nixstrap")" NIXOS_REPO
-fi
-
-# Ask HOST if not provided as argument
-if [ -z "$HOST" ]; then
-    read -rp "$(printf "${YELLOW}%-13s${NC} | enter hostname: " "nixstrap")" HOST
-fi
-
-# 0. Partition Setup
-echo ""
-log_msg "Disk" "current block devices:"
-lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT
-echo ""
-
+# -- Shared State (global variables written by ask_* functions) --
+NIXOS_REPO="${NIXOS_REPO:-}"
+HOST="${1:-}"
+_IS_VM=false
+_PART_MODE=""
 _NEW_PARTITIONS=false
+BOOT_PART=""
+ROOT_PART=""
 FORMAT_BOOT=""
 FORMAT_ROOT=""
+_DISK=""
+_WIPE=false
+_PART_START=""
+_PART_END=""
+_BOOT_SIZE=""
+_BOOT_END=""
+_NEW_BOOT_NUM=""
+_NEW_ROOT_NUM=""
+_PRESET="workstation"
 
 # Detect virtualization (for incus-guest auto-config on new host profiles)
-_IS_VM=false
 if _VIRT_TYPE=$(systemd-detect-virt 2>/dev/null); then
     _IS_VM=true
     log_msg "Notice" "virtualized environment detected: $_VIRT_TYPE"
 fi
 
-read -rp "$(printf "${YELLOW}%-13s${NC} | partition mode — 1=use existing, 2=create new [2]: " "nixstrap")" _PART_MODE
-_PART_MODE="${_PART_MODE:-2}"
+# -- Question Functions --
 
-if [[ "$_PART_MODE" == "1" ]]; then
-    # Use existing partitions
-    read -rp "$(printf "${YELLOW}%-13s${NC} | EFI partition path (e.g. /dev/nvme0n1p1): " "nixstrap")" BOOT_PART
-    read -rp "$(printf "${YELLOW}%-13s${NC} | root partition path (e.g. /dev/nvme0n1p2): " "nixstrap")" ROOT_PART
-    log_msg "Disk" "using existing: boot=$BOOT_PART, root=$ROOT_PART"
-
-    # Ask format questions here — before any execution begins
-    read -rp "$(printf "${YELLOW}%-13s${NC} | format boot partition ($BOOT_PART)? (y/N): " "nixstrap")" FORMAT_BOOT
-    read -rp "$(printf "${YELLOW}%-13s${NC} | format root partition ($ROOT_PART)? (y/N): " "nixstrap")" FORMAT_ROOT
-
-elif [[ "$_PART_MODE" == "2" ]]; then
-    read -rp "$(printf "${YELLOW}%-13s${NC} | target disk (e.g. /dev/nvme0n1): " "nixstrap")" _DISK
-
-    read -rp "$(printf "${YELLOW}%-13s${NC} | use entire disk? (Y/n): " "nixstrap")" _USE_WHOLE
-    _USE_WHOLE="${_USE_WHOLE:-Y}"
-
-    if [[ "$_USE_WHOLE" =~ ^[Yy]$ ]]; then
-        read -rp "$(printf "${RED}%-13s${NC} | WARNING: ALL data on '$_DISK' will be erased. type 'yes' to confirm: " "nixstrap")" _CONFIRM_WIPE
-        if [[ "$_CONFIRM_WIPE" != "yes" ]]; then
-            log_msg "Error" "cancelled."
-            exit 1
-        fi
-        _PART_START="1MiB"
-        _PART_END="100%"
-        _WIPE=true
+ask_repo() {
+    local _prompt _input
+    if [ -n "${NIXOS_REPO:-}" ]; then
+        _prompt="$(printf "${YELLOW}%-13s${NC} | repository [%s]: " "nixstrap" "$NIXOS_REPO")"
     else
-        log_msg "Disk" "scanning free space on $_DISK ..."
-        _FREE_OUTPUT=$(python3 - "$_DISK" <<'PYEOF'
+        _prompt="$(printf "${YELLOW}%-13s${NC} | repository (e.g. user/nixos): " "nixstrap")"
+    fi
+    read -rp "$_prompt" _input
+    NIXOS_REPO="${_input:-${NIXOS_REPO:-}}"
+}
+
+ask_host() {
+    local _prompt _input
+    if [ -n "${HOST:-}" ]; then
+        _prompt="$(printf "${YELLOW}%-13s${NC} | hostname [%s]: " "nixstrap" "$HOST")"
+    else
+        _prompt="$(printf "${YELLOW}%-13s${NC} | hostname: " "nixstrap")"
+    fi
+    read -rp "$_prompt" _input
+    HOST="${_input:-${HOST:-}}"
+}
+
+ask_partitions() {
+    local _USE_WHOLE _CONFIRM_WIPE _FREE_OUTPUT _FREE_SEL _SELECTED
+    local _NUM _FS _FE _FSZ _OLD_PART_COUNT
+
+    echo ""
+    log_msg "Disk" "current block devices:"
+    lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT
+    echo ""
+
+    # Reset partition state on every entry (supports re-editing)
+    _NEW_PARTITIONS=false
+    BOOT_PART=""
+    ROOT_PART=""
+    FORMAT_BOOT=""
+    FORMAT_ROOT=""
+    _WIPE=false
+
+    # Mode selection loop (re-asks on invalid input instead of exiting)
+    while true; do
+        read -rp "$(printf "${YELLOW}%-13s${NC} | partition mode — 1=use existing, 2=create new [2]: " "nixstrap")" _PART_MODE
+        _PART_MODE="${_PART_MODE:-2}"
+        [[ "$_PART_MODE" == "1" || "$_PART_MODE" == "2" ]] && break
+        log_msg "Error" "invalid mode. select 1 or 2."
+    done
+
+    if [[ "$_PART_MODE" == "1" ]]; then
+        # Use existing partitions
+        read -rp "$(printf "${YELLOW}%-13s${NC} | EFI partition path (e.g. /dev/nvme0n1p1): " "nixstrap")" BOOT_PART
+        read -rp "$(printf "${YELLOW}%-13s${NC} | root partition path (e.g. /dev/nvme0n1p2): " "nixstrap")" ROOT_PART
+
+        read -rp "$(printf "${YELLOW}%-13s${NC} | format boot partition ($BOOT_PART)? (y/N): " "nixstrap")" FORMAT_BOOT
+        read -rp "$(printf "${YELLOW}%-13s${NC} | format root partition ($ROOT_PART)? (y/N): " "nixstrap")" FORMAT_ROOT
+
+    else
+        # Create new partitions
+        read -rp "$(printf "${YELLOW}%-13s${NC} | target disk (e.g. /dev/nvme0n1): " "nixstrap")" _DISK
+
+        read -rp "$(printf "${YELLOW}%-13s${NC} | use entire disk? (Y/n): " "nixstrap")" _USE_WHOLE
+        _USE_WHOLE="${_USE_WHOLE:-Y}"
+
+        if [[ "$_USE_WHOLE" =~ ^[Yy]$ ]]; then
+            read -rp "$(printf "${RED}%-13s${NC} | WARNING: ALL data on '%s' will be erased. type 'yes' to confirm: " "nixstrap" "$_DISK")" _CONFIRM_WIPE
+            if [[ "$_CONFIRM_WIPE" != "yes" ]]; then
+                log_msg "Error" "cancelled."
+                exit 1
+            fi
+            _PART_START="1MiB"
+            _PART_END="100%"
+            _WIPE=true
+        else
+            log_msg "Disk" "scanning free space on $_DISK ..."
+            _FREE_OUTPUT=$(python3 - "$_DISK" <<'PYEOF'
 import subprocess, sys, re
 
 disk = sys.argv[1]
@@ -153,41 +194,44 @@ else:
 PYEOF
 )
 
-        if [[ "$_FREE_OUTPUT" == "NONE" ]]; then
-            log_msg "Error" "no usable free space (>=2GiB) found on $_DISK."
-            exit 1
-        fi
-
-        echo ""
-        log_msg "Disk" "available free space:"
-        while IFS=: read -r _NUM _FS _FE _FSZ; do
-            printf "  %s) %s ~ %s  (%s)\n" "$_NUM" "$_FS" "$_FE" "$_FSZ"
-        done <<< "$_FREE_OUTPUT"
-        echo ""
-
-        read -rp "$(printf "${YELLOW}%-13s${NC} | select number or enter range (e.g. 128GiB-476GiB): " "nixstrap")" _FREE_SEL
-
-        if [[ "$_FREE_SEL" =~ ^[0-9]+$ ]]; then
-            _SELECTED=$(echo "$_FREE_OUTPUT" | grep "^${_FREE_SEL}:" || true)
-            if [ -z "$_SELECTED" ]; then
-                log_msg "Error" "invalid selection."
+            if [[ "$_FREE_OUTPUT" == "NONE" ]]; then
+                log_msg "Error" "no usable free space (>=2GiB) found on $_DISK."
                 exit 1
             fi
-            _PART_START=$(echo "$_SELECTED" | cut -d: -f2)
-            _PART_END=$(echo "$_SELECTED" | cut -d: -f3)
-        else
-            _PART_START="${_FREE_SEL%-*}"
-            _PART_END="${_FREE_SEL#*-}"
+
+            echo ""
+            log_msg "Disk" "available free space:"
+            while IFS=: read -r _NUM _FS _FE _FSZ; do
+                printf "  %s) %s ~ %s  (%s)\n" "$_NUM" "$_FS" "$_FE" "$_FSZ"
+            done <<< "$_FREE_OUTPUT"
+            echo ""
+
+            # Free-space selection loop
+            while true; do
+                read -rp "$(printf "${YELLOW}%-13s${NC} | select number or enter range (e.g. 128GiB-476GiB): " "nixstrap")" _FREE_SEL
+                if [[ "$_FREE_SEL" =~ ^[0-9]+$ ]]; then
+                    _SELECTED=$(echo "$_FREE_OUTPUT" | grep "^${_FREE_SEL}:" || true)
+                    if [ -z "$_SELECTED" ]; then
+                        log_msg "Error" "invalid selection."
+                        continue
+                    fi
+                    _PART_START=$(echo "$_SELECTED" | cut -d: -f2)
+                    _PART_END=$(echo "$_SELECTED" | cut -d: -f3)
+                else
+                    _PART_START="${_FREE_SEL%-*}"
+                    _PART_END="${_FREE_SEL#*-}"
+                fi
+                break
+            done
+            _WIPE=false
         fi
-        _WIPE=false
-    fi
 
-    # Boot partition size
-    read -rp "$(printf "${YELLOW}%-13s${NC} | boot partition size (default: 1GiB, enter): " "nixstrap")" _BOOT_SIZE
-    _BOOT_SIZE="${_BOOT_SIZE:-1GiB}"
+        # Boot partition size
+        read -rp "$(printf "${YELLOW}%-13s${NC} | boot partition size (default: 1GiB, enter): " "nixstrap")" _BOOT_SIZE
+        _BOOT_SIZE="${_BOOT_SIZE:-1GiB}"
 
-    # Calculate boot end position
-    _BOOT_END=$(python3 - "$_PART_START" "$_BOOT_SIZE" <<'PYEOF'
+        # Calculate boot end position
+        _BOOT_END=$(python3 - "$_PART_START" "$_BOOT_SIZE" <<'PYEOF'
 import sys, re
 
 def parse_to_mib(s):
@@ -211,61 +255,105 @@ else:
 PYEOF
 )
 
-    # Count existing partitions (before creation)
-    _OLD_PART_COUNT=$(parted -m "$_DISK" unit MiB print 2>/dev/null | grep -c '^[0-9]' || echo "0")
-    _NEW_BOOT_NUM=$((_OLD_PART_COUNT + 1))
-    _NEW_ROOT_NUM=$((_OLD_PART_COUNT + 2))
+        # Count existing partitions to derive new partition numbers
+        _OLD_PART_COUNT=$(parted -m "$_DISK" unit MiB print 2>/dev/null | grep -c '^[0-9]' || echo "0")
+        _NEW_BOOT_NUM=$((_OLD_PART_COUNT + 1))
+        _NEW_ROOT_NUM=$((_OLD_PART_COUNT + 2))
 
-    # Derive device names (nvme/mmcblk style vs sda style)
-    if [[ "$_DISK" =~ [0-9]$ ]]; then
-        _PREVIEW_BOOT="${_DISK}p${_NEW_BOOT_NUM}"
-        _PREVIEW_ROOT="${_DISK}p${_NEW_ROOT_NUM}"
+        # Derive device names (nvme/mmcblk style vs sda style)
+        if [[ "$_DISK" =~ [0-9]$ ]]; then
+            BOOT_PART="${_DISK}p${_NEW_BOOT_NUM}"
+            ROOT_PART="${_DISK}p${_NEW_ROOT_NUM}"
+        else
+            BOOT_PART="${_DISK}${_NEW_BOOT_NUM}"
+            ROOT_PART="${_DISK}${_NEW_ROOT_NUM}"
+        fi
+
+        _NEW_PARTITIONS=true
+        FORMAT_BOOT="y"
+        FORMAT_ROOT="y"
+    fi
+}
+
+ask_preset() {
+    # Loops until a valid preset is entered
+    local _input _new_preset
+    while true; do
+        read -rp "$(printf "${YELLOW}%-13s${NC} | select preset (workstation/server) [%s]: " "nixstrap" "$_PRESET")" _input
+        _new_preset="${_input:-${_PRESET}}"
+        if [[ "$_new_preset" == "workstation" || "$_new_preset" == "server" ]]; then
+            _PRESET="$_new_preset"
+            return 0
+        fi
+        log_msg "Error" "unknown preset '$_new_preset'. use workstation or server."
+    done
+}
+
+show_summary() {
+    local _fmt_boot _fmt_root
+    echo ""
+    printf "${PURPLE}NIXSTRAP${NC} ${CYAN}%-9s${NC} | Installation configuration:\n" "Review"
+    printf "  1. %-11s:  %s\n" "Repository" "${NIXOS_REPO:-(not set)}"
+    printf "  2. %-11s:  %s\n" "Hostname" "${HOST:-(not set)}"
+
+    if [[ "${_PART_MODE:-}" == "1" ]]; then
+        _fmt_boot="no"; [[ "${FORMAT_BOOT:-}" =~ ^[Yy]$ ]] && _fmt_boot="yes"
+        _fmt_root="no"; [[ "${FORMAT_ROOT:-}" =~ ^[Yy]$ ]] && _fmt_root="yes"
+        printf "  3. %-11s:  existing  boot=%s  root=%s\n" \
+            "Partitions" "${BOOT_PART:-(not set)}" "${ROOT_PART:-(not set)}"
+        printf "     %-11s   format boot: %s  format root: %s\n" "" "$_fmt_boot" "$_fmt_root"
+    elif [[ "${_PART_MODE:-}" == "2" ]]; then
+        printf "  3. %-11s:  new  %s -> %s (EFI %s), %s (root)\n" \
+            "Partitions" "${_DISK:-(not set)}" \
+            "${BOOT_PART:-(not set)}" "${_BOOT_SIZE:-?}" "${ROOT_PART:-(not set)}"
+        if [[ "${_WIPE:-false}" == "true" ]]; then
+            printf "     %-11s   ${RED}WIPE ENTIRE DISK${NC}\n" ""
+        fi
     else
-        _PREVIEW_BOOT="${_DISK}${_NEW_BOOT_NUM}"
-        _PREVIEW_ROOT="${_DISK}${_NEW_ROOT_NUM}"
+        printf "  3. %-11s:  %s\n" "Partitions" "(not set)"
     fi
 
-    # Preview
-    echo ""
-    log_msg "Disk" "partitions to create:"
-    printf "${PURPLE}NIXSTRAP${NC} ${PURPLE}%-9s${NC} | → %-22s EFI   %s  (%s ~ %s)\n" "Disk" "$_PREVIEW_BOOT" "$_BOOT_SIZE" "$_PART_START" "$_BOOT_END"
-    printf "${PURPLE}NIXSTRAP${NC} ${PURPLE}%-9s${NC} | → %-22s root  remaining  (%s ~ %s)\n" "Disk" "$_PREVIEW_ROOT" "$_BOOT_END" "$_PART_END"
-    echo ""
+    printf "  4. %-11s:  %s  (new host only)\n" "Preset" "${_PRESET:-workstation}"
+    printf "  %s\n" "─────────────────────────────────────────────"
+}
 
-    read -rp "$(printf "${YELLOW}%-13s${NC} | create partitions? (y/N): " "nixstrap")" _CONFIRM_PART
-    if [[ ! "$_CONFIRM_PART" =~ ^[Yy]$ ]]; then
-        log_msg "Error" "cancelled."
-        exit 1
-    fi
+# -- Initial Collection --
+ask_repo
+ask_host
+ask_partitions
+ask_preset
 
-    BOOT_PART="$_PREVIEW_BOOT"
-    ROOT_PART="$_PREVIEW_ROOT"
-    _NEW_PARTITIONS=true
-    FORMAT_BOOT="y"
-    FORMAT_ROOT="y"
+# -- Review Loop --
+# User can re-enter any section before confirming.
+_review=""
+while true; do
+    show_summary
+    read -rp "$(printf "${YELLOW}%-13s${NC} | Enter=proceed  1-4=edit  q=quit: " "nixstrap")" _review
+    case "${_review:-}" in
+        "")
+            if [ -z "${NIXOS_REPO:-}" ]; then
+                log_msg "Error" "repository is required. edit item 1."
+                continue
+            fi
+            if [ -z "${HOST:-}" ]; then
+                log_msg "Error" "hostname is required. edit item 2."
+                continue
+            fi
+            if [ -z "${BOOT_PART:-}" ] || [ -z "${ROOT_PART:-}" ]; then
+                log_msg "Error" "partition info is incomplete. edit item 3."
+                continue
+            fi
+            break
+            ;;
+        1) ask_repo ;;
+        2) ask_host ;;
+        3) ask_partitions ;;
+        4) ask_preset ;;
+        q|Q) log_msg "Error" "cancelled."; exit 1 ;;
+        *) log_msg "Notice" "enter 1-4 to edit an item, or press Enter to proceed." ;;
+    esac
+done
 
-else
-    log_msg "Error" "invalid mode. select 1 or 2."
-    exit 1
-fi
-
-# Preset selection
-# (목적: 신규 호스트 프로파일 생성 시 사용. 레포에 이미 호스트가 있으면 무시됨)
-read -rp "$(printf "${YELLOW}%-13s${NC} | select preset (workstation/server) [workstation]: " "nixstrap")" _PRESET_INPUT
-_PRESET="${_PRESET_INPUT:-workstation}"
-
-if [[ "$_PRESET" != "workstation" && "$_PRESET" != "server" ]]; then
-    log_msg "Error" "unknown preset '$_PRESET'. use workstation or server."
-    exit 1
-fi
-
-# Print Configuration Summary
-echo ""
-log_msg "Init" "Action:   installation"
-log_msg "Init" "Hostname: $HOST"
-log_msg "Init" "Preset:   $_PRESET (used only if host profile is new)"
-log_msg "Init" "Boot:     $BOOT_PART"
-log_msg "Init" "Root:     $ROOT_PART"
 echo ""
 
 # ===========================================================================
