@@ -129,9 +129,6 @@
               pkgs' = nixpkgs.legacyPackages.${hostInfo.system};
             in [
               (pkgs'.writeShellScriptBin "nixup" ''
-                # (목적: nix-shell shebang이 <nixpkgs>를 찾을 수 있도록 NIX_PATH 폴백 주입)
-                # (이유: nixup os 빌드 직후 같은 세션에서 실행 시 /etc/set-environment가 아직 소싱 안 된 상태)
-                export NIX_PATH="''${NIX_PATH:-nixpkgs=flake:nixpkgs}"
                 exec /home/${hostCtx.metaConfig.username}/nixos/core/scripts/nixup.sh "$@"
               '')
               (pkgs'.runCommand "nixup-man" {} ''

@@ -1,5 +1,5 @@
 #!/usr/bin/env nix-shell
-#!nix-shell -i bash -p nvd jq nix-output-monitor git gh dotenv-cli deadnix statix alejandra shellcheck python3
+#!nix-shell -i bash -I nixpkgs=flake:nixpkgs -p nvd jq nix-output-monitor git gh dotenv-cli deadnix statix alejandra shellcheck python3
 # shellcheck disable=SC1008,SC1091,SC2034
 set -euo pipefail
 

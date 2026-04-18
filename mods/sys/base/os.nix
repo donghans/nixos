@@ -27,8 +27,9 @@
 
   nix = {
     # (목적: 채널 관리 비활성화 → 레거시 채널 경로 warning 제거 + tmpfiles/activation 정리)
-    # (nixPath 기본값이 [] 로 바뀌므로 nix-shell shebang용 flake 참조만 명시, mkForce 불필요)
     channel.enable = false;
+    # (목적: 일반 nix-shell 사용 시 <nixpkgs> 참조 보장 — 새 세션부터 NIX_PATH로 주입)
+    # (nixup 스크립트 자체는 shebang의 -I 플래그로 세션 무관하게 직접 해결)
     nixPath = ["nixpkgs=flake:nixpkgs"];
 
     settings = {
