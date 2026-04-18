@@ -13,7 +13,7 @@ NIXOS_PATH=$(readlink -f "$SCRIPT_DIR/../..")
 ENV_FILE="$NIXOS_PATH/.env"
 if [ -f "$ENV_FILE" ] && [ -z "${NIXUP_DOTENV_LOADED:-}" ]; then
     export NIXUP_DOTENV_LOADED=1
-    exec dotenv -e "$ENV_FILE" -- bash "$0" "${@:-}"
+    exec dotenv -e "$ENV_FILE" -- "$0" "${@:-}"
 fi
 
 source "$SCRIPT_DIR/nixup.lib-build.sh"

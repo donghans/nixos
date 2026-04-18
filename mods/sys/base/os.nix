@@ -26,7 +26,10 @@
   programs.zsh.enable = true;
 
   nix = {
-    nixPath = lib.mkForce ["nixpkgs=flake:nixpkgs"]; # (목적: 레거시 채널 경로 제거, nix-shell용 <nixpkgs> 참조는 유지)
+    # (목적: 채널 관리 비활성화 → 레거시 채널 경로 warning 제거 + tmpfiles/activation 정리)
+    # (nixPath 기본값이 [] 로 바뀌므로 nix-shell shebang용 flake 참조만 명시, mkForce 불필요)
+    channel.enable = false;
+    nixPath = ["nixpkgs=flake:nixpkgs"];
 
     settings = {
       auto-optimise-store = true; # (목적: 중복 파일 자동 하드링크)
