@@ -41,7 +41,7 @@ with lib; let
     case "$action" in
       "터미널 열기")
         ${pkgs.kitty}/bin/kitty --title "incus: $vm_name" \
-          ${pkgs.incus}/bin/incus exec "$vm_name" -- login &
+          ${pkgs.incus}/bin/incus console "$vm_name" &
         ;;
       "켜기")
         ${pkgs.incus}/bin/incus start "$vm_name"
@@ -50,7 +50,7 @@ with lib; let
         ${pkgs.libnotify}/bin/notify-send "Incus" "$vm_name 시작 중..."
         ${pkgs.incus}/bin/incus start "$vm_name" && \
           ${pkgs.kitty}/bin/kitty --title "incus: $vm_name" \
-            ${pkgs.incus}/bin/incus exec "$vm_name" -- login &
+            ${pkgs.incus}/bin/incus console "$vm_name" &
         ;;
       "켜고 뷰어 열기")
         ${pkgs.libnotify}/bin/notify-send "Incus" "$vm_name 시작 중..."
