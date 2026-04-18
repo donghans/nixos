@@ -2,9 +2,9 @@
 # bootstrap.sh — NixOS 환경 이식 헬퍼
 #
 # 사용법:
-#   ./bootstrap.sh install [EFI_PART] [ROOT_PART] [HOSTNAME]
+#   ./bootstrap.sh install [HOSTNAME]
 #       표준 NixOS live 환경에서 실행. 필요한 도구를 자동으로 확보하고
-#       파티션 정보가 없으면 대화형으로 물어봅니다.
+#       nixstrap을 실행합니다. 파티션 선택은 nixstrap이 대화형으로 안내합니다.
 #
 #   ./bootstrap.sh build-iso [--arm]
 #       기존 NixOS 환경에서 커스텀 ISO를 빌드합니다.
@@ -24,7 +24,7 @@ PURPLE='\033[0;35m'
 NC='\033[0m'
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
-SETUP_SCRIPT="$SCRIPT_DIR/core/scripts/iso.setup.sh"
+SETUP_SCRIPT="$SCRIPT_DIR/core/scripts/nixstrap.sh"
 NIXUP_SCRIPT="$SCRIPT_DIR/core/scripts/nixup.sh"
 BASE_TOML="$SCRIPT_DIR/hosts/base.toml"
 
@@ -49,9 +49,9 @@ show_help() {
     echo "  bootstrap.sh — NixOS 환경 이식 헬퍼"
     echo ""
     echo "  명령:"
-    echo "    install [EFI_PART] [ROOT_PART] [HOSTNAME]"
+    echo "    install [HOSTNAME]"
     echo "        live 환경에서 NixOS를 설치합니다."
-    echo "        인자를 생략하면 대화형으로 입력받습니다."
+    echo "        호스트명 미입력 시 nixstrap이 대화형으로 안내합니다."
     echo ""
     echo "    build-iso [--arm]"
     echo "        커스텀 NixOS 설치 ISO를 빌드합니다."
@@ -115,34 +115,11 @@ print(d.get('git', {}).get('nixosRepo', ''))
     log Info "저장소: $NIXOS_REPO (base.toml에서 읽음)"
 }
 
-# ── 파티션 정보 수집 ──────────────────────────────────────────────────────────
+# ── 호스트명 수집 ─────────────────────────────────────────────────────────────
+# 파티션 선택은 nixstrap이 대화형으로 처리하므로 호스트명만 전달한다.
+# 호스트명이 없으면 nixstrap 내부에서 물어보게 두면 되므로 빈 값도 허용.
 collect_install_args() {
-    local efi=$1 root=$2 host=$3
-
-    if [ -z "$efi" ] || [ -z "$root" ] || [ -z "$host" ]; then
-        echo ""
-        log Info "현재 디스크 목록:"
-        lsblk -o NAME,SIZE,TYPE,MOUNTPOINT 2>/dev/null || true
-        echo ""
-    fi
-
-    if [ -z "$efi" ]; then
-        read -rp "$(printf '%s' "${CYAN}Bootstrap Input${NC} | EFI 파티션 경로 (예: /dev/nvme0n1p1): ")" efi
-    fi
-    if [ -z "$root" ]; then
-        read -rp "$(printf '%s' "${CYAN}Bootstrap Input${NC} | 루트 파티션 경로 (예: /dev/nvme0n1p2): ")" root
-    fi
-    if [ -z "$host" ]; then
-        read -rp "$(printf '%s' "${CYAN}Bootstrap Input${NC} | 호스트명 (hosts/ 폴더 이름): ")" host
-    fi
-
-    [ -n "$efi" ]  || die "EFI 파티션 경로가 입력되지 않았습니다."
-    [ -n "$root" ] || die "루트 파티션 경로가 입력되지 않았습니다."
-    [ -n "$host" ] || die "호스트명이 입력되지 않았습니다."
-
-    INSTALL_EFI=$efi
-    INSTALL_ROOT=$root
-    INSTALL_HOST=$host
+    INSTALL_HOST=${1:-}
 }
 
 # ── install 모드 ──────────────────────────────────────────────────────────────
@@ -150,15 +127,15 @@ cmd_install() {
     ensure_tools "$@"
     resolve_repo
 
-    local efi="${1:-}" root="${2:-}" host="${3:-}"
-    collect_install_args "$efi" "$root" "$host"
+    local host="${1:-}"
+    collect_install_args "$host"
 
     [ -f "$SETUP_SCRIPT" ] || die "설치 스크립트를 찾을 수 없습니다: $SETUP_SCRIPT"
 
-    log Step "설치를 시작합니다: EFI=$INSTALL_EFI ROOT=$INSTALL_ROOT HOST=$INSTALL_HOST"
+    log Step "nixstrap을 시작합니다${INSTALL_HOST:+ (호스트: $INSTALL_HOST)}..."
     echo ""
-    NIXOS_REPO="$NIXOS_REPO" sudo -E bash "$SETUP_SCRIPT" \
-        "$INSTALL_EFI" "$INSTALL_ROOT" "$INSTALL_HOST"
+    # 호스트명이 있으면 첫 번째 인수로 전달, 없으면 nixstrap이 대화형으로 물어봄
+    NIXOS_REPO="$NIXOS_REPO" sudo -E bash "$SETUP_SCRIPT" ${INSTALL_HOST:+"$INSTALL_HOST"}
 }
 
 # ── build-iso 모드 ────────────────────────────────────────────────────────────

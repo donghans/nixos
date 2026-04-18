@@ -129,7 +129,7 @@
               pkgs' = nixpkgs.legacyPackages.${hostInfo.system};
             in [
               (pkgs'.writeShellScriptBin "nixup" ''
-                exec /home/${hostCtx.metaConfig.username}/nixos/core/scripts/nixup.sh "$@"
+                exec bash /home/${hostCtx.metaConfig.username}/nixos/core/scripts/nixup.sh "$@"
               '')
               (pkgs'.runCommand "nixup-man" {} ''
                 mkdir -p $out/share/man/man1

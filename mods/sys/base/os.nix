@@ -26,7 +26,7 @@
   programs.zsh.enable = true;
 
   nix = {
-    nixPath = lib.mkForce []; # (목적: flake 전용 시스템에서 레거시 채널 경로 경고 제거)
+    nixPath = lib.mkForce ["nixpkgs=flake:nixpkgs"]; # (목적: 레거시 채널 경로 제거, nix-shell용 <nixpkgs> 참조는 유지)
 
     settings = {
       auto-optimise-store = true; # (목적: 중복 파일 자동 하드링크)

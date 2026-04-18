@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# [iso:setup] NixOS Installation Script
+# [nixstrap] NixOS Installation Script
 # This script is wrapped by nixos-setup-from-repo.
 # Everything is ASCII only to prevent build errors.
 
@@ -32,7 +32,7 @@ log_msg() {
         *)            cat_color=$NC ;;
     esac
 
-    printf "${PURPLE}ISO${NC} ${cat_color}%-9s${NC} | %s\n" "$category" "$msg"
+    printf "${PURPLE}NIXSTRAP${NC} ${cat_color}%-9s${NC} | %s\n" "$category" "$msg"
 }
 
 # Command Execution Helper (Aligned with | marker)
@@ -42,17 +42,17 @@ log_exec() {
     local msg=$3
     local cat_color=$BLUE
 
-    # Matches NIXUP's aligned format: ISO Exec cmd > description
-    printf "${PURPLE}ISO${NC} ${cat_color}Exec %-4s${NC} %s %s\n" "$cmd_name" "$state" "$msg"
+    # Matches NIXUP's aligned format: NIXSTRAP Exec cmd > description
+    printf "${PURPLE}NIXSTRAP${NC} ${cat_color}Exec %-4s${NC} %s %s\n" "$cmd_name" "$state" "$msg"
 }
 
 # 2. Initialization
-SHORT_CMD="nixup-install"
+SHORT_CMD="nixstrap"
 
 HOST=${1:-}
 
 # Welcome Message
-log_msg "Init" "ISO: NixOS Installation Helper"
+log_msg "Init" "NixOS Installer"
 
 show_usage() {
     log_msg "Usage" "$SHORT_CMD [HOSTNAME]"
@@ -61,16 +61,21 @@ show_usage() {
     log_msg "Notice" "Target repository: ${NIXOS_REPO:-unknown}"
 }
 
+# ===========================================================================
+# PHASE 1: GATHER ALL INPUT
+# All interactive prompts are collected here before any execution begins.
+# ===========================================================================
+
 # 3. Ensure NIXOS_REPO is known before clone
 # (목적: clone 전에 레포 주소 확보 — 레이블 추출을 위해 먼저 clone 필요)
 if [ -z "${NIXOS_REPO:-}" ]; then
     log_msg "Notice" "nixos_repo environment variable is not defined."
-    read -rp "$(printf "${YELLOW}%-13s${NC} | enter repository (e.g. user/nixos): " "ISO Input")" NIXOS_REPO
+    read -rp "$(printf "${YELLOW}%-13s${NC} | enter repository (e.g. user/nixos): " "nixstrap")" NIXOS_REPO
 fi
 
 # Ask HOST if not provided as argument
 if [ -z "$HOST" ]; then
-    read -rp "$(printf "${YELLOW}%-13s${NC} | enter hostname: " "ISO Input")" HOST
+    read -rp "$(printf "${YELLOW}%-13s${NC} | enter hostname: " "nixstrap")" HOST
 fi
 
 # 0. Partition Setup
@@ -80,6 +85,8 @@ lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT
 echo ""
 
 _NEW_PARTITIONS=false
+FORMAT_BOOT=""
+FORMAT_ROOT=""
 
 # Detect virtualization (for incus-guest auto-config on new host profiles)
 _IS_VM=false
@@ -88,23 +95,27 @@ if _VIRT_TYPE=$(systemd-detect-virt 2>/dev/null); then
     log_msg "Notice" "virtualized environment detected: $_VIRT_TYPE"
 fi
 
-read -rp "$(printf "${YELLOW}%-13s${NC} | partition mode — 1=use existing, 2=create new [2]: " "ISO Question")" _PART_MODE
+read -rp "$(printf "${YELLOW}%-13s${NC} | partition mode — 1=use existing, 2=create new [2]: " "nixstrap")" _PART_MODE
 _PART_MODE="${_PART_MODE:-2}"
 
 if [[ "$_PART_MODE" == "1" ]]; then
     # Use existing partitions
-    read -rp "$(printf "${YELLOW}%-13s${NC} | EFI partition path (e.g. /dev/nvme0n1p1): " "ISO Input")" BOOT_PART
-    read -rp "$(printf "${YELLOW}%-13s${NC} | root partition path (e.g. /dev/nvme0n1p2): " "ISO Input")" ROOT_PART
+    read -rp "$(printf "${YELLOW}%-13s${NC} | EFI partition path (e.g. /dev/nvme0n1p1): " "nixstrap")" BOOT_PART
+    read -rp "$(printf "${YELLOW}%-13s${NC} | root partition path (e.g. /dev/nvme0n1p2): " "nixstrap")" ROOT_PART
     log_msg "Disk" "using existing: boot=$BOOT_PART, root=$ROOT_PART"
 
-elif [[ "$_PART_MODE" == "2" ]]; then
-    read -rp "$(printf "${YELLOW}%-13s${NC} | target disk (e.g. /dev/nvme0n1): " "ISO Input")" _DISK
+    # Ask format questions here — before any execution begins
+    read -rp "$(printf "${YELLOW}%-13s${NC} | format boot partition ($BOOT_PART)? (y/N): " "nixstrap")" FORMAT_BOOT
+    read -rp "$(printf "${YELLOW}%-13s${NC} | format root partition ($ROOT_PART)? (y/N): " "nixstrap")" FORMAT_ROOT
 
-    read -rp "$(printf "${YELLOW}%-13s${NC} | use entire disk? (Y/n): " "ISO Question")" _USE_WHOLE
+elif [[ "$_PART_MODE" == "2" ]]; then
+    read -rp "$(printf "${YELLOW}%-13s${NC} | target disk (e.g. /dev/nvme0n1): " "nixstrap")" _DISK
+
+    read -rp "$(printf "${YELLOW}%-13s${NC} | use entire disk? (Y/n): " "nixstrap")" _USE_WHOLE
     _USE_WHOLE="${_USE_WHOLE:-Y}"
 
     if [[ "$_USE_WHOLE" =~ ^[Yy]$ ]]; then
-        read -rp "$(printf "${RED}%-13s${NC} | WARNING: ALL data on '$_DISK' will be erased. type 'yes' to confirm: " "ISO Warning")" _CONFIRM_WIPE
+        read -rp "$(printf "${RED}%-13s${NC} | WARNING: ALL data on '$_DISK' will be erased. type 'yes' to confirm: " "nixstrap")" _CONFIRM_WIPE
         if [[ "$_CONFIRM_WIPE" != "yes" ]]; then
             log_msg "Error" "cancelled."
             exit 1
@@ -154,7 +165,7 @@ PYEOF
         done <<< "$_FREE_OUTPUT"
         echo ""
 
-        read -rp "$(printf "${YELLOW}%-13s${NC} | select number or enter range (e.g. 128GiB-476GiB): " "ISO Input")" _FREE_SEL
+        read -rp "$(printf "${YELLOW}%-13s${NC} | select number or enter range (e.g. 128GiB-476GiB): " "nixstrap")" _FREE_SEL
 
         if [[ "$_FREE_SEL" =~ ^[0-9]+$ ]]; then
             _SELECTED=$(echo "$_FREE_OUTPUT" | grep "^${_FREE_SEL}:" || true)
@@ -172,7 +183,7 @@ PYEOF
     fi
 
     # Boot partition size
-    read -rp "$(printf "${YELLOW}%-13s${NC} | boot partition size (default: 1GiB, enter): " "ISO Input")" _BOOT_SIZE
+    read -rp "$(printf "${YELLOW}%-13s${NC} | boot partition size (default: 1GiB, enter): " "nixstrap")" _BOOT_SIZE
     _BOOT_SIZE="${_BOOT_SIZE:-1GiB}"
 
     # Calculate boot end position
@@ -217,47 +228,50 @@ PYEOF
     # Preview
     echo ""
     log_msg "Disk" "partitions to create:"
-    printf "${PURPLE}ISO${NC} ${PURPLE}%-9s${NC} | → %-22s EFI   %s  (%s ~ %s)\n" "Disk" "$_PREVIEW_BOOT" "$_BOOT_SIZE" "$_PART_START" "$_BOOT_END"
-    printf "${PURPLE}ISO${NC} ${PURPLE}%-9s${NC} | → %-22s root  remaining  (%s ~ %s)\n" "Disk" "$_PREVIEW_ROOT" "$_BOOT_END" "$_PART_END"
+    printf "${PURPLE}NIXSTRAP${NC} ${PURPLE}%-9s${NC} | → %-22s EFI   %s  (%s ~ %s)\n" "Disk" "$_PREVIEW_BOOT" "$_BOOT_SIZE" "$_PART_START" "$_BOOT_END"
+    printf "${PURPLE}NIXSTRAP${NC} ${PURPLE}%-9s${NC} | → %-22s root  remaining  (%s ~ %s)\n" "Disk" "$_PREVIEW_ROOT" "$_BOOT_END" "$_PART_END"
     echo ""
 
-    read -rp "$(printf "${YELLOW}%-13s${NC} | create partitions? (y/N): " "ISO Question")" _CONFIRM_PART
+    read -rp "$(printf "${YELLOW}%-13s${NC} | create partitions? (y/N): " "nixstrap")" _CONFIRM_PART
     if [[ ! "$_CONFIRM_PART" =~ ^[Yy]$ ]]; then
         log_msg "Error" "cancelled."
         exit 1
     fi
 
-    # Create partitions
-    log_msg "Disk" "creating partitions on $_DISK ..."
-    log_exec "disk" ">" "parted"
-    if [[ "$_WIPE" == "true" ]]; then
-        parted "$_DISK" --script mklabel gpt
-    fi
-    parted "$_DISK" --script mkpart ESP fat32 "$_PART_START" "$_BOOT_END"
-    parted "$_DISK" --script set "$_NEW_BOOT_NUM" esp on
-    parted "$_DISK" --script mkpart primary "$_BOOT_END" "$_PART_END"
-    log_exec "disk" "<" "parted"
-
-    log_msg "Disk" "waiting for udev ..."
-    udevadm settle --timeout=10
-
     BOOT_PART="$_PREVIEW_BOOT"
     ROOT_PART="$_PREVIEW_ROOT"
     _NEW_PARTITIONS=true
-
-    log_msg "Disk" "partitions ready: boot=$BOOT_PART, root=$ROOT_PART"
+    FORMAT_BOOT="y"
+    FORMAT_ROOT="y"
 
 else
     log_msg "Error" "invalid mode. select 1 or 2."
     exit 1
 fi
 
-# Print Configuration Info
+# Preset selection
+# (목적: 신규 호스트 프로파일 생성 시 사용. 레포에 이미 호스트가 있으면 무시됨)
+read -rp "$(printf "${YELLOW}%-13s${NC} | select preset (workstation/server) [workstation]: " "nixstrap")" _PRESET_INPUT
+_PRESET="${_PRESET_INPUT:-workstation}"
+
+if [[ "$_PRESET" != "workstation" && "$_PRESET" != "server" ]]; then
+    log_msg "Error" "unknown preset '$_PRESET'. use workstation or server."
+    exit 1
+fi
+
+# Print Configuration Summary
 echo ""
 log_msg "Init" "Action:   installation"
-log_msg "Init" "Target:   Boot($BOOT_PART), Root($ROOT_PART)"
 log_msg "Init" "Hostname: $HOST"
+log_msg "Init" "Preset:   $_PRESET (used only if host profile is new)"
+log_msg "Init" "Boot:     $BOOT_PART"
+log_msg "Init" "Root:     $ROOT_PART"
 echo ""
+
+# ===========================================================================
+# PHASE 2: EXECUTE
+# No more interactive prompts from this point on.
+# ===========================================================================
 
 # 4. Cleanup Previous Attempt
 # 재시도 시 이전 마운트가 남아있으면 mkfs.*가 "contains a mounted filesystem"으로 실패함
@@ -308,12 +322,24 @@ BOOT_LABEL="${BOOT_LABEL:-boot}"
 DISK_LABEL="${DISK_LABEL:-nixos}"
 log_msg "Config" "disk labels: boot=$BOOT_LABEL, root=$DISK_LABEL"
 
-# 6. Boot Partition Format
+# 6. Create Partitions (mode 2 only)
 if [[ "$_NEW_PARTITIONS" == "true" ]]; then
-    FORMAT_BOOT="y"
-else
-    read -rp "$(printf "${YELLOW}%-13s${NC} | format boot partition($BOOT_PART)? (y/N): " "ISO Question")" FORMAT_BOOT
+    log_msg "Disk" "creating partitions on $_DISK ..."
+    log_exec "disk" ">" "parted"
+    if [[ "$_WIPE" == "true" ]]; then
+        parted "$_DISK" --script mklabel gpt
+    fi
+    parted "$_DISK" --script mkpart ESP fat32 "$_PART_START" "$_BOOT_END"
+    parted "$_DISK" --script set "$_NEW_BOOT_NUM" esp on
+    parted "$_DISK" --script mkpart primary "$_BOOT_END" "$_PART_END"
+    log_exec "disk" "<" "parted"
+
+    log_msg "Disk" "waiting for udev ..."
+    udevadm settle --timeout=10
+    log_msg "Disk" "partitions ready: boot=$BOOT_PART, root=$ROOT_PART"
 fi
+
+# 7. Boot Partition Format
 if [[ "$FORMAT_BOOT" =~ ^[Yy]$ ]]; then
     log_msg "Disk" "formatting boot partition (fat32, label=$BOOT_LABEL)..."
     log_exec "disk" ">" "mkfs.fat"
@@ -323,12 +349,7 @@ else
     log_msg "Disk" "skipping boot partition format."
 fi
 
-# 7. Btrfs Format & Subvolume
-if [[ "$_NEW_PARTITIONS" == "true" ]]; then
-    FORMAT_ROOT="y"
-else
-    read -rp "$(printf "${YELLOW}%-13s${NC} | format root partition($ROOT_PART)? (y/N): " "ISO Question")" FORMAT_ROOT
-fi
+# 8. Btrfs Format & Subvolume
 if [[ "$FORMAT_ROOT" =~ ^[Yy]$ ]]; then
     log_msg "Disk" "formatting root (label=$DISK_LABEL) and creating subvolumes..."
     log_exec "disk" ">" "mkfs.btrfs"
@@ -344,7 +365,7 @@ else
     log_msg "Disk" "skipping root format — using existing btrfs and subvolumes."
 fi
 
-# 8. Mount
+# 9. Mount
 export MOUNT_OPTS="noatime,compress=zstd,space_cache=v2"
 log_msg "Mount" "mounting partitions with optimal options..."
 log_exec "disk" ">" "mount"
@@ -358,35 +379,26 @@ mount -o subvol=@log,"${MOUNT_OPTS}" "$ROOT_PART" /mnt/var/log
 mount -o fmask=0137,dmask=0027 "$BOOT_PART" /mnt/boot
 log_exec "disk" "<" "mount"
 
-# 9. Move Cloned Repo to Final Location
+# 10. Move Cloned Repo to Final Location
 log_msg "Git" "moving repository to /mnt/etc/nixos ..."
 mkdir -p /mnt/etc
 mv "$REPO_TMP" /mnt/etc/nixos
 
-# 10. New Host Profile Creation
+# 11. New Host Profile Creation
 # (목적: 레포에 없는 신규 호스트면 host.toml + 최소 nix 파일 자동 생성)
 # (주의: resolve.py 실행 전에 생성해야 새 호스트명이 resolved.json에 포함됨)
 HOST_DIR="/mnt/etc/nixos/hosts/$HOST"
 if [ ! -d "$HOST_DIR" ]; then
     log_msg "Notice" "host profile '$HOST' not found — creating new profile..."
 
-    # preset 선택 (workstation / server)
-    read -rp "$(printf "${YELLOW}%-13s${NC} | select preset (workstation/server) [workstation]: " "ISO Input")" _PRESET_INPUT
-    _PRESET="${_PRESET_INPUT:-workstation}"
-
-    # preset 유효성 검사
-    if [[ "$_PRESET" != "workstation" && "$_PRESET" != "server" ]]; then
-        log_msg "Error" "unknown preset '$_PRESET'. use workstation or server."
-        exit 1
-    fi
-
     mkdir -p "$HOST_DIR"
 
     # host.toml 생성
-    # (VM 환경이면 incus-guest mod 자동 활성화)
+    # (VM 환경이면 incus-guest 활성화 + incus 비활성화)
+    # (이유: incus를 VM 내부에서 켜면 incusbr0가 호스트와 같은 서브넷을 점유해 라우팅 충돌 발생)
     if [[ "$_IS_VM" == "true" ]]; then
-        printf 'type = "desktop"\npreset = "%s"\n\n[mods.sys.services.incus-guest]\nenable = true\n' "$_PRESET" > "$HOST_DIR/host.toml"
-        log_msg "Config" "incus-guest enabled in host.toml (virtualized environment)"
+        printf 'type = "desktop"\npreset = "%s"\n\n[mods.sys.services]\nincus-guest = true\nincus = false\n' "$_PRESET" > "$HOST_DIR/host.toml"
+        log_msg "Config" "incus-guest enabled, incus disabled in host.toml (virtualized environment)"
     else
         printf 'type = "desktop"\npreset = "%s"\n' "$_PRESET" > "$HOST_DIR/host.toml"
     fi
@@ -402,7 +414,7 @@ else
     log_msg "Config" "using existing host profile: $HOST"
 fi
 
-# 11. Resolve Metadata (설치 대상 하드웨어 기반 resolved.json 생성)
+# 12. Resolve Metadata (설치 대상 하드웨어 기반 resolved.json 생성)
 # (목적: /proc/meminfo에서 실제 RAM을 감지하여 swap/tmpfs 크기를 올바르게 설정)
 # (주의: 레포 루트가 아닌 임시 경로에 출력해야 git untracked 파일 오염을 방지함)
 RESOLVE_TMP="/tmp/nixos-resolve"
@@ -413,7 +425,7 @@ python3 /mnt/etc/nixos/core/scripts/nixup.resolve.py \
     /mnt/etc/nixos "$RESOLVE_TMP"
 log_exec "py" "<" "nixup.resolve.py"
 
-# 12. Metadata Extraction
+# 13. Metadata Extraction
 BASE_TOML="/mnt/etc/nixos/hosts/base.toml"
 if [ ! -f "$BASE_TOML" ]; then
     log_msg "Error" "could not find $BASE_TOML in the cloned repository."
@@ -425,7 +437,7 @@ if [ -z "$USERNAME" ]; then
     exit 1
 fi
 
-# 13. Hardware Config
+# 14. Hardware Config
 log_msg "Config" "generating hardware-configuration.nix ..."
 nixos-generate-config --root /mnt --no-filesystems
 mkdir -p "/mnt/etc/nixos/hosts/$HOST"
@@ -433,7 +445,7 @@ mv /mnt/etc/nixos/hardware-configuration.nix "/mnt/etc/nixos/hosts/$HOST/_hardwa
 rm -f /mnt/etc/nixos/configuration.nix
 printf 'NIXUP_LAST_HOST=%s\n' "$HOST" > /mnt/etc/nixos/.env
 
-# 14. Prepare .build/ Environment
+# 15. Prepare .build/ Environment
 # (목적: nixup과 동일한 격리 환경 구성 — core/flake.nix의 import 경로가 .build/ 루트 기준이므로
 #         /mnt/etc/nixos/core를 직접 flake로 지정하면 core/core/flake.outputs.nix를 찾아 실패)
 # (주의: /mnt/etc/nixos 안에 두면 해당 git repo의 미추적 파일로 인식되어 nixos-install 실패.
@@ -452,7 +464,7 @@ for _lf in "/mnt/etc/nixos/.locks/$HOST.lock" "/mnt/etc/nixos/.locks/_rolling.lo
     [ -f "$_lf" ] && cp "$_lf" "$BUILD_DIR/flake.lock" && break
 done
 
-# 15. Install
+# 16. Install
 # --no-root-passwd: root 패스워드 설정 생략 (NixOS 설정에서 잠금 예정)
 log_msg "Install" "starting nixos-install for #$HOST ..."
 log_exec "nix" ">" "nixos-install"
@@ -460,7 +472,7 @@ log_exec "nix" ">" "nixos-install"
 HOME=/root nixos-install --no-root-passwd --flake "$BUILD_DIR#$HOST"
 log_exec "nix" "<" "nixos-install"
 
-# 16. Post-processing
+# 17. Post-processing
 log_msg "Done" "running post-installation tasks for user: $USERNAME ..."
 mkdir -p "/mnt/home/$USERNAME/"
 mv /mnt/etc/nixos "/mnt/home/$USERNAME/nixos"

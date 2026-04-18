@@ -5,8 +5,8 @@
   ...
 }: let
   # 1. setup.sh를 ISO 시스템의 bin 폴더에 넣기 위한 '패키지' 생성
-  nixup-install-script = pkgs.writeShellApplication {
-    name = "nixup-install"; # 실행될 명령어 이름
+  nixstrap-script = pkgs.writeShellApplication {
+    name = "nixstrap"; # 실행될 명령어 이름
 
     # 스크립트 실행에 필요한 패키지들을 런타임에 보장
     runtimeInputs = [
@@ -17,8 +17,8 @@
       pkgs.util-linux # mount, umount 등
     ];
 
-    # core/scripts/iso.setup.sh 파일을 읽어와서 본문으로 사용
-    text = builtins.readFile ./scripts/iso.setup.sh;
+    # core/scripts/nixstrap.sh 파일을 읽어와서 본문으로 사용
+    text = builtins.readFile ./scripts/nixstrap.sh;
   };
 in {
   imports = [];
@@ -74,7 +74,7 @@ in {
         echo "설치를 시작하려면 아래 명령어를 입력하세요:"
         echo ""
         echo "1. 자동 설치 (추천):"
-        echo "   nixup-install [HOSTNAME]"
+        echo "   nixstrap [HOSTNAME]"
         echo ""
         echo "   파티션 생성/기존 선택, 디스크 지정 등을 대화형으로 안내합니다."
         echo "   HOSTNAME이 레포에 없으면 프리셋(workstation/server)을 물어보고"
@@ -82,10 +82,10 @@ in {
         echo ""
         echo "2. 다른 리포지토리 사용 시:"
         echo "   NIXOS_REPO=user/repo sudo -E \\"
-        echo "   nixup-install [HOSTNAME]"
+        echo "   nixstrap [HOSTNAME]"
         echo ""
         echo "예시 (nvme0n1 기기):"
-        echo "   nixup-install beelink-ser7-co"
+        echo "   nixstrap beelink-ser7-co"
         echo ""
         echo "TIP: 현재 기본 리포지토리는 '${metaConfig.nixosRepo}'로 설정되어 있습니다."
         echo "--------------------------------------------------"
@@ -96,7 +96,7 @@ in {
         echo "To start the installation, enter the command below:"
         echo ""
         echo "1. Automatic Installation (Recommended):"
-        echo "   nixup-install [HOSTNAME]"
+        echo "   nixstrap [HOSTNAME]"
         echo ""
         echo "   Interactively guides you through partitioning or selecting existing partitions."
         echo "   If HOSTNAME does not exist in the repo, you will be prompted for"
@@ -104,10 +104,10 @@ in {
         echo ""
         echo "2. Using a different repository:"
         echo "   NIXOS_REPO=user/repo sudo -E \\"
-        echo "   nixup-install [HOSTNAME]"
+        echo "   nixstrap [HOSTNAME]"
         echo ""
         echo "Example (nvme0n1 device):"
-        echo "   nixup-install beelink-ser7-co"
+        echo "   nixstrap beelink-ser7-co"
         echo ""
         echo "TIP: Default repository is set to '${metaConfig.nixosRepo}'."
         echo "--------------------------------------------------"
@@ -197,12 +197,12 @@ in {
     disko # 만약 disko를 쓰신다면 유용합니다
     pciutils # lspci로 하드웨어 확인
     usbutils # lsusb
-    nixup-install-script
+    nixstrap-script
   ];
 
   environment.shellAliases = {
     # 이제 터미널에서 'nixos-setup'만 치면 파라미터 입력 단계로 바로 넘어갑니다.
     # NIXOS_REPO 환경변수를 통해 setup 스크립트에 전달합니다.
-    nixup-install = "NIXOS_REPO=${metaConfig.nixosRepo} sudo -E nixup-install";
+    nixstrap = "NIXOS_REPO=${metaConfig.nixosRepo} sudo -E nixstrap";
   };
 }

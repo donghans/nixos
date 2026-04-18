@@ -17,7 +17,7 @@
   - **`nixup.lib-lock.sh`**: 기기 특성(`isRolling`)에 따른 유연한 락 파일 관리 로직.
   - **`nixup.resolve.py`**: TOML 소스(`base.toml`, `host.toml`, `_preset/*.toml`)를 읽어 Nix가 사용할 `resolved.json`과 `presets.json`을 생성하는 메타데이터 변환기.
   - **`nixup.task-*.sh`**: 실제 비즈니스 로직(빌드, 업데이트, 복구 등)을 수행하는 모듈형 스크립트.
-  - **`iso.setup.sh`**: ISO 부팅 환경에서 실행되는 설치 스크립트. `nixos-setup` 명령으로 노출되며, 파티셔닝(EFI+Btrfs), 저장소 클론, 하드웨어 감지, `nixos-install`, 후처리(저장소 이동 및 심볼릭 링크)를 순서대로 수행합니다.
+  - **`nixstrap.sh`**: ISO 부팅 환경에서 실행되는 설치 스크립트. `nixstrap` 명령으로 노출되며, 파티셔닝(EFI+Btrfs), 저장소 클론, 하드웨어 감지, `nixos-install`, 후처리(저장소 이동 및 심볼릭 링크)를 순서대로 수행합니다.
 
 ---
 
