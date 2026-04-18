@@ -16,6 +16,7 @@ tailscale      = false
 docker         = false
 incus          = false
 incus-win11    = false
+incus-guest    = true
 headscale        = false
 caddy            = false
 cockpit          = false

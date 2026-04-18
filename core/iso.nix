@@ -113,9 +113,6 @@ in {
     fi
   '';
 
-  # incus SPICE 뷰어와 클립보드 공유를 위한 vdagent
-  services.spice-vdagentd.enable = true;
-
   # Firefox 등이 systemd-resolved를 통해 DNS 조회함 → 없으면 브라우저에서만 DNS 실패
   services.resolved.enable = true;
 

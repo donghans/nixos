@@ -14,6 +14,7 @@ networkmanager = true
 tailscale      = true
 incus          = true
 incus-win11    = false
+incus-guest    = false
 headscale      = true
 caddy          = true
 cockpit        = true

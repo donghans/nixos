@@ -3,6 +3,9 @@
     ./_hardware.nix
   ];
 
+  # llm-utils-project 관련 테스트를 위해 임시로 열어둔 포트
+  networking.firewall.allowedTCPPorts = [7681];
+
   # == Clock ==
   # (목적: 듀얼부팅 시 윈도우 시간 깨짐 방지)
   # Linux는 기본적으로 하드웨어 클럭을 UTC로 다루지만, Windows는 로컬 시간으로 읽음.

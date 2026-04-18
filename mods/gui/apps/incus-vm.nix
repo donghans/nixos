@@ -29,9 +29,9 @@ with lib; let
 
     # 2단계: 상태에 따라 가능한 액션만 표시
     if [ "$vm_status" = "Running" ]; then
-      actions="뷰어 열기\n끄기\n강제 종료\n재시작"
+      actions="터미널 열기\n뷰어 열기\n끄기\n강제 종료\n재시작"
     else
-      actions="켜기\n켜고 뷰어 열기"
+      actions="켜기\n켜고 터미널 열기\n켜고 뷰어 열기"
     fi
 
     action=$(printf "$actions" \
@@ -39,8 +39,18 @@ with lib; let
     [ -z "$action" ] && exit
 
     case "$action" in
+      "터미널 열기")
+        ${pkgs.kitty}/bin/kitty --hold --title "incus: $vm_name" \
+          ${pkgs.incus}/bin/incus exec "$vm_name" -- bash &
+        ;;
       "켜기")
         ${pkgs.incus}/bin/incus start "$vm_name"
+        ;;
+      "켜고 터미널 열기")
+        ${pkgs.libnotify}/bin/notify-send "Incus" "$vm_name 시작 중..."
+        ${pkgs.incus}/bin/incus start "$vm_name" && \
+          ${pkgs.kitty}/bin/kitty --title "incus: $vm_name" \
+            ${pkgs.incus}/bin/incus exec "$vm_name" -- bash &
         ;;
       "켜고 뷰어 열기")
         ${pkgs.libnotify}/bin/notify-send "Incus" "$vm_name 시작 중..."
