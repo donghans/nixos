@@ -18,9 +18,10 @@ in {
       # nixos-fw의 기본 정책이 drop이라 VM→호스트 트래픽(DHCP 등)도 차단됨
       networking.firewall.trustedInterfaces = ["incusbr0"];
       networking.nftables.enable = true;
-      # (목적: VM→인터넷 TLS 핸드셰이크 타임아웃 방지)
-      # NAT 브릿지 통과 시 MTU 불일치로 큰 패킷(TLS ClientHello 등)이 드롭됨.
-      # SYN 패킷의 MSS를 PMTU에 맞게 클램프하여 패킷 단편화 문제를 해결.
+      # (목적: VM→인터넷 TCP 단편화 방지)
+      # wlo1 MTU가 1400으로 설정된 환경에서 VM이 MSS=1460을 협상하면
+      # 호스트가 IP 단편화를 수행해야 함. SYN 패킷에서 rt mtu 기준으로
+      # MSS를 클램프하면 단편화 없이 전송 가능한 크기로 자동 조정됨.
       networking.nftables.tables.mss-clamp = {
         family = "ip";
         content = ''
@@ -34,6 +35,13 @@ in {
       # VM이 IPv6 RA를 브리지로 보낼 때 호스트 IPv6 라우팅이 바뀌는 것을 방지
       # (RA를 수락하면 Tailscale 등 호스트 IPv6 연결이 끊김)
       boot.kernel.sysctl."net.ipv6.conf.incusbr0.accept_ra" = 0;
+      # (목적: VM 첫 패킷 2~3초 지연 방지)
+      # br_netfilter가 켜지면 브릿지 트래픽이 브릿지 레벨·IP 레벨에서 conntrack을 이중으로 거침.
+      # 첫 패킷에서 두 레이어가 conntrack entry를 동시에 생성하려다 충돌 → 수 초 지연.
+      # incus가 자체 nftables로 forwarding을 관리하므로 br_netfilter 개입 불필요.
+      # Docker는 IP 레벨(table ip filter)에서 FORWARD 규칙을 관리하므로 영향 없음.
+      boot.kernel.sysctl."net.bridge.bridge-nf-call-iptables" = 0;
+      boot.kernel.sysctl."net.bridge.bridge-nf-call-ip6tables" = 0;
       users.users.${config.workspace.username}.extraGroups = ["incus-admin"];
 
       virtualisation.incus.preseed = {

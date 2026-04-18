@@ -45,7 +45,7 @@ in {
       # NetworkManager·systemd-networkd 모두에서 동작함.
       # en*/eth*: 유선 이더넷, wl*: 무선랜 (veth·bridge·tailscale0 등 가상 인터페이스는 미매칭)
       systemd.network.links."10-tailscale-mtu" = {
-        matchConfig.Name = "en* eth* wl*";
+        matchConfig.OriginalName = "en* eth* wl*";
         linkConfig.MTUBytes = "1400";
       };
     }
