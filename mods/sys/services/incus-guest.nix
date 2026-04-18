@@ -20,7 +20,7 @@ in {
       services.spice-vdagentd.enable = true;
       # (목적: incus console 명령으로 시리얼 콘솔 접근 가능하게)
       # ttyS0 시리얼 콘솔을 활성화해야 incus console이 출력을 표시함
-      boot.kernelParams = [ "console=ttyS0" ];
+      boot.kernelParams = ["console=ttyS0"];
       systemd.services."serial-getty@ttyS0".enable = true;
     }
     else {}
