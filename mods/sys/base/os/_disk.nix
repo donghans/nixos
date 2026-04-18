@@ -16,7 +16,7 @@ in {
   fileSystems."/boot" = {
     device = config.workspace.bootDevice;
     fsType = "vfat";
-    options = ["fmask=0022" "dmask=0022"];
+    options = ["fmask=0137" "dmask=0027"];
   };
 
   # == Btrfs 파일시스템 ==
