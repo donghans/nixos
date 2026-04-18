@@ -10,6 +10,7 @@
     ./os/_boot.nix
     ./os/_disk.nix
     ./os/_swap.nix
+    ./os/_power.nix
   ];
 
   # == User & Nix Engine ==

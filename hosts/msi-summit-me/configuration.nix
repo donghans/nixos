@@ -49,47 +49,23 @@
   networking.modemmanager.enable = false;
   services.fprintd.enable = false; # (이유: 지문 인식 초기화 시 프리징 방지)
 
-  services.tlp = {
-    enable = true;
+  # (참고: TLP 기본 laptop 프로파일은 mods/sys/base/os/_power.nix에서 적용됨)
+  # MSI 전용 TLP quirk 추가 설정
+  services.tlp.settings = {
+    # (목적: MSI Summit E13 발열 제어 — AC 어댑터 전력 한계로 터보 강제 비활성화)
+    CPU_BOOST_ON_AC = 0;
+    CPU_BOOST_ON_BAT = 0;
 
-    settings = {
-      CPU_SCALING_GOVERNOR_ON_BAT = "powersave";
-      CPU_ENERGY_PERF_POLICY_ON_BAT = "power";
-      CPU_MAX_PERF_ON_BAT = 50;
+    # (목적: Intel 하이브리드 아키텍처 E-코어 우선 사용 유도)
+    SCHED_POWERSAVE_ON_AC = 1;
+    SCHED_POWERSAVE_ON_BAT = 1;
 
-      CPU_SCALING_GOVERNOR_ON_AC = "balanced";
-      CPU_ENERGY_PERF_POLICY_ON_AC = "balance_performance";
-      CPU_MAX_PERF_ON_AC = 100;
+    # (이유: Elan Touchscreen USB 절전 제외)
+    USB_DENYLIST = "04f3:2ffa";
 
-      # (목적: 완벽한 발열 제어를 위해 AC/BAT 환경 모두 터보 부스트 강제 비활성화)
-      CPU_BOOST_ON_BAT = 0;
-      CPU_BOOST_ON_AC = 0;
-
-      # (목적: 인텔 하이브리드 아키텍처 E-코어 우선 사용 유도)
-      SCHED_POWERSAVE_ON_AC = 1;
-      SCHED_POWERSAVE_ON_BAT = 1;
-
-      SATA_LINKPWR_ON_BAT = "med_power_with_dipm";
-      USB_AUTOSUSPEND = 0;
-      USB_EXCLUDE_PHONE = 1;
-      USB_DENYLIST = "04f3:2ffa"; # (이유: Elan Touchscreen 블랙리스트)
-
-      RUNTIME_PM_ON_AC = "auto";
-      RUNTIME_PM_ON_BAT = "auto";
-
-      # (이유: 터치패드 절전 제외)
-      RUNTIME_PM_DENYLIST = "00:12.0 00:15.0";
-      RUNTIME_PM_DRIVER_DENYLIST = "i2c_designware intel_ishtp intel_ishtp_hid intel_lpss_pci";
-
-      # (목적: 배터리 모드에서도 Wi-Fi 절전 비활성화)
-      WIFI_PWR_ON_AC = "off";
-      WIFI_PWR_ON_BAT = "off";
-
-      DEVICES_TO_DISABLE_ON_BAT_NOT_IN_USE = "";
-
-      MAX_LOST_WORK_SECS_ON_BAT = 60;
-      MAX_LOST_WORK_SECS_ON_AC = 15;
-    };
+    # (이유: I2C 터치패드 디바이스 런타임 절전 제외)
+    RUNTIME_PM_DENYLIST = "00:12.0 00:15.0";
+    RUNTIME_PM_DRIVER_DENYLIST = "i2c_designware intel_ishtp intel_ishtp_hid intel_lpss_pci";
   };
 
   # == Power Management & Interfaces ==
@@ -117,5 +93,4 @@
       echo -en '\x04' | sudo dd of="/sys/kernel/debug/ec/ec0/io" bs=1 seek=152 count=1 conv=notrunc 2>/dev/null
     '')
   ];
-
 }

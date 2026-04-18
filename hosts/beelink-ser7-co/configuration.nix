@@ -12,27 +12,7 @@
   };
 
   # == Services & Networking ==
-  services = {
-    auto-cpufreq = {
-      enable = true;
-      settings.charger = {
-        governor = "performance";
-        turbo = "always";
-      };
-    };
-
-    # [OPTIONAL] USB-PD 전력공급 시 안정성 세팅
-    # tlp = {
-    #   enable = true;
-    #   settings = {
-    #     CPU_BOOST_ON_AC = 0;
-    #     CPU_SCALING_GOVERNOR_ON_AC = "powersave";
-    #     CPU_ENERGY_PERF_POLICY_ON_AC = "balance_performance";
-    #     CPU_SCALING_MAX_FREQ_ON_AC = 3500000;
-    #   };
-    # };
-
-    irqbalance.enable = true;
-  };
-
+  # (참고: TLP 전원 관리는 mods/sys/base/os/_power.nix에서 desktop 프로파일로 자동 적용됨)
+  # (참고: USB-PD 전력 부족 시 turbo 제어가 필요하면 services.tlp.settings.CPU_BOOST_ON_AC = 0 추가)
+  services.irqbalance.enable = true;
 }
