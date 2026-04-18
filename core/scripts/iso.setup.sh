@@ -49,30 +49,17 @@ log_exec() {
 # 2. Initialization
 SHORT_CMD="nixup-install"
 
-BOOT_PART=$1
-ROOT_PART=$2
-HOST=$3
+HOST=${1:-}
 
 # Welcome Message
 log_msg "Init" "ISO: NixOS Installation Helper"
 
 show_usage() {
-    log_msg "Usage" "$SHORT_CMD <EFI_PART> <ROOT_PART> <HOSTNAME>"
-    log_msg "Usage" "Example: $SHORT_CMD /dev/nvme0n1p1 /dev/nvme0n1p2 host"
+    log_msg "Usage" "$SHORT_CMD [HOSTNAME]"
+    log_msg "Usage" "Example: $SHORT_CMD host"
     echo ""
     log_msg "Notice" "Target repository: ${NIXOS_REPO:-unknown}"
 }
-
-if [ -z "$BOOT_PART" ] || [ -z "$ROOT_PART" ] || [ -z "$HOST" ]; then
-    show_usage
-    exit 1
-fi
-
-# Print Configuration Info
-log_msg "Init" "Action:   installation"
-log_msg "Init" "Target:   Boot($BOOT_PART), Root($ROOT_PART)"
-log_msg "Init" "Hostname: $HOST"
-echo ""
 
 # 3. Ensure NIXOS_REPO is known before clone
 # (목적: clone 전에 레포 주소 확보 — 레이블 추출을 위해 먼저 clone 필요)
@@ -80,6 +67,197 @@ if [ -z "${NIXOS_REPO:-}" ]; then
     log_msg "Notice" "nixos_repo environment variable is not defined."
     read -rp "$(printf "${YELLOW}%-13s${NC} | enter repository (e.g. user/nixos): " "ISO Input")" NIXOS_REPO
 fi
+
+# Ask HOST if not provided as argument
+if [ -z "$HOST" ]; then
+    read -rp "$(printf "${YELLOW}%-13s${NC} | enter hostname: " "ISO Input")" HOST
+fi
+
+# 0. Partition Setup
+echo ""
+log_msg "Disk" "current block devices:"
+lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT
+echo ""
+
+_NEW_PARTITIONS=false
+
+# Detect virtualization (for incus-guest auto-config on new host profiles)
+_IS_VM=false
+if _VIRT_TYPE=$(systemd-detect-virt 2>/dev/null); then
+    _IS_VM=true
+    log_msg "Notice" "virtualized environment detected: $_VIRT_TYPE"
+fi
+
+read -rp "$(printf "${YELLOW}%-13s${NC} | partition mode — 1=use existing, 2=create new [2]: " "ISO Question")" _PART_MODE
+_PART_MODE="${_PART_MODE:-2}"
+
+if [[ "$_PART_MODE" == "1" ]]; then
+    # Use existing partitions
+    read -rp "$(printf "${YELLOW}%-13s${NC} | EFI partition path (e.g. /dev/nvme0n1p1): " "ISO Input")" BOOT_PART
+    read -rp "$(printf "${YELLOW}%-13s${NC} | root partition path (e.g. /dev/nvme0n1p2): " "ISO Input")" ROOT_PART
+    log_msg "Disk" "using existing: boot=$BOOT_PART, root=$ROOT_PART"
+
+elif [[ "$_PART_MODE" == "2" ]]; then
+    read -rp "$(printf "${YELLOW}%-13s${NC} | target disk (e.g. /dev/nvme0n1): " "ISO Input")" _DISK
+
+    read -rp "$(printf "${YELLOW}%-13s${NC} | use entire disk? (Y/n): " "ISO Question")" _USE_WHOLE
+    _USE_WHOLE="${_USE_WHOLE:-Y}"
+
+    if [[ "$_USE_WHOLE" =~ ^[Yy]$ ]]; then
+        read -rp "$(printf "${RED}%-13s${NC} | WARNING: ALL data on '$_DISK' will be erased. type 'yes' to confirm: " "ISO Warning")" _CONFIRM_WIPE
+        if [[ "$_CONFIRM_WIPE" != "yes" ]]; then
+            log_msg "Error" "cancelled."
+            exit 1
+        fi
+        _PART_START="1MiB"
+        _PART_END="100%"
+        _WIPE=true
+    else
+        log_msg "Disk" "scanning free space on $_DISK ..."
+        _FREE_OUTPUT=$(python3 - "$_DISK" <<'PYEOF'
+import subprocess, sys, re
+
+disk = sys.argv[1]
+result = subprocess.run(
+    ['parted', '-m', disk, 'unit', 'GiB', 'print', 'free'],
+    capture_output=True, text=True
+)
+blocks = []
+for line in result.stdout.strip().split('\n')[2:]:
+    parts = line.rstrip(';').split(':')
+    if len(parts) >= 5 and parts[4] == 'free':
+        start, end, size = parts[1], parts[2], parts[3]
+        try:
+            size_val = float(re.sub(r'[^0-9.]', '', size))
+        except ValueError:
+            continue
+        if size_val >= 2:
+            blocks.append((start, end, size))
+
+if not blocks:
+    print("NONE")
+else:
+    for i, (start, end, size) in enumerate(blocks, 1):
+        print(f"{i}:{start}:{end}:{size}")
+PYEOF
+)
+
+        if [[ "$_FREE_OUTPUT" == "NONE" ]]; then
+            log_msg "Error" "no usable free space (>=2GiB) found on $_DISK."
+            exit 1
+        fi
+
+        echo ""
+        log_msg "Disk" "available free space:"
+        while IFS=: read -r _NUM _FS _FE _FSZ; do
+            printf "  %s) %s ~ %s  (%s)\n" "$_NUM" "$_FS" "$_FE" "$_FSZ"
+        done <<< "$_FREE_OUTPUT"
+        echo ""
+
+        read -rp "$(printf "${YELLOW}%-13s${NC} | select number or enter range (e.g. 128GiB-476GiB): " "ISO Input")" _FREE_SEL
+
+        if [[ "$_FREE_SEL" =~ ^[0-9]+$ ]]; then
+            _SELECTED=$(echo "$_FREE_OUTPUT" | grep "^${_FREE_SEL}:" || true)
+            if [ -z "$_SELECTED" ]; then
+                log_msg "Error" "invalid selection."
+                exit 1
+            fi
+            _PART_START=$(echo "$_SELECTED" | cut -d: -f2)
+            _PART_END=$(echo "$_SELECTED" | cut -d: -f3)
+        else
+            _PART_START="${_FREE_SEL%-*}"
+            _PART_END="${_FREE_SEL#*-}"
+        fi
+        _WIPE=false
+    fi
+
+    # Boot partition size
+    read -rp "$(printf "${YELLOW}%-13s${NC} | boot partition size (default: 1GiB, enter): " "ISO Input")" _BOOT_SIZE
+    _BOOT_SIZE="${_BOOT_SIZE:-1GiB}"
+
+    # Calculate boot end position
+    _BOOT_END=$(python3 - "$_PART_START" "$_BOOT_SIZE" <<'PYEOF'
+import sys, re
+
+def parse_to_mib(s):
+    s = s.strip()
+    val = float(re.sub(r'[^0-9.]', '', s))
+    unit = re.sub(r'[0-9. ]', '', s).upper()
+    if unit in ('GIB', 'G', 'GB'):
+        return val * 1024
+    elif unit in ('MIB', 'M', 'MB'):
+        return val
+    return val * 1024  # assume GiB
+
+start_mib = parse_to_mib(sys.argv[1])
+size_mib = parse_to_mib(sys.argv[2])
+end_mib = start_mib + size_mib
+
+if end_mib >= 1024 and end_mib % 1024 == 0:
+    print(f"{int(end_mib // 1024)}GiB")
+else:
+    print(f"{end_mib:.0f}MiB")
+PYEOF
+)
+
+    # Count existing partitions (before creation)
+    _OLD_PART_COUNT=$(parted -m "$_DISK" unit MiB print 2>/dev/null | grep -c '^[0-9]' || echo "0")
+    _NEW_BOOT_NUM=$((_OLD_PART_COUNT + 1))
+    _NEW_ROOT_NUM=$((_OLD_PART_COUNT + 2))
+
+    # Derive device names (nvme/mmcblk style vs sda style)
+    if [[ "$_DISK" =~ [0-9]$ ]]; then
+        _PREVIEW_BOOT="${_DISK}p${_NEW_BOOT_NUM}"
+        _PREVIEW_ROOT="${_DISK}p${_NEW_ROOT_NUM}"
+    else
+        _PREVIEW_BOOT="${_DISK}${_NEW_BOOT_NUM}"
+        _PREVIEW_ROOT="${_DISK}${_NEW_ROOT_NUM}"
+    fi
+
+    # Preview
+    echo ""
+    log_msg "Disk" "partitions to create:"
+    printf "${PURPLE}ISO${NC} ${PURPLE}%-9s${NC} | → %-22s EFI   %s  (%s ~ %s)\n" "Disk" "$_PREVIEW_BOOT" "$_BOOT_SIZE" "$_PART_START" "$_BOOT_END"
+    printf "${PURPLE}ISO${NC} ${PURPLE}%-9s${NC} | → %-22s root  remaining  (%s ~ %s)\n" "Disk" "$_PREVIEW_ROOT" "$_BOOT_END" "$_PART_END"
+    echo ""
+
+    read -rp "$(printf "${YELLOW}%-13s${NC} | create partitions? (y/N): " "ISO Question")" _CONFIRM_PART
+    if [[ ! "$_CONFIRM_PART" =~ ^[Yy]$ ]]; then
+        log_msg "Error" "cancelled."
+        exit 1
+    fi
+
+    # Create partitions
+    log_msg "Disk" "creating partitions on $_DISK ..."
+    log_exec "disk" ">" "parted"
+    if [[ "$_WIPE" == "true" ]]; then
+        parted "$_DISK" --script mklabel gpt
+    fi
+    parted "$_DISK" --script mkpart ESP fat32 "$_PART_START" "$_BOOT_END"
+    parted "$_DISK" --script set "$_NEW_BOOT_NUM" esp on
+    parted "$_DISK" --script mkpart primary "$_BOOT_END" "$_PART_END"
+    log_exec "disk" "<" "parted"
+
+    log_msg "Disk" "waiting for udev ..."
+    udevadm settle --timeout=10
+
+    BOOT_PART="$_PREVIEW_BOOT"
+    ROOT_PART="$_PREVIEW_ROOT"
+    _NEW_PARTITIONS=true
+
+    log_msg "Disk" "partitions ready: boot=$BOOT_PART, root=$ROOT_PART"
+
+else
+    log_msg "Error" "invalid mode. select 1 or 2."
+    exit 1
+fi
+
+# Print Configuration Info
+echo ""
+log_msg "Init" "Action:   installation"
+log_msg "Init" "Target:   Boot($BOOT_PART), Root($ROOT_PART)"
+log_msg "Init" "Hostname: $HOST"
+echo ""
 
 # 4. Cleanup Previous Attempt
 # 재시도 시 이전 마운트가 남아있으면 mkfs.*가 "contains a mounted filesystem"으로 실패함
@@ -131,7 +309,11 @@ DISK_LABEL="${DISK_LABEL:-nixos}"
 log_msg "Config" "disk labels: boot=$BOOT_LABEL, root=$DISK_LABEL"
 
 # 6. Boot Partition Format
-read -rp "$(printf "${YELLOW}%-13s${NC} | format boot partition($BOOT_PART)? (y/N): " "ISO Question")" FORMAT_BOOT
+if [[ "$_NEW_PARTITIONS" == "true" ]]; then
+    FORMAT_BOOT="y"
+else
+    read -rp "$(printf "${YELLOW}%-13s${NC} | format boot partition($BOOT_PART)? (y/N): " "ISO Question")" FORMAT_BOOT
+fi
 if [[ "$FORMAT_BOOT" =~ ^[Yy]$ ]]; then
     log_msg "Disk" "formatting boot partition (fat32, label=$BOOT_LABEL)..."
     log_exec "disk" ">" "mkfs.fat"
@@ -142,7 +324,11 @@ else
 fi
 
 # 7. Btrfs Format & Subvolume
-read -rp "$(printf "${YELLOW}%-13s${NC} | format root partition($ROOT_PART)? (y/N): " "ISO Question")" FORMAT_ROOT
+if [[ "$_NEW_PARTITIONS" == "true" ]]; then
+    FORMAT_ROOT="y"
+else
+    read -rp "$(printf "${YELLOW}%-13s${NC} | format root partition($ROOT_PART)? (y/N): " "ISO Question")" FORMAT_ROOT
+fi
 if [[ "$FORMAT_ROOT" =~ ^[Yy]$ ]]; then
     log_msg "Disk" "formatting root (label=$DISK_LABEL) and creating subvolumes..."
     log_exec "disk" ">" "mkfs.btrfs"
@@ -197,7 +383,13 @@ if [ ! -d "$HOST_DIR" ]; then
     mkdir -p "$HOST_DIR"
 
     # host.toml 생성
-    printf 'type = "desktop"\npreset = "%s"\n' "$_PRESET" > "$HOST_DIR/host.toml"
+    # (VM 환경이면 incus-guest mod 자동 활성화)
+    if [[ "$_IS_VM" == "true" ]]; then
+        printf 'type = "desktop"\npreset = "%s"\n\n[mods.sys.services.incus-guest]\nenable = true\n' "$_PRESET" > "$HOST_DIR/host.toml"
+        log_msg "Config" "incus-guest enabled in host.toml (virtualized environment)"
+    else
+        printf 'type = "desktop"\npreset = "%s"\n' "$_PRESET" > "$HOST_DIR/host.toml"
+    fi
 
     # 최소 configuration.nix — 하드웨어 임포트만
     printf '{...}: {\n  imports = [./_hardware.nix];\n}\n' > "$HOST_DIR/configuration.nix"
@@ -265,11 +457,6 @@ log_exec "nix" ">" "nixos-install"
 HOME=/root nixos-install --no-root-passwd --flake "$BUILD_DIR#$HOST"
 log_exec "nix" "<" "nixos-install"
 
-# 15-B. Set user password
-log_msg "Install" "setting password for user '$USERNAME' ..."
-nixos-enter --root /mnt -c \
-    "/nix/var/nix/profiles/system/sw/bin/passwd $USERNAME"
-
 # 16. Post-processing
 log_msg "Done" "running post-installation tasks for user: $USERNAME ..."
 mkdir -p "/mnt/home/$USERNAME/"
@@ -280,3 +467,4 @@ nixos-enter --root /mnt --command "ln -sfn /home/$USERNAME/nixos /etc/nixos"
 
 echo ""
 log_msg "Success" "installation complete. please reboot your system."
+log_msg "Notice" "first boot: run 'passwd' to set your password."

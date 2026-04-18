@@ -143,6 +143,12 @@
             # (wheel 그룹을 통해 sudo는 계속 사용 가능)
             users.users.root.hashedPassword = nixpkgs.lib.mkIf (!isISO) "!";
 
+            # (목적: 신규 설치 시 shadow 항목이 없으면 빈 비밀번호로 첫 부팅 로그인 허용)
+            # (이후 사용자가 passwd 실행하면 shadow가 갱신되어 이 설정은 무시됨 — mutableUsers=true 기본값)
+            # (ISO는 nixos 유저를 installation-cd-graphical-base.nix에서 별도 관리하므로 제외)
+            users.users.${hostCtx.metaConfig.username}.initialHashedPassword =
+              nixpkgs.lib.mkIf (!isISO) "";
+
             # (목적: nixup 로그 디렉터리 생성 및 쓰기 권한 부여)
             systemd.tmpfiles.rules = [
               "d /var/log/nixup 0775 ${hostCtx.metaConfig.username} users -"
