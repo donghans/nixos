@@ -404,10 +404,13 @@ fi
 
 # 11. Resolve Metadata (설치 대상 하드웨어 기반 resolved.json 생성)
 # (목적: /proc/meminfo에서 실제 RAM을 감지하여 swap/tmpfs 크기를 올바르게 설정)
+# (주의: 레포 루트가 아닌 임시 경로에 출력해야 git untracked 파일 오염을 방지함)
+RESOLVE_TMP="/tmp/nixos-resolve"
+mkdir -p "$RESOLVE_TMP"
 log_msg "Config" "generating resolved.json from target hardware..."
 log_exec "py" ">" "nixup.resolve.py"
 python3 /mnt/etc/nixos/core/scripts/nixup.resolve.py \
-    /mnt/etc/nixos /mnt/etc/nixos
+    /mnt/etc/nixos "$RESOLVE_TMP"
 log_exec "py" "<" "nixup.resolve.py"
 
 # 12. Metadata Extraction
@@ -428,7 +431,7 @@ nixos-generate-config --root /mnt --no-filesystems
 mkdir -p "/mnt/etc/nixos/hosts/$HOST"
 mv /mnt/etc/nixos/hardware-configuration.nix "/mnt/etc/nixos/hosts/$HOST/_hardware.nix"
 rm -f /mnt/etc/nixos/configuration.nix
-echo "$HOST" > /mnt/etc/nixos/.current_host
+printf 'NIXUP_LAST_HOST=%s\n' "$HOST" > /mnt/etc/nixos/.env
 
 # 14. Prepare .build/ Environment
 # (목적: nixup과 동일한 격리 환경 구성 — core/flake.nix의 import 경로가 .build/ 루트 기준이므로
@@ -443,8 +446,8 @@ cp -a /mnt/etc/nixos/core "$BUILD_DIR/"
 cp -a /mnt/etc/nixos/hosts "$BUILD_DIR/"
 cp -a /mnt/etc/nixos/mods "$BUILD_DIR/"
 cp /mnt/etc/nixos/core/flake.nix "$BUILD_DIR/flake.nix"
-cp /mnt/etc/nixos/resolved.json "$BUILD_DIR/"
-cp /mnt/etc/nixos/presets.json "$BUILD_DIR/"
+cp "$RESOLVE_TMP/resolved.json" "$BUILD_DIR/"
+cp "$RESOLVE_TMP/presets.json" "$BUILD_DIR/"
 for _lf in "/mnt/etc/nixos/.locks/$HOST.lock" "/mnt/etc/nixos/.locks/_rolling.lock"; do
     [ -f "$_lf" ] && cp "$_lf" "$BUILD_DIR/flake.lock" && break
 done
