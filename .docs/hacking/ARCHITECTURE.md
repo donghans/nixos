@@ -76,9 +76,9 @@
 실제 시스템의 살점이 되는 부분이며, **Mods 프레임워크** 기반으로 설계되었습니다.
 
 - **Domain-Driven Design**: `sys`, `gui`, `devel`로 도메인을 분리하여 응집도를 높였습니다.
-  - `mods/sys/`: 시스템 기반 — `base`(부팅/네트워크/Zsh/Git), `fonts`, `vfs`, `services`(bluetooth/tailscale/docker/networkmanager 등), `utils/nfd`
-  - `mods/gui/`: GUI 환경 — `core`(Hyprland 번들), `apps`(vivaldi/slack/bitwarden/speedcrunch), `utils/custom-notify-logger`
-  - `mods/devel/`: 개발 도구 — `toolchains`(node/python/fvm/devbox), `apps`(llm-cli/zed), `jetbrains`(android-studio 포함)
+  - `mods/sys/`: 시스템 기반 — `base`(부팅/네트워크/Zsh/Git), `fonts`, `vfs`, `services`(bluetooth/tailscale/docker/incus/networkmanager 등 12개), `utils/nfd`
+  - `mods/gui/`: GUI 환경 — `core`(Hyprland 번들), `apps`(vivaldi/slack/bitwarden/speedcrunch/incus-vm), `utils/custom-notify-logger`
+  - `mods/devel/`: 개발 도구 — `base`(공통 설정), `toolchains`(node/python/fvm/devbox/jetbrains), `apps`(llm-cli/zed)
 - **Opt-in Mods System**: 모든 `mods.<domain>.<feature>.enable`은 `false`에서 시작합니다. `isNixOS` 플래그를 통해 NixOS와 Home Manager 양측의 구성을 단일 파일에서 분기 처리합니다(Dual-Context).
 - **프리셋 시스템 (`mods/_preset/`)**: `workstation.toml`(개발 환경), `server.toml`(서버 환경), `iso.toml`(설치 미디어) 등 용도별 프리셋이 정의되어 있습니다. flake.nix가 이를 읽어 호스트별 mods와 병합하여 적용합니다. `host.toml`에는 프리셋 기본값에서 변경할 항목만 기재합니다.
 - **Mods Coverage Check**: flake.nix가 호스트별로 `mk-preset.nix` 기반 coverageModule을 주입합니다. ISO(`custom-iso`, `custom-iso-aarch64`) 빌드도 포함하여 두 가지 검사를 수행합니다: ① 선언됐지만 preset에 없는 옵션 감지, ② 같은 그룹 내 옵션 중 일부만 명시 시 오류(형제 완전성 검사).

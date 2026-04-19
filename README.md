@@ -22,11 +22,11 @@ nixos/
 ├── core/               # 프레임워크 엔진
 │   ├── flake.nix       # 메인 진입점
 │   ├── lib/            # 빌더(builders.nix), 옵션 선언(workspace-options.nix)
-│   └── scripts/        # nixup 관리 CLI (nixup.sh, nixup.resolve.py 등)
+│   └── scripts/        # nixup 관리 CLI + nixstrap 설치 스크립트
 ├── mods/               # 재사용 가능한 기능 모듈
 │   ├── sys/            # 시스템 기반 (base, fonts, vfs, services, utils)
 │   ├── gui/            # GUI 환경 (Hyprland 번들, apps, utils)
-│   ├── devel/          # 개발 도구 (toolchains, jetbrains, android)
+│   ├── devel/          # 개발 도구 (base, toolchains, apps)
 │   └── _preset/        # 구성 레시피 (workstation.toml 등)
 ├── hosts/              # 호스트별 고유 설정
 │   ├── base.toml       # 전역 메타데이터 (username, git, system)
