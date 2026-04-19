@@ -57,8 +57,8 @@ if load_params; then
 else
     ask_repo_and_clone
     select_host
-    ask_partitions
     [ "$_HOST_IS_NEW" = true ] && ask_preset
+    ask_partitions
 fi
 review_loop
 

@@ -22,7 +22,7 @@ log_msg() {
         Install)         cat_color=$PURPLE ;;
         Done|Success)    cat_color=$GREEN ;;
         Error)           cat_color=$RED ;;
-        Notice|Question) cat_color=$YELLOW ;;
+        Notice|Question|Input) cat_color=$YELLOW ;;
         *)               cat_color=$NC ;;
     esac
 
