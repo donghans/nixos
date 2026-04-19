@@ -40,7 +40,7 @@
       runHook preCheck
       export LC_ALL=C.UTF-8
       ${pkgs.stdenv.shellDryRun} "$target"
-      ${pkgs.shellcheck}/bin/shellcheck "$target"
+      ${pkgs.shellcheck}/bin/shellcheck -e SC1091,SC2034 "$target"
       runHook postCheck
     '';
   };

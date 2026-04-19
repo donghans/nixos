@@ -1,7 +1,6 @@
 #!/usr/bin/env nix-shell
 #! nix-shell -i bash -p python3 git jq parted btrfs-progs util-linux
 # shellcheck shell=bash
-# shellcheck disable=SC1091,SC2034
 set -euo pipefail
 
 # [nixstrap] NixOS 설치 스크립트
