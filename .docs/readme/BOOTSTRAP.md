@@ -154,8 +154,8 @@ host.toml의 `[mods.sys.services]` 섹션에서 개별 서비스를 `false`로 �
 기기에 실제로 설치하기 전에 설정이 올바른지 빌드로 확인할 수 있습니다. nixup이 설치된 기존 NixOS 환경에서 실행하세요.
 
 ```bash
-nixup os --dry-run    # NixOS 시스템 설정 빌드 검증
-nixup home --dry-run  # Home Manager 설정 빌드 검증
+nixup os --build    # NixOS 시스템 설정 빌드 검증
+nixup home --build  # Home Manager 설정 빌드 검증
 nixup check                      # 포맷팅 + 린트 + eval 통합 검증
 ```
 

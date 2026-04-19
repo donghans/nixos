@@ -7,7 +7,7 @@
 ## 1. Orchestration Phase (준비 및 격리)
 사용자의 작업 환경을 보호하고 빌드 일관성을 확보하는 단계입니다.
 
-1.  **Input Parsing**: 사용자의 명령(예: `nixup os`, `nixup home --dry-run`)을 해석하고 대상 호스트가 롤링 채널을 사용하는지 여부를 확인합니다.
+1.  **Input Parsing**: 사용자의 명령(예: `nixup os`, `nixup home --build`)을 해석하고 대상 호스트가 롤링 채널을 사용하는지 여부를 확인합니다.
 2.  **Resolve**: `nixup.resolve.py`가 `hosts/base.toml`, `hosts/<hostname>/host.toml`, `mods/_preset/*.toml`을 읽어 `presets.json`(프리셋 mods + explicitOptional)과 `resolved.json`(호스트별 merged 데이터)을 생성합니다.
 3.  **Build Isolation**: 레포 내 `.build/` 디렉터리에 소스 파일을 물리 복사합니다. `.build/`는 메인 레포의 `.gitignore`에 등록되어 있고 자체 `.git`이 없습니다. nix는 `path:` 모드로 호출되어 git 추적 여부를 확인하지 않고 해당 디렉터리를 store에 직접 복사하여 순수(pure) 평가를 수행합니다. 커밋하지 않은 실험적인 코드도 즉시 테스트할 수 있습니다.
 4.  **Lock Injection**: 대상 기기의 특성에 맞는 락 파일(`.locks/_rolling.lock` 또는 `<hostname>.lock`)을 `.build/flake.lock`으로 주입합니다. `flake.lock`은 `.build/` 안에만 존재하며 메인 레포에 커밋되지 않습니다.

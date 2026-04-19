@@ -3,7 +3,7 @@
 nixup \- NixOS update utility
 .SH SYNOPSIS
 .B nixup
-[\fISUBCOMMAND\fR] [\fIHOST\fR] [\fIFLAGS\fR]
+[\fISUBCOMMAND\fR] [\fIFLAGS\fR]
 .br
 .B nixup help
 [\fISUBCOMMAND\fR]
@@ -49,14 +49,14 @@ Show help. Pass a subcommand name to see subcommand-specific help.
 .SH FLAGS
 .SS os / home
 .TP
-.B \-d, \-\-dry\-run
+.B \-b, \-\-build
 Build only; do not create a new generation or activate.
 .TP
-.B \-t, \-\-activate
-Activate immediately without registering a new generation (test mode).
+.B \-t, \-\-try
+Activate immediately without registering a new generation.
 Reverts on reboot.
 .TP
-.B \-n, \-\-next\-boot
+.B \-s, \-\-stage
 Schedule activation for the next boot.
 .SS check
 .TP
@@ -88,16 +88,10 @@ Apply OS configuration to the current host:
     nixup os
 .fi
 .PP
-Apply configuration to a specific host:
+Build home configuration only:
 .PP
 .nf
-    nixup os my-host
-.fi
-.PP
-Dry-run home configuration:
-.PP
-.nf
-    nixup home --dry-run
+    nixup home --build
 .fi
 .PP
 Clean all old generations system-wide, keeping last 5:

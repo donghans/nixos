@@ -12,9 +12,9 @@ nixup [subcommand] [flags]
 
 - **`subcommand`**: 작업 종류 (`os`, `home`, `iso`, `fix`, `check`, `update`, `clean`)
   - 생략 시 `os` (시스템 설정 적용)가 기본값입니다.
-- **`flags`**: 동작 제어 옵션 (`--activate`, `--next-boot`, `--dry-run` 등)
+- **`flags`**: 동작 제어 옵션 (`--try`, `--stage`, `--build` 등)
 
-> **대상 호스트 결정**: `.env`의 `NIXUP_LAST_HOST` 값을 우선 사용합니다. 없으면 OS 호스트명(`hostname -s`)으로 자동 감지합니다. switch/`--activate`/`--next-boot` 실행 후에는 해당 호스트가 `.env`에 자동으로 저장됩니다.
+> **대상 호스트 결정**: `.env`의 `NIXUP_LAST_HOST` 값을 우선 사용합니다. 없으면 OS 호스트명(`hostname -s`)으로 자동 감지합니다. switch/`--try`/`--stage` 실행 후에는 해당 호스트가 `.env`에 자동으로 저장됩니다.
 
 ---
 
@@ -29,20 +29,20 @@ nixup [subcommand] [flags]
   4. `shellcheck` — 셸 스크립트 정적 분석
   5. `nix eval` — 현재 호스트에 대해 빌드 가능 여부를 빠르게 검증
 - `nixup check --deep`: 5단계를 `nix flake check`로 교체하여 **전체 호스트**를 완전히 검사합니다. 시간이 오래 걸리지만 CI 수준의 완전한 검증을 제공합니다.
-- **참고**: `nixup check`는 `.env`의 `NIXUP_LAST_HOST`를 갱신하지 않습니다. 호스트 기록은 switch/`--activate`/`--next-boot` 시에만 이루어집니다.
+- **참고**: `nixup check`는 `.env`의 `NIXUP_LAST_HOST`를 갱신하지 않습니다. 호스트 기록은 switch/`--try`/`--stage` 시에만 이루어집니다.
 
 ### 시스템 설정 관리 (`os`)
 기존 `nixos-rebuild`를 대체하며, 빌드 격리 환경에서 안전하게 수행됩니다.
 - `nixup [os]`: 설정을 즉시 적용하고 부팅 메뉴에 추가합니다. (가장 많이 사용)
-- `nixup os --next-boot` / `-n`: 다음 부팅 시 적용되도록 설정만 합니다.
-- `nixup os --activate` / `-t`: 현재 세션에만 임시로 설정을 적용합니다. (재부팅 시 원복)
-- `nixup os --dry-run` / `-d`: 빌드만 수행하고 새 세대를 생성하지 않습니다. 빌드 캐시 워밍업 또는 설정 오류 사전 확인에 유용합니다.
+- `nixup os --stage` / `-s`: 다음 부팅 시 적용되도록 설정만 합니다.
+- `nixup os --try` / `-t`: 현재 세션에만 임시로 설정을 적용합니다. (재부팅 시 원복)
+- `nixup os --build` / `-b`: 빌드만 수행하고 새 세대를 생성하지 않습니다. 빌드 캐시 워밍업 또는 설정 오류 사전 확인에 유용합니다.
 
 ### 사용자 설정 관리 (`home`)
 Home Manager 설정을 적용합니다.
 - `nixup home`: 유저 도구, 테마, 앱 설정 등을 즉시 반영합니다.
-- `nixup home --activate` / `-t`: 홈 설정을 dry-run 모드로 미리 확인합니다.
-- `nixup home --dry-run` / `-d`: 홈 설정을 빌드만 수행합니다. (`os --dry-run`과 동일한 목적)
+- `nixup home --try` / `-t`: 홈 설정을 즉시 활성화합니다. (세대 등록 없음, 재부팅 시 원복)
+- `nixup home --build` / `-b`: 홈 설정을 빌드만 수행합니다. (`os --build`와 동일한 목적)
 
 ### 시스템 업데이트 및 관리
 - `nixup update`: `flake.lock`의 모든 입력을 최신 버전으로 업데이트합니다. (Rolling 호스트는 `_rolling.lock` 업데이트)
@@ -65,7 +65,7 @@ Home Manager 설정을 적용합니다.
 ### 상황 A: 새로운 앱 설정을 테스트하고 싶을 때
 시스템을 영구적으로 바꾸기 전에 설정이 올바른지 확인하고 싶을 때 사용합니다.
 ```bash
-nixup os --activate
+nixup os --try
 ```
 - 결과가 만족스러우면 `nixup os`로 영구 적용합니다.
 

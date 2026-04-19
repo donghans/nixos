@@ -59,9 +59,9 @@ for arg in "$@"; do
         --deep)
             # shellcheck disable=SC2034
             CHECK_DEEP=true ;;
-        -t|--activate)  ACTION="test" ;;
-        -n|--next-boot) ACTION="boot" ;;
-        -d|--dry-run)   ACTION="build" ;;
+        -t|--try)    ACTION="test" ;;
+        -s|--stage)  ACTION="boot" ;;
+        -b|--build)  ACTION="build" ;;
         --keep=*)       CLEAN_KEEP="${arg#--keep=}" ;;
         --help|-h)      print_help_subcmd "$TARGET_PROFILE"; exit 0 ;;
         -*)
@@ -77,6 +77,19 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# 상호 배타 체크: --build / --try / --stage 는 동시에 사용 불가
+_action_flags=0
+for arg in "$@"; do
+    case $arg in
+        -b|--build|-t|--try|-s|--stage) ((_action_flags++)) ;;
+    esac
+done
+if [ "$_action_flags" -gt 1 ]; then
+    log_msg "Error" "--build, --try, --stage 는 동시에 사용할 수 없습니다."
+    exit 1
+fi
+unset _action_flags
 
 # 3. Logging & Lock
 exec 3>&1

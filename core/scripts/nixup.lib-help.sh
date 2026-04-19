@@ -22,15 +22,15 @@ NixOS update utility
   help      이 도움말 표시
 
 공통 플래그:
-  -d, --dry-run       빌드만 수행 (적용 안 함)
-  -t, --activate      즉시 활성화 (세대 등록 없음, test 모드)
-  -n, --next-boot     다음 부팅 시 적용
+  -b, --build         빌드만 수행 (적용 안 함)
+  -t, --try           즉시 활성화 (세대 등록 없음, 재부팅 시 원복)
+  -s, --stage         다음 부팅 시 적용
   -h, --help          도움말 표시
 
 예시:
   nixup                         현재 호스트에 OS 설정 적용
-  nixup os my-host              특정 호스트에 OS 설정 적용
-  nixup home --dry-run          홈 설정 빌드만 수행
+  nixup os --try                임시 활성화 (재부팅 시 원복)
+  nixup home --build            홈 설정 빌드만 수행
   nixup clean --all --keep=5    시스템 전체 정리, 5세대 보존
   nixup check --deep            전체 호스트 완전 검사
 
@@ -43,38 +43,33 @@ print_help_subcmd() {
     case "$subcmd" in
         os)
             cat <<'EOF'
-nixup os [HOST] [FLAGS]  —  NixOS 시스템 빌드 및 적용
-
-  HOST      대상 호스트명 (생략 시 마지막 사용 호스트)
+nixup os [FLAGS]  —  NixOS 시스템 빌드 및 적용
 
   플래그:
-    -d, --dry-run       빌드만 수행, 새 세대 생성 안 함
-    -t, --activate      즉시 활성화 (test 모드, 세대 등록 없음)
-    -n, --next-boot     다음 부팅 시 적용
+    -b, --build         빌드만 수행, 새 세대 생성 안 함
+    -t, --try           즉시 활성화 (세대 등록 없음, 재부팅 시 원복)
+    -s, --stage         다음 부팅 시 적용
     -h, --help          이 도움말
 
   예시:
     nixup                       현재 호스트 즉시 적용 (os 생략 가능)
-    nixup os my-host            특정 호스트 적용
-    nixup os --dry-run          빌드만 수행 (미리보기)
-    nixup os --activate         임시 활성화 (재부팅 시 원복)
+    nixup os --build            빌드만 수행 (미리보기)
+    nixup os --try              임시 활성화 (재부팅 시 원복)
 EOF
             ;;
         home)
             cat <<'EOF'
-nixup home [HOST] [FLAGS]  —  Home Manager 빌드 및 적용
-
-  HOST      대상 호스트명 (생략 시 마지막 사용 호스트)
+nixup home [FLAGS]  —  Home Manager 빌드 및 적용
 
   플래그:
-    -d, --dry-run       빌드만 수행
-    -t, --activate      즉시 활성화 (세대 등록 없음)
-    -n, --next-boot     다음 부팅 시 적용
+    -b, --build         빌드만 수행
+    -t, --try           즉시 활성화 (세대 등록 없음, 재부팅 시 원복)
+    -s, --stage         다음 부팅 시 적용
     -h, --help          이 도움말
 
   예시:
     nixup home                  현재 호스트 홈 설정 적용
-    nixup home --dry-run        빌드만 수행
+    nixup home --build          빌드만 수행
 EOF
             ;;
         check)
