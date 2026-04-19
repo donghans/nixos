@@ -2,6 +2,8 @@
 
 이 프로젝트는 유지보수성과 확장성을 극대화하기 위해 명확한 **관심사 분리(Separation of Concerns)**를 실천하고 있습니다.
 
+> **다이어그램**: [ARCHITECTURE.mermaid](./ARCHITECTURE.mermaid) (레이어 구조 및 데이터 흐름)
+
 ---
 
 ## 1. 실행 엔진 레이어 (CLI Engine Layer)
@@ -13,16 +15,21 @@
   - **역할**: 모든 명령의 통합 입구이자 빌드 오케스트레이터입니다.
   - **특징**: `nix-shell` 쉬뱅을 사용하여 `jq`, `nom` 등의 도구가 없어도 시스템을 부트스트랩할 수 있도록 설계되었습니다. 로깅(`YYYYMMDDTHHMMSS.log`, 예: `20260405T120000.log`)과 세션 락(`flock`)을 독점적으로 관리합니다.
 - **Task & Lib**:
+  - **`nixup.lib-ui.sh`**: 색상 상수, `log_msg`/`log_exec` 헬퍼, 초기화 배너 출력.
   - **`nixup.lib-build.sh`**: `.build/` 격리 빌드 환경 구축 로직. 소스를 물리 복사하고 nix를 `path:` 모드로 호출하여 git 추적 없이 순수 평가를 수행합니다.
   - **`nixup.lib-lock.sh`**: 기기 특성(`isRolling`)에 따른 유연한 락 파일 관리 로직.
   - **`nixup.resolve.py`**: TOML 소스(`base.toml`, `host.toml`, `_preset/*.toml`)를 읽어 Nix가 사용할 `resolved.json`과 `presets.json`을 생성하는 메타데이터 변환기.
   - **`nixup.task-*.sh`**: 실제 비즈니스 로직(빌드, 업데이트, 복구 등)을 수행하는 모듈형 스크립트.
-  - **`nixstrap` (core/scripts/)**: ISO 부팅 환경에서 실행되는 설치 스크립트. `nixstrap` 명령으로 노출되며 다음 모듈로 구성됩니다:
-    - `nixstrap.sh`: 진입점 스켈레톤. Phase 1/2 흐름 제어 및 공유 상태 관리.
-    - `nixstrap.lib-{log,ui,input,install}.sh`: 로깅, 화살표 키 UI, Phase 1 입력 수집, Phase 2 설치 실행 함수.
-    - `nixstrap.lib.py`: TOML 파싱, 파티션 검증, 디스크 레이블 추출 등 Python 헬퍼 (8개 서브커맨드).
-    - **Phase 1**: 저장소 클론, 호스트·파티션·프리셋 선택. 이전 세션 파라미터(`/root/nixstrap-params.env`) 복원 지원.
-    - **Phase 2**: 파티셔닝(EFI+Btrfs) → 서브볼륨 생성 → 마운트 → 하드웨어 감지 → `nixos-install` → 후처리(저장소 이동·심볼릭 링크) 14단계 순서 실행.
+- **`nixstrap.sh` (Bootstrap Engine)**:
+  - nixup과 독립적인 설치 전용 서브시스템. `nixstrap` 명령으로 노출됩니다. Phase 1/2 흐름 제어 및 공유 상태 관리.
+  - **Phase 1 (입력 수집)**: 저장소 클론 또는 로컬 경로 사용, 호스트·파티션·프리셋 선택, 비밀번호 입력. 이전 세션 파라미터(`/root/nixstrap-params.env`) 복원 지원.
+  - **Phase 2 (설치 실행)**: 파티셔닝(EFI+Btrfs) → 서브볼륨 생성 → 마운트 → 하드웨어 감지 → `nixos-install` → 후처리(저장소 이동·심볼릭 링크·비밀번호 적용) 순서 실행.
+  - **Lib**:
+    - `nixstrap.lib-ui.sh`: 색상 상수, 로깅 헬퍼, 화살표 키 선택 UI.
+    - `nixstrap.lib-input.sh`: Phase 1 대화형 입력 함수 (저장소·호스트·파티션·프리셋·비밀번호).
+    - `nixstrap.lib-install.sh`: Phase 2 설치 실행 함수.
+    - `nixstrap.repo.py`: TOML 파싱, 디스크 레이블 추출 등 레포지토리/설정 헬퍼 (6개 서브커맨드).
+    - `nixstrap.part.py`: 빈 공간 탐색, 파티션 범위 검증 등 디스크/파티션 헬퍼 (4개 서브커맨드).
 
 ---
 

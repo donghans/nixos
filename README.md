@@ -62,8 +62,8 @@ fvm = true
 
 시스템이 설치된 후에는 프로젝트 경로와 상관없이 터미널 어디서든 `nixup` 명령어를 사용할 수 있습니다. 구체적인 명령어 사용법과 활용 사례는 [NIXUP.md](./.docs/readme/NIXUP.md) 가이드를 참조하세요.
 
-- **OS 설정 적용:** `nixup [os] [host_id]`
-- **Home Manager 적용:** `nixup home [host_id]`
+- **OS 설정 적용:** `nixup [os]`
+- **Home Manager 적용:** `nixup home`
 - **커스텀 ISO 빌드:** `nixup iso` (x86_64) / `nixup iso --arm` (aarch64) — 결과물은 `.build/` 폴더에 생성됨
 - **시스템 업데이트:** `nixup update`
 - **깨진 패키지 복구:** `nixup fix [pkg1] [pkg2] ...`

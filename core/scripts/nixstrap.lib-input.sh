@@ -22,13 +22,13 @@ ask_repo_and_clone() {
             log_exec "git" "<" "git clone"
             # base.toml의 git.nixosRepo와 비교하여 불일치 시 치환 여부 확인
             local _toml_repo _replace
-            _toml_repo=$(python3 "$SCRIPT_DIR/nixstrap.lib.py" check-repo "$REPO_TMP")
+            _toml_repo=$(python3 "$SCRIPT_DIR/nixstrap.repo.py" check-repo "$REPO_TMP")
             if [ -n "$_toml_repo" ] && [ "$_toml_repo" != "$NIXOS_REPO" ]; then
                 log_msg "Notice" "base.toml has git.nixosRepo = '$_toml_repo'"
                 read -rp "$(printf "$(log_prompt)update to '$NIXOS_REPO'? (Y/n): ")" _replace
                 _replace="${_replace:-Y}"
                 if [[ "$_replace" =~ ^[Yy]$ ]]; then
-                    python3 "$SCRIPT_DIR/nixstrap.lib.py" update-repo "$REPO_TMP" "$NIXOS_REPO"
+                    python3 "$SCRIPT_DIR/nixstrap.repo.py" update-repo "$REPO_TMP" "$NIXOS_REPO"
                     log_msg "Config" "base.toml updated: git.nixosRepo = '$NIXOS_REPO'"
                 fi
             fi
@@ -42,7 +42,7 @@ ask_repo_and_clone() {
 
 select_host() {
     local host_data
-    host_data=$(python3 "$SCRIPT_DIR/nixstrap.lib.py" list-hosts "$REPO_TMP")
+    host_data=$(python3 "$SCRIPT_DIR/nixstrap.repo.py" list-hosts "$REPO_TMP")
 
     local -a _host_names=() _host_labels=()
     while IFS='|' read -r _name _type _preset_val; do
@@ -111,7 +111,7 @@ ask_partitions() {
         # EFI 파티션 선택
         local _efi_data _efi_name _efi_size _efi_fs _efi_label
         local -a _efi_paths=() _efi_labels=()
-        _efi_data=$(python3 "$SCRIPT_DIR/nixstrap.lib.py" list-parts efi)
+        _efi_data=$(python3 "$SCRIPT_DIR/nixstrap.part.py" list-parts efi)
         if [[ "$_efi_data" != "NONE" ]]; then
             while IFS='|' read -r _efi_name _efi_size _efi_fs _efi_label; do
                 [ -z "$_efi_name" ] && continue
@@ -136,7 +136,7 @@ ask_partitions() {
         # Root 파티션 선택
         local _root_data _root_name _root_size _root_fs _root_label
         local -a _root_paths=() _root_labels=()
-        _root_data=$(python3 "$SCRIPT_DIR/nixstrap.lib.py" list-parts root)
+        _root_data=$(python3 "$SCRIPT_DIR/nixstrap.part.py" list-parts root)
         if [[ "$_root_data" != "NONE" ]]; then
             while IFS='|' read -r _root_name _root_size _root_fs _root_label; do
                 [ -z "$_root_name" ] && continue
@@ -165,7 +165,7 @@ ask_partitions() {
         # 디스크 선택
         local _disk_data _disk_name _disk_size
         local -a _disk_paths=() _disk_labels=()
-        _disk_data=$(python3 "$SCRIPT_DIR/nixstrap.lib.py" list-parts disk)
+        _disk_data=$(python3 "$SCRIPT_DIR/nixstrap.part.py" list-parts disk)
         if [[ "$_disk_data" != "NONE" ]]; then
             while IFS='|' read -r _disk_name _disk_size; do
                 [ -z "$_disk_name" ] && continue
@@ -201,7 +201,7 @@ ask_partitions() {
             _WIPE=true
         else
             log_msg "Disk" "scanning free space on $_DISK ..."
-            _FREE_OUTPUT=$(python3 "$SCRIPT_DIR/nixstrap.lib.py" free-space "$_DISK")
+            _FREE_OUTPUT=$(python3 "$SCRIPT_DIR/nixstrap.part.py" free-space "$_DISK")
 
             if [[ "$_FREE_OUTPUT" == "NONE" ]]; then
                 log_msg "Error" "no usable free space (>=2GiB) found on $_DISK."
@@ -229,7 +229,7 @@ ask_partitions() {
                     _PART_START="${_FREE_SEL%-*}"
                     _PART_END="${_FREE_SEL#*-}"
                     local _range_err
-                    if ! _range_err=$(python3 "$SCRIPT_DIR/nixstrap.lib.py" check-range "$_PART_START" "$_PART_END" 2>&1); then
+                    if ! _range_err=$(python3 "$SCRIPT_DIR/nixstrap.part.py" check-range "$_PART_START" "$_PART_END" 2>&1); then
                         log_msg "Error" "$_range_err"
                         continue
                     fi
@@ -242,7 +242,7 @@ ask_partitions() {
         read -rp "$(printf "$(log_prompt)boot partition size (default: 1GiB, enter): ")" _BOOT_SIZE
         _BOOT_SIZE="${_BOOT_SIZE:-1GiB}"
 
-        _BOOT_END=$(python3 "$SCRIPT_DIR/nixstrap.lib.py" boot-end "$_PART_START" "$_BOOT_SIZE")
+        _BOOT_END=$(python3 "$SCRIPT_DIR/nixstrap.part.py" boot-end "$_PART_START" "$_BOOT_SIZE")
 
         # 기존 파티션 수로 새 파티션 번호 계산
         _OLD_PART_COUNT=$(parted -m "$_DISK" unit MiB print 2>/dev/null | grep -c '^[0-9]' || echo "0")
@@ -270,7 +270,7 @@ ask_preset() {
     while IFS= read -r _pname; do
         [ -z "$_pname" ] && continue
         _preset_opts+=("$_pname")
-    done < <(python3 "$SCRIPT_DIR/nixstrap.lib.py" list-presets "$REPO_TMP")
+    done < <(python3 "$SCRIPT_DIR/nixstrap.repo.py" list-presets "$REPO_TMP")
 
     # 레포에 프리셋이 없는 경우 폴백 (정상적으론 발생 안 함)
     if [ ${#_preset_opts[@]} -eq 0 ]; then
@@ -279,6 +279,35 @@ ask_preset() {
     echo ""
     _pick "select preset:" "${_preset_opts[@]}"
     _PRESET="${_preset_opts[$REPLY]}"
+}
+
+ask_password() {
+    local _preview_user _pw _pw2
+    _preview_user=$(python3 "$SCRIPT_DIR/nixstrap.repo.py" username "$REPO_TMP" 2>/dev/null || true)
+    local _label="${_preview_user:-user}"
+    echo ""
+    log_msg "Notice" "set login password for '$_label' (press Enter twice to skip):"
+    while true; do
+        read -rsp "$(printf "$(log_prompt)password: ")" _pw
+        echo ""
+        if [ -z "$_pw" ]; then
+            read -rp "$(printf "$(log_prompt)skip password setup? (y/N): ")" _skip
+            if [[ "${_skip:-N}" =~ ^[Yy]$ ]]; then
+                _USER_PASSWORD=""
+                log_msg "Notice" "skipped — no password will be set."
+                break
+            fi
+            continue
+        fi
+        read -rsp "$(printf "$(log_prompt)confirm:  ")" _pw2
+        echo ""
+        if [ "$_pw" = "$_pw2" ]; then
+            _USER_PASSWORD="$_pw"
+            log_msg "Config" "password accepted."
+            break
+        fi
+        log_msg "Error" "passwords do not match. try again."
+    done
 }
 
 show_summary() {

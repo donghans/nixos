@@ -30,9 +30,7 @@ email     = "your@email.com"                # ← 필수 수정
 nixosRepo = "<your-username>/nixos"         # ← 필수 수정 (설치 시 클론할 저장소)
 ```
 
-> **참고**: `nixosRepo`가 실제 클론한 저장소와 다를 경우 nixstrap이 설치 도중 업데이트를 제안합니다.
->
-> `diskDevice`/`bootDevice`(파티션 경로)와 `rollingStateVersion` 등은 기본값을 유지해도 됩니다. 기기마다 다른 파티션 경로가 필요한 경우 `host.toml`에서 오버라이드할 수 있습니다 (섹션 4 참고).
+> **참고**: `diskDevice`/`bootDevice`(파티션 경로)와 `rollingStateVersion` 등은 기본값을 유지해도 됩니다. 기기마다 다른 파티션 경로가 필요한 경우 `host.toml`에서 오버라이드할 수 있습니다 (섹션 4 참고).
 
 ---
 
@@ -63,7 +61,7 @@ cd nixos
 
 ### 경로 B: 커스텀 ISO 빌드 (기존 NixOS 환경)
 
-nixstrap이 포함된 커스텀 live GUI ISO를 빌드합니다. 부팅 직후 친숙한 Hyprland 환경과 설치 명령이 자동으로 안내됩니다.
+nixstrap이 포함된 커스텀 live GUI ISO를 빌드합니다. 부팅 직후 이 레포지토리의 Workstation 환경(Hyprland)으로 부팅되며, 설치 명령이 자동으로 안내됩니다.
 
 ```bash
 ./nixup-iso.sh        # x86_64

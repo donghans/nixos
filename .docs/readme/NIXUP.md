@@ -29,7 +29,7 @@ nixup [subcommand] [flags]
   4. `shellcheck` — 셸 스크립트 정적 분석
   5. `nix eval` — 현재 호스트에 대해 빌드 가능 여부를 빠르게 검증
 - `nixup check --deep`: 5단계를 `nix flake check`로 교체하여 **전체 호스트**를 완전히 검사합니다. 시간이 오래 걸리지만 CI 수준의 완전한 검증을 제공합니다.
-- **참고**: `nixup check`는 `.env`의 `NIXUP_LAST_HOST`를 갱신하지 않습니다. 호스트 기록은 switch/`--try`/`--stage` 시에만 이루어집니다.
+
 
 ### 시스템 설정 관리 (`os`)
 기존 `nixos-rebuild`를 대체하며, 빌드 격리 환경에서 안전하게 수행됩니다.

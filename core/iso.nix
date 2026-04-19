@@ -7,31 +7,43 @@
   # 1. lib 파일들을 Nix store에 바이트 복사 (문자열 인터폴레이션 없음 → 비 ASCII 안전)
   nixstrap-libs = pkgs.runCommand "nixstrap-libs" {} ''
     mkdir -p $out
-    cp ${./scripts/nixstrap.lib-log.sh}  $out/nixstrap.lib-log.sh
     cp ${./scripts/nixstrap.lib-ui.sh}   $out/nixstrap.lib-ui.sh
     cp ${./scripts/nixstrap.lib-input.sh}   $out/nixstrap.lib-input.sh
     cp ${./scripts/nixstrap.lib-install.sh} $out/nixstrap.lib-install.sh
-    cp ${./scripts/nixstrap.lib.py}         $out/nixstrap.lib.py
+    cp ${./scripts/nixstrap.repo.py}        $out/nixstrap.repo.py
+    cp ${./scripts/nixstrap.part.py}        $out/nixstrap.part.py
   '';
 
   # 2. nixstrap.sh를 ISO 시스템의 bin 폴더에 넣기 위한 '패키지' 생성
-  nixstrap-script = pkgs.writeShellApplication {
-    name = "nixstrap"; # 실행될 명령어 이름
+  #
+  # nixstrap.sh shebang의 -p 목록을 파싱하여 runtimeInputs로 자동 주입.
+  # → 도구 목록을 shebang 한 곳에서만 관리하고 여기서 중복 선언하지 않음.
+  #
+  # runtimeInputs의 두 가지 역할:
+  #   (1) 실행 시 PATH 주입 — nixstrap이 nix-shell 없이도 python3·parted 등을 바로 사용
+  #   (2) ISO 클로저 포함 — 오프라인 설치 환경에서도 해당 패키지가 /nix/store에 존재
+  #
+  # binary 이름을 nixstrap-wrapped로 분리하여 alias → binary 흐름을 명확히 함.
+  # (alias nixstrap → sudo -E nixstrap-wrapped)
+  _nixstrapPkgLine = builtins.elemAt (lib.splitString "\n" (builtins.readFile ./scripts/nixstrap.sh)) 1;
+  # "#! nix-shell -i bash -p python3 git jq parted btrfs-progs util-linux"
+  _nixstrapPkgStr = lib.removePrefix "#! nix-shell -i bash -p " _nixstrapPkgLine;
+  nixstrapRuntimePkgs = map (name: pkgs.${name})
+    (lib.filter (s: s != "") (lib.splitString " " _nixstrapPkgStr));
 
-    # 스크립트 실행에 필요한 패키지들을 런타임에 보장
-    runtimeInputs = [
-      pkgs.jq
-      pkgs.git
-      pkgs.python3
-      pkgs.btrfs-progs
-      pkgs.util-linux # mount, umount 등
-    ];
+  nixstrap-wrapped = pkgs.writeShellApplication {
+    name = "nixstrap-wrapped";
 
-    # SCRIPT_DIR을 nixstrap-libs store 경로로 주입한 뒤 nixstrap.sh 본문 추가
-    # (nixstrap.sh는 SCRIPT_DIR이 미리 설정된 경우 덮어쓰지 않음)
+    runtimeInputs = nixstrapRuntimePkgs;
+
+    # SCRIPT_DIR: nixstrap-libs store 경로로 주입 (lib 파일 탐색용)
+    # NIXOS_REPO: ISO 빌드 시점의 레포 주소를 기본값으로 내장
+    #   → alias는 sudo 권한 상승만 담당, 레포 설정은 binary 안에 캡슐화
+    #   → 사용자가 Enter만 눌러도 올바른 레포가 선택됨 (변경도 가능)
     text =
       ''
         export SCRIPT_DIR="${nixstrap-libs}"
+        export NIXOS_REPO="${metaConfig.nixosRepo}"
       ''
       + builtins.readFile ./scripts/nixstrap.sh;
 
@@ -200,14 +212,12 @@ in {
   # ISO에 기본적으로 포함하고 싶은 도구들
   environment.systemPackages = with pkgs; [
     parted
-    disko
     pciutils # lspci
     usbutils # lsusb
-    nixstrap-script
+    nixstrap-wrapped
   ];
 
   environment.shellAliases = {
-    # 기본 리포지토리를 주입하여 nixstrap을 sudo로 실행
-    nixstrap = "NIXOS_REPO=${metaConfig.nixosRepo} sudo -E nixstrap";
+    nixstrap = "sudo -E nixstrap-wrapped";
   };
 }

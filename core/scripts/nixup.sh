@@ -16,6 +16,7 @@ if [ -f "$ENV_FILE" ] && [ -z "${NIXUP_DOTENV_LOADED:-}" ]; then
     exec dotenv -e "$ENV_FILE" -- "$0" "$@"
 fi
 
+source "$SCRIPT_DIR/nixup.lib-ui.sh"
 source "$SCRIPT_DIR/nixup.lib-build.sh"
 source "$SCRIPT_DIR/nixup.lib-lock.sh"
 source "$SCRIPT_DIR/nixup.lib-help.sh"

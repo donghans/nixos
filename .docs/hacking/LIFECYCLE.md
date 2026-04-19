@@ -2,6 +2,8 @@
 
 `nixup` 명령어가 입력된 시점부터 시스템에 설정이 반영되기까지의 구체적인 내부 흐름입니다.
 
+> **다이어그램**: [LIFECYCLE.mermaid](./LIFECYCLE.mermaid) · [NIXSTRAP.mermaid](./NIXSTRAP.mermaid) (nixstrap 부트스트랩 흐름)
+
 ---
 
 ## 1. Orchestration Phase (준비 및 격리)

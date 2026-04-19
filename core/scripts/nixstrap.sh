@@ -8,7 +8,6 @@ set -euo pipefail
 # writeShellApplication이 직접 읽는 파일. lib 파일과 동일하게 한국어 주석 사용 가능.
 
 SCRIPT_DIR="${SCRIPT_DIR:-$(dirname "$(readlink -f "$0")")}"
-source "$SCRIPT_DIR/nixstrap.lib-log.sh"
 source "$SCRIPT_DIR/nixstrap.lib-ui.sh"
 source "$SCRIPT_DIR/nixstrap.lib-input.sh"
 source "$SCRIPT_DIR/nixstrap.lib-install.sh"
@@ -37,6 +36,7 @@ _NEW_ROOT_NUM=""
 _PRESET="workstation"
 REPO_TMP="/tmp/nixos-setup-repo"
 PARAMS_FILE="${PARAMS_FILE:-/root/nixstrap-params.env}"
+_USER_PASSWORD=""  # ask_password에서 설정, _post_process에서 적용 후 즉시 비움 (파일 저장 안 함)
 # Phase 2 함수들이 설정:
 BOOT_LABEL=""
 DISK_LABEL=""
@@ -55,12 +55,17 @@ fi
 if load_params; then
     : # params 로드됨 — review_loop에서 확인/수정
 else
-    ask_repo_and_clone
+    if [ -n "${NIXOS_REPO_PATH:-}" ]; then
+        REPO_TMP="$NIXOS_REPO_PATH"
+    else
+        ask_repo_and_clone
+    fi
     select_host
     [ "$_HOST_IS_NEW" = true ] && ask_preset
     ask_partitions
 fi
 review_loop
+ask_password
 
 # -- Phase 2: 실행 --
 phase2_execute

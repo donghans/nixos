@@ -33,7 +33,7 @@ Unstable 채널 사용자의 최대 고민인 '빌드 실패'를 자동화로 �
   3. 해당 해시와 SHA256을 프로젝트 루트 **`.env`**에 기록합니다.
 - **`.env` 파일 형식** (git 추적 제외):
   ```bash
-  NIXUP_LAST_HOST=<마지막으로 빌드한 호스트명>        # switch/--try/--stage 시 nixup이 기록 (check/--build는 기록 안 함)
+  NIXUP_LAST_HOST=<마지막으로 빌드한 호스트명>
   NIX_UNSTABLE_FALLBACK_REV=<nixpkgs 커밋 해시>    # nixup fix가 관리
   NIX_UNSTABLE_FALLBACK_SHA=<sha256 해시>          # nixup fix가 관리
   ```

@@ -1,0 +1,65 @@
+%%{init: {'theme': 'dark', 'flowchart': {'curve': 'basis'}}}%%
+flowchart TD
+    User(["`**nixup** os · home · check · update …`"]) --> ORC
+
+    subgraph ORC["① Orchestration  ·  준비 및 격리"]
+        direction TB
+        O1["**Input Parsing**
+        명령·플래그·채널 결정"] --> O2["**Resolve**
+        TOML → resolved.json / presets.json"]
+        O2 --> O3["**Build Isolation**
+        소스 → .build/  (path: 모드, git 비참조)"]
+        O3 --> O4["**Lock Injection**
+        .locks/&lt;host&gt;.lock or _rolling.lock → .build/flake.lock"]
+    end
+
+    ORC --> EVL
+
+    subgraph EVL["② Evaluation  ·  평가 및 선언"]
+        direction TB
+        E1["**Metadata Parsing**
+        flake.nix: resolved.json → AttrSet"] --> E2["**Package Set Construction**
+        nixpkgs + unstable + unstable-fallback(.env)"]
+        E2 --> E3["**Overlay Application**
+        mkWrapper · *.overlay.nix 자동 탐색"]
+    end
+
+    EVL --> EXP
+
+    subgraph EXP["③ Expansion  ·  모듈 확장"]
+        direction TB
+        X1["**Host Loading**
+        configuration.nix + modsModule(preset)"] --> X2["**Inheritance**
+        _hardware.nix · sys 공통 설정"]
+        X2 --> X3["**Mix-in**
+        sys · gui · devel 도메인 병합"]
+        X3 --> X4["**Coverage Check**
+        누락 옵션 · 형제 완전성 위반 시 빌드 오류"]
+    end
+
+    EXP --> APP
+
+    subgraph APP["④ Application  ·  최종 적용"]
+        direction TB
+        A1["**Build Monitor**
+        nix build → nom --json 진행 시각화"] --> A2{Action?}
+        A2 -->|"nixup os --build"| A3["빌드 결과물 생성만"]
+        A2 -->|"nixup os --try"| A4["즉시 활성화
+        (세대 등록 없음)"]
+        A2 -->|"nixup os"| A5["세대 등록
+        + switch-to-configuration"]
+        A3 & A4 & A5 --> A6["**NVD Diff**
+        전·후 store path 비교 → 변경 패키지 출력"]
+        A6 --> A7["**Logging & Sync**
+        YYYYMMDDTHHMMSS.log 기록
+        락 파일 변경 보고"]
+    end
+
+    APP --> Done(["✓ 완료"])
+
+    style ORC fill:#1e2a3a,stroke:#4a9eff,color:#cdd6f4
+    style EVL fill:#1a2a1a,stroke:#4aff7a,color:#cdd6f4
+    style EXP fill:#2a1a2a,stroke:#c97bff,color:#cdd6f4
+    style APP fill:#2a1a1a,stroke:#ff7b7b,color:#cdd6f4
+    style User fill:#313244,stroke:#89b4fa,color:#cdd6f4
+    style Done fill:#1e3a2a,stroke:#a6e3a1,color:#cdd6f4

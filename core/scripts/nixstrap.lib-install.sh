@@ -14,7 +14,7 @@ _cleanup_mounts() {
 _read_disk_labels() {
     # base.toml + host.toml에서 diskDevice/bootDevice를 읽어 레이블 추출
     # by-label 경로에서만 레이블 추출. UUID 등 다른 형식이면 기본값 사용
-    read -r BOOT_LABEL DISK_LABEL <<< "$(python3 "$SCRIPT_DIR/nixstrap.lib.py" disk-labels "$REPO_TMP" "$HOST")"
+    read -r BOOT_LABEL DISK_LABEL <<< "$(python3 "$SCRIPT_DIR/nixstrap.repo.py" disk-labels "$REPO_TMP" "$HOST")"
     BOOT_LABEL="${BOOT_LABEL:-boot}"
     DISK_LABEL="${DISK_LABEL:-nixos}"
     log_msg "Config" "disk labels: boot=$BOOT_LABEL, root=$DISK_LABEL"
@@ -185,11 +185,16 @@ _post_process() {
     mv /mnt/etc/nixos "/mnt/home/$USERNAME/nixos"
     nixos-enter --root /mnt --command "chown -R $USERNAME:users /home/$USERNAME/nixos"
     nixos-enter --root /mnt --command "ln -sfn /home/$USERNAME/nixos /etc/nixos"
+    if [ -n "${_USER_PASSWORD:-}" ]; then
+        log_msg "Notice" "setting password for '$USERNAME'..."
+        printf "%s:%s\n" "$USERNAME" "$_USER_PASSWORD" | nixos-enter --root /mnt -- chpasswd
+        _USER_PASSWORD=""
+    fi
 }
 
 phase2_execute() {
     _cleanup_mounts       # 1. 이전 마운트 정리
-    _read_disk_labels     # 2. TOML → nixstrap.lib.py disk-labels → BOOT_LABEL, DISK_LABEL
+    _read_disk_labels     # 2. TOML → nixstrap.repo.py disk-labels → BOOT_LABEL, DISK_LABEL
     _create_partitions    # 3. 파티션 생성 (mode 2만)
     _format_boot          # 4. 부트 파티션 포맷
     _format_root          # 5. Btrfs 포맷 + 서브볼륨
@@ -205,5 +210,4 @@ phase2_execute() {
 
     echo ""
     log_msg "Success" "installation complete. please reboot your system."
-    log_msg "Notice" "first boot: run 'passwd' to set your password."
 }
