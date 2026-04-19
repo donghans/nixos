@@ -101,12 +101,15 @@ _create_host_profile() {
 
     # VM 환경이면 incus-guest 활성화 + incus 비활성화
     # (incus를 VM 내부에서 켜면 incusbr0가 호스트와 같은 서브넷을 점유해 라우팅 충돌 발생)
+    local _sv_line=""
+    [ -n "${_STATE_VERSION:-}" ] && _sv_line=$'\nstateVersion = "'"$_STATE_VERSION"'"'
+
     if [[ "$_IS_VM" == "true" ]]; then
-        printf 'type = "desktop"\npreset = "%s"\n\n[mods.sys.services]\nincus-guest = true\nincus = false\n' \
-            "$_PRESET" > "$HOST_DIR/host.toml"
+        printf 'type = "desktop"\npreset = "%s"%s\n\n[mods.sys.services]\nincus-guest = true\nincus = false\n' \
+            "$_PRESET" "$_sv_line" > "$HOST_DIR/host.toml"
         log_msg "Config" "incus-guest enabled, incus disabled in host.toml (virtualized environment)"
     else
-        printf 'type = "desktop"\npreset = "%s"\n' "$_PRESET" > "$HOST_DIR/host.toml"
+        printf 'type = "desktop"\npreset = "%s"%s\n' "$_PRESET" "$_sv_line" > "$HOST_DIR/host.toml"
     fi
 
     # 최소 configuration.nix — 하드웨어 임포트만
@@ -114,7 +117,8 @@ _create_host_profile() {
     # 최소 home.nix — 빈 모듈
     printf '_: {}\n' > "$HOST_DIR/home.nix"
 
-    log_msg "Config" "created host profile: $HOST (preset=$_PRESET)"
+    local _sv_info="${_STATE_VERSION:-rolling}"
+    log_msg "Config" "created host profile: $HOST (preset=$_PRESET, stateVersion=$_sv_info)"
 }
 
 _resolve_metadata() {

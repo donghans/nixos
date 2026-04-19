@@ -20,6 +20,7 @@ with lib; {
       };
       hostname = mkOption {
         type = types.str;
+        # default 없음 — nixup.resolve.py가 resolved.json에 항상 주입하므로 평가 오류 발생 안 함
         description = "System hostname";
       };
       type = mkOption {

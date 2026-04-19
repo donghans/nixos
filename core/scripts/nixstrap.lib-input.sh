@@ -281,6 +281,19 @@ ask_preset() {
     _PRESET="${_preset_opts[$REPLY]}"
 }
 
+ask_state_version() {
+    local _input
+    echo ""
+    log_msg "Notice" "pin to a NixOS release? (e.g. 25.11 — leave blank for rolling):"
+    read -rp "$(printf "$(log_prompt)stateVersion: ")" _input
+    _STATE_VERSION="${_input:-}"
+    if [ -n "$_STATE_VERSION" ]; then
+        log_msg "Config" "stateVersion: $_STATE_VERSION (stable lock)"
+    else
+        log_msg "Config" "stateVersion: (none — rolling)"
+    fi
+}
+
 ask_password() {
     local _preview_user _pw _pw2
     _preview_user=$(python3 "$SCRIPT_DIR/nixstrap.repo.py" username "$REPO_TMP" 2>/dev/null || true)
@@ -351,7 +364,8 @@ show_summary() {
     fi
 
     if [ "$_HOST_IS_NEW" = true ]; then
-        printf "  4. %-11s:  %s\n" "Preset" "${_PRESET:-workstation}"
+        local _sv_display="${_STATE_VERSION:-rolling}"
+        printf "  4. %-11s:  %s  (stateVersion: %s)\n" "Preset" "${_PRESET:-workstation}" "$_sv_display"
     else
         printf "  4. %-11s:  %s  (from repo)\n" "Preset" "${_HOST_PRESET_FROM_REPO:-?}"
     fi
@@ -366,6 +380,7 @@ save_params() {
         printf '_HOST_TYPE=%s\n'              "$_HOST_TYPE"
         printf '_HOST_PRESET_FROM_REPO=%s\n'  "$_HOST_PRESET_FROM_REPO"
         printf '_PRESET=%s\n'                 "$_PRESET"
+        printf '_STATE_VERSION=%s\n'          "$_STATE_VERSION"
         printf '_PART_MODE=%s\n'              "$_PART_MODE"
         printf '_NEW_PARTITIONS=%s\n'         "$_NEW_PARTITIONS"
         printf 'BOOT_PART=%s\n'               "$BOOT_PART"
@@ -445,6 +460,7 @@ review_loop() {
             4)
                 if [ "$_HOST_IS_NEW" = true ]; then
                     ask_preset
+                    ask_state_version
                 else
                     log_msg "Notice" "preset is fixed for existing hosts (from repo)."
                 fi
