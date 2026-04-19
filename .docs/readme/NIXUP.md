@@ -7,13 +7,14 @@
 ## 1. 기본 명령어 구조
 
 ```bash
-nixup [subcommand] [hostname] [flags]
+nixup [subcommand] [flags]
 ```
 
 - **`subcommand`**: 작업 종류 (`os`, `home`, `iso`, `fix`, `check`, `update`, `clean`)
   - 생략 시 `os` (시스템 설정 적용)가 기본값입니다.
-- **`hostname`**: 대상 기기 이름 (생략 시 마지막 빌드 대상 재사용)
 - **`flags`**: 동작 제어 옵션 (`--activate`, `--next-boot`, `--dry-run` 등)
+
+> **대상 호스트 결정**: `.env`의 `NIXUP_LAST_HOST` 값을 우선 사용합니다. 없으면 OS 호스트명(`hostname -s`)으로 자동 감지합니다. switch/`--activate`/`--next-boot` 실행 후에는 해당 호스트가 `.env`에 자동으로 저장됩니다.
 
 ---
 
@@ -81,14 +82,7 @@ nixup os
 ```
 - 내부적으로 TensorFlow의 이전 정상 커밋을 찾아 고정(Pin)하므로, 나머지 시스템은 최신 상태를 유지하면서 문제만 해결할 수 있습니다.
 
-### 상황 C: 여러 대의 기기를 관리할 때
-현재 사용 중인 기기가 아닌 다른 기기의 설정을 미리 빌드해보고 싶을 때 사용합니다.
-```bash
-nixup os beelink-ser7-co
-```
-- `host.toml`에 등록된 호스트명을 지정하여 원격으로 관리하거나 설정을 검증할 수 있습니다.
-
-### 상황 D: 디스크 용량이 부족할 때
+### 상황 C: 디스크 용량이 부족할 때
 NixOS는 빌드 시마다 이전 버전을 보관하므로 주기적인 정리가 필요합니다.
 ```bash
 nixup clean --all
