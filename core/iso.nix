@@ -7,8 +7,10 @@
   # 1. lib 파일들을 Nix store에 바이트 복사 (문자열 인터폴레이션 없음 → 비 ASCII 안전)
   nixstrap-libs = pkgs.runCommand "nixstrap-libs" {} ''
     mkdir -p $out
-    cp ${./scripts/nixstrap.lib-ui.sh}   $out/nixstrap.lib-ui.sh
+    cp ${./scripts/nixstrap.lib-ui.sh}      $out/nixstrap.lib-ui.sh
     cp ${./scripts/nixstrap.lib-input.sh}   $out/nixstrap.lib-input.sh
+    cp ${./scripts/nixstrap.lib-disk.sh}    $out/nixstrap.lib-disk.sh
+    cp ${./scripts/nixstrap.lib-params.sh}  $out/nixstrap.lib-params.sh
     cp ${./scripts/nixstrap.lib-install.sh} $out/nixstrap.lib-install.sh
     cp ${./scripts/nixstrap.repo.py}        $out/nixstrap.repo.py
     cp ${./scripts/nixstrap.part.py}        $out/nixstrap.part.py

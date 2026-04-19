@@ -10,6 +10,8 @@ set -euo pipefail
 SCRIPT_DIR="${SCRIPT_DIR:-$(dirname "$(readlink -f "$0")")}"
 source "$SCRIPT_DIR/nixstrap.lib-ui.sh"
 source "$SCRIPT_DIR/nixstrap.lib-input.sh"
+source "$SCRIPT_DIR/nixstrap.lib-disk.sh"
+source "$SCRIPT_DIR/nixstrap.lib-params.sh"
 source "$SCRIPT_DIR/nixstrap.lib-install.sh"
 
 # -- 공유 상태 --

@@ -86,12 +86,12 @@ in {
       enable = mkOption {
         type = types.bool;
         default = false;
-        description = "Notification Logger Service를 활성화합니다.";
+        description = "Enable the Notification Logger background service.";
       };
       logDir = mkOption {
         type = types.str;
         default = "/var/log/custom-notify-logger";
-        description = "알림 로그 파일이 저장될 디렉터리 경로.";
+        description = "Directory path where notification log files are stored.";
       };
     };
   };

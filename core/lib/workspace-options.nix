@@ -1,3 +1,7 @@
+# workspace 옵션 선언
+# nixup.resolve.py가 생성한 resolved.json 값을 config.workspace.* 네임스페이스로 주입하기 위한
+# 타입 선언 파일. 사용자가 직접 설정하는 것이 아니라 TOML 메타데이터에서 자동으로 채워짐.
+# mods의 기능 토글(config.mods.*.*.enable)과는 완전히 별개의 네임스페이스임.
 {lib, ...}:
 with lib; {
   options = {
@@ -75,7 +79,7 @@ with lib; {
       nixCacheAddr = mkOption {
         type = types.str;
         default = "";
-        description = "Nix 바이너리 캐시 프록시 서버 주소 (예: 192.168.1.10:7070). 비어있으면 클라이언트 substituter 설정 없음.";
+        description = "Nix binary cache proxy server address (e.g. 192.168.1.10:7070). Leave empty to disable client substituter.";
       };
     };
   };

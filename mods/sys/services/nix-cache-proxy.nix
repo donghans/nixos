@@ -18,24 +18,24 @@ with lib; let
   hasProxy = proxyUrl != "";
 in {
   options.mods.sys.services."nix-cache-proxy" = {
-    enable = mkEnableOption "Nix binary cache proxy 서버 (cache.nixos.org 캐싱)";
+    enable = mkEnableOption "Nix binary cache proxy (caches cache.nixos.org)";
 
     port = mkOption {
       type = types.port;
       default = 7070;
-      description = "nginx가 수신할 포트";
+      description = "Port for nginx to listen on";
     };
 
     maxSize = mkOption {
       type = types.str;
       default = "30g";
-      description = "캐시 최대 용량 (예: \"30g\", \"50g\")";
+      description = "Maximum cache size (e.g. \"30g\", \"50g\")";
     };
 
     inactiveDays = mkOption {
       type = types.int;
       default = 90;
-      description = "미접근 시 캐시 만료 기간 (일 단위)";
+      description = "Cache expiry in days since last access";
     };
   };
 

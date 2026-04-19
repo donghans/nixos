@@ -19,19 +19,23 @@
 
 ### nixup
 명령어 입력부터 시스템 적용까지의 단계별 프로세스입니다.
-👉 [**LIFECYCLE_NIXUP.md 자세히 보기**](./LIFECYCLE_NIXUP.md) · [📊 다이어그램](./LIFECYCLE.mermaid)
+👉 [**LIFECYCLE_NIXUP.md 자세히 보기**](./LIFECYCLE_NIXUP.md) · [📊 다이어그램](./LIFECYCLE_NIXUP.mermaid)
 
-- **Orchestration**: 소스 물리 복사 및 `path:` 모드 격리 환경 구축.
-- **Evaluation**: Flake 평가 및 패키지 구성.
-- **Expansion**: 모듈 상속 및 믹스인 과정.
-- **Application**: 최종 빌드 및 시스템 전환.
+- **Orchestration**: 입력 분석, TOML resolve, 소스 물리 복사 및 `path:` 모드 격리 환경 구축.
+- **Evaluation**: Flake 평가, 패키지 세트 구성, overlay 적용.
+- **Expansion**: 호스트 구성 로드·상속, 모듈 믹스인 및 커버리지 검증.
+- **Application**: 빌드·액션 분기, NVD diff, 로그 기록.
 
 ### nixstrap
 신규 기기 부트스트랩 설치 흐름입니다.
-👉 [**LIFECYCLE_NIXSTRAP.md 자세히 보기**](./LIFECYCLE_NIXSTRAP.md) · [📊 다이어그램](./NIXSTRAP.mermaid)
+👉 [**LIFECYCLE_NIXSTRAP.md 자세히 보기**](./LIFECYCLE_NIXSTRAP.md) · [📊 다이어그램](./LIFECYCLE_NIXSTRAP.mermaid)
 
-- **Phase 1**: 입력 수집 (레포 준비, 호스트 선택, 파티션 설정, 비밀번호 입력).
-- **Phase 2**: 설치 실행 (포맷·마운트, nixos-install, 후처리 14단계).
+- **Phase 1 — 레포 · 호스트**: 레포 클론 또는 로컬 경로 사용, 호스트 선택·프리셋·릴리즈 고정.
+- **Phase 1 — 파티셔닝**: 기존 파티션 지정(mode 1) 또는 디스크·범위 선택 후 자동 생성(mode 2).
+- **Phase 1 — 검토 · 저장**: 설정 검토, params 저장, 비밀번호 입력(메모리에만 보관).
+- **Phase 2 — 디스크 준비**: cleanup → labels → 파티션 생성 → 포맷 → 마운트.
+- **Phase 2 — 설치 환경 구성**: 레포 이동, 호스트 프로파일, resolve, hw-config, build-dir.
+- **Phase 2 — 설치 · 후처리**: nixos-install, post_process (chown · symlink · chpasswd).
 
 ---
 
