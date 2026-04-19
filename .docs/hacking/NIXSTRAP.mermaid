@@ -56,11 +56,10 @@ flowchart TD
         /tmp/nixos-build 격리 환경 구성"]
         S11 --> S12["nixos-install
         --no-root-passwd --flake path:#HOST"]
-        S12 --> S13["post_process
+        S12 --> S13["_post_process
         mv nixos → /home/USERNAME/nixos
-        chown · symlink /etc/nixos"]
-        S13 --> S14["passwd USERNAME
-        첫 로그인용 비밀번호 설정"]
+        chown · symlink /etc/nixos
+        chpasswd로 비밀번호 자동 적용 → 메모리 즉시 비움"]
     end
 
     P2 --> Done(["✓ 설치 완료 → 재부팅"])

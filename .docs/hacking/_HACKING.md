@@ -6,7 +6,7 @@
 
 ## 🏗️ 1. 프로젝트 아키텍처 (Architecture)
 프로젝트를 구성하는 4개의 핵심 레이어에 대한 상세 분석입니다.
-👉 [**ARCHITECTURE.md 자세히 보기**](./ARCHITECTURE.md)
+👉 [**ARCHITECTURE.md 자세히 보기**](./ARCHITECTURE.md) · [📊 다이어그램](./ARCHITECTURE.mermaid)
 
 - **CLI Engine**: `nixup.sh`와 태스크 스크립트 구조 (Update, Fix, Check 등).
 - **Metadata**: JSON 기반의 데이터 중심 설계.
@@ -16,13 +16,22 @@
 ---
 
 ## 🔄 2. 실행 라이프사이클 (Lifecycle)
+
+### nixup
 명령어 입력부터 시스템 적용까지의 단계별 프로세스입니다.
-👉 [**LIFECYCLE.md 자세히 보기**](./LIFECYCLE.md)
+👉 [**LIFECYCLE_NIXUP.md 자세히 보기**](./LIFECYCLE_NIXUP.md) · [📊 다이어그램](./LIFECYCLE.mermaid)
 
 - **Orchestration**: 소스 물리 복사 및 `path:` 모드 격리 환경 구축.
 - **Evaluation**: Flake 평가 및 패키지 구성.
 - **Expansion**: 모듈 상속 및 믹스인 과정.
 - **Application**: 최종 빌드 및 시스템 전환.
+
+### nixstrap
+신규 기기 부트스트랩 설치 흐름입니다.
+👉 [**LIFECYCLE_NIXSTRAP.md 자세히 보기**](./LIFECYCLE_NIXSTRAP.md) · [📊 다이어그램](./NIXSTRAP.mermaid)
+
+- **Phase 1**: 입력 수집 (레포 준비, 호스트 선택, 파티션 설정, 비밀번호 입력).
+- **Phase 2**: 설치 실행 (포맷·마운트, nixos-install, 후처리 14단계).
 
 ---
 
