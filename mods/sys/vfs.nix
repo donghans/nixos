@@ -21,10 +21,10 @@ in {
       home.packages = with pkgs; [trash-cli];
 
       home.shellAliases = {
-        tp = "trash-put";
-        tl = "trash-list";
-        tr = "trash-restore";
-        te = "trash-empty";
+        tmv = "trash-put";
+        tls = "trash-list";
+        trm = "trash-empty";
+        trs = "trash-restore";
       };
     }
   );
