@@ -1,6 +1,6 @@
 # 🚀 시스템 이식 가이드 (Bootstrap)
 
-이 프로젝트는 **Btrfs 서브볼륨 구조(`@`, `@home`, `@nix`, `@log`)**에 최적화되어 설계되었습니다. `bootstrap.sh` 하나로 설치 전 과정이 자동화됩니다.
+이 프로젝트는 **Btrfs 서브볼륨 구조(`@`, `@home`, `@nix`, `@log`)**에 최적화되어 설계되었습니다. `nixstrap.sh` 하나로 설치 전 과정이 자동화됩니다.
 
 ---
 
@@ -47,10 +47,10 @@ NixOS 공식 ISO를 USB에 구워 부팅한 뒤:
 nix-shell -p git --run "git clone https://github.com/<your-username>/nixos"
 
 cd nixos
-./bootstrap.sh install   # nixstrap이 호스트·파티션 선택을 대화형으로 안내
+./nixstrap.sh   # nixstrap이 호스트·파티션 선택을 대화형으로 안내
 ```
 
-`bootstrap.sh install`이 자동으로 처리하는 것:
+`nixstrap.sh`이 자동으로 처리하는 것:
 - 누락된 도구(`python3`, `btrfs-progs`, `parted` 등)를 `nix-shell`로 확보
 - 이후 `nixstrap`을 호출 — 저장소·호스트·파티션 선택, 하드웨어 감지, `nixos-install`까지 대화형 안내
 
@@ -63,11 +63,11 @@ cd nixos
 
 ### 경로 B: 커스텀 ISO 빌드 (기존 NixOS 환경)
 
-이미 NixOS가 설치된 기기에서 커스텀 ISO를 빌드하면, 부팅 직후 친숙한 Hyprland 환경과 설치 명령이 자동으로 안내됩니다.
+nixstrap이 포함된 커스텀 live GUI ISO를 빌드합니다. 부팅 직후 친숙한 Hyprland 환경과 설치 명령이 자동으로 안내됩니다.
 
 ```bash
-./bootstrap.sh build-iso        # x86_64
-./bootstrap.sh build-iso --arm  # aarch64
+./nixup-iso.sh        # x86_64
+./nixup-iso.sh --arm  # aarch64
 ```
 
 > nixup이 아직 설치되지 않아도 `nix-shell` 쉬뱅을 통해 필요한 도구를 자동으로 가져옵니다.
@@ -154,8 +154,8 @@ host.toml의 `[mods.sys.services]` 섹션에서 개별 서비스를 `false`로 �
 기기에 실제로 설치하기 전에 설정이 올바른지 빌드로 확인할 수 있습니다. nixup이 설치된 기존 NixOS 환경에서 실행하세요.
 
 ```bash
-nixup os <hostname> --dry-run    # NixOS 시스템 설정 빌드 검증
-nixup home <hostname> --dry-run  # Home Manager 설정 빌드 검증
+nixup os --dry-run    # NixOS 시스템 설정 빌드 검증
+nixup home --dry-run  # Home Manager 설정 빌드 검증
 nixup check                      # 포맷팅 + 린트 + eval 통합 검증
 ```
 
