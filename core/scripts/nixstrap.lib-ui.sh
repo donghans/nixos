@@ -21,7 +21,7 @@ _pick() {
         done
     }
 
-    printf "${YELLOW}%-13s${NC} | %s\n" "nixstrap" "$label"
+    log_msg "Input" "$label"
     _redraw_pick
 
     local key seq
@@ -41,5 +41,7 @@ _pick() {
         _redraw_pick
     done
 
+    # Enter 시 커서가 목록 상단에 있으므로 최종 상태를 다시 그려 커서를 아래로 이동
+    _redraw_pick
     REPLY=$sel
 }

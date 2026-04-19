@@ -47,14 +47,12 @@ NixOS 공식 ISO를 USB에 구워 부팅한 뒤:
 nix-shell -p git --run "git clone https://github.com/<your-username>/nixos"
 
 cd nixos
-./bootstrap.sh install              # 완전 대화형 (nixstrap이 파티션 포함 안내)
-./bootstrap.sh install myhostname   # 호스트명만 지정, 파티션은 nixstrap이 대화형으로 안내
+./bootstrap.sh install   # nixstrap이 호스트·파티션 선택을 대화형으로 안내
 ```
 
 `bootstrap.sh install`이 자동으로 처리하는 것:
 - 누락된 도구(`python3`, `btrfs-progs`, `parted` 등)를 `nix-shell`로 확보
-- `hosts/base.toml`에서 `nixosRepo` 값을 읽어 `NIXOS_REPO` 자동 설정
-- 이후 `nixstrap`을 호출 — 파티션 선택, 저장소 클론, 하드웨어 감지, `nixos-install`까지 안내
+- 이후 `nixstrap`을 호출 — 저장소·호스트·파티션 선택, 하드웨어 감지, `nixos-install`까지 대화형 안내
 
 `nixstrap` 주요 동작:
 - **호스트 자동 생성**: 레포에 없는 새 호스트명을 지정하면 프리셋(workstation/server)을 물어보고 `host.toml` · `configuration.nix` · `home.nix`를 자동 생성합니다. 하드웨어 프로필(`_hardware.nix`)도 자동 감지됩니다.
@@ -78,14 +76,7 @@ cd nixos
 (터미널을 닫았거나 추가로 열어야 할 경우: `Super + P` → kitty 검색)
 
 ```bash
-nixstrap myhostname   # 호스트명 지정
-nixstrap              # 완전 대화형 (호스트명도 nixstrap이 물어봄)
-```
-
-다른 리포지토리에서 설치하거나 `NIXOS_REPO`를 직접 지정하려면:
-
-```bash
-NIXOS_REPO=user/repo sudo -E nixstrap myhostname
+nixstrap   # 호스트·파티션 선택을 대화형으로 안내
 ```
 
 > **기본 단축키 (Hyprland)**

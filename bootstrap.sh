@@ -2,9 +2,9 @@
 # bootstrap.sh — NixOS 환경 이식 헬퍼
 #
 # 사용법:
-#   ./bootstrap.sh install [HOSTNAME]
+#   ./bootstrap.sh install
 #       표준 NixOS live 환경에서 실행. 필요한 도구를 자동으로 확보하고
-#       nixstrap을 실행합니다. 파티션 선택은 nixstrap이 대화형으로 안내합니다.
+#       nixstrap을 실행합니다. 호스트·파티션 선택은 nixstrap이 대화형으로 안내합니다.
 #
 #   ./bootstrap.sh build-iso [--arm]
 #       기존 NixOS 환경에서 커스텀 ISO를 빌드합니다.
@@ -49,9 +49,9 @@ show_help() {
     echo "  bootstrap.sh — NixOS 환경 이식 헬퍼"
     echo ""
     echo "  명령:"
-    echo "    install [HOSTNAME]"
+    echo "    install"
     echo "        live 환경에서 NixOS를 설치합니다."
-    echo "        호스트명 미입력 시 nixstrap이 대화형으로 안내합니다."
+    echo "        호스트·파티션 선택은 nixstrap이 대화형으로 안내합니다."
     echo ""
     echo "    build-iso [--arm]"
     echo "        커스텀 NixOS 설치 ISO를 빌드합니다."
@@ -116,27 +116,17 @@ print(d.get('git', {}).get('nixosRepo', ''))
     log Info "저장소: $NIXOS_REPO (base.toml에서 읽음)"
 }
 
-# ── 호스트명 수집 ─────────────────────────────────────────────────────────────
-# 파티션 선택은 nixstrap이 대화형으로 처리하므로 호스트명만 전달한다.
-# 호스트명이 없으면 nixstrap 내부에서 물어보게 두면 되므로 빈 값도 허용.
-collect_install_args() {
-    INSTALL_HOST=${1:-}
-}
 
 # ── install 모드 ──────────────────────────────────────────────────────────────
 cmd_install() {
     ensure_tools "$@"
     resolve_repo
 
-    local host="${1:-}"
-    collect_install_args "$host"
-
     [ -f "$SETUP_SCRIPT" ] || die "설치 스크립트를 찾을 수 없습니다: $SETUP_SCRIPT"
 
-    log Step "nixstrap을 시작합니다${INSTALL_HOST:+ (호스트: $INSTALL_HOST)}..."
+    log Step "nixstrap을 시작합니다..."
     echo ""
-    # 호스트명이 있으면 첫 번째 인수로 전달, 없으면 nixstrap이 대화형으로 물어봄
-    NIXOS_REPO="$NIXOS_REPO" sudo -E bash "$SETUP_SCRIPT" ${INSTALL_HOST:+"$INSTALL_HOST"}
+    NIXOS_REPO="$NIXOS_REPO" sudo -E bash "$SETUP_SCRIPT"
 }
 
 # ── build-iso 모드 ────────────────────────────────────────────────────────────

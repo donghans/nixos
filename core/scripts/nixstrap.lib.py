@@ -10,6 +10,7 @@
   boot-end     <start> <size>         → 부트 파티션 끝 위치 출력
   check-range  <start> <end>          → 유효하면 exit 0, 아니면 exit 1 + stderr 메시지
   disk-labels  <repo_tmp> <host>      → BOOT_LABEL DISK_LABEL 출력 (공백 구분)
+  list-parts   <category>             → name|size|fstype|label 형식 (efi/root/disk), 없으면 NONE
 """
 
 import sys
@@ -152,6 +153,45 @@ def cmd_disk_labels(args):
     print(extract_label(boot_dev), extract_label(disk_dev))
 
 
+def cmd_list_parts(args):
+    import json
+
+    category = args[0]  # efi, root, disk
+    result = subprocess.run(
+        ["lsblk", "-J", "-o", "NAME,SIZE,TYPE,FSTYPE,LABEL"],
+        capture_output=True,
+        text=True,
+    )
+    devices = json.loads(result.stdout).get("blockdevices", [])
+
+    # 디스크와 그 하위 파티션을 flat 리스트로 수집
+    entries = []
+    for dev in devices:
+        if category == "disk" and dev.get("type") == "disk":
+            name = dev["name"]
+            # loop, zram, rom 등 제외
+            if any(name.startswith(p) for p in ("loop", "zram", "sr")):
+                continue
+            entries.append(f"{name}|{dev.get('size', '?')}")
+            continue
+        for child in dev.get("children", []):
+            if child.get("type") != "part":
+                continue
+            fs = child.get("fstype") or ""
+            label = child.get("label") or ""
+            size = child.get("size", "?")
+            name = child["name"]
+            if category == "efi" and fs == "vfat":
+                entries.append(f"{name}|{size}|{fs}|{label}")
+            elif category == "root" and fs in ("btrfs", "ext4", "xfs", "f2fs"):
+                entries.append(f"{name}|{size}|{fs}|{label}")
+
+    if not entries:
+        print("NONE")
+    else:
+        print("\n".join(entries))
+
+
 SUBCOMMANDS = {
     "check-repo":   cmd_check_repo,
     "update-repo":  cmd_update_repo,
@@ -161,6 +201,7 @@ SUBCOMMANDS = {
     "boot-end":     cmd_boot_end,
     "check-range":  cmd_check_range,
     "disk-labels":  cmd_disk_labels,
+    "list-parts":   cmd_list_parts,
 }
 
 if __name__ == "__main__":

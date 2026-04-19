@@ -5,9 +5,9 @@ ask_repo_and_clone() {
     local _prompt _input
     while true; do
         if [ -n "${NIXOS_REPO:-}" ]; then
-            _prompt="$(printf "${YELLOW}%-13s${NC} | repository [%s]: " "nixstrap" "$NIXOS_REPO")"
+            _prompt="$(printf "$(log_prompt)repository [%s]: " "$NIXOS_REPO")"
         else
-            _prompt="$(printf "${YELLOW}%-13s${NC} | repository (e.g. user/nixos): " "nixstrap")"
+            _prompt="$(printf "$(log_prompt)repository (e.g. user/nixos): ")"
         fi
         read -rp "$_prompt" _input
         NIXOS_REPO="${_input:-${NIXOS_REPO:-}}"
@@ -25,7 +25,7 @@ ask_repo_and_clone() {
             _toml_repo=$(python3 "$SCRIPT_DIR/nixstrap.lib.py" check-repo "$REPO_TMP")
             if [ -n "$_toml_repo" ] && [ "$_toml_repo" != "$NIXOS_REPO" ]; then
                 log_msg "Notice" "base.toml has git.nixosRepo = '$_toml_repo'"
-                read -rp "$(printf "${YELLOW}%-13s${NC} | update to '$NIXOS_REPO'? (Y/n): " "nixstrap")" _replace
+                read -rp "$(printf "$(log_prompt)update to '$NIXOS_REPO'? (Y/n): ")" _replace
                 _replace="${_replace:-Y}"
                 if [[ "$_replace" =~ ^[Yy]$ ]]; then
                     python3 "$SCRIPT_DIR/nixstrap.lib.py" update-repo "$REPO_TMP" "$NIXOS_REPO"
@@ -67,7 +67,7 @@ select_host() {
         _HOST_TYPE=""
         _HOST_PRESET_FROM_REPO=""
         local _hinput
-        read -rp "$(printf "${YELLOW}%-13s${NC} | new hostname: " "nixstrap")" _hinput
+        read -rp "$(printf "$(log_prompt)new hostname: ")" _hinput
         HOST="${_hinput:-}"
         if [ -z "$HOST" ]; then
             log_msg "Error" "hostname cannot be empty."
@@ -101,38 +101,97 @@ ask_partitions() {
     _WIPE=false
 
     while true; do
-        read -rp "$(printf "${YELLOW}%-13s${NC} | partition mode — 1=use existing, 2=create new [2]: " "nixstrap")" _PART_MODE
+        read -rp "$(printf "$(log_prompt)partition mode — 1=use existing, 2=create new [2]: ")" _PART_MODE
         _PART_MODE="${_PART_MODE:-2}"
         [[ "$_PART_MODE" == "1" || "$_PART_MODE" == "2" ]] && break
         log_msg "Error" "invalid mode. select 1 or 2."
     done
 
     if [[ "$_PART_MODE" == "1" ]]; then
-        while true; do
-            read -rp "$(printf "${YELLOW}%-13s${NC} | EFI partition path (e.g. /dev/nvme0n1p1): " "nixstrap")" BOOT_PART
-            [ -b "$BOOT_PART" ] && break
-            log_msg "Error" "device not found: $BOOT_PART"
-        done
-        while true; do
-            read -rp "$(printf "${YELLOW}%-13s${NC} | root partition path (e.g. /dev/nvme0n1p2): " "nixstrap")" ROOT_PART
-            [ -b "$ROOT_PART" ] && break
-            log_msg "Error" "device not found: $ROOT_PART"
-        done
-        read -rp "$(printf "${YELLOW}%-13s${NC} | format boot partition ($BOOT_PART)? (y/N): " "nixstrap")" FORMAT_BOOT
-        read -rp "$(printf "${YELLOW}%-13s${NC} | format root partition ($ROOT_PART)? (y/N): " "nixstrap")" FORMAT_ROOT
+        # EFI 파티션 선택
+        local _efi_data _efi_name _efi_size _efi_fs _efi_label
+        local -a _efi_paths=() _efi_labels=()
+        _efi_data=$(python3 "$SCRIPT_DIR/nixstrap.lib.py" list-parts efi)
+        if [[ "$_efi_data" != "NONE" ]]; then
+            while IFS='|' read -r _efi_name _efi_size _efi_fs _efi_label; do
+                [ -z "$_efi_name" ] && continue
+                _efi_paths+=("/dev/$_efi_name")
+                _efi_labels+=("$(printf "%-16s %8s  %s" "$_efi_name" "$_efi_size" "${_efi_label:-<unlabeled>}")")
+            done <<< "$_efi_data"
+        fi
+        _efi_labels+=("+ Enter manually")
+
+        echo ""
+        _pick "select EFI partition:" "${_efi_labels[@]}"
+        if [ "$REPLY" -eq "${#_efi_paths[@]}" ]; then
+            while true; do
+                read -rp "$(printf "$(log_prompt)EFI partition path: ")" BOOT_PART
+                [ -b "$BOOT_PART" ] && break
+                log_msg "Error" "device not found: $BOOT_PART"
+            done
+        else
+            BOOT_PART="${_efi_paths[$REPLY]}"
+        fi
+
+        # Root 파티션 선택
+        local _root_data _root_name _root_size _root_fs _root_label
+        local -a _root_paths=() _root_labels=()
+        _root_data=$(python3 "$SCRIPT_DIR/nixstrap.lib.py" list-parts root)
+        if [[ "$_root_data" != "NONE" ]]; then
+            while IFS='|' read -r _root_name _root_size _root_fs _root_label; do
+                [ -z "$_root_name" ] && continue
+                _root_paths+=("/dev/$_root_name")
+                _root_labels+=("$(printf "%-16s %8s [%-5s] %s" "$_root_name" "$_root_size" "$_root_fs" "${_root_label:-<unlabeled>}")")
+            done <<< "$_root_data"
+        fi
+        _root_labels+=("+ Enter manually")
+
+        echo ""
+        _pick "select root partition:" "${_root_labels[@]}"
+        if [ "$REPLY" -eq "${#_root_paths[@]}" ]; then
+            while true; do
+                read -rp "$(printf "$(log_prompt)root partition path: ")" ROOT_PART
+                [ -b "$ROOT_PART" ] && break
+                log_msg "Error" "device not found: $ROOT_PART"
+            done
+        else
+            ROOT_PART="${_root_paths[$REPLY]}"
+        fi
+
+        read -rp "$(printf "$(log_prompt)format boot partition ($BOOT_PART)? (y/N): ")" FORMAT_BOOT
+        read -rp "$(printf "$(log_prompt)format root partition ($ROOT_PART)? (y/N): ")" FORMAT_ROOT
 
     else
-        while true; do
-            read -rp "$(printf "${YELLOW}%-13s${NC} | target disk (e.g. /dev/nvme0n1): " "nixstrap")" _DISK
-            [ -b "$_DISK" ] && break
-            log_msg "Error" "device not found: $_DISK"
-        done
+        # 디스크 선택
+        local _disk_data _disk_name _disk_size
+        local -a _disk_paths=() _disk_labels=()
+        _disk_data=$(python3 "$SCRIPT_DIR/nixstrap.lib.py" list-parts disk)
+        if [[ "$_disk_data" != "NONE" ]]; then
+            while IFS='|' read -r _disk_name _disk_size; do
+                [ -z "$_disk_name" ] && continue
+                _disk_paths+=("/dev/$_disk_name")
+                _disk_labels+=("$(printf "%-16s %8s" "$_disk_name" "$_disk_size")")
+            done <<< "$_disk_data"
+        fi
+        _disk_labels+=("+ Enter manually")
 
-        read -rp "$(printf "${YELLOW}%-13s${NC} | use entire disk? (Y/n): " "nixstrap")" _USE_WHOLE
+        echo ""
+        _pick "select target disk:" "${_disk_labels[@]}"
+        if [ "$REPLY" -eq "${#_disk_paths[@]}" ]; then
+            while true; do
+                read -rp "$(printf "$(log_prompt)target disk path: ")" _DISK
+                [ -b "$_DISK" ] && break
+                log_msg "Error" "device not found: $_DISK"
+            done
+        else
+            _DISK="${_disk_paths[$REPLY]}"
+        fi
+
+        read -rp "$(printf "$(log_prompt)use entire disk? (Y/n): ")" _USE_WHOLE
         _USE_WHOLE="${_USE_WHOLE:-Y}"
 
         if [[ "$_USE_WHOLE" =~ ^[Yy]$ ]]; then
-            read -rp "$(printf "${RED}%-13s${NC} | WARNING: ALL data on '%s' will be erased. type 'yes' to confirm: " "nixstrap" "$_DISK")" _CONFIRM_WIPE
+            read -rp "$(printf "$(log_prompt_danger)WARNING: ALL data on '%s' will be erased. type 'yes' to confirm: " "$_DISK")" _CONFIRM_WIPE
             if [[ "$_CONFIRM_WIPE" != "yes" ]]; then
                 log_msg "Error" "cancelled."
                 exit 1
@@ -157,7 +216,7 @@ ask_partitions() {
             echo ""
 
             while true; do
-                read -rp "$(printf "${YELLOW}%-13s${NC} | select number or enter range (e.g. 128GiB-476GiB): " "nixstrap")" _FREE_SEL
+                read -rp "$(printf "$(log_prompt)select number or enter range (e.g. 128GiB-476GiB): ")" _FREE_SEL
                 if [[ "$_FREE_SEL" =~ ^[0-9]+$ ]]; then
                     _SELECTED=$(echo "$_FREE_OUTPUT" | grep "^${_FREE_SEL}:" || true)
                     if [ -z "$_SELECTED" ]; then
@@ -180,7 +239,7 @@ ask_partitions() {
             _WIPE=false
         fi
 
-        read -rp "$(printf "${YELLOW}%-13s${NC} | boot partition size (default: 1GiB, enter): " "nixstrap")" _BOOT_SIZE
+        read -rp "$(printf "$(log_prompt)boot partition size (default: 1GiB, enter): ")" _BOOT_SIZE
         _BOOT_SIZE="${_BOOT_SIZE:-1GiB}"
 
         _BOOT_END=$(python3 "$SCRIPT_DIR/nixstrap.lib.py" boot-end "$_PART_START" "$_BOOT_SIZE")
@@ -330,7 +389,7 @@ review_loop() {
     local _review=""
     while true; do
         show_summary
-        read -rp "$(printf "${YELLOW}%-13s${NC} | Enter=proceed  1-4=edit  q=quit: " "nixstrap")" _review
+        read -rp "$(printf "$(log_prompt)Enter=proceed  1-4=edit  q=quit: ")" _review
         case "${_review:-}" in
             "")
                 if [ -z "${HOST:-}" ]; then

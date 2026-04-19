@@ -97,21 +97,12 @@ in {
         echo "--------------------------------------------------"
         echo "설치를 시작하려면 아래 명령어를 입력하세요:"
         echo ""
-        echo "1. 자동 설치 (추천):"
-        echo "   nixstrap [HOSTNAME]"
+        echo "  nixstrap"
         echo ""
-        echo "   파티션 생성/기존 선택, 디스크 지정 등을 대화형으로 안내합니다."
-        echo "   HOSTNAME이 레포에 없으면 프리셋(workstation/server)을 물어보고"
-        echo "   host.toml / configuration.nix / home.nix를 자동 생성합니다."
-        echo ""
-        echo "2. 다른 리포지토리 사용 시:"
-        echo "   NIXOS_REPO=user/repo sudo -E \\"
-        echo "   nixstrap [HOSTNAME]"
-        echo ""
-        echo "예시 (nvme0n1 기기):"
-        echo "   nixstrap beelink-ser7-co"
-        echo ""
-        echo "TIP: 현재 기본 리포지토리는 '${metaConfig.nixosRepo}'로 설정되어 있습니다."
+        echo "저장소·호스트·파티션 선택을 대화형으로 안내합니다."
+        echo "레포에 없는 호스트명을 지정하면 프리셋(workstation/server)을"
+        echo "물어보고 host.toml / configuration.nix / home.nix를 자동 생성합니다."
+        echo "실패 시 이전 설정을 자동 저장하여 재시도할 수 있습니다."
         echo "--------------------------------------------------"
       else
         echo "--------------------------------------------------"
@@ -119,21 +110,12 @@ in {
         echo "--------------------------------------------------"
         echo "To start the installation, enter the command below:"
         echo ""
-        echo "1. Automatic Installation (Recommended):"
-        echo "   nixstrap [HOSTNAME]"
+        echo "  nixstrap"
         echo ""
-        echo "   Interactively guides you through partitioning or selecting existing partitions."
-        echo "   If HOSTNAME does not exist in the repo, you will be prompted for"
-        echo "   a preset (workstation/server) and the profile will be auto-created."
-        echo ""
-        echo "2. Using a different repository:"
-        echo "   NIXOS_REPO=user/repo sudo -E \\"
-        echo "   nixstrap [HOSTNAME]"
-        echo ""
-        echo "Example (nvme0n1 device):"
-        echo "   nixstrap beelink-ser7-co"
-        echo ""
-        echo "TIP: Default repository is set to '${metaConfig.nixosRepo}'."
+        echo "Interactively guides you through repo, host, and partition selection."
+        echo "If a new hostname is given, a preset (workstation/server) will be"
+        echo "prompted and host.toml / configuration.nix / home.nix auto-created."
+        echo "On failure, your settings are saved and can be reloaded on retry."
         echo "--------------------------------------------------"
       fi
     fi
@@ -218,15 +200,18 @@ in {
   # ISO에 기본적으로 포함하고 싶은 도구들
   environment.systemPackages = with pkgs; [
     parted
-    disko # 만약 disko를 쓰신다면 유용합니다
-    pciutils # lspci로 하드웨어 확인
+    disko
+    pciutils # lspci
     usbutils # lsusb
     nixstrap-script
+
+    # fuzzel에서 vim/gvim 숨김 (NoDisplay=true 오버라이드)
+    (writeTextDir "share/applications/vim.desktop" "[Desktop Entry]\nType=Application\nName=Vim\nNoDisplay=true")
+    (writeTextDir "share/applications/gvim.desktop" "[Desktop Entry]\nType=Application\nName=GVim\nNoDisplay=true")
   ];
 
   environment.shellAliases = {
-    # 이제 터미널에서 'nixos-setup'만 치면 파라미터 입력 단계로 바로 넘어갑니다.
-    # NIXOS_REPO 환경변수를 통해 setup 스크립트에 전달합니다.
+    # 기본 리포지토리를 주입하여 nixstrap을 sudo로 실행
     nixstrap = "NIXOS_REPO=${metaConfig.nixosRepo} sudo -E nixstrap";
   };
 }

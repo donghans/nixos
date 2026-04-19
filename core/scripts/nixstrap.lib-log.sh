@@ -29,6 +29,16 @@ log_msg() {
     printf "${PURPLE}NIXSTRAP${NC} ${cat_color}%-9s${NC} | %s\n" "$category" "$msg"
 }
 
+# read -rp용 프롬프트 접두사 (log_msg와 동일한 정렬)
+log_prompt() {
+    printf "${PURPLE}NIXSTRAP${NC} ${YELLOW}%-9s${NC} | " "Input"
+}
+
+# 위험 동작 프롬프트 (빨간색)
+log_prompt_danger() {
+    printf "${PURPLE}NIXSTRAP${NC} ${RED}%-9s${NC} | " "Input"
+}
+
 # nixup과 동일한 정렬 포맷: NIXSTRAP Exec cmd > description
 log_exec() {
     local cmd_name=$1
