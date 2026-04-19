@@ -133,7 +133,7 @@
               '')
               (pkgs'.runCommand "nixup-man" {} ''
                 mkdir -p $out/share/man/man1
-                cp ${../scripts/nixup.1} $out/share/man/man1/nixup.1
+                cp ${../scripts/man/nixup.1} $out/share/man/man1/nixup.1
                 gzip $out/share/man/man1/nixup.1
               '')
             ];

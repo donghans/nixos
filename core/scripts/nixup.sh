@@ -13,7 +13,7 @@ NIXOS_PATH=$(readlink -f "$SCRIPT_DIR/../..")
 ENV_FILE="$NIXOS_PATH/.env"
 if [ -f "$ENV_FILE" ] && [ -z "${NIXUP_DOTENV_LOADED:-}" ]; then
     export NIXUP_DOTENV_LOADED=1
-    exec dotenv -e "$ENV_FILE" -- "$0" "${@:-}"
+    exec dotenv -e "$ENV_FILE" -- "$0" "$@"
 fi
 
 source "$SCRIPT_DIR/nixup.lib-build.sh"
@@ -23,7 +23,7 @@ _nixup_maybe_help "$@"
 
 # 2. Argument Parsing
 DO_CLEAN=false; CLEAN_TARGET="user"; CLEAN_KEEP=3
-TARGET_HOST=""; TARGET_PROFILE="os"; ACTION="switch"; LOCK_CHANGED=false
+TARGET_PROFILE="os"; ACTION="switch"; LOCK_CHANGED=false
 ISO_ARCH="x86_64"
 # shellcheck disable=SC2034  # sourced scripts (nixup.task-check.sh) 에서 사용
 CHECK_DEEP=false
@@ -44,15 +44,15 @@ case "$SUBCOMMAND" in
         TARGET_PROFILE="os"
         ;;
     *)
-        # 호스트명만 → os 기본 (shift 안 함, 아래 루프에서 호스트로 처리)
-        TARGET_PROFILE="os"
+        log_msg "Error" "unknown subcommand: '$SUBCOMMAND'. use: os home check fix iso update clean"
+        exit 1
         ;;
 esac
 
 [ "$TARGET_PROFILE" = "fix" ]   && TARGET_PROFILE="fix-unstable"
 [ "$TARGET_PROFILE" = "clean" ] && DO_CLEAN=true
 
-for arg in "${@:-}"; do
+for arg in "$@"; do
     case $arg in
         --all|-a)       CLEAN_TARGET="all" ;;
         --arm)          ISO_ARCH="aarch64" ;;
@@ -71,7 +71,8 @@ for arg in "${@:-}"; do
             if [ "$TARGET_PROFILE" = "fix-unstable" ]; then
                 EXTRA_ARGS+=("$arg")
             else
-                TARGET_HOST="$arg"
+                log_msg "Error" "unknown argument: '$arg'"
+                exit 1
             fi
             ;;
     esac
@@ -95,7 +96,7 @@ if [ "$DO_CLEAN" != true ] && [ "$TARGET_PROFILE" != "fix-unstable" ]; then
         _PERSIST_ENV="$ENV_FILE"
     fi
     set +e
-    HOST_INFO_RAW=$(determine_host_info "$TARGET_PROFILE" "$TARGET_HOST" "$_PERSIST_ENV")
+    HOST_INFO_RAW=$(resolve_host_info "$TARGET_PROFILE" "$_PERSIST_ENV")
     DETERMINE_EXIT_CODE=$?
     set -e
     if [ $DETERMINE_EXIT_CODE -ne 0 ] || [ -z "$HOST_INFO_RAW" ]; then exit 1; fi

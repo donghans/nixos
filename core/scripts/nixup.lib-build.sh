@@ -107,25 +107,28 @@ update_env_file() {
     mv "${env_path}.tmp" "$env_path"
 }
 
-# 4. Determine Host Info
-determine_host_info() {
+# 4. Resolve Host Info
+resolve_host_info() {
     local target_profile=$1
-    local input_host=$2
-    local env_file=$3
+    local env_file=$2
 
     if [ "$target_profile" == "iso" ]; then
         echo "nixos-iso true"
         return
     fi
 
-    local host_id="$input_host"
-    # $NIXUP_LAST_HOST는 .env에서 로드된 값 (nixup.sh 시작 시 주입).
-    # 명령행에서 호스트를 명시하면 update_env_file()이 .env에 NIXUP_LAST_HOST를 기록하고,
-    # 다음 실행 시 호스트를 생략하면 이 값을 재사용 → "마지막 빌드 대상 유지" 동작.
-    [ -z "$host_id" ] && host_id="$NIXUP_LAST_HOST"
+    # NIXUP_LAST_HOST 우선 (.env에서 로드된 값).
+    # 없으면 OS hostname으로 fallback (nixos-iso 계열이면 거부).
+    local host_id="${NIXUP_LAST_HOST:-}"
     if [ -z "$host_id" ]; then
-        log_msg "Error" "host id is required."
-        exit 1
+        local os_host
+        os_host=$(hostname -s 2>/dev/null || true)
+        if [[ "$os_host" == nixos* ]]; then
+            log_msg "Error" "NIXUP_LAST_HOST is not set and OS hostname looks like a live ISO ($os_host)."
+            exit 1
+        fi
+        host_id="$os_host"
+        log_msg "Notice" "NIXUP_LAST_HOST not set — using OS hostname: $host_id"
     fi
 
     local resolved_path="$JSON_DIR/resolved.json"

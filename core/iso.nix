@@ -4,7 +4,17 @@
   metaConfig,
   ...
 }: let
-  # 1. setup.sh를 ISO 시스템의 bin 폴더에 넣기 위한 '패키지' 생성
+  # 1. lib 파일들을 Nix store에 바이트 복사 (문자열 인터폴레이션 없음 → 비 ASCII 안전)
+  nixstrap-libs = pkgs.runCommand "nixstrap-libs" {} ''
+    mkdir -p $out
+    cp ${./scripts/nixstrap.lib-log.sh}  $out/nixstrap.lib-log.sh
+    cp ${./scripts/nixstrap.lib-ui.sh}   $out/nixstrap.lib-ui.sh
+    cp ${./scripts/nixstrap.lib-input.sh}   $out/nixstrap.lib-input.sh
+    cp ${./scripts/nixstrap.lib-install.sh} $out/nixstrap.lib-install.sh
+    cp ${./scripts/nixstrap.lib.py}         $out/nixstrap.lib.py
+  '';
+
+  # 2. nixstrap.sh를 ISO 시스템의 bin 폴더에 넣기 위한 '패키지' 생성
   nixstrap-script = pkgs.writeShellApplication {
     name = "nixstrap"; # 실행될 명령어 이름
 
@@ -17,8 +27,22 @@
       pkgs.util-linux # mount, umount 등
     ];
 
-    # core/scripts/nixstrap.sh 파일을 읽어와서 본문으로 사용
-    text = builtins.readFile ./scripts/nixstrap.sh;
+    # SCRIPT_DIR을 nixstrap-libs store 경로로 주입한 뒤 nixstrap.sh 본문 추가
+    # (nixstrap.sh는 SCRIPT_DIR이 미리 설정된 경우 덮어쓰지 않음)
+    text =
+      ''
+        export SCRIPT_DIR="${nixstrap-libs}"
+      ''
+      + builtins.readFile ./scripts/nixstrap.sh;
+
+    # 비 ASCII(한국어 주석 등) 대응을 위해 UTF-8 로케일 지정
+    checkPhase = ''
+      runHook preCheck
+      export LC_ALL=C.UTF-8
+      ${pkgs.stdenv.shellDryRun} "$target"
+      ${pkgs.shellcheck}/bin/shellcheck "$target"
+      runHook postCheck
+    '';
   };
 in {
   imports = [];

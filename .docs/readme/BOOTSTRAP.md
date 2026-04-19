@@ -107,7 +107,7 @@ nixup check                      # 포맷팅 + 린트 + eval 통합 검증
 
 ---
 
-## 5. 설치
+## 6. 설치
 
 ### 경로 A: 표준 NixOS Live USB (범용)
 
@@ -123,9 +123,13 @@ cd nixos
 ```
 
 `bootstrap.sh install`이 자동으로 처리하는 것:
-- 누락된 도구(`python3`, `btrfs-progs` 등)를 `nix-shell`로 확보
+- 누락된 도구(`python3`, `btrfs-progs`, `parted` 등)를 `nix-shell`로 확보
 - `hosts/base.toml`에서 `nixosRepo` 값을 읽어 `NIXOS_REPO` 자동 설정
 - 이후 `nixstrap`을 호출 — 파티션 선택, 저장소 클론, 하드웨어 감지, `nixos-install`까지 안내
+
+`nixstrap` 주요 동작:
+- **파티션 모드**: 기존 파티션 직접 지정(mode 1) 또는 전체 디스크·빈 공간 범위로 신규 생성(mode 2) 중 선택
+- **params 저장/복원**: review 확인 후 설치 파라미터를 `/root/nixstrap-params.env`에 저장. 네트워크 오류 등으로 실패 후 재시도 시 이전 설정을 불러와 확인/수정 후 재개 가능
 
 ---
 
@@ -173,7 +177,7 @@ NIXOS_REPO=user/repo sudo -E nixstrap myhostname
 
 ---
 
-## 6. 다음으로 해볼 것 (Next Steps)
+## 7. 다음으로 해볼 것 (Next Steps)
 
 설치가 완료되고 재부팅하면 `nixup` 명령어를 통해 시스템을 관리할 수 있습니다.
 

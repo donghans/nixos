@@ -74,7 +74,7 @@ show_help() {
 }
 
 # ── 도구 확보 (install 모드 전용) ─────────────────────────────────────────────
-# nix-shell 재진입으로 git/python3/btrfs-progs를 확보합니다.
+# nix-shell 재진입으로 nixstrap 의존 도구를 확보합니다.
 ensure_tools() {
     if [ "${BOOTSTRAP_IN_NIX_SHELL:-}" = "1" ]; then
         return  # 이미 nix-shell 안에 있음
@@ -84,13 +84,14 @@ ensure_tools() {
     command -v git     &>/dev/null || missing+=("git")
     command -v python3 &>/dev/null || missing+=("python3")
     command -v btrfs   &>/dev/null || missing+=("btrfs-progs")
+    command -v parted  &>/dev/null || missing+=("parted")
 
     if [ "${#missing[@]}" -gt 0 ]; then
         log Info "누락된 도구: ${missing[*]}"
         log Step "nix-shell로 도구를 확보한 뒤 재실행합니다..."
         export BOOTSTRAP_IN_NIX_SHELL=1
         # $* is intentional — nix-shell --run takes a single string argument
-        exec nix-shell -p git python3 btrfs-progs util-linux \
+        exec nix-shell -p git python3 btrfs-progs util-linux parted \
             --run "bash $(readlink -f "$0") install $*"
     fi
 }

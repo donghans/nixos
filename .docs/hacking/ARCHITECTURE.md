@@ -17,7 +17,12 @@
   - **`nixup.lib-lock.sh`**: 기기 특성(`isRolling`)에 따른 유연한 락 파일 관리 로직.
   - **`nixup.resolve.py`**: TOML 소스(`base.toml`, `host.toml`, `_preset/*.toml`)를 읽어 Nix가 사용할 `resolved.json`과 `presets.json`을 생성하는 메타데이터 변환기.
   - **`nixup.task-*.sh`**: 실제 비즈니스 로직(빌드, 업데이트, 복구 등)을 수행하는 모듈형 스크립트.
-  - **`nixstrap.sh`**: ISO 부팅 환경에서 실행되는 설치 스크립트. `nixstrap` 명령으로 노출되며, 파티셔닝(EFI+Btrfs), 저장소 클론, 하드웨어 감지, `nixos-install`, 후처리(저장소 이동 및 심볼릭 링크)를 순서대로 수행합니다.
+  - **`nixstrap` (core/scripts/)**: ISO 부팅 환경에서 실행되는 설치 스크립트. `nixstrap` 명령으로 노출되며 다음 모듈로 구성됩니다:
+    - `nixstrap.sh`: 진입점 스켈레톤. Phase 1/2 흐름 제어 및 공유 상태 관리.
+    - `nixstrap.lib-{log,ui,input,install}.sh`: 로깅, 화살표 키 UI, Phase 1 입력 수집, Phase 2 설치 실행 함수.
+    - `nixstrap.lib.py`: TOML 파싱, 파티션 검증, 디스크 레이블 추출 등 Python 헬퍼 (8개 서브커맨드).
+    - **Phase 1**: 저장소 클론, 호스트·파티션·프리셋 선택. 이전 세션 파라미터(`/root/nixstrap-params.env`) 복원 지원.
+    - **Phase 2**: 파티셔닝(EFI+Btrfs) → 서브볼륨 생성 → 마운트 → 하드웨어 감지 → `nixos-install` → 후처리(저장소 이동·심볼릭 링크) 14단계 순서 실행.
 
 ---
 
