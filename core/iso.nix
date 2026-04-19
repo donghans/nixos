@@ -204,10 +204,6 @@ in {
     pciutils # lspci
     usbutils # lsusb
     nixstrap-script
-
-    # fuzzel에서 vim/gvim 숨김 (NoDisplay=true 오버라이드)
-    (writeTextDir "share/applications/vim.desktop" "[Desktop Entry]\nType=Application\nName=Vim\nNoDisplay=true")
-    (writeTextDir "share/applications/gvim.desktop" "[Desktop Entry]\nType=Application\nName=GVim\nNoDisplay=true")
   ];
 
   environment.shellAliases = {

@@ -13,10 +13,20 @@
   ];
 
   # == Hide Default Application Icons ==
-  # (목적: 메뉴에서 xterm을 가려서 커스텀 인스톨러 느낌을 강화)
+  # (목적: 메뉴에서 불필요한 항목을 가려서 커스텀 인스톨러 느낌을 강화)
+  # ~/.local/share/applications/ 가 시스템 경로보다 XDG 우선순위가 높으므로
+  # systemPackages writeTextDir 방식보다 확실하게 덮어씌워진다.
   xdg.desktopEntries = {
     xterm = {
       name = "XTerm (Hidden)";
+      noDisplay = true;
+    };
+    vim = {
+      name = "Vim (Hidden)";
+      noDisplay = true;
+    };
+    gvim = {
+      name = "GVim (Hidden)";
       noDisplay = true;
     };
   };
