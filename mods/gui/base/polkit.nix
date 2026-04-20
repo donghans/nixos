@@ -1,13 +1,10 @@
-{mkMod, ...}:
-mkMod __curPos null ({
-  config,
+{mkPartOf, ...}:
+mkPartOf "mods.gui" ({
   pkgs,
   lib,
   ...
-}: let
-  guiEnabled = config.mods.gui.enable;
-in {
-  os = lib.mkIf guiEnabled {
+}: {
+  os = {
     security = {
       polkit.enable = true;
       # (목적: 로그인 시 GNOME Keyring 자동 해제 — login과 greetd 양쪽 필요)
@@ -16,7 +13,7 @@ in {
     };
     services.gnome.gnome-keyring.enable = true;
   };
-  hm = lib.mkIf guiEnabled {
+  hm = {
     # (목적: Wayland 환경에서 권한 상승 다이얼로그 처리)
     wayland.windowManager.hyprland.settings.exec-once = lib.mkOrder 100 [
       "uwsm app -- ${pkgs.hyprpolkitagent}/libexec/hyprpolkitagent"

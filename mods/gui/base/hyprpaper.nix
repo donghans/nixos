@@ -1,5 +1,5 @@
-{mkMod, ...}:
-mkMod __curPos null ({
+{mkPartOf, ...}:
+mkPartOf "mods.gui" ({
   pkgs,
   lib,
   ...

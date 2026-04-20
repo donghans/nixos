@@ -1,17 +1,10 @@
-{mkMod, ...}:
-mkMod __curPos null ({
-  config,
-  pkgs,
-  lib,
-  ...
-}: let
-  guiEnabled = config.mods.gui.enable;
-in {
-  os = lib.mkIf guiEnabled {
+{mkPartOf, ...}:
+mkPartOf "mods.gui" ({pkgs, ...}: {
+  os = {
     # (목적: Wayland 포털 탐색에 필요한 시스템 PATH 등록)
     environment.pathsToLink = ["/share/applications" "/share/xdg-desktop-portal"];
   };
-  hm = lib.mkIf guiEnabled {
+  hm = {
     home.sessionVariables = {
       XDG_CURRENT_DESKTOP = "Hyprland";
       XDG_SESSION_TYPE = "wayland";

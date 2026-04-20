@@ -1,5 +1,5 @@
-{mkMod, ...}:
-mkMod __curPos null (_: {
+{mkPartOf, ...}:
+mkPartOf "mods.gui" (_: {
   hm = {
     programs.kitty.enable = true;
 

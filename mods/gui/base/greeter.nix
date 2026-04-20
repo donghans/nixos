@@ -1,15 +1,19 @@
-{mkMod, ...}:
-mkMod __curPos null ({
-  config,
+{mkModOf, ...}:
+mkModOf "mods.gui" __curPos "Login greeter (greetd + tuigreet)" ({
+  cfg,
   pkgs,
   lib,
   ...
 }: {
-  os = lib.mkIf config.mods.gui.enable {
+  options.sessionCmd = lib.mkOption {
+    type = lib.types.str;
+    description = "Session command passed to tuigreet --cmd (set by the window manager module)";
+  };
+  os = {
     services.greetd = {
       enable = true;
       settings.default_session = {
-        command = "${pkgs.tuigreet}/bin/tuigreet --time --cmd 'uwsm start hyprland-uwsm.desktop'";
+        command = "${pkgs.tuigreet}/bin/tuigreet --time --cmd '${cfg.sessionCmd}'";
         user = "greeter";
       };
     };

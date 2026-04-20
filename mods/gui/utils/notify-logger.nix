@@ -1,10 +1,9 @@
 {
-  mkMod,
+  mkModOf,
   lib,
   ...
 }: let
-  base = mkMod __curPos "Custom Notification Logger" ({
-    cfg,
+  base = mkModOf "mods.gui" __curPos "Custom Notification Logger" ({
     config,
     pkgs,
     lib,

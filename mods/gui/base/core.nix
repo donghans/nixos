@@ -17,6 +17,22 @@
         config.allowUnfree = true;
       };
   in {
+    os = lib.mkIf config.mods.gui.enable {
+      # (목적: Wayland/GPU 가속을 위한 그래픽 드라이버 활성화)
+      hardware.graphics.enable = true;
+      hardware.graphics.enable32Bit = pkgs.stdenv.hostPlatform.isx86_64;
+
+      programs = {
+        uwsm.enable = true;
+        hyprland.enable = true;
+        hyprland.withUWSM = true;
+      };
+
+      # greeter.nix에 uwsm 세션 커맨드 주입
+      mods.gui.base.greeter.sessionCmd = "uwsm start hyprland-uwsm.desktop";
+
+      # (참고: services.blueman.enable은 mods.sys.services.bluetooth.nix에서 조건부 처리)
+    };
     hm = lib.mkMerge [
       {
         _module.args = {
@@ -49,31 +65,14 @@
         # - bluetooth        → mods/sys/services/bluetooth.nix
         # - networkmanager   → mods/sys/services/networkmanager.nix
         # - tailscale        → mods/sys/services/tailscale.nix
-        # - hyprpaper        → home/hyprpaper.nix
-        # - wl-clip-persist  → home/wl-clip.nix
-        # - hyprpolkitagent  → core/polkit.nix
-        # - fcitx5           → core/fcitx.nix
-        # - waybar           → home/waybar.nix
+        # - hyprpaper        → hyprpaper.nix
+        # - wl-clip-persist  → wl-clip.nix
+        # - hyprpolkitagent  → polkit.nix
+        # - fcitx5           → fcitx.nix
+        # - waybar           → waybar.nix
       })
     ];
   });
 in {
-  imports =
-    base.imports
-    ++ [
-      ./home/_bind.nix
-      ./home/_bind.hwctl.nix
-      ./home/_ui.nix
-      ./home/_ui.cursor.nix
-      ./home/_ui.dark-mode.nix
-      ./home/_ux.nix
-      ./home/fuzzel.nix
-      ./home/hyprlock.nix
-      ./home/hyprpaper.nix
-      ./home/kitty.nix
-      ./home/mako.nix
-      ./home/satty.nix
-      ./home/waybar.nix
-      ./home/wl-clip.nix
-    ];
+  inherit (base) imports;
 }

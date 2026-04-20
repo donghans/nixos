@@ -1,13 +1,10 @@
-{mkMod, ...}:
-mkMod __curPos null ({
-  config,
+{mkPartOf, ...}:
+mkPartOf "mods.gui" ({
   pkgs,
   lib,
   ...
-}: let
-  guiEnabled = config.mods.gui.enable;
-in {
-  os = lib.mkIf guiEnabled {
+}: {
+  os = {
     i18n.inputMethod = {
       enable = true;
       type = "fcitx5";
@@ -18,7 +15,7 @@ in {
       ];
     };
   };
-  hm = lib.mkIf guiEnabled {
+  hm = {
     wayland.windowManager.hyprland.settings.exec-once = lib.mkOrder 500 [
       "uwsm app -- fcitx5"
     ];
