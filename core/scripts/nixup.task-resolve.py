@@ -46,15 +46,15 @@ def write_json(path, data):
 
 
 # == presets.json 생성 ==
-# mods/_preset/*.toml → presets.json (Nix가 읽는 JSON 형식)
-presets_dir = f"{src_path}/mods/_preset"
+# hosts/_preset.*.toml → presets.json (Nix가 읽는 JSON 형식)
+hosts_dir = f"{src_path}/hosts"
 all_presets = {}
 
-for entry in sorted(os.listdir(presets_dir)):
-    if not entry.endswith(".toml"):
+for entry in sorted(os.listdir(hosts_dir)):
+    if not entry.startswith("_preset.") or not entry.endswith(".toml"):
         continue
-    preset_name = entry[:-5]  # .toml 제거
-    with open(os.path.join(presets_dir, entry), "rb") as f:
+    preset_name = entry[len("_preset."):-len(".toml")]
+    with open(os.path.join(hosts_dir, entry), "rb") as f:
         preset_data = tomllib.load(f)
 
     # stateVersion 미지정 → None (rolling)
@@ -71,8 +71,8 @@ write_json(presets_path, all_presets)
 print(f"→ {presets_path}")
 
 # == resolved.json 생성 ==
-# hosts/base.toml + hosts/<hostname>/host.toml + preset → resolved.json
-with open(f"{src_path}/hosts/base.toml", "rb") as f:
+# hosts/base.toml + hosts/<hostname>.toml + preset → resolved.json
+with open(f"{src_path}/hosts/_base.toml", "rb") as f:
     base = tomllib.load(f)
 
 rolling_state_version = base["rollingStateVersion"]
@@ -81,10 +81,11 @@ hosts_dir = f"{src_path}/hosts"
 all_resolved = {}
 
 for entry in sorted(os.listdir(hosts_dir)):
-    host_dir = os.path.join(hosts_dir, entry)
-    host_toml_path = os.path.join(host_dir, "host.toml")
-    if not os.path.isdir(host_dir) or not os.path.exists(host_toml_path):
+    # hosts/<hostname>.toml 형식 (평탄 구조)
+    if not entry.endswith(".toml") or entry == "_base.toml" or entry.startswith("_preset."):
         continue
+    hostname = entry[:-5]  # .toml 제거
+    host_toml_path = os.path.join(hosts_dir, entry)
 
     with open(host_toml_path, "rb") as f:
         host = tomllib.load(f)
@@ -117,8 +118,8 @@ for entry in sorted(os.listdir(hosts_dir)):
     # swap을 직접 지정하려면 swapGb를 사용하세요.
     ram_gb = detect_ram_gb()
 
-    all_resolved[entry] = {
-        "hostname": entry,
+    all_resolved[hostname] = {
+        "hostname": hostname,
         "system": host.get("system", base["system"]),
         "type": host["type"],
         "ramGb": ram_gb,
@@ -139,7 +140,7 @@ for entry in sorted(os.listdir(hosts_dir)):
         "isRolling": is_rolling,
         "mods": mods,
     }
-    print(f"{entry}  stateVersion={state_version}  isRolling={is_rolling}")
+    print(f"{hostname}  stateVersion={state_version}  isRolling={is_rolling}")
 
 resolved_path = os.path.join(target_path, "resolved.json")
 write_json(resolved_path, all_resolved)

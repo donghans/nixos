@@ -18,7 +18,7 @@ import tomllib
 
 def cmd_check_repo(args):
     repo_tmp = args[0]
-    base_path = os.path.join(repo_tmp, "hosts", "base.toml")
+    base_path = os.path.join(repo_tmp, "hosts", "_base.toml")
     try:
         with open(base_path, "rb") as f:
             base = tomllib.load(f)
@@ -29,7 +29,7 @@ def cmd_check_repo(args):
 
 def cmd_update_repo(args):
     repo_tmp, new_repo = args[0], args[1]
-    toml_path = os.path.join(repo_tmp, "hosts", "base.toml")
+    toml_path = os.path.join(repo_tmp, "hosts", "_base.toml")
     with open(toml_path, "r") as f:
         content = f.read()
     content = re.sub(
@@ -43,7 +43,7 @@ def cmd_update_repo(args):
 
 def cmd_username(args):
     repo_tmp = args[0]
-    base_path = os.path.join(repo_tmp, "hosts", "base.toml")
+    base_path = os.path.join(repo_tmp, "hosts", "_base.toml")
     try:
         with open(base_path, "rb") as f:
             base = tomllib.load(f)
@@ -57,31 +57,33 @@ def cmd_list_hosts(args):
     hosts_dir = os.path.join(repo_tmp, "hosts")
     entries = []
     for entry in sorted(os.listdir(hosts_dir)):
-        toml_path = os.path.join(hosts_dir, entry, "host.toml")
-        if not os.path.isfile(toml_path):
+        # hosts/<hostname>.toml 형식 (평탄 구조)
+        if not entry.endswith(".toml") or entry == "_base.toml" or entry.startswith("_preset."):
             continue
+        hostname = entry[:-5]  # .toml 제거
+        toml_path = os.path.join(hosts_dir, entry)
         with open(toml_path, "rb") as f:
             h = tomllib.load(f)
-        entries.append(f"{entry}|{h.get('type', '?')}|{h.get('preset', '?')}")
+        entries.append(f"{hostname}|{h.get('type', '?')}|{h.get('preset', '?')}")
     print("\n".join(entries))
 
 
 def cmd_list_presets(args):
     repo_tmp = args[0]
-    preset_dir = os.path.join(repo_tmp, "mods", "_preset")
+    hosts_dir = os.path.join(repo_tmp, "hosts")
     names = sorted(
-        f[:-5]
-        for f in os.listdir(preset_dir)
-        if f.endswith(".toml") and f != "iso.toml"
+        f[len("_preset."):-len(".toml")]
+        for f in os.listdir(hosts_dir)
+        if f.startswith("_preset.") and f.endswith(".toml") and f != "_preset.iso.toml"
     )
     print("\n".join(names))
 
 
 def cmd_disk_labels(args):
     repo_tmp, host = args[0], args[1]
-    with open(os.path.join(repo_tmp, "hosts", "base.toml"), "rb") as f:
+    with open(os.path.join(repo_tmp, "hosts", "_base.toml"), "rb") as f:
         base = tomllib.load(f)
-    host_path = os.path.join(repo_tmp, "hosts", host, "host.toml")
+    host_path = os.path.join(repo_tmp, "hosts", f"{host}.toml")
     host_data = {}
     if os.path.exists(host_path):
         with open(host_path, "rb") as f:

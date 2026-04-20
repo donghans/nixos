@@ -88,16 +88,16 @@ _move_repo() {
 }
 
 _create_host_profile() {
-    # 레포에 없는 신규 호스트면 host.toml + 최소 nix 파일 자동 생성
+    # 레포에 없는 신규 호스트면 <hostname>.toml + <hostname>.nix 자동 생성
     # resolve.py 실행 전에 생성해야 새 호스트명이 resolved.json에 포함됨
-    local HOST_DIR="/mnt/etc/nixos/hosts/$HOST"
-    if [ -d "$HOST_DIR" ]; then
+    local HOST_TOML="/mnt/etc/nixos/hosts/$HOST.toml"
+    local HOST_NIX="/mnt/etc/nixos/hosts/$HOST.nix"
+    if [ -f "$HOST_TOML" ]; then
         log_msg "Config" "using existing host profile: $HOST"
         return
     fi
 
     log_msg "Notice" "host profile '$HOST' not found — creating new profile..."
-    mkdir -p "$HOST_DIR"
 
     # VM 환경이면 incus-guest 활성화 + incus 비활성화
     # (incus를 VM 내부에서 켜면 incusbr0가 호스트와 같은 서브넷을 점유해 라우팅 충돌 발생)
@@ -106,16 +106,14 @@ _create_host_profile() {
 
     if [[ "$_IS_VM" == "true" ]]; then
         printf 'type = "desktop"\npreset = "%s"%s\n\n[mods.sys.services]\nincus-guest = true\nincus = false\n' \
-            "$_PRESET" "$_sv_line" > "$HOST_DIR/host.toml"
-        log_msg "Config" "incus-guest enabled, incus disabled in host.toml (virtualized environment)"
+            "$_PRESET" "$_sv_line" > "$HOST_TOML"
+        log_msg "Config" "incus-guest enabled, incus disabled in $HOST.toml (virtualized environment)"
     else
-        printf 'type = "desktop"\npreset = "%s"%s\n' "$_PRESET" "$_sv_line" > "$HOST_DIR/host.toml"
+        printf 'type = "desktop"\npreset = "%s"%s\n' "$_PRESET" "$_sv_line" > "$HOST_TOML"
     fi
 
-    # 최소 configuration.nix — 하드웨어 임포트만
-    printf '{...}: {\n  imports = [./_hardware.nix];\n}\n' > "$HOST_DIR/configuration.nix"
-    # 최소 home.nix — 빈 모듈
-    printf '_: {}\n' > "$HOST_DIR/home.nix"
+    # 최소 통합 호스트 파일 — os/hm 블록 분리 (mkHostConfiguration 패턴)
+    printf '{mkHostConfiguration, ...}:\nmkHostConfiguration ({...}: { os = {}; hm = {}; })\n' > "$HOST_NIX"
 
     local _sv_info="${_STATE_VERSION:-rolling}"
     log_msg "Config" "created host profile: $HOST (preset=$_PRESET, stateVersion=$_sv_info)"
@@ -134,7 +132,7 @@ _resolve_metadata() {
 }
 
 _extract_username() {
-    local BASE_TOML="/mnt/etc/nixos/hosts/base.toml"
+    local BASE_TOML="/mnt/etc/nixos/hosts/_base.toml"
     if [ ! -f "$BASE_TOML" ]; then
         log_msg "Error" "could not find $BASE_TOML in the cloned repository."
         exit 1
