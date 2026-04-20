@@ -4,6 +4,7 @@
 서브커맨드:
   check-repo   <repo_tmp>             → base.toml에서 git.nixosRepo 출력
   update-repo  <repo_tmp> <new_repo>  → base.toml의 git.nixosRepo를 in-place 수정
+  sync-remote  <repo_path>            → git remote origin에서 owner/repo 자동 감지 후 base.toml 동기화
   username     <repo_tmp>             → base.toml에서 username 출력
   list-hosts   <repo_tmp>             → hostname|type|preset 형식으로 호스트 목록 출력
   list-presets <repo_tmp>             → 프리셋 이름 출력 (iso 제외)
@@ -25,6 +26,43 @@ def cmd_check_repo(args):
         print(base.get("git", {}).get("nixosRepo", ""))
     except Exception:
         print("")
+
+
+def cmd_sync_remote(args):
+    """git remote origin URL에서 owner/repo를 추출하여 base.toml을 자동 동기화."""
+    import subprocess
+    repo_path = args[0]
+
+    # git remote get-url origin
+    try:
+        remote_url = subprocess.check_output(
+            ["git", "remote", "get-url", "origin"],
+            cwd=repo_path, text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return  # remote 없거나 git 없으면 skip
+
+    # https://github.com/owner/repo.git  또는  git@github.com:owner/repo.git → owner/repo
+    m = re.search(r"[:/]([^/:][^/]*/[^/]+?)(?:\.git)?$", remote_url)
+    if not m:
+        return  # 형식 불명 — skip
+
+    detected = m.group(1)
+
+    # 현재 base.toml 값과 비교
+    base_path = os.path.join(repo_path, "hosts", "_base.toml")
+    try:
+        with open(base_path, "rb") as f:
+            base = tomllib.load(f)
+        current = base.get("git", {}).get("nixosRepo", "")
+    except Exception:
+        return
+
+    if current == detected:
+        return  # 이미 일치
+
+    cmd_update_repo([repo_path, detected])
+    print(f"[sync] git.nixosRepo: '{current}' → '{detected}'")
 
 
 def cmd_update_repo(args):
@@ -102,6 +140,7 @@ def cmd_disk_labels(args):
 SUBCOMMANDS = {
     "check-repo":   cmd_check_repo,
     "update-repo":  cmd_update_repo,
+    "sync-remote":  cmd_sync_remote,
     "username":     cmd_username,
     "list-hosts":   cmd_list_hosts,
     "list-presets": cmd_list_presets,
