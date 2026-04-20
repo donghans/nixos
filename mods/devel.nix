@@ -1,12 +1,11 @@
 {
-  mkNamedMod,
+  mkMod,
   lib,
   ...
 }: let
-  inherit (import ../_lib.nix {inherit lib;}) importDir;
-  # default.nix는 __curPos가 "mods.devel.default" 경로를 생성하므로 mkNamedMod로 명시적 경로 사용
-  # (Phase 2에서 devel.nix로 이동하면 이 우회가 불필요해짐)
-  base = mkNamedMod "mods.devel" "Master switch for developer workshop" ({
+  inherit (import ./_lib.nix {inherit lib;}) importDir;
+  # __curPos가 mods/devel.nix에서 평가되므로 경로가 "mods.devel"로 정확히 생성됨
+  base = mkMod __curPos "Master switch for developer workshop" ({
     cfg,
     lib,
     ...
@@ -27,5 +26,5 @@
     hm = cascade;
   });
 in {
-  imports = base.imports ++ importDir ./toolchains ++ importDir ./apps;
+  imports = base.imports ++ importDir ./devel/toolchains ++ importDir ./devel/apps;
 }
