@@ -173,7 +173,7 @@ in {
           inherit (hostCtx) pkgs;
           extraSpecialArgs =
             {
-              isNixOS = false;
+              forOS = false;
               inherit inputs;
               inherit (hostCtx) metaConfig unstable unstable-fallback;
             }
@@ -190,7 +190,7 @@ in {
           inherit (hostCtx) pkgs;
           extraSpecialArgs =
             {
-              isNixOS = false;
+              forOS = false;
               inherit inputs;
               metaConfig = hostCtx.metaConfig // {username = "root";};
               inherit (hostCtx) unstable unstable-fallback;

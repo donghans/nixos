@@ -180,7 +180,7 @@ hosts/_preset.workstation.toml         hosts/<hostname>.toml
 
 ---
 
-## 6. Dual-Context (`isNixOS` 분기)
+## 6. Dual-Context (`forOS` 분기)
 
 ### 주입 지점
 
@@ -188,9 +188,9 @@ hosts/_preset.workstation.toml         hosts/<hostname>.toml
 
 | 컨텍스트 | 주입 값 | 적용 블록 |
 |----------|---------|-----------|
-| NixOS system modules | `isNixOS = true` | `body.os` |
-| HM sharedModules | `isNixOS = false` | `body.hm` |
-| homeConfigurations (standalone) | `isNixOS = false` | `body.hm` |
+| NixOS system modules | `forOS = true` | `body.os` |
+| HM sharedModules | `forOS = false` | `body.hm` |
+| homeConfigurations (standalone) | `forOS = false` | `body.hm` |
 
 ### 분기 메커니즘
 
@@ -198,7 +198,7 @@ hosts/_preset.workstation.toml         hosts/<hostname>.toml
 
 ```nix
 config =
-  if isNixOS
+  if forOS
   then autoWrap (body.os or {})    # NixOS 평가 시
   else autoWrap (body.hm or {});   # HM 평가 시
 ```
@@ -207,5 +207,5 @@ config =
 
 이 설계 덕분에:
 - NixOS 시스템 설정과 사용자 설정을 한 파일에서 관리
-- 모듈 작성자가 `isNixOS`를 직접 참조할 필요 없음
+- 모듈 작성자가 `forOS`를 직접 참조할 필요 없음
 - 동일한 모듈 집합을 양쪽에 로드해도 충돌 없음

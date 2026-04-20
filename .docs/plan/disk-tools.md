@@ -13,14 +13,14 @@ The user requested a better way to monitor disk usage and file sizes than the st
 ## Implementation Steps (For Later)
 
 ### 1. Create `mods/sys/utils/disk-tools.nix`
-Create the file with the following structure to handle both `isNixOS` (system-level) and home-manager environments seamlessly:
+Create the file with the following structure to handle both `forOS` (system-level) and home-manager environments seamlessly:
 
 ```nix
 {
   config,
   lib,
   pkgs,
-  isNixOS ? false,
+  forOS ? false,
   ...
 }:
 with lib; let
@@ -37,7 +37,7 @@ in {
   options.mods.sys.utils.disk-tools.enable = mkEnableOption "Modern disk monitoring tools (duf, dust, ncdu)";
   
   config = mkIf cfg.enable (
-    if isNixOS
+    if forOS
     then {
       environment.systemPackages = with pkgs; [ duf du-dust ncdu ];
       environment.shellAliases = aliases;

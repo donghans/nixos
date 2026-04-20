@@ -69,8 +69,8 @@
 
 | 키 | 설명 |
 |----|------|
-| `os` | NixOS 설정 (`isNixOS=true`일 때만 적용) |
-| `hm` | Home Manager 설정 (`isNixOS=false`일 때만 적용) |
+| `os` | NixOS 설정 (`forOS=true`일 때만 적용) |
+| `hm` | Home Manager 설정 (`forOS=false`일 때만 적용) |
 | `options` | 추가 옵션 선언 (`enable` 외에 커스텀 옵션이 필요할 때) |
 
 ---

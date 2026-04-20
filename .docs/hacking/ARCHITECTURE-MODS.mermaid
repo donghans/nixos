@@ -14,10 +14,10 @@ flowchart TD
     subgraph DUAL["② Dual-Context  ·  양쪽 주입"]
         direction LR
         nixos_ctx["`**NixOS modules**
-        isNixOS = true
+        forOS = true
         → body.**os** 적용`"]
         hm_ctx["`**HM sharedModules**
-        isNixOS = false
+        forOS = false
         → body.**hm** 적용`"]
     end
 

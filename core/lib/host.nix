@@ -116,7 +116,7 @@
     nixpkgs.lib.nixosSystem {
       specialArgs =
         {
-          isNixOS = true;
+          forOS = true;
           inherit isISO;
           inherit inputs;
           inherit (hostCtx) metaConfig;
@@ -190,7 +190,7 @@
             home-manager.users.root = import ../../mods/sys/base/core.nix;
             home-manager.extraSpecialArgs =
               {
-                isNixOS = false;
+                forOS = false;
                 inherit isISO;
                 inherit inputs;
                 inherit (hostCtx) metaConfig;

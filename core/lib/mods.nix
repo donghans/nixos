@@ -25,7 +25,7 @@
   #   - enable      : desc가 null이 아니면 자동 추가 (mkEnableOption desc)
   #   - os/hm       : 값이 plain attrset이면 mkIf cfg.enable 자동 적용
   #                   _type 필드가 있는 값(mkMerge, mkIf, mkOverride 등)은 그대로 통과
-  #   - isNixOS 분기는 내부에서 처리 (모듈 시그니처에 선언 불필요)
+  #   - forOS 분기는 내부에서 처리 (모듈 시그니처에 선언 불필요)
   #   - _module.args 항목(예: hyprTerm)은 bodyFn의 named arg로 받으면 안 됨:
   #     innerModule이 {imports=[]} 래퍼 안에 있어 _module.args 키가 args 키셋에 없음.
   #     대신 bodyFn 안에서 config._module.args.hyprTerm 으로 lazily 접근할 것.
@@ -57,7 +57,7 @@
       config,
       lib,
       pkgs,
-      isNixOS ? false,
+      forOS ? false,
       ...
     } @ args: let
       pathParts = lib.splitString "." path;
@@ -90,7 +90,7 @@
       # bodyFn 호출 시 "called without required argument" 오류가 발생함.
       # sub-module imports가 필요하면 외부 모듈에서 직접 imports = [...] 사용.
       config =
-        if isNixOS
+        if forOS
         then autoWrap (body.os or {})
         else autoWrap (body.hm or {});
     };
@@ -118,7 +118,7 @@
       config,
       lib,
       pkgs,
-      isNixOS ? false,
+      forOS ? false,
       ...
     } @ args: let
       parentParts = lib.splitString "." parentPath;
@@ -130,7 +130,7 @@
         else lib.mkIf cfg.enable v;
     in {
       config =
-        if isNixOS
+        if forOS
         then autoWrap (body.os or {})
         else autoWrap (body.hm or {});
     };
@@ -180,7 +180,7 @@
   };
 
   # mkHostConfiguration — 호스트 파일 전용 통합 헬퍼
-  # os/hm 블록을 한 파일에 선언하고, 빌더가 컨텍스트(isNixOS)에 따라 분기해 적용.
+  # os/hm 블록을 한 파일에 선언하고, 빌더가 컨텍스트(forOS)에 따라 분기해 적용.
   # enable 옵션 없음 (호스트 파일은 항상 활성화).
   #
   # 사용 예:
@@ -191,13 +191,13 @@
   #   })
   mkHostConfiguration = bodyFn: let
     innerModule = {
-      isNixOS ? false,
+      forOS ? false,
       pkgs,
       ...
     } @ args: let
       body = bodyFn (args // {inherit pkgs;});
       selected =
-        if isNixOS
+        if forOS
         then (body.os or {})
         else (body.hm or {});
       # os/hm 블록 안의 imports를 최상위 module imports로 승격

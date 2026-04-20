@@ -105,7 +105,7 @@
   → NixOS + HM 양쪽에 주입 (host.nix)
     → mkMod/mkModOf가 enable 옵션 자동 선언
       → preset TOML + host TOML이 enable 값 결정 (flake.outputs.nix)
-        → isNixOS 플래그에 따라 os 또는 hm 블록만 적용 → autoWrap
+        → forOS 플래그에 따라 os 또는 hm 블록만 적용 → autoWrap
 ```
 
 ### Enable 결정 흐름 예시
