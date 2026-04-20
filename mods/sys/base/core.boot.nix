@@ -1,12 +1,13 @@
-{
+{mkPartOf, ...}:
+mkPartOf "mods.sys.base" ({
   config,
   pkgs,
   lib,
   ...
 }: let
   isRpi = config.workspace.type == "rpi";
-in
-  lib.mkMerge [
+in {
+  os = lib.mkMerge [
     # == EFI 시스템 (desktop / laptop / server) ==
     (lib.mkIf (!isRpi) {
       boot = {
@@ -26,4 +27,5 @@ in
         kernelPackages = pkgs.linuxPackages;
       };
     })
-  ]
+  ];
+})

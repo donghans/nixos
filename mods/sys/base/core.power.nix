@@ -1,9 +1,9 @@
-{
+{mkPartOf, ...}:
+mkPartOf "mods.sys.base" ({
   config,
   lib,
   ...
-}:
-with lib; let
+}: let
   isRpi = config.workspace.type == "rpi";
   isVm = config.mods.sys.services.incus-guest.enable;
   isServer = config.mods.sys.server.enable;
@@ -57,10 +57,11 @@ with lib; let
     else if isLaptop
     then laptopSettings
     else desktopSettings;
-in
-  mkIf enableTlp {
+in {
+  os = lib.mkIf enableTlp {
     services.tlp = {
       enable = true;
       settings = tlpSettings;
     };
-  }
+  };
+})
