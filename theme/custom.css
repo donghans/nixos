@@ -34,3 +34,56 @@
 .content main table th {
     padding: 0.45em 0.8em;
 }
+
+/* ── Mermaid 클릭 확대 ─────────────────────────────────────────── */
+
+/* 확대 가능한 다이어그램에 zoom-in 커서 표시 */
+.mz-zoomable {
+    cursor: zoom-in;
+}
+
+/* 오버레이 배경 */
+#mz-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.88);
+    z-index: 9000;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    padding: 1.5rem;
+    box-sizing: border-box;
+    cursor: zoom-out;
+}
+#mz-overlay.mz-open {
+    display: flex;
+}
+
+/* 닫기 안내 텍스트 */
+#mz-hint {
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
+    pointer-events: none;
+    flex-shrink: 0;
+}
+
+/* SVG를 담는 스크롤 박스 — 자연 크기 그대로, 뷰포트 초과 시 스크롤 */
+#mz-box {
+    overflow: auto;
+    max-width: 94vw;
+    max-height: 88vh;
+    cursor: default;
+    background: #1e1e2e;
+    border-radius: 6px;
+    padding: 1.2rem;
+    box-sizing: border-box;
+    flex-shrink: 1;
+}
+#mz-box svg {
+    display: block;
+    /* 인라인 style 제거 후 width/height 속성 기준 자연 크기로 렌더 */
+    max-width: none;
+}

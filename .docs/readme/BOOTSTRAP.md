@@ -17,17 +17,23 @@ cd nixos
 
 ## 2. 전역 설정 (`hosts/_base.toml`)
 
-설치 전에 반드시 수정해야 하는 필드는 `username`과 `[git]` 블록입니다. 나머지는 기본값으로 충분합니다.
+`./nixstrap.sh`(또는 `./nixup-iso.sh`) 실행 시 **자동으로 초기화**됩니다. 직접 실행하면 다음을 처리합니다:
+
+- `git.nixosRepo` — git remote origin에서 `owner/repo` 자동 감지·갱신
+- `git.name` / `git.email` — GitHub API로 자동 채우기 (API 접근 불가 시 대화형 입력)
+- `username` — 시스템 사용자명 (항상 대화형 입력)
+
+수동으로 미리 설정하려면 `hosts/_base.toml`을 직접 편집하세요:
 
 ```toml
 # hosts/_base.toml
-username            = "your_username"       # ← 필수 수정
+username            = "your_username"       # 시스템 사용자명
 system              = "x86_64-linux"
 
 [git]
-name      = "Your Name"                     # ← 필수 수정
-email     = "your@email.com"                # ← 필수 수정
-nixosRepo = "<your-username>/nixos"         # ← 필수 수정 (설치 시 클론할 저장소)
+name      = "Your Name"                     # Git 이름
+email     = "your@email.com"                # Git 이메일
+nixosRepo = "<your-username>/nixos"         # Fork한 저장소 (owner/repo)
 ```
 
 > **참고**: `diskDevice`/`bootDevice`(파티션 경로)와 `rollingStateVersion` 등은 기본값을 유지해도 됩니다. 기기마다 다른 파티션 경로가 필요한 경우 `<hostname>.toml`에서 오버라이드할 수 있습니다 (섹션 4 참고).
@@ -53,7 +59,7 @@ cd nixos
 - 이후 `nixstrap`을 호출 — 저장소·호스트·파티션 선택, 하드웨어 감지, `nixos-install`까지 대화형 안내
 
 `nixstrap` 주요 동작:
-- **호스트 자동 생성**: 레포에 없는 새 호스트명을 지정하면 프리셋(workstation/server)을 물어보고 `<hostname>.toml` · `<hostname>.nix`를 자동 생성합니다. 하드웨어 프로필(`hardware.nix`)도 자동 감지 및 생성됩니다.
+- **호스트 자동 생성**: 레포에 없는 새 호스트명을 지정하면 프리셋(workstation/server), stateVersion, **호스트별 username**(`_base.toml` 기본값 표시)을 물어보고 `<hostname>.toml` · `<hostname>.nix`를 자동 생성합니다. 하드웨어 프로필(`hardware.nix`)도 자동 감지 및 생성됩니다.
 - **파티션 모드**: 기존 파티션 직접 지정(mode 1) 또는 전체 디스크·빈 공간 범위로 신규 생성(mode 2) 중 선택
 - **params 저장/복원**: review 확인 후 설치 파라미터를 `/root/nixstrap-params.env`에 저장. 네트워크 오류 등으로 실패 후 재시도 시 이전 설정을 불러와 확인/수정 후 재개 가능
 

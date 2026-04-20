@@ -8,6 +8,21 @@
 
 ---
 
+## 사전 초기화 · sync-remote
+
+`./nixstrap.sh` 또는 `./nixup-iso.sh` 실행 직후, Phase 1 입력 수집에 앞서 `nixstrap.lib-repo.py sync-remote`가 자동으로 실행됩니다.
+
+| 단계 | 동작 |
+|------|------|
+| 1 | `git remote get-url origin`으로 `owner/repo` 자동 감지 |
+| 2 | `_base.toml`의 `git.nixosRepo`와 불일치 시 자동 갱신 |
+| 3 | GitHub API로 `git.name` / `git.email` 자동 채우기 (API 실패 시 대화형 입력) |
+| 4 | `username` 대화형 입력 |
+
+> remote가 없거나 `_base.toml`이 이미 일치하는 경우 자동으로 건너뜁니다.
+
+---
+
 ## Phase 1 · 입력 수집
 
 이전 세션의 파라미터 파일이 존재하면 불러와 검토 단계(review_loop)로 바로 진입합니다. 없으면 아래 순서로 입력을 수집합니다.
@@ -15,7 +30,7 @@
 ### 레포 · 호스트
 
 1. **레포 준비**: `NIXOS_REPO_PATH`가 설정된 경우(`./nixstrap.sh` 실행) 현재 레포 경로를 그대로 사용합니다. 커스텀 ISO 환경에서는 `ask_repo_and_clone`으로 GitHub에서 클론합니다.
-2. **호스트 선택**: `select_host`로 기존 호스트를 선택하거나 새 이름을 입력합니다. 신규 호스트라면 `ask_preset`으로 `workstation` / `server` 중 프리셋을 지정합니다.
+2. **호스트 선택**: `select_host`로 기존 호스트를 선택하거나 새 이름을 입력합니다. 신규 호스트라면 `ask_preset`으로 `workstation` / `server` 중 프리셋을 지정하고, `ask_host_username`으로 호스트별 username을 입력합니다(`_base.toml` 기본값 표시, 변경 없으면 Enter).
 3. **릴리즈 고정**: `ask_state_version`으로 NixOS 릴리즈를 고정하거나 rolling으로 유지합니다. 신규 호스트에만 해당합니다.
 
 ### 파티셔닝

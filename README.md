@@ -14,17 +14,14 @@ git clone https://github.com/<your-username>/nixos.git
 cd nixos
 ```
 
-### 2. 전역 설정 수정
+### 2. 전역 설정 (자동 초기화)
 
-`hosts/_base.toml`에서 **3줄만** 수정하면 됩니다:
+`./nixstrap.sh` 실행 시 git remote origin에서 설정을 **자동으로 감지·갱신**합니다:
 
-```toml
-username = "your_username"     # 사용자명
+- `git.nixosRepo` · `git.name` · `git.email` — GitHub에서 자동 채우기
+- `username` — 대화형 입력
 
-[git]
-name  = "Your Name"            # Git 이름
-email = "your@email.com"       # Git 이메일
-```
+필요하면 `hosts/_base.toml`을 실행 전에 직접 편집할 수도 있습니다.
 
 ### 3. 설치
 
@@ -37,7 +34,7 @@ email = "your@email.com"       # Git 이메일
 ```
 
 `nixstrap`이 호스트 선택, 파티셔닝, `nixos-install`까지 대화형으로 안내합니다.
-상세 가이드: [BOOTSTRAP.md](./.docs/readme/BOOTSTRAP.md)
+상세 가이드: [BOOTSTRAP.md](https://donghans.github.io/nixos/readme/BOOTSTRAP.html)
 
 ---
 
@@ -64,10 +61,10 @@ fvm = true                 # Flutter 추가 활성화
 
 | 문서 | 대상 | 내용 |
 |------|------|------|
-| [시스템 이식 가이드](./.docs/readme/BOOTSTRAP.md) | 처음 설치 | Fork, 설정, 설치 전 과정 |
-| [nixup 명령어](./.docs/manual/NIXUP.md) | 일상 관리 | 서브커맨드, 플래그, 활용 사례 |
-| [Mods 확장 가이드](./.docs/manual/MODS.md) | 기능 확장 | API 레퍼런스, Cookbook, 추가/삭제 절차 |
-| [기술 심층 가이드](./.docs/hacking/_HACKING.md) | 내부 구조 | 아키텍처, 메커니즘, 라이프사이클 |
+| [시스템 이식 가이드](https://donghans.github.io/nixos/readme/BOOTSTRAP.html) | 처음 설치 | Fork, 설정, 설치 전 과정 |
+| [nixup 명령어](https://donghans.github.io/nixos/manual/NIXUP.html) | 일상 관리 | 서브커맨드, 플래그, 활용 사례 |
+| [Mods 확장 가이드](https://donghans.github.io/nixos/manual/MODS.html) | 기능 확장 | API 레퍼런스, Cookbook, 추가/삭제 절차 |
+| [기술 심층 가이드](https://donghans.github.io/nixos/hacking/_HACKING.html) | 내부 구조 | 아키텍처, 메커니즘, 라이프사이클 |
 
 ---
 

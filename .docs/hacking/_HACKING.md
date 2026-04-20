@@ -30,7 +30,8 @@
 신규 기기 부트스트랩 설치 흐름입니다.
 👉 [**LIFECYCLE_NIXSTRAP.md 자세히 보기**](./LIFECYCLE_NIXSTRAP.md)
 
-- **Phase 1 — 레포 · 호스트**: 레포 클론 또는 로컬 경로 사용, 호스트 선택·프리셋·릴리즈 고정.
+- **sync-remote 초기화**: git remote 감지, `_base.toml` 자동 갱신 (nixosRepo · name · email · username).
+- **Phase 1 — 레포 · 호스트**: 레포 클론 또는 로컬 경로 사용, 호스트 선택·프리셋·username·릴리즈 고정.
 - **Phase 1 — 파티셔닝**: 기존 파티션 지정(mode 1) 또는 디스크·범위 선택 후 자동 생성(mode 2).
 - **Phase 1 — 검토 · 저장**: 설정 검토, params 저장, 비밀번호 입력(메모리에만 보관).
 - **Phase 2 — 디스크 준비**: cleanup → labels → 파티션 생성 → 포맷 → 마운트.

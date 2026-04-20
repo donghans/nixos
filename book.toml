@@ -10,6 +10,7 @@ build-dir = "book"
 
 [output.html]
 additional-css = ["theme/custom.css"]
+additional-js  = ["theme/mermaid-zoom.js"]
 git-repository-url = "https://github.com/donghans/nixos"
 edit-url-template = "https://github.com/donghans/nixos/edit/stable/.docs/{path}"
 

@@ -28,11 +28,12 @@ flowchart TD
         독립 enable
         preset 등록 필요`"]
         mkmodof["`**mkModOf**
-        부모 cascade
+        부모 연쇄 활성화
         mkDefault true`"]
         mkpartof["`**mkPartOf**
         enable 없음
         부모 종속`"]
+        mkmod ~~~ mkmodof ~~~ mkpartof
     end
 
     nixos_ctx -- "body.**os** 적용" --> HELPER
@@ -43,7 +44,7 @@ flowchart TD
         master["`**마스터 스위치**
         gui.nix · devel.nix
         mods.gui.enable = true`"]
-        cascade["`**cascade**
+        cascade["`**연쇄 활성화**
         vivaldi.enable = mkDefault true
         (host.toml로 오버라이드 가능)`"]
         part["`**part**
