@@ -91,6 +91,7 @@ nixos/
 ├── core/               # 프레임워크 엔진
 │   ├── flake.nix       # 메인 진입점
 │   ├── lib/            # 호스트 빌더(host.nix), Mods 헬퍼(mods.nix), 옵션 선언(workspace-options.nix)
+│   ├── overlays/       # 커스텀 오버레이 (mkWrapper 헬퍼)
 │   └── scripts/        # nixup 관리 CLI + nixstrap 설치 스크립트
 ├── mods/               # 재사용 가능한 기능 모듈
 │   ├── sys/            # 시스템 기반 (base, fonts, vfs, services, utils)

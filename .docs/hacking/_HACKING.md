@@ -11,8 +11,7 @@
 - **CLI Engine**: `nixup.sh`와 태스크 스크립트 구조 (Update, Fix, Check 등).
 - **Metadata**: TOML 기반의 데이터 중심 설계.
 - **Logic Core**: Flake 기반 동적 호스트 생성.
-- **Mods Layer**: 도메인별 기능 모듈 및 프레임워크.
-  - 📐 Mods 프레임워크 심층: [ARCHITECTURE-MODS.md](./ARCHITECTURE-MODS.md)
+- **Mods Layer**: 도메인별 기능 모듈 및 프레임워크 (→ 아래 섹션 3 참조).
 
 ---
 

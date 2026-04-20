@@ -11,17 +11,18 @@ flowchart TD
         nix_files --> filter
     end
 
-    subgraph DUAL["② Dual-Context  ·  양쪽 주입"]
+    subgraph DUAL["② Dual-Context  ·  같은 모듈이 양쪽에 로드"]
         direction LR
         nixos_ctx["`**NixOS modules**
-        forOS = true
-        → body.**os** 적용`"]
+        forOS = true`"]
         hm_ctx["`**HM sharedModules**
-        forOS = false
-        → body.**hm** 적용`"]
+        forOS = false`"]
     end
 
-    subgraph HELPER["③ 헬퍼 패턴  ·  옵션 자동 선언"]
+    filter --> nixos_ctx
+    filter --> hm_ctx
+
+    subgraph HELPER["③ 헬퍼  ·  forOS에 따라 os/hm 블록 분기"]
         direction LR
         mkmod["`**mkMod**
         독립 enable
@@ -33,6 +34,9 @@ flowchart TD
         enable 없음
         부모 종속`"]
     end
+
+    nixos_ctx -- "body.**os** 적용" --> HELPER
+    hm_ctx -- "body.**hm** 적용" --> HELPER
 
     subgraph ENABLE["④ Enable 계층"]
         direction TB
@@ -59,8 +63,6 @@ flowchart TD
         preset --> autowrap
     end
 
-    filter --> DUAL
-    DUAL --> HELPER
     HELPER --> ENABLE
     ENABLE --> preset
     autowrap --> Out(["✓ NixOS / HM config"])
