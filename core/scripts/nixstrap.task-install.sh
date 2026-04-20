@@ -178,7 +178,7 @@ _install_nixos() {
     log_exec "nix" ">" "nixos-install"
     # setsid: 새 세션에서 실행 → 터미널 Ctrl+C(SIGINT)를 받지 않음
     # HOME=/root: sudo -E로 실행 시 nixos 유저의 $HOME이 넘어오면 "not owned by you" 경고 발생
-    setsid HOME=/root nixos-install --no-root-passwd --flake "$BUILD_DIR#$HOST" &
+    setsid env HOME=/root nixos-install --no-root-passwd --flake "$BUILD_DIR#$HOST" &
     _NIXOS_INSTALL_PID=$!
     local _rc
     while true; do
