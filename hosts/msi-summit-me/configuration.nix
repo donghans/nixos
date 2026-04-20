@@ -1,8 +1,4 @@
 {pkgs, ...}: {
-  imports = [
-    ./_hardware.nix
-  ];
-
   # llm-utils-project 관련 테스트를 위해 임시로 열어둔 포트
   networking.firewall.allowedTCPPorts = [7681];
 

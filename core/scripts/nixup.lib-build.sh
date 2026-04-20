@@ -146,6 +146,9 @@ prepare_build_dir() {
     if [ -n "$lock_file" ] && [ -f "$lock_file" ]; then
         cp "$lock_file" "$build_dir/flake.lock"
     fi
+
+    # hardware.nix: 현재 시스템 기준으로 매번 생성 (git에 저장하지 않고 빌드 디렉터리에만 존재)
+    nixos-generate-config --no-filesystems --show-hardware-config > "$build_dir/hardware.nix"
     # nix는 path: 모드로 호출 — git 추적 없이 BUILD_DIR을 store에 직접 복사하여 순수 평가
 }
 

@@ -148,11 +148,11 @@ _extract_username() {
 }
 
 _generate_hw_config() {
-    log_msg "Config" "generating hardware-configuration.nix ..."
-    nixos-generate-config --root /mnt --no-filesystems
-    mkdir -p "/mnt/etc/nixos/hosts/$HOST"
-    mv /mnt/etc/nixos/hardware-configuration.nix "/mnt/etc/nixos/hosts/$HOST/_hardware.nix"
-    rm -f /mnt/etc/nixos/configuration.nix
+    log_msg "Config" "generating hardware.nix for $HOST..."
+    # --show-hardware-config: stdout 출력만 하고 /mnt/etc/nixos/에 파일을 쓰지 않음
+    # → 레포에 hardware.nix가 남지 않음; 빌드 디렉터리에만 존재
+    nixos-generate-config --root /mnt --no-filesystems --show-hardware-config \
+        > "$BUILD_DIR/hardware.nix"
     printf 'NIXUP_LAST_HOST=%s\n' "$HOST" > /mnt/etc/nixos/.env
 }
 
@@ -224,8 +224,8 @@ phase2_execute() {
     _create_host_profile  # 8. 신규 호스트 프로파일 생성
     _resolve_metadata     # 9. nixup.task-resolve.py 실행 → RESOLVE_TMP
     _extract_username     # 10. base.toml → USERNAME
-    _generate_hw_config   # 11. nixos-generate-config
-    _prepare_build_dir    # 12. /tmp/nixos-build 구성
+    _prepare_build_dir    # 11. /tmp/nixos-build 구성 (BUILD_DIR 설정됨)
+    _generate_hw_config   # 12. _hardware.nix → BUILD_DIR에 직접 생성
     _install_nixos        # 13. nixos-install
     _post_process         # 14. mv, chown, symlink
 

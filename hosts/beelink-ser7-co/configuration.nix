@@ -1,8 +1,4 @@
 {...}: {
-  imports = [
-    ./_hardware.nix
-  ];
-
   # == Boot & Kernel ==
   boot = {
     kernelParams = [

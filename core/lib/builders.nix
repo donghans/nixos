@@ -100,6 +100,7 @@
       ]
       else [
         ../../hosts/${hostInfo.hostname}/configuration.nix
+        ../../hardware.nix
       ];
   in
     nixpkgs.lib.nixosSystem {
