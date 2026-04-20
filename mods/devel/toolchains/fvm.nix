@@ -1,5 +1,5 @@
-{mkMod, ...}:
-mkMod __curPos "Flutter Version Management" ({
+{mkModOf, ...}:
+mkModOf "mods.devel" __curPos "Flutter Version Management" ({
   config,
   pkgs,
   ...

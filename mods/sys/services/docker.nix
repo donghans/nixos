@@ -1,9 +1,5 @@
 {mkMod, ...}:
-mkMod __curPos "Docker Daemon and tools" ({
-  cfg,
-  config,
-  ...
-}: {
+mkMod __curPos "Docker Daemon and tools" ({config, ...}: {
   os = {
     virtualisation.docker = {
       enable = true;

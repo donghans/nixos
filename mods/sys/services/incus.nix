@@ -1,9 +1,5 @@
 {mkMod, ...}:
-mkMod __curPos "Incus hypervisor" ({
-  cfg,
-  config,
-  ...
-}: {
+mkMod __curPos "Incus hypervisor" ({config, ...}: {
   os = {
     virtualisation.incus.enable = true;
     virtualisation.incus.ui.enable = true;

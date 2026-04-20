@@ -4,9 +4,34 @@
 }: let
   inherit (inputs) nixpkgs nixpkgs-unstable home-manager;
 
-  # mods/_lib.nix의 mkMod / mkModHere 헬퍼를 specialArgs로 전 모듈에 주입
-  mods-lib = import ../../mods/_lib.nix {inherit (nixpkgs) lib;};
-  inherit (mods-lib) mkMod mkNamedMod;
+  # core/lib/mods-lib.nix의 mkMod 등 헬퍼를 specialArgs로 전 모듈에 주입
+  mods-lib = import ./mods-lib.nix {inherit (nixpkgs) lib;};
+  inherit (mods-lib) mkMod mkNamedMod mkPartOf mkModOf recursiveImportDir;
+
+  # mkHostConfiguration — 호스트 파일 전용 통합 헬퍼
+  # os/hm 블록을 한 파일에 선언하고, 빌더가 컨텍스트(isNixOS)에 따라 분기해 적용.
+  # enable 옵션 없음 (호스트 파일은 항상 활성화).
+  #
+  # 사용 예:
+  #   {mkHostConfiguration, ...}:
+  #   mkHostConfiguration ({pkgs, lib, ...}: {
+  #     os = { boot.kernelParams = ["amd_pstate=active"]; };
+  #     hm = { services.hypridle.settings.listener = [...]; };
+  #   })
+  mkHostConfiguration = bodyFn: let
+    innerModule = {
+      isNixOS ? false,
+      pkgs,
+      ...
+    } @ args: let
+      body = bodyFn (args // {inherit pkgs;});
+    in {
+      config =
+        if isNixOS
+        then (body.os or {})
+        else (body.hm or {});
+    };
+  in {imports = [innerModule];};
 
   # == Common Host Context Generator ==
   mkHostContext = hostInfo @ {
@@ -63,9 +88,15 @@
       then "nixos"
       else workspaceMeta.username;
 
+    # 통합 호스트 파일(hosts/<hostname>.nix) 우선 탐색, 없으면 기존 경로로 fallback
+    unifiedHostFile = ../../hosts/${hostname}.nix;
+    hasUnifiedHost = builtins.pathExists unifiedHostFile;
+
     homeConfig =
       if isISO
       then ../iso.home.nix
+      else if hasUnifiedHost
+      then unifiedHostFile
       else ../../hosts/${hostname}/home.nix;
 
     metaConfig = {
@@ -85,6 +116,7 @@
     };
   in {
     inherit homeUser homeConfig metaConfig unstable unstable-fallback pkgs;
+    inherit hasUnifiedHost unifiedHostFile;
   };
 
   # == Host Generator ==
@@ -99,6 +131,8 @@
         "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-graphical-base.nix"
         ../iso.nix
       ]
+      else if hostCtx.hasUnifiedHost
+      then [hostCtx.unifiedHostFile ../../hardware.nix]
       else [
         ../../hosts/${hostInfo.hostname}/configuration.nix
         ../../hardware.nix
@@ -107,7 +141,7 @@
     nixpkgs.lib.nixosSystem {
       specialArgs = {
         isNixOS = true;
-        inherit inputs mkMod mkNamedMod;
+        inherit inputs mkMod mkNamedMod mkPartOf mkModOf mkHostConfiguration;
         inherit (hostCtx) metaConfig;
         inherit (hostCtx) unstable;
         inherit (hostCtx) unstable-fallback;
@@ -116,9 +150,9 @@
       modules =
         [{nixpkgs.hostPlatform = hostInfo.system;}]
         ++ mainConfig
+        ++ [./workspace-options.nix]
+        ++ recursiveImportDir ../../mods
         ++ [
-          ./workspace-options.nix
-          ../../mods/default.nix
           {
             workspace = hostCtx.metaConfig;
             nixpkgs.overlays = customOverlays;
@@ -165,11 +199,9 @@
           home-manager.nixosModules.home-manager
           {
             home-manager.sharedModules =
-              [
-                ./workspace-options.nix
-                ../../mods/default.nix
-                {workspace = hostCtx.metaConfig;}
-              ]
+              [./workspace-options.nix]
+              ++ recursiveImportDir ../../mods
+              ++ [{workspace = hostCtx.metaConfig;}]
               ++ extraModules;
             home-manager.useGlobalPkgs = true;
             home-manager.useUserPackages = true;
@@ -177,10 +209,10 @@
             # (목적: 기존 설정과 충돌 시 파일 백업 생성)
             home-manager.backupFileExtension = "backup";
             home-manager.users.${hostCtx.homeUser} = import hostCtx.homeConfig;
-            home-manager.users.root = import ../../mods/sys/base/home.nix;
+            home-manager.users.root = import ../../mods/sys/base/core.nix;
             home-manager.extraSpecialArgs = {
               isNixOS = false;
-              inherit inputs mkMod mkNamedMod;
+              inherit inputs mkMod mkNamedMod mkPartOf mkModOf mkHostConfiguration;
               inherit (hostCtx) metaConfig;
               inherit (hostCtx) unstable;
               inherit (hostCtx) unstable-fallback;
@@ -189,5 +221,5 @@
         ];
     };
 in {
-  inherit mkHostContext mkHost;
+  inherit mkHostContext mkHost mkMod mkNamedMod mkPartOf mkModOf mkHostConfiguration recursiveImportDir;
 }

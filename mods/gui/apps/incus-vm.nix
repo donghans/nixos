@@ -1,9 +1,7 @@
-{mkMod, ...}:
-mkMod __curPos "Incus VM" ({
-  cfg,
+{mkModOf, ...}:
+mkModOf "mods.gui" __curPos "Incus VM" ({
   config,
   pkgs,
-  lib,
   ...
 }: let
   # GUI VM 목록을 fuzzel로 선택 → 상태에 따라 켜기/끄기/뷰어 열기 액션 선택

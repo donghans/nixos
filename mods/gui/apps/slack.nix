@@ -1,5 +1,5 @@
-{mkMod, ...}:
-mkMod __curPos "Slack" ({
+{mkModOf, ...}:
+mkModOf "mods.gui" __curPos "Slack" ({
   pkgs,
   unstable,
   ...

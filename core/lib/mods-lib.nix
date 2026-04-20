@@ -1,6 +1,6 @@
 {lib}: let
   # mods/ 루트 절대 경로 — pathFromPos에서 상대 경로 계산에 사용
-  modsRoot = toString ./.;
+  modsRoot = toString ../../mods;
 
   # __curPos 위치에서 option path 자동 유도
   # 예: { file = ".../mods/sys/services/docker.nix"; ... } → "mods.sys.services.docker"
@@ -66,7 +66,7 @@
         then null
         else lib.getAttrFromPath pathParts config;
 
-      body = bodyFn (args // {inherit cfg;});
+      body = bodyFn (args // {inherit cfg pkgs;});
 
       # plain attrset → mkIf cfg.enable 자동 적용
       # _type 있음(mkIf/mkMerge/mkOverride 등) → 그대로 통과
@@ -96,6 +96,46 @@
     };
   in {imports = [innerModule];};
 
+  # mkPartOf — 부모 모드의 enable에 종속되는 서브모듈 헬퍼
+  #
+  # 자체 enable 옵션을 선언하지 않고, 지정한 부모 경로의 cfg.enable에 따라 활성화됨.
+  # TOML 프리셋에 개별 항목으로 노출되지 않는 서브모듈에 사용.
+  #
+  # 인자:
+  #   parentPath — 부모 옵션 경로 문자열 (예: "mods.gui", "mods.sys.base")
+  #   bodyFn     — { cfg, config, lib, pkgs, ... } 를 받아 { os?, hm? } 를 반환하는 함수
+  #                cfg = 부모의 config.mods.* attrset
+  #
+  # 사용 예:
+  #   { mkPartOf, ... }:
+  #   mkPartOf "mods.gui" ({ cfg, pkgs, lib, ... }: {
+  #     os = { services.greetd.enable = true; };   # mkIf cfg.enable 자동 적용
+  #     hm = { programs.fuzzel.enable = true; };   # mkIf cfg.enable 자동 적용
+  #   })
+  #
+  mkPartOf = parentPath: bodyFn: let
+    innerModule = {
+      config,
+      lib,
+      pkgs,
+      isNixOS ? false,
+      ...
+    } @ args: let
+      parentParts = lib.splitString "." parentPath;
+      cfg = lib.getAttrFromPath parentParts config;
+      body = bodyFn (args // {inherit cfg pkgs;});
+      autoWrap = v:
+        if v ? _type
+        then v
+        else lib.mkIf cfg.enable v;
+    in {
+      config =
+        if isNixOS
+        then autoWrap (body.os or {})
+        else autoWrap (body.hm or {});
+    };
+  in {imports = [innerModule];};
+
   # mkMod — __curPos에서 파일 위치를 자동 유도하는 기본 헬퍼 (구 mkModHere)
   #
   # 사용 예:
@@ -106,21 +146,71 @@
   #
   # __curPos는 호출 파일 안에서 평가되므로 해당 파일의 경로를 자동으로 가져온다.
   mkMod = pos: desc: bodyFn: mkNamedMod (pathFromPos pos) desc bodyFn;
-in {
-  # 디렉터리 내 NixOS 모듈 파일 목록 반환
-  # 제외: _ prefix (라이브러리/프라이빗), .home.nix suffix (조건부 로드 파일)
+
+  # mkModOf — 부모 도메인 마스터 스위치에 자동 연결되는 서브모듈
+  #
+  # mkMod와 동일하지만 parentPath.enable = true 시 자동으로 enable = mkDefault true 설정.
+  # 부모 파일(gui.nix, devel.nix 등)에서 cascade를 명시할 필요 없이, 각 모듈 파일에서
+  # 소속 도메인만 선언하면 마스터 스위치와 자동 연결된다.
+  #
+  # 사용 예:
+  #   { mkModOf, ... }:
+  #   mkModOf "mods.devel" __curPos "Node.js toolchain" ({ cfg, pkgs, ... }: {
+  #     hm = { home.packages = [ pkgs.nodejs ]; };
+  #   })
+  #
+  mkModOf = parentPath: pos: desc: bodyFn: let
+    modulePath = pathFromPos pos;
+    baseMod = mkNamedMod modulePath desc bodyFn;
+    cascadeModule = {
+      config,
+      lib,
+      ...
+    }: let
+      parentParts = lib.splitString "." parentPath;
+      parentCfg = lib.getAttrFromPath parentParts config;
+      moduleParts = lib.splitString "." modulePath;
+    in {
+      config =
+        lib.mkIf parentCfg.enable
+        (lib.setAttrByPath moduleParts {enable = lib.mkDefault true;});
+    };
+  in {
+    imports = baseMod.imports ++ [cascadeModule];
+  };
+
+  # 제외 규칙 (importDir / recursiveImportDir 공통)
+  # _ prefix: 라이브러리·프라이빗 파일, .home.nix / .overlay.nix suffix: 조건부 로드 파일
+  # default.nix: 오케스트레이터 (모듈 아님)
+  isImportable = n:
+    lib.hasSuffix ".nix" n
+    && !lib.hasPrefix "_" n
+    && !lib.hasSuffix ".home.nix" n
+    && !lib.hasSuffix ".overlay.nix" n
+    && n != "default.nix";
+
+  # 디렉터리 내 NixOS 모듈 파일 목록 반환 (비재귀)
   importDir = dir: let
     contents = builtins.readDir dir;
-    isImportable = n:
-      lib.hasSuffix ".nix" n
-      && !lib.hasPrefix "_" n
-      && !lib.hasSuffix ".home.nix" n
-      && !lib.hasSuffix ".overlay.nix" n;
     files =
       builtins.filter isImportable
       (builtins.attrNames (lib.filterAttrs (_: v: v == "regular") contents));
   in
     map (n: dir + "/${n}") files;
 
-  inherit mkMod mkNamedMod;
+  # 디렉터리 트리 전체의 NixOS 모듈 파일 목록 반환 (재귀)
+  # _ prefix 디렉터리도 skip (예: _preset/)
+  recursiveImportDir = dir: let
+    contents = builtins.readDir dir;
+    files =
+      builtins.filter isImportable
+      (builtins.attrNames (lib.filterAttrs (_: v: v == "regular") contents));
+    subdirs =
+      builtins.attrNames
+      (lib.filterAttrs (n: v: v == "directory" && !lib.hasPrefix "_" n) contents);
+  in
+    map (n: dir + "/${n}") files
+    ++ builtins.concatLists (map (d: recursiveImportDir (dir + "/${d}")) subdirs);
+in {
+  inherit mkMod mkNamedMod mkPartOf mkModOf importDir recursiveImportDir;
 }

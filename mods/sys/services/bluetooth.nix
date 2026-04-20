@@ -1,6 +1,5 @@
 {mkMod, ...}:
 mkMod __curPos "Bluetooth support" ({
-  cfg,
   config,
   lib,
   ...

@@ -86,7 +86,7 @@
   builders = import ./lib/builders.nix {
     inherit inputs customOverlays;
   };
-  inherit (builders) mkHost mkHostContext;
+  inherit (builders) mkHost mkHostContext mkMod mkNamedMod mkPartOf mkModOf mkHostConfiguration recursiveImportDir;
 
   # == ISO 빌더 헬퍼 (system만 다르고 나머지 동일) ==
   mkISO = system:
@@ -173,17 +173,13 @@ in {
           inherit (hostCtx) pkgs;
           extraSpecialArgs = {
             isNixOS = false;
-            inherit inputs;
+            inherit inputs mkMod mkNamedMod mkPartOf mkModOf mkHostConfiguration;
             inherit (hostCtx) metaConfig unstable unstable-fallback;
           };
-          modules = [
-            ./lib/workspace-options.nix
-            {workspace = hostCtx.metaConfig;}
-            ../mods/default.nix
-            modsModule
-            coverageModule
-            (import hostCtx.homeConfig)
-          ];
+          modules =
+            [./lib/workspace-options.nix {workspace = hostCtx.metaConfig;}]
+            ++ recursiveImportDir ../mods
+            ++ [modsModule coverageModule (import hostCtx.homeConfig)];
         };
       }
       {
@@ -192,29 +188,29 @@ in {
           inherit (hostCtx) pkgs;
           extraSpecialArgs = {
             isNixOS = false;
-            inherit inputs;
+            inherit inputs mkMod mkNamedMod mkPartOf mkModOf mkHostConfiguration;
             metaConfig = hostCtx.metaConfig // {username = "root";};
             inherit (hostCtx) unstable unstable-fallback;
           };
-          modules = [
-            ./lib/workspace-options.nix
-            {workspace = hostCtx.metaConfig // {username = "root";};}
-            # gui/devel 설정 제외한 modsModule (옵션 선언은 mods/default.nix가 담당)
-            rootModsModule
-            ({
-              options,
-              lib,
-              ...
-            }:
-              import ./lib/mk-preset.nix {
-                inherit lib options;
-                presetName = resolved.preset;
-                presetsJsonPath = ../presets.json;
-                # root는 sys 모듈만 활성화하므로 gui/devel 커버리지 제외
-                excludePrefixes = ["mods.gui" "mods.devel"];
-              })
-            ../mods/default.nix
-          ];
+          modules =
+            [./lib/workspace-options.nix {workspace = hostCtx.metaConfig // {username = "root";};}]
+            ++ recursiveImportDir ../mods
+            ++ [
+              # gui/devel 설정 제외한 modsModule (옵션 선언은 recursiveImportDir가 담당)
+              rootModsModule
+              ({
+                options,
+                lib,
+                ...
+              }:
+                import ./lib/mk-preset.nix {
+                  inherit lib options;
+                  presetName = resolved.preset;
+                  presetsJsonPath = ../presets.json;
+                  # root는 sys 모듈만 활성화하므로 gui/devel 커버리지 제외
+                  excludePrefixes = ["mods.gui" "mods.devel"];
+                })
+            ];
         };
       }
     ])

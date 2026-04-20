@@ -1,6 +1,5 @@
 {mkMod, ...}:
 mkMod __curPos "NetworkManager (nmcli + nm-applet)" ({
-  cfg,
   config,
   pkgs,
   lib,

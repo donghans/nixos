@@ -1,5 +1,5 @@
-{mkMod, ...}:
-mkMod __curPos "LLM CLI tools" ({unstable, ...}: let
+{mkModOf, ...}:
+mkModOf "mods.devel" __curPos "LLM CLI tools" ({unstable, ...}: let
   # (목적: Wayland 터미널(kitty, alacritty 등)에서 LLM CLI의 Home/End 키 깨짐 현상 수정)
   #
   # 원인: gemini-cli, claude-code 모두 시작 시 kitty keyboard protocol 쿼리(\x1b[?u)를 보내고,

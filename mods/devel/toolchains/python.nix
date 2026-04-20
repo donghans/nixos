@@ -1,5 +1,5 @@
-{mkMod, ...}:
-mkMod __curPos "Python toolchain" ({pkgs, ...}: let
+{mkModOf, ...}:
+mkModOf "mods.devel" __curPos "Python toolchain" ({pkgs, ...}: let
   pythonEnv = pkgs.python312.withPackages (ps:
     with ps; [
       pip
