@@ -120,7 +120,7 @@ __curPos.file = "/home/user/nixos/mods/gui/apps/vivaldi.nix"
 
 `mods.gui.enable = true`가 되면 fonts, vfs 등 의존성도 함께 켜집니다.
 
-### 4-2. mkModOf cascade
+### 4-2. mkModOf 연쇄 활성화
 
 ```nix
 # mods/gui/apps/vivaldi.nix
@@ -174,7 +174,6 @@ hosts/_preset.workstation.toml         hosts/<hostname>.toml
 |-----------|------|
 | Plain attrset (`{services.foo = true;}`) | `lib.mkIf cfg.enable` 자동 wrapping |
 | `_type` 있음 (`lib.mkMerge [...]`, `lib.mkIf ...`) | **그대로 통과** — 이미 직접 조합한 것 |
-| `desc = null` 모듈 | wrapping 건너뜀 (항상 활성화) |
 
 이 덕분에 모듈 작성자가 매번 `lib.mkIf cfg.enable`을 직접 쓸 필요가 없습니다. 복잡한 조건이 필요한 경우에만 `lib.mkMerge`나 `lib.mkIf`를 직접 사용하면 됩니다.
 

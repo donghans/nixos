@@ -16,13 +16,13 @@
   #
   # 인자:
   #   path    — 옵션 경로 문자열 (예: "mods.gui.apps.vivaldi")
-  #   desc    — mkEnableOption 설명. null이면 enable 옵션을 추가하지 않음.
+  #   desc    — mkEnableOption 설명.
   #   bodyFn  — { cfg, config, lib, pkgs, unstable, ... } 를 받아
   #              { options?, os?, hm? } 를 반환하는 함수
   #
   # 동작:
-  #   - cfg         : path 기반으로 config에서 자동 해결 (desc=null이면 null)
-  #   - enable      : desc가 null이 아니면 자동 추가 (mkEnableOption desc)
+  #   - cfg         : path 기반으로 config에서 자동 해결
+  #   - enable      : 자동 추가 (mkEnableOption desc)
   #   - os/hm       : 값이 plain attrset이면 mkIf cfg.enable 자동 적용
   #                   _type 필드가 있는 값(mkMerge, mkIf, mkOverride 등)은 그대로 통과
   #   - forOS 분기는 내부에서 처리 (모듈 시그니처에 선언 불필요)
@@ -47,11 +47,6 @@
   #     ];
   #   })
   #
-  #   # enable 없는 항상-켜지는 모듈 (desc=null)
-  #   mkMod __curPos null ({ pkgs, ... }: {
-  #     hm = { programs.fuzzel = { enable = true; }; };
-  #   })
-  #
   mkNamedMod = path: desc: bodyFn: let
     innerModule = {
       config,
@@ -61,25 +56,19 @@
       ...
     } @ args: let
       pathParts = lib.splitString "." path;
-      cfg =
-        if desc == null
-        then null
-        else lib.getAttrFromPath pathParts config;
+      cfg = lib.getAttrFromPath pathParts config;
 
       body = bodyFn (args // {inherit cfg pkgs;});
 
       # plain attrset → mkIf cfg.enable 자동 적용
       # _type 있음(mkIf/mkMerge/mkOverride 등) → 그대로 통과
-      # desc = null(enable 없음) → 그대로 통과
       autoWrap = v:
-        if desc == null
-        then v
-        else if v ? _type
+        if v ? _type
         then v
         else lib.mkIf cfg.enable v;
 
       baseOptions = lib.setAttrByPath pathParts (
-        lib.optionalAttrs (desc != null) {enable = lib.mkEnableOption desc;}
+        {enable = lib.mkEnableOption desc;}
         // (body.options or {})
       );
     in {
@@ -150,7 +139,7 @@
   # mkModOf — 부모 도메인 마스터 스위치에 자동 연결되는 서브모듈
   #
   # mkMod와 동일하지만 parentPath.enable = true 시 자동으로 enable = mkDefault true 설정.
-  # 부모 파일(gui.nix, devel.nix 등)에서 cascade를 명시할 필요 없이, 각 모듈 파일에서
+  # 부모 파일(gui.nix, devel.nix 등)에서 연쇄 활성화를 명시할 필요 없이, 각 모듈 파일에서
   # 소속 도메인만 선언하면 마스터 스위치와 자동 연결된다.
   #
   # 사용 예:

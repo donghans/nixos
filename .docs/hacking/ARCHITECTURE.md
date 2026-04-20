@@ -16,12 +16,12 @@
 - **`nixup.sh` (Dispatcher)**:
   - **역할**: 모든 명령의 통합 입구이자 빌드 오케스트레이터입니다.
   - **특징**: `nix-shell` 쉬뱅을 사용하여 `jq`, `nom` 등의 도구가 없어도 시스템을 부트스트랩할 수 있도록 설계되었습니다. 로깅(`YYYYMMDDTHHMMSS.log`, 예: `20260405T120000.log`)과 세션 락(`flock`)을 독점적으로 관리합니다.
-- **Task & Lib**:
-  - **`nixup.lib-ui.sh`**: 색상 상수, `log_msg`/`log_exec` 헬퍼, 초기화 배너 출력.
-  - **`nixup.lib-build.sh`**: `.build/` 격리 빌드 환경 구축 로직. 소스를 물리 복사하고 nix를 `path:` 모드로 호출하여 git 추적 없이 순수 평가를 수행합니다.
-  - **`nixup.lib-lock.sh`**: 기기 특성(`isRolling`)에 따른 유연한 락 파일 관리 로직.
-  - **`nixup.task-resolve.py`**: TOML 소스(`hosts/_base.toml`, `hosts/<hostname>.toml`, `hosts/_preset.*.toml`)를 읽어 Nix가 사용할 `resolved.json`과 `presets.json`을 생성하는 메타데이터 변환기.
-  - **`nixup.task-*.sh`**: 실제 비즈니스 로직(빌드, 업데이트, 복구 등)을 수행하는 모듈형 스크립트.
+  - **Task & Lib**:
+    - **`nixup.lib-ui.sh`**: 색상 상수, `log_msg`/`log_exec` 헬퍼, 초기화 배너 출력.
+    - **`nixup.lib-build.sh`**: `.build/` 격리 빌드 환경 구축 로직. 소스를 물리 복사하고 nix를 `path:` 모드로 호출하여 git 추적 없이 순수 평가를 수행합니다.
+    - **`nixup.lib-lock.sh`**: 기기 특성(`isRolling`)에 따른 유연한 락 파일 관리 로직.
+    - **`nixup.task-resolve.py`**: TOML 소스(`hosts/_base.toml`, `hosts/<hostname>.toml`, `hosts/_preset.*.toml`)를 읽어 Nix가 사용할 `resolved.json`과 `presets.json`을 생성하는 메타데이터 변환기.
+    - **`nixup.task-*.sh`**: 실제 비즈니스 로직(빌드, 업데이트, 복구 등)을 수행하는 모듈형 스크립트.
 - **`nixstrap.sh` (Bootstrap Engine)**:
   - nixup과 독립적인 설치 전용 서브시스템. `nixstrap` 명령으로 노출됩니다. Phase 1/2 흐름 제어 및 공유 상태 관리.
   - **Phase 1 (입력 수집)**: 저장소 클론 또는 로컬 경로 사용, 호스트·파티션·프리셋 선택, 비밀번호 입력. 이전 세션 파라미터(`/root/nixstrap-params.env`) 복원 지원.
@@ -93,7 +93,7 @@
 - **Mod 헬퍼 패턴**:
   - `mkMod` / `mkNamedMod`: 독립 기능 단위. `mods.<domain>.<name>.enable`을 선언하며, false일 때 완전히 비활성화됩니다.
   - `mkPartOf "parent.path"`: 자체 enable 없이 부모에 완전히 귀속되는 서브 파트.
-  - `mkModOf "parent.path" __curPos "설명"`: 부모가 활성화되면 기본 활성화되는 자식 모듈(역방향 cascade). enable 옵션 자동 생성.
+  - `mkModOf "parent.path" __curPos "설명"`: 부모가 활성화되면 기본 활성화되는 자식 모듈(연쇄 활성화). enable 옵션 자동 생성.
 - **프리셋 시스템 (`hosts/_preset.*.toml`)**: `_preset.workstation.toml`(개발 환경), `_preset.server.toml`(서버 환경), `_preset.iso.toml`(설치 미디어) 등 용도별 프리셋이 정의되어 있습니다. flake.nix가 이를 읽어 호스트별 mods와 병합하여 적용합니다. `<hostname>.toml`에는 프리셋 기본값에서 변경할 항목만 기재합니다.
 - **Mods Coverage Check**: flake.nix가 호스트별로 `preset.nix` 기반 coverageModule을 주입합니다. ISO(`custom-iso`, `custom-iso-aarch64`) 빌드도 포함하여 두 가지 검사를 수행합니다: ① 선언됐지만 preset에 없는 옵션 감지, ② 같은 그룹 내 옵션 중 일부만 명시 시 오류(형제 완전성 검사).
 - **Shared Data (`mods/_data/`)**: `builtins.readFile`로 Nix 모듈에서 읽는 비-Nix 파일을 분리 관리합니다 — `zsh/` (셸 초기화 스크립트), `waybar/` (CSS), `incus/` (XML·PS1), `devbox/` (설정 템플릿) 등.
@@ -110,7 +110,7 @@
 
 ### Enable 결정 흐름 예시
 
-`_preset.workstation.toml`이 `gui = true` 선언 → `mkModOf` cascade로 `gui.apps.vivaldi.enable = mkDefault true` → `<hostname>.toml`에서 `vivaldi = false` 오버라이드 가능 → 최종: 비활성화
+`_preset.workstation.toml`이 `gui = true` 선언 → `mkModOf` 연쇄 활성화로 `gui.apps.vivaldi.enable = mkDefault true` → `<hostname>.toml`에서 `vivaldi = false` 오버라이드 가능 → 최종: 비활성화
 
 > 내부 원리 상세: [ARCHITECTURE-MODS.md](./ARCHITECTURE-MODS.md) · [다이어그램](./ARCHITECTURE-MODS.mermaid)
 > 사용법 및 API: [MODS.md](../manual/MODS.md)

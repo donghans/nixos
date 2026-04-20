@@ -4,7 +4,7 @@
 #   1. 이 파일을 mods/<domain>/<name>.nix 로 복사
 #   2. DESCRIPTION 을 실제 값으로 교체 (예: "Vivaldi browser")
 #   3. os / hm 블록 작성 (불필요한 블록은 삭제)
-#   4. mods/_preset/workstation.toml 또는 server.toml 에 기본값 추가
+#   4. hosts/_preset.workstation.toml 또는 _preset.server.toml 에 기본값 추가
 #      예: [mods.gui.apps]  vivaldi = false
 #
 # enable 옵션은 자동으로 추가됨 (__curPos → 파일 경로에서 option path 자동 유도).

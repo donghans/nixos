@@ -9,6 +9,7 @@ src = ".docs"
 build-dir = "book"
 
 [output.html]
+additional-css = ["theme/custom.css"]
 git-repository-url = "https://github.com/donghans/nixos"
 edit-url-template = "https://github.com/donghans/nixos/edit/stable/.docs/{path}"
 

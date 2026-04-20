@@ -41,7 +41,7 @@
 
 ## 📦 3. Mods 프레임워크
 
-`mods/` 하위에 `.nix` 파일을 놓으면 `recursiveImportDir`이 자동으로 탐색하여 NixOS와 Home Manager 양쪽에 로드합니다. `mkMod`/`mkModOf`/`mkPartOf` 헬퍼가 enable 옵션 선언, 부모 cascade, `mkIf` 자동 적용까지 처리하므로, 모듈 파일만 작성하면 옵션 선언·활성화·분기가 모두 자동으로 이루어집니다.
+`mods/` 하위에 `.nix` 파일을 놓으면 `recursiveImportDir`이 자동으로 탐색하여 NixOS와 Home Manager 양쪽에 로드합니다. `mkMod`/`mkModOf`/`mkPartOf` 헬퍼가 enable 옵션 선언, 연쇄 활성화, `mkIf` 자동 적용까지 처리하므로, 모듈 파일만 작성하면 옵션 선언·활성화·분기가 모두 자동으로 이루어집니다.
 
 - 📐 **내부 원리**: [ARCHITECTURE-MODS.md](./ARCHITECTURE-MODS.md) — 스캐닝 규칙, 경로 자동 유도, enable 계층, autoWrap, Dual-Context
 - 📖 **사용법 · API · Cookbook**: [MODS.md](../manual/MODS.md) — API 레퍼런스, 7가지 실전 예시, 추가/삭제 절차

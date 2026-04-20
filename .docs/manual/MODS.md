@@ -100,7 +100,7 @@ mkModOf "mods.gui" __curPos "Login greeter (greetd + tuigreet)" ({cfg, pkgs, lib
 - `options`에 선언한 `sessionCmd`는 `cfg.sessionCmd`로 접근
 - 다른 모듈에서 `mods.gui.base.greeter.sessionCmd = "uwsm start hyprland-uwsm.desktop";`로 설정
 
-### 예시 4: 부모 cascade — mkModOf
+### 예시 4: 부모 연쇄 활성화 — mkModOf
 
 `mods.gui.enable = true` 시 자동으로 활성화되는 GUI 앱.
 
@@ -116,7 +116,7 @@ mkModOf "mods.gui" __curPos "Vivaldi Browser" ({unstable, ...}: {
 })
 ```
 
-- `mods.gui.enable = true` → `mods.gui.apps.vivaldi.enable = mkDefault true` (cascade)
+- `mods.gui.enable = true` → `mods.gui.apps.vivaldi.enable = mkDefault true` (연쇄 활성화)
 - `<hostname>.toml`에서 `vivaldi = false`로 개별 비활성화 가능
 
 ### 예시 5: 부모 귀속 — mkPartOf
@@ -167,7 +167,7 @@ mkPartOf "mods.sys.base" ({lib, ...}: {
 - `_data/`는 `_` prefix이므로 `recursiveImportDir`에서 자동 제외
 - `builtins.readFile`은 Nix 인터폴레이션 없이 파일 내용을 그대로 문자열로 읽음
 
-### 예시 7: 항상-켜지는 모듈 — desc=null
+### 예시 7: 항상-켜지는 모듈 — mkPartOf
 
 enable 없이 모든 호스트에 적용되는 베이스 설정.
 
@@ -185,7 +185,6 @@ mkPartOf "mods.sys.base" ({config, pkgs, ...}: {
 })
 ```
 
-> 이 예시는 `mkPartOf`라 desc 파라미터 자체가 없지만, `mkMod __curPos null bodyFn` 형태로도 항상-켜지는 모듈을 만들 수 있습니다. 이 경우 enable 옵션이 생성되지 않고, autoWrap도 건너뜁니다.
 
 ---
 
@@ -200,7 +199,7 @@ mkPartOf "mods.sys.base" ({config, pkgs, ...}: {
 | 파라미터 | 설명 |
 |----------|------|
 | `pos` | `__curPos` — 파일 경로에서 옵션 경로를 자동 유도 |
-| `desc` | 문자열 → `mkEnableOption` 설명. `null`이면 enable 없음 (항상 활성화) |
+| `desc` | 문자열 → `mkEnableOption` 설명 |
 | `bodyFn` | `{cfg, config, lib, pkgs, ...}` → `{os?, hm?, options?}` |
 
 - 생성 옵션: `mods.<자동경로>.enable`
