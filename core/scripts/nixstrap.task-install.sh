@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# nixstrap.lib-install.sh — Phase 2 설치 실행 함수
+# nixstrap.task-install.sh — Phase 2 설치 실행 함수
 
 _cleanup_mounts() {
     # 재시도 시 이전 마운트가 남아있으면 mkfs.*가 "contains a mounted filesystem"으로 실패함
@@ -14,7 +14,7 @@ _cleanup_mounts() {
 _read_disk_labels() {
     # base.toml + host.toml에서 diskDevice/bootDevice를 읽어 레이블 추출
     # by-label 경로에서만 레이블 추출. UUID 등 다른 형식이면 기본값 사용
-    read -r BOOT_LABEL DISK_LABEL <<< "$(python3 "$SCRIPT_DIR/nixstrap.repo.py" disk-labels "$REPO_TMP" "$HOST")"
+    read -r BOOT_LABEL DISK_LABEL <<< "$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" disk-labels "$REPO_TMP" "$HOST")"
     BOOT_LABEL="${BOOT_LABEL:-boot}"
     DISK_LABEL="${DISK_LABEL:-nixos}"
     log_msg "Config" "disk labels: boot=$BOOT_LABEL, root=$DISK_LABEL"
@@ -127,10 +127,10 @@ _resolve_metadata() {
     RESOLVE_TMP="/tmp/nixos-resolve"
     mkdir -p "$RESOLVE_TMP"
     log_msg "Config" "generating resolved.json from target hardware..."
-    log_exec "py" ">" "nixup.resolve.py"
-    python3 /mnt/etc/nixos/core/scripts/nixup.resolve.py \
+    log_exec "py" ">" "nixup.task-resolve.py"
+    python3 /mnt/etc/nixos/core/scripts/nixup.task-resolve.py \
         /mnt/etc/nixos "$RESOLVE_TMP"
-    log_exec "py" "<" "nixup.resolve.py"
+    log_exec "py" "<" "nixup.task-resolve.py"
 }
 
 _extract_username() {
@@ -178,9 +178,26 @@ _prepare_build_dir() {
 _install_nixos() {
     log_msg "Install" "starting nixos-install for #$HOST ..."
     log_exec "nix" ">" "nixos-install"
+    # setsid: 새 세션에서 실행 → 터미널 Ctrl+C(SIGINT)를 받지 않음
     # HOME=/root: sudo -E로 실행 시 nixos 유저의 $HOME이 넘어오면 "not owned by you" 경고 발생
-    HOME=/root nixos-install --no-root-passwd --flake "$BUILD_DIR#$HOST"
+    setsid HOME=/root nixos-install --no-root-passwd --flake "$BUILD_DIR#$HOST" &
+    _NIXOS_INSTALL_PID=$!
+    local _rc
+    while true; do
+        if wait "$_NIXOS_INSTALL_PID"; then
+            _rc=0; break
+        else
+            _rc=$?
+            # rc > 128: wait가 시그널로 중단됨. 프로세스가 아직 살아있으면 계속 대기.
+            if [ "$_rc" -gt 128 ] && kill -0 "$_NIXOS_INSTALL_PID" 2>/dev/null; then
+                continue
+            fi
+            break
+        fi
+    done
+    _NIXOS_INSTALL_PID=""
     log_exec "nix" "<" "nixos-install"
+    return "$_rc"
 }
 
 _post_process() {
@@ -198,14 +215,14 @@ _post_process() {
 
 phase2_execute() {
     _cleanup_mounts       # 1. 이전 마운트 정리
-    _read_disk_labels     # 2. TOML → nixstrap.repo.py disk-labels → BOOT_LABEL, DISK_LABEL
+    _read_disk_labels     # 2. TOML → nixstrap.lib-repo.py disk-labels → BOOT_LABEL, DISK_LABEL
     _create_partitions    # 3. 파티션 생성 (mode 2만)
     _format_boot          # 4. 부트 파티션 포맷
     _format_root          # 5. Btrfs 포맷 + 서브볼륨
     _mount_partitions     # 6. 마운트
     _move_repo            # 7. /tmp/nixos-setup-repo → /mnt/etc/nixos
     _create_host_profile  # 8. 신규 호스트 프로파일 생성
-    _resolve_metadata     # 9. nixup.resolve.py 실행 → RESOLVE_TMP
+    _resolve_metadata     # 9. nixup.task-resolve.py 실행 → RESOLVE_TMP
     _extract_username     # 10. base.toml → USERNAME
     _generate_hw_config   # 11. nixos-generate-config
     _prepare_build_dir    # 12. /tmp/nixos-build 구성

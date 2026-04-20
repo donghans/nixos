@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# nixstrap.lib-disk.sh — Phase 1 디스크·파티션 입력 함수
+# nixstrap.task-disk.sh — Phase 1 디스크·파티션 입력 함수
 
 ask_partitions() {
     local _USE_WHOLE _CONFIRM_WIPE _FREE_OUTPUT _FREE_SEL _SELECTED
@@ -29,7 +29,7 @@ ask_partitions() {
         # EFI 파티션 선택
         local _efi_data _efi_name _efi_size _efi_fs _efi_label
         local -a _efi_paths=() _efi_labels=()
-        _efi_data=$(python3 "$SCRIPT_DIR/nixstrap.part.py" list-parts efi)
+        _efi_data=$(python3 "$SCRIPT_DIR/nixstrap.lib-part.py" list-parts efi)
         if [[ "$_efi_data" != "NONE" ]]; then
             while IFS='|' read -r _efi_name _efi_size _efi_fs _efi_label; do
                 [ -z "$_efi_name" ] && continue
@@ -54,7 +54,7 @@ ask_partitions() {
         # Root 파티션 선택
         local _root_data _root_name _root_size _root_fs _root_label
         local -a _root_paths=() _root_labels=()
-        _root_data=$(python3 "$SCRIPT_DIR/nixstrap.part.py" list-parts root)
+        _root_data=$(python3 "$SCRIPT_DIR/nixstrap.lib-part.py" list-parts root)
         if [[ "$_root_data" != "NONE" ]]; then
             while IFS='|' read -r _root_name _root_size _root_fs _root_label; do
                 [ -z "$_root_name" ] && continue
@@ -83,7 +83,7 @@ ask_partitions() {
         # 디스크 선택
         local _disk_data _disk_name _disk_size
         local -a _disk_paths=() _disk_labels=()
-        _disk_data=$(python3 "$SCRIPT_DIR/nixstrap.part.py" list-parts disk)
+        _disk_data=$(python3 "$SCRIPT_DIR/nixstrap.lib-part.py" list-parts disk)
         if [[ "$_disk_data" != "NONE" ]]; then
             while IFS='|' read -r _disk_name _disk_size; do
                 [ -z "$_disk_name" ] && continue
@@ -119,7 +119,7 @@ ask_partitions() {
             _WIPE=true
         else
             log_msg "Disk" "scanning free space on $_DISK ..."
-            _FREE_OUTPUT=$(python3 "$SCRIPT_DIR/nixstrap.part.py" free-space "$_DISK")
+            _FREE_OUTPUT=$(python3 "$SCRIPT_DIR/nixstrap.lib-part.py" free-space "$_DISK")
 
             if [[ "$_FREE_OUTPUT" == "NONE" ]]; then
                 log_msg "Error" "no usable free space (>=2GiB) found on $_DISK."
@@ -147,7 +147,7 @@ ask_partitions() {
                     _PART_START="${_FREE_SEL%-*}"
                     _PART_END="${_FREE_SEL#*-}"
                     local _range_err
-                    if ! _range_err=$(python3 "$SCRIPT_DIR/nixstrap.part.py" check-range "$_PART_START" "$_PART_END" 2>&1); then
+                    if ! _range_err=$(python3 "$SCRIPT_DIR/nixstrap.lib-part.py" check-range "$_PART_START" "$_PART_END" 2>&1); then
                         log_msg "Error" "$_range_err"
                         continue
                     fi
@@ -160,7 +160,7 @@ ask_partitions() {
         read -rp "$(printf "$(log_prompt)boot partition size (default: 1GiB, enter): ")" _BOOT_SIZE
         _BOOT_SIZE="${_BOOT_SIZE:-1GiB}"
 
-        _BOOT_END=$(python3 "$SCRIPT_DIR/nixstrap.part.py" boot-end "$_PART_START" "$_BOOT_SIZE")
+        _BOOT_END=$(python3 "$SCRIPT_DIR/nixstrap.lib-part.py" boot-end "$_PART_START" "$_BOOT_SIZE")
 
         # 기존 파티션 수로 새 파티션 번호 계산
         _OLD_PART_COUNT=$(parted -m "$_DISK" unit MiB print 2>/dev/null | grep -c '^[0-9]' || echo "0")

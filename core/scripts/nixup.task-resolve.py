@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# core/scripts/nixup.resolve.py
+# core/scripts/nixup.task-resolve.py
 # TOML 소스 파일 → resolved.json + presets.json (OUT_DIR 루트에 생성)
 #
 # 사용법:
-#   python3 nixup.resolve.py              # NIXOS_PATH 기준 읽기/쓰기 (레거시)
-#   python3 nixup.resolve.py /tmp/dir     # 지정 디렉토리 기준 읽기/쓰기 (task-check.sh 등)
-#   python3 nixup.resolve.py /src /out    # /src에서 읽고 /out에 생성 (nixup 내부 호출)
+#   python3 nixup.task-resolve.py              # NIXOS_PATH 기준 읽기/쓰기 (레거시)
+#   python3 nixup.task-resolve.py /tmp/dir     # 지정 디렉토리 기준 읽기/쓰기 (task-check.sh 등)
+#   python3 nixup.task-resolve.py /src /out    # /src에서 읽고 /out에 생성 (nixup 내부 호출)
 #
 # 생성 파일:
 #   resolved.json  — 호스트별 merged 데이터 (flake.nix, nixup.lib-build.sh 사용)

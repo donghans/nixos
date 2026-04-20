@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""nixstrap.part.py — nixstrap.sh용 디스크/파티션 서브커맨드 헬퍼
+"""nixstrap.lib-part.py — nixstrap.sh용 디스크/파티션 서브커맨드 헬퍼
 
 서브커맨드:
   free-space   <disk>                 → num:start:end:size 형식으로 빈 공간 출력, 없으면 NONE
@@ -125,7 +125,7 @@ SUBCOMMANDS = {
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in SUBCOMMANDS:
-        print(f"usage: nixstrap.part.py <subcommand> [args...]", file=sys.stderr)
+        print(f"usage: nixstrap.lib-part.py <subcommand> [args...]", file=sys.stderr)
         print(f"subcommands: {', '.join(SUBCOMMANDS)}", file=sys.stderr)
         sys.exit(1)
     SUBCOMMANDS[sys.argv[1]](sys.argv[2:])

@@ -100,7 +100,7 @@ acquire_lock
 
 # 4. Resolve & Host Detection
 mkdir -p "$JSON_DIR"
-python3 -B "$SCRIPT_DIR/nixup.resolve.py" "$NIXOS_PATH" "$JSON_DIR" >/dev/null
+python3 -B "$SCRIPT_DIR/nixup.task-resolve.py" "$NIXOS_PATH" "$JSON_DIR" >/dev/null
 
 LOCK_STORE_DIR="$NIXOS_PATH/.locks"
 HOST_ID=""; IS_ROLLING=""; HOST_SPECIFIC_LOCK=""

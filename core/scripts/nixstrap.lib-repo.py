@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""nixstrap.repo.py — nixstrap.sh용 레포지토리/설정 서브커맨드 헬퍼
+"""nixstrap.lib-repo.py — nixstrap.sh용 레포지토리/설정 서브커맨드 헬퍼
 
 서브커맨드:
   check-repo   <repo_tmp>             → base.toml에서 git.nixosRepo 출력
@@ -108,7 +108,7 @@ SUBCOMMANDS = {
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in SUBCOMMANDS:
-        print(f"usage: nixstrap.repo.py <subcommand> [args...]", file=sys.stderr)
+        print(f"usage: nixstrap.lib-repo.py <subcommand> [args...]", file=sys.stderr)
         print(f"subcommands: {', '.join(SUBCOMMANDS)}", file=sys.stderr)
         sys.exit(1)
     SUBCOMMANDS[sys.argv[1]](sys.argv[2:])
