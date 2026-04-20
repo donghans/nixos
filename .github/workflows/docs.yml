@@ -35,7 +35,9 @@ jobs:
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Build
-        run: mdbook build
+        run: |
+          mdbook-mermaid install
+          mdbook build
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
