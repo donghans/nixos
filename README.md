@@ -56,7 +56,7 @@ fvm = true
 
 ## 🚀 처음 사용자용 가이드 (Getting Started)
 
-이 프로젝트는 **Btrfs 서브볼륨 구조**에 최적화되어 설계되었습니다. `hosts/base.toml`에서 사용자 정보만 수정한 뒤 바로 설치를 시작할 수 있습니다. 호스트 프로필은 설치 도중 `nixstrap`이 대화형으로 생성합니다. 자세한 내용은 [BOOTSTRAP.md](./.docs/readme/BOOTSTRAP.md) 가이드를 참고하세요.
+이 프로젝트는 **Btrfs 서브볼륨 구조**에 최적화되어 설계되었습니다. `hosts/_base.toml`에서 사용자 정보만 수정한 뒤 바로 설치를 시작할 수 있습니다. 호스트 프로필은 설치 도중 `nixstrap`이 대화형으로 생성합니다. 자세한 내용은 [BOOTSTRAP.md](./.docs/readme/BOOTSTRAP.md) 가이드를 참고하세요.
 
 ---
 

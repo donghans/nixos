@@ -49,12 +49,12 @@
 
 **리졸브 우선순위** — 병합은 2단계로 진행됩니다.
 
-- 1단계(Python): base.toml + host.toml + preset.toml → `resolved.json` / `presets.json` 생성
+- 1단계(Python): `_base.toml` + `<hostname>.toml` + `_preset.*.toml` → `resolved.json` / `presets.json` 생성
 - 2단계(Nix): flake.nix가 `presets.json`(프리셋 mods)에 `resolved.json`(host 오버라이드)을 덮어씌워 최종 병합
 
 | 필드 | 우선순위 |
 |------|---------|
-| `username`, `git.*` | host.toml 오버라이드 가능 (기본값: base.toml) |
+| `username`, `git.*` | `<hostname>.toml` 오버라이드 가능 (기본값: `_base.toml`) |
 | `system` | `<hostname>.toml` → `_base.toml` |
 | `diskDevice`, `bootDevice` | `<hostname>.toml` → `_base.toml` (파티션 경로. 레이블·UUID 모두 가능) |
 | `type`, `preset` | `<hostname>.toml` 필수 선언 |

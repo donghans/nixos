@@ -67,11 +67,11 @@ flowchart TD
             S6["move_repo
             REPO_TMP → /mnt/etc/nixos"]
             S7["create_host_profile
-            신규 호스트: host.toml · nix 파일 생성"]
+            신규 호스트: <hostname>.toml · .nix 생성"]
             S8["resolve_metadata
-            nixup.resolve.py → resolved.json / presets.json"]
+            nixup.task-resolve.py → resolved.json / presets.json"]
             S9["extract_username
-            base.toml → USERNAME"]
+            _base.toml → USERNAME"]
             S10["prepare_build_dir
             /tmp/nixos-build 격리 환경 구성"]
             S11["generate_hw_config
