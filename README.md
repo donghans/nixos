@@ -34,6 +34,13 @@ cd nixos
 ```
 
 `nixstrap`이 호스트 선택, 파티셔닝, `nixos-install`까지 대화형으로 안내합니다.
+
+설치 완료 후 재부팅하면 TTY(Ctrl+Alt+F2)에서 아래 명령을 실행하세요:
+
+```bash
+nixup home   # 사용자 환경 최초 적용
+```
+
 상세 가이드: [BOOTSTRAP.md](https://donghans.github.io/nixos/readme/BOOTSTRAP.html)
 
 ---

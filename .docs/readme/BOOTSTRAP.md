@@ -169,9 +169,17 @@ nixup check                      # 포맷팅 + 린트 + eval 통합 검증
 
 ## 6. 다음으로 해볼 것 (Next Steps)
 
-설치가 완료되고 재부팅하면 `nixup` 명령어를 통해 시스템을 관리할 수 있습니다.
+설치가 완료되고 재부팅하면 **먼저 TTY(Ctrl+Alt+F2)에서 home-manager를 적용**해야 합니다:
+
+```bash
+nixup home   # 사용자 환경 적용 (처음 한 번만)
+```
+
+이후 재로그인하면 전체 환경(Hyprland, 쉘 설정, 패키지 등)이 활성화됩니다.
+
+> **참고**: `nixup os`와 `nixup home`은 독립적으로 동작합니다. `os` 블록 변경은 `nixup os`, `hm` 블록 변경은 `nixup home`만 실행하면 됩니다. 두 블록을 모두 수정한 경우 둘 다 실행하세요.
 
 - **시스템 관리 익히기**: [NIXUP.md](../manual/NIXUP.md)
-- **개발 환경 구성**: `<hostname>.toml`의 `[mods.devel]` 섹션에 도구를 활성화하고 `nixup home`
+- **개발 환경 구성**: `<hostname>.toml`의 `[mods.devel]` 섹션에 도구를 활성화하고 `nixup os` + `nixup home`
 - **Mods 확장 가이드**: [MODS.md](../manual/MODS.md)
 - **심화 구조 이해**: [HACKING.md](../hacking/_HACKING.md)
