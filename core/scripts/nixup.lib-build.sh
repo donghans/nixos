@@ -167,7 +167,7 @@ prepare_build_dir() {
     # (sudo 필요: nixos-generate-config가 Btrfs 서브볼륨 쿼리 등에 root 권한을 요구함)
     if [ ! -s "$build_dir/hardware.nix" ]; then
         log_msg "Config" "generating hardware.nix..."
-        sudo nixos-generate-config --no-filesystems --show-hardware-config > "$build_dir/hardware.nix"
+        sudo nixos-generate-config --no-filesystems --show-hardware-config | sudo tee "$build_dir/hardware.nix" > /dev/null
     fi
     # nix는 path: 모드로 호출 — git 추적 없이 BUILD_DIR을 store에 직접 복사하여 순수 평가
 }

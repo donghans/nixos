@@ -1,6 +1,8 @@
 #!/usr/bin/env nix-shell
 #! nix-shell -i bash -p python3 git jq parted btrfs-progs util-linux
 # shellcheck shell=bash
+# shellcheck disable=SC2034  # sourced 스크립트들이 공유하는 전역 상태 변수
+# shellcheck disable=SC1091  # 동적 경로 source: 정적 분석 불가
 set -euo pipefail
 
 # [nixstrap] NixOS 설치 스크립트

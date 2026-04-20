@@ -7,9 +7,9 @@ ask_repo_and_clone() {
     local _prompt _input
     while true; do
         if [ -n "${NIXOS_REPO:-}" ]; then
-            _prompt="$(printf "$(log_prompt)repository [%s]: " "$NIXOS_REPO")"
+            _prompt="$(log_prompt)repository [${NIXOS_REPO}]: "
         else
-            _prompt="$(printf "$(log_prompt)repository (e.g. user/nixos): ")"
+            _prompt="$(log_prompt)repository (e.g. user/nixos): "
         fi
         read -rp "$_prompt" _input
         NIXOS_REPO="${_input:-${NIXOS_REPO:-}}"
@@ -22,16 +22,16 @@ ask_repo_and_clone() {
         log_exec "git" ">" "git clone"
         if git clone "https://github.com/$NIXOS_REPO.git" "$REPO_TMP"; then
             log_exec "git" "<" "git clone"
-            # base.toml의 git.nixosRepo와 비교하여 불일치 시 치환 여부 확인
+            # _base.toml의 git.nixosRepo와 비교하여 불일치 시 치환 여부 확인
             local _toml_repo _replace
             _toml_repo=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" check-repo "$REPO_TMP")
             if [ -n "$_toml_repo" ] && [ "$_toml_repo" != "$NIXOS_REPO" ]; then
-                log_msg "Notice" "base.toml has git.nixosRepo = '$_toml_repo'"
-                read -rp "$(printf "$(log_prompt)update to '$NIXOS_REPO'? (Y/n): ")" _replace
+                log_msg "Notice" "_base.toml has git.nixosRepo = '$_toml_repo'"
+                read -rp "$(log_prompt)update to '${NIXOS_REPO}'? (Y/n): " _replace
                 _replace="${_replace:-Y}"
                 if [[ "$_replace" =~ ^[Yy]$ ]]; then
                     python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" update-repo "$REPO_TMP" "$NIXOS_REPO"
-                    log_msg "Config" "base.toml updated: git.nixosRepo = '$NIXOS_REPO'"
+                    log_msg "Config" "_base.toml updated: git.nixosRepo = '$NIXOS_REPO'"
                 fi
             fi
             break
@@ -69,7 +69,7 @@ select_host() {
         _HOST_TYPE=""
         _HOST_PRESET_FROM_REPO=""
         local _hinput
-        read -rp "$(printf "$(log_prompt)new hostname: ")" _hinput
+        read -rp "$(log_prompt)new hostname: " _hinput
         HOST="${_hinput:-}"
         if [ -z "$HOST" ]; then
             log_msg "Error" "hostname cannot be empty."
@@ -106,7 +106,7 @@ ask_state_version() {
     local _input
     echo ""
     log_msg "Notice" "pin to a NixOS release? (e.g. 25.11 — leave blank for rolling):"
-    read -rp "$(printf "$(log_prompt)stateVersion: ")" _input
+    read -rp "$(log_prompt)stateVersion: " _input
     _STATE_VERSION="${_input:-}"
     if [ -n "$_STATE_VERSION" ]; then
         log_msg "Config" "stateVersion: $_STATE_VERSION (stable lock)"
@@ -122,10 +122,10 @@ ask_password() {
     echo ""
     log_msg "Notice" "set login password for '$_label' (press Enter twice to skip):"
     while true; do
-        read -rsp "$(printf "$(log_prompt)password: ")" _pw
+        read -rsp "$(log_prompt)password: " _pw
         echo ""
         if [ -z "$_pw" ]; then
-            read -rp "$(printf "$(log_prompt)skip password setup? (y/N): ")" _skip
+            read -rp "$(log_prompt)skip password setup? (y/N): " _skip
             if [[ "${_skip:-N}" =~ ^[Yy]$ ]]; then
                 _USER_PASSWORD=""
                 log_msg "Notice" "skipped — no password will be set."
@@ -133,7 +133,7 @@ ask_password() {
             fi
             continue
         fi
-        read -rsp "$(printf "$(log_prompt)confirm:  ")" _pw2
+        read -rsp "$(log_prompt)confirm:  " _pw2
         echo ""
         if [ "$_pw" = "$_pw2" ]; then
             _USER_PASSWORD="$_pw"
@@ -256,7 +256,7 @@ review_loop() {
     local _review=""
     while true; do
         show_summary
-        read -rp "$(printf "$(log_prompt)Enter=install  1-4=edit  s=save  q=quit: ")" _review || {
+        read -rp "$(log_prompt)Enter=install  1-4=edit  s=save  q=quit: " _review || {
             # Ctrl+C 인터럽트: _trap_int가 경고 처리함. 타임아웃 리셋 없이 루프 재진입.
             _review=""
             continue
