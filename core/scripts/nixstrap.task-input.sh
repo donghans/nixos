@@ -68,6 +68,7 @@ select_host() {
         _HOST_IS_NEW=true
         _HOST_TYPE=""
         _HOST_PRESET_FROM_REPO=""
+        _HOST_USERNAME=""
         local _hinput
         read -rp "$(log_prompt)new hostname: " _hinput
         HOST="${_hinput:-}"
@@ -76,13 +77,22 @@ select_host() {
             select_host
             return
         fi
+        ask_host_username
     else
         _HOST_IS_NEW=false
+        _HOST_USERNAME=""
         HOST="${_host_names[$_sel]}"
         _HOST_TYPE=$(echo "$host_data" | grep "^${HOST}|" | cut -d'|' -f2)
         _HOST_PRESET_FROM_REPO=$(echo "$host_data" | grep "^${HOST}|" | cut -d'|' -f3)
         _PRESET="$_HOST_PRESET_FROM_REPO"
     fi
+}
+
+ask_host_username() {
+    local _base_user _input
+    _base_user=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" username "$REPO_TMP" 2>/dev/null || true)
+    read -rp "$(log_prompt)username [${_base_user:-_base.toml}]: " _input
+    _HOST_USERNAME="${_input:-}"
 }
 
 ask_preset() {
@@ -159,6 +169,8 @@ show_summary() {
             else
                 printf "  2. %-11s:  %s  (new)\n" "Hostname" "$HOST"
             fi
+            local _uname_display="${_HOST_USERNAME:-from _base.toml}"
+            printf "     %-11s   username: %s\n" "" "$_uname_display"
         else
             printf "  2. %-11s:  %s  [%s] %s\n" "Hostname" "$HOST" "${_HOST_TYPE:-?}" "${_HOST_PRESET_FROM_REPO:-?}"
             if [ "$_IS_VM" = true ]; then
@@ -204,6 +216,7 @@ save_params() {
         printf '_HOST_PRESET_FROM_REPO=%s\n'  "$_HOST_PRESET_FROM_REPO"
         printf '_PRESET=%s\n'                 "$_PRESET"
         printf '_STATE_VERSION=%s\n'          "$_STATE_VERSION"
+        printf '_HOST_USERNAME=%s\n'          "$_HOST_USERNAME"
         printf '_PART_MODE=%s\n'              "$_PART_MODE"
         printf '_NEW_PARTITIONS=%s\n'         "$_NEW_PARTITIONS"
         printf 'BOOT_PART=%s\n'               "$BOOT_PART"

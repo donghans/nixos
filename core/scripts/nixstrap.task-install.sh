@@ -103,13 +103,15 @@ _create_host_profile() {
     # (incus를 VM 내부에서 켜면 incusbr0가 호스트와 같은 서브넷을 점유해 라우팅 충돌 발생)
     local _sv_line=""
     [ -n "${_STATE_VERSION:-}" ] && _sv_line=$'\nstateVersion = "'"$_STATE_VERSION"'"'
+    local _username_line=""
+    [ -n "${_HOST_USERNAME:-}" ] && _username_line=$'\nusername = "'"$_HOST_USERNAME"'"'
 
     if [[ "$_IS_VM" == "true" ]]; then
-        printf 'type = "desktop"\npreset = "%s"%s\n\n[mods.sys.services]\nincus-guest = true\nincus = false\n' \
-            "$_PRESET" "$_sv_line" > "$HOST_TOML"
+        printf 'type = "desktop"\npreset = "%s"%s%s\n\n[mods.sys.services]\nincus-guest = true\nincus = false\n' \
+            "$_PRESET" "$_sv_line" "$_username_line" > "$HOST_TOML"
         log_msg "Config" "incus-guest enabled, incus disabled in $HOST.toml (virtualized environment)"
     else
-        printf 'type = "desktop"\npreset = "%s"%s\n' "$_PRESET" "$_sv_line" > "$HOST_TOML"
+        printf 'type = "desktop"\npreset = "%s"%s%s\n' "$_PRESET" "$_sv_line" "$_username_line" > "$HOST_TOML"
     fi
 
     # 최소 통합 호스트 파일 — os/hm 블록 분리 (mkHostConfiguration 패턴)

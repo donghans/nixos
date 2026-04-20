@@ -38,6 +38,7 @@ _NEW_BOOT_NUM=""
 _NEW_ROOT_NUM=""
 _PRESET="workstation"
 _STATE_VERSION=""  # 신규 호스트: 비어있으면 rolling, 값 있으면 host.toml에 기재
+_HOST_USERNAME=""  # 신규 호스트: 비어있으면 _base.toml fallback, 값 있으면 host.toml에 기재
 REPO_TMP="/tmp/nixos-setup-repo"
 PARAMS_FILE="${PARAMS_FILE:-/root/nixstrap-params.env}"
 _USER_PASSWORD=""  # ask_password에서 설정, _post_process에서 적용 후 즉시 비움 (파일 저장 안 함)
