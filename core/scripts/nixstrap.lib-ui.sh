@@ -62,7 +62,7 @@ _pick() {
         for i in "${!items[@]}"; do
             tput el || true
             if [ "$i" -eq "$sel" ]; then
-                printf "  %s>  %s%s\n" "${CYAN}" "${items[$i]}" "${NC}"
+                printf "  ${CYAN}>  %s${NC}\n" "${items[$i]}"
             else
                 printf "     %s\n" "${items[$i]}"
             fi
