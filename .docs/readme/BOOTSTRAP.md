@@ -15,12 +15,12 @@ cd nixos
 
 ---
 
-## 2. 전역 설정 (`hosts/base.toml`)
+## 2. 전역 설정 (`hosts/_base.toml`)
 
 설치 전에 반드시 수정해야 하는 필드는 `username`과 `[git]` 블록입니다. 나머지는 기본값으로 충분합니다.
 
 ```toml
-# hosts/base.toml
+# hosts/_base.toml
 username            = "your_username"       # ← 필수 수정
 system              = "x86_64-linux"
 
@@ -30,7 +30,7 @@ email     = "your@email.com"                # ← 필수 수정
 nixosRepo = "<your-username>/nixos"         # ← 필수 수정 (설치 시 클론할 저장소)
 ```
 
-> **참고**: `diskDevice`/`bootDevice`(파티션 경로)와 `rollingStateVersion` 등은 기본값을 유지해도 됩니다. 기기마다 다른 파티션 경로가 필요한 경우 `host.toml`에서 오버라이드할 수 있습니다 (섹션 4 참고).
+> **참고**: `diskDevice`/`bootDevice`(파티션 경로)와 `rollingStateVersion` 등은 기본값을 유지해도 됩니다. 기기마다 다른 파티션 경로가 필요한 경우 `<hostname>.toml`에서 오버라이드할 수 있습니다 (섹션 4 참고).
 
 ---
 
@@ -53,7 +53,7 @@ cd nixos
 - 이후 `nixstrap`을 호출 — 저장소·호스트·파티션 선택, 하드웨어 감지, `nixos-install`까지 대화형 안내
 
 `nixstrap` 주요 동작:
-- **호스트 자동 생성**: 레포에 없는 새 호스트명을 지정하면 프리셋(workstation/server)을 물어보고 `host.toml` · `configuration.nix` · `home.nix`를 자동 생성합니다. 하드웨어 프로필(`_hardware.nix`)도 자동 감지됩니다.
+- **호스트 자동 생성**: 레포에 없는 새 호스트명을 지정하면 프리셋(workstation/server)을 물어보고 `<hostname>.toml` · `<hostname>.nix`를 자동 생성합니다. 하드웨어 프로필(`hardware.nix`)도 자동 감지 및 생성됩니다.
 - **파티션 모드**: 기존 파티션 직접 지정(mode 1) 또는 전체 디스크·빈 공간 범위로 신규 생성(mode 2) 중 선택
 - **params 저장/복원**: review 확인 후 설치 파라미터를 `/root/nixstrap-params.env`에 저장. 네트워크 오류 등으로 실패 후 재시도 시 이전 설정을 불러와 확인/수정 후 재개 가능
 
@@ -90,7 +90,7 @@ nixstrap   # 호스트·파티션 선택을 대화형으로 안내
 > | `Super + 마우스 좌클릭 드래그` | 창 이동 |
 > | `Super + 마우스 우클릭 드래그` | 창 크기 조절 |
 >
-> `Super`는 키보드의 Windows/Command 키입니다. 전체 단축키는 `mods/gui/core/home/_bind.nix`를 참고하세요.
+> `Super`는 키보드의 Windows/Command 키입니다. 전체 단축키는 `mods/gui/base/core.bind.nix`를 참고하세요.
 
 ---
 
@@ -98,7 +98,7 @@ nixstrap   # 호스트·파티션 선택을 대화형으로 안내
 
 nixstrap이 대화형으로 호스트를 생성하므로 이 단계는 선택사항입니다. 설치 전에 호스트를 미리 정의하거나, 설치 후 세부 설정을 조정할 때 참고하세요.
 
-### 호스트 메타데이터 (`hosts/<hostname>/host.toml`)
+### 호스트 메타데이터 (`hosts/<hostname>.toml`)
 
 ```toml
 type   = "desktop"    # desktop, laptop, server, rpi
@@ -108,21 +108,21 @@ preset = "workstation"
 [mods.devel]
 fvm = true
 
-# ramGb는 /proc/meminfo에서 자동 감지됩니다 (host.toml 입력 불가).
+# ramGb는 /proc/meminfo에서 자동 감지됩니다 (<hostname>.toml 입력 불가).
 # swap/tmpfs/zram은 ramGb를 기반으로 자동 계산되며, 필요 시 아래에서 오버라이드 가능합니다.
 # swapGb      = 24    # swap 파일 크기 (GB). 기본: ceil(ramGb × 0.75)
 # tmpfsSize   = "100%" # /tmp tmpfs 상한. 기본: "100%"
 # zramPercent = 50    # ZRAM 풀 크기 (물리 RAM의 %). 기본: 50
 
-# 파티션 경로 (기본값은 base.toml 참조, 기기마다 다를 경우에만 기재)
+# 파티션 경로 (기본값은 _base.toml 참조, 기기마다 다를 경우에만 기재)
 # bootDevice = "/dev/disk/by-label/ESP"          # 레이블이 다른 경우
 # bootDevice = "/dev/disk/by-uuid/XXXX-XXXX"     # 기존 파티션을 UUID로 참조하는 경우
 # diskDevice = "/dev/disk/by-label/custom-label" # Btrfs 레이블이 다른 경우
 ```
 
-기존 호스트(`hosts/beelink-ser7-co/`, `hosts/msi-summit-me/`)의 `configuration.nix`와 `home.nix`를 참고하여 하드웨어 부팅 파라미터 등을 작성합니다. 하드웨어 프로필(`_hardware.nix`)은 설치 시 자동 생성됩니다.
+기존 호스트(`hosts/beelink-ser7-co.nix`, `hosts/msi-summit-me.nix`)를 참고하여 하드웨어 부팅 파라미터 등을 작성합니다. 하드웨어 프로필(`hardware.nix`)은 설치 시 자동 생성됩니다.
 
-### 프리셋 (`mods/_preset/`)
+### 프리셋 (`hosts/_preset.*.toml`)
 
 `preset` 필드에 지정한 이름에 따라 기본 mods 활성화 여부가 결정됩니다.
 

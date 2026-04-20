@@ -7,8 +7,8 @@
 ## 🚀 주요 특징
 
 - **Mods Framework**: 모든 설정을 `sys` / `gui` / `devel` 세 도메인으로 격리하고, 명시적 `enable` 옵션을 통해 기능을 선택합니다.
-- **TOML 설정 원본**: `hosts/base.toml`과 `hosts/<hostname>/host.toml`에 메타데이터를 선언합니다. `nixup` 실행 시 내부적으로 이를 `resolved.json`으로 변환하여 flake.nix에 주입합니다.
-- **프리셋 시스템**: `mods/_preset/`에 workstation, server, iso 등 다양한 프리셋이 정의되어 있습니다. `host.toml`에 `preset = "workstation"` 한 줄로 해당 환경 전체(tailscale, docker, bluetooth, GUI, 개발 도구 등)가 자동 적용되며, 호스트별 변경 항목만 추가로 기재하면 됩니다.
+- **TOML 설정 원본**: `hosts/_base.toml`과 `hosts/<hostname>.toml`에 메타데이터를 선언합니다. `nixup` 실행 시 내부적으로 이를 `resolved.json`으로 변환하여 flake.nix에 주입합니다.
+- **프리셋 시스템**: `hosts/_preset.*.toml`에 workstation, server, iso 등 다양한 프리셋이 정의되어 있습니다. `<hostname>.toml`에 `preset = "workstation"` 한 줄로 해당 환경 전체(tailscale, docker, bluetooth, GUI, 개발 도구 등)가 자동 적용되며, 호스트별 변경 항목만 추가로 기재하면 됩니다.
 - **Mods Coverage Check**: 빌드 시 프리셋에 선언된 옵션과 workspace-options에 등록된 옵션을 대조하여, 누락된 항목을 빌드 타임 에러로 알립니다.
 - **격리된 빌드 환경**: 모든 빌드는 소스를 `.build/` 디렉터리에 물리 복사하고 `path:` 모드로 호출하여 git 추적 없이 안전하게 수행됩니다.
 - **시스템 통합 도구 (`nixup`)**: `nixup`을 통해 시스템 업데이트, 전환, ISO 빌드, 패키지 복구 등 모든 작업을 수행합니다.
@@ -21,16 +21,18 @@
 nixos/
 ├── core/               # 프레임워크 엔진
 │   ├── flake.nix       # 메인 진입점
-│   ├── lib/            # 빌더(builders.nix), 옵션 선언(workspace-options.nix)
+│   ├── lib/            # 빌더(builders.nix), Mods 헬퍼(mods-lib.nix), 옵션 선언(workspace-options.nix)
 │   └── scripts/        # nixup 관리 CLI + nixstrap 설치 스크립트
 ├── mods/               # 재사용 가능한 기능 모듈
 │   ├── sys/            # 시스템 기반 (base, fonts, vfs, services, utils)
 │   ├── gui/            # GUI 환경 (Hyprland 번들, apps, utils)
 │   ├── devel/          # 개발 도구 (base, toolchains, apps)
-│   └── _preset/        # 구성 레시피 (workstation.toml 등)
-├── hosts/              # 호스트별 고유 설정
-│   ├── base.toml       # 전역 메타데이터 (username, git, system)
-│   └── <hostname>/     # host.toml, configuration.nix, home.nix
+│   └── _data/          # 비-Nix 데이터 파일 (zsh 스크립트, CSS, XML 등)
+├── hosts/              # 호스트별 고유 설정 (평탄 구조)
+│   ├── _base.toml      # 전역 메타데이터 (username, git, system)
+│   ├── _preset.*.toml  # 프리셋 정의 (workstation/server/iso)
+│   ├── <hostname>.toml # 호스트 메타데이터 (type, preset, mods 오버라이드)
+│   └── <hostname>.nix  # 호스트 전용 NixOS + Home Manager 설정
 └── .locks/             # Flake lock 파일 (Rolling/Stable 전략)
 ```
 
@@ -39,7 +41,7 @@ nixos/
 ## 🛠️ 호스트 설정 방법
 
 ```toml
-# hosts/<hostname>/host.toml 예시
+# hosts/<hostname>.toml 예시
 type   = "desktop"
 preset = "workstation"
 

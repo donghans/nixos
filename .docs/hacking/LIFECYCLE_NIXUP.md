@@ -13,7 +13,7 @@
 ### 입력 · 분석
 
 1. **Input Parsing**: 사용자의 명령(예: `nixup os`, `nixup home --build`)을 해석하고 대상 호스트가 롤링 채널을 사용하는지 여부를 확인합니다.
-2. **Resolve**: `nixup.resolve.py`가 `hosts/base.toml`, `hosts/<hostname>/host.toml`, `mods/_preset/*.toml`을 읽어 `presets.json`(프리셋 mods + explicitOptional)과 `resolved.json`(호스트별 merged 데이터)을 생성합니다.
+2. **Resolve**: `nixup.task-resolve.py`가 `hosts/_base.toml`, `hosts/<hostname>.toml`, `hosts/_preset.*.toml`을 읽어 `presets.json`(프리셋 mods + explicitOptional)과 `resolved.json`(호스트별 merged 데이터)을 생성합니다.
 
 ### 빌드 격리
 
@@ -43,12 +43,12 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 
 ### 호스트 구성
 
-1. **Host Specific Loading**: `hosts/<hostname>/configuration.nix`가 먼저 로드됩니다. 프리셋 mods는 flake.nix가 `resolved.json`과 `presets.json`을 병합하여 `modsModule`로 주입합니다.
-2. **Inheritance**: 기기별 하드웨어 설정(`hosts/<hostname>/_hardware.nix`)이 임포트됩니다. Btrfs/ZRAM 스토리지 공통 설정은 `mods/sys/base/default.nix`를 통해 sys 도메인에서 포함됩니다.
+1. **Host Specific Loading**: `hosts/<hostname>.nix`가 먼저 로드됩니다. 프리셋 mods는 flake.nix가 `resolved.json`과 `presets.json`을 병합하여 `modsModule`로 주입합니다.
+2. **Inheritance**: 기기별 하드웨어 설정(`hardware.nix`)이 `.build/` 환경에서 임포트됩니다. 레포에는 포함되지 않으며 빌드 시 자동 생성됩니다.
 
 ### 모듈 · 검증
 
-3. **Mix-in**: `mods/default.nix`를 통해 sys, gui, devel 세 도메인이 모두 로드됩니다. 각 모듈은 `mkIf cfg.enable`로 enable된 항목만 실제 설정에 기여합니다.
+3. **Mix-in**: `core/lib/mods-lib.nix`의 `recursiveImportDir`이 `mods/` 하위를 재귀 탐색하여 sys, gui, devel 세 도메인을 모두 로드합니다. 각 모듈은 `mkIf cfg.enable`로 enable된 항목만 실제 설정에 기여합니다.
 4. **Coverage Check**: flake.nix가 주입한 `coverageModule`(`mk-preset.nix` 기반)의 `assertions`가 평가됩니다. ① 선언됐지만 preset에 없는 누락 옵션, ② 같은 그룹 내 일부만 명시된 형제 완전성 위반 중 하나라도 감지되면 즉시 오류를 발생시킵니다.
 
 ---

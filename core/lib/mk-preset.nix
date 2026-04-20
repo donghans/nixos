@@ -120,20 +120,44 @@ in {
     {
       assertion = uncovered == [];
       message = ''
-        [Mods Coverage] workspace-options에 선언됐으나 preset에 없는 옵션:
-          ${concatStringsSep "\n  " uncovered}
-        → ${presetName}.toml에 추가하거나,
-          의도적 제외라면 ${presetName}.toml의 [explicitOptional] paths에 추가하세요.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        [Mods Coverage] 프리셋에 등록되지 않은 모드 옵션이 있습니다.
+
+          누락된 옵션:
+            ${concatStringsSep "\n        " uncovered}
+
+          발생 원인:
+            core/lib/workspace-options.nix에 새 enable 옵션이 추가됐지만
+            hosts/_preset.${presetName}.toml에 해당 항목이 없을 때 발생합니다.
+
+          해결 방법 (둘 중 하나):
+            1. hosts/_preset.${presetName}.toml에 추가 (기본값 선언):
+                 [mods.<도메인>]
+                 <기능> = false   # 비활성화 기본값, 또는 true
+            2. 의도적으로 프리셋 밖에서 관리할 경우:
+                 hosts/_preset.${presetName}.toml의 [explicitOptional] paths에 추가
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       '';
     }
     # == Sibling Coverage Check: 형제 옵션 완전성 검사 ==
     {
       assertion = incompleteGroups == {};
       message = ''
-        [Mods Coverage] 형제 옵션 일부만 명시됨 (하나라도 명시 시 그룹 전체 명시 필요):
-          ${concatStringsSep "\n  " incompleteMessages}
-        → ${presetName}.toml에 누락된 형제 옵션을 추가하거나,
-          의도적 제외라면 ${presetName}.toml의 [explicitOptional] paths에 추가하세요.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        [Mods Coverage] 같은 그룹에서 일부 옵션만 프리셋에 명시되었습니다.
+
+          불완전한 그룹 (누락된 항목):
+            ${concatStringsSep "\n        " incompleteMessages}
+
+          발생 원인:
+            hosts/_preset.${presetName}.toml에서 [mods.x.y] 섹션 내
+            일부 옵션만 기재하고 나머지를 누락했을 때 발생합니다.
+            같은 그룹 안에서 하나라도 명시하면 나머지도 전부 명시해야 합니다.
+
+          해결 방법 (둘 중 하나):
+            1. hosts/_preset.${presetName}.toml에서 누락된 형제 옵션도 추가
+            2. 의도적 제외라면 [explicitOptional] paths에 추가
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       '';
     }
   ];

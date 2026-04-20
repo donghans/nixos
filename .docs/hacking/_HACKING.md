@@ -39,7 +39,17 @@
 
 ---
 
-## 💡 3. 핵심 메커니즘 (Mechanisms)
+## 📦 3. Mods 등록 · 삭제 가이드
+새 기능 추가/삭제 절차와 Coverage Check 오류 대응입니다.
+👉 [**MODS.md 자세히 보기**](./MODS.md)
+
+- **추가**: `.nix` 파일 생성 → `mkMod`/`mkModOf`/`mkPartOf` 패턴 선택 → 프리셋 TOML 등록 → `nixup check`
+- **삭제**: `.nix` 파일 삭제 → 프리셋 TOML에서 항목 제거 → `nixup check`
+- **Coverage Check 오류**: 오류 메시지가 누락 경로와 해결 방법을 안내합니다.
+
+---
+
+## 💡 4. 핵심 메커니즘 (Mechanisms)
 이 프로젝트만의 독창적인 기술적 강점과 구현 원리입니다.
 👉 [**MECHANISMS.md 자세히 보기**](./MECHANISMS.md)
 
@@ -49,23 +59,30 @@
 
 ---
 
-## 📂 4. 디렉토리 구조 요약
+## 📂 5. 디렉토리 구조 요약
 
 ```text
 /
-├── core/             # Flake 진입점(flake.nix), 빌더(lib/), 엔진 스크립트(scripts/)
-│   └── lib/          # builders.nix, workspace-options.nix, mk-wrapper.nix, mk-preset.nix
-├── hosts/            # 호스트별 설정(폴더 단위), 하드웨어 프로필, 전역 메타데이터
-│   ├── base.toml     # 전역 설정 원본 (username, git, system)
-│   └── <hostname>/   # host.toml, configuration.nix, home.nix
-├── mods/             # Mods 프레임워크 (4개 레이어)
-│   ├── sys/          # 시스템 기반 (base, fonts, vfs, services, utils)
-│   ├── gui/          # GUI 환경 (core 번들, apps, utils)
-│   ├── devel/        # 개발 도구 (toolchains, jetbrains, apps)
-│   ├── _preset/      # 구성 레시피 (workstation.toml 등)
-│   └── _data/        # 정적 데이터 (devbox 템플릿 등)
-├── .docs/            # 문서 저장소 (readme, plan, hacking)
-└── .locks/           # 시스템 안정성을 위한 락 파일 관리
+├── core/                    # Flake 진입점(flake.nix), 빌더(lib/), 엔진 스크립트(scripts/)
+│   ├── lib/                 # builders.nix, mods-lib.nix, workspace-options.nix, mk-wrapper.nix, mk-preset.nix
+│   ├── scripts/             # nixup 관리 CLI, nixstrap 설치 스크립트
+│   ├── iso.nix              # ISO 전용 NixOS 설정 (Firefox 네트워크 패치, 진단 도구 등)
+│   ├── iso.home.nix         # ISO 전용 Home Manager 설정 (spice-vdagent, 클립보드 브릿지 등)
+│   └── iso.nixstrap.nix     # ISO에 nixstrap 인스톨러 주입 로직
+├── hosts/                   # 호스트별 설정 (평탄 구조)
+│   ├── _base.toml           # 전역 설정 원본 (username, git, system)
+│   ├── _preset.workstation.toml  # 워크스테이션 프리셋 mods 정의
+│   ├── _preset.server.toml  # 서버 프리셋 mods 정의
+│   ├── _preset.iso.toml     # ISO 프리셋 mods 정의
+│   ├── <hostname>.toml      # 호스트 메타데이터 (type, preset, mods 오버라이드)
+│   └── <hostname>.nix       # 호스트 전용 NixOS + Home Manager 설정 (mkHostConfiguration 패턴)
+├── mods/                    # Mods 프레임워크 (3개 도메인)
+│   ├── sys/                 # 시스템 기반 (base, fonts, vfs, services, utils)
+│   ├── gui/                 # GUI 환경 (base 번들, apps, utils)
+│   ├── devel/               # 개발 도구 (toolchains, jetbrains, apps)
+│   └── _data/               # 비-Nix 데이터 파일 (zsh 스크립트, waybar CSS, incus XML/PS1, devbox 설정 등)
+├── .docs/                   # 문서 저장소 (readme, plan, hacking)
+└── .locks/                  # 시스템 안정성을 위한 락 파일 관리
 ```
 
 이 설계를 바탕으로 본인만의 강력한 NixOS 환경을 구축해 보세요!
