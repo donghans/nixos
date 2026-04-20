@@ -1,9 +1,9 @@
-# core/lib/mk-preset.nix
+# core/lib/preset.nix
 # 프리셋 커버리지 체크 모듈 팩토리
 #
 # 사용법 (flake.nix에서 per-host로 생성):
 #   coverageModule = { config, options, lib, ... }:
-#     import ./lib/mk-preset.nix {
+#     import ./lib/preset.nix {
 #       inherit lib config options;
 #       presetName      = resolved.preset;
 #       presetsJsonPath = ./presets.json;

@@ -179,6 +179,37 @@
     imports = baseMod.imports ++ [cascadeModule];
   };
 
+  # mkHostConfiguration — 호스트 파일 전용 통합 헬퍼
+  # os/hm 블록을 한 파일에 선언하고, 빌더가 컨텍스트(isNixOS)에 따라 분기해 적용.
+  # enable 옵션 없음 (호스트 파일은 항상 활성화).
+  #
+  # 사용 예:
+  #   {mkHostConfiguration, ...}:
+  #   mkHostConfiguration ({pkgs, lib, ...}: {
+  #     os = { boot.kernelParams = ["amd_pstate=active"]; };
+  #     hm = { services.hypridle.settings.listener = [...]; };
+  #   })
+  mkHostConfiguration = bodyFn: let
+    innerModule = {
+      isNixOS ? false,
+      pkgs,
+      ...
+    } @ args: let
+      body = bodyFn (args // {inherit pkgs;});
+      selected =
+        if isNixOS
+        then (body.os or {})
+        else (body.hm or {});
+      # os/hm 블록 안의 imports를 최상위 module imports로 승격
+      # (NixOS·HM 모듈 시스템 모두 {imports=[...]; config={...};} 구조를 동일하게 처리함)
+      blockImports = selected.imports or [];
+      configAttrs = builtins.removeAttrs selected ["imports"];
+    in {
+      imports = blockImports;
+      config = configAttrs;
+    };
+  in {imports = [innerModule];};
+
   # 제외 규칙 (importDir / recursiveImportDir 공통)
   # _ prefix: 라이브러리·프라이빗 파일, .home.nix / .overlay.nix suffix: 조건부 로드 파일
   # default.nix: 오케스트레이터 (모듈 아님)
@@ -212,5 +243,8 @@
     map (n: dir + "/${n}") files
     ++ builtins.concatLists (map (d: recursiveImportDir (dir + "/${d}")) subdirs);
 in {
-  inherit mkMod mkNamedMod mkPartOf mkModOf importDir recursiveImportDir;
+  # specialArgs로 주입할 모듈-facing 헬퍼 번들
+  modArgs = {inherit mkMod mkNamedMod mkPartOf mkModOf mkHostConfiguration;};
+  # 빌드 인프라 전용 (specialArgs에 안 감)
+  inherit importDir recursiveImportDir;
 }

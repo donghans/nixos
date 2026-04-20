@@ -11,7 +11,7 @@
     (nixpkgs.lib.filesystem.listFilesRecursive ../mods);
   customOverlays =
     [
-      (import ./lib/mk-wrapper.nix)
+      (import ./overlays/wrapper.nix)
     ]
     ++ map import overlayFiles;
 
@@ -83,10 +83,10 @@
   };
 
   # == Builders ==
-  builders = import ./lib/builders.nix {
+  builders = import ./lib/host.nix {
     inherit inputs customOverlays;
   };
-  inherit (builders) mkHost mkHostContext mkMod mkNamedMod mkPartOf mkModOf mkHostConfiguration recursiveImportDir;
+  inherit (builders) mkHost mkHostContext modArgs recursiveImportDir;
 
   # == ISO 빌더 헬퍼 (system만 다르고 나머지 동일) ==
   mkISO = system:
@@ -105,7 +105,7 @@
           lib,
           ...
         }:
-          import ./lib/mk-preset.nix {
+          import ./lib/preset.nix {
             inherit lib options;
             presetName = "iso";
             presetsJsonPath = ../presets.json;
@@ -137,7 +137,7 @@
       lib,
       ...
     }:
-      import ./lib/mk-preset.nix {
+      import ./lib/preset.nix {
         inherit lib options;
         presetName = resolved.preset;
         presetsJsonPath = ../presets.json;
@@ -171,11 +171,13 @@ in {
         name = "${resolved.username}@${name}";
         value = home-manager.lib.homeManagerConfiguration {
           inherit (hostCtx) pkgs;
-          extraSpecialArgs = {
-            isNixOS = false;
-            inherit inputs mkMod mkNamedMod mkPartOf mkModOf mkHostConfiguration;
-            inherit (hostCtx) metaConfig unstable unstable-fallback;
-          };
+          extraSpecialArgs =
+            {
+              isNixOS = false;
+              inherit inputs;
+              inherit (hostCtx) metaConfig unstable unstable-fallback;
+            }
+            // modArgs;
           modules =
             [./lib/workspace-options.nix {workspace = hostCtx.metaConfig;}]
             ++ recursiveImportDir ../mods
@@ -186,12 +188,14 @@ in {
         name = "root@${name}";
         value = home-manager.lib.homeManagerConfiguration {
           inherit (hostCtx) pkgs;
-          extraSpecialArgs = {
-            isNixOS = false;
-            inherit inputs mkMod mkNamedMod mkPartOf mkModOf mkHostConfiguration;
-            metaConfig = hostCtx.metaConfig // {username = "root";};
-            inherit (hostCtx) unstable unstable-fallback;
-          };
+          extraSpecialArgs =
+            {
+              isNixOS = false;
+              inherit inputs;
+              metaConfig = hostCtx.metaConfig // {username = "root";};
+              inherit (hostCtx) unstable unstable-fallback;
+            }
+            // modArgs;
           modules =
             [./lib/workspace-options.nix {workspace = hostCtx.metaConfig // {username = "root";};}]
             ++ recursiveImportDir ../mods
@@ -203,7 +207,7 @@ in {
                 lib,
                 ...
               }:
-                import ./lib/mk-preset.nix {
+                import ./lib/preset.nix {
                   inherit lib options;
                   presetName = resolved.preset;
                   presetsJsonPath = ../presets.json;

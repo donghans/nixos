@@ -4,34 +4,9 @@
 }: let
   inherit (inputs) nixpkgs nixpkgs-unstable home-manager;
 
-  # core/lib/mods-lib.nix의 mkMod 등 헬퍼를 specialArgs로 전 모듈에 주입
-  mods-lib = import ./mods-lib.nix {inherit (nixpkgs) lib;};
-  inherit (mods-lib) mkMod mkNamedMod mkPartOf mkModOf recursiveImportDir;
-
-  # mkHostConfiguration — 호스트 파일 전용 통합 헬퍼
-  # os/hm 블록을 한 파일에 선언하고, 빌더가 컨텍스트(isNixOS)에 따라 분기해 적용.
-  # enable 옵션 없음 (호스트 파일은 항상 활성화).
-  #
-  # 사용 예:
-  #   {mkHostConfiguration, ...}:
-  #   mkHostConfiguration ({pkgs, lib, ...}: {
-  #     os = { boot.kernelParams = ["amd_pstate=active"]; };
-  #     hm = { services.hypridle.settings.listener = [...]; };
-  #   })
-  mkHostConfiguration = bodyFn: let
-    innerModule = {
-      isNixOS ? false,
-      pkgs,
-      ...
-    } @ args: let
-      body = bodyFn (args // {inherit pkgs;});
-    in {
-      config =
-        if isNixOS
-        then (body.os or {})
-        else (body.hm or {});
-    };
-  in {imports = [innerModule];};
+  # core/lib/mods.nix의 모듈 헬퍼 번들 — specialArgs로 전 모듈에 주입
+  modsLib = import ./mods.nix {inherit (nixpkgs) lib;};
+  inherit (modsLib) modArgs recursiveImportDir;
 
   # == Common Host Context Generator ==
   mkHostContext = hostInfo @ {
@@ -94,7 +69,7 @@
 
     homeConfig =
       if isISO
-      then ../iso.home.nix
+      then ../iso.nix
       else if hasUnifiedHost
       then unifiedHostFile
       else ../../hosts/${hostname}/home.nix;
@@ -139,13 +114,16 @@
       ];
   in
     nixpkgs.lib.nixosSystem {
-      specialArgs = {
-        isNixOS = true;
-        inherit inputs mkMod mkNamedMod mkPartOf mkModOf mkHostConfiguration;
-        inherit (hostCtx) metaConfig;
-        inherit (hostCtx) unstable;
-        inherit (hostCtx) unstable-fallback;
-      };
+      specialArgs =
+        {
+          isNixOS = true;
+          inherit isISO;
+          inherit inputs;
+          inherit (hostCtx) metaConfig;
+          inherit (hostCtx) unstable;
+          inherit (hostCtx) unstable-fallback;
+        }
+        // modArgs;
 
       modules =
         [{nixpkgs.hostPlatform = hostInfo.system;}]
@@ -210,16 +188,20 @@
             home-manager.backupFileExtension = "backup";
             home-manager.users.${hostCtx.homeUser} = import hostCtx.homeConfig;
             home-manager.users.root = import ../../mods/sys/base/core.nix;
-            home-manager.extraSpecialArgs = {
-              isNixOS = false;
-              inherit inputs mkMod mkNamedMod mkPartOf mkModOf mkHostConfiguration;
-              inherit (hostCtx) metaConfig;
-              inherit (hostCtx) unstable;
-              inherit (hostCtx) unstable-fallback;
-            };
+            home-manager.extraSpecialArgs =
+              {
+                isNixOS = false;
+                inherit isISO;
+                inherit inputs;
+                inherit (hostCtx) metaConfig;
+                inherit (hostCtx) unstable;
+                inherit (hostCtx) unstable-fallback;
+              }
+              // modArgs;
           }
         ];
     };
 in {
-  inherit mkHostContext mkHost mkMod mkNamedMod mkPartOf mkModOf mkHostConfiguration recursiveImportDir;
+  inherit mkHostContext mkHost recursiveImportDir;
+  inherit (modsLib) modArgs;
 }
