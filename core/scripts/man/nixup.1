@@ -17,11 +17,14 @@ no git tracking) and invoked with \fBpath:\fR mode to enable testing of
 uncommitted changes.
 .SH SUBCOMMANDS
 .TP
+.B (none)
+Build and activate both NixOS system and Home Manager configurations (default when no subcommand is given).
+.TP
 .B os
-Build and activate NixOS system configuration (default when no subcommand is given).
+Build and activate NixOS system configuration only.
 .TP
 .B home
-Build and activate Home Manager configuration.
+Build and activate Home Manager configuration only.
 .TP
 .B check
 Run code integrity checks in order: deadnix, statix fix, alejandra,
@@ -81,10 +84,15 @@ Build aarch64 target instead of the default x86_64.
 Show help. Use after a subcommand to see subcommand-specific help.
 .SH EXAMPLES
 .PP
-Apply OS configuration to the current host:
+Apply both OS and Home Manager configuration to the current host:
 .PP
 .nf
     nixup
+.fi
+.PP
+Apply OS configuration only:
+.PP
+.nf
     nixup os
 .fi
 .PP

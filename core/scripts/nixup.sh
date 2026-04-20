@@ -38,11 +38,11 @@ case "$SUBCOMMAND" in
         shift
         ;;
     "")
-        TARGET_PROFILE="os"
+        TARGET_PROFILE="all"
         ;;
     -*)
-        # 플래그만 → os 기본
-        TARGET_PROFILE="os"
+        # 플래그만 → all 기본 (os + home)
+        TARGET_PROFILE="all"
         ;;
     *)
         log_msg "Error" "unknown subcommand: '$SUBCOMMAND'. use: os home check fix iso update clean"

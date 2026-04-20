@@ -12,8 +12,9 @@ NixOS update utility
        nixup help [SUBCOMMAND]
 
 서브커맨드:
-  os        NixOS 시스템 빌드 및 적용 (기본값)
-  home      Home Manager 빌드 및 적용
+  (없음)    NixOS 시스템 + Home Manager 빌드 및 적용 (기본값)
+  os        NixOS 시스템만 빌드 및 적용
+  home      Home Manager만 빌드 및 적용
   check     코드 무결성 검사
   update    flake.lock 갱신
   clean     오래된 세대 정리
@@ -28,8 +29,10 @@ NixOS update utility
   -h, --help          도움말 표시
 
 예시:
-  nixup                         현재 호스트에 OS 설정 적용
-  nixup os --try                임시 활성화 (재부팅 시 원복)
+  nixup                         현재 호스트에 OS + Home Manager 설정 적용
+  nixup os                      NixOS 시스템만 적용
+  nixup home                    Home Manager만 적용
+  nixup --try                   임시 활성화 (재부팅 시 원복)
   nixup home --build            홈 설정 빌드만 수행
   nixup clean --all --keep=5    시스템 전체 정리, 5세대 보존
   nixup check --deep            전체 호스트 완전 검사
@@ -43,7 +46,7 @@ print_help_subcmd() {
     case "$subcmd" in
         os)
             cat <<'EOF'
-nixup os [FLAGS]  —  NixOS 시스템 빌드 및 적용
+nixup os [FLAGS]  —  NixOS 시스템만 빌드 및 적용
 
   플래그:
     -b, --build         빌드만 수행, 새 세대 생성 안 함
@@ -52,7 +55,7 @@ nixup os [FLAGS]  —  NixOS 시스템 빌드 및 적용
     -h, --help          이 도움말
 
   예시:
-    nixup                       현재 호스트 즉시 적용 (os 생략 가능)
+    nixup os                    NixOS 시스템만 적용
     nixup os --build            빌드만 수행 (미리보기)
     nixup os --try              임시 활성화 (재부팅 시 원복)
 EOF

@@ -122,7 +122,7 @@ _activate_home() {
 run_build_task() {
     log_msg "Task" "building configuration for #$HOST_ID..."
 
-    if [ "$TARGET_PROFILE" == "os" ]; then
+    if [ "$TARGET_PROFILE" == "os" ] || [ "$TARGET_PROFILE" == "all" ]; then
         local attr="path:${BUILD_DIR}#nixosConfigurations.${HOST_ID}.config.system.build.toplevel"
         local pre_store
         pre_store=$(readlink -f "/nix/var/nix/profiles/system" 2>/dev/null || true)
@@ -133,7 +133,9 @@ run_build_task() {
         else
             _log_nvd_diff "/nix/var/nix/profiles/system" "os"
         fi
-    else
+    fi
+
+    if [ "$TARGET_PROFILE" == "home" ] || [ "$TARGET_PROFILE" == "all" ]; then
         local attr="path:${BUILD_DIR}#homeConfigurations.\"${USER}@${HOST_ID}\".activationPackage"
         local pre_home_store
         pre_home_store=$(readlink -f "$HOME/.local/state/nix/profiles/home-manager" 2>/dev/null || true)

@@ -14,8 +14,9 @@
 
 프로젝트 루트에서 다음 명령어를 사용합니다. (모든 작업은 빌드 격리 환경에서 수행됩니다.)
 
-- **시스템 설정 적용**: `nixup os [hostname]` (생략 시 마지막 호스트)
-- **사용자 설정 적용**: `nixup home [hostname]`
+- **전체 설정 적용**: `nixup [hostname]` — NixOS 시스템 + Home Manager 동시 적용 (기본값)
+- **시스템만 적용**: `nixup os [hostname]` — `os` 블록 변경만 있을 때
+- **사용자만 적용**: `nixup home [hostname]` — `hm` 블록 변경만 있을 때
 - **무결성 점검**: `nixup check` (포맷팅, 린팅, 빌드 가능 여부 확인)
 - **전체 호스트 검사**: `nixup check --deep`
 - **커스텀 ISO 빌드**: `nixup iso` (x86_64), `nixup iso --arm` (aarch64)
