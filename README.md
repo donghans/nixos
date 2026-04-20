@@ -1,21 +1,90 @@
-# NixOS 모듈형 설정 프로젝트 (Flake 기반)
+# NixOS 모듈형 설정 프레임워크
 
-이 프로젝트는 **Nix Flakes**와 **Home Manager**를 사용하여 여러 대의 NixOS 호스트 설정을 효율적으로 관리하고, 나만의 커스텀 설치 미디어(ISO)를 생성하기 위한 환경입니다.
-
----
-
-## 🚀 주요 특징
-
-- **Mods Framework**: 모든 설정을 `sys` / `gui` / `devel` 세 도메인으로 격리하고, 명시적 `enable` 옵션을 통해 기능을 선택합니다.
-- **TOML 설정 원본**: `hosts/_base.toml`과 `hosts/<hostname>.toml`에 메타데이터를 선언합니다. `nixup` 실행 시 내부적으로 이를 `resolved.json`으로 변환하여 flake.nix에 주입합니다.
-- **프리셋 시스템**: `hosts/_preset.*.toml`에 workstation, server, iso 등 다양한 프리셋이 정의되어 있습니다. `<hostname>.toml`에 `preset = "workstation"` 한 줄로 해당 환경 전체(tailscale, docker, bluetooth, GUI, 개발 도구 등)가 자동 적용되며, 호스트별 변경 항목만 추가로 기재하면 됩니다.
-- **Mods Coverage Check**: 빌드 시 프리셋에 선언된 옵션과 workspace-options에 등록된 옵션을 대조하여, 누락된 항목을 빌드 타임 에러로 알립니다.
-- **격리된 빌드 환경**: 모든 빌드는 소스를 `.build/` 디렉터리에 물리 복사하고 `path:` 모드로 호출하여 git 추적 없이 안전하게 수행됩니다.
-- **시스템 통합 도구 (`nixup`)**: `nixup`을 통해 시스템 업데이트, 전환, ISO 빌드, 패키지 복구 등 모든 작업을 수행합니다.
+TOML 선언 한 파일로 NixOS 호스트를 정의하고, 프리셋 한 줄로 전체 환경을 자동 구성하는 Flake 기반 프레임워크입니다.
 
 ---
 
-## 📂 프로젝트 구조
+## 왜 이 프로젝트인가
+
+일반적인 NixOS dotfiles 레포는 설정이 늘어날수록 파일 간 의존성이 복잡해지고, 새 호스트를 추가하려면 기존 설정을 복사·수정해야 합니다. 이 프로젝트는 **설정과 로직을 완전히 분리**하여:
+
+- **TOML 한 파일**(`hosts/<hostname>.toml`)로 호스트의 타입, 프리셋, 기능 토글을 선언합니다.
+- **프리셋 시스템**이 workstation/server 환경을 자동으로 구성하고, 호스트별 차이점만 오버라이드합니다.
+- **Mods 프레임워크**가 `.nix` 파일 하나를 NixOS와 Home Manager 양쪽에 자동 로드합니다.
+- **통합 CLI(`nixup`)**로 빌드, 업데이트, 복구, ISO 생성까지 한 곳에서 관리합니다.
+- **대화형 설치기(`nixstrap`)**가 신규 기기에 호스트 프로필 생성부터 설치까지 안내합니다.
+
+---
+
+## 빠른 시작
+
+### 1. 저장소 준비
+
+```bash
+# Fork 후 클론
+git clone https://github.com/<your-username>/nixos.git
+cd nixos
+```
+
+### 2. 전역 설정 수정
+
+`hosts/_base.toml`에서 **3줄만** 수정하면 됩니다:
+
+```toml
+username = "your_username"     # 사용자명
+
+[git]
+name  = "Your Name"            # Git 이름
+email = "your@email.com"       # Git 이메일
+```
+
+### 3. 설치
+
+```bash
+# 표준 NixOS Live USB에서:
+./nixstrap.sh
+
+# 또는 커스텀 ISO(Hyprland GUI 포함)를 빌드하여 설치:
+./nixup-iso.sh
+```
+
+`nixstrap`이 호스트 선택, 파티셔닝, `nixos-install`까지 대화형으로 안내합니다.
+상세 가이드: [BOOTSTRAP.md](./.docs/readme/BOOTSTRAP.md)
+
+---
+
+## 호스트 설정 예시
+
+```toml
+# hosts/<hostname>.toml
+type   = "desktop"
+preset = "workstation"     # GUI + 개발도구 + 서비스 자동 구성
+
+# 프리셋 기본값에서 변경할 항목만 기재
+[mods.devel]
+fvm = true                 # Flutter 추가 활성화
+```
+
+프리셋이 Hyprland, Docker, Tailscale, Bluetooth, 개발 도구 등을 한꺼번에 설정합니다.
+호스트별로 다른 부분만 몇 줄 추가하면 됩니다.
+
+---
+
+## 문서
+
+> 전체 문서는 사이드바와 검색을 지원하는 [**문서 사이트**](https://donghans.github.io/nixos/)에서 볼 수 있습니다.
+
+| 문서 | 대상 | 내용 |
+|------|------|------|
+| [시스템 이식 가이드](./.docs/readme/BOOTSTRAP.md) | 처음 설치 | Fork, 설정, 설치 전 과정 |
+| [nixup 명령어](./.docs/manual/NIXUP.md) | 일상 관리 | 서브커맨드, 플래그, 활용 사례 |
+| [Mods 확장 가이드](./.docs/manual/MODS.md) | 기능 확장 | API 레퍼런스, Cookbook, 추가/삭제 절차 |
+| [기술 심층 가이드](./.docs/hacking/_HACKING.md) | 내부 구조 | 아키텍처, 메커니즘, 라이프사이클 |
+
+---
+
+<details>
+<summary><strong>프로젝트 구조</strong></summary>
 
 ```
 nixos/
@@ -36,58 +105,4 @@ nixos/
 └── .locks/             # Flake lock 파일 (Rolling/Stable 전략)
 ```
 
----
-
-## 🛠️ 호스트 설정 방법
-
-```toml
-# hosts/<hostname>.toml 예시
-type   = "desktop"
-preset = "workstation"
-
-# 프리셋 기본값에서 변경할 항목만 기재
-[mods.devel]
-fvm = true
-```
-
-상세한 설정 옵션(파티션 경로, 메모리, 프리셋 등)은 [BOOTSTRAP.md](./.docs/readme/BOOTSTRAP.md) 섹션 4를 참고하세요.
-
----
-
-## 🚀 처음 사용자용 가이드 (Getting Started)
-
-이 프로젝트는 **Btrfs 서브볼륨 구조**에 최적화되어 설계되었습니다. `hosts/_base.toml`에서 사용자 정보만 수정한 뒤 바로 설치를 시작할 수 있습니다. 호스트 프로필은 설치 도중 `nixstrap`이 대화형으로 생성합니다. 자세한 내용은 [BOOTSTRAP.md](./.docs/readme/BOOTSTRAP.md) 가이드를 참고하세요.
-
----
-
-## 🛠️ 프로젝트 관리 (`nixup`)
-
-시스템이 설치된 후에는 프로젝트 경로와 상관없이 터미널 어디서든 `nixup` 명령어를 사용할 수 있습니다. 구체적인 명령어 사용법과 활용 사례는 [NIXUP.md](./.docs/manual/NIXUP.md) 가이드를 참조하세요.
-
-- **OS 설정 적용:** `nixup [os]`
-- **Home Manager 적용:** `nixup home`
-- **커스텀 ISO 빌드:** `nixup iso` (x86_64) / `nixup iso --arm` (aarch64) — 결과물은 `.build/` 폴더에 생성됨
-- **시스템 업데이트:** `nixup update`
-- **깨진 패키지 복구:** `nixup fix [pkg1] [pkg2] ...`
-- **무결성 및 스타일 점검:** `nixup check` (deadnix, 안티패턴 정리, 포맷팅, shellcheck, 빌드 검증)
-- **시스템 정리:** `nixup clean [--all] [--keep=N]`
-
----
-
-## 📦 Mods 확장 (커스텀 기능 추가)
-
-이 프로젝트의 모든 기능은 `mods/` 디렉터리의 모듈(Mod)로 구성되어 있습니다. 새 기능을 추가하거나 기존 기능을 수정하려면 Mods 가이드를 참고하세요.
-
-- **API 레퍼런스**: `mkMod`, `mkModOf`, `mkPartOf` 헬퍼 사용법
-- **Cookbook**: 패키지 설치, NixOS+HM 동시 설정, 부모 도메인 cascade 등 7가지 실전 예시
-- **추가/삭제 절차**: 파일 생성 → 프리셋 등록 → `nixup check` 검증
-
-👉 [MODS.md](./.docs/manual/MODS.md)
-
-내부 작동 원리(모듈 스캐닝, enable 계층, Dual-Context 등)가 궁금하다면 [ARCHITECTURE-MODS.md](./.docs/hacking/ARCHITECTURE-MODS.md)를 참고하세요.
-
----
-
-## 💡 주요 개념 및 고급 가이드
-
-이 프로젝트의 내부 작동 방식(빌드 격리, 락 전략, Mods Framework 아키텍처 등)이 궁금하거나, 시스템을 깊게 커스텀하고 싶은 고급 사용자는 [HACKING.md](./.docs/hacking/_HACKING.md) 파일을 참조하세요.
+</details>
