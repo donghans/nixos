@@ -2,5 +2,6 @@
 
 .build
 .env
+book
 GEMINI.md
 __pycache__/

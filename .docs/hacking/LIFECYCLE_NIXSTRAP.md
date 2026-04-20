@@ -2,7 +2,9 @@
 
 새 기기에 NixOS를 처음 설치할 때 `nixstrap`이 실행하는 단계별 흐름입니다. 커스텀 ISO 부팅 또는 기존 환경에서 `./nixstrap.sh`로 진입합니다.
 
-> **다이어그램**: [LIFECYCLE_NIXSTRAP.mermaid](./LIFECYCLE_NIXSTRAP.mermaid)
+```mermaid
+{{#include ./LIFECYCLE_NIXSTRAP.mermaid}}
+```
 
 ---
 

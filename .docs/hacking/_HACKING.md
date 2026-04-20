@@ -6,13 +6,13 @@
 
 ## 🏗️ 1. 프로젝트 아키텍처 (Architecture)
 프로젝트를 구성하는 4개의 핵심 레이어에 대한 상세 분석입니다.
-👉 [**ARCHITECTURE.md 자세히 보기**](./ARCHITECTURE.md) · [📊 다이어그램](./ARCHITECTURE.mermaid)
+👉 [**ARCHITECTURE.md 자세히 보기**](./ARCHITECTURE.md)
 
 - **CLI Engine**: `nixup.sh`와 태스크 스크립트 구조 (Update, Fix, Check 등).
 - **Metadata**: TOML 기반의 데이터 중심 설계.
 - **Logic Core**: Flake 기반 동적 호스트 생성.
 - **Mods Layer**: 도메인별 기능 모듈 및 프레임워크.
-  - 📐 Mods 프레임워크 심층: [ARCHITECTURE-MODS.md](./ARCHITECTURE-MODS.md) · [📊 다이어그램](./ARCHITECTURE-MODS.mermaid)
+  - 📐 Mods 프레임워크 심층: [ARCHITECTURE-MODS.md](./ARCHITECTURE-MODS.md)
 
 ---
 
@@ -20,7 +20,7 @@
 
 ### nixup
 명령어 입력부터 시스템 적용까지의 단계별 프로세스입니다.
-👉 [**LIFECYCLE_NIXUP.md 자세히 보기**](./LIFECYCLE_NIXUP.md) · [📊 다이어그램](./LIFECYCLE_NIXUP.mermaid)
+👉 [**LIFECYCLE_NIXUP.md 자세히 보기**](./LIFECYCLE_NIXUP.md)
 
 - **Orchestration**: 입력 분석, TOML resolve, 소스 물리 복사 및 `path:` 모드 격리 환경 구축.
 - **Evaluation**: Flake 평가, 패키지 세트 구성, overlay 적용.
@@ -29,7 +29,7 @@
 
 ### nixstrap
 신규 기기 부트스트랩 설치 흐름입니다.
-👉 [**LIFECYCLE_NIXSTRAP.md 자세히 보기**](./LIFECYCLE_NIXSTRAP.md) · [📊 다이어그램](./LIFECYCLE_NIXSTRAP.mermaid)
+👉 [**LIFECYCLE_NIXSTRAP.md 자세히 보기**](./LIFECYCLE_NIXSTRAP.md)
 
 - **Phase 1 — 레포 · 호스트**: 레포 클론 또는 로컬 경로 사용, 호스트 선택·프리셋·릴리즈 고정.
 - **Phase 1 — 파티셔닝**: 기존 파티션 지정(mode 1) 또는 디스크·범위 선택 후 자동 생성(mode 2).
@@ -44,7 +44,7 @@
 
 `mods/` 하위에 `.nix` 파일을 놓으면 `recursiveImportDir`이 자동으로 탐색하여 NixOS와 Home Manager 양쪽에 로드합니다. `mkMod`/`mkModOf`/`mkPartOf` 헬퍼가 enable 옵션 선언, 부모 cascade, `mkIf` 자동 적용까지 처리하므로, 모듈 파일만 작성하면 옵션 선언·활성화·분기가 모두 자동으로 이루어집니다.
 
-- 📐 **내부 원리**: [ARCHITECTURE-MODS.md](./ARCHITECTURE-MODS.md) · [📊 다이어그램](./ARCHITECTURE-MODS.mermaid) — 스캐닝 규칙, 경로 자동 유도, enable 계층, autoWrap, Dual-Context
+- 📐 **내부 원리**: [ARCHITECTURE-MODS.md](./ARCHITECTURE-MODS.md) — 스캐닝 규칙, 경로 자동 유도, enable 계층, autoWrap, Dual-Context
 - 📖 **사용법 · API · Cookbook**: [MODS.md](../manual/MODS.md) — API 레퍼런스, 7가지 실전 예시, 추가/삭제 절차
 
 ---
@@ -68,10 +68,8 @@
 │   ├── lib/                 # host.nix, mods.nix, workspace-options.nix, preset.nix
 │   ├── scripts/             # nixup 관리 CLI, nixstrap 설치 스크립트
 │   ├── overlays/            # mkWrapper 오버레이 (wrapper.nix)
-│   ├── iso.nix              # ISO 전용 통합 설정 (nixstrap + incus-guest 인스톨러 주입)
-│   ├── iso.nixstrap.nix     # ISO nixstrap 인스톨러 주입 로직
-│   ├── iso.incus-guest.os.nix   # ISO Incus Guest NixOS 설정
-│   └── iso.incus-guest.hm.nix   # ISO Incus Guest Home Manager 설정
+│   ├── iso.nix              # ISO 전용 통합 설정 (mkHostConfiguration 패턴)
+│   └── iso.nixstrap.nix     # ISO nixstrap 인스톨러 주입 로직
 ├── hosts/                   # 호스트별 설정 (평탄 구조)
 │   ├── _base.toml           # 전역 설정 원본 (username, git, system)
 │   ├── _preset.workstation.toml  # 워크스테이션 프리셋 mods 정의

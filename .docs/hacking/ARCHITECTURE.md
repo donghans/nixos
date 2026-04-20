@@ -2,7 +2,9 @@
 
 이 프로젝트는 유지보수성과 확장성을 극대화하기 위해 명확한 **관심사 분리(Separation of Concerns)**를 실천하고 있습니다.
 
-> **다이어그램**: [ARCHITECTURE.mermaid](./ARCHITECTURE.mermaid) (레이어 구조 및 데이터 흐름)
+```mermaid
+{{#include ./ARCHITECTURE.mermaid}}
+```
 
 ---
 

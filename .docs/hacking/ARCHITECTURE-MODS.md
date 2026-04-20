@@ -1,6 +1,8 @@
 # 🔧 Mods 프레임워크 — 내부 작동 원리
 
-> **다이어그램**: [ARCHITECTURE-MODS.mermaid](./ARCHITECTURE-MODS.mermaid)
+```mermaid
+{{#include ./ARCHITECTURE-MODS.mermaid}}
+```
 > **사용법 및 API**: [MODS.md](../manual/MODS.md)
 
 이 문서는 Mods 프레임워크의 내부 메커니즘을 설명합니다. 파일을 모듈로 로드하고, 옵션을 자동 생성하고, 조건부로 적용하는 전체 파이프라인입니다.
