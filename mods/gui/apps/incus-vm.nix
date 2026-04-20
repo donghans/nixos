@@ -1,13 +1,11 @@
-{
+{mkModHere, ...}:
+mkModHere __curPos "Incus VM" ({
+  cfg,
   config,
-  lib,
   pkgs,
-  isNixOS ? false,
+  lib,
   ...
-}:
-with lib; let
-  cfg = config.mods.gui.apps."incus-vm";
-
+}: let
   # GUI VM 목록을 fuzzel로 선택 → 상태에 따라 켜기/끄기/뷰어 열기 액션 선택
   spiceViewerScript = pkgs.writeShellScriptBin "incus-vm" ''
     # 가상머신(컨테이너 제외)만 조회 - "이름 (상태)" 형식으로 표시
@@ -83,20 +81,14 @@ with lib; let
     categories = ["System" "Emulator"];
     terminal = false;
   };
-in
-  {options.mods.gui.apps."incus-vm".enable = mkEnableOption "Incus VM";}
-  // (
-    if isNixOS
-    then {
-      config = mkIf cfg.enable {
-        assertions = [
-          {
-            assertion = config.mods.sys.services.incus.enable;
-            message = "mods.gui.apps.incus-vm는 mods.sys.services.incus.enable = true 가 필요합니다";
-          }
-        ];
-        environment.systemPackages = [spiceViewerScript spiceViewerDesktop];
-      };
-    }
-    else {}
-  )
+in {
+  os = {
+    assertions = [
+      {
+        assertion = config.mods.sys.services.incus.enable;
+        message = "mods.gui.apps.incus-vm는 mods.sys.services.incus.enable = true 가 필요합니다";
+      }
+    ];
+    environment.systemPackages = [spiceViewerScript spiceViewerDesktop];
+  };
+})

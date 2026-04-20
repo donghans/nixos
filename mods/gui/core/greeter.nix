@@ -1,13 +1,11 @@
-{
+{mkModHere, ...}:
+mkModHere __curPos null ({
+  config,
   pkgs,
   lib,
-  config,
   ...
-}:
-with lib; let
-  cfg = config.mods.gui;
-in {
-  config = mkIf cfg.enable {
+}: {
+  os = lib.mkIf config.mods.gui.enable {
     services.greetd = {
       enable = true;
       settings.default_session = {
@@ -26,4 +24,4 @@ in {
       TTYVTDisallocate = true;
     };
   };
-}
+})

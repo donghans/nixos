@@ -1,30 +1,21 @@
-{
-  config,
+{mkModHere, ...}:
+mkModHere __curPos "Caddy Web Server with reverse proxy support" ({
+  cfg,
   lib,
-  isNixOS ? false,
   ...
-}:
-with lib; let
-  cfg = config.mods.sys.services.caddy;
-in {
-  options.mods.sys.services.caddy = {
-    enable = mkEnableOption "Caddy Web Server with reverse proxy support";
-    configText = mkOption {
-      type = types.lines;
+}: {
+  options = {
+    configText = lib.mkOption {
+      type = lib.types.lines;
       default = "";
       description = "Extra Caddyfile configuration";
     };
   };
-
-  config = mkIf cfg.enable (
-    if isNixOS
-    then {
-      services.caddy = {
-        enable = true;
-        extraConfig = cfg.configText;
-      };
-      networking.firewall.allowedTCPPorts = [80 443];
-    }
-    else {}
-  );
-}
+  os = {
+    services.caddy = {
+      enable = true;
+      extraConfig = cfg.configText;
+    };
+    networking.firewall.allowedTCPPorts = [80 443];
+  };
+})

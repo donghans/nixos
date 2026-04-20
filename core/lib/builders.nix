@@ -4,8 +4,9 @@
 }: let
   inherit (inputs) nixpkgs nixpkgs-unstable home-manager;
 
-  # mods/_lib.nix의 mkMod 헬퍼를 specialArgs로 전 모듈에 주입
-  mkMod = (import ../../mods/_lib.nix {lib = nixpkgs.lib;}).mkMod;
+  # mods/_lib.nix의 mkMod / mkModHere 헬퍼를 specialArgs로 전 모듈에 주입
+  mods-lib = import ../../mods/_lib.nix {inherit (nixpkgs) lib;};
+  inherit (mods-lib) mkMod mkModHere;
 
   # == Common Host Context Generator ==
   mkHostContext = hostInfo @ {
@@ -106,7 +107,7 @@
     nixpkgs.lib.nixosSystem {
       specialArgs = {
         isNixOS = true;
-        inherit inputs mkMod;
+        inherit inputs mkMod mkModHere;
         inherit (hostCtx) metaConfig;
         inherit (hostCtx) unstable;
         inherit (hostCtx) unstable-fallback;
@@ -179,7 +180,7 @@
             home-manager.users.root = import ../../mods/sys/base/home.nix;
             home-manager.extraSpecialArgs = {
               isNixOS = false;
-              inherit inputs mkMod;
+              inherit inputs mkMod mkModHere;
               inherit (hostCtx) metaConfig;
               inherit (hostCtx) unstable;
               inherit (hostCtx) unstable-fallback;

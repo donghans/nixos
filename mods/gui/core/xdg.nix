@@ -1,38 +1,32 @@
-{
-  pkgs,
+{mkModHere, ...}:
+mkModHere __curPos null ({
   config,
+  pkgs,
   lib,
-  isNixOS ? false,
   ...
-}:
-with lib; let
-  cfg = config.mods.gui;
+}: let
+  guiEnabled = config.mods.gui.enable;
 in {
-  config = mkIf cfg.enable (mkMerge [
-    # == NixOS: XDG Portal 경로 노출 ==
+  os = lib.mkIf guiEnabled {
     # (목적: Wayland 포털 탐색에 필요한 시스템 PATH 등록)
-    (optionalAttrs isNixOS {
-      environment.pathsToLink = ["/share/applications" "/share/xdg-desktop-portal"];
-    })
+    environment.pathsToLink = ["/share/applications" "/share/xdg-desktop-portal"];
+  };
+  hm = lib.mkIf guiEnabled {
+    home.sessionVariables = {
+      XDG_CURRENT_DESKTOP = "Hyprland";
+      XDG_SESSION_TYPE = "wayland";
+      XDG_SESSION_DESKTOP = "Hyprland";
+    };
 
-    # == Home Manager: XDG Portal 설정 + 세션 식별 변수 ==
-    (optionalAttrs (!isNixOS) {
-      home.sessionVariables = {
-        XDG_CURRENT_DESKTOP = "Hyprland";
-        XDG_SESSION_TYPE = "wayland";
-        XDG_SESSION_DESKTOP = "Hyprland";
-      };
+    home.packages = [pkgs.xdg-utils];
 
-      home.packages = [pkgs.xdg-utils];
-
-      xdg = {
-        portal.enable = true;
-        portal.extraPortals = with pkgs; [
-          xdg-desktop-portal-gtk
-        ];
-        portal.config.common.default = ["hyprland" "gtk"];
-        mimeApps.enable = true;
-      };
-    })
-  ]);
-}
+    xdg = {
+      portal.enable = true;
+      portal.extraPortals = with pkgs; [
+        xdg-desktop-portal-gtk
+      ];
+      portal.config.common.default = ["hyprland" "gtk"];
+      mimeApps.enable = true;
+    };
+  };
+})

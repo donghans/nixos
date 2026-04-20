@@ -1,18 +1,14 @@
-{lib}: {
-  # 디렉터리 내 NixOS 모듈 파일 목록 반환
-  # 제외: _ prefix (라이브러리/프라이빗), .home.nix suffix (조건부 로드 파일)
-  importDir = dir: let
-    contents = builtins.readDir dir;
-    isImportable = n:
-      lib.hasSuffix ".nix" n
-      && !lib.hasPrefix "_" n
-      && !lib.hasSuffix ".home.nix" n
-      && !lib.hasSuffix ".overlay.nix" n;
-    files =
-      builtins.filter isImportable
-      (builtins.attrNames (lib.filterAttrs (_: v: v == "regular") contents));
+{lib}: let
+  # mods/ 루트 절대 경로 — pathFromPos에서 상대 경로 계산에 사용
+  modsRoot = toString ./.;
+
+  # __curPos 위치에서 option path 자동 유도
+  # 예: { file = ".../mods/sys/services/docker.nix"; ... } → "mods.sys.services.docker"
+  pathFromPos = pos: let
+    relative = lib.removePrefix (modsRoot + "/") pos.file;
+    withoutNix = lib.removeSuffix ".nix" relative;
   in
-    map (n: dir + "/${n}") files;
+    "mods." + lib.replaceStrings ["/"] ["."] withoutNix;
 
   # mkMod — NixOS + Home Manager 이중 컨텍스트 모듈 선언 헬퍼
   #
@@ -20,14 +16,19 @@
   #   path    — 옵션 경로 문자열 (예: "mods.gui.apps.vivaldi")
   #   desc    — mkEnableOption 설명. null이면 enable 옵션을 추가하지 않음.
   #   bodyFn  — { cfg, config, lib, pkgs, unstable, ... } 를 받아
-  #              { options?, os?, hm? } 를 반환하는 함수
+  #              { options?, os?, hm?, osImports?, hmImports?, imports? } 를 반환하는 함수
   #
   # 동작:
-  #   - cfg    : path 기반으로 config에서 자동 해결
-  #   - enable : desc가 null이 아니면 자동 추가 (mkEnableOption desc)
-  #   - os/hm  : 값이 plain attrset이면 mkIf cfg.enable 자동 적용
-  #              _type 필드가 있는 값(mkMerge, mkIf, mkOverride 등)은 그대로 통과
+  #   - cfg         : path 기반으로 config에서 자동 해결 (desc=null이면 null)
+  #   - enable      : desc가 null이 아니면 자동 추가 (mkEnableOption desc)
+  #   - os/hm       : 값이 plain attrset이면 mkIf cfg.enable 자동 적용
+  #                   _type 필드가 있는 값(mkMerge, mkIf, mkOverride 등)은 그대로 통과
   #   - isNixOS 분기는 내부에서 처리 (모듈 시그니처에 선언 불필요)
+  #   - _module.args 항목(예: hyprTerm)은 bodyFn의 named arg로 받으면 안 됨:
+  #     innerModule이 {imports=[]} 래퍼 안에 있어 _module.args 키가 args 키셋에 없음.
+  #     대신 bodyFn 안에서 config._module.args.hyprTerm 으로 lazily 접근할 것.
+  #   - sub-module imports가 필요하면 외부 모듈에서 직접 선언:
+  #     { imports = (mkModHere __curPos ...).imports ++ [./sub1.nix ...]; }
   #
   # 사용 예:
   #   mkMod "mods.gui.apps.vivaldi" "Vivaldi browser" ({ cfg, pkgs, ... }: {
@@ -44,14 +45,24 @@
   #     ];
   #   })
   #
-  #   # enable 없는 항상-켜지는 모듈
+  #   # enable 없는 항상-켜지는 모듈 (desc=null)
   #   mkMod "mods.gui.core.fuzzel" null ({ pkgs, ... }: {
   #     hm = { programs.fuzzel = { enable = true; }; };
   #   })
-  mkMod = path: desc: bodyFn:
-    {config, lib, pkgs, isNixOS ? false, ...}@args: let
+  #
+  mkMod = path: desc: bodyFn: let
+    innerModule = {
+      config,
+      lib,
+      pkgs,
+      isNixOS ? false,
+      ...
+    } @ args: let
       pathParts = lib.splitString "." path;
-      cfg = lib.getAttrFromPath pathParts config;
+      cfg =
+        if desc == null
+        then null
+        else lib.getAttrFromPath pathParts config;
 
       body = bodyFn (args // {inherit cfg;});
 
@@ -59,8 +70,10 @@
       # _type 있음(mkIf/mkMerge/mkOverride 등) → 그대로 통과
       # desc = null(enable 없음) → 그대로 통과
       autoWrap = v:
-        if desc == null then v
-        else if v ? _type then v
+        if desc == null
+        then v
+        else if v ? _type
+        then v
         else lib.mkIf cfg.enable v;
 
       baseOptions = lib.setAttrByPath pathParts (
@@ -69,9 +82,43 @@
       );
     in {
       options = baseOptions;
+      # osImports/hmImports는 innerModule.imports에서 지원하지 않음:
+      # imports는 모듈 수집 단계(collection phase)에서 평가되는데,
+      # 이 시점에는 _module.args(예: hyprTerm) 가 아직 해결되지 않아
+      # bodyFn 호출 시 "called without required argument" 오류가 발생함.
+      # sub-module imports가 필요하면 외부 모듈에서 직접 imports = [...] 사용.
       config =
         if isNixOS
         then autoWrap (body.os or {})
         else autoWrap (body.hm or {});
     };
+  in {imports = [innerModule];};
+
+  # mkModHere — __curPos를 받아 파일 위치에서 option path를 자동 유도하는 mkMod 래퍼
+  #
+  # 사용 예:
+  #   { mkModHere, ... }:
+  #   mkModHere __curPos "Docker Daemon and tools" ({ cfg, config, ... }: {
+  #     os = { virtualisation.docker.enable = true; };
+  #   })
+  #
+  # __curPos는 호출 파일 안에서 평가되므로 해당 파일의 경로를 자동으로 가져온다.
+  mkModHere = pos: desc: bodyFn: mkMod (pathFromPos pos) desc bodyFn;
+in {
+  # 디렉터리 내 NixOS 모듈 파일 목록 반환
+  # 제외: _ prefix (라이브러리/프라이빗), .home.nix suffix (조건부 로드 파일)
+  importDir = dir: let
+    contents = builtins.readDir dir;
+    isImportable = n:
+      lib.hasSuffix ".nix" n
+      && !lib.hasPrefix "_" n
+      && !lib.hasSuffix ".home.nix" n
+      && !lib.hasSuffix ".overlay.nix" n;
+    files =
+      builtins.filter isImportable
+      (builtins.attrNames (lib.filterAttrs (_: v: v == "regular") contents));
+  in
+    map (n: dir + "/${n}") files;
+
+  inherit mkMod mkModHere;
 }

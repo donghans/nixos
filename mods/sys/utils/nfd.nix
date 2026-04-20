@@ -1,13 +1,5 @@
-{
-  config,
-  lib,
-  pkgs,
-  isNixOS ? false,
-  ...
-}:
-with lib; let
-  cfg = config.mods.sys.utils.nfd;
-  # 🚀 nfd-fix custom script definition
+{mkModHere, ...}:
+mkModHere __curPos "NFD macOS filename fix tools" ({pkgs, ...}: let
   nfd-fix = pkgs.writeShellScriptBin "nfd-fix" ''
     TARGET=''${1:-.}
     if [[ ! -d "$TARGET" ]]; then
@@ -29,7 +21,6 @@ with lib; let
     fi
   '';
 
-  # == Common Zsh Init Content ==
   zshInit = ''
     # == NFD (Normalization Form Decomposition) file identification helper ==
     nfd-ls() {
@@ -53,16 +44,12 @@ with lib; let
     }
   '';
 in {
-  options.mods.sys.utils.nfd.enable = mkEnableOption "NFD macOS filename fix tools";
-  config = mkIf cfg.enable (
-    if isNixOS
-    then {
-      environment.systemPackages = [nfd-fix];
-      programs.zsh.interactiveShellInit = zshInit;
-    }
-    else {
-      home.packages = [nfd-fix];
-      programs.zsh.initContent = zshInit;
-    }
-  );
-}
+  os = {
+    environment.systemPackages = [nfd-fix];
+    programs.zsh.interactiveShellInit = zshInit;
+  };
+  hm = {
+    home.packages = [nfd-fix];
+    programs.zsh.initContent = zshInit;
+  };
+})

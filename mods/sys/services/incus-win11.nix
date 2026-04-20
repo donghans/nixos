@@ -1,13 +1,11 @@
-{
+{mkModHere, ...}:
+mkModHere __curPos "Incus win11 profile" ({
+  cfg,
   config,
-  lib,
   pkgs,
-  isNixOS ? false,
+  lib,
   ...
-}:
-with lib; let
-  cfg = config.mods.sys.services."incus-win11";
-
+}: let
   # 첫 로그인 시 실행되는 디블로팅 스크립트
   # - 불필요한 AppX 패키지 제거
   # - 불필요 서비스 비활성화
@@ -187,53 +185,47 @@ with lib; let
     genisoimage -output $out -volid "SETUP" -J -joliet-long iso
   '';
 in {
-  options.mods.sys.services."incus-win11".enable = mkEnableOption "Incus win11 profile";
-
-  config = mkIf cfg.enable (
-    if isNixOS
-    then {
-      assertions = [
-        {
-          assertion = config.mods.sys.services.incus.enable;
-          message = "mods.sys.services.incus-win11는 mods.sys.services.incus.enable = true 가 필요합니다";
-        }
-      ];
-      virtualisation.incus.preseed.profiles = [
-        {
-          name = "win11";
-          config = {
-            "limits.cpu" = "4";
-            "limits.memory" = "8GiB";
-            # SPICE 동적 해상도는 virtio-win-guest-tools의 SPICE VDAgent가 처리
-            # (Incus가 qemu.conf에서 디스플레이 장치를 자체 설정하므로 qxl-vga 직접 추가 불필요)
-            "raw.qemu" = "-device usb-tablet -boot menu=on,splash-time=5000";
-            "security.secureboot" = "false";
+  os = {
+    assertions = [
+      {
+        assertion = config.mods.sys.services.incus.enable;
+        message = "mods.sys.services.incus-win11는 mods.sys.services.incus.enable = true 가 필요합니다";
+      }
+    ];
+    virtualisation.incus.preseed.profiles = [
+      {
+        name = "win11";
+        config = {
+          "limits.cpu" = "4";
+          "limits.memory" = "8GiB";
+          # SPICE 동적 해상도는 virtio-win-guest-tools의 SPICE VDAgent가 처리
+          # (Incus가 qemu.conf에서 디스플레이 장치를 자체 설정하므로 qxl-vga 직접 추가 불필요)
+          "raw.qemu" = "-device usb-tablet -boot menu=on,splash-time=5000";
+          "security.secureboot" = "false";
+        };
+        devices = {
+          eth0 = {
+            name = "eth0";
+            network = "incusbr0";
+            type = "nic";
           };
-          devices = {
-            eth0 = {
-              name = "eth0";
-              network = "incusbr0";
-              type = "nic";
-            };
-            root = {
-              path = "/";
-              pool = "default";
-              type = "disk";
-              "io.bus" = "virtio-scsi";
-              size = "64GiB";
-            };
-            setup = {
-              source = "${setupIso}";
-              type = "disk";
-              "io.bus" = "usb";
-            };
-            vtpm = {
-              type = "tpm";
-            };
+          root = {
+            path = "/";
+            pool = "default";
+            type = "disk";
+            "io.bus" = "virtio-scsi";
+            size = "64GiB";
           };
-        }
-      ];
-    }
-    else {}
-  );
-}
+          setup = {
+            source = "${setupIso}";
+            type = "disk";
+            "io.bus" = "usb";
+          };
+          vtpm = {
+            type = "tpm";
+          };
+        };
+      }
+    ];
+  };
+})

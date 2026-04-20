@@ -1,13 +1,9 @@
-{
-  config,
-  lib,
+{mkModHere, ...}:
+mkModHere __curPos "Vivaldi Browser" ({
   pkgs,
   unstable,
-  isNixOS ? false,
   ...
-}:
-with lib; let
-  cfg = config.mods.gui.apps.vivaldi;
+}: let
   # Chromium distribution 설정만 유효 (Vivaldi 전용 설정은 initial_preferences로 제어 불가)
   initialPreferences = builtins.toJSON {
     distribution = {
@@ -17,26 +13,20 @@ with lib; let
       import_history = false;
     };
   };
-in
-  {options.mods.gui.apps.vivaldi.enable = mkEnableOption "Vivaldi Browser";}
-  // (
-    if isNixOS
-    then {}
-    else {
-      config = mkIf cfg.enable {
-        home.packages = [
-          ((unstable.vivaldi.override {
-              proprietaryCodecs = true;
-              inherit (unstable) vivaldi-ffmpeg-codecs;
-              commandLineArgs = ["--lang=ko"];
-            }).overrideAttrs (old: {
-              postInstall =
-                (old.postInstall or "")
-                + ''
-                  cp ${pkgs.writeText "initial_preferences" initialPreferences} $out/opt/vivaldi/initial_preferences
-                '';
-            }))
-        ];
-      };
-    }
-  )
+in {
+  hm = {
+    home.packages = [
+      ((unstable.vivaldi.override {
+          proprietaryCodecs = true;
+          inherit (unstable) vivaldi-ffmpeg-codecs;
+          commandLineArgs = ["--lang=ko"];
+        }).overrideAttrs (old: {
+          postInstall =
+            (old.postInstall or "")
+            + ''
+              cp ${pkgs.writeText "initial_preferences" initialPreferences} $out/opt/vivaldi/initial_preferences
+            '';
+        }))
+    ];
+  };
+})

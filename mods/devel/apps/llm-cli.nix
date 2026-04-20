@@ -1,21 +1,11 @@
-{
-  config,
-  lib,
-  unstable,
-  isNixOS ? false,
-  ...
-}:
-with lib; let
-  cfg = config.mods.devel;
-  modCfg = config.mods.devel.llm-cli;
-
+{mkModHere, ...}:
+mkModHere __curPos "LLM CLI tools" ({unstable, ...}: let
   # (목적: Wayland 터미널(kitty, alacritty 등)에서 LLM CLI의 Home/End 키 깨짐 현상 수정)
   #
   # 원인: gemini-cli, claude-code 모두 시작 시 kitty keyboard protocol 쿼리(\x1b[?u)를 보내고,
   # kitty/alacritty 등 최신 Wayland 터미널이 이를 지원한다고 응답하면 프로토콜을 활성화(\x1b[>1u).
   # 이 모드에서 Home/End 키가 앱 자체의 키 파서가 처리하지 못하는 확장 시퀀스로 전송됨.
   # kmscon(TTY)은 해당 프로토콜을 지원하지 않아 정상 동작.
-
   # gemini-cli: enableKittyKeyboardProtocol() 함수 본문을 no-op으로 교체
   # chunk 파일명은 빌드마다 해시가 바뀌므로 grep으로 동적 탐색
   gemini = unstable.gemini-cli.overrideAttrs (old: {
@@ -48,25 +38,19 @@ with lib; let
         fi
       '';
   });
-in
-  {options.mods.devel.llm-cli.enable = mkEnableOption "LLM CLI tools";}
-  // (
-    if isNixOS
-    then {}
-    else {
-      config = mkIf (cfg.enable || modCfg.enable) {
-        home.packages = [claude gemini];
+in {
+  hm = {
+    home.packages = [claude gemini];
 
-        # Gemini CLI 지침 (기존 메모리 동기화 및 전역 원칙 강제)
-        home.file.".gemini/GEMINI.md" = {
-          text = ''
-            # Gemini Added Memories
-            - Answer in korean.
-            - 코드 수정은 최소한으로, git diff 확인을 통해 잘못 수정된것은 정정할 것
-            - md 등의 문서가 길어진다면 분리해서 작성할 것
-          '';
-          force = true; # 기존 파일이 있더라도 Nix 관리 하에 둠
-        };
-      };
-    }
-  )
+    # Gemini CLI 지침 (기존 메모리 동기화 및 전역 원칙 강제)
+    home.file.".gemini/GEMINI.md" = {
+      text = ''
+        # Gemini Added Memories
+        - Answer in korean.
+        - 코드 수정은 최소한으로, git diff 확인을 통해 잘못 수정된것은 정정할 것
+        - md 등의 문서가 길어진다면 분리해서 작성할 것
+      '';
+      force = true; # 기존 파일이 있더라도 Nix 관리 하에 둠
+    };
+  };
+})

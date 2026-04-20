@@ -13,7 +13,13 @@
 # os/hm 블록에 plain attrset을 쓰면 mkIf cfg.enable 이 자동 적용됨.
 # mkMerge 등이 필요하면 직접 사용 — 자동 감지로 그대로 통과됨.
 {mkMod, ...}:
-mkMod "mods.<domain>.<name>" "<description>" ({cfg, pkgs, lib, unstable, ...}: {
+mkMod "mods.<domain>.<name>" "<description>" ({
+  cfg,
+  pkgs,
+  lib,
+  unstable,
+  ...
+}: {
   # -- 추가 옵션 (enable 외, 불필요하면 삭제) --
   # options = {
   #   package = lib.mkPackageOption pkgs "<package-name>" {};

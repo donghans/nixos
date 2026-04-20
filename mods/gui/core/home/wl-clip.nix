@@ -1,10 +1,10 @@
-{
+{mkModHere, ...}:
+mkModHere __curPos null ({
+  config,
   pkgs,
   lib,
-  config,
   ...
-}:
-with lib; let
+}: let
   # XWayland→Wayland 클립보드 브릿지 스크립트
   #
   # [문제] JetBrains(XWayland) 클립보드를 Wayland 앱이 읽을 때 MIME 협상 단계에서
@@ -37,8 +37,7 @@ with lib; let
     done
   '';
 in {
-  # == 클립보드 관리 ==
-  config = mkIf config.mods.gui.enable {
+  hm = lib.mkIf config.mods.gui.enable {
     # wl-clip-persist 제거:
     # - 브릿지(x11-clipboard-bridge)가 이미 XWayland 클립보드를 wl-copy 프로세스에 보존
     # - wl-clip-persist는 소유자 전환 시 복잡한 MIME 타입 읽기를 시도하여
@@ -79,4 +78,4 @@ in {
       Install.WantedBy = ["graphical-session.target"];
     };
   };
-}
+})

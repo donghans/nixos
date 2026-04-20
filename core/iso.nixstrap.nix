@@ -29,7 +29,8 @@
   _nixstrapPkgLine = builtins.elemAt (lib.splitString "\n" (builtins.readFile ./scripts/nixstrap.sh)) 1;
   # "#! nix-shell -i bash -p python3 git jq parted btrfs-progs util-linux"
   _nixstrapPkgStr = lib.removePrefix "#! nix-shell -i bash -p " _nixstrapPkgLine;
-  nixstrapRuntimePkgs = map (name: pkgs.${name})
+  nixstrapRuntimePkgs =
+    map (name: pkgs.${name})
     (lib.filter (s: s != "") (lib.splitString " " _nixstrapPkgStr));
 
   nixstrap-wrapped = pkgs.writeShellApplication {
@@ -91,7 +92,7 @@ in {
     fi
   '';
 
-  environment.systemPackages = [ nixstrap-wrapped ];
+  environment.systemPackages = [nixstrap-wrapped];
 
   environment.shellAliases = {
     nixstrap = "sudo -E nixstrap-wrapped";

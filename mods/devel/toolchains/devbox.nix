@@ -1,13 +1,9 @@
-{
+{mkModHere, ...}:
+mkModHere __curPos "Devbox global profile" ({
   config,
-  lib,
   pkgs,
-  isNixOS ? false,
   ...
-}:
-with lib; let
-  modCfg = config.mods.devel.devbox;
-
+}: let
   # (목적: 템플릿 복사 및 초기화를 한 번에 수행하는 통합 헬퍼)
   devbox-setup = pkgs.writeShellScriptBin "devbox-setup" ''
     TYPE="''${1:-}"
@@ -30,19 +26,11 @@ with lib; let
     # devbox.json에 내장된 setup-all 실행 (direnv, stealth 등 자동화)
     devbox run setup-all
   '';
-in
-  {
-    options.mods.devel.devbox.enable = mkEnableOption "Devbox global profile";
-  }
-  // (
-    if isNixOS
-    then {}
-    else {
-      config = mkIf modCfg.enable {
-        home.packages = [
-          pkgs.devbox
-          devbox-setup
-        ];
-      };
-    }
-  )
+in {
+  hm = {
+    home.packages = [
+      pkgs.devbox
+      devbox-setup
+    ];
+  };
+})

@@ -1,8 +1,11 @@
-_: {
-  services.mako.enable = true;
+{mkModHere, ...}:
+mkModHere __curPos null (_: {
+  hm = {
+    services.mako.enable = true;
 
-  services.mako.settings = {
-    default-timeout = 5000; # ms
-    background-color = "#282a36";
+    services.mako.settings = {
+      default-timeout = 5000; # ms
+      background-color = "#282a36";
+    };
   };
-}
+})
