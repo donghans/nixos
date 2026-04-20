@@ -126,7 +126,7 @@ prepare_build_dir() {
         # 댕글링 *.iso 심볼릭링크 제거 (재부팅 후 /tmp 초기화로 대상 파일이 사라진 경우)
         # (-xtype l: 심볼릭링크를 역참조했을 때도 l 타입 → 대상이 존재하지 않는 댕글링 링크)
         find "$build_dir" -mindepth 1 -maxdepth 1 -name '*.iso' -xtype l -exec rm -f {} +
-        find "$build_dir" -mindepth 1 -maxdepth 1 ! -name '*.iso' ! -name 'flake.lock' -exec rm -rf {} +
+        find "$build_dir" -mindepth 1 -maxdepth 1 ! -name '*.iso' ! -name 'flake.lock' ! -name 'hardware.nix' -exec rm -rf {} +
     else
         mkdir -p "$build_dir"
     fi
@@ -147,8 +147,13 @@ prepare_build_dir() {
         cp "$lock_file" "$build_dir/flake.lock"
     fi
 
-    # hardware.nix: 현재 시스템 기준으로 매번 생성 (git에 저장하지 않고 빌드 디렉터리에만 존재)
-    nixos-generate-config --no-filesystems --show-hardware-config > "$build_dir/hardware.nix"
+    # hardware.nix: 없을 때만 생성 (flake.lock처럼 .build/에 캐시)
+    # 하드웨어가 바뀌면 .build/hardware.nix를 삭제해서 강제 재생성
+    # (sudo 필요: nixos-generate-config가 Btrfs 서브볼륨 쿼리 등에 root 권한을 요구함)
+    if [ ! -s "$build_dir/hardware.nix" ]; then
+        log_msg "Config" "generating hardware.nix..."
+        sudo nixos-generate-config --no-filesystems --show-hardware-config > "$build_dir/hardware.nix"
+    fi
     # nix는 path: 모드로 호출 — git 추적 없이 BUILD_DIR을 store에 직접 복사하여 순수 평가
 }
 

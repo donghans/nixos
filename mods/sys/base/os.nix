@@ -25,8 +25,20 @@
   users.defaultUserShell = pkgs.zsh;
   programs.zsh.enable = true;
 
+  # (목적: nix.channel.enable = false 이후 남은 레거시 채널 디렉터리 정리)
+  # (이유: channel.enable = false가 새 경로 생성은 막지만 기존 디렉터리는 제거하지 않음)
+  system.activationScripts.removeOldChannels = {
+    text = ''
+      rm -rf /root/.nix-defexpr/channels
+      rm -rf /nix/var/nix/profiles/per-user/root/channels
+      rm -rf /home/${config.workspace.username}/.nix-defexpr/channels
+      rm -rf /nix/var/nix/profiles/per-user/${config.workspace.username}/channels
+    '';
+    deps = ["users"];
+  };
+
   nix = {
-    # (목적: 채널 관리 비활성화 → 레거시 채널 경로 warning 제거 + tmpfiles/activation 정리)
+    # (목적: 채널 관리 비활성화 → 레거시 채널 경로 warning 제거)
     channel.enable = false;
     # (목적: 일반 nix-shell 사용 시 <nixpkgs> 참조 보장 — 새 세션부터 NIX_PATH로 주입)
     # (nixup 스크립트 자체는 shebang의 -I 플래그로 세션 무관하게 직접 해결)
