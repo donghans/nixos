@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos null ({lib, ...}: {
+{mkMod, ...}:
+mkMod __curPos null ({lib, ...}: {
   hm = {
     programs.zsh = {
       enable = true; # (목적: 사용자별 .zshrc를 생성하여 초기 설치 메시지 차단)

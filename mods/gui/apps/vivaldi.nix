@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "Vivaldi Browser" ({
+{mkMod, ...}:
+mkMod __curPos "Vivaldi Browser" ({
   pkgs,
   unstable,
   ...

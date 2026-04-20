@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "CJK and Nerd Fonts" ({pkgs, ...}: {
+{mkMod, ...}:
+mkMod __curPos "CJK and Nerd Fonts" ({pkgs, ...}: {
   os = {
     fonts = {
       packages = with pkgs; [

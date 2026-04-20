@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "NFD macOS filename fix tools" ({pkgs, ...}: let
+{mkMod, ...}:
+mkMod __curPos "NFD macOS filename fix tools" ({pkgs, ...}: let
   nfd-fix = pkgs.writeShellScriptBin "nfd-fix" ''
     TARGET=''${1:-.}
     if [[ ! -d "$TARGET" ]]; then

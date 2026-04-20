@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos null ({
+{mkMod, ...}:
+mkMod __curPos null ({
   pkgs,
   config,
   lib,

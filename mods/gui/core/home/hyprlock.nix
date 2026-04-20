@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos null (_: {
+{mkMod, ...}:
+mkMod __curPos null (_: {
   hm = {
     programs.hyprlock.enable = true;
 

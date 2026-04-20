@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "Incus VM" ({
+{mkMod, ...}:
+mkMod __curPos "Incus VM" ({
   cfg,
   config,
   pkgs,

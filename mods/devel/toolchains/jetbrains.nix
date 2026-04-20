@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "JetBrains common configs" ({
+{mkMod, ...}:
+mkMod __curPos "JetBrains common configs" ({
   cfg,
   config,
   pkgs,

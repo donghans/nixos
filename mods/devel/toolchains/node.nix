@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "Node.js toolchain" ({
+{mkMod, ...}:
+mkMod __curPos "Node.js toolchain" ({
   cfg,
   config,
   pkgs,

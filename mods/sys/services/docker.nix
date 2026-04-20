@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "Docker Daemon and tools" ({
+{mkMod, ...}:
+mkMod __curPos "Docker Daemon and tools" ({
   cfg,
   config,
   ...

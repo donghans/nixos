@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "Bluetooth support" ({
+{mkMod, ...}:
+mkMod __curPos "Bluetooth support" ({
   cfg,
   config,
   lib,

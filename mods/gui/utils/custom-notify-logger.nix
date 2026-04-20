@@ -1,9 +1,9 @@
 {
-  mkModHere,
+  mkMod,
   lib,
   ...
 }: let
-  base = mkModHere __curPos "Custom Notification Logger" ({
+  base = mkMod __curPos "Custom Notification Logger" ({
     cfg,
     config,
     pkgs,
@@ -148,7 +148,7 @@
 in {
   inherit (base) imports;
 
-  # services.custom-notify-logger 옵션은 mods.* 경로 밖에 있어 mkModHere options 블록 사용 불가
+  # services.custom-notify-logger 옵션은 mods.* 경로 밖에 있어 mkMod options 블록 사용 불가
   options.services.custom-notify-logger = {
     enable = lib.mkOption {
       type = lib.types.bool;

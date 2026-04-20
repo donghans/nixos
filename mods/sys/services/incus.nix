@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "Incus hypervisor" ({
+{mkMod, ...}:
+mkMod __curPos "Incus hypervisor" ({
   cfg,
   config,
   ...

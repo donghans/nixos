@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "Incus win11 profile" ({
+{mkMod, ...}:
+mkMod __curPos "Incus win11 profile" ({
   cfg,
   config,
   pkgs,

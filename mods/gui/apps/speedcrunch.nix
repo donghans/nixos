@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "SpeedCrunch" ({pkgs, ...}: {
+{mkMod, ...}:
+mkMod __curPos "SpeedCrunch" ({pkgs, ...}: {
   hm = {
     home.packages = [pkgs.speedcrunch];
   };

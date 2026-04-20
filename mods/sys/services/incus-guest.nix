@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "Incus VM Guest (agent + SPICE vdagent + serial console)" (_: {
+{mkMod, ...}:
+mkMod __curPos "Incus VM Guest (agent + SPICE vdagent + serial console)" (_: {
   os = {
     # (목적: incus exec 동작에 필요한 게스트 에이전트)
     # incus-agent가 실행 중이어야 호스트에서 incus exec로 VM 셸 접근 가능.

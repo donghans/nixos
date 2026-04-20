@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos null ({config, ...}: {
+{mkMod, ...}:
+mkMod __curPos null ({config, ...}: {
   hm = {
     programs.fuzzel.enable = true;
 

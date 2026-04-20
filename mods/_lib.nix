@@ -10,13 +10,15 @@
   in
     "mods." + lib.replaceStrings ["/"] ["."] withoutNix;
 
-  # mkMod — NixOS + Home Manager 이중 컨텍스트 모듈 선언 헬퍼
+  # mkNamedMod — 경로 문자열을 명시적으로 지정하는 저수준 헬퍼
+  # 일반적으로는 mkMod(__curPos 자동 경로)를 사용할 것.
+  # default.nix 처럼 __curPos 경로가 올바르지 않은 경우에만 사용.
   #
   # 인자:
   #   path    — 옵션 경로 문자열 (예: "mods.gui.apps.vivaldi")
   #   desc    — mkEnableOption 설명. null이면 enable 옵션을 추가하지 않음.
   #   bodyFn  — { cfg, config, lib, pkgs, unstable, ... } 를 받아
-  #              { options?, os?, hm?, osImports?, hmImports?, imports? } 를 반환하는 함수
+  #              { options?, os?, hm? } 를 반환하는 함수
   #
   # 동작:
   #   - cfg         : path 기반으로 config에서 자동 해결 (desc=null이면 null)
@@ -28,17 +30,17 @@
   #     innerModule이 {imports=[]} 래퍼 안에 있어 _module.args 키가 args 키셋에 없음.
   #     대신 bodyFn 안에서 config._module.args.hyprTerm 으로 lazily 접근할 것.
   #   - sub-module imports가 필요하면 외부 모듈에서 직접 선언:
-  #     { imports = (mkModHere __curPos ...).imports ++ [./sub1.nix ...]; }
+  #     { imports = (mkMod __curPos ...).imports ++ [./sub1.nix ...]; }
   #
   # 사용 예:
-  #   mkMod "mods.gui.apps.vivaldi" "Vivaldi browser" ({ cfg, pkgs, ... }: {
+  #   mkMod __curPos "Vivaldi browser" ({ cfg, pkgs, ... }: {
   #     options = { package = lib.mkPackageOption pkgs "vivaldi" {}; };
   #     os = { environment.systemPackages = [ cfg.package ]; };
   #     hm = { home.packages = [ cfg.package ]; };
   #   })
   #
   #   # mkMerge가 필요한 경우 — _type 감지로 자동 통과
-  #   mkMod "mods.sys.services.foo" "Foo" ({ cfg, config, lib, ... }: {
+  #   mkMod __curPos "Foo" ({ cfg, config, lib, ... }: {
   #     os = lib.mkMerge [
   #       (lib.mkIf cfg.enable { services.foo.enable = true; })
   #       (lib.mkIf (cfg.enable && config.services.bar.enable) { ... })
@@ -46,11 +48,11 @@
   #   })
   #
   #   # enable 없는 항상-켜지는 모듈 (desc=null)
-  #   mkMod "mods.gui.core.fuzzel" null ({ pkgs, ... }: {
+  #   mkMod __curPos null ({ pkgs, ... }: {
   #     hm = { programs.fuzzel = { enable = true; }; };
   #   })
   #
-  mkMod = path: desc: bodyFn: let
+  mkNamedMod = path: desc: bodyFn: let
     innerModule = {
       config,
       lib,
@@ -94,16 +96,16 @@
     };
   in {imports = [innerModule];};
 
-  # mkModHere — __curPos를 받아 파일 위치에서 option path를 자동 유도하는 mkMod 래퍼
+  # mkMod — __curPos에서 파일 위치를 자동 유도하는 기본 헬퍼 (구 mkModHere)
   #
   # 사용 예:
-  #   { mkModHere, ... }:
-  #   mkModHere __curPos "Docker Daemon and tools" ({ cfg, config, ... }: {
+  #   { mkMod, ... }:
+  #   mkMod __curPos "Docker Daemon and tools" ({ cfg, config, ... }: {
   #     os = { virtualisation.docker.enable = true; };
   #   })
   #
   # __curPos는 호출 파일 안에서 평가되므로 해당 파일의 경로를 자동으로 가져온다.
-  mkModHere = pos: desc: bodyFn: mkMod (pathFromPos pos) desc bodyFn;
+  mkMod = pos: desc: bodyFn: mkNamedMod (pathFromPos pos) desc bodyFn;
 in {
   # 디렉터리 내 NixOS 모듈 파일 목록 반환
   # 제외: _ prefix (라이브러리/프라이빗), .home.nix suffix (조건부 로드 파일)
@@ -120,5 +122,5 @@ in {
   in
     map (n: dir + "/${n}") files;
 
-  inherit mkMod mkModHere;
+  inherit mkMod mkNamedMod;
 }

@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "Virtual File Systems (GVFS, Udisks2, trash-cli)" ({pkgs, ...}: {
+{mkMod, ...}:
+mkMod __curPos "Virtual File Systems (GVFS, Udisks2, trash-cli)" ({pkgs, ...}: {
   os = {
     services.gvfs.enable = true;
     services.udisks2.enable = true;

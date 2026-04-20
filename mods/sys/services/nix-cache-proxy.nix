@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "Nix binary cache proxy (caches cache.nixos.org)" ({
+{mkMod, ...}:
+mkMod __curPos "Nix binary cache proxy (caches cache.nixos.org)" ({
   cfg,
   config,
   lib,

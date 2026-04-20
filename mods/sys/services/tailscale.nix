@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "Tailscale Mesh VPN" ({
+{mkMod, ...}:
+mkMod __curPos "Tailscale Mesh VPN" ({
   cfg,
   config,
   pkgs,

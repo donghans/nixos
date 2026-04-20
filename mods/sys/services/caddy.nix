@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "Caddy Web Server with reverse proxy support" ({
+{mkMod, ...}:
+mkMod __curPos "Caddy Web Server with reverse proxy support" ({
   cfg,
   lib,
   ...

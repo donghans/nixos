@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "NetworkManager (nmcli + nm-applet)" ({
+{mkMod, ...}:
+mkMod __curPos "NetworkManager (nmcli + nm-applet)" ({
   cfg,
   config,
   pkgs,

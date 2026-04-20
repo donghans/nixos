@@ -34,13 +34,28 @@ setup_logging() {
     return 0
 }
 
-# 2. Acquire Lock
+# 2. Acquire Lock (PID 기반 스테일 감지 포함)
 acquire_lock() {
     exec 9> "$SESSION_LOCK"
     if ! flock -n 9; then
-        log_msg "Error" "another build process is already running." >&2
-        exit 1
+        local held_pid
+        held_pid=$(cat "$SESSION_LOCK" 2>/dev/null || echo "")
+        if [ -n "$held_pid" ] && ! kill -0 "$held_pid" 2>/dev/null; then
+            # PID가 죽어있으나 락이 유지 중 (자식 프로세스 fd 상속 케이스)
+            log_msg "Warn" "이전 프로세스(PID $held_pid)의 잔여 락을 정리합니다."
+            rm -f "$SESSION_LOCK"
+            exec 9> "$SESSION_LOCK"
+            flock -n 9 || {
+                log_msg "Error" "락 해제 실패. 수동 확인: lsof $SESSION_LOCK" >&2
+                exit 1
+            }
+        else
+            log_msg "Error" "이미 실행 중인 nixup이 있습니다 (PID: ${held_pid:-unknown})." >&2
+            log_msg "Error" "종료 후 재시도하거나, 프로세스가 없으면: rm $SESSION_LOCK" >&2
+            exit 1
+        fi
     fi
+    echo "$$" >&9
 }
 
 # 3. Update .env Utility (순수 bash — sed 구분자/정규식 문제 회피)

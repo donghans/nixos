@@ -1,5 +1,5 @@
-{mkModHere, ...}:
-mkModHere __curPos "Devbox global profile" ({
+{mkMod, ...}:
+mkMod __curPos "Devbox global profile" ({
   config,
   pkgs,
   ...

@@ -1,5 +1,5 @@
-{mkModHere, ...}: let
-  base = mkModHere __curPos null ({
+{mkMod, ...}: let
+  base = mkMod __curPos null ({
     config,
     lib,
     ...
