@@ -65,11 +65,13 @@
 ```text
 /
 ├── core/                    # Flake 진입점(flake.nix), 빌더(lib/), 엔진 스크립트(scripts/)
-│   ├── lib/                 # builders.nix, mods-lib.nix, workspace-options.nix, mk-wrapper.nix, mk-preset.nix
+│   ├── lib/                 # host.nix, mods.nix, workspace-options.nix, preset.nix
 │   ├── scripts/             # nixup 관리 CLI, nixstrap 설치 스크립트
-│   ├── iso.nix              # ISO 전용 NixOS 설정 (Firefox 네트워크 패치, 진단 도구 등)
-│   ├── iso.home.nix         # ISO 전용 Home Manager 설정 (spice-vdagent, 클립보드 브릿지 등)
-│   └── iso.nixstrap.nix     # ISO에 nixstrap 인스톨러 주입 로직
+│   ├── overlays/            # mkWrapper 오버레이 (wrapper.nix)
+│   ├── iso.nix              # ISO 전용 통합 설정 (nixstrap + incus-guest 인스톨러 주입)
+│   ├── iso.nixstrap.nix     # ISO nixstrap 인스톨러 주입 로직
+│   ├── iso.incus-guest.os.nix   # ISO Incus Guest NixOS 설정
+│   └── iso.incus-guest.hm.nix   # ISO Incus Guest Home Manager 설정
 ├── hosts/                   # 호스트별 설정 (평탄 구조)
 │   ├── _base.toml           # 전역 설정 원본 (username, git, system)
 │   ├── _preset.workstation.toml  # 워크스테이션 프리셋 mods 정의

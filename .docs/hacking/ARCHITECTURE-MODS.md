@@ -9,9 +9,9 @@
 
 ## 1. 모듈 자동 스캐닝 (`recursiveImportDir`)
 
-**핵심 파일**: `core/lib/mods-lib.nix`
+**핵심 파일**: `core/lib/mods.nix`
 
-`builders.nix`가 `recursiveImportDir ../../mods`를 호출하면, `mods/` 하위의 모든 `.nix` 파일을 재귀적으로 탐색합니다. **동일한 모듈 집합이 NixOS와 Home Manager 양쪽에 로드됩니다** (builders.nix에서 NixOS modules와 HM sharedModules에 각각 주입).
+`host.nix`가 `recursiveImportDir ../../mods`를 호출하면, `mods/` 하위의 모든 `.nix` 파일을 재귀적으로 탐색합니다. **동일한 모듈 집합이 NixOS와 Home Manager 양쪽에 로드됩니다** (host.nix에서 NixOS modules와 HM sharedModules에 각각 주입).
 
 ### 제외 규칙
 
@@ -19,7 +19,7 @@
 |------|------|
 | `_` prefix 디렉터리 | `_data/`(비-Nix 데이터), `_preset/`(제거됨) 등 모듈이 아닌 디렉터리 |
 | `_` prefix 파일 | `_template.nix` 등 내부 유틸 |
-| `*.home.nix` | 호스트별 조건부 로드 파일 — `builders.nix`에서 별도 처리 |
+| `*.home.nix` | 호스트별 조건부 로드 파일 — `host.nix`에서 별도 처리 |
 | `*.overlay.nix` | 오버레이 전용 — `flake.outputs.nix`가 별도로 수집하여 `customOverlays`에 등록 |
 | `default.nix` | Nix 모듈 시스템이 디렉터리 import 시 `default.nix`를 자동 로드하므로 중복 방지 |
 
@@ -182,7 +182,7 @@ hosts/_preset.workstation.toml         hosts/<hostname>.toml
 
 ### 주입 지점
 
-`builders.nix`에서:
+`host.nix`에서:
 
 | 컨텍스트 | 주입 값 | 적용 블록 |
 |----------|---------|-----------|

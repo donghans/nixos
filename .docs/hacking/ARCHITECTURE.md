@@ -70,11 +70,11 @@
 
 시스템 설정의 두뇌에 해당하며, Nix Flake의 강력한 기능을 활용해 복잡한 패키징과 모듈성을 구현합니다.
 
-- **Dynamic Generator (`core/lib/builders.nix`)**: JSON 데이터를 기반으로 `nixosConfigurations`와 `homeConfigurations`를 동적으로 생성해내는 **메타프로그래밍 구조**와 빌더 팩토리입니다. `recursiveImportDir`로 `mods/` 하위 `.nix` 파일을 자동 탐색하여 모듈로 로드합니다.
-- **Mods 헬퍼 라이브러리 (`core/lib/mods-lib.nix`)**: `mkMod`, `mkNamedMod`, `mkPartOf`, `mkModOf`, `recursiveImportDir` 헬퍼를 제공합니다. `_`로 시작하는 디렉터리/파일, `*.home.nix`, `*.overlay.nix`, `default.nix`를 자동 제외하고 나머지 `.nix`를 모두 모듈로 로드합니다.
+- **Dynamic Generator (`core/lib/host.nix`)**: JSON 데이터를 기반으로 `nixosConfigurations`와 `homeConfigurations`를 동적으로 생성해내는 **메타프로그래밍 구조**와 빌더 팩토리입니다. `recursiveImportDir`로 `mods/` 하위 `.nix` 파일을 자동 탐색하여 모듈로 로드합니다.
+- **Mods 헬퍼 라이브러리 (`core/lib/mods.nix`)**: `mkMod`, `mkNamedMod`, `mkPartOf`, `mkModOf`, `mkHostConfiguration`, `recursiveImportDir` 헬퍼를 제공합니다. `_`로 시작하는 디렉터리/파일, `*.home.nix`, `*.overlay.nix`, `default.nix`를 자동 제외하고 나머지 `.nix`를 모두 모듈로 로드합니다.
 - **옵션 선언부 (`core/lib/workspace-options.nix`)**: `config.workspace` 및 `config.mods`를 선언하여 전역 설정과 기능 모듈(Mods)의 통합 옵션을 제공합니다.
 - **Overlay System**:
-  - **`core/lib/mk-wrapper.nix`**: `mkWrapper` 헬퍼. 패키지에 런타임 환경 변수, 라이브러리 경로(`libs`), PATH 바이너리(`bins`), 환경변수(`env`), 실행 전 쉘 훅(`run`), 추가 인수(`addFlags`) 등을 조합하여 주입합니다.
+  - **`core/overlays/wrapper.nix`**: `mkWrapper` 헬퍼. 패키지에 런타임 환경 변수, 라이브러리 경로(`libs`), PATH 바이너리(`bins`), 환경변수(`env`), 실행 전 쉘 훅(`run`), 추가 인수(`addFlags`) 등을 조합하여 주입합니다.
   - **`mods/**/*.overlay.nix`** (자동 탐색): `flake.outputs.nix`가 `mods/` 하위에서 `*.overlay.nix` 파일을 재귀 탐색하여 `customOverlays`에 자동 추가합니다. nixpkgs 패키지를 overlay로 직접 패치할 때 사용하며, 관련 모듈 옆에 위치하여 locality를 유지합니다. 현재 `mods/devel/toolchains/`에 `jetbrains.overlay.nix`, `node.overlay.nix`, `fvm.overlay.nix` 3개가 등록되어 있습니다.
 
 ---
@@ -93,14 +93,14 @@
   - `mkPartOf "parent.path"`: 자체 enable 없이 부모에 완전히 귀속되는 서브 파트.
   - `mkModOf "parent.path" __curPos "설명"`: 부모가 활성화되면 기본 활성화되는 자식 모듈(역방향 cascade). enable 옵션 자동 생성.
 - **프리셋 시스템 (`hosts/_preset.*.toml`)**: `_preset.workstation.toml`(개발 환경), `_preset.server.toml`(서버 환경), `_preset.iso.toml`(설치 미디어) 등 용도별 프리셋이 정의되어 있습니다. flake.nix가 이를 읽어 호스트별 mods와 병합하여 적용합니다. `<hostname>.toml`에는 프리셋 기본값에서 변경할 항목만 기재합니다.
-- **Mods Coverage Check**: flake.nix가 호스트별로 `mk-preset.nix` 기반 coverageModule을 주입합니다. ISO(`custom-iso`, `custom-iso-aarch64`) 빌드도 포함하여 두 가지 검사를 수행합니다: ① 선언됐지만 preset에 없는 옵션 감지, ② 같은 그룹 내 옵션 중 일부만 명시 시 오류(형제 완전성 검사).
+- **Mods Coverage Check**: flake.nix가 호스트별로 `preset.nix` 기반 coverageModule을 주입합니다. ISO(`custom-iso`, `custom-iso-aarch64`) 빌드도 포함하여 두 가지 검사를 수행합니다: ① 선언됐지만 preset에 없는 옵션 감지, ② 같은 그룹 내 옵션 중 일부만 명시 시 오류(형제 완전성 검사).
 - **Shared Data (`mods/_data/`)**: `builtins.readFile`로 Nix 모듈에서 읽는 비-Nix 파일을 분리 관리합니다 — `zsh/` (셸 초기화 스크립트), `waybar/` (CSS), `incus/` (XML·PS1), `devbox/` (설정 템플릿) 등.
 
 ### 데이터 흐름
 
 ```
-.nix 파일 작성 → recursiveImportDir 자동 탐색 (core/lib/mods-lib.nix)
-  → NixOS + HM 양쪽에 주입 (builders.nix)
+.nix 파일 작성 → recursiveImportDir 자동 탐색 (core/lib/mods.nix)
+  → NixOS + HM 양쪽에 주입 (host.nix)
     → mkMod/mkModOf가 enable 옵션 자동 선언
       → preset TOML + host TOML이 enable 값 결정 (flake.outputs.nix)
         → isNixOS 플래그에 따라 os 또는 hm 블록만 적용 → autoWrap

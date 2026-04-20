@@ -48,8 +48,8 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 
 ### 모듈 · 검증
 
-3. **Mix-in**: `core/lib/mods-lib.nix`의 `recursiveImportDir`이 `mods/` 하위를 재귀 탐색하여 sys, gui, devel 세 도메인을 모두 로드합니다. 각 모듈은 `mkIf cfg.enable`로 enable된 항목만 실제 설정에 기여합니다.
-4. **Coverage Check**: flake.nix가 주입한 `coverageModule`(`mk-preset.nix` 기반)의 `assertions`가 평가됩니다. ① 선언됐지만 preset에 없는 누락 옵션, ② 같은 그룹 내 일부만 명시된 형제 완전성 위반 중 하나라도 감지되면 즉시 오류를 발생시킵니다.
+3. **Mix-in**: `core/lib/mods.nix`의 `recursiveImportDir`이 `mods/` 하위를 재귀 탐색하여 sys, gui, devel 세 도메인을 모두 로드합니다. 각 모듈은 `mkIf cfg.enable`로 enable된 항목만 실제 설정에 기여합니다.
+4. **Coverage Check**: flake.nix가 주입한 `coverageModule`(`preset.nix` 기반)의 `assertions`가 평가됩니다. ① 선언됐지만 preset에 없는 누락 옵션, ② 같은 그룹 내 일부만 명시된 형제 완전성 위반 중 하나라도 감지되면 즉시 오류를 발생시킵니다.
 
 ---
 

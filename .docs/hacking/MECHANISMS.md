@@ -54,7 +54,7 @@ Mods 프레임워크는 **파일 스캐닝 → 옵션 자동 생성 → 조건�
 위 섹션 4의 Mods 프레임워크 위에서 동작하는 검증 레이어입니다. 새 옵션이 추가될 때 프리셋 선언에서 누락되는 것을 빌드 타임에 감지합니다.
 
 - **문제**: `workspace-options.nix`에 새 `enable` 옵션을 추가하면서 프리셋 TOML에 해당 항목을 기재하지 않으면, 신규 기능이 의도치 않게 모든 호스트에서 비활성화 상태로 방치됩니다.
-- **해결**: `core/lib/mk-preset.nix`가 호스트별로 주입되어 두 목록을 대조합니다. 일반 호스트뿐 아니라 ISO 빌드(`custom-iso`, `custom-iso-aarch64`)도 coverageModule 대상에 포함됩니다.
+- **해결**: `core/lib/preset.nix`가 호스트별로 주입되어 두 목록을 대조합니다. 일반 호스트뿐 아니라 ISO 빌드(`custom-iso`, `custom-iso-aarch64`)도 coverageModule 대상에 포함됩니다.
   1. **presetCovered**: `presets.json`에서 읽은 preset mods의 `.enable` 경로 목록
   2. **declaredOptions**: `options.mods`를 재귀 탐색하여 찾은 선언된 `.enable` 옵션 목록
 - **효과**: 두 가지 검사를 수행하며, 하나라도 실패하면 빌드 타임 오류를 발생시킵니다.
@@ -67,8 +67,8 @@ Mods 프레임워크는 **파일 스캐닝 → 옵션 자동 생성 → 조건�
 ## 6. 오버레이 시스템 (Overlay System)
 복잡한 패키지 의존성 문제를 선언적으로 해결합니다.
 
-- **`mkWrapper` (`core/lib/mk-wrapper.nix`)**: 패키지의 소스 코드를 수정하지 않고도, 실행 파일에 필요한 환경 변수(`PATH`, `LD_LIBRARY_PATH` 등)를 주입하거나 래핑(Wrapping)할 수 있는 범용 헬퍼 함수입니다. `pkg`, `binName`을 기본으로 받으며 `libs`(LD_LIBRARY_PATH), `bins`(PATH), `env`(환경변수), `run`(실행 전 쉘 훅), `addFlags`(인수 추가)를 선택적으로 조합할 수 있습니다.
-- **`*.overlay.nix` 자동 탐색**: `mods/` 하위 어디든 `<name>.overlay.nix` 파일을 두면 `flake.outputs.nix`가 `lib.filesystem.listFilesRecursive`로 자동 탐색하여 `customOverlays`에 추가합니다. 특정 패키지를 nixpkgs overlay로 패치할 때 사용하며, 관련 모듈 옆에 위치하여 locality를 유지합니다. `core/lib/mods-lib.nix`의 `recursiveImportDir`은 이 파일을 home-manager 모듈로 로드하지 않도록 자동 제외합니다.
+- **`mkWrapper` (`core/overlays/wrapper.nix`)**: 패키지의 소스 코드를 수정하지 않고도, 실행 파일에 필요한 환경 변수(`PATH`, `LD_LIBRARY_PATH` 등)를 주입하거나 래핑(Wrapping)할 수 있는 범용 헬퍼 함수입니다. `pkg`, `binName`을 기본으로 받으며 `libs`(LD_LIBRARY_PATH), `bins`(PATH), `env`(환경변수), `run`(실행 전 쉘 훅), `addFlags`(인수 추가)를 선택적으로 조합할 수 있습니다.
+- **`*.overlay.nix` 자동 탐색**: `mods/` 하위 어디든 `<name>.overlay.nix` 파일을 두면 `flake.outputs.nix`가 `lib.filesystem.listFilesRecursive`로 자동 탐색하여 `customOverlays`에 추가합니다. 특정 패키지를 nixpkgs overlay로 패치할 때 사용하며, 관련 모듈 옆에 위치하여 locality를 유지합니다. `core/lib/mods.nix`의 `recursiveImportDir`은 이 파일을 home-manager 모듈로 로드하지 않도록 자동 제외합니다.
 
 **현재 등록된 overlay 목록** (`mods/devel/toolchains/`):
 
