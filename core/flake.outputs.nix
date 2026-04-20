@@ -174,6 +174,7 @@ in {
           extraSpecialArgs =
             {
               forOS = false;
+              isISO = false;
               inherit inputs;
               inherit (hostCtx) metaConfig unstable unstable-fallback;
             }
@@ -191,6 +192,7 @@ in {
           extraSpecialArgs =
             {
               forOS = false;
+              isISO = false;
               inherit inputs;
               metaConfig = hostCtx.metaConfig // {username = "root";};
               inherit (hostCtx) unstable unstable-fallback;
