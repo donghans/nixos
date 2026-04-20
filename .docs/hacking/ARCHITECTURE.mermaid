@@ -12,20 +12,20 @@ flowchart TB
         TOML → JSON 변환기"]
     end
 
-    subgraph L2["② Metadata Layer  ·  hosts/  ·  mods/_preset/"]
+    subgraph L2["② Metadata Layer  ·  hosts/"]
         direction LR
         toml["`**TOML 원본**
-        base.toml  ·  host.toml
-        _preset/workstation.toml  …`"]
+        _base.toml  ·  <hostname>.toml
+        _preset.*.toml`"]
         json["`**생성 JSON** (.build/)
         resolved.json  ·  presets.json`"]
         hostnix["`**호스트별 Nix**
-        configuration.nix  ·  home.nix`"]
+        <hostname>.nix (mkHostConfiguration)`"]
     end
 
     subgraph L3["③ Logic Core Layer  ·  core/flake.nix  ·  core/lib/"]
         direction LR
-        flake["`**flake.nix + builders.nix**
+        flake["`**flake.nix + builders.nix + mods-lib.nix**
         nixosConfigurations · homeConfigurations
         동적 생성 · Coverage Check 주입`"]
         overlay["`**Overlay System**
@@ -38,7 +38,7 @@ flowchart TB
         base · fonts · vfs
         services (12개)`"]
         gui["`**gui/**
-        core (Hyprland)
+        base (Hyprland)
         apps · utils`"]
         devel["`**devel/**
         base · toolchains

@@ -62,7 +62,7 @@ fvm = true
 
 ## 🛠️ 프로젝트 관리 (`nixup`)
 
-시스템이 설치된 후에는 프로젝트 경로와 상관없이 터미널 어디서든 `nixup` 명령어를 사용할 수 있습니다. 구체적인 명령어 사용법과 활용 사례는 [NIXUP.md](./.docs/readme/NIXUP.md) 가이드를 참조하세요.
+시스템이 설치된 후에는 프로젝트 경로와 상관없이 터미널 어디서든 `nixup` 명령어를 사용할 수 있습니다. 구체적인 명령어 사용법과 활용 사례는 [NIXUP.md](./.docs/manual/NIXUP.md) 가이드를 참조하세요.
 
 - **OS 설정 적용:** `nixup [os]`
 - **Home Manager 적용:** `nixup home`
@@ -71,6 +71,20 @@ fvm = true
 - **깨진 패키지 복구:** `nixup fix [pkg1] [pkg2] ...`
 - **무결성 및 스타일 점검:** `nixup check` (deadnix, 안티패턴 정리, 포맷팅, shellcheck, 빌드 검증)
 - **시스템 정리:** `nixup clean [--all] [--keep=N]`
+
+---
+
+## 📦 Mods 확장 (커스텀 기능 추가)
+
+이 프로젝트의 모든 기능은 `mods/` 디렉터리의 모듈(Mod)로 구성되어 있습니다. 새 기능을 추가하거나 기존 기능을 수정하려면 Mods 가이드를 참고하세요.
+
+- **API 레퍼런스**: `mkMod`, `mkModOf`, `mkPartOf` 헬퍼 사용법
+- **Cookbook**: 패키지 설치, NixOS+HM 동시 설정, 부모 도메인 cascade 등 7가지 실전 예시
+- **추가/삭제 절차**: 파일 생성 → 프리셋 등록 → `nixup check` 검증
+
+👉 [MODS.md](./.docs/manual/MODS.md)
+
+내부 작동 원리(모듈 스캐닝, enable 계층, Dual-Context 등)가 궁금하다면 [ARCHITECTURE-MODS.md](./.docs/hacking/ARCHITECTURE-MODS.md)를 참고하세요.
 
 ---
 

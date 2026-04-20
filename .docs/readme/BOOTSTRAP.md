@@ -165,6 +165,7 @@ nixup check                      # 포맷팅 + 린트 + eval 통합 검증
 
 설치가 완료되고 재부팅하면 `nixup` 명령어를 통해 시스템을 관리할 수 있습니다.
 
-- **시스템 관리 익히기**: [NIXUP.md](./NIXUP.md)
+- **시스템 관리 익히기**: [NIXUP.md](../manual/NIXUP.md)
 - **개발 환경 구성**: `host.toml`의 `[mods.devel]` 섹션에 도구를 활성화하고 `nixup home`
+- **Mods 확장 가이드**: [MODS.md](../manual/MODS.md)
 - **심화 구조 이해**: [HACKING.md](../hacking/_HACKING.md)

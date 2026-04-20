@@ -95,3 +95,20 @@
 - **프리셋 시스템 (`hosts/_preset.*.toml`)**: `_preset.workstation.toml`(개발 환경), `_preset.server.toml`(서버 환경), `_preset.iso.toml`(설치 미디어) 등 용도별 프리셋이 정의되어 있습니다. flake.nix가 이를 읽어 호스트별 mods와 병합하여 적용합니다. `<hostname>.toml`에는 프리셋 기본값에서 변경할 항목만 기재합니다.
 - **Mods Coverage Check**: flake.nix가 호스트별로 `mk-preset.nix` 기반 coverageModule을 주입합니다. ISO(`custom-iso`, `custom-iso-aarch64`) 빌드도 포함하여 두 가지 검사를 수행합니다: ① 선언됐지만 preset에 없는 옵션 감지, ② 같은 그룹 내 옵션 중 일부만 명시 시 오류(형제 완전성 검사).
 - **Shared Data (`mods/_data/`)**: `builtins.readFile`로 Nix 모듈에서 읽는 비-Nix 파일을 분리 관리합니다 — `zsh/` (셸 초기화 스크립트), `waybar/` (CSS), `incus/` (XML·PS1), `devbox/` (설정 템플릿) 등.
+
+### 데이터 흐름
+
+```
+.nix 파일 작성 → recursiveImportDir 자동 탐색 (core/lib/mods-lib.nix)
+  → NixOS + HM 양쪽에 주입 (builders.nix)
+    → mkMod/mkModOf가 enable 옵션 자동 선언
+      → preset TOML + host TOML이 enable 값 결정 (flake.outputs.nix)
+        → isNixOS 플래그에 따라 os 또는 hm 블록만 적용 → autoWrap
+```
+
+### Enable 결정 흐름 예시
+
+`_preset.workstation.toml`이 `gui = true` 선언 → `mkModOf` cascade로 `gui.apps.vivaldi.enable = mkDefault true` → `<hostname>.toml`에서 `vivaldi = false` 오버라이드 가능 → 최종: 비활성화
+
+> 내부 원리 상세: [ARCHITECTURE-MODS.md](./ARCHITECTURE-MODS.md) · [다이어그램](./ARCHITECTURE-MODS.mermaid)
+> 사용법 및 API: [MODS.md](../manual/MODS.md)

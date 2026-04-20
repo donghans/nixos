@@ -9,9 +9,10 @@
 👉 [**ARCHITECTURE.md 자세히 보기**](./ARCHITECTURE.md) · [📊 다이어그램](./ARCHITECTURE.mermaid)
 
 - **CLI Engine**: `nixup.sh`와 태스크 스크립트 구조 (Update, Fix, Check 등).
-- **Metadata**: JSON 기반의 데이터 중심 설계.
+- **Metadata**: TOML 기반의 데이터 중심 설계.
 - **Logic Core**: Flake 기반 동적 호스트 생성.
-- **Modules**: 공통 라이브러리 및 베이스 설정.
+- **Mods Layer**: 도메인별 기능 모듈 및 프레임워크.
+  - 📐 Mods 프레임워크 심층: [ARCHITECTURE-MODS.md](./ARCHITECTURE-MODS.md) · [📊 다이어그램](./ARCHITECTURE-MODS.mermaid)
 
 ---
 
@@ -39,17 +40,15 @@
 
 ---
 
-## 📦 3. Mods 등록 · 삭제 가이드
-새 기능 추가/삭제 절차와 Coverage Check 오류 대응입니다.
-👉 [**MODS.md 자세히 보기**](./MODS.md)
+## 📦 3. Mods 사용 가이드 & 내부 원리
 
-- **추가**: `.nix` 파일 생성 → `mkMod`/`mkModOf`/`mkPartOf` 패턴 선택 → 프리셋 TOML 등록 → `nixup check`
-- **삭제**: `.nix` 파일 삭제 → 프리셋 TOML에서 항목 제거 → `nixup check`
-- **Coverage Check 오류**: 오류 메시지가 누락 경로와 해결 방법을 안내합니다.
+- 📖 **사용법 · API · Cookbook**: [MODS.md](../manual/MODS.md) — Mod 추가/삭제 절차, API 레퍼런스, 7가지 실전 예시
+- 📐 **내부 원리**: [ARCHITECTURE-MODS.md](./ARCHITECTURE-MODS.md) — 모듈 스캐닝, enable 계층, Dual-Context 메커니즘
 
 ---
 
 ## 💡 4. 핵심 메커니즘 (Mechanisms)
+> 빌드 격리, 잠금 전략, 패키지 복구, Mods 프레임워크, Coverage Check, 오버레이
 이 프로젝트만의 독창적인 기술적 강점과 구현 원리입니다.
 👉 [**MECHANISMS.md 자세히 보기**](./MECHANISMS.md)
 

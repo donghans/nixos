@@ -41,8 +41,17 @@ Unstable 채널 사용자의 최대 고민인 '빌드 실패'를 자동화로 �
 
 ---
 
-## 4. Mods Coverage Check (프리셋 커버리지 검증)
-`workspace-options.nix`에 새 옵션이 추가될 때 프리셋 선언에서 누락되는 것을 빌드 타임에 감지합니다.
+## 4. Mods 프레임워크 (Module Loader & Enable Cascade)
+
+Mods 프레임워크는 **파일 스캐닝 → 옵션 자동 생성 → 조건부 적용**의 3단계 파이프라인으로, 모듈 파일만 작성하면 옵션 선언·활성화·분기가 모두 자동 처리됩니다.
+
+→ 상세: [ARCHITECTURE-MODS.md](./ARCHITECTURE-MODS.md) · [다이어그램](./ARCHITECTURE-MODS.mermaid)
+→ 사용법 및 API: [MODS.md](../manual/MODS.md)
+
+---
+
+## 5. Mods Coverage Check (프리셋 커버리지 검증)
+위 섹션 4의 Mods 프레임워크 위에서 동작하는 검증 레이어입니다. 새 옵션이 추가될 때 프리셋 선언에서 누락되는 것을 빌드 타임에 감지합니다.
 
 - **문제**: `workspace-options.nix`에 새 `enable` 옵션을 추가하면서 프리셋 TOML에 해당 항목을 기재하지 않으면, 신규 기능이 의도치 않게 모든 호스트에서 비활성화 상태로 방치됩니다.
 - **해결**: `core/lib/mk-preset.nix`가 호스트별로 주입되어 두 목록을 대조합니다. 일반 호스트뿐 아니라 ISO 빌드(`custom-iso`, `custom-iso-aarch64`)도 coverageModule 대상에 포함됩니다.
@@ -55,11 +64,11 @@ Unstable 채널 사용자의 최대 고민인 '빌드 실패'를 자동화로 �
 
 ---
 
-## 5. 오버레이 시스템 (Overlay System)
+## 6. 오버레이 시스템 (Overlay System)
 복잡한 패키지 의존성 문제를 선언적으로 해결합니다.
 
 - **`mkWrapper` (`core/lib/mk-wrapper.nix`)**: 패키지의 소스 코드를 수정하지 않고도, 실행 파일에 필요한 환경 변수(`PATH`, `LD_LIBRARY_PATH` 등)를 주입하거나 래핑(Wrapping)할 수 있는 범용 헬퍼 함수입니다. `pkg`, `binName`을 기본으로 받으며 `libs`(LD_LIBRARY_PATH), `bins`(PATH), `env`(환경변수), `run`(실행 전 쉘 훅), `addFlags`(인수 추가)를 선택적으로 조합할 수 있습니다.
-- **`*.overlay.nix` 자동 탐색**: `mods/` 하위 어디든 `<name>.overlay.nix` 파일을 두면 `flake.outputs.nix`가 `lib.filesystem.listFilesRecursive`로 자동 탐색하여 `customOverlays`에 추가합니다. 특정 패키지를 nixpkgs overlay로 패치할 때 사용하며, 관련 모듈 옆에 위치하여 locality를 유지합니다. `mods/_lib.nix`의 `importDir`은 이 파일을 home-manager 모듈로 로드하지 않도록 자동 제외합니다.
+- **`*.overlay.nix` 자동 탐색**: `mods/` 하위 어디든 `<name>.overlay.nix` 파일을 두면 `flake.outputs.nix`가 `lib.filesystem.listFilesRecursive`로 자동 탐색하여 `customOverlays`에 추가합니다. 특정 패키지를 nixpkgs overlay로 패치할 때 사용하며, 관련 모듈 옆에 위치하여 locality를 유지합니다. `core/lib/mods-lib.nix`의 `recursiveImportDir`은 이 파일을 home-manager 모듈로 로드하지 않도록 자동 제외합니다.
 
 **현재 등록된 overlay 목록** (`mods/devel/toolchains/`):
 
