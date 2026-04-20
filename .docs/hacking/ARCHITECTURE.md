@@ -18,7 +18,7 @@
   - **`nixup.lib-ui.sh`**: 색상 상수, `log_msg`/`log_exec` 헬퍼, 초기화 배너 출력.
   - **`nixup.lib-build.sh`**: `.build/` 격리 빌드 환경 구축 로직. 소스를 물리 복사하고 nix를 `path:` 모드로 호출하여 git 추적 없이 순수 평가를 수행합니다.
   - **`nixup.lib-lock.sh`**: 기기 특성(`isRolling`)에 따른 유연한 락 파일 관리 로직.
-  - **`nixup.resolve.py`**: TOML 소스(`base.toml`, `host.toml`, `_preset/*.toml`)를 읽어 Nix가 사용할 `resolved.json`과 `presets.json`을 생성하는 메타데이터 변환기.
+  - **`nixup.task-resolve.py`**: TOML 소스(`base.toml`, `host.toml`, `_preset/*.toml`)를 읽어 Nix가 사용할 `resolved.json`과 `presets.json`을 생성하는 메타데이터 변환기.
   - **`nixup.task-*.sh`**: 실제 비즈니스 로직(빌드, 업데이트, 복구 등)을 수행하는 모듈형 스크립트.
 - **`nixstrap.sh` (Bootstrap Engine)**:
   - nixup과 독립적인 설치 전용 서브시스템. `nixstrap` 명령으로 노출됩니다. Phase 1/2 흐름 제어 및 공유 상태 관리.
@@ -26,10 +26,12 @@
   - **Phase 2 (설치 실행)**: 파티셔닝(EFI+Btrfs) → 서브볼륨 생성 → 마운트 → 하드웨어 감지 → `nixos-install` → 후처리(저장소 이동·심볼릭 링크·비밀번호 적용) 순서 실행.
   - **Lib**:
     - `nixstrap.lib-ui.sh`: 색상 상수, 로깅 헬퍼, 화살표 키 선택 UI.
-    - `nixstrap.lib-input.sh`: Phase 1 대화형 입력 함수 (저장소·호스트·파티션·프리셋·비밀번호).
-    - `nixstrap.lib-install.sh`: Phase 2 설치 실행 함수.
-    - `nixstrap.repo.py`: TOML 파싱, 디스크 레이블 추출 등 레포지토리/설정 헬퍼 (6개 서브커맨드).
-    - `nixstrap.part.py`: 빈 공간 탐색, 파티션 범위 검증 등 디스크/파티션 헬퍼 (4개 서브커맨드).
+    - `nixstrap.lib-repo.py`: TOML 파싱, 디스크 레이블 추출 등 레포지토리/설정 헬퍼.
+    - `nixstrap.lib-part.py`: 빈 공간 탐색, 파티션 범위 검증 등 디스크/파티션 헬퍼.
+  - **Task**:
+    - `nixstrap.task-input.sh`: Phase 1 대화형 입력 함수 (저장소·호스트·프리셋·비밀번호·세션 관리).
+    - `nixstrap.task-disk.sh`: Phase 1 디스크·파티션 입력 함수 (`ask_partitions`).
+    - `nixstrap.task-install.sh`: Phase 2 설치 실행 함수.
 
 ---
 
@@ -39,12 +41,11 @@
 코드와 데이터를 분리하여, 사용자가 `nix` 언어를 깊게 알지 못해도 시스템 구성을 관리할 수 있게 합니다.
 
 - **TOML 설정 원본**: `base.toml`(전역: username, git, system, 파티션 경로 기본값), `host.toml`(호스트: type, preset, mods 오버라이드, 선택적 메모리/파티션 오버라이드), `_preset/*.toml`(프리셋 mods 정의 + explicitOptional)을 TOML로 선언합니다.
-- **Resolver (`nixup.resolve.py`)**: `nixup` 빌드 시 TOML 소스를 읽어 `presets.json`(프리셋 mods + explicitOptional)과 `resolved.json`(호스트별 merged 데이터)을 생성합니다. flake.nix는 이 JSON 파일을 읽어 빌드합니다.
+- **Resolver (`nixup.task-resolve.py`)**: `nixup` 빌드 시 TOML 소스를 읽어 `presets.json`(프리셋 mods + explicitOptional)과 `resolved.json`(호스트별 merged 데이터)을 생성합니다. flake.nix는 이 JSON 파일을 읽어 빌드합니다.
 - **직접 nix 실행 금지**: `flake.nix`는 `resolved.json`이 없으면 명시적 오류를 발생시킵니다. 항상 `nixup`을 통해 빌드하세요.
 - **호스트별 Nix 파일 (`hosts/<hostname>/`)**: TOML로 표현하기 어려운 하드웨어 고유 설정을 직접 작성하는 공간입니다.
   - `configuration.nix`: 커널 파라미터, 하드웨어 모듈 등 NixOS 시스템 레벨 설정.
   - `home.nix`: 해당 기기에서만 필요한 Home Manager 설정. 예: 디스플레이 배열(`monitor`), 터치패드/리드스위치 동작, 절전 타이머 등 하드웨어에 종속된 개인화 로직.
-  - `_hardware.nix`: `nixos-generate-config`로 생성되는 하드웨어 스캔 결과.
 
 **리졸브 우선순위** — 병합은 2단계로 진행됩니다.
 

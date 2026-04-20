@@ -30,7 +30,7 @@ nixos/
 │   └── _preset/        # 구성 레시피 (workstation.toml 등)
 ├── hosts/              # 호스트별 고유 설정
 │   ├── base.toml       # 전역 메타데이터 (username, git, system)
-│   └── <hostname>/     # host.toml, configuration.nix, home.nix, _hardware.nix
+│   └── <hostname>/     # host.toml, configuration.nix, home.nix
 └── .locks/             # Flake lock 파일 (Rolling/Stable 전략)
 ```
 

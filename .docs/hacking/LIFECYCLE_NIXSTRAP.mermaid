@@ -72,10 +72,10 @@ flowchart TD
             nixup.resolve.py → resolved.json / presets.json"]
             S9["extract_username
             base.toml → USERNAME"]
-            S10["generate_hw_config
-            nixos-generate-config → _hardware.nix"]
-            S11["prepare_build_dir
+            S10["prepare_build_dir
             /tmp/nixos-build 격리 환경 구성"]
+            S11["generate_hw_config
+            nixos-generate-config → hardware.nix (BUILD_DIR)"]
             S6 --> S7 --> S8 --> S9 --> S10 --> S11
         end
 

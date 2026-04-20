@@ -8,7 +8,7 @@ flowchart TB
         nixstrap["`**nixstrap.sh**
         Bootstrap Engine · 설치 전용
         Phase 1 입력 수집 / Phase 2 설치 실행`"]
-        resolve["nixup.resolve.py
+        resolve["nixup.task-resolve.py
         TOML → JSON 변환기"]
     end
 
@@ -20,8 +20,7 @@ flowchart TB
         json["`**생성 JSON** (.build/)
         resolved.json  ·  presets.json`"]
         hostnix["`**호스트별 Nix**
-        configuration.nix  ·  home.nix
-        _hardware.nix`"]
+        configuration.nix  ·  home.nix`"]
     end
 
     subgraph L3["③ Logic Core Layer  ·  core/flake.nix  ·  core/lib/"]

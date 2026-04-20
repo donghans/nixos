@@ -50,10 +50,10 @@
 |---|------|------|
 | 6 | `move_repo` | `REPO_TMP` → `/mnt/etc/nixos` 이동 |
 | 7 | `create_host_profile` | 신규 호스트: `host.toml` · nix 파일 생성 |
-| 8 | `resolve_metadata` | `nixup.resolve.py` 실행 → `resolved.json` / `presets.json` |
+| 8 | `resolve_metadata` | `nixup.task-resolve.py` 실행 → `resolved.json` / `presets.json` |
 | 9 | `extract_username` | `base.toml` → `USERNAME` 결정 |
-| 10 | `generate_hw_config` | `nixos-generate-config` → `_hardware.nix` 생성 |
-| 11 | `prepare_build_dir` | `/tmp/nixos-build` 격리 환경 구성 |
+| 10 | `prepare_build_dir` | `/tmp/nixos-build` 격리 환경 구성 |
+| 11 | `generate_hw_config` | `nixos-generate-config --show-hardware-config` → `hardware.nix` (BUILD_DIR에만 생성, 레포 미포함) |
 
 ### 설치 · 후처리 (12–14)
 

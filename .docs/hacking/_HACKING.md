@@ -34,7 +34,7 @@
 - **Phase 1 — 파티셔닝**: 기존 파티션 지정(mode 1) 또는 디스크·범위 선택 후 자동 생성(mode 2).
 - **Phase 1 — 검토 · 저장**: 설정 검토, params 저장, 비밀번호 입력(메모리에만 보관).
 - **Phase 2 — 디스크 준비**: cleanup → labels → 파티션 생성 → 포맷 → 마운트.
-- **Phase 2 — 설치 환경 구성**: 레포 이동, 호스트 프로파일, resolve, hw-config, build-dir.
+- **Phase 2 — 설치 환경 구성**: 레포 이동, 호스트 프로파일, resolve, build-dir, hw-config.
 - **Phase 2 — 설치 · 후처리**: nixos-install, post_process (chown · symlink · chpasswd).
 
 ---
@@ -57,7 +57,7 @@
 │   └── lib/          # builders.nix, workspace-options.nix, mk-wrapper.nix, mk-preset.nix
 ├── hosts/            # 호스트별 설정(폴더 단위), 하드웨어 프로필, 전역 메타데이터
 │   ├── base.toml     # 전역 설정 원본 (username, git, system)
-│   └── <hostname>/   # host.toml, configuration.nix, home.nix, _hardware.nix
+│   └── <hostname>/   # host.toml, configuration.nix, home.nix
 ├── mods/             # Mods 프레임워크 (4개 레이어)
 │   ├── sys/          # 시스템 기반 (base, fonts, vfs, services, utils)
 │   ├── gui/          # GUI 환경 (core 번들, apps, utils)
