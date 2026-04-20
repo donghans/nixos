@@ -37,10 +37,18 @@ def _update_field(toml_path, pattern, new_value):
         f.write(content)
 
 
+def _apply_if_changed(toml_path, label, pattern, old_val, new_val):
+    """new_val이 old_val과 다를 때만 _update_field 실행 후 [sync] 메시지 출력."""
+    if new_val and new_val != old_val:
+        _update_field(toml_path, pattern, new_val)
+        print(f"[sync] {label}: '{old_val}' → '{new_val}'")
+
+
 def _fetch_github_user(owner):
     """GitHub API로 사용자 정보 조회. 실패 시 None 반환.
     email이 비공개인 경우 {id}+{login}@users.noreply.github.com으로 구성."""
     import urllib.request
+    import urllib.error
     import json
     try:
         req = urllib.request.Request(
@@ -56,7 +64,7 @@ def _fetch_github_user(owner):
         if not email and uid:
             email = f"{uid}+{login}@users.noreply.github.com"
         return {"name": name, "email": email}
-    except Exception:
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError):
         return None
 
 
@@ -93,8 +101,7 @@ def cmd_sync_remote(args):
     if current == detected:
         return  # 이미 일치
 
-    cmd_update_repo([repo_path, detected])
-    print(f"[sync] git.nixosRepo: '{current}' → '{detected}'")
+    _apply_if_changed(base_path, "git.nixosRepo", r'(nixosRepo\s*=\s*")[^"]*(")', current, detected)
 
     # git.name / git.email — GitHub API로 자동 감지, 실패 시 대화형 폴백
     owner = detected.split("/")[0]
@@ -104,49 +111,31 @@ def cmd_sync_remote(args):
 
     gh = _fetch_github_user(owner)
     if gh:
-        if gh["name"] and gh["name"] != cur_name:
-            _update_field(base_path, r'(name\s*=\s*")[^"]*(")', gh["name"])
-            print(f"[sync] git.name: '{cur_name}' → '{gh['name']}'")
-        if gh["email"] and gh["email"] != cur_email:
-            _update_field(base_path, r'(email\s*=\s*")[^"]*(")', gh["email"])
-            print(f"[sync] git.email: '{cur_email}' → '{gh['email']}'")
+        _apply_if_changed(base_path, "git.name",  r'(name\s*=\s*")[^"]*(")',  cur_name,  gh["name"])
+        _apply_if_changed(base_path, "git.email", r'(email\s*=\s*")[^"]*(")', cur_email, gh["email"])
     else:
         print(f"[sync] GitHub API unavailable. Check: https://github.com/{owner}")
         try:
-            new_name = input(f"[sync] git.name [{cur_name}]: ").strip()
-            if new_name and new_name != cur_name:
-                _update_field(base_path, r'(name\s*=\s*")[^"]*(")', new_name)
-                print(f"[sync] git.name: '{cur_name}' → '{new_name}'")
+            new_name  = input(f"[sync] git.name [{cur_name}]: ").strip()
             new_email = input(f"[sync] git.email [{cur_email}]: ").strip()
-            if new_email and new_email != cur_email:
-                _update_field(base_path, r'(email\s*=\s*")[^"]*(")', new_email)
-                print(f"[sync] git.email: '{cur_email}' → '{new_email}'")
         except EOFError:
-            pass  # 비대화형 환경 — skip
+            return  # 비대화형 환경 — skip
+        _apply_if_changed(base_path, "git.name",  r'(name\s*=\s*")[^"]*(")',  cur_name,  new_name)
+        _apply_if_changed(base_path, "git.email", r'(email\s*=\s*")[^"]*(")', cur_email, new_email)
 
     # username — 항상 대화형 (시스템 사용자명, GitHub에서 자동 감지 불가)
     cur_username = base.get("username", "")
     try:
         new_username = input(f"[sync] username [{cur_username}]: ").strip()
-        if new_username and new_username != cur_username:
-            _update_field(base_path, r'(username\s*=\s*")[^"]*(")', new_username)
-            print(f"[sync] username: '{cur_username}' → '{new_username}'")
     except EOFError:
-        pass  # 비대화형 환경 — skip
+        return  # 비대화형 환경 — skip
+    _apply_if_changed(base_path, "username", r'(username\s*=\s*")[^"]*(")', cur_username, new_username)
 
 
 def cmd_update_repo(args):
     repo_tmp, new_repo = args[0], args[1]
     toml_path = os.path.join(repo_tmp, "hosts", "_base.toml")
-    with open(toml_path, "r") as f:
-        content = f.read()
-    content = re.sub(
-        r'(nixosRepo\s*=\s*")[^"]*(")',
-        f'\\g<1>{new_repo}\\g<2>',
-        content,
-    )
-    with open(toml_path, "w") as f:
-        f.write(content)
+    _update_field(toml_path, r'(nixosRepo\s*=\s*")[^"]*(")', new_repo)
 
 
 def cmd_username(args):
