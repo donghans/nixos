@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+    <settings pass="windowsPE">
+        <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+            <RunSynchronous>
+                <!-- 드라이브 문자가 고정되지 않으므로 C~H 순으로 vioscsi.inf를 탐색해 로드 -->
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <Path>cmd /c (for %d in (C D E F G H) do if exist %d:\vioscsi\w11\amd64\vioscsi.inf drvload %d:\vioscsi\w11\amd64\vioscsi.inf) &amp; exit 0</Path>
+                    <WillReboot>Never</WillReboot>
+                </RunSynchronousCommand>
+            </RunSynchronous>
+            <UserData><AcceptEula>true</AcceptEula></UserData>
+        </component>
+    </settings>
+    <settings pass="offlineServicing">
+        <component name="Microsoft-Windows-PnpCustomizationsNonWinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+            <DriverPaths>
+                <!-- offlineServicing는 파일 복사 후·첫 부팅 전에 실행 → PE에서 접근 가능한 경로로 vioscsi를 이미지에 영구 주입 -->
+                <PathAndCredentials wcm:action="add" wcm:keyValue="1"><Path>D:\vioscsi\w11\amd64</Path></PathAndCredentials>
+                <PathAndCredentials wcm:action="add" wcm:keyValue="2"><Path>E:\vioscsi\w11\amd64</Path></PathAndCredentials>
+                <PathAndCredentials wcm:action="add" wcm:keyValue="3"><Path>F:\vioscsi\w11\amd64</Path></PathAndCredentials>
+            </DriverPaths>
+        </component>
+    </settings>
+    <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <OOBE>
+                <HideEULAPage>true</HideEULAPage>
+                <HideLocalAccountScreen>true</HideLocalAccountScreen>
+                <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+                <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+                <NetworkLocation>Work</NetworkLocation>
+                <ProtectYourPC>3</ProtectYourPC>
+            </OOBE>
+            <UserAccounts>
+                <LocalAccounts>
+                    <LocalAccount wcm:action="add">
+                        <Password><Value></Value><PlainText>true</PlainText></Password>
+                        <DisplayName>PC</DisplayName>
+                        <Group>Administrators</Group>
+                        <Name>PC</Name>
+                    </LocalAccount>
+                </LocalAccounts>
+            </UserAccounts>
+            <AutoLogon>
+                <Password><Value></Value><PlainText>true</PlainText></Password>
+                <Enabled>true</Enabled>
+                <Username>PC</Username>
+            </AutoLogon>
+            <FirstLogonCommands>
+                <!-- 1. debloat.ps1을 C:\로 복사 (USB 드라이브 문자가 유동적이므로 탐색) -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <CommandLine>cmd /c for %d in (D E F G H) do if exist %d:\debloat.ps1 copy /Y %d:\debloat.ps1 C:\debloat.ps1</CommandLine>
+                    <RequiresUserInput>false</RequiresUserInput>
+                </SynchronousCommand>
+                <!-- 2. virtio-win guest tools 설치 (QXL 디스플레이, SPICE 에이전트, netkvm 네트워크) -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>2</Order>
+                    <CommandLine>cmd /c for %d in (D E F G H) do if exist %d:\virtio-win-guest-tools.exe %d:\virtio-win-guest-tools.exe /S /norestart</CommandLine>
+                    <RequiresUserInput>false</RequiresUserInput>
+                </SynchronousCommand>
+                <!-- 3. 디블로팅: 불필요 앱 제거, 서비스 비활성화, 절전 끄기 -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>3</Order>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -NonInteractive -File C:\debloat.ps1</CommandLine>
+                    <RequiresUserInput>false</RequiresUserInput>
+                </SynchronousCommand>
+            </FirstLogonCommands>
+        </component>
+    </settings>
+</unattend>

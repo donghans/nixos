@@ -1,0 +1,112 @@
+/* 전체 폰트 및 최소 높이 초기화 */
+* {
+  font-size: 13px;
+  min-height: 0;
+}
+
+/* Waybar 전체 배경 */
+window#waybar {
+  background-color: rgba(0, 0, 0, 0.75);
+  border-bottom: none;
+}
+
+/* 워크스페이스 버튼 공통 */
+#workspaces button {
+  padding: 0 4px;
+  margin: 0;
+  background: transparent;
+  color: #ffffff;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  transition: all 0.1s ease;
+}
+
+/* 워크스페이스 버튼 — Hover */
+#workspaces button:hover {
+  background-color: rgba(51, 204, 255, 1);
+  color: #000000;
+}
+
+/* 워크스페이스 버튼 — Active (하단 선으로 표시) */
+#workspaces button.active {
+  color: #33ccff;
+  background-color: transparent;
+  box-shadow: inset 0 -3px 0 #33ccff;
+}
+
+/* 워크스페이스 버튼 — Active Hover */
+#workspaces button.active:hover {
+  background-color: rgba(51, 204, 255, 1);
+  color: #000000;
+}
+
+/* 워크스페이스 버튼 — 창 있음 (점유 중) */
+#workspaces button.occupied {
+  color: #bbbbbb;
+}
+
+/* 워크스페이스 버튼 — Urgent */
+#workspaces button.urgent {
+  background-color: #ebcb8b;
+  color: #2e3440;
+}
+
+/* 활성 창 제목 */
+#window {
+  padding: 0 8px;
+  color: #ffffff;
+}
+
+/* 서브맵 — 활성 시 강조 */
+#submap {
+  padding: 0 6px;
+  color: #33ccff;
+}
+
+/* 트레이 */
+#tray {
+  padding: 0 6px;
+}
+
+/* 트레이 — 비활성 아이콘 반투명 */
+#tray > .passive {
+  -gtk-icon-effect: dim;
+}
+
+/* 트레이 — 알림 필요 아이콘 강조 */
+#tray > .needs-attention {
+  -gtk-icon-effect: highlight;
+  background-color: #ebcb8b;
+}
+
+/* 배터리 기본 */
+#battery {
+  padding: 0 1px;
+  margin: 0 3px;
+}
+
+/* 배터리 — 충전 중 (활성 워크스페이스와 동일한 밑줄 스타일) */
+#battery.charging,
+#battery.plugged {
+  color: #33ccff;
+  box-shadow: inset 0 -3px 0 #33ccff;
+}
+
+/* 배터리 — 경고 (30% 미만) */
+#battery.warning:not(.charging) {
+  color: #ebcb8b;
+  box-shadow: inset 0 -3px 0 #ebcb8b;
+}
+
+/* 배터리 — 심각 (15% 미만) */
+#battery.critical:not(.charging) {
+  color: #f38ba8;
+  box-shadow: inset 0 -3px 0 #f38ba8;
+}
+
+/* 시계 */
+#clock {
+  padding: 0 6px;
+  margin-left: 2px;
+}
