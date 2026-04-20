@@ -211,6 +211,9 @@ _post_process() {
         printf "%s:%s\n" "$USERNAME" "$_USER_PASSWORD" | nixos-enter --root /mnt -- chpasswd
         _USER_PASSWORD=""
     fi
+    # home-manager 첫 실행 마커 — 첫 로그인 시 경고 표시용
+    touch "/mnt/home/$USERNAME/.nixstrap-first-run"
+    nixos-enter --root /mnt --command "chown $USERNAME:users /home/$USERNAME/.nixstrap-first-run"
 }
 
 phase2_execute() {
@@ -230,5 +233,5 @@ phase2_execute() {
     _post_process         # 14. mv, chown, symlink
 
     echo ""
-    log_msg "Success" "installation complete. please reboot your system."
+    log_msg "Success" "installation complete. reboot → TTY login → 'nixup home' → re-login."
 }

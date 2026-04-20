@@ -2,7 +2,7 @@
   inputs,
   customOverlays,
 }: let
-  inherit (inputs) nixpkgs nixpkgs-unstable home-manager;
+  inherit (inputs) nixpkgs nixpkgs-unstable;
 
   # core/lib/mods.nix의 모듈 헬퍼 번들 — specialArgs로 전 모듈에 주입
   modsLib = import ./mods.nix {inherit (nixpkgs) lib;};
@@ -172,34 +172,7 @@
             ];
           }
         ]
-        ++ extraModules
-        ++ [
-          home-manager.nixosModules.home-manager
-          {
-            home-manager.sharedModules =
-              [./workspace-options.nix]
-              ++ recursiveImportDir ../../mods
-              ++ [{workspace = hostCtx.metaConfig;}]
-              ++ extraModules;
-            home-manager.useGlobalPkgs = true;
-            home-manager.useUserPackages = true;
-
-            # (목적: 기존 설정과 충돌 시 파일 백업 생성)
-            home-manager.backupFileExtension = "backup";
-            home-manager.users.${hostCtx.homeUser} = import hostCtx.homeConfig;
-            home-manager.users.root = import ../../mods/sys/base/core.nix;
-            home-manager.extraSpecialArgs =
-              {
-                forOS = false;
-                inherit isISO;
-                inherit inputs;
-                inherit (hostCtx) metaConfig;
-                inherit (hostCtx) unstable;
-                inherit (hostCtx) unstable-fallback;
-              }
-              // modArgs;
-          }
-        ];
+        ++ extraModules;
     };
 in {
   inherit mkHostContext mkHost recursiveImportDir;

@@ -139,6 +139,8 @@ run_build_task() {
         pre_home_store=$(readlink -f "$HOME/.local/state/nix/profiles/home-manager" 2>/dev/null || true)
         _nix_build "$attr"
         _activate_home "$NIX_BUILD_RESULT" "$ACTION"
+        # nixstrap 첫 부팅 마커 제거 (switch 시에만)
+        [[ "$ACTION" == "switch" ]] && rm -f "$HOME/.nixstrap-first-run" 2>/dev/null || true
         if [ "$NIX_BUILD_RESULT" = "$pre_home_store" ]; then
             log_msg "Notice" "no package changes (home)"
         else

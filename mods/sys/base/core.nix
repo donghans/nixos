@@ -18,6 +18,15 @@ mkPartOf "mods.sys.base" ({
     users.defaultUserShell = pkgs.zsh;
     programs.zsh.enable = true;
 
+    # (목적: nixstrap 최초 설치 후 home-manager 미적용 시 경고 — 'nixup home' 실행 유도)
+    # (제거: nixup home 성공 시 ~/.nixstrap-first-run 파일 삭제로 자동 비활성화)
+    programs.zsh.interactiveShellInit = ''
+      if [[ -f "$HOME/.nixstrap-first-run" ]]; then
+        printf '\n\033[1;33m[nixstrap]\033[0m home-manager가 아직 적용되지 않았습니다.\n'
+        printf '          TTY에서 \033[1;32mnixup home\033[0m 을 실행하고 재로그인하세요.\n\n'
+      fi
+    '';
+
     # (목적: nix.channel.enable = false 이후 남은 레거시 채널 디렉터리 정리)
     # (이유: channel.enable = false가 새 경로 생성은 막지만 기존 디렉터리는 제거하지 않음)
     system.activationScripts.removeOldChannels = {
