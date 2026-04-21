@@ -1,33 +1,19 @@
 #!/usr/bin/env nix-shell
 #!nix-shell -i bash -I nixpkgs=flake:nixpkgs -p jq python3 git openssh
-# shellcheck disable=SC1008,SC1091,SC2034
+# shellcheck disable=SC1008,SC1091,SC2034,SC2154
 set -euo pipefail
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 NIXOS_PATH=$(readlink -f "$SCRIPT_DIR/../..")
 
 source "$SCRIPT_DIR/nixup.lib-ui.sh"
-
-# RNIXSTRAP prefix 오버라이드
-log_msg() {
-    local category=$1 msg=$2 cat_color=$NC
-    case "$category" in
-        Init|Prep|Input|Review) cat_color=$CYAN ;;
-        Task)                   cat_color=$PURPLE ;;
-        Done|Success)           cat_color=$GREEN ;;
-        Error)                  cat_color=$RED ;;
-        Notice|Warn)            cat_color=$YELLOW ;;
-    esac
-    printf "${CYAN}RNIXSTRAP${NC} ${cat_color}%-9s${NC} | %s\n" "$category" "$msg"
-}
-log_exec() {
-    printf "${CYAN}RNIXSTRAP${NC} ${BLUE}Exec %-4s${NC} %s %s\n" "$1" "$2" "$3"
-}
+_LOG_PREFIX="RNIXSTRAP"
+_LOG_CAT[Review]="$CYAN"
 
 # ── 도움말 ────────────────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
     printf "\n"
-    printf "${CYAN}RNIXSTRAP${NC} ${CYAN}%-9s${NC} | 원격 NixOS 호스트 초기 설치 도구\n" "Help"
+    printf "${_LOG_PREFIX_COLOR}${_LOG_PREFIX}${NC} ${CYAN}%-9s${NC} | 원격 NixOS 호스트 초기 설치 도구\n" "Help"
     printf "\n"
     printf "  Usage:\n"
     printf "    rnixstrap     — 대화형으로 새 호스트 추가 또는 기존 호스트 재설치\n"
@@ -61,16 +47,18 @@ mkdir -p "$JSON_DIR"
 # ── 공유 상태 (Phase 1 → Phase 2 전달) ───────────────────────────────────────
 _HOST_IS_NEW=true       # false = 기존 호스트 재설치
 _HOSTNAME=""
-_PROVIDER=""
-_PROVIDER_IDX=0
 _IP=""
 _SSH_KEY=""
 _SYSTEM="x86_64-linux"
-_BOOT_TARGET=""
+_BOOT_LOADER=""
 _DISK_DEVICE=""
+_REMOTE_RAM_MB=-1   # 원격 RAM(MB), -1=감지 전/실패
 _SERVICES=()
+_SSH_USER="root"        # nixos-anywhere bootstrap 접속 유저
 _TOML_IP=""             # 기존 호스트 TOML에서 로드
 _TOML_SSH_KEY=""        # 기존 호스트 TOML에서 로드
+_TOML_BOOT_LOADER=""    # 기존 호스트 TOML에서 로드
+_TOML_DISK_DEVICE=""    # 기존 호스트 TOML에서 로드
 
 # ── lib 로드 ──────────────────────────────────────────────────────────────────
 source "$SCRIPT_DIR/nixup.lib-build.sh"
@@ -95,16 +83,14 @@ printf "\n"
 select_or_create_hostname
 
 if [ "$_HOST_IS_NEW" = true ]; then
-    ask_provider
+    ask_ssh_user
     ask_ip
     ask_ssh_key
     ask_system
-    infer_boot_target
-    infer_disk_device
     ask_services
 else
-    ask_ip       # 기존 IP를 기본값으로, 변경 가능
-    ask_ssh_key  # 기존 키를 기본값으로, 변경 가능
+    ask_ip        # 기존 IP를 기본값으로, 변경 가능
+    ask_ssh_key   # 기존 키를 기본값으로, 변경 가능
 fi
 
 run_setup

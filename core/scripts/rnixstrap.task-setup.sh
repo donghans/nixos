@@ -3,12 +3,24 @@
 # (공개키 추출 → TOML/nix 생성 → resolve → build → nixos-anywhere → deploy-rs)
 #
 # 변수 의존:
-#   _HOSTNAME, _IP, _SSH_KEY, _SYSTEM, _BOOT_TARGET, _DISK_DEVICE, _SERVICES[]
+#   _HOSTNAME, _IP, _SSH_KEY, _SYSTEM, _BOOT_LOADER, _DISK_DEVICE, _SERVICES[]
 #   _HOST_IS_NEW, _TOML_IP, _TOML_SSH_KEY
 #   NIXOS_PATH, BUILD_DIR, JSON_DIR, SCRIPT_DIR, ENV_FILE
 #
 # 출력 변수:
-#   _PUB_KEY — ssh-keygen -y로 추출한 공개키 (host.nix에 인라인 embed)
+#   _PUB_KEY — ssh-keygen -y로 추출한 공개키 (hosts/pubs/<hostname>.pub 저장)
+
+# ── 공통 SSH 옵션 ─────────────────────────────────────────────────────────────
+# UserKnownHostsFile=/dev/null : "Permanently added" 메시지 억제
+# LogLevel=ERROR               : post-quantum 경고 등 노이즈 억제
+_SSH_OPTS=(
+    -o StrictHostKeyChecking=no
+    -o BatchMode=yes
+    -o UserKnownHostsFile=/dev/null
+    -o LogLevel=ERROR
+)
+# nixos-anywhere 내부 SSH 호출에도 동일 옵션 전달
+export NIX_SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 
 # ── 1. 공개키 추출 → _PUB_KEY 변수에 저장 ────────────────────────────────────
 extract_pub_key() {
@@ -20,6 +32,14 @@ extract_pub_key() {
     fi
     _PUB_KEY="$_PUB_KEY $_HOSTNAME"
     log_msg "Done" "공개키 추출 완료"
+}
+
+# ── 1.5. 공개키 파일 저장 → hosts/pubs/<hostname>.pub ─────────────────────────
+write_pub_key_file() {
+    local pubs_dir="$NIXOS_PATH/hosts/pubs"
+    mkdir -p "$pubs_dir"
+    printf '%s\n' "$_PUB_KEY" > "$pubs_dir/${_HOSTNAME}.pub"
+    log_msg "Done" "공개키 저장: hosts/pubs/${_HOSTNAME}.pub"
 }
 
 # ── 2. TOML 생성 ─────────────────────────────────────────────────────────────
@@ -40,9 +60,9 @@ generate_toml() {
         printf 'tmpfsSize  = "0"\n'
         printf 'diskDevice = "%s"\n' "$_DISK_DEVICE"
         printf 'bootDevice = "%s"\n' "$_DISK_DEVICE"
+        printf 'bootLoader = "%s"\n' "$_BOOT_LOADER"
         printf '\n'
         printf '[deploy]\n'
-        printf 'destination = "%s"\n' "$_BOOT_TARGET"
         printf 'ip          = "%s"\n' "$_IP"
         printf 'sshKey      = "%s"\n' "$_SSH_KEY"
         printf '\n'
@@ -61,8 +81,9 @@ generate_toml() {
 # ── 3. NixHostConfiguration 스텁 생성 ────────────────────────────────────────
 generate_nix_stub() {
     local nix_path="$NIXOS_PATH/hosts/${_HOSTNAME}.nix"
+    # 이미 존재하면 덮어쓰지 않음 (재설치 시 사용자 편집 내용 보존)
+    [ -f "$nix_path" ] && return
 
-    # 선택된 서비스에 따라 추가 설정 결정
     local has_caddy=false
     for sel in "${_SERVICES[@]+"${_SERVICES[@]}"}"; do
         [ "$sel" = "caddy" ] && has_caddy=true
@@ -70,23 +91,20 @@ generate_nix_stub() {
 
     {
         printf '# %s 호스트 설정 (rnixstrap으로 생성)\n' "$_HOSTNAME"
-        printf '# 배포 전 플레이스홀더를 실제 값으로 교체하세요.\n'
+        printf '# SSH 공개키는 hosts/pubs/%s.pub 에서 자동 로드됩니다.\n' "$_HOSTNAME"
         printf '{mkHostConfiguration, ...}:\n'
         printf 'mkHostConfiguration (_: {\n'
         printf '  os = {\n'
-        printf '    # == SSH 공개키 (nixos-anywhere 후 authorized_keys 재주입) ==\n'
-        printf '    users.users.root.openssh.authorizedKeys.keys = [\n'
-        printf '      "%s"\n' "$_PUB_KEY"
-        printf '    ];\n'
 
         if [ "$has_caddy" = true ]; then
-            printf '\n'
             printf '    # == Caddy reverse proxy ==\n'
             printf '    services.caddy.extraConfig = '"''"'\n'
             printf '      YOUR_DOMAIN {\n'
             printf '        reverse_proxy * localhost:8080\n'
             printf '      }\n'
             printf '    '"'''"';\n'
+        else
+            printf '    # 서비스 설정을 여기에 추가하세요.\n'
         fi
 
         printf '  };\n'
@@ -98,10 +116,10 @@ generate_nix_stub() {
 # ── 3.5. TOML의 ip/sshKey 업데이트 (기존 호스트, 값 변경 시만) ───────────────
 _update_toml_if_changed() {
     [ "$_IP" = "$_TOML_IP" ] && [ "$_SSH_KEY" = "$_TOML_SSH_KEY" ] && return
-    log_msg "Prep" "TOML 업데이트 중 (ip/sshKey 변경됨)..."
+    log_msg "Prep" "TOML 업데이트 중..."
     python3 - "$NIXOS_PATH/hosts/${_HOSTNAME}.toml" "$_IP" "$_SSH_KEY" <<'EOF'
 import sys, re
-path, new_ip, new_key = sys.argv[1], sys.argv[2], sys.argv[3]
+path, new_ip, new_key = sys.argv[1:]
 with open(path) as f:
     text = f.read()
 text = re.sub(r'(ip\s*=\s*)"[^"]*"', f'\\1"{new_ip}"', text)
@@ -109,7 +127,7 @@ text = re.sub(r'(sshKey\s*=\s*)"[^"]*"', f'\\1"{new_key}"', text)
 with open(path, "w") as f:
     f.write(text)
 EOF
-    log_msg "Done" "TOML 업데이트 완료 (ip/sshKey)"
+    log_msg "Done" "TOML 업데이트 완료"
 }
 
 # ── 4. resolved.json + BUILD_DIR 동기화 ───────────────────────────────────────
@@ -122,15 +140,66 @@ run_resolve_and_prepare() {
     log_msg "Done" "빌드 환경 준비 완료"
 }
 
-# ── 5. SSH 연결 프로브 ────────────────────────────────────────────────────────
+# ── 5. RAM 사전 감지 (review 출력 전 호출, 실패 시 _REMOTE_RAM_MB=-1 유지) ──────
+_probe_ram() {
+    local out
+    out=$(ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" -o ConnectTimeout=8 \
+        "${_SSH_USER}@${_IP}" \
+        "awk '/MemTotal/{print int(\$2/1024)}' /proc/meminfo" \
+        2>/dev/null) || true
+    [[ "$out" =~ ^[0-9]+$ ]] && _REMOTE_RAM_MB="$out"
+}
+
+# ── 5.5. SSH 연결 프로브 + 디스크·부트 자동 감지 ─────────────────────────────
+probe_disk_and_boot() {
+    log_msg "Prep" "원격 디스크·부트 타입 감지 중..."
+    local remote_out
+    remote_out=$(ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" -o ConnectTimeout=10 \
+        "${_SSH_USER}@${_IP}" \
+        'test -d /sys/firmware/efi && echo uefi || echo bios; lsblk -dn -o NAME,TYPE 2>/dev/null | awk '"'"'$2=="disk"{print "/dev/"$1; exit}'"'"'' \
+        2>/dev/null) || true
+
+    if [ -z "$remote_out" ]; then
+        log_msg "Warn" "원격 감지 실패 — 기존 값 유지 (disk=$_DISK_DEVICE, boot=$_BOOT_LOADER)"
+        return
+    fi
+
+    local boot_raw disk_raw
+    boot_raw=$(printf '%s' "$remote_out" | sed -n '1p')
+    disk_raw=$(printf '%s' "$remote_out" | sed -n '2p')
+
+    case "$boot_raw" in
+        uefi) _BOOT_LOADER="grub-uefi" ;;
+        bios) _BOOT_LOADER="grub-bios" ;;
+    esac
+    [ -n "$disk_raw" ] && _DISK_DEVICE="$disk_raw"
+
+    log_msg "Done" "감지: diskDevice=$_DISK_DEVICE  bootLoader=$_BOOT_LOADER"
+}
+
+_update_toml_disk_boot_if_changed() {
+    [ "$_DISK_DEVICE" = "$_TOML_DISK_DEVICE" ] && [ "$_BOOT_LOADER" = "$_TOML_BOOT_LOADER" ] && return
+    log_msg "Prep" "TOML diskDevice/bootLoader 업데이트 중..."
+    python3 - "$NIXOS_PATH/hosts/${_HOSTNAME}.toml" "$_DISK_DEVICE" "$_BOOT_LOADER" <<'EOF'
+import sys, re
+path, new_disk, new_boot = sys.argv[1:]
+with open(path) as f:
+    text = f.read()
+text = re.sub(r'(diskDevice\s*=\s*)"[^"]*"', f'\\1"{new_disk}"', text)
+text = re.sub(r'(bootDevice\s*=\s*)"[^"]*"', f'\\1"{new_disk}"', text)
+text = re.sub(r'(bootLoader\s*=\s*)"[^"]*"', f'\\1"{new_boot}"', text)
+with open(path, "w") as f:
+    f.write(text)
+EOF
+    [ "$_DISK_DEVICE" != "$_TOML_DISK_DEVICE" ] && log_msg "Done" "diskDevice: $_TOML_DISK_DEVICE → $_DISK_DEVICE"
+    [ "$_BOOT_LOADER" != "$_TOML_BOOT_LOADER" ] && log_msg "Done" "bootLoader: $_TOML_BOOT_LOADER → $_BOOT_LOADER"
+}
+
 probe_ssh() {
-    log_msg "Prep" "SSH 연결 확인 중 (root@$_IP)..."
-    if ! ssh -i "$_SSH_KEY" \
-             -o ConnectTimeout=15 \
-             -o StrictHostKeyChecking=no \
-             -o BatchMode=yes \
-             "root@$_IP" true 2>/dev/null; then
-        log_msg "Error" "SSH 연결 실패: root@$_IP"
+    log_msg "Prep" "SSH 연결 확인 중 (${_SSH_USER}@$_IP)..."
+    if ! ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" -o ConnectTimeout=15 \
+             "${_SSH_USER}@${_IP}" true 2>/dev/null; then
+        log_msg "Error" "SSH 연결 실패: ${_SSH_USER}@${_IP}"
         log_msg "Notice" "확인 사항:"
         log_msg "Notice" "  • 인스턴스가 실행 중인지 확인"
         log_msg "Notice" "  • 보안 그룹 / 방화벽에서 포트 22(SSH) 개방 여부"
@@ -149,13 +218,13 @@ run_nixos_anywhere() {
     # --generate-hardware-config: 타깃 머신에서 nixos-generate-config 실행 후 로컬에 저장
     local hw_path="$BUILD_DIR/hardware.nix"
 
-    log_exec "nixos-anywhere" ">" "initial install ($_HOSTNAME)"
+    log_exec "n-aw" ">" "nixos-anywhere: $_HOSTNAME"
     nix run "github:nix-community/nixos-anywhere" -- \
         --flake "path:${BUILD_DIR}#${_HOSTNAME}" \
         --generate-hardware-config nixos-generate-config "$hw_path" \
         -i "$_SSH_KEY" \
-        "root@${_IP}"
-    log_exec "nixos-anywhere" "<" "initial install ($_HOSTNAME)"
+        "${_SSH_USER}@${_IP}"
+    log_exec "n-aw" "<" "nixos-anywhere: $_HOSTNAME"
 }
 
 # ── 7. SSH known_hosts 갱신 ──────────────────────────────────────────────────
@@ -167,21 +236,20 @@ renew_host_key() {
 
 # ── 8. SSH 응답 폴링 (재부팅 대기) ───────────────────────────────────────────
 wait_for_ssh() {
-    log_msg "Notice" "재부팅 대기 중... (최대 3분, 5초 간격 폴링)"
-    local deadline attempt=0
-    deadline=$(( $(date +%s) + 180 ))
+    log_msg "Notice" "재부팅 대기 중... (최대 10분, 5초 간격 폴링)"
+    local deadline start attempt=0
+    start=$(date +%s)
+    deadline=$(( start + 600 ))
     while true; do
         attempt=$((attempt + 1))
-        if ssh -i "$_SSH_KEY" \
-               -o ConnectTimeout=5 \
-               -o StrictHostKeyChecking=no \
-               -o BatchMode=yes \
+        if ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" -o ConnectTimeout=5 \
                "root@$_IP" true 2>/dev/null; then
-            log_msg "Done" "SSH 응답 확인 (${attempt}번째 시도)"
+            local elapsed=$(( $(date +%s) - start ))
+            log_msg "Done" "SSH 응답 확인 (${elapsed}초 경과, ${attempt}번째 시도)"
             return
         fi
         if [ "$(date +%s)" -ge "$deadline" ]; then
-            log_msg "Error" "재부팅 후 SSH 응답 없음 (3분 초과)"
+            log_msg "Error" "재부팅 후 SSH 응답 없음 (10분 초과)"
             log_msg "Notice" "  • 인스턴스 콘솔에서 부팅 로그 확인"
             log_msg "Notice" "  • SSH 접속 가능해진 후: rnixup 으로 재시도"
             exit 1
@@ -193,18 +261,30 @@ wait_for_ssh() {
 # ── 9. deploy-rs 최종 배포 ────────────────────────────────────────────────────
 run_deploy_rs() {
     log_msg "Task" "deploy-rs로 최종 closure 배포 중..."
-    log_exec "deploy-rs" ">" "initial deploy $_HOSTNAME"
+    log_exec "d-rs" ">" "deploy-rs: $_HOSTNAME"
     nix run "github:serokell/deploy-rs" -- \
         --skip-checks \
         "path:${BUILD_DIR}#${_HOSTNAME}"
-    log_exec "deploy-rs" "<" "initial deploy $_HOSTNAME"
+    log_exec "d-rs" "<" "deploy-rs: $_HOSTNAME"
     log_msg "Done" "초기 배포 완료: $_HOSTNAME → $_IP"
 }
 
 # ── 새 호스트 파일 생성 ───────────────────────────────────────────────────────
 _write_new_host_files() {
     probe_ssh
+    probe_disk_and_boot
+    if [ -z "$_BOOT_LOADER" ]; then
+        log_msg "Warn" "부트 타입 자동 감지 실패 — 수동 선택이 필요합니다."
+        printf "\n"
+        _pick "부트 타입 선택:" \
+            "grub-bios  (MBR/GRUB, AWS Lightsail 등 구형 BIOS 전용)" \
+            "grub-uefi  (GPT/GRUB+EFI, Hetzner/GCP 등 가상화 EFI)"
+        _BOOT_LOADER="grub-bios"
+        [ "$REPLY" -eq 1 ] && _BOOT_LOADER="grub-uefi"
+        log_msg "Done" "부트 타입: $_BOOT_LOADER (수동 선택)"
+    fi
     extract_pub_key
+    write_pub_key_file
     generate_toml
     generate_nix_stub
 }
@@ -220,28 +300,39 @@ _run_install() {
 
 # ── 메인 오케스트레이터 ───────────────────────────────────────────────────────
 run_setup() {
+    # ── RAM 사전 감지 (review 전, 실패해도 무시) ──────────────────────────────
+    _probe_ram
+
     # ── 설정 확인 출력 ────────────────────────────────────────────────────────
     printf "\n"
     if [ "${_HOST_IS_NEW:-true}" = true ]; then
-        printf "${CYAN}RNIXSTRAP${NC} ${CYAN}%-9s${NC} | 설정 확인:\n" "Review"
+        log_msg "Review" "설정 확인:"
         printf "  %-16s: %s\n" "hostname"   "$_HOSTNAME"
-        printf "  %-16s: %s\n" "provider"   "$_PROVIDER"
         printf "  %-16s: %s\n" "IP"         "$_IP"
         printf "  %-16s: %s\n" "SSH key"    "$_SSH_KEY"
-        printf "  %-16s: %s\n" "system"     "$_SYSTEM"
-        printf "  %-16s: %s\n" "bootTarget" "$_BOOT_TARGET"
-        printf "  %-16s: %s\n" "diskDevice" "$_DISK_DEVICE"
+        printf "  %-16s: %s\n"              "system"     "$_SYSTEM"
+        printf "  %-16s: \033[2m%s\033[0m\n" "diskDevice" "SSH 자동 감지"
+        printf "  %-16s: \033[2m%s\033[0m\n" "bootLoader" "SSH 자동 감지"
         if [ ${#_SERVICES[@]} -gt 0 ]; then
             printf "  %-16s: %s\n" "services" "${_SERVICES[*]}"
         else
             printf "  %-16s: (없음)\n" "services"
+        fi
+        if [ "$_REMOTE_RAM_MB" -eq -1 ]; then
+            printf "  %-16s: \033[2m알 수 없음\033[0m\n" "RAM"
+        elif [ "$_REMOTE_RAM_MB" -lt 1000 ]; then
+            printf "  %-16s: \033[31m%sMB  ← 최소치(1000MB) 미달\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
+        elif [ "$_REMOTE_RAM_MB" -lt 1500 ]; then
+            printf "  %-16s: \033[33m%sMB  ← kexec 실패 가능 (권장 1500MB)\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
+        else
+            printf "  %-16s: %sMB\n" "RAM" "$_REMOTE_RAM_MB"
         fi
         printf "  %s\n" "────────────────────────────────────────────────"
         printf "  ${GREEN}%-42s %s${NC}\n" "hosts/${_HOSTNAME}.toml" "신규 생성"
         printf "  ${GREEN}%-42s %s${NC}\n" "hosts/${_HOSTNAME}.nix"  "신규 생성"
         printf "  \033[2m참고: 바로 진행/쓰기만 모두 SSH 접속 포함\033[0m\n"
     else
-        printf "${CYAN}RNIXSTRAP${NC} ${CYAN}%-9s${NC} | 설정 확인 \033[2m(기존 호스트 재설치)\033[0m:\n" "Review"
+        log_msg "Review" "설정 확인 \033[2m(기존 호스트 재설치)\033[0m:"
         printf "  %-16s: %s\n" "hostname" "$_HOSTNAME"
         if [ "$_IP" != "$_TOML_IP" ]; then
             printf "  %-16s: \033[2m%s\033[0m  →  %s\n" "IP" "$_TOML_IP" "$_IP"
@@ -253,9 +344,18 @@ run_setup() {
         else
             printf "  %-16s: %s\n" "SSH key" "$_SSH_KEY"
         fi
-        printf "  %-16s: %s  \033[2m(TOML)\033[0m\n" "system"     "$_SYSTEM"
-        printf "  %-16s: %s  \033[2m(TOML)\033[0m\n" "bootTarget" "$_BOOT_TARGET"
-        printf "  %-16s: %s  \033[2m(TOML)\033[0m\n" "diskDevice" "$_DISK_DEVICE"
+        printf "  %-16s: %s  \033[2m(TOML)\033[0m\n"              "system"     "$_SYSTEM"
+        printf "  %-16s: %s  \033[2m(TOML, 재감지 예정)\033[0m\n" "diskDevice" "$_DISK_DEVICE"
+        printf "  %-16s: %s  \033[2m(TOML, 재감지 예정)\033[0m\n" "bootLoader" "$_BOOT_LOADER"
+        if [ "$_REMOTE_RAM_MB" -eq -1 ]; then
+            printf "  %-16s: \033[2m알 수 없음\033[0m\n" "RAM"
+        elif [ "$_REMOTE_RAM_MB" -lt 1000 ]; then
+            printf "  %-16s: \033[31m%sMB  ← 최소치(1000MB) 미달\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
+        elif [ "$_REMOTE_RAM_MB" -lt 1500 ]; then
+            printf "  %-16s: \033[33m%sMB  ← kexec 실패 가능 (권장 1500MB)\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
+        else
+            printf "  %-16s: %sMB\n" "RAM" "$_REMOTE_RAM_MB"
+        fi
         printf "  %s\n" "────────────────────────────────────────────────"
         printf "  \033[2m%-42s %s\033[0m\n" "hosts/${_HOSTNAME}.nix" "유지"
         if [ "$_IP" != "$_TOML_IP" ] || [ "$_SSH_KEY" != "$_TOML_SSH_KEY" ]; then
@@ -266,17 +366,35 @@ run_setup() {
     fi
     printf "\n"
 
-    # ── 3-way 선택 ────────────────────────────────────────────────────────────
-    _pick "다음 단계를 선택하세요:" \
-        "바로 진행  — nixos-anywhere 설치 + deploy-rs 배포" \
-        "쓰기만     — 파일 작업만 하고 종료" \
-        "취소       — 아무것도 하지 않고 종료"
-
-    # ── 취소 ──────────────────────────────────────────────────────────────────
-    if [ "$REPLY" -eq 2 ]; then
+    # ── 선택 (RAM < 1000MB면 '바로 진행' 차단) ───────────────────────────────
+    if [ "$_REMOTE_RAM_MB" -ne -1 ] && [ "$_REMOTE_RAM_MB" -lt 1000 ]; then
         printf "\n"
-        log_msg "Notice" "취소되었습니다."
-        exit 0
+        log_msg "Error" "RAM ${_REMOTE_RAM_MB}MB — nixos-anywhere kexec 최소 1000MB 필요"
+        log_msg "Notice" "  인스턴스를 더 높은 사양으로 업그레이드한 후 재시도하세요."
+        printf "\n"
+        _pick "다음 단계를 선택하세요:" \
+            "쓰기만     — 파일 작업만 하고 종료 (설치 불가)" \
+            "취소       — 아무것도 하지 않고 종료"
+        if [ "$REPLY" -eq 1 ]; then
+            printf "\n"
+            log_msg "Notice" "취소되었습니다."
+            exit 0
+        fi
+        REPLY=1  # '쓰기만' 분기로 처리
+    else
+        [ "$_REMOTE_RAM_MB" -ne -1 ] && [ "$_REMOTE_RAM_MB" -lt 1500 ] && {
+            printf "\n"
+            log_msg "Warn" "RAM ${_REMOTE_RAM_MB}MB — kexec 실패 가능성 있음 (권장: 1500MB 이상)"
+        }
+        _pick "다음 단계를 선택하세요:" \
+            "바로 진행  — nixos-anywhere 설치 + deploy-rs 배포" \
+            "쓰기만     — 파일 작업만 하고 종료" \
+            "취소       — 아무것도 하지 않고 종료"
+        if [ "$REPLY" -eq 2 ]; then
+            printf "\n"
+            log_msg "Notice" "취소되었습니다."
+            exit 0
+        fi
     fi
 
     # ── 파일 작업 (바로 진행 + 쓰기만 공통) ──────────────────────────────────
@@ -303,9 +421,13 @@ run_setup() {
         exit 0
     fi
 
-    # ── 바로 진행: 기존 호스트는 SSH probe 추가 후 설치 ──────────────────────
+    # ── 바로 진행: 기존 호스트는 SSH probe + 재감지 + pub key 갱신 + TOML 업데이트 ─
     if [ "${_HOST_IS_NEW:-true}" != true ]; then
         probe_ssh
+        probe_disk_and_boot
+        _update_toml_disk_boot_if_changed
+        extract_pub_key
+        write_pub_key_file
     fi
     _run_install
 
