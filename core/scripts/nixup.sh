@@ -125,6 +125,23 @@ trap 'handle_signal SIGINT' INT
 trap 'handle_signal SIGTERM' TERM
 trap cleanup EXIT
 
+# 5.5. Sudo 사전 인증 (빌드 완료 전 타임아웃 방지)
+SUDO_KEEPALIVE_PID=""
+_needs_sudo=false
+if { [ "$TARGET_PROFILE" = "os" ] || [ "$TARGET_PROFILE" = "all" ]; } && [ "$ACTION" != "build" ]; then
+    _needs_sudo=true
+fi
+if [ "$DO_CLEAN" = true ] && [ "$CLEAN_TARGET" = "all" ]; then
+    _needs_sudo=true
+fi
+if [ "$_needs_sudo" = true ]; then
+    log_msg "Notice" "sudo 인증 중..."
+    sudo -v
+    ( while true; do sudo -n true; sleep 60; done ) &
+    SUDO_KEEPALIVE_PID=$!
+fi
+unset _needs_sudo
+
 # 6. Routing
 if [ "$DO_CLEAN" = true ]; then
     log_exec "nix" ">" "clean generations (keep last $CLEAN_KEEP)"

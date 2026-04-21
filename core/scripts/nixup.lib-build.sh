@@ -211,6 +211,8 @@ handle_signal() {
 
 # 10. Cleanup (EXIT trap 핸들러 — 실행 요약 및 후처리)
 cleanup() {
+    [ -n "${SUDO_KEEPALIVE_PID:-}" ] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+
     END_TIME_RAW=$(date +%s)
     END_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
     DURATION=$((END_TIME_RAW - START_TIME_RAW))
