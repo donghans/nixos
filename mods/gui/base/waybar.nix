@@ -23,6 +23,7 @@ mkPartOf "mods.gui" ({
       margin-bottom = 0;
       margin-left = 0;
       margin-right = 0;
+      spacing = 0;
 
       modules-left = ["hyprland/workspaces" "hyprland/submap"];
       modules-center = ["hyprland/window"];
