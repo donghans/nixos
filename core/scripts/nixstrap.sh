@@ -94,6 +94,7 @@ _trap_int() {
 
 _trap_exit() {
     local _code=$?
+    _print_summary
     _trap_cleanup
     return "$_code"
 }
@@ -103,6 +104,8 @@ trap '_trap_int'               INT
 trap '_trap_cleanup; exit 143' TERM
 
 # -- 초기화 --
+_START_TIME=$(date +%s)
+_START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
 log_msg "Init" "NixOS Installer"
 if _VIRT_TYPE=$(systemd-detect-virt 2>/dev/null); then
     _IS_VM=true

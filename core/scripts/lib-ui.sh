@@ -171,3 +171,15 @@ _check() {
         [ "${selected[$i]}" = "true" ] && REPLY_CHECKED+=("${keys[$i]}")
     done
 }
+
+# ── _print_summary: 실행 요약 (EXIT trap에서 호출) ─────────────────────────────
+# _START_TIME / _START_TIME_STR 가 설정된 경우에만 출력 (미설정 시 no-op)
+_print_summary() {
+    [ -z "${_START_TIME:-}" ] && return
+    local _end _dur
+    _end=$(date "+%Y-%m-%d %H:%M:%S")
+    _dur=$(( $(date +%s) - _START_TIME ))
+    log_msg "Summary" "시작:    $_START_TIME_STR"
+    log_msg "Summary" "완료:    $_end"
+    log_msg "Summary" "소요:    ${_dur}s"
+}

@@ -61,12 +61,13 @@ _TOML_BOOT_LOADER=""    # 기존 호스트 TOML에서 로드
 _TOML_DISK_DEVICE=""    # 기존 호스트 TOML에서 로드
 
 # ── lib 로드 ──────────────────────────────────────────────────────────────────
-source "$SCRIPT_DIR/nixup.lib-build.sh"
+source "$SCRIPT_DIR/lib-build.sh"
 source "$SCRIPT_DIR/rnixstrap.lib-input.sh"
 source "$SCRIPT_DIR/rnixstrap.task-setup.sh"
 
 # ── Cleanup trap ──────────────────────────────────────────────────────────────
 _cleanup() {
+    _print_summary
     tput cnorm 2>/dev/null || true
     stty sane 2>/dev/null || true
 }
@@ -74,6 +75,8 @@ trap '_cleanup' EXIT
 trap '_cleanup; exit 130' INT TERM
 
 # ── 시작 배너 ─────────────────────────────────────────────────────────────────
+_START_TIME=$(date +%s)
+_START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
 printf "\n"
 log_msg "Init" "원격 NixOS 호스트 초기 설치 도구"
 log_msg "Init" "새 호스트 추가 또는 기존 호스트 재설치를 진행합니다."

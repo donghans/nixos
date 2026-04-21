@@ -8,7 +8,7 @@
 #   python3 nixup.task-resolve.py /src /out    # /src에서 읽고 /out에 생성 (nixup 내부 호출)
 #
 # 생성 파일:
-#   resolved.json  — 호스트별 merged 데이터 (flake.nix, nixup.lib-build.sh 사용)
+#   resolved.json  — 호스트별 merged 데이터 (flake.nix, lib-build.sh 사용)
 #   presets.json   — 프리셋별 전체 mods 맵 + explicitOptional (flake.nix 사용)
 
 import json

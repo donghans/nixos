@@ -102,6 +102,15 @@
     extraModules = hostInfo.extraModules or [];
     hostCtx = mkHostContext (hostInfo // {inherit isISO;});
 
+    # remote 호스트는 per-host hardware.nix(hosts/deploy/<hostname>.hardware.nix)를 우선 사용.
+    # 파일이 없거나 로컬 호스트이면 공용 hardware.nix(BUILD_DIR 루트)로 fallback.
+    _isRemote = hostInfo.isRemote or false;
+    _remoteHwPath = ../../hosts/deploy/${hostInfo.hostname}.hardware.nix;
+    _hwModule =
+      if _isRemote && builtins.pathExists _remoteHwPath
+      then _remoteHwPath
+      else ../../hardware.nix;
+
     mainConfig =
       if isISO
       then [
@@ -109,10 +118,10 @@
         ../iso.nix
       ]
       else if hostCtx.hasUnifiedHost
-      then [hostCtx.unifiedHostFile ../../hardware.nix]
+      then [hostCtx.unifiedHostFile _hwModule]
       else [
         ../../hosts/${hostInfo.hostname}/configuration.nix
-        ../../hardware.nix
+        _hwModule
       ];
   in
     nixpkgs.lib.nixosSystem {
@@ -179,8 +188,8 @@
             users.users.root.openssh.authorizedKeys.keyFiles =
               nixpkgs.lib.mkIf hostCtx.metaConfig.isRemote
               (nixpkgs.lib.optional
-                (builtins.pathExists ../../hosts/pubs/${hostInfo.hostname}.pub)
-                ../../hosts/pubs/${hostInfo.hostname}.pub);
+                (builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub)
+                ../../hosts/deploy/${hostInfo.hostname}.pub);
 
             # (목적: deploy-rs가 root로 nix copy 실행 — root는 기본 trusted-user)
             nix.settings.trusted-users =

@@ -34,12 +34,12 @@ extract_pub_key() {
     log_msg "Done" "공개키 추출 완료"
 }
 
-# ── 1.5. 공개키 파일 저장 → hosts/pubs/<hostname>.pub ─────────────────────────
+# ── 1.5. 공개키 파일 저장 → hosts/deploy/<hostname>.pub ──────────────────────
 write_pub_key_file() {
-    local pubs_dir="$NIXOS_PATH/hosts/pubs"
-    mkdir -p "$pubs_dir"
-    printf '%s\n' "$_PUB_KEY" > "$pubs_dir/${_HOSTNAME}.pub"
-    log_msg "Done" "공개키 저장: hosts/pubs/${_HOSTNAME}.pub"
+    local deploy_dir="$NIXOS_PATH/hosts/deploy"
+    mkdir -p "$deploy_dir"
+    printf '%s\n' "$_PUB_KEY" > "$deploy_dir/${_HOSTNAME}.pub"
+    log_msg "Done" "공개키 저장: hosts/deploy/${_HOSTNAME}.pub"
 }
 
 # ── 2. TOML 생성 ─────────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ generate_toml() {
         printf '\n'
         printf '[deploy]\n'
         printf 'ip          = "%s"\n' "$_IP"
-        printf 'sshKey      = "%s"\n' "$_SSH_KEY"
+        printf 'sshKey      = "%s"\n' "${_SSH_KEY/#$HOME/~}"
         printf '\n'
         printf '[mods.sys.services]\n'
         for svc in "${all_services[@]}"; do
@@ -117,7 +117,7 @@ generate_nix_stub() {
 _update_toml_if_changed() {
     [ "$_IP" = "$_TOML_IP" ] && [ "$_SSH_KEY" = "$_TOML_SSH_KEY" ] && return
     log_msg "Prep" "TOML 업데이트 중..."
-    python3 - "$NIXOS_PATH/hosts/${_HOSTNAME}.toml" "$_IP" "$_SSH_KEY" <<'EOF'
+    python3 - "$NIXOS_PATH/hosts/${_HOSTNAME}.toml" "$_IP" "${_SSH_KEY/#$HOME/~}" <<'EOF'
 import sys, re
 path, new_ip, new_key = sys.argv[1:]
 with open(path) as f:
@@ -135,7 +135,7 @@ run_resolve_and_prepare() {
     log_msg "Task" "빌드 환경 준비 중..."
     python3 -B "$SCRIPT_DIR/nixup.task-resolve.py" "$NIXOS_PATH" "$JSON_DIR" >/dev/null
 
-    # prepare_build_dir는 nixup.lib-build.sh에서 source됨
+    # prepare_build_dir는 lib-build.sh에서 source됨
     prepare_build_dir "$NIXOS_PATH" "$BUILD_DIR" "$ENV_FILE"
     log_msg "Done" "빌드 환경 준비 완료"
 }
@@ -214,9 +214,11 @@ run_nixos_anywhere() {
     log_msg "Notice" "nixos-anywhere 초기 설치 시작..."
     log_msg "Notice" "  → disko로 디스크 파티셔닝 후 NixOS를 설치합니다."
 
-    # hardware.nix를 원격에서 생성 (local 머신의 hw config가 아닌 타깃 머신의 hw config)
+    # hardware.nix를 원격에서 생성 (타깃 머신의 hw config)
     # --generate-hardware-config: 타깃 머신에서 nixos-generate-config 실행 후 로컬에 저장
-    local hw_path="$BUILD_DIR/hardware.nix"
+    # hosts/deploy/<hostname>.hardware.nix 에 저장 (flake에서 per-host 경로로 참조)
+    mkdir -p "$BUILD_DIR/hosts/deploy"
+    local hw_path="$BUILD_DIR/hosts/deploy/${_HOSTNAME}.hardware.nix"
 
     log_exec "n-aw" ">" "nixos-anywhere: $_HOSTNAME"
     nix run "github:nix-community/nixos-anywhere" -- \
@@ -225,6 +227,11 @@ run_nixos_anywhere() {
         -i "$_SSH_KEY" \
         "${_SSH_USER}@${_IP}"
     log_exec "n-aw" "<" "nixos-anywhere: $_HOSTNAME"
+
+    # 생성된 hardware.nix를 소스 레포로 역복사 (이후 rnixup이 사용)
+    mkdir -p "$NIXOS_PATH/hosts/deploy"
+    cp "$hw_path" "$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.hardware.nix"
+    log_msg "Done" "hardware.nix 저장: hosts/deploy/${_HOSTNAME}.hardware.nix"
 }
 
 # ── 7. SSH known_hosts 갱신 ──────────────────────────────────────────────────

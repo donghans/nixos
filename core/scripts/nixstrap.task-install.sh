@@ -5,7 +5,7 @@ _cleanup_mounts() {
     # 재시도 시 이전 마운트가 남아있으면 mkfs.*가 "contains a mounted filesystem"으로 실패함
     # swapoff → 역순 umount (boot → log → nix → home → /) 후 /mnt 자체 해제
     if mountpoint -q /mnt 2>/dev/null; then
-        log_msg "Mount" "cleaning up previous mounts under /mnt ..."
+        log_msg "Mount" "/mnt 이전 마운트 정리 중..."
         swapoff -a 2>/dev/null || true
         umount -R /mnt 2>/dev/null || umount -lR /mnt 2>/dev/null || true
     fi
@@ -17,13 +17,13 @@ _read_disk_labels() {
     read -r BOOT_LABEL DISK_LABEL <<< "$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" disk-labels "$REPO_TMP" "$HOST")"
     BOOT_LABEL="${BOOT_LABEL:-boot}"
     DISK_LABEL="${DISK_LABEL:-nixos}"
-    log_msg "Config" "disk labels: boot=$BOOT_LABEL, root=$DISK_LABEL"
+    log_msg "Config" "디스크 레이블: boot=$BOOT_LABEL, root=$DISK_LABEL"
 }
 
 _create_partitions() {
     if [[ "$_NEW_PARTITIONS" != "true" ]]; then return; fi
 
-    log_msg "Disk" "creating partitions on $_DISK ..."
+    log_msg "Disk" "$_DISK 에 파티션 생성 중..."
     log_exec "disk" ">" "parted"
     if [[ "$_WIPE" == "true" ]]; then
         parted "$_DISK" --script mklabel gpt
@@ -33,25 +33,25 @@ _create_partitions() {
     parted "$_DISK" --script mkpart primary "$_BOOT_END" "$_PART_END"
     log_exec "disk" "<" "parted"
 
-    log_msg "Disk" "waiting for udev ..."
+    log_msg "Disk" "udev 대기 중..."
     udevadm settle --timeout=10
-    log_msg "Disk" "partitions ready: boot=$BOOT_PART, root=$ROOT_PART"
+    log_msg "Disk" "파티션 준비 완료: boot=$BOOT_PART, root=$ROOT_PART"
 }
 
 _format_boot() {
     if [[ "$FORMAT_BOOT" =~ ^[Yy]$ ]]; then
-        log_msg "Disk" "formatting boot partition (fat32, label=$BOOT_LABEL)..."
+        log_msg "Disk" "부트 파티션 포맷 중 (fat32, label=$BOOT_LABEL)..."
         log_exec "disk" ">" "mkfs.fat"
         mkfs.fat -F 32 -n "$BOOT_LABEL" "$BOOT_PART"
         log_exec "disk" "<" "mkfs.fat"
     else
-        log_msg "Disk" "skipping boot partition format."
+        log_msg "Disk" "부트 파티션 포맷 건너뜀."
     fi
 }
 
 _format_root() {
     if [[ "$FORMAT_ROOT" =~ ^[Yy]$ ]]; then
-        log_msg "Disk" "formatting root (label=$DISK_LABEL) and creating subvolumes..."
+        log_msg "Disk" "루트 포맷 중 (label=$DISK_LABEL) 및 서브볼륨 생성..."
         log_exec "disk" ">" "mkfs.btrfs"
         mkfs.btrfs -L "$DISK_LABEL" -f "$ROOT_PART"
         mount "$ROOT_PART" /mnt
@@ -62,13 +62,13 @@ _format_root() {
         umount /mnt
         log_exec "disk" "<" "mkfs.btrfs"
     else
-        log_msg "Disk" "skipping root format — using existing btrfs and subvolumes."
+        log_msg "Disk" "루트 포맷 건너뜀 — 기존 btrfs 및 서브볼륨 사용."
     fi
 }
 
 _mount_partitions() {
     local MOUNT_OPTS="noatime,compress=zstd,space_cache=v2"
-    log_msg "Mount" "mounting partitions with optimal options..."
+    log_msg "Mount" "파티션을 최적 옵션으로 마운트 중..."
     log_exec "disk" ">" "mount"
     mount -o "subvol=@,${MOUNT_OPTS}" "$ROOT_PART" /mnt
     mkdir -p /mnt/{home,nix,var/log,boot}
@@ -82,7 +82,7 @@ _mount_partitions() {
 }
 
 _move_repo() {
-    log_msg "Git" "moving repository to /mnt/etc/nixos ..."
+    log_msg "Git" "레포지터리를 /mnt/etc/nixos 로 이동 중..."
     mkdir -p /mnt/etc
     mv "$REPO_TMP" /mnt/etc/nixos
 }
@@ -93,11 +93,11 @@ _create_host_profile() {
     local HOST_TOML="/mnt/etc/nixos/hosts/$HOST.toml"
     local HOST_NIX="/mnt/etc/nixos/hosts/$HOST.nix"
     if [ -f "$HOST_TOML" ]; then
-        log_msg "Config" "using existing host profile: $HOST"
+        log_msg "Config" "기존 호스트 프로파일 사용: $HOST"
         return
     fi
 
-    log_msg "Notice" "host profile '$HOST' not found — creating new profile..."
+    log_msg "Notice" "호스트 프로파일 '$HOST' 없음 — 새 프로파일 생성 중..."
 
     # VM 환경이면 incus-guest 활성화 + incus 비활성화
     # (incus를 VM 내부에서 켜면 incusbr0가 호스트와 같은 서브넷을 점유해 라우팅 충돌 발생)
@@ -109,7 +109,7 @@ _create_host_profile() {
     if [[ "$_IS_VM" == "true" ]]; then
         printf 'type = "desktop"\npreset = "%s"%s%s\n\n[mods.sys.services]\nincus-guest = true\nincus = false\n' \
             "$_PRESET" "$_sv_line" "$_username_line" > "$HOST_TOML"
-        log_msg "Config" "incus-guest enabled, incus disabled in $HOST.toml (virtualized environment)"
+        log_msg "Config" "$HOST.toml 에서 incus-guest 활성화, incus 비활성화 (가상화 환경)"
     else
         printf 'type = "desktop"\npreset = "%s"%s%s\n' "$_PRESET" "$_sv_line" "$_username_line" > "$HOST_TOML"
     fi
@@ -118,7 +118,7 @@ _create_host_profile() {
     printf '{mkHostConfiguration, ...}:\nmkHostConfiguration ({...}: { os = {}; hm = {}; })\n' > "$HOST_NIX"
 
     local _sv_info="${_STATE_VERSION:-rolling}"
-    log_msg "Config" "created host profile: $HOST (preset=$_PRESET, stateVersion=$_sv_info)"
+    log_msg "Config" "호스트 프로파일 생성: $HOST (preset=$_PRESET, stateVersion=$_sv_info)"
 }
 
 _resolve_metadata() {
@@ -126,7 +126,7 @@ _resolve_metadata() {
     # 레포 루트가 아닌 임시 경로에 출력하여 git untracked 파일 오염 방지
     RESOLVE_TMP="/tmp/nixos-resolve"
     mkdir -p "$RESOLVE_TMP"
-    log_msg "Config" "generating resolved.json from target hardware..."
+    log_msg "Config" "대상 하드웨어에서 resolved.json 생성 중..."
     log_exec "py" ">" "nixup.task-resolve.py"
     python3 /mnt/etc/nixos/core/scripts/nixup.task-resolve.py \
         /mnt/etc/nixos "$RESOLVE_TMP"
@@ -136,19 +136,19 @@ _resolve_metadata() {
 _extract_username() {
     local BASE_TOML="/mnt/etc/nixos/hosts/_base.toml"
     if [ ! -f "$BASE_TOML" ]; then
-        log_msg "Error" "could not find $BASE_TOML in the cloned repository."
+        log_msg "Error" "클론된 레포지터리에서 $BASE_TOML 을 찾을 수 없습니다."
         exit 1
     fi
     USERNAME=$(BASE_TOML="$BASE_TOML" python3 -c \
         "import tomllib, os; print(tomllib.load(open(os.environ['BASE_TOML'],'rb'))['username'])")
     if [ -z "$USERNAME" ]; then
-        log_msg "Error" "failed to extract username from $BASE_TOML"
+        log_msg "Error" "$BASE_TOML 에서 username 추출에 실패했습니다."
         exit 1
     fi
 }
 
 _generate_hw_config() {
-    log_msg "Config" "generating hardware.nix for $HOST..."
+    log_msg "Config" "$HOST 의 hardware.nix 생성 중..."
     # --show-hardware-config: stdout 출력만 하고 /mnt/etc/nixos/에 파일을 쓰지 않음
     # → 레포에 hardware.nix가 남지 않음; 빌드 디렉터리에만 존재
     nixos-generate-config --root /mnt --no-filesystems --show-hardware-config \
@@ -160,7 +160,7 @@ _prepare_build_dir() {
     # nixup과 동일한 격리 환경 구성 — core/flake.nix의 import 경로가 .build/ 루트 기준이므로
     # /mnt/etc/nixos/core를 직접 flake로 지정하면 core/core/flake.outputs.nix를 찾아 실패
     # /tmp/nixos-build처럼 git repo 바깥에 두면 Nix가 git을 전혀 참조하지 않음
-    log_msg "Config" "preparing .build/ environment for nixos-install..."
+    log_msg "Config" "nixos-install 을 위한 .build/ 환경 준비 중..."
     BUILD_DIR="/tmp/nixos-build"
     rm -rf "$BUILD_DIR"
     mkdir -p "$BUILD_DIR"
@@ -176,7 +176,7 @@ _prepare_build_dir() {
 }
 
 _install_nixos() {
-    log_msg "Install" "starting nixos-install for #$HOST ..."
+    log_msg "Install" "$HOST NixOS 설치 시작..."
     log_exec "nix" ">" "nixos-install"
     # setsid: 새 세션에서 실행 → 터미널 Ctrl+C(SIGINT)를 받지 않음
     # HOME=/root: sudo -E로 실행 시 nixos 유저의 $HOME이 넘어오면 "not owned by you" 경고 발생
@@ -201,13 +201,13 @@ _install_nixos() {
 }
 
 _post_process() {
-    log_msg "Done" "running post-installation tasks for user: $USERNAME ..."
+    log_msg "Done" "사용자 '$USERNAME' 의 설치 후 작업 실행 중..."
     mkdir -p "/mnt/home/$USERNAME/"
     mv /mnt/etc/nixos "/mnt/home/$USERNAME/nixos"
     nixos-enter --root /mnt --command "chown -R $USERNAME:users /home/$USERNAME/nixos"
     nixos-enter --root /mnt --command "ln -sfn /home/$USERNAME/nixos /etc/nixos"
     if [ -n "${_USER_PASSWORD:-}" ]; then
-        log_msg "Notice" "setting password for '$USERNAME'..."
+        log_msg "Notice" "'$USERNAME' 의 비밀번호 설정 중..."
         printf "%s:%s\n" "$USERNAME" "$_USER_PASSWORD" | nixos-enter --root /mnt -- chpasswd
         _USER_PASSWORD=""
     fi
@@ -233,5 +233,5 @@ phase2_execute() {
     _post_process         # 14. mv, chown, symlink
 
     echo ""
-    log_msg "Success" "installation complete. reboot → TTY login → 'nixup home' → re-login."
+    log_msg "Success" "설치 완료. 재부팅 → TTY 로그인 → 'nixup home' → 재로그인."
 }

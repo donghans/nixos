@@ -7,18 +7,18 @@ ask_repo_and_clone() {
     local _prompt _input
     while true; do
         if [ -n "${NIXOS_REPO:-}" ]; then
-            _prompt="$(_log_prompt)repository [${NIXOS_REPO}]: "
+            _prompt="$(_log_prompt)레포지터리 [${NIXOS_REPO}]: "
         else
-            _prompt="$(_log_prompt)repository (e.g. user/nixos): "
+            _prompt="$(_log_prompt)레포지터리 (예: user/nixos): "
         fi
         read -rp "$_prompt" _input
         NIXOS_REPO="${_input:-${NIXOS_REPO:-}}"
         if [ -z "$NIXOS_REPO" ]; then
-            log_msg "Error" "repository is required."
+            log_msg "Error" "레포지터리는 필수입니다."
             continue
         fi
         rm -rf "$REPO_TMP"
-        log_msg "Git" "cloning github.com/$NIXOS_REPO ..."
+        log_msg "Git" "github.com/$NIXOS_REPO 클론 중..."
         log_exec "git" ">" "git clone"
         if git clone "https://github.com/$NIXOS_REPO.git" "$REPO_TMP"; then
             log_exec "git" "<" "git clone"
@@ -26,17 +26,17 @@ ask_repo_and_clone() {
             local _toml_repo _replace
             _toml_repo=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" check-repo "$REPO_TMP")
             if [ -n "$_toml_repo" ] && [ "$_toml_repo" != "$NIXOS_REPO" ]; then
-                log_msg "Notice" "_base.toml has git.nixosRepo = '$_toml_repo'"
-                read -rp "$(_log_prompt)update to '${NIXOS_REPO}'? (Y/n): " _replace
+                log_msg "Notice" "_base.toml의 git.nixosRepo = '$_toml_repo'"
+                read -rp "$(_log_prompt)'${NIXOS_REPO}'로 업데이트하시겠습니까? (Y/n): " _replace
                 _replace="${_replace:-Y}"
                 if [[ "$_replace" =~ ^[Yy]$ ]]; then
                     python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" update-repo "$REPO_TMP" "$NIXOS_REPO"
-                    log_msg "Config" "_base.toml updated: git.nixosRepo = '$NIXOS_REPO'"
+                    log_msg "Config" "_base.toml 업데이트: git.nixosRepo = '$NIXOS_REPO'"
                 fi
             fi
             break
         else
-            log_msg "Error" "clone failed. check the address and try again."
+            log_msg "Error" "클론 실패. 주소를 확인하고 다시 시도하세요."
             NIXOS_REPO=""
         fi
     done
@@ -61,13 +61,13 @@ select_host() {
 
     local -a _all_labels
     if [ ${#_sel_labels[@]} -gt 0 ]; then
-        _all_labels=("${_sel_labels[@]}" "+ Enter new hostname")
+        _all_labels=("${_sel_labels[@]}" "+ 새 호스트명 입력")
     else
-        _all_labels=("+ Enter new hostname")
+        _all_labels=("+ 새 호스트명 입력")
     fi
 
     printf "\n"
-    _pick "select host:" "${_all_labels[@]}"
+    _pick "호스트 선택:" "${_all_labels[@]}"
     local _sel=$REPLY
     _PICK_FIXED_FOOTER=()  # 사용 후 초기화
 
@@ -77,15 +77,15 @@ select_host() {
         _HOST_PRESET_FROM_REPO=""
         _HOST_USERNAME=""
         local _hinput
-        read -rp "$(_log_prompt)new hostname: " _hinput
+        read -rp "$(_log_prompt)새 호스트명: " _hinput
         HOST="${_hinput:-}"
         if [ -z "$HOST" ]; then
-            log_msg "Error" "hostname cannot be empty."
+            log_msg "Error" "호스트명은 필수입니다."
             select_host
             return
         fi
         if [ -f "$REPO_TMP/hosts/${HOST}.toml" ]; then
-            log_msg "Error" "'$HOST' already exists. select it from the list above."
+            log_msg "Error" "'$HOST'는 이미 존재합니다. 위 목록에서 선택하세요."
             select_host
             return
         fi
@@ -103,7 +103,7 @@ select_host() {
 ask_host_username() {
     local _base_user _input
     _base_user=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" username "$REPO_TMP" 2>/dev/null || true)
-    read -rp "$(_log_prompt)username [${_base_user:-_base.toml}]: " _input
+    read -rp "$(_log_prompt)사용자명 [${_base_user:-_base.toml}]: " _input
     _HOST_USERNAME="${_input:-}"
 }
 
@@ -120,20 +120,20 @@ ask_preset() {
         _preset_opts=("workstation" "server")
     fi
     printf "\n"
-    _pick "select preset:" "${_preset_opts[@]}"
+    _pick "프리셋 선택:" "${_preset_opts[@]}"
     _PRESET="${_preset_opts[$REPLY]}"
 }
 
 ask_state_version() {
     local _input
     printf "\n"
-    log_msg "Notice" "pin to a NixOS release? (e.g. 25.11 — leave blank for rolling):"
+    log_msg "Notice" "NixOS 릴리스에 고정하시겠습니까? (예: 25.11 — 빈 칸이면 rolling):"
     read -rp "$(_log_prompt)stateVersion: " _input
     _STATE_VERSION="${_input:-}"
     if [ -n "$_STATE_VERSION" ]; then
         log_msg "Config" "stateVersion: $_STATE_VERSION (stable lock)"
     else
-        log_msg "Config" "stateVersion: (none — rolling)"
+        log_msg "Config" "stateVersion: (없음 — rolling)"
     fi
 }
 
@@ -142,27 +142,27 @@ ask_password() {
     _preview_user=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" username "$REPO_TMP" 2>/dev/null || true)
     local _label="${_preview_user:-user}"
     printf "\n"
-    log_msg "Notice" "set login password for '$_label' (press Enter twice to skip):"
+    log_msg "Notice" "'$_label' 로그인 비밀번호 설정 (Enter 두 번 누르면 건너뜀):"
     while true; do
-        read -rsp "$(_log_prompt)password: " _pw
+        read -rsp "$(_log_prompt)비밀번호: " _pw
         printf "\n"
         if [ -z "$_pw" ]; then
-            read -rp "$(_log_prompt)skip password setup? (y/N): " _skip
+            read -rp "$(_log_prompt)비밀번호 설정을 건너뛰시겠습니까? (y/N): " _skip
             if [[ "${_skip:-N}" =~ ^[Yy]$ ]]; then
                 _USER_PASSWORD=""
-                log_msg "Notice" "skipped — no password will be set."
+                log_msg "Notice" "건너뜀 — 비밀번호가 설정되지 않습니다."
                 break
             fi
             continue
         fi
-        read -rsp "$(_log_prompt)confirm:  " _pw2
+        read -rsp "$(_log_prompt)확인:     " _pw2
         printf "\n"
         if [ "$_pw" = "$_pw2" ]; then
             _USER_PASSWORD="$_pw"
-            log_msg "Config" "password accepted."
+            log_msg "Config" "비밀번호 설정 완료."
             break
         fi
-        log_msg "Error" "passwords do not match. try again."
+        log_msg "Error" "비밀번호가 일치하지 않습니다. 다시 입력하세요."
     done
 }
 
@@ -171,50 +171,50 @@ ask_password() {
 show_summary() {
     local _fmt_boot _fmt_root
     printf "\n"
-    log_msg "Review" "Installation configuration:"
-    printf "  1. %-11s:  %s\n" "Repository" "${NIXOS_REPO:-(not set)}"
+    log_msg "Review" "설치 설정 확인:"
+    printf "  1. %-11s:  %s\n" "레포지터리" "${NIXOS_REPO:-(미설정)}"
 
     if [ -n "${HOST:-}" ]; then
         if [ "$_HOST_IS_NEW" = true ]; then
             if [ "$_IS_VM" = true ]; then
-                printf "  2. %-11s:  %s  (new, VM: incus-guest=on incus=off)\n" "Hostname" "$HOST"
+                printf "  2. %-11s:  %s  (신규, VM: incus-guest=on incus=off)\n" "호스트명" "$HOST"
             else
-                printf "  2. %-11s:  %s  (new)\n" "Hostname" "$HOST"
+                printf "  2. %-11s:  %s  (신규)\n" "호스트명" "$HOST"
             fi
-            local _uname_display="${_HOST_USERNAME:-from _base.toml}"
-            printf "     %-11s   username: %s\n" "" "$_uname_display"
+            local _uname_display="${_HOST_USERNAME:-_base.toml에서}"
+            printf "     %-11s   사용자명: %s\n" "" "$_uname_display"
         else
-            printf "  2. %-11s:  %s  [%s] %s\n" "Hostname" "$HOST" "${_HOST_TYPE:-?}" "${_HOST_PRESET_FROM_REPO:-?}"
+            printf "  2. %-11s:  %s  [%s] %s\n" "호스트명" "$HOST" "${_HOST_TYPE:-?}" "${_HOST_PRESET_FROM_REPO:-?}"
             if [ "$_IS_VM" = true ]; then
-                printf "     %-11s   VM detected — host.toml already exists, incus settings unchanged\n" ""
+                printf "     %-11s   VM 감지됨 — host.toml 기존 파일 유지, incus 설정 변경 없음\n" ""
             fi
         fi
     else
-        printf "  2. %-11s:  %s\n" "Hostname" "(not set)"
+        printf "  2. %-11s:  %s\n" "호스트명" "(미설정)"
     fi
 
     if [[ "${_PART_MODE:-}" == "1" ]]; then
-        _fmt_boot="no"; [[ "${FORMAT_BOOT:-}" =~ ^[Yy]$ ]] && _fmt_boot="yes"
-        _fmt_root="no"; [[ "${FORMAT_ROOT:-}" =~ ^[Yy]$ ]] && _fmt_root="yes"
-        printf "  3. %-11s:  existing  boot=%s  root=%s\n" \
-            "Partitions" "${BOOT_PART:-(not set)}" "${ROOT_PART:-(not set)}"
-        printf "     %-11s   format boot: %s  format root: %s\n" "" "$_fmt_boot" "$_fmt_root"
+        _fmt_boot="아니오"; [[ "${FORMAT_BOOT:-}" =~ ^[Yy]$ ]] && _fmt_boot="예"
+        _fmt_root="아니오"; [[ "${FORMAT_ROOT:-}" =~ ^[Yy]$ ]] && _fmt_root="예"
+        printf "  3. %-11s:  기존  boot=%s  root=%s\n" \
+            "파티션" "${BOOT_PART:-(미설정)}" "${ROOT_PART:-(미설정)}"
+        printf "     %-11s   부트 포맷: %s  루트 포맷: %s\n" "" "$_fmt_boot" "$_fmt_root"
     elif [[ "${_PART_MODE:-}" == "2" ]]; then
-        printf "  3. %-11s:  new  %s -> %s (EFI %s), %s (root)\n" \
-            "Partitions" "${_DISK:-(not set)}" \
-            "${BOOT_PART:-(not set)}" "${_BOOT_SIZE:-?}" "${ROOT_PART:-(not set)}"
+        printf "  3. %-11s:  신규  %s -> %s (EFI %s), %s (root)\n" \
+            "파티션" "${_DISK:-(미설정)}" \
+            "${BOOT_PART:-(미설정)}" "${_BOOT_SIZE:-?}" "${ROOT_PART:-(미설정)}"
         if [[ "${_WIPE:-false}" == "true" ]]; then
-            printf "     %-11s   ${RED}WIPE ENTIRE DISK${NC}\n" ""
+            printf "     %-11s   ${RED}전체 디스크 초기화${NC}\n" ""
         fi
     else
-        printf "  3. %-11s:  %s\n" "Partitions" "(not set)"
+        printf "  3. %-11s:  %s\n" "파티션" "(미설정)"
     fi
 
     if [ "$_HOST_IS_NEW" = true ]; then
         local _sv_display="${_STATE_VERSION:-rolling}"
-        printf "  4. %-11s:  %s  (stateVersion: %s)\n" "Preset" "${_PRESET:-workstation}" "$_sv_display"
+        printf "  4. %-11s:  %s  (stateVersion: %s)\n" "프리셋" "${_PRESET:-workstation}" "$_sv_display"
     else
-        printf "  4. %-11s:  %s  (from repo)\n" "Preset" "${_HOST_PRESET_FROM_REPO:-?}"
+        printf "  4. %-11s:  %s  (레포에서)\n" "프리셋" "${_HOST_PRESET_FROM_REPO:-?}"
     fi
     printf "  %s\n" "─────────────────────────────────────────────"
 }
@@ -244,7 +244,7 @@ save_params() {
         printf '_NEW_BOOT_NUM=%s\n'           "$_NEW_BOOT_NUM"
         printf '_NEW_ROOT_NUM=%s\n'           "$_NEW_ROOT_NUM"
     } > "$PARAMS_FILE"
-    log_msg "Config" "session saved: $PARAMS_FILE"
+    log_msg "Config" "세션 저장: $PARAMS_FILE"
 }
 
 load_params() {
@@ -258,18 +258,18 @@ load_params() {
     _boot=$(grep '^BOOT_PART='   "$PARAMS_FILE" | cut -d= -f2-)
     _root=$(grep '^ROOT_PART='   "$PARAMS_FILE" | cut -d= -f2-)
 
-    log_msg "Notice" "previous session found:"
+    log_msg "Notice" "이전 세션 발견:"
     printf "     repo=%-30s host=%s\n" "$_repo" "$_host"
     printf "     mode=%-5s boot=%-20s root=%s\n" "$_mode" "$_boot" "$_root"
 
-    _pick "load previous session?" \
-        "Yes — load and review" \
-        "No  — start fresh (delete saved session)"
+    _pick "이전 세션을 불러오시겠습니까?" \
+        "예  — 불러와서 확인" \
+        "아니오  — 새로 시작 (저장된 세션 삭제)"
 
     if [ "$REPLY" -eq 0 ]; then
         # shellcheck disable=SC1090
         source "$PARAMS_FILE"
-        log_msg "Config" "session loaded."
+        log_msg "Config" "세션 로드됨."
         return 0
     else
         rm -f "$PARAMS_FILE"
@@ -281,7 +281,7 @@ review_loop() {
     local _review=""
     while true; do
         show_summary
-        read -rp "$(_log_prompt)Enter=install  1-4=edit  s=save  q=quit: " _review || {
+        read -rp "$(_log_prompt)Enter=설치  1-4=수정  s=저장  q=종료: " _review || {
             # Ctrl+C 인터럽트: _trap_int가 경고 처리함. 타임아웃 리셋 없이 루프 재진입.
             _review=""
             continue
@@ -290,11 +290,11 @@ review_loop() {
         case "${_review:-}" in
             "")
                 if [ -z "${HOST:-}" ]; then
-                    log_msg "Error" "hostname is required. edit item 2."
+                    log_msg "Error" "호스트명이 필요합니다. 항목 2를 수정하세요."
                     continue
                 fi
                 if [ -z "${BOOT_PART:-}" ] || [ -z "${ROOT_PART:-}" ]; then
-                    log_msg "Error" "partition info is incomplete. edit item 3."
+                    log_msg "Error" "파티션 정보가 불완전합니다. 항목 3을 수정하세요."
                     continue
                 fi
                 save_params
@@ -302,15 +302,15 @@ review_loop() {
                 ;;
             s|S)
                 if [ -z "${HOST:-}" ]; then
-                    log_msg "Error" "hostname is required. edit item 2."
+                    log_msg "Error" "호스트명이 필요합니다. 항목 2를 수정하세요."
                     continue
                 fi
                 if [ -z "${BOOT_PART:-}" ] || [ -z "${ROOT_PART:-}" ]; then
-                    log_msg "Error" "partition info is incomplete. edit item 3."
+                    log_msg "Error" "파티션 정보가 불완전합니다. 항목 3을 수정하세요."
                     continue
                 fi
                 save_params
-                log_msg "Done" "params saved to $PARAMS_FILE. run again to install."
+                log_msg "Done" "$PARAMS_FILE 에 저장됨. 재실행하면 설치를 계속할 수 있습니다."
                 exit 0
                 ;;
             1)
@@ -328,11 +328,11 @@ review_loop() {
                     ask_preset
                     ask_state_version
                 else
-                    log_msg "Notice" "preset is fixed for existing hosts (from repo)."
+                    log_msg "Notice" "기존 호스트의 프리셋은 레포에서 고정됩니다."
                 fi
                 ;;
-            q|Q) log_msg "Error" "cancelled."; exit 1 ;;
-            *) log_msg "Notice" "enter 1-4 to edit, s to save, or press Enter to install." ;;
+            q|Q) log_msg "Error" "취소됨."; exit 1 ;;
+            *) log_msg "Notice" "1-4로 수정, s로 저장, Enter로 설치를 진행하세요." ;;
         esac
     done
 }

@@ -213,18 +213,12 @@ handle_signal() {
 cleanup() {
     [ -n "${SUDO_KEEPALIVE_PID:-}" ] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
 
-    END_TIME_RAW=$(date +%s)
-    END_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
-    DURATION=$((END_TIME_RAW - START_TIME_RAW))
-
     if [ "$IS_SUCCESS" != true ]; then
-        log_msg "Error" "Process terminated abnormally."
+        log_msg "Error" "비정상 종료."
     fi
 
-    log_msg "Summary" "Started:  $START_TIME_STR"
-    log_msg "Summary" "Finished: $END_TIME_STR"
-    log_msg "Summary" "Duration: ${DURATION}s"
-    log_msg "Summary" "Log File: ${LOG_FILE:-disabled}"
+    _print_summary
+    log_msg "Summary" "로그:    ${LOG_FILE:-disabled}"
 
     rm -f "$NIXOS_PATH"/result "$NIXOS_PATH"/result-*
     check_origin_git_status "$NIXOS_PATH"

@@ -4,8 +4,8 @@
 set -euo pipefail
 
 # 1. Initialization
-START_TIME_RAW=$(date +%s)
-START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
+_START_TIME=$(date +%s)
+_START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 NIXOS_PATH=$(readlink -f "$SCRIPT_DIR/../..")
 
@@ -17,7 +17,7 @@ if [ -f "$ENV_FILE" ] && [ -z "${NIXUP_DOTENV_LOADED:-}" ]; then
 fi
 
 source "$SCRIPT_DIR/nixup.lib-ui.sh"
-source "$SCRIPT_DIR/nixup.lib-build.sh"
+source "$SCRIPT_DIR/lib-build.sh"
 source "$SCRIPT_DIR/nixup.lib-lock.sh"
 source "$SCRIPT_DIR/nixup.lib-help.sh"
 _nixup_maybe_help "$@"

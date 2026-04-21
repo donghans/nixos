@@ -7,7 +7,7 @@ ask_partitions() {
     local _NUM _FS _FE _FSZ _OLD_PART_COUNT
 
     echo ""
-    log_msg "Disk" "current block devices:"
+    log_msg "Disk" "현재 블록 디바이스:"
     lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT
     echo ""
 
@@ -20,10 +20,10 @@ ask_partitions() {
     _WIPE=false
 
     while true; do
-        read -rp "$(_log_prompt)partition mode — 1=use existing, 2=create new [2]: " _PART_MODE
+        read -rp "$(_log_prompt)파티션 모드 — 1=기존 사용, 2=신규 생성 [2]: " _PART_MODE
         _PART_MODE="${_PART_MODE:-2}"
         [[ "$_PART_MODE" == "1" || "$_PART_MODE" == "2" ]] && break
-        log_msg "Error" "invalid mode. select 1 or 2."
+        log_msg "Error" "잘못된 선택. 1 또는 2를 입력하세요."
     done
 
     if [[ "$_PART_MODE" == "1" ]]; then
@@ -38,15 +38,15 @@ ask_partitions() {
                 _efi_labels+=("$(printf "%-16s %8s  %s" "$_efi_name" "$_efi_size" "${_efi_label:-<unlabeled>}")")
             done <<< "$_efi_data"
         fi
-        _efi_labels+=("+ Enter manually")
+        _efi_labels+=("+ 직접 입력")
 
         echo ""
-        _pick "select EFI partition:" "${_efi_labels[@]}"
+        _pick "EFI 파티션 선택:" "${_efi_labels[@]}"
         if [ "$REPLY" -eq "${#_efi_paths[@]}" ]; then
             while true; do
-                read -rp "$(_log_prompt)EFI partition path: " BOOT_PART
+                read -rp "$(_log_prompt)EFI 파티션 경로: " BOOT_PART
                 [ -b "$BOOT_PART" ] && break
-                log_msg "Error" "device not found: $BOOT_PART"
+                log_msg "Error" "디바이스를 찾을 수 없습니다: $BOOT_PART"
             done
         else
             BOOT_PART="${_efi_paths[$REPLY]}"
@@ -63,22 +63,22 @@ ask_partitions() {
                 _root_labels+=("$(printf "%-16s %8s [%-5s] %s" "$_root_name" "$_root_size" "$_root_fs" "${_root_label:-<unlabeled>}")")
             done <<< "$_root_data"
         fi
-        _root_labels+=("+ Enter manually")
+        _root_labels+=("+ 직접 입력")
 
         echo ""
-        _pick "select root partition:" "${_root_labels[@]}"
+        _pick "루트 파티션 선택:" "${_root_labels[@]}"
         if [ "$REPLY" -eq "${#_root_paths[@]}" ]; then
             while true; do
-                read -rp "$(_log_prompt)root partition path: " ROOT_PART
+                read -rp "$(_log_prompt)루트 파티션 경로: " ROOT_PART
                 [ -b "$ROOT_PART" ] && break
-                log_msg "Error" "device not found: $ROOT_PART"
+                log_msg "Error" "디바이스를 찾을 수 없습니다: $ROOT_PART"
             done
         else
             ROOT_PART="${_root_paths[$REPLY]}"
         fi
 
-        read -rp "$(_log_prompt)format boot partition (${BOOT_PART})? (y/N): " FORMAT_BOOT
-        read -rp "$(_log_prompt)format root partition (${ROOT_PART})? (y/N): " FORMAT_ROOT
+        read -rp "$(_log_prompt)부트 파티션 (${BOOT_PART})을 포맷하시겠습니까? (y/N): " FORMAT_BOOT
+        read -rp "$(_log_prompt)루트 파티션 (${ROOT_PART})을 포맷하시겠습니까? (y/N): " FORMAT_ROOT
 
     else
         # 디스크 선택
@@ -92,54 +92,54 @@ ask_partitions() {
                 _disk_labels+=("$(printf "%-16s %8s" "$_disk_name" "$_disk_size")")
             done <<< "$_disk_data"
         fi
-        _disk_labels+=("+ Enter manually")
+        _disk_labels+=("+ 직접 입력")
 
         echo ""
-        _pick "select target disk:" "${_disk_labels[@]}"
+        _pick "대상 디스크 선택:" "${_disk_labels[@]}"
         if [ "$REPLY" -eq "${#_disk_paths[@]}" ]; then
             while true; do
-                read -rp "$(_log_prompt)target disk path: " _DISK
+                read -rp "$(_log_prompt)대상 디스크 경로: " _DISK
                 [ -b "$_DISK" ] && break
-                log_msg "Error" "device not found: $_DISK"
+                log_msg "Error" "디바이스를 찾을 수 없습니다: $_DISK"
             done
         else
             _DISK="${_disk_paths[$REPLY]}"
         fi
 
-        read -rp "$(_log_prompt)use entire disk? (Y/n): " _USE_WHOLE
+        read -rp "$(_log_prompt)전체 디스크를 사용하시겠습니까? (Y/n): " _USE_WHOLE
         _USE_WHOLE="${_USE_WHOLE:-Y}"
 
         if [[ "$_USE_WHOLE" =~ ^[Yy]$ ]]; then
-            read -rp "$(_log_prompt_danger)WARNING: ALL data on '${_DISK}' will be erased. type 'yes' to confirm: " _CONFIRM_WIPE
+            read -rp "$(_log_prompt_danger)경고: '${_DISK}'의 모든 데이터가 삭제됩니다. 확인하려면 'yes'를 입력하세요: " _CONFIRM_WIPE
             if [[ "$_CONFIRM_WIPE" != "yes" ]]; then
-                log_msg "Error" "cancelled."
+                log_msg "Error" "취소됨."
                 exit 1
             fi
             _PART_START="1MiB"
             _PART_END="100%"
             _WIPE=true
         else
-            log_msg "Disk" "scanning free space on $_DISK ..."
+            log_msg "Disk" "$_DISK 여유 공간 스캔 중..."
             _FREE_OUTPUT=$(python3 "$SCRIPT_DIR/nixstrap.lib-part.py" free-space "$_DISK")
 
             if [[ "$_FREE_OUTPUT" == "NONE" ]]; then
-                log_msg "Error" "no usable free space (>=2GiB) found on $_DISK."
+                log_msg "Error" "$_DISK 에서 사용 가능한 여유 공간(>=2GiB)을 찾을 수 없습니다."
                 exit 1
             fi
 
             echo ""
-            log_msg "Disk" "available free space:"
+            log_msg "Disk" "사용 가능한 여유 공간:"
             while IFS=: read -r _NUM _FS _FE _FSZ; do
                 printf "  %s) %s ~ %s  (%s)\n" "$_NUM" "$_FS" "$_FE" "$_FSZ"
             done <<< "$_FREE_OUTPUT"
             echo ""
 
             while true; do
-                read -rp "$(_log_prompt)select number or enter range (e.g. 128GiB-476GiB): " _FREE_SEL
+                read -rp "$(_log_prompt)번호 선택 또는 범위 입력 (예: 128GiB-476GiB): " _FREE_SEL
                 if [[ "$_FREE_SEL" =~ ^[0-9]+$ ]]; then
                     _SELECTED=$(echo "$_FREE_OUTPUT" | grep "^${_FREE_SEL}:" || true)
                     if [ -z "$_SELECTED" ]; then
-                        log_msg "Error" "invalid selection."
+                        log_msg "Error" "잘못된 선택입니다."
                         continue
                     fi
                     _PART_START=$(echo "$_SELECTED" | cut -d: -f2)
@@ -158,7 +158,7 @@ ask_partitions() {
             _WIPE=false
         fi
 
-        read -rp "$(_log_prompt)boot partition size (default: 1GiB, enter): " _BOOT_SIZE
+        read -rp "$(_log_prompt)부트 파티션 크기 (기본: 1GiB, Enter): " _BOOT_SIZE
         _BOOT_SIZE="${_BOOT_SIZE:-1GiB}"
 
         _BOOT_END=$(python3 "$SCRIPT_DIR/nixstrap.lib-part.py" boot-end "$_PART_START" "$_BOOT_SIZE")
