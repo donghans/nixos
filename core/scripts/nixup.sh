@@ -27,7 +27,7 @@ DO_CLEAN=false; CLEAN_TARGET="user"; CLEAN_KEEP=3
 TARGET_PROFILE="os"; ACTION="switch"; LOCK_CHANGED=false
 ISO_ARCH="x86_64"
 # shellcheck disable=SC2034  # sourced scripts (nixup.task-check.sh) 에서 사용
-CHECK_DEEP=false
+CHECK_FAST=false
 EXTRA_ARGS=()
 
 # 서브커맨드 파싱 (첫 번째 인자)
@@ -57,9 +57,9 @@ for arg in "$@"; do
     case $arg in
         --all|-a)       CLEAN_TARGET="all" ;;
         --arm)          ISO_ARCH="aarch64" ;;
-        --deep)
+        --fast)
             # shellcheck disable=SC2034
-            CHECK_DEEP=true ;;
+            CHECK_FAST=true ;;
         -t|--try)    ACTION="test" ;;
         -s|--stage)  ACTION="boot" ;;
         -b|--build)  ACTION="build" ;;
@@ -83,7 +83,7 @@ done
 _action_flags=0
 for arg in "$@"; do
     case $arg in
-        -b|--build|-t|--try|-s|--stage) ((_action_flags++)) ;;
+        -b|--build|-t|--try|-s|--stage) (( ++_action_flags )) ;;
     esac
 done
 if [ "$_action_flags" -gt 1 ]; then

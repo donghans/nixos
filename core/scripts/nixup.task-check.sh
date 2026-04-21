@@ -40,8 +40,8 @@ run_check_task() {
     log_exec "nix" "<" "shellcheck"
 
     # 5. Integrity Verification
-    # 기본: 현재 호스트만 nix eval (빠름)
-    # --deep: 전체 호스트 nix flake check + eval 캐시 (.build git 기반)
+    # 기본: 전체 호스트 nix flake check (완전 검증)
+    # --fast: 현재 호스트만 nix eval (빠름)
     NIX_EVAL_FLAGS=(--allow-import-from-derivation "${NIX_FLAKE_FLAGS[@]}")
 
     # 공통: build 환경 준비 (양쪽 모드 동일)
@@ -50,18 +50,7 @@ run_check_task() {
     fi
     prepare_build_dir "$NIXOS_PATH" "$BUILD_DIR" "$ENV_FILE" "$HOST_SPECIFIC_LOCK"
 
-    if [ "$CHECK_DEEP" = true ]; then
-        log_msg "Task" "Step 5: Full integrity check via nix flake check (all hosts)"
-        log_exec "nix" ">" "nix flake check"
-        if nix flake check "path:$BUILD_DIR" "${NIX_EVAL_FLAGS[@]}"; then
-            log_exec "nix" "<" "nix flake check"
-            log_msg "Done" "All verifications passed successfully!"
-        else
-            log_exec "nix" "<" "nix flake check"
-            log_msg "Error" "Verification failed! (inspect: $BUILD_DIR)"
-            exit 1
-        fi
-    else
+    if [ "${CHECK_FAST:-false}" = true ]; then
         log_msg "Task" "Step 5: Integrity check via nix eval (nixosConfigurations.${HOST_ID})"
         EVAL_FAILED=false
 
@@ -101,6 +90,17 @@ run_check_task() {
             exit 1
         fi
         log_msg "Done" "All verifications passed successfully!"
+    else
+        log_msg "Task" "Step 5: Full integrity check via nix flake check (all hosts)"
+        log_exec "nix" ">" "nix flake check"
+        if nix flake check "path:$BUILD_DIR" "${NIX_EVAL_FLAGS[@]}"; then
+            log_exec "nix" "<" "nix flake check"
+            log_msg "Done" "All verifications passed successfully!"
+        else
+            log_exec "nix" "<" "nix flake check"
+            log_msg "Error" "Verification failed! (inspect: $BUILD_DIR)"
+            exit 1
+        fi
     fi
 }
 

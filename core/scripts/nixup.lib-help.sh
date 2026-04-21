@@ -35,7 +35,8 @@ NixOS update utility
   nixup --try                   임시 활성화 (재부팅 시 원복)
   nixup home --build            홈 설정 빌드만 수행
   nixup clean --all --keep=5    시스템 전체 정리, 5세대 보존
-  nixup check --deep            전체 호스트 완전 검사
+  nixup check                   전체 호스트 완전 검사
+  nixup check --fast            현재 호스트만 빠른 검사
 
 서브커맨드별 도움말: nixup SUBCOMMAND --help
 EOF
@@ -79,10 +80,10 @@ EOF
             cat <<'EOF'
 nixup check [FLAGS]  —  코드 무결성 검사
 
-  단계: deadnix → statix fix → alejandra → shellcheck → nix eval
+  단계: deadnix → statix fix → alejandra → shellcheck → nix flake check
 
   플래그:
-    --deep     nix eval 대신 nix flake check로 전체 호스트 완전 검사
+    --fast     nix flake check 대신 nix eval로 현재 호스트만 빠른 검사
     -h, --help 이 도움말
 
   참고: check는 NIXUP_LAST_HOST를 갱신하지 않습니다.

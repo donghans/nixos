@@ -1,27 +1,17 @@
 #!/usr/bin/env bash
 
-# 성공 후 이전/현재 세대 간 패키지 변경사항을 로그에 기록
-# test/build 액션은 새 세대를 만들지 않으므로 제외
-_log_nvd_diff() {
-    local profile_path=$1
-    local label=$2
+# 빌드 전/후 store path를 직접 비교하여 패키지 변경사항 출력
+# pre_store와 new_store를 직접 받아 비교 → 모든 액션(switch/test/build)에서 동작
+_show_nvd_diff() {
+    local old_store=$1 new_store=$2 label=$3
 
-    # shellcheck disable=SC2153
-    [[ "$ACTION" == "test" || "$ACTION" == "build" ]] && return
-    [ ! -L "$profile_path" ] && return
-
-    local profile_dir profile_name link_name cur_num prev_num prev_path
-    profile_dir=$(dirname "$profile_path")
-    profile_name=$(basename "$profile_path")
-    link_name=$(readlink "$profile_path")
-    cur_num=$(echo "$link_name" | grep -oE '[0-9]+-link' | grep -oE '[0-9]+')
-    prev_num=$(( cur_num - 1 ))
-    prev_path="$profile_dir/${profile_name}-${prev_num}-link"
-
-    [ ! -e "$prev_path" ] && return
+    if [ -z "$old_store" ] || [ -z "$new_store" ] || [ "$old_store" = "$new_store" ]; then
+        log_msg "Notice" "no package changes ($label)"
+        return
+    fi
 
     local diff_out
-    diff_out=$(nvd diff "$prev_path" "$(readlink -f "$profile_path")" 2>&1 || true)
+    diff_out=$(nvd diff "$old_store" "$new_store" 2>&1 || true)
     if echo "$diff_out" | grep -qE '^(Added|Removed|Changed) packages:'; then
         log_exec "nvd" ">" "nvd diff ($label)"
         echo "$diff_out"
@@ -127,12 +117,9 @@ run_build_task() {
         local pre_store
         pre_store=$(readlink -f "/nix/var/nix/profiles/system" 2>/dev/null || true)
         _nix_build "$attr"
+        # shellcheck disable=SC2153  # ACTION은 nixup.sh에서 전역으로 설정됨
         _activate_os "$NIX_BUILD_RESULT" "$ACTION"
-        if [ "$NIX_BUILD_RESULT" = "$pre_store" ]; then
-            log_msg "Notice" "no package changes (os)"
-        else
-            _log_nvd_diff "/nix/var/nix/profiles/system" "os"
-        fi
+        _show_nvd_diff "$pre_store" "$NIX_BUILD_RESULT" "os"
     fi
 
     if [ "$TARGET_PROFILE" == "home" ] || [ "$TARGET_PROFILE" == "all" ]; then
@@ -143,11 +130,7 @@ run_build_task() {
         _activate_home "$NIX_BUILD_RESULT" "$ACTION"
         # nixstrap 첫 부팅 마커 제거 (switch 시에만)
         [[ "$ACTION" == "switch" ]] && rm -f "$HOME/.nixstrap-first-run" 2>/dev/null || true
-        if [ "$NIX_BUILD_RESULT" = "$pre_home_store" ]; then
-            log_msg "Notice" "no package changes (home)"
-        else
-            _log_nvd_diff "$HOME/.local/state/nix/profiles/home-manager" "home"
-        fi
+        _show_nvd_diff "$pre_home_store" "$NIX_BUILD_RESULT" "home"
     fi
 }
 
