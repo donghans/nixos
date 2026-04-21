@@ -139,17 +139,35 @@ fvm = true
 
 **workstation**: GUI(Hyprland), 개발 도구(`mods.devel`), Bluetooth, Docker, Tailscale, Incus, NetworkManager가 기본 활성화됩니다. `stateVersion` 미지정 시 rolling 채널을 사용합니다.
 
-**server**: GUI와 개발 도구는 비활성화됩니다. 다음 서비스가 기본 활성화됩니다:
+**server**: GUI와 개발 도구는 비활성화됩니다. 서비스는 모두 기본 `false`이며, 필요한 것만 `<hostname>.toml`에서 명시적으로 활성화합니다:
 
-| 서비스 | 설명 |
-|--------|------|
-| `networkmanager` | 네트워크 관리 |
-| `tailscale` | VPN 메시 네트워크 |
-| `incus` | LXC/VM 컨테이너 |
-| `caddy` | 리버스 프록시 |
-| `cockpit` | 웹 기반 서버 관리 UI |
+```toml
+[mods.sys.services]
+tailscale       = true   # VPN 메시 네트워크
+caddy           = true   # 리버스 프록시
+headscale       = true   # self-hosted VPN 컨트롤러
+nix-cache-proxy = true   # Nix 바이너리 캐시 프록시
+```
 
-`<hostname>.toml`의 `[mods.sys.services]` 섹션에서 개별 서비스를 `false`로 비활성화하거나 추가 서비스(headscale, frp, nix-cache-proxy 등)를 켤 수 있습니다.
+---
+
+## 4-B. 원격 서버 설치 (rnixstrap)
+
+클라우드 서버(Lightsail, Hetzner 등)에 nixos-anywhere + deploy-rs로 원격 설치할 때 사용합니다. **기존 NixOS 환경에서 실행**합니다.
+
+```bash
+rnixstrap   # 대화형으로 새 호스트 추가 또는 기존 호스트 재설치
+```
+
+`rnixstrap`이 자동으로 처리하는 것:
+- 호스트명 · IP · SSH 키 · system · 서비스 대화형 입력
+- `hosts/<hostname>.toml` · `hosts/<hostname>.nix` 생성
+- 서버 RAM 사전 감지 (kexec 최소 1000MB 확인)
+- nixos-anywhere로 원격 파티셔닝 + NixOS 설치
+- `hosts/deploy/<hostname>.pub` · `hosts/deploy/<hostname>.hardware.nix` 저장
+- deploy-rs로 초기 설정 배포
+
+설치 완료 후 일상 배포는 `rnixup`을 사용합니다.
 
 ---
 

@@ -8,7 +8,7 @@
 프로젝트를 구성하는 4개의 핵심 레이어에 대한 상세 분석입니다.
 👉 [**ARCHITECTURE.md 자세히 보기**](./ARCHITECTURE.md)
 
-- **CLI Engine**: `nixup.sh`와 태스크 스크립트 구조 (Update, Fix, Check 등).
+- **CLI Engine**: `nixup.sh` · `nixstrap.sh` · `rnixup.sh` · `rnixstrap.sh`와 태스크 스크립트 구조 (Update, Fix, Check, Deploy 등).
 - **Metadata**: TOML 기반의 데이터 중심 설계.
 - **Logic Core**: Flake 기반 동적 호스트 생성.
 - **Mods Layer**: 도메인별 기능 모듈 및 프레임워크 (→ 아래 섹션 3 참조).
@@ -26,10 +26,11 @@
 - **Expansion**: 호스트 구성 로드·상속, 모듈 믹스인 및 커버리지 검증.
 - **Application**: 빌드·액션 분기, NVD diff, 로그 기록.
 
-### nixstrap
+### nixstrap / rnixstrap
 신규 기기 부트스트랩 설치 흐름입니다.
 👉 [**LIFECYCLE_NIXSTRAP.md 자세히 보기**](./LIFECYCLE_NIXSTRAP.md)
 
+**nixstrap** (로컬 설치):
 - **sync-remote 초기화**: git remote 감지, `_base.toml` 자동 갱신 (nixosRepo · name · email · username).
 - **Phase 1 — 레포 · 호스트**: 레포 클론 또는 로컬 경로 사용, 호스트 선택·프리셋·username·릴리즈 고정.
 - **Phase 1 — 파티셔닝**: 기존 파티션 지정(mode 1) 또는 디스크·범위 선택 후 자동 생성(mode 2).
@@ -37,6 +38,10 @@
 - **Phase 2 — 디스크 준비**: cleanup → labels → 파티션 생성 → 포맷 → 마운트.
 - **Phase 2 — 설치 환경 구성**: 레포 이동, 호스트 프로파일, resolve, build-dir, hw-config.
 - **Phase 2 — 설치 · 후처리**: nixos-install, post_process (chown · symlink · chpasswd).
+
+**rnixstrap** (원격 초기 설치):
+- **Phase 1**: 호스트 선택/신규, IP · SSH 키 · system 입력.
+- **run_setup**: RAM 감지 → 설정 확인 → TOML 생성 → 공개키 추출(`hosts/deploy/<hostname>.pub`) → nixos-anywhere → hardware.nix 역복사(`hosts/deploy/<hostname>.hardware.nix`) → deploy-rs 배포.
 
 ---
 
@@ -76,7 +81,10 @@
 │   ├── _preset.server.toml  # 서버 프리셋 mods 정의
 │   ├── _preset.iso.toml     # ISO 프리셋 mods 정의
 │   ├── <hostname>.toml      # 호스트 메타데이터 (type, preset, mods 오버라이드)
-│   └── <hostname>.nix       # 호스트 전용 NixOS + Home Manager 설정 (mkHostConfiguration 패턴)
+│   ├── <hostname>.nix       # 호스트 전용 NixOS + Home Manager 설정 (mkHostConfiguration 패턴)
+│   └── deploy/              # 원격 호스트 전용 파일
+│       ├── <hostname>.pub          # SSH 공개키 (rnixstrap이 추출·저장)
+│       └── <hostname>.hardware.nix # 하드웨어 설정 (nixos-anywhere 후 역복사)
 ├── mods/                    # Mods 프레임워크 (3개 도메인)
 │   ├── sys/                 # 시스템 기반 (base, fonts, vfs, services, utils)
 │   ├── gui/                 # GUI 환경 (base 번들, apps, utils)

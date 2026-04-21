@@ -84,7 +84,7 @@ nixos/
 │   ├── flake.nix       # 메인 진입점
 │   ├── lib/            # 호스트 빌더(host.nix), Mods 헬퍼(mods.nix), 옵션 선언(workspace-options.nix)
 │   ├── overlays/       # 커스텀 오버레이 (mkWrapper 헬퍼)
-│   └── scripts/        # nixup 관리 CLI + nixstrap 설치 스크립트
+│   └── scripts/        # nixup · nixstrap · rnixup · rnixstrap CLI
 ├── mods/               # 재사용 가능한 기능 모듈
 │   ├── sys/            # 시스템 기반 (base, fonts, vfs, services, utils)
 │   ├── gui/            # GUI 환경 (Hyprland 번들, apps, utils)
@@ -94,7 +94,8 @@ nixos/
 │   ├── _base.toml      # 전역 메타데이터 (username, git, system)
 │   ├── _preset.*.toml  # 프리셋 정의 (workstation/server/iso)
 │   ├── <hostname>.toml # 호스트 메타데이터 (type, preset, mods 오버라이드)
-│   └── <hostname>.nix  # 호스트 전용 NixOS + Home Manager 설정
+│   ├── <hostname>.nix  # 호스트 전용 NixOS + Home Manager 설정
+│   └── deploy/         # 원격 호스트 전용 (pub 키, hardware.nix)
 └── .locks/             # Flake lock 파일 (Rolling/Stable 전략)
 ```
 

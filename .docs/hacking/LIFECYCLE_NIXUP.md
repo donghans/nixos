@@ -30,7 +30,7 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 
 ### 메타데이터 · 패키지
 
-1. **Metadata Parsing**: `flake.nix`가 `resolved.json`과 `presets.json`을 읽어 모든 호스트 설정을 AttrSet으로 생성합니다.
+1. **Metadata Parsing**: `flake.nix`가 `resolved.json`과 `presets.json`을 읽어 모든 호스트 설정을 AttrSet으로 생성합니다. `resolved.json`의 `deploy` 섹션 유무로 `isRemote` 여부를 판단하며, `bootLoader`(enum: `systemd-boot` · `grub-bios` · `grub-uefi`)가 부트 방식을 결정합니다.
 2. **Package Set Construction**: `nixpkgs`, `unstable`, 그리고 `.env`에 명시된 `unstable-fallback`을 조합하여 기기에 최적화된 패키지 세트를 구성합니다.
 
 ### 오버레이
@@ -46,7 +46,7 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 ### 호스트 구성
 
 1. **Host Specific Loading**: `hosts/<hostname>.nix`가 먼저 로드됩니다. 프리셋 mods는 flake.nix가 `resolved.json`과 `presets.json`을 병합하여 `modsModule`로 주입합니다.
-2. **Inheritance**: 기기별 하드웨어 설정(`hardware.nix`)이 `.build/` 환경에서 임포트됩니다. 레포에는 포함되지 않으며 빌드 시 자동 생성됩니다.
+2. **Inheritance**: 기기별 하드웨어 설정(`hardware.nix`)이 `.build/` 환경에서 임포트됩니다. 로컬 호스트는 빌드 시 자동 생성(`nixos-generate-config`)되어 레포에 포함되지 않습니다. 원격 호스트(`isRemote=true`)는 `hosts/deploy/<hostname>.hardware.nix`를 우선 탐색하고, 없으면 `.build/hardware.nix`로 fallback합니다.
 
 ### 모듈 · 검증
 
@@ -58,6 +58,10 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 ## 4. Application Phase (최종 적용)
 
 빌드된 명세를 실제 시스템에 반영하는 마지막 단계입니다.
+
+### 사전 준비
+
+0. **Sudo Pre-auth**: `nixup os` / `nixup`(기본값) 실행 시 빌드 전 `sudo -v`로 인증을 완료하고 백그라운드 keepalive 프로세스(`sudo -n true; sleep 60` 루프)를 유지합니다. 빌드가 수십 분 걸려도 활성화 단계에서 sudo 타임아웃이 발생하지 않습니다. **실행 시간은 sudo 인증 완료 후부터 측정**됩니다.
 
 ### 빌드 · 액션
 

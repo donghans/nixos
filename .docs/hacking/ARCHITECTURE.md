@@ -16,24 +16,36 @@
 - **`nixup.sh` (Dispatcher)**:
   - **역할**: 모든 명령의 통합 입구이자 빌드 오케스트레이터입니다.
   - **특징**: `nix-shell` 쉬뱅을 사용하여 `jq`, `nom` 등의 도구가 없어도 시스템을 부트스트랩할 수 있도록 설계되었습니다. 로깅(`YYYYMMDDTHHMMSS.log`, 예: `20260405T120000.log`)과 세션 락(`flock`)을 독점적으로 관리합니다.
-  - **Task & Lib**:
-    - **`nixup.lib-ui.sh`**: 색상 상수, `log_msg`/`log_exec` 헬퍼, 초기화 배너 출력.
-    - **`nixup.lib-build.sh`**: `.build/` 격리 빌드 환경 구축 로직. 소스를 물리 복사하고 nix를 `path:` 모드로 호출하여 git 추적 없이 순수 평가를 수행합니다.
+  - **Shared Lib**:
+    - **`lib-ui.sh`**: 색상 상수, `log_msg`/`log_exec`/`_pick`/`_check`/`_print_summary` 헬퍼. nixup·nixstrap·rnixup·rnixstrap **4개 커맨드가 공유**하는 UI 레이어.
+    - **`lib-build.sh`**: `.build/` 격리 빌드 환경 구축, 세션 락(`flock`), 시그널 핸들링. 소스를 물리 복사하고 nix를 `path:` 모드로 호출하여 git 추적 없이 순수 평가를 수행합니다.
+  - **nixup Task & Lib**:
+    - **`nixup.lib-ui.sh`**: `_LOG_PREFIX="NIXUP"` 설정 후 `lib-ui.sh` 소싱 — nixup 전용 얇은 래퍼.
     - **`nixup.lib-lock.sh`**: 기기 특성(`isRolling`)에 따른 유연한 락 파일 관리 로직.
     - **`nixup.task-resolve.py`**: TOML 소스(`hosts/_base.toml`, `hosts/<hostname>.toml`, `hosts/_preset.*.toml`)를 읽어 Nix가 사용할 `resolved.json`과 `presets.json`을 생성하는 메타데이터 변환기.
     - **`nixup.task-*.sh`**: 실제 비즈니스 로직(빌드, 업데이트, 복구 등)을 수행하는 모듈형 스크립트.
-- **`nixstrap.sh` (Bootstrap Engine)**:
+- **`nixstrap.sh` (Local Bootstrap Engine)**:
   - nixup과 독립적인 설치 전용 서브시스템. `nixstrap` 명령으로 노출됩니다. Phase 1/2 흐름 제어 및 공유 상태 관리.
   - **Phase 1 (입력 수집)**: 저장소 클론 또는 로컬 경로 사용, 호스트·파티션·프리셋 선택, 비밀번호 입력. 이전 세션 파라미터(`/root/nixstrap-params.env`) 복원 지원.
   - **Phase 2 (설치 실행)**: 파티셔닝(EFI+Btrfs) → 서브볼륨 생성 → 마운트 → 하드웨어 감지 → `nixos-install` → 후처리(저장소 이동·심볼릭 링크·비밀번호 적용) 순서 실행.
   - **Lib**:
-    - `nixstrap.lib-ui.sh`: 색상 상수, 로깅 헬퍼, 화살표 키 선택 UI.
+    - `nixstrap.lib-ui.sh`: `_LOG_PREFIX="NIXSTRAP"` 설정 후 `lib-ui.sh` 소싱 — nixstrap 전용 얇은 래퍼.
     - `nixstrap.lib-repo.py`: TOML 파싱, 디스크 레이블 추출 등 레포지토리/설정 헬퍼.
     - `nixstrap.lib-part.py`: 빈 공간 탐색, 파티션 범위 검증 등 디스크/파티션 헬퍼.
   - **Task**:
     - `nixstrap.task-input.sh`: Phase 1 대화형 입력 함수 (저장소·호스트·프리셋·비밀번호·세션 관리).
     - `nixstrap.task-disk.sh`: Phase 1 디스크·파티션 입력 함수 (`ask_partitions`).
     - `nixstrap.task-install.sh`: Phase 2 설치 실행 함수.
+- **`rnixup.sh` (Remote Deploy Engine)**:
+  - 원격 NixOS 호스트에 deploy-rs로 설정을 배포하는 도구. `rnixup` 명령으로 노출됩니다.
+  - **흐름**: dry-activate 미리보기 → 사용자 확인 → 전체 호스트 배포. 실행 시간은 사용자 확인 직후부터 측정됩니다.
+  - `rnixup list`: 설정된 원격 호스트 목록 출력.
+  - **`rnixup.task-deploy.sh`**: SSH 키 사전 확인, dry-activate, 배포 확인 프롬프트, 실제 deploy-rs 실행.
+- **`rnixstrap.sh` (Remote Initial Install Engine)**:
+  - 원격 서버에 nixos-anywhere로 NixOS를 처음 설치하는 도구. `rnixstrap` 명령으로 노출됩니다.
+  - **Phase 1 (입력 수집)**: 호스트 선택/신규, IP·SSH 키·system·서비스 입력.
+  - **run_setup**: RAM 사전 감지 → 설정 확인 → TOML 파일 생성 → 공개키 추출·저장 → nixos-anywhere 설치 → hardware.nix 역복사 → deploy-rs 배포.
+  - **Lib**: `rnixstrap.lib-input.sh` (대화형 입력 함수), `rnixstrap.task-setup.sh` (설치 오케스트레이터).
 
 ---
 
@@ -48,6 +60,8 @@
 - **호스트별 Nix 파일**: TOML로 표현하기 어려운 하드웨어 고유 설정을 직접 작성하는 공간입니다.
   - `hosts/<hostname>.nix`: 커널 파라미터, 하드웨어 모듈 등 NixOS 시스템 레벨 설정과 Home Manager 설정을 `mkHostConfiguration` 패턴으로 함께 담습니다.
   - `hosts/<hostname>.home.nix`: Home Manager 전용 추가 설정 (디스플레이 배열, 터치패드/리드스위치 동작, 절전 타이머 등 하드웨어 종속 개인화 로직). 분리가 필요할 때만 사용합니다.
+  - `hosts/deploy/<hostname>.pub`: rnixstrap이 서버에서 추출한 SSH 공개키. deploy-rs의 root 인증에 사용됩니다.
+  - `hosts/deploy/<hostname>.hardware.nix`: rnixstrap 설치 후 서버에서 역복사된 하드웨어 설정. 이후 `rnixup` 빌드 시 `hardware.nix` 대신 이 파일이 우선 사용됩니다.
 
 **리졸브 우선순위** — 병합은 2단계로 진행됩니다.
 
@@ -60,6 +74,8 @@
 | `system` | `<hostname>.toml` → `_base.toml` |
 | `diskDevice`, `bootDevice` | `<hostname>.toml` → `_base.toml` (파티션 경로. 레이블·UUID 모두 가능) |
 | `type`, `preset` | `<hostname>.toml` 필수 선언 |
+| `bootLoader` | `<hostname>.toml` 선언 (enum: `systemd-boot` · `grub-bios` · `grub-uefi`, 기본: `systemd-boot`) |
+| `isRemote` | resolver가 `[deploy]` 섹션 유무로 자동 판단 — 직접 선언 불필요 |
 | `ramGb` | 자동 감지 (`/proc/meminfo`), `<hostname>.toml` 입력 무시 |
 | `swapGb`, `tmpfsSize`, `zramPercent` | 선택적 오버라이드 (기본값: 자동 계산) |
 | `stateVersion` | `<hostname>.toml` 명시 → preset 선언 → `_base.toml rollingStateVersion` (rolling 폴백, 항상 non-null) |

@@ -1,6 +1,8 @@
-# nixstrap 부트스트랩 라이프사이클
+# nixstrap / rnixstrap 부트스트랩 라이프사이클
 
-새 기기에 NixOS를 처음 설치할 때 `nixstrap`이 실행하는 단계별 흐름입니다. 커스텀 ISO 부팅 또는 기존 환경에서 `./nixstrap.sh`로 진입합니다.
+**nixstrap**: 새 로컬 기기에 NixOS를 처음 설치할 때 사용합니다. 커스텀 ISO 부팅 또는 기존 환경에서 `./nixstrap.sh`로 진입합니다.
+
+**rnixstrap**: 원격 서버에 nixos-anywhere로 초기 설치하는 도구입니다. `rnixstrap` 명령으로 진입합니다. Phase 1 입력 수집 후 `run_setup`에서 TOML 생성 → nixos-anywhere 설치 → deploy-rs 배포 순으로 진행합니다.
 
 ```mermaid
 {{#include ./LIFECYCLE_NIXSTRAP.mermaid}}
@@ -70,7 +72,7 @@
 | 8 | `resolve_metadata` | `nixup.task-resolve.py` 실행 → `resolved.json` / `presets.json` |
 | 9 | `extract_username` | `_base.toml` → `USERNAME` 결정 |
 | 10 | `prepare_build_dir` | `/tmp/nixos-build` 격리 환경 구성 |
-| 11 | `generate_hw_config` | `nixos-generate-config --show-hardware-config` → `hardware.nix` (BUILD_DIR에만 생성, 레포 미포함) |
+| 11 | `generate_hw_config` | `nixos-generate-config --show-hardware-config` → `hardware.nix` (BUILD_DIR에만 생성) |
 
 ### 설치 · 후처리 (12–14)
 
@@ -78,3 +80,31 @@
 |---|------|------|
 | 12 | `nixos-install` | `--no-root-passwd --flake path:#HOST` 로 설치 |
 | 13–14 | `_post_process` | `/mnt/etc/nixos` → `/home/USERNAME/nixos` 이동, chown · symlink, `chpasswd`로 비밀번호 자동 적용 후 메모리 즉시 비움 |
+
+> **타이머**: Phase 1 전체(입력 수집 · review_loop · ask_password)가 완료된 직후, phase2_execute 시작 전부터 실행 시간을 측정합니다. 사용자가 대화에 머무른 시간은 제외됩니다.
+
+---
+
+## rnixstrap 흐름
+
+원격 서버 초기 설치 전용입니다. `nixstrap`과 달리 디스크 파티셔닝을 직접 수행하지 않고 nixos-anywhere에 위임합니다.
+
+### Phase 1 · 입력 수집
+
+| 입력 | 설명 |
+|------|------|
+| 호스트 선택/신규 | 기존 TOML에서 선택하거나 새 hostname 입력 |
+| IP 주소 | 접속 대상 서버 IP |
+| SSH 키 경로 | `~/.ssh/rnixup/` 하위 권장. TOML 저장 시 `~` 정규화 |
+| system | `x86_64-linux` / `aarch64-linux` (신규 호스트만) |
+| 서비스 | headscale 등 선택적 활성화 (신규 호스트만) |
+
+### run_setup · 설정 확인 및 실행
+
+1. **_probe_ram**: SSH로 서버 RAM 사전 측정 (kexec 최소 1000MB 확인)
+2. **설정 확인 · 선택**: `_pick`으로 바로 진행 / 쓰기만 / 취소 선택 — **타이머는 선택 직후부터 시작**
+3. **파일 작업**: `hosts/<hostname>.toml` · `hosts/<hostname>.nix` 생성 또는 업데이트
+4. **SSH 정보 추출**: 서버에서 공개키 추출 → `hosts/deploy/<hostname>.pub` 저장
+5. **nixos-anywhere**: 서버에 원격 파티셔닝 + NixOS 설치
+   - 생성된 `hardware.nix`를 `hosts/deploy/<hostname>.hardware.nix`로 레포에 역복사
+6. **deploy-rs 배포**: 설치 완료 후 rnixup으로 초기 설정 배포
