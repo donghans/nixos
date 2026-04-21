@@ -6,7 +6,8 @@
 base       = true
 
 [mods.sys.utils]
-nfd = false
+nfd   = false
+trash = false
 
 [mods.sys.services]
 bluetooth      = true
@@ -15,10 +16,7 @@ docker         = false
 incus          = false
 incus-win11    = false
 incus-guest    = true
-headscale        = false
 caddy            = false
-cockpit          = false
-frp              = false
 nix-cache-proxy  = false
 
 [mods.gui]
