@@ -93,7 +93,7 @@ run_check_task() {
     else
         log_msg "Task" "Step 5: Full integrity check via nix flake check (all hosts)"
         log_exec "nix" ">" "nix flake check"
-        if nix flake check "path:$BUILD_DIR" "${NIX_EVAL_FLAGS[@]}"; then
+        if nix flake check "path:$BUILD_DIR" "${NIX_EVAL_FLAGS[@]}" 2> >(grep -v "warning: unknown flake output 'deploy'" >&2); then
             log_exec "nix" "<" "nix flake check"
             log_msg "Done" "All verifications passed successfully!"
         else
