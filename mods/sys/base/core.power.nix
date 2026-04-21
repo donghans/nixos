@@ -6,7 +6,7 @@ mkPartOf "mods.sys.base" ({
 }: let
   isRpi = config.workspace.type == "rpi";
   isVm = config.mods.sys.services.incus-guest.enable;
-  isServer = config.mods.sys.server.enable;
+  isServer = config.workspace.type == "server";
   isLaptop = config.workspace.type == "laptop";
 
   # (목적: RPi(ARM)과 VM 내부에서는 TLP가 무의미하거나 오작동할 수 있으므로 제외)

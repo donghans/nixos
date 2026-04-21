@@ -27,13 +27,9 @@ mkPartOf "mods.sys.base" ({
         RebootWatchdogSec = "off";
         KExecWatchdogSec = "off";
       };
-
-      # (목적: 부팅 시 온라인 대기 비활성화로 부팅 속도 향상)
-      systemd.services.NetworkManager-wait-online.enable = false;
-      systemd.network.wait-online.enable = false;
     })
     # (목적: 서버용 고성능 네트워크 및 파일 시스템 최적화)
-    (lib.mkIf config.mods.sys.server.enable {
+    (lib.mkIf (config.workspace.type == "server") {
       boot = {
         # (이유: intel_iommu/iommu=pt는 x86 전용 — ARM은 arm-smmu로 별도 처리)
         kernelParams = lib.optionals pkgs.stdenv.hostPlatform.isx86_64 [

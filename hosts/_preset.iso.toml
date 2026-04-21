@@ -4,14 +4,12 @@
 
 [mods.sys]
 base       = true
-server     = false
 
 [mods.sys.utils]
 nfd = false
 
 [mods.sys.services]
 bluetooth      = true
-networkmanager = true
 tailscale      = false
 docker         = false
 incus          = false

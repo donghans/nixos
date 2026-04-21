@@ -2,7 +2,6 @@
 
 [mods.sys]
 base = true
-server = true
 fonts = true
 vfs = true
 
@@ -10,7 +9,6 @@ vfs = true
 nfd = true
 
 [mods.sys.services]
-networkmanager = true
 tailscale      = true
 incus          = true
 incus-win11    = false
