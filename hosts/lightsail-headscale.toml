@@ -1,0 +1,20 @@
+# AWS Lightsail headscale 서버
+# 배포 전 LIGHTSAIL_PUBLIC_IP와 도메인을 실제 값으로 교체하세요.
+
+preset    = "server"
+type      = "server"
+system    = "x86_64-linux"
+swapGb    = 0       # resolve.py는 로컬 /proc/meminfo 기준 → 원격 호스트는 명시 필요
+tmpfsSize = "0"     # tmpfs 비활성 (저사양 RAM 절약)
+diskDevice = "/dev/xvda"
+bootDevice = "/dev/xvda"  # cloud-bios(MBR) → ESP 없음, dummy
+
+[deploy]
+destination = "cloud-bios"
+ip          = "LIGHTSAIL_PUBLIC_IP"
+sshKey      = "/home/donghans/.ssh/lightsail-headscale.pem"
+
+[mods.sys.services]
+caddy     = true
+tailscale = false
+incus     = false

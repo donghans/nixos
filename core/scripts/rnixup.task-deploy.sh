@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# rnixup.task-deploy.sh — 원격 NixOS 호스트 전체 배포 (deploy-rs)
+#
+# deploy.nodes 전체를 deploy-rs 네이티브 병렬로 배포.
+# 변수 의존: BUILD_DIR, JSON_DIR
+
+# readline-safe 프롬프트 (read -e 와 함께 사용)
+_rnixup_prompt_rl() {
+    printf "\001${CYAN}\002RNIXUP\001${NC}\002 \001${YELLOW}\002%-9s\001${NC}\002 | " "Input"
+}
+
+# ── SSH 키 파일 누락 사전 확인 ────────────────────────────────────────────────
+# ~/.ssh/rnixup/.hostignore에 없는 호스트 중 sshKey 파일이 없으면 일괄 안내.
+_check_ssh_keys() {
+    local hostignore="$HOME/.ssh/rnixup/.hostignore"
+    local resolved_json="$JSON_DIR/resolved.json"
+    local rnixup_dir="$HOME/.ssh/rnixup"
+    local -a _missing_hosts=() _missing_keys=()
+    local -a _remain_hosts=() _remain_keys=() _check_args=()
+    local _choice _src _ignored _selected sel hostname i
+
+    while IFS=$'\t' read -r hostname keypath; do
+        [ -z "$hostname" ] && continue
+        # .hostignore에 등록된 호스트는 스킵
+        if [ -f "$hostignore" ] && grep -qxF "$hostname" "$hostignore" 2>/dev/null; then
+            continue
+        fi
+        local expanded="${keypath/#\~/$HOME}"
+        if [ ! -f "$expanded" ]; then
+            _missing_hosts+=("$hostname")
+            _missing_keys+=("$expanded")
+        fi
+    done < <(jq -r '
+        to_entries[]
+        | select(.value.deploy != null and (.value.deploy.sshKey // "") != "")
+        | [.key, .value.deploy.sshKey]
+        | @tsv
+    ' "$resolved_json")
+
+    [ "${#_missing_hosts[@]}" -eq 0 ] && return
+
+    while [ "${#_missing_hosts[@]}" -gt 0 ]; do
+        # 누락 목록 출력
+        printf "\n"
+        log_msg "Warn" "SSH 키 파일이 없는 호스트 (${#_missing_hosts[@]}개):"
+        for i in "${!_missing_hosts[@]}"; do
+            printf "  ${YELLOW}%-28s${NC} → %s\n" "${_missing_hosts[$i]}" "${_missing_keys[$i]}"
+        done
+        printf "\n"
+        log_msg "Input" "처리 방법: [c]opy 경로 지정  /  [q]uit  /  [i]gnore 다시 묻지 않음:"
+        read -rp "$(printf "${CYAN}RNIXUP${NC} ${YELLOW}%-9s${NC} | " "Input")" _choice
+
+        case "${_choice:-q}" in
+            c|C)
+                mkdir -p "$rnixup_dir"
+                chmod 700 "$rnixup_dir"
+                # 복사할 호스트 선택 (선택 없이 Enter → 뒤로가기)
+                _check_args=()
+                for i in "${!_missing_hosts[@]}"; do
+                    _check_args+=("${_missing_hosts[$i]}" "${_missing_hosts[$i]}  →  ${_missing_keys[$i]}")
+                done
+                _check "복사할 호스트를 선택하세요  (선택 없이 Enter = 뒤로가기)" "${_check_args[@]}"
+                [ "${#REPLY_CHECKED[@]}" -eq 0 ] && continue
+                # 선택된 호스트마다 순서대로 경로 입력
+                _remain_hosts=(); _remain_keys=()
+                for i in "${!_missing_hosts[@]}"; do
+                    _selected=false
+                    for sel in "${REPLY_CHECKED[@]}"; do
+                        [ "${_missing_hosts[$i]}" = "$sel" ] && _selected=true && break
+                    done
+                    if [ "$_selected" = false ]; then
+                        _remain_hosts+=("${_missing_hosts[$i]}")
+                        _remain_keys+=("${_missing_keys[$i]}")
+                        continue
+                    fi
+                    printf "\n"
+                    log_msg "Input" "${_missing_hosts[$i]} 키 파일 원본 경로 (Tab 자동완성, 빈 줄=건너뜀):"
+                    read -rep "$(_rnixup_prompt_rl)" _src
+                    if [ -z "$_src" ]; then
+                        log_msg "Notice" "건너뜀: ${_missing_hosts[$i]}"
+                        _remain_hosts+=("${_missing_hosts[$i]}")
+                        _remain_keys+=("${_missing_keys[$i]}")
+                    else
+                        _src="${_src/#\~/$HOME}"
+                        if [ ! -f "$_src" ]; then
+                            log_msg "Error" "파일 없음: $_src"
+                            _remain_hosts+=("${_missing_hosts[$i]}")
+                            _remain_keys+=("${_missing_keys[$i]}")
+                        else
+                            cp "$_src" "${_missing_keys[$i]}"
+                            chmod 600 "${_missing_keys[$i]}"
+                            log_msg "Done" "복사 완료: ${_missing_keys[$i]}"
+                        fi
+                    fi
+                done
+                _missing_hosts=("${_remain_hosts[@]+"${_remain_hosts[@]}"}")
+                _missing_keys=("${_remain_keys[@]+"${_remain_keys[@]}"}")
+                ;;
+            i|I)
+                # _check UI: ignore할 호스트 복수 선택
+                _check_args=()
+                for i in "${!_missing_hosts[@]}"; do
+                    _check_args+=("${_missing_hosts[$i]}" "${_missing_hosts[$i]}  →  ${_missing_keys[$i]}")
+                done
+                _check "ignore할 호스트를 선택하세요" "${_check_args[@]}"
+                if [ "${#REPLY_CHECKED[@]}" -gt 0 ]; then
+                    mkdir -p "$rnixup_dir"
+                    for hostname in "${REPLY_CHECKED[@]}"; do
+                        echo "$hostname" >> "$hostignore"
+                    done
+                    log_msg "Done" ".hostignore에 추가: ${REPLY_CHECKED[*]}"
+                    # 선택된 호스트 목록에서 제거
+                    _remain_hosts=(); _remain_keys=()
+                    for i in "${!_missing_hosts[@]}"; do
+                        _ignored=false
+                        for sel in "${REPLY_CHECKED[@]}"; do
+                            [ "${_missing_hosts[$i]}" = "$sel" ] && _ignored=true && break
+                        done
+                        [ "$_ignored" = false ] && {
+                            _remain_hosts+=("${_missing_hosts[$i]}")
+                            _remain_keys+=("${_missing_keys[$i]}")
+                        }
+                    done
+                    _missing_hosts=("${_remain_hosts[@]+"${_remain_hosts[@]}"}")
+                    _missing_keys=("${_remain_keys[@]+"${_remain_keys[@]}"}")
+                fi
+                ;;
+            *)
+                log_msg "Notice" "취소. 키 파일을 직접 복사 후 rnixup을 재실행하세요:"
+                for i in "${!_missing_hosts[@]}"; do
+                    log_msg "Notice" "  cp <source> ${_missing_keys[$i]}"
+                done
+                exit 0
+                ;;
+        esac
+    done
+}
+
+_run_deploy_task() {
+    local resolved_json="$JSON_DIR/resolved.json"
+
+    local deploy_count
+    deploy_count=$(jq '[to_entries[] | select(.value.deploy != null)] | length' "$resolved_json")
+
+    if [ "$deploy_count" -eq 0 ]; then
+        log_msg "Error" "deploy 가능한 호스트가 없습니다."
+        log_msg "Notice" "hosts/*.toml에 [deploy] 섹션을 추가하거나, 새 호스트라면 rnixstrap을 사용하세요."
+        exit 1
+    fi
+
+    _check_ssh_keys
+
+    # ── dry-activate ──────────────────────────────────────────────────────────
+    log_msg "Task" "$deploy_count remote host(s) dry-activate 중..."
+    log_exec "deploy-rs" ">" "dry-activate"
+    nix run "github:serokell/deploy-rs" -- \
+        --skip-checks \
+        --dry-activate \
+        "path:${BUILD_DIR}"
+    log_exec "deploy-rs" "<" "dry-activate"
+
+    # ── 배포 확인 ─────────────────────────────────────────────────────────────
+    printf "\n"
+    log_msg "Input" "위 변경사항을 배포하시겠습니까? (Y/n):"
+    read -rp "$(printf "${CYAN}RNIXUP${NC} ${YELLOW}%-9s${NC} | " "Confirm")" _confirm
+    _confirm="${_confirm:-Y}"
+    if [[ ! "$_confirm" =~ ^[Yy]$ ]]; then
+        log_msg "Notice" "배포 취소됨."
+        exit 0
+    fi
+
+    # ── 실제 배포 ─────────────────────────────────────────────────────────────
+    log_msg "Task" "$deploy_count remote host(s) 배포 시작..."
+    log_exec "deploy-rs" ">" "all nodes"
+    nix run "github:serokell/deploy-rs" -- \
+        --skip-checks \
+        "path:${BUILD_DIR}"
+    log_exec "deploy-rs" "<" "all nodes"
+    log_msg "Done" "$deploy_count 호스트 배포 완료"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    log_msg "Notice" "redirecting to rnixup..."
+    exec rnixup
+fi
+
+_run_deploy_task

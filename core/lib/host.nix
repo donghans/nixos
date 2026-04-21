@@ -82,6 +82,7 @@
       swapGb = hostInfo.swapGb      or null;
       tmpfsSize = hostInfo.tmpfsSize   or null;
       zramPercent = hostInfo.zramPercent or null;
+      bootTarget = hostInfo.bootTarget   or null;
       diskDevice = hostInfo.diskDevice    or workspaceMeta.diskDevice;
       bootDevice = hostInfo.bootDevice    or workspaceMeta.bootDevice;
       timeZone = hostInfo.timeZone      or workspaceMeta.timeZone;
@@ -129,6 +130,7 @@
         [{nixpkgs.hostPlatform = hostInfo.system;}]
         ++ mainConfig
         ++ [./workspace-options.nix]
+        ++ [inputs.disko.nixosModules.disko]
         ++ recursiveImportDir ../../mods
         ++ [
           {
@@ -147,6 +149,12 @@
             in [
               (pkgs'.writeShellScriptBin "nixup" ''
                 exec /etc/nixos/core/scripts/nixup.sh "$@"
+              '')
+              (pkgs'.writeShellScriptBin "rnixup" ''
+                exec /etc/nixos/core/scripts/rnixup.sh "$@"
+              '')
+              (pkgs'.writeShellScriptBin "rnixstrap" ''
+                exec /etc/nixos/core/scripts/rnixstrap.sh "$@"
               '')
               (pkgs'.runCommand "nixup-man" {} ''
                 mkdir -p $out/share/man/man1
