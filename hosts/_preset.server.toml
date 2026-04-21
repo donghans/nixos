@@ -10,13 +10,13 @@ nfd   = true
 trash = true
 
 [mods.sys.services]
-tailscale      = true
-incus          = true
+tailscale      = false
+incus          = false
 incus-win11    = false
 incus-guest    = false
 headscale      = false
-caddy          = true
-cockpit        = true
+caddy          = false
+cockpit        = false
 frp            = false
 bluetooth        = false
 docker           = false
