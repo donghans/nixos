@@ -15,10 +15,7 @@ docker         = true
 incus          = true
 incus-win11    = true
 incus-guest    = false
-headscale        = false
 caddy            = false
-cockpit          = false
-frp              = false
 nix-cache-proxy  = false
 
 [mods.gui]
