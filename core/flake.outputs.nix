@@ -1,6 +1,7 @@
 {
   nixpkgs,
   home-manager,
+  deploy-rs,
   ...
 } @ inputs: let
   # == Overlays ==
@@ -125,6 +126,7 @@
         swapGb = resolved.swapGb      or null;
         tmpfsSize = resolved.tmpfsSize   or null;
         zramPercent = resolved.zramPercent or null;
+        bootTarget = resolved.bootTarget   or null;
       };
     presetMods = allPresets.${resolved.preset}.mods;
     mergedMods = nixpkgs.lib.recursiveUpdate presetMods resolved.mods;
@@ -143,9 +145,10 @@
         presetsJsonPath = ../presets.json;
       };
   in {inherit resolved perHostMeta modsModule rootModsModule coverageModule;};
-in {
-  # == Output: NixOS Configurations ==
-  nixosConfigurations =
+
+  # == nixosConfigurations let 바인딩 ==
+  # deploy.nodes에서 참조하므로 non-recursive attrset 외부에 선언
+  nixosConfigurationsAll =
     (nixpkgs.lib.genAttrs hostNames (name: let
       h = mkPerHostBindings name;
       inherit (h) resolved perHostMeta modsModule coverageModule;
@@ -160,6 +163,9 @@ in {
       custom-iso = mkISO "x86_64-linux";
       custom-iso-aarch64 = mkISO "aarch64-linux";
     };
+in {
+  # == Output: NixOS Configurations ==
+  nixosConfigurations = nixosConfigurationsAll;
 
   # == Output: Home Configurations ==
   homeConfigurations = builtins.listToAttrs (nixpkgs.lib.concatMap (name: let
@@ -221,4 +227,34 @@ in {
       }
     ])
     hostNames);
+
+  # == Output: deploy-rs 배포 노드 ==
+  # [deploy] 섹션이 있는 호스트만 포함 (resolved.json deploy != null)
+  deploy.nodes = let
+    deployHosts =
+      builtins.filter
+      (name: allResolved.${name}.deploy or null != null)
+      hostNames;
+  in
+    builtins.listToAttrs (map (name: let
+        resolved = allResolved.${name};
+      in {
+        inherit name;
+        value = {
+          hostname = resolved.deploy.ip;
+          sshUser = "root";
+          sshOpts = [
+            "-i"
+            resolved.deploy.sshKey
+            "-o"
+            "StrictHostKeyChecking=accept-new"
+          ];
+          profiles.system = {
+            path =
+              deploy-rs.lib.${resolved.system}.activate.nixos
+              nixosConfigurationsAll.${name};
+          };
+        };
+      })
+      deployHosts);
 }

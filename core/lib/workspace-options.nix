@@ -81,6 +81,11 @@ with lib; {
         default = "";
         description = "Nix binary cache proxy server address (e.g. 192.168.1.10:7070). Leave empty to disable client substituter.";
       };
+      bootTarget = mkOption {
+        type = types.nullOr (types.enum ["cloud-bios" "cloud-uefi"]);
+        default = null;
+        description = "Boot/partition target override. null=systemd-boot+EFI (local default), cloud-bios=GRUB+MBR (Lightsail 등 BIOS 전용), cloud-uefi=GRUB+EFI-removable (canTouchEfiVariables=false). deploy.destination에서 자동 주입됨.";
+      };
     };
   };
 }

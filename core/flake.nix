@@ -10,6 +10,14 @@
 
     # (목적: HM이 시스템과 동일한 Nixpkgs 버전을 사용하도록 강제)
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
+
+    # (목적: 선언적 디스크 파티셔닝 — nixos-anywhere 초기 설치 시 사용)
+    disko.url = "github:nix-community/disko";
+    disko.inputs.nixpkgs.follows = "nixpkgs";
+
+    # (목적: 원격 NixOS 시스템 배포 — nixup deploy 서브커맨드)
+    deploy-rs.url = "github:serokell/deploy-rs";
+    deploy-rs.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   # (목적: nixup은 빌드 시 이 파일을 .build/flake.nix(루트)로 복사하므로,
