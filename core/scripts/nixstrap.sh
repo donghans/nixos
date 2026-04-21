@@ -58,13 +58,13 @@ _trap_cleanup() {
     tput cnorm 2>/dev/null || true
     stty sane 2>/dev/null || true
     if [ -n "${_NIXOS_INSTALL_PID:-}" ]; then
-        printf "\nNIXSTRAP Cleanup   | nixos-install 종료 중...\n" >&2
+        printf "\n" >&2; log_msg "Cleanup" "nixos-install 종료 중..." >&2
         kill "$_NIXOS_INSTALL_PID" 2>/dev/null || true
         wait "$_NIXOS_INSTALL_PID" 2>/dev/null || true
         _NIXOS_INSTALL_PID=""
     fi
     if mountpoint -q /mnt 2>/dev/null; then
-        printf "NIXSTRAP Cleanup   | /mnt 마운트 해제 중...\n" >&2
+        log_msg "Cleanup" "/mnt 마운트 해제 중..." >&2
         swapoff -a 2>/dev/null || true
         umount -R /mnt 2>/dev/null || umount -lR /mnt 2>/dev/null || true
     fi
@@ -82,9 +82,9 @@ _trap_int() {
         _TRAP_INT_WARNED_AT=$_now
         printf "\n" >&2
         if [ -n "${_NIXOS_INSTALL_PID:-}" ]; then
-            printf "NIXSTRAP Notice    | nixos-install 진행 중 — %s초 내 Ctrl+C 한 번 더 누르면 중단합니다.\n" "$_timeout" >&2
+            log_msg "Notice" "nixos-install 진행 중 — ${_timeout}초 내 Ctrl+C 한 번 더 누르면 중단합니다." >&2
         else
-            printf "NIXSTRAP Notice    | %s초 내 Ctrl+C 한 번 더 누르면 종료합니다.\n" "$_timeout" >&2
+            log_msg "Notice" "${_timeout}초 내 Ctrl+C 한 번 더 누르면 종료합니다." >&2
         fi
         return
     fi

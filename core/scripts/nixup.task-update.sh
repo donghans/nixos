@@ -14,7 +14,7 @@ run_update_task() {
         LOCK_CHANGED=true
         log_msg "Done" "update complete. saved to $HOST_SPECIFIC_LOCK"
     else
-        log_msg "Info" "no changes detected in flake.lock"
+        log_msg "Notice" "no changes detected in flake.lock"
     fi
 }
 

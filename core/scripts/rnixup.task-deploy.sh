@@ -4,10 +4,6 @@
 # deploy.nodes 전체를 deploy-rs 네이티브 병렬로 배포.
 # 변수 의존: BUILD_DIR, JSON_DIR
 
-# readline-safe 프롬프트 (read -e 와 함께 사용)
-_rnixup_prompt_rl() {
-    printf "\001${CYAN}\002RNIXUP\001${NC}\002 \001${YELLOW}\002%-9s\001${NC}\002 | " "Input"
-}
 
 # ── SSH 키 파일 누락 사전 확인 ────────────────────────────────────────────────
 # ~/.ssh/rnixup/.hostignore에 없는 호스트 중 sshKey 파일이 없으면 일괄 안내.
@@ -47,8 +43,7 @@ _check_ssh_keys() {
             printf "  ${YELLOW}%-28s${NC} → %s\n" "${_missing_hosts[$i]}" "${_missing_keys[$i]}"
         done
         printf "\n"
-        log_msg "Input" "처리 방법: [c]opy 경로 지정  /  [q]uit  /  [i]gnore 다시 묻지 않음:"
-        read -rp "$(printf "${CYAN}RNIXUP${NC} ${YELLOW}%-9s${NC} | " "Input")" _choice
+        read -rp "$(_log_prompt)처리 방법: [c]opy 경로 지정  /  [q]uit  /  [i]gnore 다시 묻지 않음: " _choice
 
         case "${_choice:-q}" in
             c|C)
@@ -59,7 +54,8 @@ _check_ssh_keys() {
                 for i in "${!_missing_hosts[@]}"; do
                     _check_args+=("${_missing_hosts[$i]}" "${_missing_hosts[$i]}  →  ${_missing_keys[$i]}")
                 done
-                _check "복사할 호스트를 선택하세요  (선택 없이 Enter = 뒤로가기)" "${_check_args[@]}"
+                log_msg "Notice" "선택 없이 Enter = 뒤로가기"
+                _check "복사할 호스트를 선택하세요" "${_check_args[@]}"
                 [ "${#REPLY_CHECKED[@]}" -eq 0 ] && continue
                 # 선택된 호스트마다 순서대로 경로 입력
                 _remain_hosts=(); _remain_keys=()
@@ -74,8 +70,7 @@ _check_ssh_keys() {
                         continue
                     fi
                     printf "\n"
-                    log_msg "Input" "${_missing_hosts[$i]} 키 파일 원본 경로 (Tab 자동완성, 빈 줄=건너뜀):"
-                    read -rep "$(_rnixup_prompt_rl)" _src
+                    read -rep "$(_log_prompt_rl)${_missing_hosts[$i]} 키 파일 원본 경로 (Tab 자동완성, 빈 줄=건너뜀): " _src
                     if [ -z "$_src" ]; then
                         log_msg "Notice" "건너뜀: ${_missing_hosts[$i]}"
                         _remain_hosts+=("${_missing_hosts[$i]}")
@@ -152,17 +147,16 @@ _run_deploy_task() {
 
     # ── dry-activate ──────────────────────────────────────────────────────────
     log_msg "Task" "$deploy_count remote host(s) dry-activate 중..."
-    log_exec "deploy-rs" ">" "dry-activate"
+    log_exec "d-rs" ">" "dry-activate"
     nix run "github:serokell/deploy-rs" -- \
         --skip-checks \
         --dry-activate \
         "path:${BUILD_DIR}"
-    log_exec "deploy-rs" "<" "dry-activate"
+    log_exec "d-rs" "<" "dry-activate"
 
     # ── 배포 확인 ─────────────────────────────────────────────────────────────
     printf "\n"
-    log_msg "Input" "위 변경사항을 배포하시겠습니까? (Y/n):"
-    read -rp "$(printf "${CYAN}RNIXUP${NC} ${YELLOW}%-9s${NC} | " "Confirm")" _confirm
+    read -rp "$(_log_prompt)위 변경사항을 배포하시겠습니까? (Y/n): " _confirm
     _confirm="${_confirm:-Y}"
     if [[ ! "$_confirm" =~ ^[Yy]$ ]]; then
         log_msg "Notice" "배포 취소됨."
@@ -171,11 +165,11 @@ _run_deploy_task() {
 
     # ── 실제 배포 ─────────────────────────────────────────────────────────────
     log_msg "Task" "$deploy_count remote host(s) 배포 시작..."
-    log_exec "deploy-rs" ">" "all nodes"
+    log_exec "d-rs" ">" "all nodes"
     nix run "github:serokell/deploy-rs" -- \
         --skip-checks \
         "path:${BUILD_DIR}"
-    log_exec "deploy-rs" "<" "all nodes"
+    log_exec "d-rs" "<" "all nodes"
     log_msg "Done" "$deploy_count 호스트 배포 완료"
 }
 

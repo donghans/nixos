@@ -7,9 +7,9 @@ ask_repo_and_clone() {
     local _prompt _input
     while true; do
         if [ -n "${NIXOS_REPO:-}" ]; then
-            _prompt="$(log_prompt)repository [${NIXOS_REPO}]: "
+            _prompt="$(_log_prompt)repository [${NIXOS_REPO}]: "
         else
-            _prompt="$(log_prompt)repository (e.g. user/nixos): "
+            _prompt="$(_log_prompt)repository (e.g. user/nixos): "
         fi
         read -rp "$_prompt" _input
         NIXOS_REPO="${_input:-${NIXOS_REPO:-}}"
@@ -27,7 +27,7 @@ ask_repo_and_clone() {
             _toml_repo=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" check-repo "$REPO_TMP")
             if [ -n "$_toml_repo" ] && [ "$_toml_repo" != "$NIXOS_REPO" ]; then
                 log_msg "Notice" "_base.toml has git.nixosRepo = '$_toml_repo'"
-                read -rp "$(log_prompt)update to '${NIXOS_REPO}'? (Y/n): " _replace
+                read -rp "$(_log_prompt)update to '${NIXOS_REPO}'? (Y/n): " _replace
                 _replace="${_replace:-Y}"
                 if [[ "$_replace" =~ ^[Yy]$ ]]; then
                     python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" update-repo "$REPO_TMP" "$NIXOS_REPO"
@@ -66,8 +66,8 @@ select_host() {
         _all_labels=("+ Enter new hostname")
     fi
 
-    echo ""
-    _pick "select host (up/down arrow, Enter to confirm):" "${_all_labels[@]}"
+    printf "\n"
+    _pick "select host:" "${_all_labels[@]}"
     local _sel=$REPLY
     _PICK_FIXED_FOOTER=()  # 사용 후 초기화
 
@@ -77,7 +77,7 @@ select_host() {
         _HOST_PRESET_FROM_REPO=""
         _HOST_USERNAME=""
         local _hinput
-        read -rp "$(log_prompt)new hostname: " _hinput
+        read -rp "$(_log_prompt)new hostname: " _hinput
         HOST="${_hinput:-}"
         if [ -z "$HOST" ]; then
             log_msg "Error" "hostname cannot be empty."
@@ -103,7 +103,7 @@ select_host() {
 ask_host_username() {
     local _base_user _input
     _base_user=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" username "$REPO_TMP" 2>/dev/null || true)
-    read -rp "$(log_prompt)username [${_base_user:-_base.toml}]: " _input
+    read -rp "$(_log_prompt)username [${_base_user:-_base.toml}]: " _input
     _HOST_USERNAME="${_input:-}"
 }
 
@@ -119,16 +119,16 @@ ask_preset() {
     if [ ${#_preset_opts[@]} -eq 0 ]; then
         _preset_opts=("workstation" "server")
     fi
-    echo ""
+    printf "\n"
     _pick "select preset:" "${_preset_opts[@]}"
     _PRESET="${_preset_opts[$REPLY]}"
 }
 
 ask_state_version() {
     local _input
-    echo ""
+    printf "\n"
     log_msg "Notice" "pin to a NixOS release? (e.g. 25.11 — leave blank for rolling):"
-    read -rp "$(log_prompt)stateVersion: " _input
+    read -rp "$(_log_prompt)stateVersion: " _input
     _STATE_VERSION="${_input:-}"
     if [ -n "$_STATE_VERSION" ]; then
         log_msg "Config" "stateVersion: $_STATE_VERSION (stable lock)"
@@ -141,13 +141,13 @@ ask_password() {
     local _preview_user _pw _pw2
     _preview_user=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" username "$REPO_TMP" 2>/dev/null || true)
     local _label="${_preview_user:-user}"
-    echo ""
+    printf "\n"
     log_msg "Notice" "set login password for '$_label' (press Enter twice to skip):"
     while true; do
-        read -rsp "$(log_prompt)password: " _pw
-        echo ""
+        read -rsp "$(_log_prompt)password: " _pw
+        printf "\n"
         if [ -z "$_pw" ]; then
-            read -rp "$(log_prompt)skip password setup? (y/N): " _skip
+            read -rp "$(_log_prompt)skip password setup? (y/N): " _skip
             if [[ "${_skip:-N}" =~ ^[Yy]$ ]]; then
                 _USER_PASSWORD=""
                 log_msg "Notice" "skipped — no password will be set."
@@ -155,8 +155,8 @@ ask_password() {
             fi
             continue
         fi
-        read -rsp "$(log_prompt)confirm:  " _pw2
-        echo ""
+        read -rsp "$(_log_prompt)confirm:  " _pw2
+        printf "\n"
         if [ "$_pw" = "$_pw2" ]; then
             _USER_PASSWORD="$_pw"
             log_msg "Config" "password accepted."
@@ -170,8 +170,8 @@ ask_password() {
 
 show_summary() {
     local _fmt_boot _fmt_root
-    echo ""
-    printf "${PURPLE}NIXSTRAP${NC} ${CYAN}%-9s${NC} | Installation configuration:\n" "Review"
+    printf "\n"
+    log_msg "Review" "Installation configuration:"
     printf "  1. %-11s:  %s\n" "Repository" "${NIXOS_REPO:-(not set)}"
 
     if [ -n "${HOST:-}" ]; then
@@ -281,7 +281,7 @@ review_loop() {
     local _review=""
     while true; do
         show_summary
-        read -rp "$(log_prompt)Enter=install  1-4=edit  s=save  q=quit: " _review || {
+        read -rp "$(_log_prompt)Enter=install  1-4=edit  s=save  q=quit: " _review || {
             # Ctrl+C 인터럽트: _trap_int가 경고 처리함. 타임아웃 리셋 없이 루프 재진입.
             _review=""
             continue

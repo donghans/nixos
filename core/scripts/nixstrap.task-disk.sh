@@ -20,7 +20,7 @@ ask_partitions() {
     _WIPE=false
 
     while true; do
-        read -rp "$(log_prompt)partition mode — 1=use existing, 2=create new [2]: " _PART_MODE
+        read -rp "$(_log_prompt)partition mode — 1=use existing, 2=create new [2]: " _PART_MODE
         _PART_MODE="${_PART_MODE:-2}"
         [[ "$_PART_MODE" == "1" || "$_PART_MODE" == "2" ]] && break
         log_msg "Error" "invalid mode. select 1 or 2."
@@ -44,7 +44,7 @@ ask_partitions() {
         _pick "select EFI partition:" "${_efi_labels[@]}"
         if [ "$REPLY" -eq "${#_efi_paths[@]}" ]; then
             while true; do
-                read -rp "$(log_prompt)EFI partition path: " BOOT_PART
+                read -rp "$(_log_prompt)EFI partition path: " BOOT_PART
                 [ -b "$BOOT_PART" ] && break
                 log_msg "Error" "device not found: $BOOT_PART"
             done
@@ -69,7 +69,7 @@ ask_partitions() {
         _pick "select root partition:" "${_root_labels[@]}"
         if [ "$REPLY" -eq "${#_root_paths[@]}" ]; then
             while true; do
-                read -rp "$(log_prompt)root partition path: " ROOT_PART
+                read -rp "$(_log_prompt)root partition path: " ROOT_PART
                 [ -b "$ROOT_PART" ] && break
                 log_msg "Error" "device not found: $ROOT_PART"
             done
@@ -77,8 +77,8 @@ ask_partitions() {
             ROOT_PART="${_root_paths[$REPLY]}"
         fi
 
-        read -rp "$(log_prompt)format boot partition (${BOOT_PART})? (y/N): " FORMAT_BOOT
-        read -rp "$(log_prompt)format root partition (${ROOT_PART})? (y/N): " FORMAT_ROOT
+        read -rp "$(_log_prompt)format boot partition (${BOOT_PART})? (y/N): " FORMAT_BOOT
+        read -rp "$(_log_prompt)format root partition (${ROOT_PART})? (y/N): " FORMAT_ROOT
 
     else
         # 디스크 선택
@@ -98,7 +98,7 @@ ask_partitions() {
         _pick "select target disk:" "${_disk_labels[@]}"
         if [ "$REPLY" -eq "${#_disk_paths[@]}" ]; then
             while true; do
-                read -rp "$(log_prompt)target disk path: " _DISK
+                read -rp "$(_log_prompt)target disk path: " _DISK
                 [ -b "$_DISK" ] && break
                 log_msg "Error" "device not found: $_DISK"
             done
@@ -106,11 +106,11 @@ ask_partitions() {
             _DISK="${_disk_paths[$REPLY]}"
         fi
 
-        read -rp "$(log_prompt)use entire disk? (Y/n): " _USE_WHOLE
+        read -rp "$(_log_prompt)use entire disk? (Y/n): " _USE_WHOLE
         _USE_WHOLE="${_USE_WHOLE:-Y}"
 
         if [[ "$_USE_WHOLE" =~ ^[Yy]$ ]]; then
-            read -rp "$(log_prompt_danger)WARNING: ALL data on '${_DISK}' will be erased. type 'yes' to confirm: " _CONFIRM_WIPE
+            read -rp "$(_log_prompt_danger)WARNING: ALL data on '${_DISK}' will be erased. type 'yes' to confirm: " _CONFIRM_WIPE
             if [[ "$_CONFIRM_WIPE" != "yes" ]]; then
                 log_msg "Error" "cancelled."
                 exit 1
@@ -135,7 +135,7 @@ ask_partitions() {
             echo ""
 
             while true; do
-                read -rp "$(log_prompt)select number or enter range (e.g. 128GiB-476GiB): " _FREE_SEL
+                read -rp "$(_log_prompt)select number or enter range (e.g. 128GiB-476GiB): " _FREE_SEL
                 if [[ "$_FREE_SEL" =~ ^[0-9]+$ ]]; then
                     _SELECTED=$(echo "$_FREE_OUTPUT" | grep "^${_FREE_SEL}:" || true)
                     if [ -z "$_SELECTED" ]; then
@@ -158,7 +158,7 @@ ask_partitions() {
             _WIPE=false
         fi
 
-        read -rp "$(log_prompt)boot partition size (default: 1GiB, enter): " _BOOT_SIZE
+        read -rp "$(_log_prompt)boot partition size (default: 1GiB, enter): " _BOOT_SIZE
         _BOOT_SIZE="${_BOOT_SIZE:-1GiB}"
 
         _BOOT_END=$(python3 "$SCRIPT_DIR/nixstrap.lib-part.py" boot-end "$_PART_START" "$_BOOT_SIZE")

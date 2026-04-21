@@ -16,7 +16,7 @@ run_fix_task() {
     log_msg "Task" "searching safest common commit for: ${pkg_names[*]}"
 
     for pkg_name in "${pkg_names[@]}"; do
-        echo "   - processing '$pkg_name'..."
+        log_msg "Notice" "processing '$pkg_name'..."
         
         local search_path api_result
         api_result=$(gh api "search/code?q=filename:package.nix+path:pkgs/by-name/**/${pkg_name}+repo:${repo}") || {
@@ -80,7 +80,7 @@ run_fix_task() {
         exit 1
     fi
 
-    log_msg "Info" "safe commit selected: $final_rev ($final_date)"
+    log_msg "Done" "safe commit selected: $final_rev ($final_date)"
     
     local tarball_url="https://github.com/${repo}/archive/${final_rev}.tar.gz"
     local sha256

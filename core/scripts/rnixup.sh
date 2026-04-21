@@ -7,22 +7,7 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 NIXOS_PATH=$(readlink -f "$SCRIPT_DIR/../..")
 
 source "$SCRIPT_DIR/nixup.lib-ui.sh"
-
-# RNIXUP prefix 오버라이드
-log_msg() {
-    local category=$1 msg=$2 cat_color=$NC
-    case "$category" in
-        Init|Prep)      cat_color=$CYAN ;;
-        Task)           cat_color=$PURPLE ;;
-        Done|Success)   cat_color=$GREEN ;;
-        Error)          cat_color=$RED ;;
-        Notice|Warn)    cat_color=$YELLOW ;;
-    esac
-    printf "${CYAN}RNIXUP${NC} ${cat_color}%-9s${NC} | %s\n" "$category" "$msg"
-}
-log_exec() {
-    printf "${CYAN}RNIXUP${NC} ${BLUE}Exec %-4s${NC} %s %s\n" "$1" "$2" "$3"
-}
+_LOG_PREFIX="RNIXUP"
 
 # 상수 (nixup.lib-build.sh와 동일한 경로)
 BUILD_DIR="$NIXOS_PATH/.build"
@@ -32,7 +17,7 @@ ENV_FILE="$NIXOS_PATH/.env"
 # ── 도움말 ────────────────────────────────────────────────────────────────────
 _print_help() {
     printf "\n"
-    printf "${CYAN}RNIXUP${NC} ${CYAN}%-9s${NC} | Remote NixOS deploy tool\n" "Help"
+    printf "${_LOG_PREFIX_COLOR}${_LOG_PREFIX}${NC} ${CYAN}%-9s${NC} | Remote NixOS deploy tool\n" "Help"
     printf "\n"
     printf "  Usage:\n"
     printf "    rnixup        — dry-activate preview, then confirm → deploy all hosts\n"
@@ -77,7 +62,7 @@ if [ "$SUBCOMMAND" = "list" ]; then
     jq -r '
         to_entries[]
         | select(.value.deploy != null)
-        | [.key, (.value.deploy.ip // "?"), (.value.deploy.destination // "?"), (.value.type // "?")]
+        | [.key, (.value.deploy.ip // "?"), (.value.bootLoader // "?"), (.value.type // "?")]
         | @tsv
     ' "$JSON_DIR/resolved.json" | while IFS=$'\t' read -r name ip dest type; do
         printf "  %-28s %-18s %-14s %s\n" "$name" "$ip" "$dest" "$type"
