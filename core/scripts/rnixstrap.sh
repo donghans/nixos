@@ -75,8 +75,6 @@ trap '_cleanup' EXIT
 trap '_cleanup; exit 130' INT TERM
 
 # ── 시작 배너 ─────────────────────────────────────────────────────────────────
-_START_TIME=$(date +%s)
-_START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
 printf "\n"
 log_msg "Init" "원격 NixOS 호스트 초기 설치 도구"
 log_msg "Init" "새 호스트 추가 또는 기존 호스트 재설치를 진행합니다."

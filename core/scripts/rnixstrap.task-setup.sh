@@ -404,6 +404,10 @@ run_setup() {
         fi
     fi
 
+    # 대화형 선택 완료 후부터 시간 측정
+    _START_TIME=$(date +%s)
+    _START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
+
     # ── 파일 작업 (바로 진행 + 쓰기만 공통) ──────────────────────────────────
     if [ "${_HOST_IS_NEW:-true}" = true ]; then
         _write_new_host_files

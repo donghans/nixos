@@ -104,8 +104,6 @@ trap '_trap_int'               INT
 trap '_trap_cleanup; exit 143' TERM
 
 # -- 초기화 --
-_START_TIME=$(date +%s)
-_START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
 log_msg "Init" "NixOS Installer"
 if _VIRT_TYPE=$(systemd-detect-virt 2>/dev/null); then
     _IS_VM=true
@@ -130,4 +128,7 @@ review_loop
 ask_password
 
 # -- Phase 2: 실행 --
+# 대화형 입력(Phase 1) 완료 후부터 시간 측정
+_START_TIME=$(date +%s)
+_START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
 phase2_execute

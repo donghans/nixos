@@ -163,6 +163,10 @@ _run_deploy_task() {
         exit 0
     fi
 
+    # dry-activate + 사용자 확인 완료 후부터 시간 측정
+    _START_TIME=$(date +%s)
+    _START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
+
     # ── 실제 배포 ─────────────────────────────────────────────────────────────
     log_msg "Task" "$deploy_count remote host(s) 배포 시작..."
     log_exec "d-rs" ">" "all nodes"

@@ -4,8 +4,6 @@
 set -euo pipefail
 
 # 1. Initialization
-_START_TIME=$(date +%s)
-_START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 NIXOS_PATH=$(readlink -f "$SCRIPT_DIR/../..")
 
@@ -141,6 +139,10 @@ if [ "$_needs_sudo" = true ]; then
     SUDO_KEEPALIVE_PID=$!
 fi
 unset _needs_sudo
+
+# sudo 획득(또는 불필요) 이후부터 시간 측정 — 인증 대기 시간 제외
+_START_TIME=$(date +%s)
+_START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
 
 # 6. Routing
 if [ "$DO_CLEAN" = true ]; then

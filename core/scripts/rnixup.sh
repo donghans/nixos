@@ -72,10 +72,7 @@ if [ "$SUBCOMMAND" = "list" ]; then
     exit 0
 fi
 
-# ── 시작 시각 기록 + 배너 ─────────────────────────────────────────────────────
-_START_TIME=$(date +%s)
-_START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
-
+# ── 배너 ──────────────────────────────────────────────────────────────────────
 _deploy_count=$(jq '[to_entries[] | select(.value.deploy != null)] | length' "$JSON_DIR/resolved.json")
 log_msg "Init" "원격 NixOS 배포 도구"
 log_msg "Init" "Command:  deploy-rs (dry-activate → deploy)"
