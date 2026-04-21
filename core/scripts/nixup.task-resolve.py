@@ -118,15 +118,10 @@ for entry in sorted(os.listdir(hosts_dir)):
     # swap을 직접 지정하려면 swapGb를 사용하세요.
     ram_gb = detect_ram_gb()
 
-    # deploy 섹션: [deploy] destination → bootTarget 매핑
-    DESTINATION_TO_BOOT_TARGET = {
-        "cloud-bios": "cloud-bios",
-        "cloud-uefi": "cloud-uefi",
-    }
     deploy_section = host.get("deploy", None)
-    boot_target = DESTINATION_TO_BOOT_TARGET.get(
-        (deploy_section or {}).get("destination"), None
-    )
+    if deploy_section and "sshKey" in deploy_section:
+        deploy_section = dict(deploy_section)
+        deploy_section["sshKey"] = os.path.expanduser(deploy_section["sshKey"])
 
     all_resolved[hostname] = {
         "hostname": hostname,
@@ -136,7 +131,7 @@ for entry in sorted(os.listdir(hosts_dir)):
         "swapGb": host.get("swapGb"),       # None → Nix 기본값 적용 (ceil(ramGb*0.75))
         "tmpfsSize": host.get("tmpfsSize"),  # None → Nix 기본값 적용 ("100%")
         "zramPercent": host.get("zramPercent"),  # None → Nix 기본값 적용 (50)
-        "bootTarget": boot_target,           # None → local default (systemd-boot+EFI)
+        "bootLoader": host.get("bootLoader", "systemd-boot"),
         "deploy": deploy_section,            # None → 로컬 호스트 (배포 대상 아님)
         "diskDevice":    host.get("diskDevice",    base["diskDevice"]),
         "bootDevice":    host.get("bootDevice",    base["bootDevice"]),

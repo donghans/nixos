@@ -5,7 +5,7 @@ mkPartOf "mods.sys.base" ({
   lib,
   ...
 }: let
-  inherit (config.workspace) bootTarget;
+  inherit (config.workspace) bootLoader;
   inherit (config.workspace) diskDevice;
 
   btrfsOpts = subvol: [
@@ -36,8 +36,8 @@ mkPartOf "mods.sys.base" ({
   };
 in {
   os = lib.mkMerge [
-    # == 로컬 호스트 (bootTarget=null) — 수동 fileSystems 선언 ==
-    (lib.mkIf (bootTarget == null) {
+    # == 로컬 호스트 (bootLoader="systemd-boot") — 수동 fileSystems 선언 ==
+    (lib.mkIf (bootLoader == "systemd-boot") {
       fileSystems."/boot" = {
         device = config.workspace.bootDevice;
         fsType = "vfat";
@@ -75,8 +75,8 @@ in {
       environment.systemPackages = with pkgs; [btrfs-progs];
     })
 
-    # == 원격 호스트 (bootTarget!=null) — disko가 파티셔닝 + fileSystems 담당 ==
-    (lib.mkIf (bootTarget == "cloud-bios") {
+    # == 원격 호스트 (bootLoader="grub-bios") — disko가 파티셔닝 + fileSystems 담당 ==
+    (lib.mkIf (bootLoader == "grub-bios") {
       disko.devices.disk.main = {
         device = diskDevice;
         type = "disk";
@@ -100,7 +100,7 @@ in {
       };
     })
 
-    (lib.mkIf (bootTarget == "cloud-uefi") {
+    (lib.mkIf (bootLoader == "grub-uefi") {
       disko.devices.disk.main = {
         device = diskDevice;
         type = "disk";

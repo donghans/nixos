@@ -81,10 +81,15 @@ with lib; {
         default = "";
         description = "Nix binary cache proxy server address (e.g. 192.168.1.10:7070). Leave empty to disable client substituter.";
       };
-      bootTarget = mkOption {
-        type = types.nullOr (types.enum ["cloud-bios" "cloud-uefi"]);
-        default = null;
-        description = "Boot/partition target override. null=systemd-boot+EFI (local default), cloud-bios=GRUB+MBR (Lightsail 등 BIOS 전용), cloud-uefi=GRUB+EFI-removable (canTouchEfiVariables=false). deploy.destination에서 자동 주입됨.";
+      bootLoader = mkOption {
+        type = types.enum ["systemd-boot" "grub-bios" "grub-uefi"];
+        default = "systemd-boot";
+        description = "Boot loader: systemd-boot=local EFI with manual fileSystems (default), grub-bios=disko+GRUB+MBR, grub-uefi=disko+GRUB+EFI-removable (canTouchEfiVariables=false). Auto-injected from host.toml bootLoader.";
+      };
+      isRemote = mkOption {
+        type = types.bool;
+        default = false;
+        description = "True if this host is a remote deploy-rs target (has [deploy] section in host.toml). Auto-injected from resolved.json.";
       };
     };
   };

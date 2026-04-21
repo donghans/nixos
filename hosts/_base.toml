@@ -3,6 +3,7 @@ username            = "donghans"
 rollingStateVersion = "25.11"
 diskDevice          = "/dev/disk/by-label/nixos"
 bootDevice          = "/dev/disk/by-label/boot"
+# bootLoader        = "grub-uefi"   # 부트로더: "systemd-boot"(기본) | "grub-bios" | "grub-uefi"
 nixCacheAddr        = ""            # Nix 캐시 프록시 서버 주소 (예: 192.168.1.10:7070). 비어있으면 미사용.
 timeZone            = "Asia/Seoul"
 defaultLocale       = "en_US.UTF-8"

@@ -82,7 +82,8 @@
       swapGb = hostInfo.swapGb      or null;
       tmpfsSize = hostInfo.tmpfsSize   or null;
       zramPercent = hostInfo.zramPercent or null;
-      bootTarget = hostInfo.bootTarget   or null;
+      bootLoader = hostInfo.bootLoader or "systemd-boot";
+      isRemote = hostInfo.isRemote or false;
       diskDevice = hostInfo.diskDevice    or workspaceMeta.diskDevice;
       bootDevice = hostInfo.bootDevice    or workspaceMeta.bootDevice;
       timeZone = hostInfo.timeZone      or workspaceMeta.timeZone;
@@ -168,15 +169,39 @@
             # (wheel 그룹을 통해 sudo는 계속 사용 가능)
             users.users.root.hashedPassword = nixpkgs.lib.mkIf (!isISO) "!";
 
-            # (목적: 신규 설치 시 shadow 항목이 없으면 빈 비밀번호로 첫 부팅 로그인 허용)
-            # (이후 사용자가 passwd 실행하면 shadow가 갱신되어 이 설정은 무시됨 — mutableUsers=true 기본값)
+            # (목적: 원격 호스트 SSH — root 키 전용 허용, magic rollback 정상 작동)
+            services.openssh = nixpkgs.lib.mkIf hostCtx.metaConfig.isRemote {
+              enable = true;
+              settings.PermitRootLogin = "prohibit-password";
+            };
+
+            # (목적: deploy-rs가 root SSH로 magic rollback 확인 가능하게 root에 공개키 주입)
+            users.users.root.openssh.authorizedKeys.keyFiles =
+              nixpkgs.lib.mkIf hostCtx.metaConfig.isRemote
+              (nixpkgs.lib.optional
+                (builtins.pathExists ../../hosts/pubs/${hostInfo.hostname}.pub)
+                ../../hosts/pubs/${hostInfo.hostname}.pub);
+
+            # (목적: deploy-rs가 root로 nix copy 실행 — root는 기본 trusted-user)
+            nix.settings.trusted-users =
+              nixpkgs.lib.mkIf
+              hostCtx.metaConfig.isRemote
+              ["root"];
+
+            # (목적: 로컬 호스트 primary user — 신규 설치 시 빈 비밀번호로 첫 부팅 로그인 허용)
+            # (이후 passwd 실행하면 shadow 갱신 — mutableUsers=true 기본값)
             # (ISO는 nixos 유저를 installation-cd-graphical-base.nix에서 별도 관리하므로 제외)
-            users.users.${hostCtx.metaConfig.username}.initialHashedPassword =
-              nixpkgs.lib.mkIf (!isISO) "";
+            users.users.${hostCtx.metaConfig.username} = nixpkgs.lib.mkIf (!hostCtx.metaConfig.isRemote && !isISO) {
+              initialHashedPassword = "";
+            };
 
             # (목적: nixup 로그 디렉터리 생성 및 쓰기 권한 부여)
             systemd.tmpfiles.rules = [
-              "d /var/log/nixup 0775 ${hostCtx.metaConfig.username} users -"
+              "d /var/log/nixup 0775 ${
+                if hostCtx.metaConfig.isRemote
+                then "root"
+                else hostCtx.metaConfig.username
+              } users -"
             ];
           }
         ]

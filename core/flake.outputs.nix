@@ -120,13 +120,14 @@
     perHostMeta =
       workspaceMeta
       // {
-        inherit (resolved) hostname type;
+        inherit (resolved) hostname type username;
         inherit (resolved) stateVersion;
         ramGb = resolved.ramGb       or null;
         swapGb = resolved.swapGb      or null;
         tmpfsSize = resolved.tmpfsSize   or null;
         zramPercent = resolved.zramPercent or null;
-        bootTarget = resolved.bootTarget   or null;
+        bootLoader = resolved.bootLoader or "systemd-boot";
+        isRemote = (resolved.deploy or null) != null;
       };
     presetMods = allPresets.${resolved.preset}.mods;
     mergedMods = nixpkgs.lib.recursiveUpdate presetMods resolved.mods;
@@ -163,12 +164,9 @@
       custom-iso = mkISO "x86_64-linux";
       custom-iso-aarch64 = mkISO "aarch64-linux";
     };
-in {
-  # == Output: NixOS Configurations ==
-  nixosConfigurations = nixosConfigurationsAll;
-
-  # == Output: Home Configurations ==
-  homeConfigurations = builtins.listToAttrs (nixpkgs.lib.concatMap (name: let
+  # == homeConfigurations let 바인딩 ==
+  # deploy.nodes에서 참조하므로 non-recursive attrset 외부에 선언
+  homeConfigurationsAll = builtins.listToAttrs (nixpkgs.lib.concatMap (name: let
       h = mkPerHostBindings name;
       inherit (h) resolved perHostMeta modsModule rootModsModule coverageModule;
       hostCtx = mkHostContext (resolved // {workspaceMeta = perHostMeta;});
@@ -227,6 +225,12 @@ in {
       }
     ])
     hostNames);
+in {
+  # == Output: NixOS Configurations ==
+  nixosConfigurations = nixosConfigurationsAll;
+
+  # == Output: Home Configurations ==
+  homeConfigurations = homeConfigurationsAll;
 
   # == Output: deploy-rs 배포 노드 ==
   # [deploy] 섹션이 있는 호스트만 포함 (resolved.json deploy != null)
@@ -250,9 +254,16 @@ in {
             "StrictHostKeyChecking=accept-new"
           ];
           profiles.system = {
+            user = "root";
             path =
               deploy-rs.lib.${resolved.system}.activate.nixos
               nixosConfigurationsAll.${name};
+          };
+          profiles.home = {
+            user = "root";
+            path =
+              deploy-rs.lib.${resolved.system}.activate.home-manager
+              homeConfigurationsAll."root@${name}";
           };
         };
       })

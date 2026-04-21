@@ -6,12 +6,12 @@ mkPartOf "mods.sys.base" ({
   ...
 }: let
   inherit (config.workspace) type;
-  inherit (config.workspace) bootTarget;
+  inherit (config.workspace) bootLoader;
   isRpi = type == "rpi";
-  isCloudBios = bootTarget == "cloud-bios";
-  isCloudUefi = bootTarget == "cloud-uefi";
-  # EFI: desktop/laptop/server 로컬 기본값 (bootTarget=null, 비-RPi)
-  isEfi = !isRpi && !isCloudBios && !isCloudUefi;
+  isBios = bootLoader == "grub-bios";
+  isUefi = bootLoader == "grub-uefi";
+  # EFI: desktop/laptop/server 로컬 기본값 (bootLoader="systemd-boot", 비-RPi)
+  isEfi = !isRpi && bootLoader == "systemd-boot";
 in {
   os = lib.mkMerge [
     # == EFI 시스템 (desktop / laptop / server 로컬) ==
@@ -24,10 +24,9 @@ in {
       };
     })
 
-    # == BIOS-only 클라우드 (Lightsail 등 — GPT+EF02) ==
-    # (목적: Lightsail 인스턴스는 EFI 미지원 → GRUB BIOS 설치)
+    # == BIOS (bootLoader="grub-bios") — GPT+EF02, GRUB BIOS 설치 ==
     # device는 disko GPT+EF02 설정이 자동 주입 — 여기서 중복 설정 불가
-    (lib.mkIf isCloudBios {
+    (lib.mkIf isBios {
       boot = {
         loader.grub = {
           enable = true;
@@ -37,12 +36,13 @@ in {
       };
     })
 
-    # == EFI 클라우드 (canTouchEfiVariables 금지) ==
-    # (목적: 가상화 EFI — GRUB removable 경로 설치, 펌웨어 직접 쓰기 불가)
-    (lib.mkIf isCloudUefi {
+    # == UEFI (bootLoader="grub-uefi") — GRUB removable 경로 설치 ==
+    # (목적: 가상화/클라우드 EFI처럼 펌웨어 직접 쓰기 불가한 환경)
+    (lib.mkIf isUefi {
       boot = {
         loader.grub = {
           enable = true;
+          device = "nodev";
           efiSupport = true;
           efiInstallAsRemovable = true;
         };
