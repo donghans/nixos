@@ -161,7 +161,9 @@ def cmd_list_hosts(args):
         toml_path = os.path.join(hosts_dir, entry)
         with open(toml_path, "rb") as f:
             h = tomllib.load(f)
-        entries.append(f"{hostname}|{h.get('type', '?')}|{h.get('preset', '?')}")
+        # 4번째 필드: [deploy] 섹션 보유 여부 ("remote" | "")
+        deploy_flag = "remote" if "deploy" in h else ""
+        entries.append(f"{hostname}|{h.get('type', '?')}|{h.get('preset', '?')}|{deploy_flag}")
     print("\n".join(entries))
 
 

@@ -51,11 +51,20 @@ log_exec() {
 
 # 사용법: _pick "레이블" "항목1" "항목2" ...
 # 선택된 인덱스(0-based)를 REPLY에 설정.
+#
+# _PICK_FIXED_FOOTER (선택적 전역 배열): 설정 시 선택 목록 하단에
+# 구분선과 함께 비선택 항목으로 표시됨. 커서가 이 영역에 진입하지 않음.
 _pick() {
     local label="$1"; shift
     local items=("$@")
     local count=${#items[@]}
     local sel=0
+    # footer: 호출 시점의 _PICK_FIXED_FOOTER 스냅샷
+    local footer=("${_PICK_FIXED_FOOTER[@]+"${_PICK_FIXED_FOOTER[@]}"}")
+    local footer_count=${#footer[@]}
+    # 실제 화면에 그려지는 총 줄 수 (구분선 1줄 포함)
+    local draw_lines=$count
+    [ "$footer_count" -gt 0 ] && draw_lines=$((draw_lines + 1 + footer_count))
 
     _redraw_pick() {
         local i
@@ -67,6 +76,14 @@ _pick() {
                 printf "     %s\n" "${items[$i]}"
             fi
         done
+        if [ "$footer_count" -gt 0 ]; then
+            tput el || true
+            printf "  \033[2m─────────────────────────────────────────\033[0m\n"
+            for item in "${footer[@]}"; do
+                tput el || true
+                printf "  \033[2m     %s\033[0m\n" "$item"
+            done
+        fi
     }
 
     log_msg "Input" "$label"
@@ -75,7 +92,7 @@ _pick() {
     local key seq
     while true; do
         local i
-        for ((i=0; i<count; i++)); do tput cuu1 || true; done
+        for ((i=0; i<draw_lines; i++)); do tput cuu1 || true; done
         IFS= read -rsn1 key
         if [[ "$key" == $'\x1b' ]]; then
             IFS= read -rsn2 seq || true

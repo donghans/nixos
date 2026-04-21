@@ -46,16 +46,22 @@ select_host() {
     local host_data
     host_data=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" list-hosts "$REPO_TMP")
 
-    local -a _host_names=() _host_labels=()
-    while IFS='|' read -r _name _type _preset_val; do
+    # 로컬 설치 가능 호스트(selectable)와 원격 전용 호스트(footer)를 분리
+    local -a _sel_names=() _sel_labels=()
+    _PICK_FIXED_FOOTER=()
+    while IFS='|' read -r _name _type _preset_val _flag; do
         [ -z "$_name" ] && continue
-        _host_names+=("$_name")
-        _host_labels+=("$(printf "%-24s [%-7s] %s" "$_name" "$_type" "$_preset_val")")
+        if [ "$_flag" = "remote" ]; then
+            _PICK_FIXED_FOOTER+=("$(printf "%-24s [remote ] rnixup / rnixstrap" "$_name")")
+        else
+            _sel_names+=("$_name")
+            _sel_labels+=("$(printf "%-24s [%-7s] %s" "$_name" "$_type" "$_preset_val")")
+        fi
     done <<< "$host_data"
 
     local -a _all_labels
-    if [ ${#_host_labels[@]} -gt 0 ]; then
-        _all_labels=("${_host_labels[@]}" "+ Enter new hostname")
+    if [ ${#_sel_labels[@]} -gt 0 ]; then
+        _all_labels=("${_sel_labels[@]}" "+ Enter new hostname")
     else
         _all_labels=("+ Enter new hostname")
     fi
@@ -63,8 +69,9 @@ select_host() {
     echo ""
     _pick "select host (up/down arrow, Enter to confirm):" "${_all_labels[@]}"
     local _sel=$REPLY
+    _PICK_FIXED_FOOTER=()  # 사용 후 초기화
 
-    if [ "$_sel" -eq "${#_host_names[@]}" ]; then
+    if [ "$_sel" -eq "${#_sel_names[@]}" ]; then
         _HOST_IS_NEW=true
         _HOST_TYPE=""
         _HOST_PRESET_FROM_REPO=""
@@ -77,11 +84,16 @@ select_host() {
             select_host
             return
         fi
+        if [ -f "$REPO_TMP/hosts/${HOST}.toml" ]; then
+            log_msg "Error" "'$HOST' already exists. select it from the list above."
+            select_host
+            return
+        fi
         ask_host_username
     else
         _HOST_IS_NEW=false
         _HOST_USERNAME=""
-        HOST="${_host_names[$_sel]}"
+        HOST="${_sel_names[$_sel]}"
         _HOST_TYPE=$(echo "$host_data" | grep "^${HOST}|" | cut -d'|' -f2)
         _HOST_PRESET_FROM_REPO=$(echo "$host_data" | grep "^${HOST}|" | cut -d'|' -f3)
         _PRESET="$_HOST_PRESET_FROM_REPO"
