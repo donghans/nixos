@@ -5,7 +5,8 @@
 base = true
 
 [mods.sys.utils]
-nfd = true
+nfd   = true
+trash = true
 
 [mods.sys.services]
 bluetooth      = true

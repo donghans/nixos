@@ -44,7 +44,7 @@ with lib; {
       tmpfsSize = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "tmpfs /tmp size as percentage of RAM (e.g. \"100%\"). Default: \"100%\".";
+        description = "tmpfs /tmp size (e.g. \"100%\", \"4G\"). Set to \"0\" to disable. Default: \"100%\".";
       };
       zramPercent = mkOption {
         type = types.nullOr types.int;

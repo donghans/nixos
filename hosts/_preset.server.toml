@@ -2,11 +2,12 @@
 
 [mods.sys]
 base = true
-fonts = true
-vfs = true
+fonts = false
+vfs = false
 
 [mods.sys.utils]
-nfd = true
+nfd   = true
+trash = true
 
 [mods.sys.services]
 tailscale      = true

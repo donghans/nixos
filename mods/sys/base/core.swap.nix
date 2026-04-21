@@ -16,9 +16,10 @@ mkPartOf "mods.sys.base" ({
     then (ramGb * 3 + 3) / 4
     else null;
 
-  # tmpfsSize: 명시 오버라이드 > "100%"
+  # tmpfsSize: 명시 오버라이드 > "100%" / "0" → 비활성 센티넬 (swapGb = 0 패턴과 통일)
+  tmpfsEnabled = cfg.tmpfsSize != "0";
   tmpfsSize =
-    if cfg.tmpfsSize != null
+    if cfg.tmpfsSize != null && tmpfsEnabled
     then cfg.tmpfsSize
     else "100%";
 
@@ -51,7 +52,7 @@ in {
     # == tmpfs (/tmp) ==
     # (목적: nixup 빌드 등 대용량 임시 파일을 RAM에서 처리 — swap이 초과분을 흡수)
     boot.tmp = {
-      useTmpfs = lib.mkDefault true;
+      useTmpfs = lib.mkDefault tmpfsEnabled;
       inherit tmpfsSize;
     };
   };
