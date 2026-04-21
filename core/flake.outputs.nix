@@ -157,6 +157,7 @@
       mkHost (resolved
         // {
           workspaceMeta = perHostMeta;
+          inherit (perHostMeta) isRemote;
           extraModules = [modsModule coverageModule];
         })))
     // {
