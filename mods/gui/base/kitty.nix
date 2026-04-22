@@ -22,6 +22,8 @@ mkPartOf "mods.gui" (_: {
 
         cursor_shape = "beam";
         shell_integration = "disabled";
+
+        open_url_modifiers = "ctrl";
       };
 
       # 마우스 매핑 (extraConfig를 사용하거나 키워드 매핑이 필요할 수 있음)
