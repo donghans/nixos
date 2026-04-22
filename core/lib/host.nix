@@ -83,7 +83,8 @@
       tmpfsSize = hostInfo.tmpfsSize   or null;
       zramPercent = hostInfo.zramPercent or null;
       bootLoader = hostInfo.bootLoader or "systemd-boot";
-      isRemote = hostInfo.isRemote or false;
+      isRemote      = hostInfo.isRemote      or false;
+      cloudProvider = hostInfo.cloudProvider or null;
       diskDevice = hostInfo.diskDevice    or workspaceMeta.diskDevice;
       bootDevice = hostInfo.bootDevice    or workspaceMeta.bootDevice;
       timeZone = hostInfo.timeZone      or workspaceMeta.timeZone;
@@ -100,6 +101,7 @@
   mkHost = hostInfo: let
     isISO = hostInfo.isISO or false;
     extraModules = hostInfo.extraModules or [];
+    hmModules    = hostInfo.hmModules    or [];
     hostCtx = mkHostContext (hostInfo // {inherit isISO;});
 
     # remote 호스트는 per-host hardware.nix(hosts/deploy/<hostname>.hardware.nix)를 우선 사용.
@@ -214,6 +216,40 @@
             ];
           }
         ]
+        # (목적: 원격 호스트 home-manager를 NixOS 모듈로 통합)
+        # (이유: deploy-rs는 root로 실행하므로 standalone HM 활성화 시 USER 불일치 오류 발생)
+        ++ nixpkgs.lib.optional hostCtx.metaConfig.isRemote
+            {
+              imports = [inputs.home-manager.nixosModules.home-manager];
+              home-manager = {
+                useGlobalPkgs   = true;
+                useUserPackages = true;
+                extraSpecialArgs = {
+                  forOS = false;
+                  isISO = false;
+                  inherit inputs;
+                  inherit (hostCtx) metaConfig unstable unstable-fallback;
+                } // modArgs;
+                users.${hostCtx.metaConfig.username}.imports =
+                  [./workspace-options.nix {workspace = hostCtx.metaConfig;}]
+                  ++ recursiveImportDir ../../mods
+                  ++ hmModules
+                  ++ [(import hostCtx.homeConfig)];
+              };
+            }
+
+        # (목적: 원격 호스트 primary user 생성 + 콘솔 SSH 키 주입)
+        # (별도 모듈로 분리: 같은 attrset 내 users.users.root.xxx 와 충돌 방지)
+        ++ nixpkgs.lib.optional hostCtx.metaConfig.isRemote
+            {
+              users.users.${hostCtx.metaConfig.username} = {
+                isNormalUser = true;
+                extraGroups  = ["wheel"];
+                openssh.authorizedKeys.keyFiles = nixpkgs.lib.optional
+                  (builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub)
+                  ../../hosts/deploy/${hostInfo.hostname}.pub;
+              };
+            }
         ++ extraModules;
     };
 in {

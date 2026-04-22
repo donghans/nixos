@@ -126,8 +126,9 @@
         swapGb = resolved.swapGb      or null;
         tmpfsSize = resolved.tmpfsSize   or null;
         zramPercent = resolved.zramPercent or null;
-        bootLoader = resolved.bootLoader or "systemd-boot";
-        isRemote = (resolved.deploy or null) != null;
+        bootLoader    = resolved.bootLoader or "systemd-boot";
+        isRemote      = (resolved.deploy or null) != null;
+        cloudProvider = resolved.deploy.cloud or null;
       };
     presetMods = allPresets.${resolved.preset}.mods;
     mergedMods = nixpkgs.lib.recursiveUpdate presetMods resolved.mods;
@@ -157,8 +158,9 @@
       mkHost (resolved
         // {
           workspaceMeta = perHostMeta;
-          inherit (perHostMeta) isRemote;
+          inherit (perHostMeta) isRemote cloudProvider;
           extraModules = [modsModule coverageModule];
+          hmModules    = [modsModule];
         })))
     // {
       # ISO는 resolved.json 없이 직접 호출 (host.toml 없는 특수 케이스)
@@ -260,12 +262,7 @@ in {
               deploy-rs.lib.${resolved.system}.activate.nixos
               nixosConfigurationsAll.${name};
           };
-          profiles.home = {
-            user = "root";
-            path =
-              deploy-rs.lib.${resolved.system}.activate.home-manager
-              homeConfigurationsAll."root@${name}";
-          };
+          # home-manager는 NixOS 모듈로 통합되어 system 프로필에 포함됨
         };
       })
       deployHosts);

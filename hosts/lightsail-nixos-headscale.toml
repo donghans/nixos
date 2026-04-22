@@ -4,7 +4,7 @@
 preset    = "server"
 type      = "server"
 system    = "x86_64-linux"
-username  = "headscale"
+username  = "ec2-user"
 swapGb    = 0       # resolve.py는 로컬 /proc/meminfo 기준 → 원격 호스트는 명시 필요
 tmpfsSize = "0"     # tmpfs 비활성 (저사양 RAM 절약)
 diskDevice = "/dev/nvme0n1"
@@ -12,9 +12,9 @@ bootDevice = "/dev/nvme0n1"
 bootLoader = "grub-uefi"
 
 [deploy]
-ip          = "3.34.148.209"
-sshKey      = "~/.ssh/rnixup/lightsail-nixos-headscale.pem"
-sshUser     = "ec2-user"
+ip     = "3.34.148.209"
+sshKey = "~/.ssh/rnixup/lightsail-nixos-headscale.pem"
+cloud  = "aws"
 
 [mods.sys.services]
 caddy     = true

@@ -91,6 +91,11 @@ with lib; {
         default = false;
         description = "True if this host is a remote deploy-rs target (has [deploy] section in host.toml). Auto-injected from resolved.json.";
       };
+      cloudProvider = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "Cloud provider identifier (e.g. \"aws\"). Auto-injected from deploy.cloud in host.toml. Enables vendor-specific modules.";
+      };
     };
   };
 }
