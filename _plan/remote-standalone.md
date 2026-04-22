@@ -246,14 +246,70 @@ headscale DB는 개인정보(노드 등록 정보)를 포함하므로 git 레포
 
 ---
 
+## step-ca 모듈 → mkHostConfiguration 전환 계획
+
+headscale과 동일한 이유로 step-ca도 단일 호스트에서만 사용될 경우
+shared module 대신 `mkHostConfiguration` 직접 구현으로 전환 가능.
+
+### 전환 방법
+
+`mods/sys/services/step-ca.nix`의 내용을 `hosts/lightsail-nixos-headscale.nix`에 인라인.
+`mkMod` 래퍼와 `options` 블록 제거, 값을 `let` 바인딩으로 직접 선언.
+
+```nix
+# hosts/lightsail-nixos-headscale.nix
+{ mkHostConfiguration, lib, ... }:
+mkHostConfiguration (_: let
+  keyFile      = "/var/lib/step-ca-secrets/intermediate_ca.key";
+  passwordFile = "/var/lib/step-ca-secrets/password";
+  secretsReady = builtins.pathExists keyFile && builtins.pathExists passwordFile;
+in {
+  os = lib.mkMerge [
+    # step-ca (키파일 있을 때만 활성화)
+    (lib.mkIf secretsReady {
+      environment.etc."step-ca/root_ca.crt".text = ''...PEM...'';
+      environment.etc."step-ca/intermediate_ca.crt".text = ''...PEM...'';
+      services.step-ca = {
+        enable = true;
+        address = "0.0.0.0";
+        port = 8443;
+        intermediatePasswordFile = passwordFile;
+        settings = { /* 기존 step-ca.nix 그대로 */ };
+      };
+      systemd.services.step-ca.serviceConfig.ReadOnlyPaths = [
+        (builtins.dirOf keyFile)
+      ];
+    })
+    # headscale ...
+  ];
+})
+```
+
+전환 시 `_preset.control-plane.toml`에서 `step-ca = true` 플래그 제거.
+`mods/sys/services/step-ca.nix` 삭제.
+
+### 트레이드오프
+
+| | shared module 유지 | mkHostConfiguration 전환 |
+|---|---|---|
+| 재사용 가능성 | ✅ 다른 서버에 적용 가능 | ❌ 인라인이므로 복붙 필요 |
+| 구현 일관성 | headscale과 다름 | headscale과 동일 방식 |
+| 코드 복잡도 | options 정의 오버헤드 | 직접 선언으로 단순 |
+| builtins.pathExists 가드 | module 내부에 추가 필요 | let 바인딩으로 자연스럽게 |
+
+> **결정 기준**: 다른 서버에 step-ca를 추가할 계획이 없으면 전환.
+> 있으면 module에 `builtins.pathExists` 가드만 추가하고 유지.
+
+---
+
 ## 구현 우선순위
 
 | 순서 | 작업 | 상태 |
 |------|------|------|
 | 1 | `mods/sys/services/step-ca.nix` (기본 구현) | ✅ 완료 |
-| 1a | `step-ca.nix` `builtins.pathExists` 가드 추가 | 미착수 |
+| 1a | step-ca: module 유지 시 `builtins.pathExists` 가드 추가 / 전환 시 mkHostConfiguration 인라인 | 미착수 |
 | 2 | `aws-roles-anywhere.nix` caServer/caCert 옵션 | ✅ 완료 |
 | 3 | `_preset.server.toml` SSH 명시 | 미착수 |
 | 4 | `_preset.control-plane.toml` 정의 | 미착수 |
 | 5 | `rnixstrap` standalone 호스트 지원 확장 | 미착수 |
-| 6 | `hosts/lightsail-nixos-headscale.nix` headscale 직접 구현 | 미착수 |
+| 6 | `hosts/lightsail-nixos-headscale.nix` headscale + step-ca 직접 구현 | 미착수 |
