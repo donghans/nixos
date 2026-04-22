@@ -22,6 +22,6 @@ for i, l in enumerate(lines):
         break
 
 content = ''.join(lines)
-content = re.sub(r'\]\(([^)]+?)\.md(#[^)]*)?\)', lambda m: f']({{m.group(1)}}{{m.group(2) or ""}})', content)
+content = re.sub(r'\]\(([^)]+?)\.md(#[^)]*)?\)', lambda m: f']({m.group(1)}{m.group(2) or ""})', content)
 out = f'---\ntitle: "{title}"\n---\n\n' + content
 open(path, 'w').write(out)
