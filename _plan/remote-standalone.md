@@ -16,7 +16,6 @@ NixOS 레포 자체를 원격 서버에 1회성으로 전달해 완전히 자립
 |------|-----------|------|
 | Tailscale 코디네이터 | `hosts/lightsail-nixos-headscale.nix` (mkHostConfiguration 직접) | 인터넷 노출 필수, 재사용 불필요 |
 | 사설 CA | `mods.sys.services.step-ca` ✅ 완료 | tailnet + 인터넷 양쪽 접근 가능 |
-| Nix 바이너리 캐시 프록시 | `mods.sys.services.nix-cache-proxy` ✅ 완료 | tailnet 내부 전용 |
 
 프리셋: `_preset.control-plane.toml`
 
@@ -68,7 +67,6 @@ bootLoader = "grub-uefi"
 [mods.sys.services]
 headscale          = true
 step-ca            = true
-nix-cache-proxy    = true
 ```
 
 > **[deploy] 섹션이 없는 이유**: bootstrap IP/키는 1회성. 이후 서버는 독립 운영되므로
