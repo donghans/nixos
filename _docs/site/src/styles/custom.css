@@ -52,6 +52,11 @@ h1.title {
   padding-block: 0.4em !important;
 }
 
+/* 리스트 내부 코드블록 상하 여백 */
+.sl-markdown-content li figure {
+  margin-block: 0.75rem;
+}
+
 /* 우측 목차 항목 간격 확대 */
 starlight-toc a {
   padding-block: 0.42rem !important;
