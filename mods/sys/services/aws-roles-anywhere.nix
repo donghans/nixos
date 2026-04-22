@@ -77,15 +77,31 @@ mkMod __curPos "AWS IAM Roles Anywhere — cert-based temporary credentials" ({c
       type = lib.types.str;
       default = "ap-northeast-2";
     };
+    caServer = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "내부 ACME CA URL (step-ca). null이면 Let's Encrypt 사용.";
+    };
+    caCert = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "내부 CA 루트 인증서 PEM. caServer 사용 시 시스템 트러스트에 추가됨.";
+    };
   };
   os = {
     security.acme.acceptTerms = true;
     security.acme.defaults.email = config.workspace.gitEmail;
-    security.acme.certs.${cfg.domain} = {
-      dnsProvider = cfg.dnsProvider;
-      environmentFile = cfg.tokenFile;
-      group = "aws-access";
-    };
+    security.acme.certs.${cfg.domain} =
+      {
+        dnsProvider = cfg.dnsProvider;
+        environmentFile = cfg.tokenFile;
+        group = "aws-access";
+      }
+      // lib.optionalAttrs (cfg.caServer != null) {
+        server = cfg.caServer;
+      };
+
+    security.pki.certificates = lib.optional (cfg.caCert != null) cfg.caCert;
 
     users.groups.aws-access = {};
     users.users.${config.workspace.username}.extraGroups = ["aws-access"];
