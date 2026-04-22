@@ -115,7 +115,7 @@ generate_nix_stub() {
 
 # ── 3.5. TOML의 ip/sshKey 업데이트 (기존 호스트, 값 변경 시만) ───────────────
 _update_toml_if_changed() {
-    [ "$_IP" = "$_TOML_IP" ] && [ "$_SSH_KEY" = "$_TOML_SSH_KEY" ] && return
+    [ "$_IP" = "$_TOML_IP" ] && [ "${_SSH_KEY/#$HOME/~}" = "$_TOML_SSH_KEY" ] && return
     log_msg "Prep" "TOML 업데이트 중..."
     python3 - "$NIXOS_PATH/hosts/${_HOSTNAME}.toml" "$_IP" "${_SSH_KEY/#$HOME/~}" <<'EOF'
 import sys, re
@@ -316,7 +316,7 @@ run_setup() {
         log_msg "Review" "설정 확인:"
         printf "  %-16s: %s\n" "hostname"   "$_HOSTNAME"
         printf "  %-16s: %s\n" "IP"         "$_IP"
-        printf "  %-16s: %s\n" "SSH key"    "$_SSH_KEY"
+        printf "  %-16s: %s\n" "SSH key"    "${_SSH_KEY/#$HOME/~}"
         printf "  %-16s: %s\n"              "system"     "$_SYSTEM"
         printf "  %-16s: \033[2m%s\033[0m\n" "diskDevice" "SSH 자동 감지"
         printf "  %-16s: \033[2m%s\033[0m\n" "bootLoader" "SSH 자동 감지"
@@ -346,10 +346,10 @@ run_setup() {
         else
             printf "  %-16s: %s\n" "IP" "$_IP"
         fi
-        if [ "$_SSH_KEY" != "$_TOML_SSH_KEY" ]; then
-            printf "  %-16s: \033[2m%s\033[0m  →  %s\n" "SSH key" "$_TOML_SSH_KEY" "$_SSH_KEY"
+        if [ "${_SSH_KEY/#$HOME/~}" != "$_TOML_SSH_KEY" ]; then
+            printf "  %-16s: \033[2m%s\033[0m  →  %s\n" "SSH key" "$_TOML_SSH_KEY" "${_SSH_KEY/#$HOME/~}"
         else
-            printf "  %-16s: %s\n" "SSH key" "$_SSH_KEY"
+            printf "  %-16s: %s\n" "SSH key" "${_SSH_KEY/#$HOME/~}"
         fi
         printf "  %-16s: %s  \033[2m(TOML)\033[0m\n"              "system"     "$_SYSTEM"
         printf "  %-16s: %s  \033[2m(TOML, 재감지 예정)\033[0m\n" "diskDevice" "$_DISK_DEVICE"
@@ -365,7 +365,7 @@ run_setup() {
         fi
         printf "  %s\n" "────────────────────────────────────────────────"
         printf "  \033[2m%-42s %s\033[0m\n" "hosts/${_HOSTNAME}.nix" "유지"
-        if [ "$_IP" != "$_TOML_IP" ] || [ "$_SSH_KEY" != "$_TOML_SSH_KEY" ]; then
+        if [ "$_IP" != "$_TOML_IP" ] || [ "${_SSH_KEY/#$HOME/~}" != "$_TOML_SSH_KEY" ]; then
             printf "  ${YELLOW}%-42s %s${NC}\n" "hosts/${_HOSTNAME}.toml" "업데이트 예정"
         else
             printf "  \033[2m%-42s %s\033[0m\n" "hosts/${_HOSTNAME}.toml" "변경 없음"
@@ -423,7 +423,7 @@ run_setup() {
             log_msg "Notice" "  hosts/${_HOSTNAME}.nix 플레이스홀더를 실제 값으로 교체 후:"
             log_msg "Notice" "  rnixstrap 재실행 → '$_HOSTNAME' 선택 → 배포 재개"
         else
-            if [ "$_IP" != "$_TOML_IP" ] || [ "$_SSH_KEY" != "$_TOML_SSH_KEY" ]; then
+            if [ "$_IP" != "$_TOML_IP" ] || [ "${_SSH_KEY/#$HOME/~}" != "$_TOML_SSH_KEY" ]; then
                 log_msg "Notice" "TOML 업데이트 완료하고 종료합니다."
             else
                 log_msg "Notice" "변경 사항 없음. 종료합니다."
