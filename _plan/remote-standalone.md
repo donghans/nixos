@@ -148,22 +148,41 @@ _SSH_USER=root
 | hardware.nix 누락 | **위험** ⚠️ | `git archive HEAD`는 커밋된 파일만 포함. hardware.nix는 nixos-anywhere 이후 미커밋 상태 → **9b 단계에서 별도 scp로 해결**. |
 | `.env` 미생성 | **주의** | hostname fallback이 대부분 동작하나 엣지케이스 방지를 위해 **10단계에서 명시 생성**. |
 
-### 시크릿 주입 전략 (수동 활성화)
+### 시크릿 주입 전략 (키파일 존재 시 자동 활성화)
 
-bootstrap 완료 직후 서비스들(step-ca, headscale)은 시크릿 파일 부재로 시작 실패 상태.
-서비스 활성화는 별도 수동 작업:
+서비스 모듈 내부에서 `builtins.pathExists`로 키파일 존재 여부를 평가 시점에 체크.
+키파일이 없으면 서비스 config 자체가 생성되지 않으므로 실패 없이 부팅됨.
+
+```nix
+# step-ca.nix (및 headscale mkHostConfiguration)
+let
+  secretsReady = builtins.pathExists cfg.keyFile
+              && builtins.pathExists cfg.passwordFile;
+in {
+  config = lib.mkIf (cfg.enable && secretsReady) {
+    # ... 서비스 설정
+  };
+}
+```
+
+> `builtins.pathExists`는 런타임이 아닌 **nixos-rebuild 평가 시점**에 체크됨.
+> 키파일이 없는 상태로 빌드하면 서비스 관련 systemd 유닛 자체가 생성되지 않음.
+
+활성화 흐름:
 
 ```bash
 # 1. 키 파일 주입
 scp intermediate_ca.key root@<server>:/var/lib/step-ca-secrets/
 scp ca_password         root@<server>:/var/lib/step-ca-secrets/password
 
-# 2. 서비스 활성화
-ssh root@<server> systemctl restart step-ca
-ssh root@<server> systemctl restart headscale
+# 2. 재빌드 → 키파일 감지 → 서비스 자동 포함 및 기동
+ssh root@<server> /opt/nixos/core/scripts/nixup.sh os
 ```
 
 Cloudflare 토큰 등 기타 시크릿도 동일 패턴.
+
+> **구현 필요**: `step-ca.nix`에 `builtins.pathExists` 가드 추가 (현재 미적용).
+> headscale은 `hosts/lightsail-nixos-headscale.nix` 직접 구현 시 동일하게 적용.
 
 ---
 
@@ -202,7 +221,7 @@ headscale DB는 개인정보(노드 등록 정보)를 포함하므로 git 레포
 1. 새 서버 프로비저닝 (Lightsail 콘솔)
 2. `rnixstrap` → `lightsail-nixos-headscale` 선택 → IP/키 입력 → standalone bootstrap
 3. passbolt에서 키 파일 복원 → `/var/lib/step-ca-secrets/` 주입
-4. `systemctl restart step-ca headscale`
+4. `nixup os` (재빌드) → 키파일 감지 → step-ca / headscale 자동 기동
 5. headscale DB 복원 → tailnet 노드 자동 재연결 (DB 없으면 재등록)
 
 목표 복구 시간: **30분 이내**
@@ -231,7 +250,8 @@ headscale DB는 개인정보(노드 등록 정보)를 포함하므로 git 레포
 
 | 순서 | 작업 | 상태 |
 |------|------|------|
-| 1 | `mods/sys/services/step-ca.nix` | ✅ 완료 |
+| 1 | `mods/sys/services/step-ca.nix` (기본 구현) | ✅ 완료 |
+| 1a | `step-ca.nix` `builtins.pathExists` 가드 추가 | 미착수 |
 | 2 | `aws-roles-anywhere.nix` caServer/caCert 옵션 | ✅ 완료 |
 | 3 | `_preset.server.toml` SSH 명시 | 미착수 |
 | 4 | `_preset.control-plane.toml` 정의 | 미착수 |
