@@ -107,7 +107,7 @@ trap '_trap_cleanup; exit 143' TERM
 log_msg "Init" "NixOS Installer"
 if _VIRT_TYPE=$(systemd-detect-virt 2>/dev/null); then
     _IS_VM=true
-    log_msg "Notice" "virtualized environment detected: $_VIRT_TYPE"
+    log_msg "Notice" "가상화 환경 감지됨: $_VIRT_TYPE"
 fi
 
 # -- Phase 1: 입력 수집 --

@@ -146,7 +146,7 @@ _run_deploy_task() {
     _check_ssh_keys
 
     # ── dry-activate ──────────────────────────────────────────────────────────
-    log_msg "Task" "$deploy_count remote host(s) dry-activate 중..."
+    log_msg "Task" "원격 호스트 ${deploy_count}개 dry-activate 중..."
     log_exec "d-rs" ">" "dry-activate"
     nix run "github:serokell/deploy-rs" -- \
         --skip-checks \
@@ -178,7 +178,7 @@ _run_deploy_task() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    log_msg "Notice" "redirecting to rnixup..."
+    log_msg "Notice" "rnixup으로 전달 중..."
     exec rnixup
 fi
 

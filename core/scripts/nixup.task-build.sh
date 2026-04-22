@@ -6,7 +6,7 @@ _show_nvd_diff() {
     local old_store=$1 new_store=$2 label=$3
 
     if [ -z "$old_store" ] || [ -z "$new_store" ] || [ "$old_store" = "$new_store" ]; then
-        log_msg "Notice" "no package changes ($label)"
+        log_msg "Notice" "패키지 변경 없음 ($label)"
         return
     fi
 
@@ -17,7 +17,7 @@ _show_nvd_diff() {
         echo "$diff_out"
         log_exec "nvd" "<" "nvd diff ($label)"
     else
-        log_msg "Notice" "no package changes ($label)"
+        log_msg "Notice" "패키지 변경 없음 ($label)"
     fi
 }
 
@@ -47,7 +47,7 @@ _nix_build() {
 
     if [ "$BUILD_EXIT" -ne 0 ]; then
         # 실패 시 build log 보존 (에러 분석용)
-        log_msg "Error" "Build failed. Build log: $build_log"
+        log_msg "Error" "빌드 실패. 빌드 로그: $build_log"
         exit 1
     fi
 
@@ -79,7 +79,7 @@ _activate_os() {
             log_exec "nix" "<" "switch-to-configuration test"
             ;;
         build)
-            log_msg "Notice" "dry-run: build complete, no activation performed."
+            log_msg "Notice" "dry-run: 빌드 완료, 활성화 없음."
             ;;
     esac
 }
@@ -104,13 +104,13 @@ _activate_home() {
             log_exec "nix" "<" "home-manager activate (dry-run)"
             ;;
         build)
-            log_msg "Notice" "dry-run: build complete, no activation performed."
+            log_msg "Notice" "dry-run: 빌드 완료, 활성화 없음."
             ;;
     esac
 }
 
 run_build_task() {
-    log_msg "Task" "building configuration for #$HOST_ID..."
+    log_msg "Task" "#$HOST_ID 설정 빌드 중..."
 
     if [ "$TARGET_PROFILE" == "os" ] || [ "$TARGET_PROFILE" == "all" ]; then
         local attr="path:${BUILD_DIR}#nixosConfigurations.${HOST_ID}.config.system.build.toplevel"
@@ -135,7 +135,7 @@ run_build_task() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    log_msg "Notice" "redirecting to nixup dispatcher..."
+    log_msg "Notice" "nixup으로 전달 중..."
     exec nixup "$@"
 fi
 

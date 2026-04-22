@@ -5,8 +5,8 @@ run_iso_task() {
     local current_arch
     current_arch=$(uname -m)
     if [ "$current_arch" = "aarch64" ]; then
-        log_msg "Error" "ISO build is not supported on aarch64 hosts."
-        log_msg "Error" "Please run 'nixup iso' from an x86_64 machine."
+        log_msg "Error" "aarch64 호스트에서는 ISO 빌드를 지원하지 않습니다."
+        log_msg "Error" "x86_64 머신에서 'nixup iso'를 실행하세요."
         exit 1
     fi
 
@@ -22,7 +22,7 @@ run_iso_task() {
     local gc_root="$gc_root_dir/result"
     local build_log="$LOG_DIR/${LOG_TIMESTAMP}.nom-build.log"
 
-    log_msg "Task" "starting ISO image build process... [${ISO_ARCH:-x86_64}]"
+    log_msg "Task" "ISO 이미지 빌드 시작... [${ISO_ARCH:-x86_64}]"
 
     mkdir -p "$gc_root_dir"
     log_exec "nix" ">" "nix build iso (nom)"
@@ -38,7 +38,7 @@ run_iso_task() {
     log_exec "nix" "<" "nix build iso (nom)"
 
     if [ "$BUILD_EXIT" -ne 0 ]; then
-        log_msg "Error" "ISO build failed. Build log: $build_log"
+        log_msg "Error" "ISO 빌드 실패. 빌드 로그: $build_log"
         exit 1
     fi
 
@@ -50,17 +50,17 @@ run_iso_task() {
         ISO_NAME=$(basename "$ISO_FILE")
 
         ln -sf "$ISO_FILE" "$BUILD_DIR/$ISO_NAME"
-        log_msg "Done" "ISO successfully created: $ISO_NAME"
-        log_msg "Done" "Store path: $ISO_FILE"
-        log_msg "Done" "Symlink: $NIXOS_PATH/.build/$ISO_NAME"
+        log_msg "Done" "ISO 생성 완료: $ISO_NAME"
+        log_msg "Done" "스토어 경로: $ISO_FILE"
+        log_msg "Done" "심볼릭링크: $NIXOS_PATH/.build/$ISO_NAME"
     else
-        log_msg "Error" "ISO build failed: result link not found."
+        log_msg "Error" "ISO 빌드 실패: result 링크를 찾을 수 없습니다."
         exit 1
     fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    log_msg "Notice" "redirecting to nixup dispatcher..."
+    log_msg "Notice" "nixup으로 전달 중..."
     exec nixup iso
 fi
 

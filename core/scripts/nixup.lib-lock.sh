@@ -11,7 +11,7 @@ apply_lock_strategy() {
 
     # Rolling Strategy
     if [ "$is_rolling" == "true" ]; then
-        log_msg "Lock" "rolling: updating nixpkgs-unstable..."
+        log_msg "Lock" "rolling: nixpkgs-unstable 업데이트 중..."
         [ -f "$final_source_lock" ] && cp "$final_source_lock" "$target_lock"
 
         if [ -f "$target_lock" ]; then

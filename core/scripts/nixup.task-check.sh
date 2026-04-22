@@ -4,27 +4,27 @@
 
 run_check_task() {
     # 1. Dead code check (deadnix)
-    log_msg "Task" "Step 1: Searching for unused code (deadnix)"
+    log_msg "Task" "1단계: 미사용 코드 검사 (deadnix)"
     log_exec "nix" ">" "deadnix"
     deadnix "$NIXOS_PATH"
     log_exec "nix" "<" "deadnix"
 
     # 2. Anti-pattern fix (statix fix)
-    log_msg "Task" "Step 2: Auto-fixing anti-patterns (statix fix)"
+    log_msg "Task" "2단계: 안티패턴 자동 수정 (statix fix)"
     log_exec "nix" ">" "statix fix"
     statix fix "$NIXOS_PATH"
     log_exec "nix" "<" "statix fix"
 
     # 3. Code Formatting (alejandra)
     # (목적: core/flake.nix는 inputs 정렬이 의도적이므로 포맷 대상 제외)
-    log_msg "Task" "Step 3: Formatting code (alejandra, excluding core/flake.nix)"
+    log_msg "Task" "3단계: 코드 포맷팅 (alejandra, core/flake.nix 제외)"
     log_exec "nix" ">" "alejandra"
     find "$NIXOS_PATH" -name "*.nix" ! -path "$NIXOS_PATH/core/flake.nix" -print0 \
         | xargs -0 alejandra -q
     log_exec "nix" "<" "alejandra"
 
     # 4. Shellcheck (Shell Script Analysis)
-    log_msg "Task" "Step 4: Shell script static analysis (shellcheck)"
+    log_msg "Task" "4단계: 쉘 스크립트 정적 분석 (shellcheck)"
     log_exec "nix" ">" "shellcheck"
     # Temporarily set +e so shellcheck errors don't crash the script immediately
     set +e
@@ -34,7 +34,7 @@ run_check_task() {
 
     if [ $SHELLCHECK_RESULT -ne 0 ]; then
         log_exec "nix" "<" "shellcheck"
-        log_msg "Error" "Shellcheck failed! Please fix syntax risks in shell scripts."
+        log_msg "Error" "shellcheck 실패! 쉘 스크립트 문법 오류를 수정하세요."
         exit 1
     fi
     log_exec "nix" "<" "shellcheck"
@@ -46,12 +46,12 @@ run_check_task() {
 
     # 공통: build 환경 준비 (양쪽 모드 동일)
     if [ -f "$HOST_SPECIFIC_LOCK" ]; then
-        log_msg "Task" "Using lock file: $(basename "$HOST_SPECIFIC_LOCK")"
+        log_msg "Task" "락 파일 사용: $(basename "$HOST_SPECIFIC_LOCK")"
     fi
     prepare_build_dir "$NIXOS_PATH" "$BUILD_DIR" "$ENV_FILE" "$HOST_SPECIFIC_LOCK"
 
     if [ "${CHECK_FAST:-false}" = true ]; then
-        log_msg "Task" "Step 5: Integrity check via nix eval (nixosConfigurations.${HOST_ID})"
+        log_msg "Task" "5단계: nix eval 무결성 검사 (nixosConfigurations.${HOST_ID})"
         EVAL_FAILED=false
 
         log_exec "nix" ">" "nixosConfigurations.${HOST_ID}"
@@ -61,7 +61,7 @@ run_check_task() {
             log_exec "nix" "<" "nixosConfigurations.${HOST_ID}"
         else
             log_exec "nix" "<" "nixosConfigurations.${HOST_ID}"
-            log_msg "Error" "nixosConfigurations.${HOST_ID} failed!"
+            log_msg "Error" "nixosConfigurations.${HOST_ID} 실패!"
             EVAL_FAILED=true
         fi
 
@@ -80,25 +80,25 @@ run_check_task() {
                 log_exec "nix" "<" "homeConfigurations.${host}"
             else
                 log_exec "nix" "<" "homeConfigurations.${host}"
-                log_msg "Error" "homeConfigurations.${host} failed!"
+                log_msg "Error" "homeConfigurations.${host} 실패!"
                 EVAL_FAILED=true
             fi
         done <<< "$HOME_HOSTS"
 
         if [ "$EVAL_FAILED" = true ]; then
-            log_msg "Error" "Verification failed! (inspect: $BUILD_DIR)"
+            log_msg "Error" "검증 실패! (확인: $BUILD_DIR)"
             exit 1
         fi
-        log_msg "Done" "All verifications passed successfully!"
+        log_msg "Done" "모든 검증 통과!"
     else
-        log_msg "Task" "Step 5: Full integrity check via nix flake check (all hosts)"
+        log_msg "Task" "5단계: nix flake check 전체 무결성 검사 (전체 호스트)"
         log_exec "nix" ">" "nix flake check"
         if nix flake check "path:$BUILD_DIR" "${NIX_EVAL_FLAGS[@]}" 2> >(grep -v "warning: unknown flake output 'deploy'" >&2); then
             log_exec "nix" "<" "nix flake check"
-            log_msg "Done" "All verifications passed successfully!"
+            log_msg "Done" "모든 검증 통과!"
         else
             log_exec "nix" "<" "nix flake check"
-            log_msg "Error" "Verification failed! (inspect: $BUILD_DIR)"
+            log_msg "Error" "검증 실패! (확인: $BUILD_DIR)"
             exit 1
         fi
     fi
@@ -106,7 +106,7 @@ run_check_task() {
 
 # Redirect to nixup dispatcher when run standalone
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    log_msg "Notice" "redirecting to nixup dispatcher..."
+    log_msg "Notice" "nixup으로 전달 중..."
     exec nixup check "$@"
 fi
 

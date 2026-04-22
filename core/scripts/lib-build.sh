@@ -15,16 +15,16 @@ setup_logging() {
     local user_name=$USER
 
     if [ ! -d "$LOG_DIR" ] || [ ! -w "$LOG_DIR" ]; then
-        log_msg "Notice" "log directory permission issue detected."
-        read -rp "$(_log_prompt)setup log directory with sudo? (Y/n): " CONFIRM
+        log_msg "Notice" "로그 디렉토리 권한 문제가 감지되었습니다."
+        read -rp "$(_log_prompt)sudo로 로그 디렉토리를 설정하시겠습니까? (Y/n): " CONFIRM
 
         if [[ "$CONFIRM" =~ ^[Yy]$ ]] || [ -z "$CONFIRM" ]; then
             sudo mkdir -p "$LOG_DIR"
             sudo chown -R "$user_name:users" "$LOG_DIR"
             sudo chmod -R 775 "$LOG_DIR"
-            log_msg "Init" "log directory prepared."
+            log_msg "Init" "로그 디렉토리 준비 완료."
         else
-            log_msg "Init" "logging disabled for this session."
+            log_msg "Init" "이번 세션에서 로깅이 비활성화됩니다."
             return 1
         fi
     fi
@@ -97,20 +97,20 @@ resolve_host_info() {
         local os_host
         os_host=$(hostname -s 2>/dev/null || true)
         if [[ "$os_host" == nixos* ]]; then
-            log_msg "Error" "NIXUP_LAST_HOST is not set and OS hostname looks like a live ISO ($os_host)."
+            log_msg "Error" "NIXUP_LAST_HOST가 설정되지 않았으며 OS 호스트명이 라이브 ISO로 보입니다 ($os_host)."
             exit 1
         fi
         host_id="$os_host"
-        log_msg "Notice" "NIXUP_LAST_HOST not set — using OS hostname: $host_id"
+        log_msg "Notice" "NIXUP_LAST_HOST 미설정 — OS 호스트명 사용: $host_id"
     fi
 
     local resolved_path="$JSON_DIR/resolved.json"
     if [ ! -f "$resolved_path" ]; then
-        log_msg "Error" "resolved.json not found. resolver may have failed."
+        log_msg "Error" "resolved.json을 찾을 수 없습니다. resolver 실패 가능성이 있습니다."
         exit 1
     fi
     if ! jq -e ".\"$host_id\"" "$resolved_path" > /dev/null 2>&1; then
-        log_msg "Error" "'$host_id' is not a registered host."
+        log_msg "Error" "'$host_id'은(는) 등록된 호스트가 아닙니다."
         exit 1
     fi
     [ -n "$env_file" ] && update_env_file "$env_file" "NIXUP_LAST_HOST" "$host_id"
@@ -126,10 +126,10 @@ prepare_build_dir() {
     local env_file=$3
     local lock_file="${4:-}"
 
-    log_msg "Task" "preparing isolated environment..."
+    log_msg "Task" "격리된 빌드 환경 준비 중..."
 
     if [ -z "$build_dir" ]; then
-        log_msg "Error" "build_dir is empty. aborting."
+        log_msg "Error" "build_dir가 비어 있습니다. 중단합니다."
         exit 1
     fi
 
@@ -166,7 +166,7 @@ prepare_build_dir() {
     # 하드웨어가 바뀌면 .build/hardware.nix를 삭제해서 강제 재생성
     # (sudo 필요: nixos-generate-config가 Btrfs 서브볼륨 쿼리 등에 root 권한을 요구함)
     if [ ! -s "$build_dir/hardware.nix" ]; then
-        log_msg "Prep" "generating hardware.nix..."
+        log_msg "Prep" "hardware.nix 생성 중..."
         sudo nixos-generate-config --no-filesystems --show-hardware-config | sudo tee "$build_dir/hardware.nix" > /dev/null
     fi
     # nix는 path: 모드로 호출 — git 추적 없이 BUILD_DIR을 store에 직접 복사하여 순수 평가
@@ -177,8 +177,8 @@ finalize_lock_sync() {
     local lock_changed=$1
     local target_lock_path=$2
     if [ "$lock_changed" = true ]; then
-        log_msg "Notice" "lock file updated: $target_lock_path"
-        log_msg "Notice" "please review and commit changes."
+        log_msg "Notice" "lock 파일 업데이트됨: $target_lock_path"
+        log_msg "Notice" "변경사항을 확인하고 커밋하세요."
     fi
 }
 
@@ -189,8 +189,8 @@ check_origin_git_status() {
         local status_out
         status_out=$(git -C "$origin_path" status --porcelain 2>/dev/null)
         if [ -n "$status_out" ]; then
-            log_msg "Notice" "uncommitted changes found in repository."
-            log_msg "Notice" "consider committing to save history."
+            log_msg "Notice" "커밋되지 않은 변경사항이 있습니다."
+            log_msg "Notice" "히스토리 보존을 위해 커밋하는 것을 권장합니다."
         fi
     fi
 }
@@ -205,7 +205,7 @@ resolve_log_name() {
 # 9. Signal Handler
 handle_signal() {
     local sig="${1:-UNKNOWN}"
-    log_msg "Error" "Process interrupted by user. ($sig)"
+    log_msg "Error" "사용자에 의해 중단되었습니다. ($sig)"
     exit 130
 }
 

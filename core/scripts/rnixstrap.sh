@@ -15,7 +15,7 @@ if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
     printf "\n"
     printf "${_LOG_PREFIX_COLOR}${_LOG_PREFIX}${NC} ${CYAN}%-9s${NC} | 원격 NixOS 호스트 초기 설치 도구\n" "Help"
     printf "\n"
-    printf "  Usage:\n"
+    printf "  사용법:\n"
     printf "    rnixstrap     — 대화형으로 새 호스트 추가 또는 기존 호스트 재설치\n"
     printf "\n"
     printf "  흐름:\n"

@@ -22,7 +22,7 @@ _print_help() {
     printf "    rnixup        — dry-activate 미리보기 후 확인 → 전체 호스트 배포\n"
     printf "    rnixup list   — 설정된 원격 호스트 목록 출력\n"
     printf "\n"
-    printf "  Tip: 새 원격 호스트 추가는 'rnixstrap'을 사용하세요.\n"
+    printf "  팁: 새 원격 호스트 추가는 'rnixstrap'을 사용하세요.\n"
     printf "\n"
 }
 
@@ -75,8 +75,8 @@ fi
 # ── 배너 ──────────────────────────────────────────────────────────────────────
 _deploy_count=$(jq '[to_entries[] | select(.value.deploy != null)] | length' "$JSON_DIR/resolved.json")
 log_msg "Init" "원격 NixOS 배포 도구"
-log_msg "Init" "Command:  deploy-rs (dry-activate → deploy)"
-log_msg "Init" "Hosts:    ${_deploy_count}개"
+log_msg "Init" "명령어:  deploy-rs (dry-activate → deploy)"
+log_msg "Init" "호스트:   ${_deploy_count}개"
 
 # ── 트랩 ──────────────────────────────────────────────────────────────────────
 trap 'handle_signal SIGINT'  INT

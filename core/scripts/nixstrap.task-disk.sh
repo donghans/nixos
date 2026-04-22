@@ -35,7 +35,7 @@ ask_partitions() {
             while IFS='|' read -r _efi_name _efi_size _efi_fs _efi_label; do
                 [ -z "$_efi_name" ] && continue
                 _efi_paths+=("/dev/$_efi_name")
-                _efi_labels+=("$(printf "%-16s %8s  %s" "$_efi_name" "$_efi_size" "${_efi_label:-<unlabeled>}")")
+                _efi_labels+=("$(printf "%-16s %8s  %s" "$_efi_name" "$_efi_size" "${_efi_label:-<레이블 없음>}")")
             done <<< "$_efi_data"
         fi
         _efi_labels+=("+ 직접 입력")
@@ -60,7 +60,7 @@ ask_partitions() {
             while IFS='|' read -r _root_name _root_size _root_fs _root_label; do
                 [ -z "$_root_name" ] && continue
                 _root_paths+=("/dev/$_root_name")
-                _root_labels+=("$(printf "%-16s %8s [%-5s] %s" "$_root_name" "$_root_size" "$_root_fs" "${_root_label:-<unlabeled>}")")
+                _root_labels+=("$(printf "%-16s %8s [%-5s] %s" "$_root_name" "$_root_size" "$_root_fs" "${_root_label:-<레이블 없음>}")")
             done <<< "$_root_data"
         fi
         _root_labels+=("+ 직접 입력")

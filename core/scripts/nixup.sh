@@ -43,7 +43,7 @@ case "$SUBCOMMAND" in
         TARGET_PROFILE="all"
         ;;
     *)
-        log_msg "Error" "unknown subcommand: '$SUBCOMMAND'. use: os home check fix iso update clean"
+        log_msg "Error" "알 수 없는 서브커맨드: '$SUBCOMMAND'. 사용법: os home check fix iso update clean"
         exit 1
         ;;
 esac
@@ -64,13 +64,13 @@ for arg in "$@"; do
         --keep=*)       CLEAN_KEEP="${arg#--keep=}" ;;
         --help|-h)      print_help_subcmd "$TARGET_PROFILE"; exit 0 ;;
         -*)
-            log_msg "Error" "unknown flag: $arg"
+            log_msg "Error" "알 수 없는 플래그: $arg"
             exit 1 ;;
         *)
             if [ "$TARGET_PROFILE" = "fix-unstable" ]; then
                 EXTRA_ARGS+=("$arg")
             else
-                log_msg "Error" "unknown argument: '$arg'"
+                log_msg "Error" "알 수 없는 인자: '$arg'"
                 exit 1
             fi
             ;;
