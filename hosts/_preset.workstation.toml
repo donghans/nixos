@@ -16,7 +16,8 @@ incus          = true
 incus-win11    = true
 incus-guest    = false
 caddy            = false
-nix-cache-proxy  = false
+nix-cache-proxy    = false
+aws-roles-anywhere = false
 
 [mods.gui]
 enable = true

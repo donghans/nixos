@@ -17,6 +17,7 @@ sshKey = "~/.ssh/rnixup/lightsail-nixos-headscale.pem"
 cloud  = "aws"
 
 [mods.sys.services]
-caddy     = true
-tailscale = false
-incus     = false
+caddy              = true
+tailscale          = false
+incus              = false
+aws-roles-anywhere = true

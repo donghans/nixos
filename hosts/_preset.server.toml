@@ -17,7 +17,8 @@ incus-guest    = false
 caddy          = false
 bluetooth        = false
 docker           = false
-nix-cache-proxy  = false
+nix-cache-proxy    = false
+aws-roles-anywhere = false
 
 [mods.gui]
 enable = false
