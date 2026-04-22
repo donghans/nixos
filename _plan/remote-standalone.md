@@ -17,10 +17,9 @@ NixOS 레포 자체를 원격 서버에 1회성으로 전달해 완전히 자립
 | Tailscale 코디네이터 | `hosts/lightsail-nixos-headscale.nix` (mkHostConfiguration 직접) | 인터넷 노출 필수, 재사용 불필요 |
 | 사설 CA | `mods.sys.services.step-ca` ✅ 완료 | tailnet + 인터넷 양쪽 접근 가능 |
 
-프리셋: `_preset.control-plane.toml`
-
-> **headscale이 shared module이 아닌 이유**: headscale은 이 서버 한 곳에서만 사용되므로
-> `mkHostConfiguration` 내에서 직접 구현. 여러 곳에서 재사용할 서비스가 아님.
+> **headscale / step-ca 모두 shared module 아님**: 두 서비스 모두 이 서버 한 곳에서만 사용.
+> `mkHostConfiguration` 내에서 직접 구현. `_preset.control-plane.toml` 별도 불필요 —
+> `preset = "server"` 그대로 사용하고 나머지는 `hosts/lightsail-nixos-headscale.nix`에 직접 선언.
 
 ### headscale + step-ca 동거 이유
 
@@ -54,10 +53,11 @@ NixOS 레포 자체를 원격 서버에 1회성으로 전달해 완전히 자립
 로컬 호스트(nixstrap)와 동일한 구조. `[deploy]` 섹션 없음. 추가 필드 불필요.
 
 ```toml
-# 예: hosts/lightsail-nixos-headscale.toml (현재 구조 그대로)
-preset     = "control-plane"
+# hosts/lightsail-nixos-headscale.toml (실제 파일 기준)
+preset     = "server"
 type       = "server"
 system     = "x86_64-linux"
+username   = "ec2-user"
 swapGb     = 0
 tmpfsSize  = "0"
 diskDevice = "/dev/nvme0n1"
@@ -65,8 +65,9 @@ bootDevice = "/dev/nvme0n1"
 bootLoader = "grub-uefi"
 
 [mods.sys.services]
-headscale          = true
-step-ca            = true
+caddy              = true   # headscale 443 노출용
+aws-roles-anywhere = true
+# headscale / step-ca는 .nix에 직접 구현 — toml 항목 없음
 ```
 
 > **[deploy] 섹션이 없는 이유**: bootstrap IP/키는 1회성. 이후 서버는 독립 운영되므로
@@ -307,9 +308,8 @@ in {
 | 순서 | 작업 | 상태 |
 |------|------|------|
 | 1 | `mods/sys/services/step-ca.nix` (기본 구현) | ✅ 완료 |
-| 1a | step-ca: module 유지 시 `builtins.pathExists` 가드 추가 / 전환 시 mkHostConfiguration 인라인 | 미착수 |
 | 2 | `aws-roles-anywhere.nix` caServer/caCert 옵션 | ✅ 완료 |
 | 3 | `_preset.server.toml` SSH 명시 | 미착수 |
-| 4 | `_preset.control-plane.toml` 정의 | 미착수 |
+| 4 | `mods/sys/services/step-ca.nix` 삭제 + mkHostConfiguration 인라인 전환 | 미착수 |
 | 5 | `rnixstrap` standalone 호스트 지원 확장 | 미착수 |
-| 6 | `hosts/lightsail-nixos-headscale.nix` headscale + step-ca 직접 구현 | 미착수 |
+| 6 | `hosts/lightsail-nixos-headscale.nix` headscale + step-ca 직접 구현 (builtins.pathExists 가드 포함) | 미착수 |

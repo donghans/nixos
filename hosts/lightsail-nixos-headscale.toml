@@ -1,23 +1,17 @@
-# AWS Lightsail headscale 서버
-# 배포 전 LIGHTSAIL_PUBLIC_IP와 도메인을 실제 값으로 교체하세요.
+# AWS Lightsail headscale + step-ca 컨트롤 플레인
+# headscale / step-ca는 hosts/lightsail-nixos-headscale.nix에 직접 구현 (mkHostConfiguration)
+# 연결 정보: ~/.ssh/rnixup/lightsail-nixos-headscale.bootstrap.env
 
-preset    = "server"
-type      = "server"
-system    = "x86_64-linux"
-username  = "ec2-user"
-swapGb    = 0       # resolve.py는 로컬 /proc/meminfo 기준 → 원격 호스트는 명시 필요
-tmpfsSize = "0"     # tmpfs 비활성 (저사양 RAM 절약)
+preset     = "server"
+type       = "server"
+system     = "x86_64-linux"
+username   = "ec2-user"
+swapGb     = 0       # resolve.py는 로컬 /proc/meminfo 기준 → 원격 호스트는 명시 필요
+tmpfsSize  = "0"     # tmpfs 비활성 (저사양 RAM 절약)
 diskDevice = "/dev/nvme0n1"
 bootDevice = "/dev/nvme0n1"
 bootLoader = "grub-uefi"
 
-[deploy]
-ip     = "3.34.148.209"
-sshKey = "~/.ssh/rnixup/lightsail-nixos-headscale.pem"
-cloud  = "aws"
-
 [mods.sys.services]
 caddy              = true
-tailscale          = false
-incus              = false
 aws-roles-anywhere = true
