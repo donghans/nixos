@@ -93,7 +93,7 @@ mkMod __curPos "AWS IAM Roles Anywhere — cert-based temporary credentials" ({c
     security.acme.defaults.email = config.workspace.gitEmail;
     security.acme.certs.${cfg.domain} =
       {
-        dnsProvider = cfg.dnsProvider;
+        inherit (cfg) dnsProvider;
         environmentFile = cfg.tokenFile;
         group = "aws-access";
       }

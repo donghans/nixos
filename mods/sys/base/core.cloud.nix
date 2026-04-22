@@ -1,4 +1,8 @@
-{mkPartOf, pkgs, ...}:
+{
+  mkPartOf,
+  pkgs,
+  ...
+}:
 mkPartOf "mods.sys.base" ({
   config,
   lib,

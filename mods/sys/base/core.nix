@@ -69,7 +69,8 @@ mkPartOf "mods.sys.base" ({
 
     # == Hardware Firmware ==
     # (이유: desktop/laptop은 Wi-Fi·Bluetooth·GPU 등 외부 펌웨어 필요. RPi는 별도 raspberrypifw 사용, server는 가상화 환경이라 불필요)
-    hardware.enableRedistributableFirmware = lib.mkIf
+    hardware.enableRedistributableFirmware =
+      lib.mkIf
       (config.workspace.type == "desktop" || config.workspace.type == "laptop")
       true;
 

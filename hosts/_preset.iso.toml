@@ -10,14 +10,16 @@ nfd   = false
 trash = false
 
 [mods.sys.services]
-bluetooth      = true
-tailscale      = false
-docker         = false
-incus          = false
-incus-win11    = false
-incus-guest    = true
-caddy            = false
-nix-cache-proxy  = false
+bluetooth          = true
+tailscale          = false
+docker             = false
+incus              = false
+incus-win11        = false
+incus-guest        = true
+caddy              = false
+nix-cache-proxy    = false
+aws-roles-anywhere = false
+step-ca            = false
 
 [mods.gui]
 enable = true

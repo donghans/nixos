@@ -94,13 +94,13 @@ mkMod __curPos "step-ca Private Certificate Authority" ({cfg, ...}: {
     services.step-ca = {
       enable = true;
       address = "0.0.0.0";
-      port = cfg.port;
+      inherit (cfg) port;
       intermediatePasswordFile = cfg.passwordFile;
       settings = {
         root = "/etc/step-ca/root_ca.crt";
         crt = "/etc/step-ca/intermediate_ca.crt";
         key = cfg.keyFile;
-        dnsNames = cfg.dnsNames;
+        inherit (cfg) dnsNames;
         db = {
           type = "badger";
           dataSource = "/var/lib/step-ca/db";

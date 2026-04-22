@@ -6,10 +6,10 @@ mkHostConfiguration (_: {
     # == AWS IAM Roles Anywhere ==
     # trustAnchorArn/profileArn/roleArn: AWS 콘솔 → IAM Roles Anywhere에서 복사
     mods.sys.services.aws-roles-anywhere = {
-      domain         = "r.772610158.xyz";
+      domain = "r.772610158.xyz";
       trustAnchorArn = "arn:aws:rolesanywhere:ap-northeast-2:732799293614:trust-anchor/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
-      profileArn     = "arn:aws:rolesanywhere:ap-northeast-2:732799293614:profile/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
-      roleArn        = "arn:aws:iam::732799293614:role/XXXXXX";
+      profileArn = "arn:aws:rolesanywhere:ap-northeast-2:732799293614:profile/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
+      roleArn = "arn:aws:iam::732799293614:role/XXXXXX";
     };
 
     # == headscale 서비스 설정 ==

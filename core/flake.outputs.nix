@@ -126,8 +126,8 @@
         swapGb = resolved.swapGb      or null;
         tmpfsSize = resolved.tmpfsSize   or null;
         zramPercent = resolved.zramPercent or null;
-        bootLoader    = resolved.bootLoader or "systemd-boot";
-        isRemote      = (resolved.deploy or null) != null;
+        bootLoader = resolved.bootLoader or "systemd-boot";
+        isRemote = (resolved.deploy or null) != null;
         cloudProvider = resolved.deploy.cloud or null;
       };
     presetMods = allPresets.${resolved.preset}.mods;
@@ -160,7 +160,7 @@
           workspaceMeta = perHostMeta;
           inherit (perHostMeta) isRemote cloudProvider;
           extraModules = [modsModule coverageModule];
-          hmModules    = [modsModule];
+          hmModules = [modsModule];
         })))
     // {
       # ISO는 resolved.json 없이 직접 호출 (host.toml 없는 특수 케이스)
