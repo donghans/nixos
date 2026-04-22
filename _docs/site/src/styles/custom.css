@@ -61,3 +61,17 @@ h1.title {
 starlight-toc a {
   padding-block: 0.42rem !important;
 }
+
+/* 수평선 상하 간격 일관화:
+   위쪽은 충분히 띄우고, 아래 바로 오는 제목은 hr이 이미 공간을 줬으므로 margin-top 제거 */
+.sl-markdown-content hr {
+  margin-block: 2rem 1.5rem;
+  border: none;
+  border-top: 1px solid var(--sl-color-hairline);
+}
+
+.sl-markdown-content hr + h2,
+.sl-markdown-content hr + h3,
+.sl-markdown-content hr + h4 {
+  margin-top: 0;
+}
