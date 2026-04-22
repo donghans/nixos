@@ -41,7 +41,7 @@ cd nixos
 nixup home   # 사용자 환경 최초 적용
 ```
 
-상세 가이드: [BOOTSTRAP.md](https://donghans.github.io/nixos/readme/BOOTSTRAP.html)
+상세 가이드: [시스템 이식 가이드](https://donghans.github.io/nixos/tutorials/first-install/)
 
 ---
 
@@ -68,10 +68,12 @@ fvm = true                 # Flutter 추가 활성화
 
 | 문서 | 대상 | 내용 |
 |------|------|------|
-| [시스템 이식 가이드](https://donghans.github.io/nixos/readme/BOOTSTRAP.html) | 처음 설치 | Fork, 설정, 설치 전 과정 |
-| [nixup 명령어](https://donghans.github.io/nixos/manual/NIXUP.html) | 일상 관리 | 서브커맨드, 플래그, 활용 사례 |
-| [Mods 확장 가이드](https://donghans.github.io/nixos/manual/MODS.html) | 기능 확장 | API 레퍼런스, Cookbook, 추가/삭제 절차 |
-| [기술 심층 가이드](https://donghans.github.io/nixos/hacking/_HACKING.html) | 내부 구조 | 아키텍처, 메커니즘, 라이프사이클 |
+| [시스템 이식 가이드](https://donghans.github.io/nixos/tutorials/first-install/) | 처음 설치 | Fork, 설정, 설치 전 과정 |
+| [시스템 관리](https://donghans.github.io/nixos/how-to/manage-system/) | 일상 관리 | 상황별 nixup 활용 사례 |
+| [Mod 만들기](https://donghans.github.io/nixos/how-to/create-mod/) | 기능 확장 | Cookbook, 추가/삭제 절차 |
+| [nixup 명령어](https://donghans.github.io/nixos/reference/nixup-commands/) | 레퍼런스 | 서브커맨드, 플래그, 로그 경로 |
+| [Mod API](https://donghans.github.io/nixos/reference/mod-api/) | 레퍼런스 | mkMod/mkModOf/mkPartOf 시그니처 |
+| [아키텍처 · 내부 구조](https://donghans.github.io/nixos/explanation/overview/) | 심층 이해 | 4개 레이어, 메커니즘, 라이프사이클 |
 
 ---
 
@@ -96,7 +98,11 @@ nixos/
 │   ├── <hostname>.toml # 호스트 메타데이터 (type, preset, mods 오버라이드)
 │   ├── <hostname>.nix  # 호스트 전용 NixOS + Home Manager 설정
 │   └── deploy/         # 원격 호스트 전용 (pub 키, hardware.nix)
-└── .locks/             # Flake lock 파일 (Rolling/Stable 전략)
+├── .locks/             # Flake lock 파일 (Rolling/Stable 전략)
+├── _docs/              # 문서 인프라
+│   ├── content/        # Markdown 소스 (Diátaxis 구조)
+│   └── site/           # Starlight 사이트 생성기
+└── _plan/              # 개발 계획 문서 (빌드 비포함)
 ```
 
 </details>
