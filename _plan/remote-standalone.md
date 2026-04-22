@@ -76,21 +76,40 @@ step-ca            = true
 
 현재: `[deploy]` 섹션 있는 toml만 목록에 표시.
 
-변경:
-- `[deploy]` 섹션 없는 toml도 "standalone bootstrap" 대상으로 표시
-- type(workstation/server) 함께 표시
+변경: **모든 hosts/*.toml을 하나의 플랫 리스트**로 표시.
+수평선(divider) 없이 라벨로 구분 — `_pick`은 단순 번호 리스트이므로 divider가 있으면
+인덱스가 꼬임.
+
+라벨 규칙:
+- `[deploy]` 섹션 있음 → IP 표시 (`1.2.3.4`) = **원격 재설치** 모드
+- `[deploy]` 섹션 없음 → type 표시 (`server` / `workstation`) = **standalone bootstrap** 모드
 - workstation 선택 시 RAM 최소치 경고 (`nixos-anywhere kexec` 기준)
-- ip/key는 대화형으로 입력, **toml에 저장하지 않음** (bootstrap 세션 내 임시 사용)
 
 ```
-호스트 선택:
-  > lightsail-nixos-headscale    [server]   ← standalone bootstrap
-    beelink-ser7-co              [workstation] ← RAM 경고 표시
-  + 새 원격 호스트 추가
-────────────────────────────────
-  (기존 원격 호스트 — 재설치)
-    some-remote-server           [1.2.3.4]
+호스트 선택  (IP있음=재설치 / type있음=standalone bootstrap):
+  lightsail-nixos-headscale    [server]
+  beelink-ser7-co              [workstation]
+  msi-summit-me                [workstation]
+  some-remote-server           [1.2.3.4]
++ 새 원격 호스트 추가
 ```
+
+선택된 호스트의 toml에 `[deploy]` 섹션 있으면 기존 재설치 흐름,
+없으면 standalone bootstrap 흐름으로 자동 분기.
+
+### bootstrap 연결 정보 저장 (`~/.ssh/rnixup/<hostname>.bootstrap.env`)
+
+standalone bootstrap 완료 후 IP/SSH키/유저를 별도 파일로 저장.
+toml에 넣지 않되 나중에 재사용 가능 (nixstrap의 `save_params` / `load_params`와 동일 패턴).
+
+```bash
+# ~/.ssh/rnixup/<hostname>.bootstrap.env
+_IP=1.2.3.4
+_SSH_KEY=~/.ssh/rnixup/lightsail-nixos-headscale.pem
+_SSH_USER=root
+```
+
+재실행 시 파일 있으면 "이전 bootstrap 정보 발견 — 불러올까요?" 물어보고 기본값으로 채움.
 
 ### standalone bootstrap 실행 흐름
 
