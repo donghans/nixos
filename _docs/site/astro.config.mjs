@@ -3,6 +3,7 @@ import starlight from '@astrojs/starlight';
 import { remarkMermaid } from './src/plugins/remark-mermaid.mjs';
 
 export default defineConfig({
+  base: '/nixos',
   markdown: {
     remarkPlugins: [remarkMermaid],
   },
