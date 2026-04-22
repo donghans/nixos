@@ -4,8 +4,9 @@ on:
   push:
     branches: [stable]
     paths:
-      - '.docs/**'
-      - 'book.toml'
+      - '_docs/**'
+      - '!_docs/site/node_modules/**'
+      - '!_docs/site/dist/**'
 
 permissions:
   pages: write
@@ -19,29 +20,71 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Sync docs into Starlight
+        run: |
+          rsync -a --delete \
+            --exclude='_snippets/' \
+            _docs/content/ _docs/site/src/content/docs/
+          find _docs/site/src/content/docs -name '*.md' | while read f; do
+            title=$(grep -m1 "^# " "$f" | sed 's/^# //')
+            python3 - "$f" "$title" <<'PYEOF'
+import sys
+path, title = sys.argv[1], sys.argv[2]
+lines = open(path).read().splitlines(keepends=True)
+import re
+# inline --8<-- snippets
+docs_root = '_docs/content'
+def inline(m):
+    p = f"{docs_root}/{m.group(1)}"
+    try: return open(p).read().rstrip()
+    except: return m.group(0)
+content = ''.join(lines)
+content = re.sub(r'--8<-- "([^"]+)"', inline, content)
+lines = content.splitlines(keepends=True)
+# remove first H1
+for i, l in enumerate(lines):
+    if l.startswith('# '):
+        nxt = lines[i+1] if i+1 < len(lines) else ''
+        lines = lines[:i] + (lines[i+2:] if nxt.strip() == '' else lines[i+1:])
+        break
+import re
+content = ''.join(lines)
+content = re.sub(r'\]\(([^)]+?)\.md(#[^)]*)?\)', lambda m: f']({{m.group(1)}}{{m.group(2) or ""}})', content)
+out = f'---\ntitle: "{title}"\n---\n\n' + content
+open(path, 'w').write(out)
+PYEOF
+          done
+
+      - name: Install deps
+        run: npm install
+        working-directory: _docs/site
+
+      - name: Build
+        run: npm run build
+        working-directory: _docs/site
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _docs/site/dist
+
   deploy:
+    needs: build
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install mdBook & mermaid
-        run: |
-          mkdir -p $HOME/.local/bin
-          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.44/mdbook-v0.4.44-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C $HOME/.local/bin
-          curl -sSL https://github.com/badboy/mdbook-mermaid/releases/download/v0.14.0/mdbook-mermaid-v0.14.0-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C $HOME/.local/bin
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Build
-        run: |
-          mdbook-mermaid install
-          mdbook build
-
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: book
       - id: deployment
         uses: actions/deploy-pages@v4

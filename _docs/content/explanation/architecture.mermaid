@@ -1,0 +1,60 @@
+flowchart TB
+    subgraph L1["① CLI Engine Layer  ·  core/scripts/"]
+        direction LR
+        nixup["`**nixup.sh**
+        Dispatcher · 빌드 오케스트레이터
+        로깅 · 세션 락 · nom 시각화`"]
+        nixstrap["`**nixstrap.sh**
+        Bootstrap Engine · 설치 전용
+        Phase 1 입력 수집 / Phase 2 설치 실행`"]
+        resolve["nixup.task-resolve.py
+        TOML → JSON 변환기"]
+    end
+
+    subgraph L2["② Metadata Layer  ·  hosts/"]
+        direction LR
+        toml["`**TOML 원본**
+        _base.toml  ·  <hostname>.toml
+        _preset.*.toml`"]
+        json["`**생성 JSON** (.build/)
+        resolved.json  ·  presets.json`"]
+        hostnix["`**호스트별 Nix**
+        <hostname>.nix (mkHostConfiguration)`"]
+    end
+
+    subgraph L3["③ Logic Core Layer  ·  core/flake.nix  ·  core/lib/"]
+        direction LR
+        flake["`**flake.nix + host.nix + mods.nix**
+        nixosConfigurations · homeConfigurations
+        동적 생성 · Coverage Check 주입`"]
+        overlay["`**Overlay System**
+        mkWrapper  ·  *.overlay.nix 자동 탐색`"]
+    end
+
+    subgraph L4["④ Mods Layer  ·  mods/"]
+        direction LR
+        sys["`**sys/**
+        base · fonts · vfs
+        services (12개)`"]
+        gui["`**gui/**
+        base (Hyprland)
+        apps · utils`"]
+        devel["`**devel/**
+        base · toolchains
+        apps`"]
+    end
+
+    nixup -->|"resolve 실행\n.build/ 격리 복사"| resolve
+    nixstrap -->|"resolve 실행"| resolve
+    toml -->|"TOML 파싱"| resolve
+    resolve -->|"JSON 생성"| json
+    json -->|"flake 입력"| flake
+    hostnix -->|"import"| flake
+    flake -->|"pkgs 주입"| overlay
+    overlay -->|"customOverlays"| L4
+    flake -->|"modsModule 주입"| L4
+    L4 -->|"`mkIf cfg.enable
+    NixOS · Home Manager 설정 기여`"| Out
+
+    Out(["✓ nixos-rebuild switch\n   nixos-install"])
+

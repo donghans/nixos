@@ -1,0 +1,85 @@
+flowchart TD
+    User(["`**nixup** os · home · check · update …`"]) --> O1
+
+    subgraph ORC["① Orchestration  ·  준비 및 격리"]
+        subgraph ORC_A["입력 · 분석"]
+            O1["**Input Parsing**
+            명령·플래그·채널 결정"]
+            O2["**Resolve**
+            TOML → resolved.json / presets.json"]
+            O1 --> O2
+        end
+        subgraph ORC_B["빌드 격리"]
+            O3["**Build Isolation**
+            소스 → .build/  (path: 모드, git 비참조)"]
+            O4["**Lock Injection**
+            .locks/&lt;host&gt;.lock or _rolling.lock → .build/flake.lock"]
+            O3 --> O4
+        end
+        O2 --> O3
+    end
+
+    subgraph EVL["② Evaluation  ·  평가 및 선언"]
+        subgraph EVL_A["메타데이터 · 패키지"]
+            E1["**Metadata Parsing**
+            flake.nix: resolved.json → AttrSet"]
+            E2["**Package Set Construction**
+            nixpkgs + unstable + unstable-fallback(.env)"]
+            E1 --> E2
+        end
+        subgraph EVL_B["오버레이"]
+            E3["**Overlay Application**
+            mkWrapper · *.overlay.nix 자동 탐색"]
+        end
+        E2 --> E3
+    end
+
+    subgraph EXP["③ Expansion  ·  모듈 확장"]
+        subgraph EXP_A["호스트 구성"]
+            X1["**Host Loading**
+            configuration.nix + modsModule(preset)"]
+            X2["**Inheritance**
+            _hardware.nix · sys 공통 설정"]
+            X1 --> X2
+        end
+        subgraph EXP_B["모듈 · 검증"]
+            X3["**Mix-in**
+            sys · gui · devel 도메인 병합"]
+            X4["**Coverage Check**
+            누락 옵션 · 형제 완전성 위반 시 빌드 오류"]
+            X3 --> X4
+        end
+        X2 --> X3
+    end
+
+    subgraph APP["④ Application  ·  최종 적용"]
+        subgraph APP_A["빌드 · 액션"]
+            A1["**Build Monitor**
+            nix build → nom --json 진행 시각화"]
+            A2{Action?}
+            A3["빌드 결과물 생성만"]
+            A4["즉시 활성화
+            (세대 등록 없음)"]
+            A5["세대 등록
+            + switch-to-configuration"]
+            A1 --> A2
+            A2 -->|"nixup os --build"| A3
+            A2 -->|"nixup os --try"| A4
+            A2 -->|"nixup os"| A5
+        end
+        subgraph APP_B["결과 · 기록"]
+            A6["**NVD Diff**
+            전·후 store path 비교 → 변경 패키지 출력"]
+            A7["**Logging & Sync**
+            YYYYMMDDTHHMMSS.log 기록
+            락 파일 변경 보고"]
+            A6 --> A7
+        end
+        A3 & A4 & A5 --> A6
+    end
+
+    O4 --> E1
+    E3 --> X1
+    X4 --> A1
+    A7 --> Done(["✓ 완료"])
+

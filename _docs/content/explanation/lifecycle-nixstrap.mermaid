@@ -1,0 +1,96 @@
+flowchart TD
+    Entry(["`**nixstrap** 진입
+    (커스텀 ISO 또는 ./nixstrap.sh)`"]) --> LoadParams
+
+    LoadParams{이전 세션 파라미터 존재?}
+    LoadParams -->|"Yes → 불러와 검토"| Review
+    LoadParams -->|"No"| RepoCheck
+
+    subgraph P1["Phase 1  ·  입력 수집"]
+
+        subgraph P1A["레포 · 호스트"]
+            RepoCheck{NIXOS_REPO_PATH 설정됨?}
+            RepoCheck -->|"Yes (./nixstrap.sh)"| SetLocalRepo["현재 레포 경로를
+            REPO_TMP로 사용"]
+            RepoCheck -->|"No (커스텀 ISO)"| Clone["ask_repo_and_clone
+            GitHub 클론"]
+            SetLocalRepo & Clone --> SelectHost["select_host
+            기존 호스트 선택 or 새 이름 입력"]
+            SelectHost -->|"신규 호스트"| AskPreset["ask_preset
+            workstation / server"]
+            AskPreset --> AskSV["ask_state_version
+            릴리즈 고정 or rolling"]
+        end
+
+        subgraph P1B["파티셔닝"]
+            AskParts{"ask_partitions
+            모드 선택"}
+            AskParts -->|"mode 1"| M1["기존 EFI · root 파티션
+            직접 지정"]
+            AskParts -->|"mode 2"| M2["디스크 · 범위 선택
+            → 자동 생성"]
+        end
+
+        subgraph P1C["검토 · 저장"]
+            Review["review_loop
+            설정 확인 → params 저장"]
+            AskPw["ask_password
+            비밀번호 입력 (메모리에만 보관)"]
+            Review --> AskPw
+        end
+
+    end
+
+    SelectHost -->|"기존 호스트"| AskParts
+    AskSV --> AskParts
+    M1 & M2 --> Review
+    AskPw --> S1
+
+    subgraph P2["Phase 2  ·  설치 실행"]
+
+        subgraph P2A["디스크 준비"]
+            S1["cleanup_mounts
+            이전 마운트 해제"]
+            S2["read_disk_labels
+            TOML → BOOT_LABEL / DISK_LABEL"]
+            S3["create_partitions
+            (mode 2: GPT · ESP · root 파티션 생성)"]
+            S4["format_boot / format_root
+            fat32 · Btrfs + 서브볼륨 @·@home·@nix·@log"]
+            S5["mount_partitions
+            /mnt 마운트 (btrfs 옵션 적용)"]
+            S1 --> S2 --> S3 --> S4 --> S5
+        end
+
+        subgraph P2B["설치 환경 구성"]
+            S6["move_repo
+            REPO_TMP → /mnt/etc/nixos"]
+            S7["create_host_profile
+            신규 호스트: <hostname>.toml · .nix 생성"]
+            S8["resolve_metadata
+            nixup.task-resolve.py → resolved.json / presets.json"]
+            S9["extract_username
+            _base.toml → USERNAME"]
+            S10["prepare_build_dir
+            /tmp/nixos-build 격리 환경 구성"]
+            S11["generate_hw_config
+            nixos-generate-config → hardware.nix (BUILD_DIR)"]
+            S6 --> S7 --> S8 --> S9 --> S10 --> S11
+        end
+
+        subgraph P2C["설치 · 후처리"]
+            S12["nixos-install
+            --no-root-passwd --flake path:#HOST"]
+            S13["_post_process
+            mv nixos → /home/USERNAME
+            chown · symlink /etc/nixos
+            chpasswd → 메모리 즉시 비움"]
+            S12 --> S13
+        end
+
+    end
+
+    S5 --> S6
+    S11 --> S12
+    S13 --> Done(["✓ 설치 완료 → 재부팅"])
+
