@@ -123,14 +123,30 @@ _SSH_USER=root
 7. nixos-anywhere --flake BUILD_DIR#<hostname>
    (hardware.nix 자동 생성 → hosts/deploy/<hostname>.hardware.nix 저장)
 8. wait_for_ssh (재부팅 대기)
-9. 레포 전송: git archive HEAD | ssh root@<ip> "tar xf - -C /opt/nixos"
-   (hosts/deploy/ git tracked이므로 hardware.nix 포함됨)
-10. SSH 접속 → /opt/nixos/core/scripts/nixup.sh os
+9. 레포 전송 (2단계):
+   a. git archive HEAD | ssh root@<ip> "mkdir -p /opt/nixos && tar xf - -C /opt/nixos"
+   b. scp hosts/deploy/<hostname>.hardware.nix root@<ip>:/opt/nixos/hosts/deploy/
+      (git archive는 커밋된 파일만 포함 → hardware.nix는 미커밋이므로 별도 전송 필수)
+10. .env 생성: ssh root@<ip> "echo NIXUP_LAST_HOST=<hostname> > /opt/nixos/.env"
+    (nixup resolve_host_info가 hostname -s fallback을 쓰긴 하지만 명시적으로 생성)
+11. SSH 접속 → /opt/nixos/core/scripts/nixup.sh os
     (서버에서 직접 nixos-rebuild switch, self-managed 완성)
 ```
 
 > deploy-rs 없음. nixos-anywhere가 full config로 설치하고,
 > 레포 전송 후 nixup os로 self-rebuild 확인.
+
+### disko / 부트로더 안전성 분석
+
+`nixup os` (nixos-rebuild switch) 실행 시 충돌 가능성을 검토함.
+
+| 항목 | 결론 | 근거 |
+|------|------|------|
+| disko 재파티셔닝 | **안전** | `nixos-rebuild switch`는 disko를 재실행하지 않음. systemd 마운트 유닛만 갱신. |
+| GRUB 재설치 | **안전** | `nixos-rebuild switch`는 grub-install을 호출하지만, `probe_disk_and_boot()`로 diskDevice가 이미 보정되어 있음. |
+| `resolved.json` / `presets.json` 누락 | **안전** | git archive에 없지만 원격 `nixup os` 실행 시 `run_resolve_and_prepare`가 재생성. |
+| hardware.nix 누락 | **위험** ⚠️ | `git archive HEAD`는 커밋된 파일만 포함. hardware.nix는 nixos-anywhere 이후 미커밋 상태 → **9b 단계에서 별도 scp로 해결**. |
+| `.env` 미생성 | **주의** | hostname fallback이 대부분 동작하나 엣지케이스 방지를 위해 **10단계에서 명시 생성**. |
 
 ### 시크릿 주입 전략 (수동 활성화)
 
