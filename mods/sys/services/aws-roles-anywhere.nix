@@ -11,7 +11,7 @@
 #    (https://letsencrypt.org/certs/isrgrootx1.pem)
 # 2. IAM → Roles → Create Role
 #    Trusted entity: IAM Roles Anywhere → 위에서 만든 Trust Anchor + Profile 선택
-#    필요 권한만 부여 (e.g. AmazonSSMReadOnlyAccess)
+#    필요 권한만 부여 (AmazonSSMManagedInstanceCore + 필요한 서비스 정책)
 # 3. IAM Roles Anywhere → Profiles → Create
 #    위에서 만든 Role 연결
 #
@@ -36,9 +36,17 @@
 # security.acme가 새 인증서 자동 발급 → Trust Anchor(ISRG Root X1)가 그대로 신뢰.
 # AWS 콘솔 재작업 불필요.
 #
+# [SSM Session Manager — Lightsail 브라우저 콘솔 대체]
+# IAM Role에 AmazonSSMManagedInstanceCore 정책 부여 시 SSM Session Manager 사용 가능.
+# SSM Agent는 기본적으로 Lightsail IMDS(계정 102212213358) 자격증명을 집어가는데,
+# 이 모듈이 amazon-ssm-agent 서비스에 AWS_CONFIG_FILE을 주입해 credential_process를
+# 우선 사용하도록 강제함 → 계정 732799293614으로 SSM 등록됨.
+# 활성화 후: aws ssm start-session --target <instance-id>
+#
 # [배포 후 검증]
 # systemctl status acme-r.772610158.xyz.service  # 인증서 발급 확인
 # aws sts get-caller-identity                     # 계정 732799293614 반환되면 성공
+# systemctl status amazon-ssm-agent              # SSM 등록 확인 (AmazonSSMManagedInstanceCore 부여 시)
 #
 {
   mkMod,
@@ -96,5 +104,9 @@ mkMod __curPos "AWS IAM Roles Anywhere — cert-based temporary credentials" ({c
     '';
 
     environment.sessionVariables.AWS_CONFIG_FILE = "/etc/aws/config";
+
+    # SSM Agent가 Lightsail IMDS(계정 102212213358) 대신 credential_process를 사용하도록 강제
+    # (AWS SDK 자격증명 체인: config file credential_process > IMDS)
+    systemd.services.amazon-ssm-agent.environment.AWS_CONFIG_FILE = "/etc/aws/config";
   };
 })
