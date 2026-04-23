@@ -105,7 +105,7 @@ mkHostConfiguration ({
       settings = {
         monitor = lib.mkForce [
           "eDP-1,2560x1600@60,auto,1"
-          "DP-2,preferred,auto-up,1"
+          "HDMI-A-1,preferred,auto-up,1"
         ];
 
         input.touchpad = {

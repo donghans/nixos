@@ -102,8 +102,8 @@ services.fprintd.enable = false; # (이유: 지문 인식 초기화 시 프리�
 
 ```nix
 monitor = lib.mkForce [
-  "eDP-1,2560x1600@60,auto,1"     # 노트북 내장
-  "DP-2,preferred,auto-up,1"      # 외부 DP (USB-C)
+  "eDP-1,2560x1600@60,auto,1"        # 노트북 내장
+  "HDMI-A-1,preferred,auto-up,1"     # 외부 모니터 (HDMI) — Hexium 32UL3C
 ];
 ```
 
