@@ -186,12 +186,12 @@
               settings.PermitRootLogin = "prohibit-password";
             };
 
-            # (목적: deploy-rs가 root SSH로 magic rollback 확인 가능하게 root에 공개키 주입)
+            # (목적: pub 파일이 있는 호스트(remote + standalone bootstrap)에 root SSH 키 주입)
+            # (isRemote 비의존: pub 파일 존재 여부가 충분한 가드 — standalone bootstrap 지원)
             users.users.root.openssh.authorizedKeys.keyFiles =
-              nixpkgs.lib.mkIf hostCtx.metaConfig.isRemote
-              (nixpkgs.lib.optional
-                (builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub)
-                ../../hosts/deploy/${hostInfo.hostname}.pub);
+              nixpkgs.lib.optional
+              (builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub)
+              ../../hosts/deploy/${hostInfo.hostname}.pub;
 
             # (목적: deploy-rs가 root로 nix copy 실행 — root는 기본 trusted-user)
             nix.settings.trusted-users =

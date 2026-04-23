@@ -45,7 +45,8 @@ ENV_FILE="$NIXOS_PATH/.env"
 mkdir -p "$JSON_DIR"
 
 # ── 공유 상태 (Phase 1 → Phase 2 전달) ───────────────────────────────────────
-_HOST_IS_NEW=true       # false = 기존 호스트 재설치
+_HOST_IS_NEW=true       # false = 기존 호스트 (재설치 or standalone bootstrap)
+_HOST_HAS_DEPLOY=true   # false = [deploy] 섹션 없는 기존 호스트 (standalone bootstrap)
 _HOSTNAME=""
 _IP=""
 _SSH_KEY=""
@@ -55,10 +56,13 @@ _DISK_DEVICE=""
 _REMOTE_RAM_MB=-1   # 원격 RAM(MB), -1=감지 전/실패
 _SERVICES=()
 _SSH_USER="root"        # nixos-anywhere bootstrap 접속 유저
-_TOML_IP=""             # 기존 호스트 TOML에서 로드
-_TOML_SSH_KEY=""        # 기존 호스트 TOML에서 로드
+_TOML_IP=""             # 기존 호스트 TOML에서 로드 ([deploy] 있는 경우)
+_TOML_SSH_KEY=""        # 기존 호스트 TOML에서 로드 ([deploy] 있는 경우)
 _TOML_BOOT_LOADER=""    # 기존 호스트 TOML에서 로드
 _TOML_DISK_DEVICE=""    # 기존 호스트 TOML에서 로드
+_BOOTSTRAP_IP=""        # .bootstrap.env에서 로드 (standalone 기본값)
+_BOOTSTRAP_SSH_KEY=""   # .bootstrap.env에서 로드 (standalone 기본값)
+_BOOTSTRAP_SSH_USER=""  # .bootstrap.env에서 로드 (standalone 기본값)
 
 # ── lib 로드 ──────────────────────────────────────────────────────────────────
 source "$SCRIPT_DIR/lib-build.sh"
@@ -89,9 +93,14 @@ if [ "$_HOST_IS_NEW" = true ]; then
     ask_ssh_key
     ask_system
     ask_services
+elif [ "$_HOST_HAS_DEPLOY" = false ]; then
+    load_bootstrap_env  # ~/.ssh/rnixup/<hostname>.bootstrap.env → _BOOTSTRAP_* 변수
+    ask_ssh_user        # _BOOTSTRAP_SSH_USER 기본값
+    ask_ip              # _BOOTSTRAP_IP 기본값
+    ask_ssh_key         # _BOOTSTRAP_SSH_KEY 기본값
 else
-    ask_ip        # 기존 IP를 기본값으로, 변경 가능
-    ask_ssh_key   # 기존 키를 기본값으로, 변경 가능
+    ask_ip        # 기존 TOML IP를 기본값으로, 변경 가능
+    ask_ssh_key   # 기존 TOML 키를 기본값으로, 변경 가능
 fi
 
 run_setup

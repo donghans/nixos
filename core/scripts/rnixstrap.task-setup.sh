@@ -156,7 +156,7 @@ probe_disk_and_boot() {
     local remote_out
     remote_out=$(ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" -o ConnectTimeout=10 \
         "${_SSH_USER}@${_IP}" \
-        'test -d /sys/firmware/efi && echo uefi || echo bios; lsblk -dn -o NAME,TYPE 2>/dev/null | awk '"'"'$2=="disk"{print "/dev/"$1; exit}'"'"'' \
+        'test -d /sys/firmware/efi && echo uefi || echo bios; lsblk -dn -o NAME,TYPE 2>/dev/null | awk '"'"'$2=="disk" && $1!~/^zram/{print "/dev/"$1; exit}'"'"'' \
         2>/dev/null) || true
 
     if [ -z "$remote_out" ]; then
@@ -191,8 +191,12 @@ text = re.sub(r'(bootLoader\s*=\s*)"[^"]*"', f'\\1"{new_boot}"', text)
 with open(path, "w") as f:
     f.write(text)
 EOF
-    [ "$_DISK_DEVICE" != "$_TOML_DISK_DEVICE" ] && log_msg "Done" "diskDevice: $_TOML_DISK_DEVICE → $_DISK_DEVICE"
-    [ "$_BOOT_LOADER" != "$_TOML_BOOT_LOADER" ] && log_msg "Done" "bootLoader: $_TOML_BOOT_LOADER → $_BOOT_LOADER"
+    if [ "$_DISK_DEVICE" != "$_TOML_DISK_DEVICE" ]; then
+        log_msg "Done" "diskDevice: $_TOML_DISK_DEVICE → $_DISK_DEVICE"
+    fi
+    if [ "$_BOOT_LOADER" != "$_TOML_BOOT_LOADER" ]; then
+        log_msg "Done" "bootLoader: $_TOML_BOOT_LOADER → $_BOOT_LOADER"
+    fi
 }
 
 probe_ssh() {
@@ -276,6 +280,56 @@ run_deploy_rs() {
     log_msg "Done" "초기 배포 완료: $_HOSTNAME → $_IP"
 }
 
+# ── standalone 호스트 파일 준비 (기존 toml/nix 유지, disk/boot + pubkey만 갱신) ─
+_write_standalone_files() {
+    probe_ssh
+    probe_disk_and_boot
+    _update_toml_disk_boot_if_changed
+    extract_pub_key
+    write_pub_key_file
+}
+
+# ── 레포 → 원격 서버 전송 ─────────────────────────────────────────────────────
+# git archive: 커밋된 파일만 포함. hardware.nix는 미커밋이므로 별도 scp.
+transfer_repo_to_remote() {
+    log_msg "Task" "레포 전송 중 (/opt/nixos)..."
+    git -C "$NIXOS_PATH" archive HEAD \
+        | ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "root@${_IP}" \
+              "mkdir -p /opt/nixos && tar xf - -C /opt/nixos"
+    scp -i "$_SSH_KEY" "${_SSH_OPTS[@]}" \
+        "$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.hardware.nix" \
+        "root@${_IP}:/opt/nixos/hosts/deploy/${_HOSTNAME}.hardware.nix"
+    log_msg "Done" "레포 전송 완료"
+}
+
+# ── 원격 서버 .env 설정 ───────────────────────────────────────────────────────
+set_remote_env() {
+    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "root@${_IP}" \
+        "echo NIXUP_LAST_HOST=${_HOSTNAME} > /opt/nixos/.env"
+    log_msg "Done" "원격 .env: NIXUP_LAST_HOST=${_HOSTNAME}"
+}
+
+# ── 원격 서버에서 nixup os 실행 ───────────────────────────────────────────────
+run_nixup_os_remote() {
+    log_msg "Task" "원격 nixup os 실행 중..."
+    log_exec "nixup" ">" "nixup os: $_HOSTNAME"
+    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "root@${_IP}" \
+        /opt/nixos/core/scripts/nixup.sh os
+    log_exec "nixup" "<" "nixup os: $_HOSTNAME"
+    log_msg "Done" "원격 nixup os 완료"
+}
+
+# ── bootstrap.env 저장 ────────────────────────────────────────────────────────
+save_bootstrap_env() {
+    local env_file="$HOME/.ssh/rnixup/${_HOSTNAME}.bootstrap.env"
+    mkdir -p "$(dirname "$env_file")"
+    chmod 700 "$(dirname "$env_file")"
+    printf '_IP=%s\n_SSH_KEY=%s\n_SSH_USER=%s\n' \
+        "$_IP" "${_SSH_KEY/#$HOME/~}" "$_SSH_USER" > "$env_file"
+    chmod 600 "$env_file"
+    log_msg "Done" "bootstrap.env 저장: ~/.ssh/rnixup/${_HOSTNAME}.bootstrap.env"
+}
+
 # ── 새 호스트 파일 생성 ───────────────────────────────────────────────────────
 _write_new_host_files() {
     probe_ssh
@@ -296,13 +350,24 @@ _write_new_host_files() {
     generate_nix_stub
 }
 
-# ── 설치 + 배포 ───────────────────────────────────────────────────────────────
+# ── 설치 + 배포 (deploy-rs 모델) ─────────────────────────────────────────────
 _run_install() {
     run_resolve_and_prepare
     run_nixos_anywhere
     renew_host_key
     wait_for_ssh
     run_deploy_rs
+}
+
+# ── 설치 + 레포 전송 + 원격 nixup os (standalone 모델) ───────────────────────
+_run_install_standalone() {
+    run_resolve_and_prepare
+    run_nixos_anywhere
+    renew_host_key
+    wait_for_ssh
+    transfer_repo_to_remote
+    set_remote_env
+    run_nixup_os_remote
 }
 
 # ── 메인 오케스트레이터 ───────────────────────────────────────────────────────
@@ -338,8 +403,29 @@ run_setup() {
         printf "  ${GREEN}%-42s %s${NC}\n" "hosts/${_HOSTNAME}.toml" "신규 생성"
         printf "  ${GREEN}%-42s %s${NC}\n" "hosts/${_HOSTNAME}.nix"  "신규 생성"
         printf "  \033[2m참고: 바로 진행/쓰기만 모두 SSH 접속 포함\033[0m\n"
+    elif [ "${_HOST_HAS_DEPLOY:-true}" = false ]; then
+        log_msg "Review" "설정 확인 (standalone bootstrap):"
+        printf "  %-16s: %s\n" "hostname" "$_HOSTNAME"
+        printf "  %-16s: %s\n" "IP"       "$_IP"
+        printf "  %-16s: %s\n" "SSH key"  "${_SSH_KEY/#$HOME/~}"
+        printf "  %-16s: %s  \033[2m(TOML)\033[0m\n"              "system"     "$_SYSTEM"
+        printf "  %-16s: %s  \033[2m(TOML, 재감지 예정)\033[0m\n" "diskDevice" "$_DISK_DEVICE"
+        printf "  %-16s: %s  \033[2m(TOML, 재감지 예정)\033[0m\n" "bootLoader" "$_BOOT_LOADER"
+        if [ "$_REMOTE_RAM_MB" -eq -1 ]; then
+            printf "  %-16s: \033[2m알 수 없음\033[0m\n" "RAM"
+        elif [ "$_REMOTE_RAM_MB" -lt 1000 ]; then
+            printf "  %-16s: \033[31m%sMB  ← 최소치(1000MB) 미달\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
+        elif [ "$_REMOTE_RAM_MB" -lt 1500 ]; then
+            printf "  %-16s: \033[33m%sMB  ← kexec 실패 가능 (권장 1500MB)\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
+        else
+            printf "  %-16s: %sMB\n" "RAM" "$_REMOTE_RAM_MB"
+        fi
+        printf "  %s\n" "────────────────────────────────────────────────"
+        printf "  \033[2m%-42s %s\033[0m\n" "hosts/${_HOSTNAME}.nix"  "유지"
+        printf "  \033[2m%-42s %s\033[0m\n" "hosts/${_HOSTNAME}.toml" "disk/boot 재감지 후 업데이트"
+        printf "  \033[2m참고: nixos-anywhere → 레포 전송 → 원격 nixup os\033[0m\n"
     else
-        log_msg "Review" "설정 확인 \033[2m(기존 호스트 재설치)\033[0m:"
+        log_msg "Review" "설정 확인 (기존 호스트 재설치):"
         printf "  %-16s: %s\n" "hostname" "$_HOSTNAME"
         if [ "$_IP" != "$_TOML_IP" ]; then
             printf "  %-16s: \033[2m%s\033[0m  →  %s\n" "IP" "$_TOML_IP" "$_IP"
@@ -393,8 +479,14 @@ run_setup() {
             printf "\n"
             log_msg "Warn" "RAM ${_REMOTE_RAM_MB}MB — kexec 실패 가능성 있음 (권장: 1500MB 이상)"
         }
+        local _proceed_label
+        if [ "${_HOST_HAS_DEPLOY:-true}" = false ]; then
+            _proceed_label="바로 진행  — nixos-anywhere 설치 + 레포 전송 + nixup os"
+        else
+            _proceed_label="바로 진행  — nixos-anywhere 설치 + deploy-rs 배포"
+        fi
         _pick "다음 단계를 선택하세요:" \
-            "바로 진행  — nixos-anywhere 설치 + deploy-rs 배포" \
+            "$_proceed_label" \
             "쓰기만     — 파일 작업만 하고 종료" \
             "취소       — 아무것도 하지 않고 종료"
         if [ "$REPLY" -eq 2 ]; then
@@ -411,6 +503,8 @@ run_setup() {
     # ── 파일 작업 (바로 진행 + 쓰기만 공통) ──────────────────────────────────
     if [ "${_HOST_IS_NEW:-true}" = true ]; then
         _write_new_host_files
+    elif [ "${_HOST_HAS_DEPLOY:-true}" = false ]; then
+        : # standalone: 바로 진행 시 _write_standalone_files 호출 (아래에서 처리)
     else
         _update_toml_if_changed
     fi
@@ -422,6 +516,9 @@ run_setup() {
             log_msg "Notice" "파일만 생성하고 종료합니다."
             log_msg "Notice" "  hosts/${_HOSTNAME}.nix 플레이스홀더를 실제 값으로 교체 후:"
             log_msg "Notice" "  rnixstrap 재실행 → '$_HOSTNAME' 선택 → 배포 재개"
+        elif [ "${_HOST_HAS_DEPLOY:-true}" = false ]; then
+            log_msg "Notice" "standalone 모드: 파일 작업 없이 종료합니다."
+            log_msg "Notice" "  rnixstrap 재실행 → '$_HOSTNAME' 선택 → bootstrap 재개"
         else
             if [ "$_IP" != "$_TOML_IP" ] || [ "${_SSH_KEY/#$HOME/~}" != "$_TOML_SSH_KEY" ]; then
                 log_msg "Notice" "TOML 업데이트 완료하고 종료합니다."
@@ -432,15 +529,23 @@ run_setup() {
         exit 0
     fi
 
-    # ── 바로 진행: 기존 호스트는 SSH probe + 재감지 + pub key 갱신 + TOML 업데이트 ─
-    if [ "${_HOST_IS_NEW:-true}" != true ]; then
-        probe_ssh
-        probe_disk_and_boot
-        _update_toml_disk_boot_if_changed
-        extract_pub_key
-        write_pub_key_file
+    # ── 바로 진행 ─────────────────────────────────────────────────────────────
+    if [ "${_HOST_HAS_DEPLOY:-true}" = false ]; then
+        # standalone bootstrap: probe + pub key + nixos-anywhere + 레포 전송 + nixup os
+        _write_standalone_files
+        _run_install_standalone
+        save_bootstrap_env
+    else
+        # deploy-rs 모델: 새 호스트 or 기존 호스트 재설치
+        if [ "${_HOST_IS_NEW:-true}" != true ]; then
+            probe_ssh
+            probe_disk_and_boot
+            _update_toml_disk_boot_if_changed
+            extract_pub_key
+            write_pub_key_file
+        fi
+        _run_install
     fi
-    _run_install
 
     printf "\n"
     log_msg "Done" "════════════════════════════════════════"
@@ -449,7 +554,12 @@ run_setup() {
     log_msg "Done" "════════════════════════════════════════"
     printf "\n"
     log_msg "Notice" "다음 단계:"
-    if [ "${_HOST_IS_NEW:-true}" = true ]; then
+    if [ "${_HOST_HAS_DEPLOY:-true}" = false ]; then
+        log_msg "Notice" "  시크릿 주입 후 서비스 활성화:"
+        log_msg "Notice" "    scp intermediate_ca.key root@$_IP:/var/lib/step-ca-secrets/"
+        log_msg "Notice" "    scp password            root@$_IP:/var/lib/step-ca-secrets/password"
+        log_msg "Notice" "    ssh root@$_IP /opt/nixos/core/scripts/nixup.sh os"
+    elif [ "${_HOST_IS_NEW:-true}" = true ]; then
         log_msg "Notice" "  1. hosts/${_HOSTNAME}.nix 에서 플레이스홀더를 실제 값으로 교체"
         log_msg "Notice" "  2. rnixup 으로 설정 반영"
     else

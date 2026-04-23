@@ -22,6 +22,10 @@ in {
       networking.useNetworkd = true;
       networking.useDHCP = false;
       services.resolved.enable = true;
+      services.openssh = {
+        enable = true;
+        settings.PasswordAuthentication = false;
+      };
       # (목적: 온라인 대기 비활성화로 부팅 속도 향상)
       systemd.network.wait-online.enable = false;
       # (목적: eth0/ens5 등 이름 무관하게 이더넷 인터페이스 DHCP 자동 설정)

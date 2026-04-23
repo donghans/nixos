@@ -127,7 +127,7 @@
         tmpfsSize = resolved.tmpfsSize   or null;
         zramPercent = resolved.zramPercent or null;
         bootLoader = resolved.bootLoader or "systemd-boot";
-        isRemote = (resolved.deploy or null) != null;
+        isRemote = (resolved.deploy or null) != null || resolved.type == "server";
         cloudProvider = resolved.deploy.cloud or null;
       };
     presetMods = allPresets.${resolved.preset}.mods;
