@@ -349,6 +349,26 @@ run_nixup_os_remote() {
     log_msg "Done" "원격 nixup os 완료"
 }
 
+# ── 레포를 홈 디렉터리로 이동 + /etc/nixos 심링크 (standalone 마무리) ─────────
+# /opt/nixos/ → ~/nixos/  +  /etc/nixos → ~/nixos  +  chown
+# nixstrap 로컬 설치와 동일한 구조로 맞춤
+# $1: SSH 유저
+finalize_standalone_repo() {
+    local u="${1:-root}"
+    log_msg "Task" "레포를 홈 디렉터리로 이동 중 (/opt/nixos → ~/nixos)..."
+    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+        "sudo bash -s -- '${u}'" <<'REMOTE'
+NIXOS_USER="$1"
+USER_HOME=$(getent passwd "$NIXOS_USER" | cut -d: -f6)
+[ -z "$USER_HOME" ] && USER_HOME="/home/$NIXOS_USER"
+mv /opt/nixos "$USER_HOME/nixos"
+rm -rf /etc/nixos
+ln -sfn "$USER_HOME/nixos" /etc/nixos
+chown -R "$NIXOS_USER:users" "$USER_HOME/nixos"
+REMOTE
+    log_msg "Done" "레포 이동 완료: ~/nixos, /etc/nixos 심링크"
+}
+
 # ── bootstrap.env 저장 ────────────────────────────────────────────────────────
 save_bootstrap_env() {
     local env_file="$HOME/.ssh/rnixup/${_HOSTNAME}.bootstrap.env"
@@ -401,6 +421,7 @@ _run_install_standalone() {
     transfer_repo_to_remote "$_nixos_user"
     set_remote_env "$_nixos_user"
     run_nixup_os_remote "$_nixos_user"
+    finalize_standalone_repo "$_nixos_user"
 }
 
 # ── 메인 오케스트레이터 ───────────────────────────────────────────────────────
