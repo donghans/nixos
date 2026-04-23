@@ -84,15 +84,17 @@ EOF
 load_bootstrap_env() {
     local env_file="$HOME/.ssh/rnixup/${_HOSTNAME}.bootstrap.env"
     [ -f "$env_file" ] || return 0
-    local _IP_SAVED="" _SSH_KEY_SAVED="" _SSH_USER_SAVED=""
-    # shellcheck disable=SC1090
-    source "$env_file"
-    _BOOTSTRAP_IP="${_IP:-}"
-    _BOOTSTRAP_SSH_KEY="${_SSH_KEY:-}"
-    _BOOTSTRAP_SSH_KEY="${_BOOTSTRAP_SSH_KEY/#\~/$HOME}"
-    _BOOTSTRAP_SSH_USER="${_SSH_USER:-root}"
-    # 전역 변수 오염 방지 — 로드 후 클린 재설정
-    _IP=""; _SSH_KEY=""; _SSH_USER="root"
+    local line key value
+    while IFS= read -r line; do
+        [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+        case "$key" in
+            _IP)       _BOOTSTRAP_IP="$value" ;;
+            _SSH_KEY)  _BOOTSTRAP_SSH_KEY="${value/#\~/$HOME}" ;;
+            _SSH_USER) _BOOTSTRAP_SSH_USER="$value" ;;
+        esac
+    done < "$env_file"
     log_msg "Init" "bootstrap.env 로드: $env_file"
 }
 
@@ -264,11 +266,7 @@ ask_system() {
 # ── ask_services ──────────────────────────────────────────────────────────────
 ask_services() {
     printf "\n"
-    _check "활성화할 서비스 선택:" \
-        "caddy"           "caddy            Caddy 웹서버 / 리버스 프록시" \
-        "tailscale"       "tailscale        Tailscale VPN 클라이언트" \
-        "docker"          "docker           Docker 컨테이너 런타임" \
-        "nix-cache-proxy" "nix-cache-proxy  Nix 바이너리 캐시 프록시"
+    _check "활성화할 서비스 선택:" "${_ALL_SERVICES[@]}"
     _SERVICES=("${REPLY_CHECKED[@]+"${REPLY_CHECKED[@]}"}")
     if [ ${#_SERVICES[@]} -gt 0 ]; then
         log_msg "Done" "선택된 서비스: ${_SERVICES[*]}"

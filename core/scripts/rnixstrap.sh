@@ -55,6 +55,15 @@ _BOOT_LOADER=""
 _DISK_DEVICE=""
 _REMOTE_RAM_MB=-1   # 원격 RAM(MB), -1=감지 전/실패
 _SERVICES=()
+# 서버 서비스 목록: 형식 "id" "UI 레이블" (짝수=id, 홀수=설명)
+# ask_services(lib-input.sh)와 generate_toml(task-setup.sh)이 공유
+_ALL_SERVICES=(
+    "caddy"           "caddy            Caddy 웹서버 / 리버스 프록시"
+    "tailscale"       "tailscale        Tailscale VPN 클라이언트"
+    "docker"          "docker           Docker 컨테이너 런타임"
+    "nix-cache-proxy" "nix-cache-proxy  Nix 바이너리 캐시 프록시"
+)
+_WRITE_ONLY=false       # true = 파일 작업만 하고 설치 없이 종료
 _SSH_USER="root"        # nixos-anywhere bootstrap 접속 유저
 _TOML_IP=""             # 기존 호스트 TOML에서 로드 ([deploy] 있는 경우)
 _TOML_SSH_KEY=""        # 기존 호스트 TOML에서 로드 ([deploy] 있는 경우)
