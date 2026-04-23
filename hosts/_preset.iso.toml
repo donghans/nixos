@@ -19,7 +19,6 @@ incus-guest        = true
 caddy              = false
 nix-cache-proxy    = false
 aws-roles-anywhere = false
-step-ca            = false
 
 [mods.gui]
 enable = true
