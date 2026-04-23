@@ -337,6 +337,9 @@ transfer_repo_to_remote() {
         "${u}@${_IP}:/tmp/${_HOSTNAME}.hardware.nix"
     ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
         "${pfx}mkdir -p /opt/nixos/hosts/deploy && ${pfx}mv /tmp/${_HOSTNAME}.hardware.nix /opt/nixos/hosts/deploy/"
+    # nixup이 일반 유저로 실행되므로 레포 소유권을 해당 유저로 변경
+    [ "$u" != "root" ] && ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+        "sudo chown -R ${u}:users /opt/nixos"
     log_msg "Done" "레포 전송 완료"
 }
 
