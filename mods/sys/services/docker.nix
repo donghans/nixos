@@ -1,6 +1,9 @@
 {mkMod, ...}:
-mkMod __curPos "Docker Daemon and tools" ({config, ...}: {
+mkMod __curPos "Docker Daemon and tools" ({config, unstable, ...}: {
   os = {
+    nixpkgs.overlays = [
+      (_final: _prev: {docker-compose = unstable.docker-compose;})
+    ];
     virtualisation.docker = {
       enable = true;
       autoPrune.enable = true;
