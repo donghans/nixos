@@ -91,6 +91,11 @@ with lib; {
         default = false;
         description = "True if this host is a remote deploy-rs target (has [deploy] section in host.toml). Auto-injected from resolved.json.";
       };
+      hasDeployRs = mkOption {
+        type = types.bool;
+        default = false;
+        description = "True if this host uses deploy-rs ([deploy] section exists). Standalone servers are isRemote=true but hasDeployRs=false.";
+      };
       cloudProvider = mkOption {
         type = types.nullOr types.str;
         default = null;
