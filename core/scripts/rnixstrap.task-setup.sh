@@ -157,7 +157,7 @@ _probe_ram() {
         "${_SSH_USER}@${_IP}" \
         "awk '/MemTotal/{print int(\$2/1024)}' /proc/meminfo" \
         2>/dev/null) || true
-    [[ "$out" =~ ^[0-9]+$ ]] && _REMOTE_RAM_MB="$out"
+    [[ "$out" =~ ^[0-9]+$ ]] && _REMOTE_RAM_MB="$out" || true
 }
 
 # ── 5.5. SSH 연결 프로브 + 디스크·부트 자동 감지 ─────────────────────────────
