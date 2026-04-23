@@ -337,14 +337,15 @@ set_remote_env() {
 }
 
 # ── 원격 서버에서 nixup os 실행 ───────────────────────────────────────────────
-# $1: SSH 유저 (기본값: root). root 아닐 경우 sudo 사용.
+# $1: SSH 유저 (기본값: root).
+# nixup.sh는 일반 유저로 실행하고 내부에서 sudo를 처리하므로 외부 sudo 불필요.
+# standalone 서버는 wheelNeedsPassword=false이므로 nixup 내부 sudo -v가 비밀번호 없이 통과.
 run_nixup_os_remote() {
     local u="${1:-root}"
-    local pfx; [ "$u" = "root" ] && pfx="" || pfx="sudo "
     log_msg "Task" "원격 nixup os 실행 중..."
     log_exec "nixup" ">" "nixup os: $_HOSTNAME"
     ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-        "${pfx}/opt/nixos/core/scripts/nixup.sh os"
+        "/opt/nixos/core/scripts/nixup.sh os"
     log_exec "nixup" "<" "nixup os: $_HOSTNAME"
     log_msg "Done" "원격 nixup os 완료"
 }
