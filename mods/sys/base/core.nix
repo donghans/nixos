@@ -85,6 +85,7 @@ mkPartOf "mods.sys.base" ({
       "${config.workspace.extraLocale}/UTF-8";
 
     environment.systemPackages = with pkgs; [
+      bash
       git
       nano
       wget
