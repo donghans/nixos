@@ -10,13 +10,19 @@
 # 출력 변수:
 #   _PUB_KEY — ssh-keygen -y로 추출한 공개키 (hosts/pubs/<hostname>.pub 저장)
 
-# ── hosts/_base.toml에서 NixOS primary username 읽기 ─────────────────────────
+# ── NixOS primary username 읽기 (호스트별 TOML 우선, 없으면 _base.toml) ──────
 _read_nixos_user() {
-    python3 - "$NIXOS_PATH/hosts/_base.toml" <<'EOF'
+    python3 - "$NIXOS_PATH/hosts/${_HOSTNAME}.toml" "$NIXOS_PATH/hosts/_base.toml" <<'EOF'
 import sys, tomllib
-with open(sys.argv[1], "rb") as f:
-    d = tomllib.load(f)
-print(d.get("username", "root"))
+host_path, base_path = sys.argv[1:3]
+with open(host_path, "rb") as f:
+    host = tomllib.load(f)
+if "username" in host:
+    print(host["username"])
+else:
+    with open(base_path, "rb") as f:
+        base = tomllib.load(f)
+    print(base.get("username", "root"))
 EOF
 }
 

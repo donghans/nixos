@@ -203,6 +203,12 @@
               hostCtx.metaConfig.isRemote
               ["root"];
 
+            # (목적: standalone 서버 — 원격 nixup os 실행 시 primary user sudo 비밀번호 불필요)
+            # (이유: PermitRootLogin=no이므로 primary user + passwordless sudo가 유일한 원격 관리 경로)
+            security.sudo.wheelNeedsPassword = nixpkgs.lib.mkIf
+              (hostCtx.metaConfig.isRemote && !hostCtx.metaConfig.hasDeployRs)
+              false;
+
             # (목적: 로컬 호스트 primary user — 신규 설치 시 빈 비밀번호로 첫 부팅 로그인 허용)
             # (이후 passwd 실행하면 shadow 갱신 — mutableUsers=true 기본값)
             # (ISO는 nixos 유저를 installation-cd-graphical-base.nix에서 별도 관리하므로 제외)
