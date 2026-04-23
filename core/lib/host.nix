@@ -84,6 +84,7 @@
       zramPercent = hostInfo.zramPercent or null;
       bootLoader = hostInfo.bootLoader or "systemd-boot";
       isRemote = hostInfo.isRemote      or false;
+      hasDeployRs = hostInfo.hasDeployRs  or false;
       cloudProvider = hostInfo.cloudProvider or null;
       diskDevice = hostInfo.diskDevice    or workspaceMeta.diskDevice;
       bootDevice = hostInfo.bootDevice    or workspaceMeta.bootDevice;
@@ -180,17 +181,20 @@
             # (wheel 그룹을 통해 sudo는 계속 사용 가능)
             users.users.root.hashedPassword = nixpkgs.lib.mkIf (!isISO) "!";
 
-            # (목적: 원격 호스트 SSH — root 키 전용 허용, magic rollback 정상 작동)
+            # (목적: 원격 호스트 SSH — 서버 타입 공통)
+            # (deploy-rs 호스트: root 키 전용 허용 — magic rollback 필요)
+            # (standalone 서버: 부트스트랩 완료 후 root 접근 불필요 → "no")
             services.openssh = nixpkgs.lib.mkIf hostCtx.metaConfig.isRemote {
               enable = true;
-              settings.PermitRootLogin = "prohibit-password";
+              settings.PermitRootLogin =
+                if hostCtx.metaConfig.hasDeployRs then "prohibit-password" else "no";
             };
 
-            # (목적: pub 파일이 있는 호스트(remote + standalone bootstrap)에 root SSH 키 주입)
-            # (isRemote 비의존: pub 파일 존재 여부가 충분한 가드 — standalone bootstrap 지원)
+            # (목적: deploy-rs 호스트에만 root SSH 키 주입 — standalone은 root login 비활성화이므로 불필요)
             users.users.root.openssh.authorizedKeys.keyFiles =
               nixpkgs.lib.optional
-              (builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub)
+              (hostCtx.metaConfig.hasDeployRs &&
+               builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub)
               ../../hosts/deploy/${hostInfo.hostname}.pub;
 
             # (목적: deploy-rs가 root로 nix copy 실행 — root는 기본 trusted-user)

@@ -10,6 +10,16 @@
 # 출력 변수:
 #   _PUB_KEY — ssh-keygen -y로 추출한 공개키 (hosts/pubs/<hostname>.pub 저장)
 
+# ── hosts/_base.toml에서 NixOS primary username 읽기 ─────────────────────────
+_read_nixos_user() {
+    python3 - "$NIXOS_PATH/hosts/_base.toml" <<'EOF'
+import sys, tomllib
+with open(sys.argv[1], "rb") as f:
+    d = tomllib.load(f)
+print(d.get("username", "root"))
+EOF
+}
+
 # ── 공통 SSH 옵션 ─────────────────────────────────────────────────────────────
 # UserKnownHostsFile=/dev/null : "Permanently added" 메시지 억제
 # LogLevel=ERROR               : post-quantum 경고 등 노이즈 억제
@@ -246,7 +256,9 @@ renew_host_key() {
 }
 
 # ── 8. SSH 응답 폴링 (재부팅 대기) ───────────────────────────────────────────
+# $1: SSH 유저 (기본값: root)
 wait_for_ssh() {
+    local poll_user="${1:-root}"
     log_msg "Notice" "재부팅 대기 중... (최대 10분, 5초 간격 폴링)"
     local deadline start attempt=0
     start=$(date +%s)
@@ -254,7 +266,7 @@ wait_for_ssh() {
     while true; do
         attempt=$((attempt + 1))
         if ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" -o ConnectTimeout=5 \
-               "root@$_IP" true 2>/dev/null; then
+               "${poll_user}@$_IP" true 2>/dev/null; then
             local elapsed=$(( $(date +%s) - start ))
             log_msg "Done" "SSH 응답 확인 (${elapsed}초 경과, ${attempt}번째 시도)"
             return
@@ -291,30 +303,42 @@ _write_standalone_files() {
 
 # ── 레포 → 원격 서버 전송 ─────────────────────────────────────────────────────
 # git archive: 커밋된 파일만 포함. hardware.nix는 미커밋이므로 별도 scp.
+# $1: SSH 유저 (기본값: root). root 아닐 경우 sudo 사용.
 transfer_repo_to_remote() {
+    local u="${1:-root}"
+    local pfx; [ "$u" = "root" ] && pfx="" || pfx="sudo "
     log_msg "Task" "레포 전송 중 (/opt/nixos)..."
     git -C "$NIXOS_PATH" archive HEAD \
-        | ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "root@${_IP}" \
-              "mkdir -p /opt/nixos && tar xf - -C /opt/nixos"
+        | ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+              "${pfx}mkdir -p /opt/nixos && ${pfx}tar xf - -C /opt/nixos"
+    # hardware.nix: scp는 sudo 미지원 → /tmp 경유 후 sudo mv
     scp -i "$_SSH_KEY" "${_SSH_OPTS[@]}" \
         "$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.hardware.nix" \
-        "root@${_IP}:/opt/nixos/hosts/deploy/${_HOSTNAME}.hardware.nix"
+        "${u}@${_IP}:/tmp/${_HOSTNAME}.hardware.nix"
+    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+        "${pfx}mkdir -p /opt/nixos/hosts/deploy && ${pfx}mv /tmp/${_HOSTNAME}.hardware.nix /opt/nixos/hosts/deploy/"
     log_msg "Done" "레포 전송 완료"
 }
 
 # ── 원격 서버 .env 설정 ───────────────────────────────────────────────────────
+# $1: SSH 유저 (기본값: root). root 아닐 경우 sudo 사용.
 set_remote_env() {
-    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "root@${_IP}" \
-        "echo NIXUP_LAST_HOST=${_HOSTNAME} > /opt/nixos/.env"
+    local u="${1:-root}"
+    local pfx; [ "$u" = "root" ] && pfx="" || pfx="sudo "
+    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+        "${pfx}bash -c 'echo NIXUP_LAST_HOST=${_HOSTNAME} > /opt/nixos/.env'"
     log_msg "Done" "원격 .env: NIXUP_LAST_HOST=${_HOSTNAME}"
 }
 
 # ── 원격 서버에서 nixup os 실행 ───────────────────────────────────────────────
+# $1: SSH 유저 (기본값: root). root 아닐 경우 sudo 사용.
 run_nixup_os_remote() {
+    local u="${1:-root}"
+    local pfx; [ "$u" = "root" ] && pfx="" || pfx="sudo "
     log_msg "Task" "원격 nixup os 실행 중..."
     log_exec "nixup" ">" "nixup os: $_HOSTNAME"
-    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "root@${_IP}" \
-        /opt/nixos/core/scripts/nixup.sh os
+    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+        "${pfx}/opt/nixos/core/scripts/nixup.sh os"
     log_exec "nixup" "<" "nixup os: $_HOSTNAME"
     log_msg "Done" "원격 nixup os 완료"
 }
@@ -360,14 +384,17 @@ _run_install() {
 }
 
 # ── 설치 + 레포 전송 + 원격 nixup os (standalone 모델) ───────────────────────
+# nixos-anywhere 이후 NixOS가 root SSH를 "no"로 설정하므로 primary user 사용
 _run_install_standalone() {
+    local _nixos_user
+    _nixos_user=$(_read_nixos_user)
     run_resolve_and_prepare
     run_nixos_anywhere
     renew_host_key
-    wait_for_ssh
-    transfer_repo_to_remote
-    set_remote_env
-    run_nixup_os_remote
+    wait_for_ssh "$_nixos_user"
+    transfer_repo_to_remote "$_nixos_user"
+    set_remote_env "$_nixos_user"
+    run_nixup_os_remote "$_nixos_user"
 }
 
 # ── 메인 오케스트레이터 ───────────────────────────────────────────────────────
