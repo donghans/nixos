@@ -6,7 +6,13 @@ run_check_task() {
     # 1. Dead code check (deadnix)
     log_msg "Task" "1단계: 미사용 코드 검사 (deadnix)"
     log_exec "nix" ">" "deadnix"
-    deadnix "$NIXOS_PATH"
+    # *.hardware.nix: nixos-generate-config 생성 파일 — 미사용 lambda arg 경고 무시
+    mapfile -t _hw_excludes < <(find "$NIXOS_PATH/hosts/deploy" -name "*.hardware.nix" 2>/dev/null)
+    if [ ${#_hw_excludes[@]} -gt 0 ]; then
+        deadnix "$NIXOS_PATH" --exclude "${_hw_excludes[@]}"
+    else
+        deadnix "$NIXOS_PATH"
+    fi
     log_exec "nix" "<" "deadnix"
 
     # 2. Anti-pattern fix (statix fix)
@@ -19,8 +25,11 @@ run_check_task() {
     # (목적: core/flake.nix는 inputs 정렬이 의도적이므로 포맷 대상 제외)
     log_msg "Task" "3단계: 코드 포맷팅 (alejandra, core/flake.nix 제외)"
     log_exec "nix" ">" "alejandra"
-    find "$NIXOS_PATH" -name "*.nix" ! -path "$NIXOS_PATH/core/flake.nix" -print0 \
-        | xargs -0 alejandra -q
+    # *.hardware.nix: nixos-generate-config 생성 파일 — 포맷 대상 제외 (재생성 시 원상복귀)
+    find "$NIXOS_PATH" -name "*.nix" \
+        ! -path "$NIXOS_PATH/core/flake.nix" \
+        ! -name "*.hardware.nix" \
+        -print0 | xargs -0 alejandra -q
     log_exec "nix" "<" "alejandra"
 
     # 4. Shellcheck (Shell Script Analysis)

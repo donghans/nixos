@@ -187,14 +187,16 @@
             services.openssh = nixpkgs.lib.mkIf hostCtx.metaConfig.isRemote {
               enable = true;
               settings.PermitRootLogin =
-                if hostCtx.metaConfig.hasDeployRs then "prohibit-password" else "no";
+                if hostCtx.metaConfig.hasDeployRs
+                then "prohibit-password"
+                else "no";
             };
 
             # (목적: deploy-rs 호스트에만 root SSH 키 주입 — standalone은 root login 비활성화이므로 불필요)
             users.users.root.openssh.authorizedKeys.keyFiles =
               nixpkgs.lib.optional
-              (hostCtx.metaConfig.hasDeployRs &&
-               builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub)
+              (hostCtx.metaConfig.hasDeployRs
+                && builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub)
               ../../hosts/deploy/${hostInfo.hostname}.pub;
 
             # (목적: deploy-rs가 root로 nix copy 실행 — root는 기본 trusted-user)
@@ -205,7 +207,8 @@
 
             # (목적: standalone 서버 — 원격 nixup os 실행 시 primary user sudo 비밀번호 불필요)
             # (이유: PermitRootLogin=no이므로 primary user + passwordless sudo가 유일한 원격 관리 경로)
-            security.sudo.wheelNeedsPassword = nixpkgs.lib.mkIf
+            security.sudo.wheelNeedsPassword =
+              nixpkgs.lib.mkIf
               (hostCtx.metaConfig.isRemote && !hostCtx.metaConfig.hasDeployRs)
               false;
 

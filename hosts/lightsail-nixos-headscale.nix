@@ -6,9 +6,13 @@
 #   scp password            root@<ip>:/var/lib/step-ca-secrets/password
 #   ssh root@<ip> /opt/nixos/core/scripts/nixup.sh os
 #   → secretsReady=true가 되어 step-ca 유닛 자동 생성·활성화
-{ mkHostConfiguration, lib, ... }:
+{
+  mkHostConfiguration,
+  lib,
+  ...
+}:
 mkHostConfiguration (_: let
-  keyFile      = "/var/lib/step-ca-secrets/intermediate_ca.key";
+  keyFile = "/var/lib/step-ca-secrets/intermediate_ca.key";
   passwordFile = "/var/lib/step-ca-secrets/password";
   secretsReady = builtins.pathExists keyFile && builtins.pathExists passwordFile;
 in {
@@ -28,15 +32,18 @@ in {
         intermediatePasswordFile = passwordFile;
         settings = {
           root = "/etc/step-ca/root_ca.crt";
-          crt  = "/etc/step-ca/intermediate_ca.crt";
-          key  = keyFile;
+          crt = "/etc/step-ca/intermediate_ca.crt";
+          key = keyFile;
           dnsNames = ["ca.PLACEHOLDER_TAILSCALE_DOMAIN"];
           db = {
             type = "badger";
             dataSource = "/var/lib/step-ca/db";
           };
           authority.provisioners = [
-            { type = "ACME"; name = "acme"; }
+            {
+              type = "ACME";
+              name = "acme";
+            }
           ];
           tls = {
             minVersion = 1.2;
@@ -71,8 +78,8 @@ in {
       mods.sys.services.aws-roles-anywhere = {
         domain = "r.772610158.xyz";
         trustAnchorArn = "arn:aws:rolesanywhere:ap-northeast-2:732799293614:trust-anchor/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
-        profileArn     = "arn:aws:rolesanywhere:ap-northeast-2:732799293614:profile/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
-        roleArn        = "arn:aws:iam::732799293614:role/XXXXXX";
+        profileArn = "arn:aws:rolesanywhere:ap-northeast-2:732799293614:profile/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
+        roleArn = "arn:aws:iam::732799293614:role/XXXXXX";
       };
 
       # == Caddy reverse proxy ==

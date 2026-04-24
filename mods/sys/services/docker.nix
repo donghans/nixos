@@ -1,8 +1,12 @@
 {mkMod, ...}:
-mkMod __curPos "Docker Daemon and tools" ({config, unstable, ...}: {
+mkMod __curPos "Docker Daemon and tools" ({
+  config,
+  unstable,
+  ...
+}: {
   os = {
     nixpkgs.overlays = [
-      (_final: _prev: {docker-compose = unstable.docker-compose;})
+      (_final: _prev: {inherit (unstable) docker-compose;})
     ];
     virtualisation.docker = {
       enable = true;
