@@ -361,10 +361,12 @@ transfer_repo_to_remote() {
     log_msg "Task" "레포 클론 중 (/opt/nixos, depth=1)..."
     if [ "$u" = "root" ]; then
         ssh -A -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "root@${_IP}" \
-            "git clone --depth=1 --branch '${_branch}' '${_origin}' /opt/nixos"
+            "mkdir -p ~/.ssh && ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null && \
+             git clone --depth=1 --branch '${_branch}' '${_origin}' /opt/nixos"
     else
         ssh -A -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-            "rm -rf ~/nixos_clone && \
+            "mkdir -p ~/.ssh && ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null && \
+             rm -rf ~/nixos_clone && \
              git clone --depth=1 --branch '${_branch}' '${_origin}' ~/nixos_clone && \
              sudo mv ~/nixos_clone /opt/nixos && \
              sudo chown -R ${u}:users /opt/nixos"
