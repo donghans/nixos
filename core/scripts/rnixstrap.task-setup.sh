@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2153  # ENV_FILE 등 상위 스크립트(rnixstrap.sh)에서 정의된 변수
 # rnixstrap.task-setup.sh — 파일 생성 + 설치 + 배포
 # (공개키 추출 → TOML/nix 생성 → resolve → build → nixos-anywhere → deploy-rs)
 #

@@ -120,6 +120,7 @@ _create_host_profile() {
 
     # deploy-rs 설정 — sshKey는 관리 머신 기준 경로 (자동 생성 시 표준 경로 사용)
     if [ "${_DEPLOY_ENABLED:-false}" = true ]; then
+        # shellcheck disable=SC2088  # 틸드는 TOML 값용 리터럴 문자열 (런타임 확장 불필요)
         local _key_ref="~/.ssh/${HOST}_ed25519"
         [ -n "${_DEPLOY_SSH_KEY:-}" ] && _key_ref="${_DEPLOY_SSH_KEY/#$HOME/~}"
         printf '\n[deploy]\nip     = ""\nsshKey = "%s"\n' "$_key_ref" >> "$HOST_TOML"
@@ -200,9 +201,11 @@ _commit_deploy_files() {
         -c user.name="nixstrap" -c user.email="nixstrap@localhost" \
         commit -m "feat: ${HOST} deploy-rs 설정 추가" 2>/dev/null; then
         log_msg "Done" "커밋 완료"
-        git -C "$repo_dir" push 2>/dev/null && \
-            log_msg "Done" "push 완료" || \
+        if git -C "$repo_dir" push 2>/dev/null; then
+            log_msg "Done" "push 완료"
+        else
             log_msg "Notice" "push 실패 — 첫 부팅 후 'git push' 필요"
+        fi
     else
         log_msg "Notice" "커밋 실패 — 첫 부팅 후 수동 커밋 필요:"
         log_msg "Notice" "  git add hosts/deploy/${HOST}.pub hosts/${HOST}.toml"
