@@ -330,7 +330,8 @@ _write_standalone_files() {
 
 # ── 레포 → 원격 서버 전송 ─────────────────────────────────────────────────────
 # git archive: 커밋된 파일만 포함. hardware.nix는 미커밋이므로 별도 scp.
-# .git은 git archive에 포함되지 않으므로 별도 tar로 전송 (git pull 가능하도록).
+# .git은 전송하지 않음 — 레포 크기가 클 수 있고 (pack 파일 포함), finalize 단계에서
+# git init + remote add로 설정한 뒤 gh auth login 후 git fetch --depth=1로 동기화.
 # $1: SSH 유저 (기본값: root). root 아닐 경우 sudo 사용.
 transfer_repo_to_remote() {
     local u="${1:-root}"
@@ -339,10 +340,6 @@ transfer_repo_to_remote() {
     git -C "$NIXOS_PATH" archive HEAD \
         | ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
               "${pfx}mkdir -p /opt/nixos && ${pfx}tar xf - -C /opt/nixos"
-    # .git 디렉터리 전송 — git pull 가능하도록
-    tar czf - -C "$NIXOS_PATH" .git \
-        | ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-              "${pfx}tar xzf - -C /opt/nixos"
     # hardware.nix: scp는 sudo 미지원 → /tmp 경유 후 sudo mv
     scp -i "$_SSH_KEY" "${_SSH_OPTS[@]}" \
         "$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.hardware.nix" \
@@ -390,21 +387,40 @@ run_nixup_os_remote() {
 # ── 레포를 홈 디렉터리로 이동 + /etc/nixos 심링크 (standalone 마무리) ─────────
 # /opt/nixos/ → ~/nixos/  +  /etc/nixos → ~/nixos  +  chown
 # nixstrap 로컬 설치와 동일한 구조로 맞춤
+# git remote 설정: gh auth login 후 git fetch --depth=1 origin <branch> 로 동기화 가능
 # $1: SSH 유저
 finalize_standalone_repo() {
     local u="${1:-root}"
+    local _origin _branch
+    _origin=$(git -C "$NIXOS_PATH" remote get-url origin 2>/dev/null || true)
+    _branch=$(git -C "$NIXOS_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     log_msg "Task" "레포를 홈 디렉터리로 이동 중 (/opt/nixos → ~/nixos)..."
     ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-        "sudo bash -s -- '${u}'" <<'REMOTE'
+        "sudo bash -s -- '${u}' '${_origin}' '${_branch}'" <<'REMOTE'
 NIXOS_USER="$1"
+ORIGIN_URL="$2"
+BRANCH="$3"
 USER_HOME=$(getent passwd "$NIXOS_USER" | cut -d: -f6)
 [ -z "$USER_HOME" ] && USER_HOME="/home/$NIXOS_USER"
 mv /opt/nixos "$USER_HOME/nixos"
 rm -rf /etc/nixos
 ln -sfn "$USER_HOME/nixos" /etc/nixos
 chown -R "$NIXOS_USER:users" "$USER_HOME/nixos"
+# git remote 설정 (gh auth login 후 fetch 가능하도록)
+if [ -n "$ORIGIN_URL" ]; then
+    su -s /bin/sh -c "
+        git -C ~/nixos init -q -b '$BRANCH' 2>/dev/null
+        git -C ~/nixos remote add origin '$ORIGIN_URL' 2>/dev/null || true
+    " "$NIXOS_USER"
+fi
 REMOTE
     log_msg "Done" "레포 이동 완료: ~/nixos, /etc/nixos 심링크"
+    if [ -n "$_origin" ]; then
+        log_msg "Notice" "git pull 설정: gh auth login 후 아래 명령 실행"
+        log_msg "Notice" "  git -C ~/nixos fetch --depth=1 origin ${_branch}"
+        log_msg "Notice" "  git -C ~/nixos reset --hard FETCH_HEAD"
+        log_msg "Notice" "  git -C ~/nixos branch -u origin/${_branch} ${_branch}"
+    fi
 }
 
 # ── bootstrap.env 저장 ────────────────────────────────────────────────────────
