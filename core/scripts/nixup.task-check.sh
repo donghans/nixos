@@ -7,18 +7,16 @@ run_check_task() {
     log_msg "Task" "1단계: 미사용 코드 검사 (deadnix)"
     log_exec "nix" ">" "deadnix"
     # *.hardware.nix: nixos-generate-config 생성 파일 — 미사용 lambda arg 경고 무시
+    # .build/: 빌드 격리 디렉터리 — 소스 복사본이므로 검사 제외
     mapfile -t _hw_excludes < <(find "$NIXOS_PATH/hosts/deploy" -name "*.hardware.nix" 2>/dev/null)
-    if [ ${#_hw_excludes[@]} -gt 0 ]; then
-        deadnix "$NIXOS_PATH" --exclude "${_hw_excludes[@]}"
-    else
-        deadnix "$NIXOS_PATH"
-    fi
+    _hw_excludes+=("$NIXOS_PATH/.build")
+    deadnix "$NIXOS_PATH" --exclude "${_hw_excludes[@]}"
     log_exec "nix" "<" "deadnix"
 
     # 2. Anti-pattern fix (statix fix)
     log_msg "Task" "2단계: 안티패턴 자동 수정 (statix fix)"
     log_exec "nix" ">" "statix fix"
-    statix fix "$NIXOS_PATH"
+    statix fix "$NIXOS_PATH" --ignore ".build/**"
     log_exec "nix" "<" "statix fix"
 
     # 3. Code Formatting (alejandra)
@@ -26,7 +24,9 @@ run_check_task() {
     log_msg "Task" "3단계: 코드 포맷팅 (alejandra, core/flake.nix 제외)"
     log_exec "nix" ">" "alejandra"
     # *.hardware.nix: nixos-generate-config 생성 파일 — 포맷 대상 제외 (재생성 시 원상복귀)
+    # .build/: 빌드 격리 디렉터리 — 소스 복사본이므로 포맷 대상 제외
     find "$NIXOS_PATH" -name "*.nix" \
+        ! -path "$NIXOS_PATH/.build/*" \
         ! -path "$NIXOS_PATH/core/flake.nix" \
         ! -name "*.hardware.nix" \
         -print0 | xargs -0 alejandra -q
