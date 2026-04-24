@@ -103,12 +103,7 @@ mkPartOf "mods.sys.base" ({
   hm = {
     programs = {
       home-manager.enable = true;
-      gh = {
-        enable = true;
-        settings = {
-          git_protocol = "ssh";
-        };
-      }; # (목적: GitHub CLI — devel/gui 여부와 무관하게 기본 제공)
+      gh.enable = true; # (목적: GitHub CLI — devel/gui 여부와 무관하게 기본 제공)
       git = {
         enable = true;
         settings = {
