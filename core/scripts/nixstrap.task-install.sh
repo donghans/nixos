@@ -106,12 +106,24 @@ _create_host_profile() {
     local _username_line=""
     [ -n "${_HOST_USERNAME:-}" ] && _username_line=$'\nusername = "'"$_HOST_USERNAME"'"'
 
+    # type: server 프리셋은 "server", 그 외는 "desktop"
+    local _type="desktop"
+    [ "${_PRESET:-}" = "server" ] && _type="server"
+
     if [[ "$_IS_VM" == "true" ]]; then
-        printf 'type = "desktop"\npreset = "%s"%s%s\n\n[mods.sys.services]\nincus-guest = true\nincus = false\n' \
-            "$_PRESET" "$_sv_line" "$_username_line" > "$HOST_TOML"
+        printf 'type = "%s"\npreset = "%s"%s%s\n\n[mods.sys.services]\nincus-guest = true\nincus = false\n' \
+            "$_type" "$_PRESET" "$_sv_line" "$_username_line" > "$HOST_TOML"
         log_msg "Config" "$HOST.toml 에서 incus-guest 활성화, incus 비활성화 (가상화 환경)"
     else
-        printf 'type = "desktop"\npreset = "%s"%s%s\n' "$_PRESET" "$_sv_line" "$_username_line" > "$HOST_TOML"
+        printf 'type = "%s"\npreset = "%s"%s%s\n' "$_type" "$_PRESET" "$_sv_line" "$_username_line" > "$HOST_TOML"
+    fi
+
+    # deploy-rs 설정 — sshKey는 관리 머신 기준 경로 (자동 생성 시 표준 경로 사용)
+    if [ "${_DEPLOY_ENABLED:-false}" = true ]; then
+        local _key_ref="~/.ssh/${HOST}_ed25519"
+        [ -n "${_DEPLOY_SSH_KEY:-}" ] && _key_ref="${_DEPLOY_SSH_KEY/#$HOME/~}"
+        printf '\n[deploy]\nip     = ""\nsshKey = "%s"\n' "$_key_ref" >> "$HOST_TOML"
+        log_msg "Config" "deploy-rs [deploy] 섹션 추가 (ip는 첫 부팅 후 설정)"
     fi
 
     # 최소 통합 호스트 파일 — os/hm 블록 분리 (mkHostConfiguration 패턴)
@@ -119,6 +131,83 @@ _create_host_profile() {
 
     local _sv_info="${_STATE_VERSION:-rolling}"
     log_msg "Config" "호스트 프로파일 생성: $HOST (preset=$_PRESET, stateVersion=$_sv_info)"
+}
+
+_setup_deploy_pubkey() {
+    [ "${_DEPLOY_ENABLED:-false}" != true ] && return
+
+    local deploy_dir="/mnt/etc/nixos/hosts/deploy"
+    mkdir -p "$deploy_dir"
+
+    if [ -n "${_DEPLOY_SSH_KEY:-}" ]; then
+        # 기존 키 사용 — pub key 추출
+        local pub_key
+        pub_key=$(ssh-keygen -y -f "$_DEPLOY_SSH_KEY" 2>/dev/null)
+        if [ -z "$pub_key" ]; then
+            log_msg "Error" "SSH 공개키 추출 실패: $_DEPLOY_SSH_KEY"
+            exit 1
+        fi
+        printf '%s %s\n' "$pub_key" "$HOST" > "$deploy_dir/${HOST}.pub"
+        log_msg "Done" "deploy-rs pub key 등록: hosts/deploy/${HOST}.pub"
+    else
+        # 신규 키 생성
+        local key_tmp="/tmp/nixstrap-deploy-$$"
+        rm -f "$key_tmp" "${key_tmp}.pub"
+        ssh-keygen -t ed25519 -f "$key_tmp" -N "" -C "$HOST" >/dev/null 2>&1
+        cp "${key_tmp}.pub" "$deploy_dir/${HOST}.pub"
+        _DEPLOY_SSH_KEY="$key_tmp"
+        _DEPLOY_KEY_WAS_GENERATED=true
+        log_msg "Done" "SSH 키 생성 및 pub key 등록: hosts/deploy/${HOST}.pub"
+    fi
+}
+
+_save_deploy_pem() {
+    [ "${_DEPLOY_KEY_WAS_GENERATED:-false}" != true ] && return
+
+    local ssh_dir="/mnt/home/$USERNAME/.ssh"
+    mkdir -p "$ssh_dir"
+    chmod 700 "$ssh_dir"
+
+    local pem_name="${HOST}_ed25519"
+    cp "$_DEPLOY_SSH_KEY" "$ssh_dir/$pem_name"
+    chmod 600 "$ssh_dir/$pem_name"
+    nixos-enter --root /mnt --command \
+        "chown -R $USERNAME:users /home/$USERNAME/.ssh"
+
+    printf "\n"
+    log_msg "Done" "SSH 프라이빗 키 저장: ~/.ssh/$pem_name"
+    log_msg "Notice" "▶  첫 부팅 후 관리 머신으로 복사하세요:"
+    log_msg "Notice" "   scp ${USERNAME}@<IP>:~/.ssh/${pem_name} ~/.ssh/${pem_name}"
+    log_msg "Notice" "   복사 후 TOML [deploy].ip와 sshKey를 관리 머신 기준으로 업데이트하세요."
+}
+
+_commit_deploy_files() {
+    [ "${_DEPLOY_ENABLED:-false}" != true ] && return
+
+    local repo_dir="/mnt/home/$USERNAME/nixos"
+    log_msg "Git" "deploy-rs 설정 파일 커밋 중..."
+
+    git -C "$repo_dir" \
+        -c user.name="nixstrap" -c user.email="nixstrap@localhost" \
+        add "hosts/deploy/${HOST}.pub" "hosts/${HOST}.toml" 2>/dev/null || true
+
+    if git -C "$repo_dir" diff --cached --quiet 2>/dev/null; then
+        log_msg "Notice" "커밋할 변경사항 없음"
+        return
+    fi
+
+    if git -C "$repo_dir" \
+        -c user.name="nixstrap" -c user.email="nixstrap@localhost" \
+        commit -m "feat: ${HOST} deploy-rs 설정 추가" 2>/dev/null; then
+        log_msg "Done" "커밋 완료"
+        git -C "$repo_dir" push 2>/dev/null && \
+            log_msg "Done" "push 완료" || \
+            log_msg "Notice" "push 실패 — 첫 부팅 후 'git push' 필요"
+    else
+        log_msg "Notice" "커밋 실패 — 첫 부팅 후 수동 커밋 필요:"
+        log_msg "Notice" "  git add hosts/deploy/${HOST}.pub hosts/${HOST}.toml"
+        log_msg "Notice" "  git commit -m 'feat: ${HOST} deploy-rs 설정 추가'"
+    fi
 }
 
 _resolve_metadata() {
@@ -217,20 +306,23 @@ _post_process() {
 }
 
 phase2_execute() {
-    _cleanup_mounts       # 1. 이전 마운트 정리
-    _read_disk_labels     # 2. TOML → nixstrap.lib-repo.py disk-labels → BOOT_LABEL, DISK_LABEL
-    _create_partitions    # 3. 파티션 생성 (mode 2만)
-    _format_boot          # 4. 부트 파티션 포맷
-    _format_root          # 5. Btrfs 포맷 + 서브볼륨
-    _mount_partitions     # 6. 마운트
-    _move_repo            # 7. /tmp/nixos-setup-repo → /mnt/etc/nixos
-    _create_host_profile  # 8. 신규 호스트 프로파일 생성
-    _resolve_metadata     # 9. nixup.task-resolve.py 실행 → RESOLVE_TMP
-    _extract_username     # 10. base.toml → USERNAME
-    _prepare_build_dir    # 11. /tmp/nixos-build 구성 (BUILD_DIR 설정됨)
-    _generate_hw_config   # 12. _hardware.nix → BUILD_DIR에 직접 생성
-    _install_nixos        # 13. nixos-install
-    _post_process         # 14. mv, chown, symlink
+    _cleanup_mounts         # 1. 이전 마운트 정리
+    _read_disk_labels       # 2. TOML → nixstrap.lib-repo.py disk-labels → BOOT_LABEL, DISK_LABEL
+    _create_partitions      # 3. 파티션 생성 (mode 2만)
+    _format_boot            # 4. 부트 파티션 포맷
+    _format_root            # 5. Btrfs 포맷 + 서브볼륨
+    _mount_partitions       # 6. 마운트
+    _move_repo              # 7. /tmp/nixos-setup-repo → /mnt/etc/nixos
+    _create_host_profile    # 8. 신규 호스트 프로파일 생성 ([deploy] 섹션 포함)
+    _setup_deploy_pubkey    # 9. deploy-rs pub key 생성/저장 (deploy-rs 시만)
+    _resolve_metadata       # 10. nixup.task-resolve.py 실행 → RESOLVE_TMP
+    _extract_username       # 11. base.toml → USERNAME
+    _prepare_build_dir      # 12. /tmp/nixos-build 구성 (BUILD_DIR 설정됨, pub key 포함)
+    _generate_hw_config     # 13. hardware.nix → BUILD_DIR에 직접 생성
+    _install_nixos          # 14. nixos-install
+    _post_process           # 15. mv, chown, symlink
+    _save_deploy_pem        # 16. PEM → ~/.ssh/ (자동 생성 키만)
+    _commit_deploy_files    # 17. pub key + TOML 커밋 + push 시도
 
     echo ""
     log_msg "Success" "설치 완료. 재부팅 → TTY 로그인 → 'nixup home' → 재로그인."

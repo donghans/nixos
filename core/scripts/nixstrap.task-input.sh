@@ -46,17 +46,11 @@ select_host() {
     local host_data
     host_data=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" list-hosts "$REPO_TMP")
 
-    # 로컬 설치 가능 호스트(selectable)와 원격 전용 호스트(footer)를 분리
     local -a _sel_names=() _sel_labels=()
-    _PICK_FIXED_FOOTER=()
     while IFS='|' read -r _name _type _preset_val _flag; do
         [ -z "$_name" ] && continue
-        if [ "$_flag" = "remote" ]; then
-            _PICK_FIXED_FOOTER+=("$(printf "%-24s [remote ] rnixup / rnixstrap" "$_name")")
-        else
-            _sel_names+=("$_name")
-            _sel_labels+=("$(printf "%-24s [%-7s] %s" "$_name" "$_type" "$_preset_val")")
-        fi
+        _sel_names+=("$_name")
+        _sel_labels+=("$(printf "%-24s [%-7s] %s" "$_name" "$_type" "$_preset_val")")
     done <<< "$host_data"
 
     local -a _all_labels
@@ -69,7 +63,6 @@ select_host() {
     printf "\n"
     _pick "호스트 선택:" "${_all_labels[@]}"
     local _sel=$REPLY
-    _PICK_FIXED_FOOTER=()  # 사용 후 초기화
 
     if [ "$_sel" -eq "${#_sel_names[@]}" ]; then
         _HOST_IS_NEW=true
@@ -134,6 +127,41 @@ ask_state_version() {
         log_msg "Config" "stateVersion: $_STATE_VERSION (stable lock)"
     else
         log_msg "Config" "stateVersion: (없음 — rolling)"
+    fi
+}
+
+ask_deploy_config() {
+    # 신규 server 프리셋 호스트에만 적용
+    [ "${_HOST_IS_NEW:-false}" != true ] && return
+    [ "${_PRESET:-}" != "server" ] && return
+
+    printf "\n"
+    _pick "원격 관리(deploy-rs) 설정:" \
+        "예  — SSH 키 설정 (rnixup으로 원격 배포 가능)" \
+        "아니오  — 로컬 관리만"
+
+    if [ "$REPLY" -eq 0 ]; then
+        _DEPLOY_ENABLED=true
+        printf "\n"
+        local _input
+        read -rep "$(_log_prompt)관리 머신의 SSH 키 경로 (비워두면 자동 생성): " _input
+        _input="${_input:-}"
+        if [ -n "$_input" ]; then
+            _input="${_input/#\~/$HOME}"
+            if [ ! -f "$_input" ]; then
+                log_msg "Error" "파일을 찾을 수 없습니다: $_input"
+                ask_deploy_config
+                return
+            fi
+            _DEPLOY_SSH_KEY="$_input"
+            log_msg "Config" "SSH 키: $_DEPLOY_SSH_KEY"
+        else
+            _DEPLOY_SSH_KEY=""
+            log_msg "Config" "SSH 키: (설치 시 자동 생성 → ~/.ssh/${HOST:-<hostname>}_ed25519)"
+        fi
+    else
+        _DEPLOY_ENABLED=false
+        _DEPLOY_SSH_KEY=""
     fi
 }
 
@@ -213,6 +241,10 @@ show_summary() {
     if [ "$_HOST_IS_NEW" = true ]; then
         local _sv_display="${_STATE_VERSION:-rolling}"
         printf "  4. %-11s:  %s  (stateVersion: %s)\n" "프리셋" "${_PRESET:-workstation}" "$_sv_display"
+        if [ "${_DEPLOY_ENABLED:-false}" = true ]; then
+            local _key_disp="${_DEPLOY_SSH_KEY:-(자동 생성)}"
+            printf "     %-11s   deploy-rs: 활성  키: %s\n" "" "$_key_disp"
+        fi
     else
         printf "  4. %-11s:  %s  (레포에서)\n" "프리셋" "${_HOST_PRESET_FROM_REPO:-?}"
     fi
@@ -243,6 +275,8 @@ save_params() {
         printf '_BOOT_END=%s\n'               "$_BOOT_END"
         printf '_NEW_BOOT_NUM=%s\n'           "$_NEW_BOOT_NUM"
         printf '_NEW_ROOT_NUM=%s\n'           "$_NEW_ROOT_NUM"
+        printf '_DEPLOY_ENABLED=%s\n'         "$_DEPLOY_ENABLED"
+        printf '_DEPLOY_SSH_KEY=%s\n'         "$_DEPLOY_SSH_KEY"
     } > "$PARAMS_FILE"
     log_msg "Config" "세션 저장: $PARAMS_FILE"
 }
@@ -316,17 +350,18 @@ review_loop() {
             1)
                 ask_repo_and_clone
                 select_host
-                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; fi
+                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_deploy_config; fi
                 ;;
             2)
                 select_host
-                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; fi
+                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_deploy_config; fi
                 ;;
             3) ask_partitions ;;
             4)
                 if [ "$_HOST_IS_NEW" = true ]; then
                     ask_preset
                     ask_state_version
+                    ask_deploy_config
                 else
                     log_msg "Notice" "기존 호스트의 프리셋은 레포에서 고정됩니다."
                 fi

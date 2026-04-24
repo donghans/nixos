@@ -221,8 +221,8 @@ def cmd_list_hosts(args):
         toml_path = os.path.join(hosts_dir, entry)
         with open(toml_path, "rb") as f:
             h = tomllib.load(f)
-        # 4번째 필드: [deploy] 섹션 보유 여부 ("remote" | "")
-        deploy_flag = "remote" if "deploy" in h else ""
+        # 4번째 필드: 이전에 remote 전용 구분용이었으나 nixstrap에서도 [deploy] 호스트 설치 가능
+        deploy_flag = ""
         entries.append(f"{hostname}|{h.get('type', '?')}|{h.get('preset', '?')}|{deploy_flag}")
     print("\n".join(entries))
 
