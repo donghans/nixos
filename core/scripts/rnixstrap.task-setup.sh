@@ -343,21 +343,43 @@ _write_standalone_files() {
 }
 
 # ── 레포 → 원격 서버 전송 ─────────────────────────────────────────────────────
-# git archive HEAD: 커밋된 파일만 포함 (hardware.nix는 run_nixos_anywhere에서 커밋됨).
-# .git은 전송하지 않음 — finalize 단계에서 git init + remote add로 설정한 뒤
-# gh auth login 후 git fetch --depth=1로 동기화.
-# $1: SSH 유저 (기본값: root). root 아닐 경우 sudo 사용.
+# SSH 에이전트 포워딩(-A)으로 로컬 GitHub SSH 키를 원격에서 사용해 git clone.
+# depth=1 shallow clone: .git 최소화 + origin 트래킹 설정 완료 → git pull 즉시 사용 가능.
+# 일반 유저는 /opt에 직접 쓸 수 없고 sudo는 에이전트 소켓을 상속하지 않으므로
+# ~/nixos_clone에 클론 후 sudo mv로 이동.
+# hardware.nix: GitHub push 전일 수 있으므로 clone 후 항상 직접 전송.
+# $1: SSH 유저 (기본값: root).
 transfer_repo_to_remote() {
     local u="${1:-root}"
+    local _origin _branch
+    _origin=$(git -C "$NIXOS_PATH" remote get-url origin 2>/dev/null || true)
+    if [ -z "$_origin" ]; then
+        log_msg "Error" "git origin이 설정되지 않았습니다. 'git remote add origin <URL>' 후 재시도"
+        exit 1
+    fi
+    _branch=$(git -C "$NIXOS_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    log_msg "Task" "레포 클론 중 (/opt/nixos, depth=1)..."
+    if [ "$u" = "root" ]; then
+        ssh -A -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "root@${_IP}" \
+            "git clone --depth=1 --branch '${_branch}' '${_origin}' /opt/nixos"
+    else
+        ssh -A -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+            "rm -rf ~/nixos_clone && \
+             git clone --depth=1 --branch '${_branch}' '${_origin}' ~/nixos_clone && \
+             sudo mv ~/nixos_clone /opt/nixos && \
+             sudo chown -R ${u}:users /opt/nixos"
+    fi
+    # hardware.nix: GitHub push 전일 수 있으므로 항상 직접 전송
+    local hw_src="$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.hardware.nix"
     local pfx; [ "$u" = "root" ] && pfx="" || pfx="sudo "
-    log_msg "Task" "레포 전송 중 (/opt/nixos)..."
-    git -C "$NIXOS_PATH" archive HEAD \
-        | ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-              "${pfx}mkdir -p /opt/nixos && ${pfx}tar xf - -C /opt/nixos"
-    # nixup이 일반 유저로 실행되므로 레포 소유권을 해당 유저로 변경
-    [ "$u" != "root" ] && ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-        "sudo chown -R ${u}:users /opt/nixos"
-    log_msg "Done" "레포 전송 완료"
+    if [ -f "$hw_src" ]; then
+        ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+            "${pfx}mkdir -p /opt/nixos/hosts/deploy"
+        ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+            "${pfx}sh -c 'cat > /opt/nixos/hosts/deploy/${_HOSTNAME}.hardware.nix'" \
+            < "$hw_src"
+    fi
+    log_msg "Done" "레포 클론 완료"
 }
 
 # ── 원격 서버 .env 설정 ───────────────────────────────────────────────────────
@@ -394,54 +416,23 @@ run_nixup_os_remote() {
 
 # ── 레포를 홈 디렉터리로 이동 + /etc/nixos 심링크 (standalone 마무리) ─────────
 # /opt/nixos/ → ~/nixos/  +  /etc/nixos → ~/nixos  +  chown
-# nixstrap 로컬 설치와 동일한 구조로 맞춤
-# git remote 설정: gh auth login 후 git fetch --depth=1 origin <branch> 로 동기화 가능
+# git clone에서 이미 origin + tracking 설정 완료 → gh auth login 후 git pull 즉시 사용 가능.
 # $1: SSH 유저
 finalize_standalone_repo() {
     local u="${1:-root}"
-    local _origin _branch
-    _origin=$(git -C "$NIXOS_PATH" remote get-url origin 2>/dev/null || true)
-    _branch=$(git -C "$NIXOS_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     log_msg "Task" "레포를 홈 디렉터리로 이동 중 (/opt/nixos → ~/nixos)..."
     ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-        "sudo bash -s -- '${u}' '${_origin}' '${_branch}'" <<'REMOTE'
+        "sudo bash -s -- '${u}'" <<'REMOTE'
 NIXOS_USER="$1"
-ORIGIN_URL="$2"
-BRANCH="$3"
 USER_HOME=$(getent passwd "$NIXOS_USER" | cut -d: -f6)
 [ -z "$USER_HOME" ] && USER_HOME="/home/$NIXOS_USER"
 mv /opt/nixos "$USER_HOME/nixos"
 rm -rf /etc/nixos
 ln -sfn "$USER_HOME/nixos" /etc/nixos
 chown -R "$NIXOS_USER:users" "$USER_HOME/nixos"
-# git remote 설정 (gh auth login 후 fetch 가능하도록)
-if [ -n "$ORIGIN_URL" ]; then
-    su -s /bin/sh -c "
-        git -C ~/nixos init -q -b '$BRANCH' 2>/dev/null
-        git -C ~/nixos remote add origin '$ORIGIN_URL' 2>/dev/null || true
-    " "$NIXOS_USER"
-fi
 REMOTE
     log_msg "Done" "레포 이동 완료: ~/nixos, /etc/nixos 심링크"
-    if [ -n "$_origin" ]; then
-        # gh auth login 후 실행할 git 동기화 스크립트를 원격에 생성
-        ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-            "bash -s -- '${_branch}'" <<'REMOTE'
-BRANCH="$1"
-cat > ~/git-sync.sh <<SCRIPT
-#!/usr/bin/env bash
-set -euo pipefail
-git -C ~/nixos fetch --depth=1 origin "$BRANCH"
-git -C ~/nixos reset --hard FETCH_HEAD
-git -C ~/nixos branch -u "origin/$BRANCH" "$BRANCH"
-rm -f ~/git-sync.sh
-echo "git 동기화 완료"
-SCRIPT
-chmod +x ~/git-sync.sh
-REMOTE
-        log_msg "Notice" "git pull 설정: gh auth login 후 아래 실행"
-        log_msg "Notice" "  ~/git-sync.sh"
-    fi
+    log_msg "Notice" "git pull: gh auth login 후 즉시 사용 가능"
 }
 
 # ── bootstrap.env 저장 ────────────────────────────────────────────────────────
@@ -570,7 +561,7 @@ run_setup() {
         printf "  %s\n" "────────────────────────────────────────────────"
         printf "  \033[2m%-42s %s\033[0m\n" "hosts/${_HOSTNAME}.nix"  "유지"
         printf "  \033[2m%-42s %s\033[0m\n" "hosts/${_HOSTNAME}.toml" "disk/boot 재감지 후 업데이트"
-        printf "  \033[2m참고: nixos-anywhere → 레포 전송 → 원격 nixup os\033[0m\n"
+        printf "  \033[2m참고: nixos-anywhere → 레포 클론 → 원격 nixup os → nixup home\033[0m\n"
     else
         log_msg "Review" "설정 확인 (기존 호스트 재설치):"
         printf "  %-16s: %s\n" "hostname" "$_HOSTNAME"
@@ -616,7 +607,7 @@ run_setup() {
         }
         local _proceed_label
         if [ "${_HOST_HAS_DEPLOY:-true}" = false ]; then
-            _proceed_label="바로 진행  — nixos-anywhere 설치 + 레포 전송 + nixup os"
+            _proceed_label="바로 진행  — nixos-anywhere 설치 + 레포 클론 + nixup os + nixup home"
         else
             _proceed_label="바로 진행  — nixos-anywhere 설치 + deploy-rs 배포"
         fi
@@ -687,10 +678,8 @@ run_setup() {
     printf "\n"
     log_msg "Notice" "다음 단계:"
     if [ "${_HOST_HAS_DEPLOY:-true}" = false ]; then
-        log_msg "Notice" "  시크릿 주입 후 서비스 활성화:"
-        log_msg "Notice" "    scp intermediate_ca.key root@$_IP:/var/lib/step-ca-secrets/"
-        log_msg "Notice" "    scp password            root@$_IP:/var/lib/step-ca-secrets/password"
-        log_msg "Notice" "    ssh root@$_IP /opt/nixos/core/scripts/nixup.sh os"
+        log_msg "Notice" "  gh auth login 으로 GitHub 인증 후 git pull 사용 가능"
+        log_msg "Notice" "  이후 변경 배포: rnixup"
     elif [ "${_HOST_IS_NEW:-true}" = true ]; then
         log_msg "Notice" "  1. hosts/${_HOSTNAME}.nix 에서 플레이스홀더를 실제 값으로 교체"
         log_msg "Notice" "  2. rnixup 으로 설정 반영"
