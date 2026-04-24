@@ -101,9 +101,12 @@ mkPartOf "mods.sys.base" ({
   };
 
   hm = {
+    # gh: programs.gh 모듈 대신 home.packages로 추가 — 모듈 사용 시 config.yml을 nix store
+    # read-only symlink로 생성해서 gh auth login 토큰 저장 불가
+    home.packages = [pkgs.gh];
+
     programs = {
       home-manager.enable = true;
-      gh.enable = true; # (목적: GitHub CLI — devel/gui 여부와 무관하게 기본 제공)
       git = {
         enable = true;
         settings = {
