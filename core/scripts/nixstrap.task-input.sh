@@ -144,15 +144,15 @@ ask_deploy_config() {
         _DEPLOY_ENABLED=true
         printf "\n"
         local _input
-        read -rep "$(_log_prompt)관리 머신의 SSH 키 경로 (비워두면 자동 생성): " _input
-        _input="${_input:-}"
-        if [ -n "$_input" ]; then
+        while true; do
+            read -rep "$(_log_prompt)관리 머신의 SSH 키 경로 (비워두면 자동 생성): " _input
+            _input="${_input:-}"
+            [ -z "$_input" ] && break
             _input="${_input/#\~/$HOME}"
-            if [ ! -f "$_input" ]; then
-                log_msg "Error" "파일을 찾을 수 없습니다: $_input"
-                ask_deploy_config
-                return
-            fi
+            [ -f "$_input" ] && break
+            log_msg "Error" "파일을 찾을 수 없습니다: $_input"
+        done
+        if [ -n "$_input" ]; then
             _DEPLOY_SSH_KEY="$_input"
             log_msg "Config" "SSH 키: $_DEPLOY_SSH_KEY"
         else
@@ -275,8 +275,9 @@ save_params() {
         printf '_BOOT_END=%s\n'               "$_BOOT_END"
         printf '_NEW_BOOT_NUM=%s\n'           "$_NEW_BOOT_NUM"
         printf '_NEW_ROOT_NUM=%s\n'           "$_NEW_ROOT_NUM"
-        printf '_DEPLOY_ENABLED=%s\n'         "$_DEPLOY_ENABLED"
-        printf '_DEPLOY_SSH_KEY=%s\n'         "$_DEPLOY_SSH_KEY"
+        printf '_DEPLOY_ENABLED=%s\n'             "$_DEPLOY_ENABLED"
+        printf '_DEPLOY_SSH_KEY=%s\n'             "$_DEPLOY_SSH_KEY"
+        printf '_DEPLOY_KEY_WAS_GENERATED=%s\n'   "$_DEPLOY_KEY_WAS_GENERATED"
     } > "$PARAMS_FILE"
     log_msg "Config" "세션 저장: $PARAMS_FILE"
 }
@@ -350,11 +351,11 @@ review_loop() {
             1)
                 ask_repo_and_clone
                 select_host
-                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_deploy_config; fi
+                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_state_version; ask_deploy_config; fi
                 ;;
             2)
                 select_host
-                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_deploy_config; fi
+                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_state_version; ask_deploy_config; fi
                 ;;
             3) ask_partitions ;;
             4)
