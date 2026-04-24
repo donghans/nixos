@@ -361,9 +361,17 @@ run_nixup_os_remote() {
     local u="${1:-root}"
     log_msg "Task" "원격 nixup os 실행 중..."
     log_exec "nixup" ">" "nixup os: $_HOSTNAME"
+    local _exit=0
     ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-        "/opt/nixos/core/scripts/nixup.sh os"
+        "/opt/nixos/core/scripts/nixup.sh os" || _exit=$?
     log_exec "nixup" "<" "nixup os: $_HOSTNAME"
+    if [ "$_exit" -eq 255 ]; then
+        # switch-to-configuration switch가 sshd를 재시작하면 연결이 끊어짐 (정상)
+        log_msg "Notice" "SSH 연결 끊어짐 — sshd 재시작으로 인한 것으로 보임. 재연결 대기..."
+    elif [ "$_exit" -ne 0 ]; then
+        log_msg "Error" "원격 nixup os 실패 (exit $_exit)"
+        exit 1
+    fi
     log_msg "Done" "원격 nixup os 완료"
 }
 
@@ -439,6 +447,7 @@ _run_install_standalone() {
     transfer_repo_to_remote "$_nixos_user"
     set_remote_env "$_nixos_user"
     run_nixup_os_remote "$_nixos_user"
+    wait_for_ssh "$_nixos_user"   # sshd 재시작 후 재연결 대기
     finalize_standalone_repo "$_nixos_user"
 }
 
