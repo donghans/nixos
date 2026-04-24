@@ -463,6 +463,25 @@ _run_install() {
     run_deploy_rs
 }
 
+# ── 원격 서버에서 nixup home 실행 ────────────────────────────────────────────
+# finalize_standalone_repo 이후(~/nixos 이동 완료) 별도 SSH 세션에서 실행.
+# nixup os의 sshd 재시작으로 연결이 끊겨 all로 한번에 실행 불가하므로 분리.
+# $1: SSH 유저
+run_nixup_home_remote() {
+    local u="${1:-root}"
+    log_msg "Task" "원격 nixup home 실행 중..."
+    log_exec "nixup" ">" "nixup home: $_HOSTNAME"
+    local _exit=0
+    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+        '$HOME/nixos/core/scripts/nixup.sh home' || _exit=$?
+    log_exec "nixup" "<" "nixup home: $_HOSTNAME"
+    if [ "$_exit" -ne 0 ]; then
+        log_msg "Error" "원격 nixup home 실패 (exit $_exit)"
+        exit 1
+    fi
+    log_msg "Done" "원격 nixup home 완료"
+}
+
 # ── 설치 + 레포 전송 + 원격 nixup os (standalone 모델) ───────────────────────
 # nixos-anywhere 이후 NixOS가 root SSH를 "no"로 설정하므로 primary user 사용
 _run_install_standalone() {
@@ -477,6 +496,7 @@ _run_install_standalone() {
     run_nixup_os_remote "$_nixos_user"
     wait_for_ssh "$_nixos_user"   # sshd 재시작 후 재연결 대기
     finalize_standalone_repo "$_nixos_user"
+    run_nixup_home_remote "$_nixos_user"
 }
 
 # ── RAM 표시 라인 출력 헬퍼 ──────────────────────────────────────────────────
