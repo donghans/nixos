@@ -424,10 +424,23 @@ fi
 REMOTE
     log_msg "Done" "레포 이동 완료: ~/nixos, /etc/nixos 심링크"
     if [ -n "$_origin" ]; then
-        log_msg "Notice" "git pull 설정: gh auth login 후 아래 명령 실행"
-        log_msg "Notice" "  git -C ~/nixos fetch --depth=1 origin ${_branch}"
-        log_msg "Notice" "  git -C ~/nixos reset --hard FETCH_HEAD"
-        log_msg "Notice" "  git -C ~/nixos branch -u origin/${_branch} ${_branch}"
+        # gh auth login 후 실행할 git 동기화 스크립트를 원격에 생성
+        ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+            "bash -s -- '${_branch}'" <<'REMOTE'
+BRANCH="$1"
+cat > ~/git-sync.sh <<SCRIPT
+#!/usr/bin/env bash
+set -euo pipefail
+git -C ~/nixos fetch --depth=1 origin "$BRANCH"
+git -C ~/nixos reset --hard FETCH_HEAD
+git -C ~/nixos branch -u "origin/$BRANCH" "$BRANCH"
+rm -f ~/git-sync.sh
+echo "git 동기화 완료"
+SCRIPT
+chmod +x ~/git-sync.sh
+REMOTE
+        log_msg "Notice" "git pull 설정: gh auth login 후 아래 실행"
+        log_msg "Notice" "  ~/git-sync.sh"
     fi
 }
 
