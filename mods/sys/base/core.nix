@@ -105,6 +105,12 @@ mkPartOf "mods.sys.base" ({
     # read-only symlink로 생성해서 gh auth login 토큰 저장 불가
     home.packages = [pkgs.gh];
 
+    # (목적: gh auth login 후 git 프로토콜을 항상 SSH로 고정)
+    # (이유: programs.gh.settings는 config.yml을 read-only symlink로 만들어 토큰 저장 불가)
+    home.activation.ghGitProtocol = lib.hm.dag.entryAfter ["writeBoundary"] ''
+      $DRY_RUN_CMD ${pkgs.gh}/bin/gh config set git_protocol ssh 2>/dev/null || true
+    '';
+
     programs = {
       home-manager.enable = true;
       git = {
