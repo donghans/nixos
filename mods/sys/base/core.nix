@@ -84,6 +84,10 @@ mkPartOf "mods.sys.base" ({
       ++ lib.optional (config.workspace.extraLocale != null)
       "${config.workspace.extraLocale}/UTF-8";
 
+    systemd.tmpfiles.rules = [
+      "L+ /bin/bash - - - - ${pkgs.bash}/bin/bash"
+    ];
+
     environment.systemPackages = with pkgs; [
       bash
       git
