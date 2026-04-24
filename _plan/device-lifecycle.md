@@ -233,6 +233,24 @@ tailscale up \
 
 Work Profile 내 앱은 개인 앱과 독립 실행 — 개인 계정과 충돌 없음.
 
+### Passbolt 등록 (공통)
+
+MDM을 통해 Passbolt 앱/익스텐션과 서버 URL(`passbolt.i.772610158.xyz`)을 자동 배포 후:
+
+```
+온보딩 에이전트(Helper) 자동 실행:
+  1. 로컬에서 GPG 키 쌍 생성 (사용자 개입 없음)
+  2. Passbolt API로 Public Key 등록 요청 전송
+  3. 관리자 대시보드에 승인 대기 알림
+
+관리자: 기기 UUID + Google email 일치 확인 후 계정 Active 처리
+→ 승인 완료 시 Passbolt 사용 가능
+```
+
+**Network-Bound Registration**: Passbolt 등록 요청은 반드시 Headscale 내부망(`passbolt.i.772610158.xyz`는 tailscale 전용)에 연결된 상태에서만 가능 — 외부에서 등록 시도 불가.
+
+> **온보딩 에이전트 구현 방향**: macOS/Linux는 nix 패키지로 배포, 모바일은 MDM 앱 배포 시 포함. `go-passbolt-cli` 기반으로 GPG 키 생성 → API 등록까지 원클릭 처리. 로드맵 참고.
+
 ---
 
 ## 3. 운영
@@ -257,8 +275,9 @@ Work Profile 내 앱은 개인 앱과 독립 실행 — 개인 계정과 충돌 
 
 ### Passbolt
 
-GPG 키 기반 — 마스터 패스워드 없음, 브라우저 익스텐션이 복호화.
-퇴사자 대응: GPG 키 폐기로 즉시 접근 차단.
+GPG 키 기반 — 마스터 패스워드 없음, 브라우저 익스텐션이 복호화.  
+Private Key는 기기 로컬(Keychain/Keystore)에만 보관, 서버 저장 지양.  
+퇴사자 대응: headscale 노드 제거로 내부망 접근 자체를 차단 (오프보딩 참고).
 
 ### MDM 체크인
 
@@ -275,15 +294,25 @@ GPG 키 기반 — 마스터 패스워드 없음, 브라우저 익스텐션이 �
 
 대시보드에서 직원 단위로 1회 처리:
 
-| 단계 | 액션 | API |
-|------|------|-----|
-| 1 | MDM 워크스페이스 제거 | NanoMDM: 프로파일 해제 / Headwind: `DELETE_WORK_PROFILE` |
-| 2 | Passbolt GPG 키 폐기 | Passbolt Admin API |
-| 3 | headscale 노드 제거 | headscale API |
+| 단계 | 액션 | API | 비고 |
+|------|------|-----|------|
+| 1 | headscale 노드 제거 | headscale API | 내부망 차단 → Passbolt 접근 즉시 불가 |
+| 2 | Passbolt 계정 비활성화 | Passbolt Admin API | 공유 비밀번호는 조직에 보존 |
+| 3 | MDM 워크스페이스 제거 | NanoMDM: 프로파일 해제 / Headwind: `DELETE_WORK_PROFILE` | 기기 내 GPG 키 · 업무 데이터 삭제 |
+
+순서 근거: Passbolt(`passbolt.i.772610158.xyz`)가 tailscale 내부망 전용이므로 headscale 노드를 먼저 제거하면 이후 단계 전에 이미 접근이 차단됨.
 
 2-step 확인 필수. 개인 데이터는 보존.
 
 ### 분실 / 도난 — 원격 초기화
+
+기기가 오프라인 상태여도 즉시 처리할 수 있는 순서로 실행:
+
+| 단계 | 액션 | API | 비고 |
+|------|------|-----|------|
+| 1 | headscale 노드 제거 | headscale API | 기기 온·오프라인 무관, 내부망 + Passbolt 접근 즉시 차단 |
+| 2 | Passbolt 계정 비활성화 (GPG 키 취소) | Passbolt Admin API | Private Key 탈취 시에도 서버 측에서 키 무효화 |
+| 3 | MDM 원격 초기화 | MDM API | 기기 온라인 복귀 시 자동 실행 |
 
 ```nix
 # ABM Supervised 등록 완료 전까지 비활성화
@@ -367,6 +396,25 @@ days_left=$(( ( $(date -d "$(openssl x509 -enddate -noout -in \
 
 PoC 검증 후 독립 레포로 이전.
 
+### 온보딩 에이전트 CLI
+
+사용자가 GPG 키 개념 없이 Passbolt를 등록할 수 있도록 하는 헬퍼 도구:
+
+- **macOS/Linux**: `go-passbolt-cli` 기반 바이너리, nix 패키지로 배포 — GPG 키 생성 → Public Key API 등록 → 관리자 승인 대기를 원클릭 처리
+- **모바일**: MDM 앱 배포 시 포함, WebView 기반으로 키 생성·등록 자동화
+
+### TPM / Secure Enclave 키 보호 (Optional)
+
+기기 내 GPG Private Key의 탈취를 원천 차단:
+
+- **데스크톱** (TPM 2.0): `tpm2-pkcs11`으로 Private Key를 TPM 칩 외부로 꺼낼 수 없게 생성, 서명 연산만 TPM 내부에서 수행. NixOS에서는 `security.tpm2.enable = true;` 한 줄로 환경 준비.
+- **모바일**: iOS Keychain(FaceID/지문 보호) / Android Keystore에 암호화 보관. Secure Enclave는 표준 GPG 미지원으로 직접 연동 불가.
+
+### Inventory Sync
+
+MDM 기기 상태(Compliance)와 Passbolt 계정 상태를 주기적으로 동기화:
+MDM에서 기기가 비정상(체크인 미응답, 루팅 감지 등)으로 감지되면 Passbolt 계정을 자동 비활성화.
+
 ---
 
 ## 보안 요약
@@ -378,6 +426,9 @@ PoC 검증 후 독립 레포로 이전.
 | APNs 인증서 | `/var/lib/nanomdn-secrets/` 파일 주입 |
 | Apple 코드서명 인증서 | `/var/lib/apple-secrets/` 파일 주입 |
 | Passbolt 관리자 GPG 키 | `/var/lib/passbolt-secrets/` 파일 주입 |
+| Passbolt GPG Private Key | 기기 로컬(Keychain/Keystore)에만 보관, 서버 저장 없음 |
+| Passbolt 등록 | Headscale 내부망 연결 상태에서만 가능 (Network-Bound) |
+| 오프보딩 순서 | headscale → Passbolt → MDM (내부망 차단 우선) |
 | 워크스페이스 제거 | 2-step 확인 |
 | 원격 초기화 | 2-step 확인 + 사유 입력 필수 |
 | `EraseDevice` | ABM 등록 완료 후 mkIf 활성화 |
