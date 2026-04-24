@@ -1,6 +1,6 @@
 ..keep
 
-.build
+/.build/
 .env
 GEMINI.md
 __pycache__/
