@@ -3,7 +3,7 @@
 
 # Constants
 # shellcheck disable=SC2034
-BUILD_DIR="$NIXOS_PATH/.build"
+BUILD_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/nixos/build"
 JSON_DIR="/tmp/nixup-json"
 SESSION_LOCK="/tmp/nixup-build.lock"
 LOG_DIR="/var/log/nixup"

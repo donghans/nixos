@@ -39,7 +39,7 @@ if [ $# -gt 0 ]; then
 fi
 
 # ── 상수 ──────────────────────────────────────────────────────────────────────
-BUILD_DIR="$NIXOS_PATH/.build"
+BUILD_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/nixos/build"
 JSON_DIR="/tmp/nixup-json"
 ENV_FILE="$NIXOS_PATH/.env"
 mkdir -p "$JSON_DIR"
