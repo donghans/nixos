@@ -21,7 +21,7 @@ _read_disk_labels() {
 }
 
 _create_partitions() {
-    if [[ "$_NEW_PARTITIONS" != "true" ]]; then return; fi
+    [[ "$_NEW_PARTITIONS" != "true" ]] && return
 
     log_msg "Disk" "$_DISK 에 파티션 생성 중..."
     log_exec "disk" ">" "parted"

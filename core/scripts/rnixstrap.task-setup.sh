@@ -456,6 +456,19 @@ _run_install_standalone() {
     finalize_standalone_repo "$_nixos_user"
 }
 
+# ── RAM 표시 라인 출력 헬퍼 ──────────────────────────────────────────────────
+_print_ram_line() {
+    if [ "$_REMOTE_RAM_MB" -eq -1 ]; then
+        printf "  %-16s: \033[2m알 수 없음\033[0m\n" "RAM"
+    elif [ "$_REMOTE_RAM_MB" -lt 1000 ]; then
+        printf "  %-16s: \033[31m%sMB  ← 최소치(1000MB) 미달\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
+    elif [ "$_REMOTE_RAM_MB" -lt 1500 ]; then
+        printf "  %-16s: \033[33m%sMB  ← kexec 실패 가능 (권장 1500MB)\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
+    else
+        printf "  %-16s: %sMB\n" "RAM" "$_REMOTE_RAM_MB"
+    fi
+}
+
 # ── 메인 오케스트레이터 ───────────────────────────────────────────────────────
 run_setup() {
     # ── RAM 사전 감지 (review 전, 실패해도 무시) ──────────────────────────────
@@ -476,15 +489,7 @@ run_setup() {
         else
             printf "  %-16s: (없음)\n" "services"
         fi
-        if [ "$_REMOTE_RAM_MB" -eq -1 ]; then
-            printf "  %-16s: \033[2m알 수 없음\033[0m\n" "RAM"
-        elif [ "$_REMOTE_RAM_MB" -lt 1000 ]; then
-            printf "  %-16s: \033[31m%sMB  ← 최소치(1000MB) 미달\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
-        elif [ "$_REMOTE_RAM_MB" -lt 1500 ]; then
-            printf "  %-16s: \033[33m%sMB  ← kexec 실패 가능 (권장 1500MB)\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
-        else
-            printf "  %-16s: %sMB\n" "RAM" "$_REMOTE_RAM_MB"
-        fi
+        _print_ram_line
         printf "  %s\n" "────────────────────────────────────────────────"
         printf "  ${GREEN}%-42s %s${NC}\n" "hosts/${_HOSTNAME}.toml" "신규 생성"
         printf "  ${GREEN}%-42s %s${NC}\n" "hosts/${_HOSTNAME}.nix"  "신규 생성"
@@ -497,15 +502,7 @@ run_setup() {
         printf "  %-16s: %s  \033[2m(TOML)\033[0m\n"              "system"     "$_SYSTEM"
         printf "  %-16s: %s  \033[2m(TOML, 재감지 예정)\033[0m\n" "diskDevice" "$_DISK_DEVICE"
         printf "  %-16s: %s  \033[2m(TOML, 재감지 예정)\033[0m\n" "bootLoader" "$_BOOT_LOADER"
-        if [ "$_REMOTE_RAM_MB" -eq -1 ]; then
-            printf "  %-16s: \033[2m알 수 없음\033[0m\n" "RAM"
-        elif [ "$_REMOTE_RAM_MB" -lt 1000 ]; then
-            printf "  %-16s: \033[31m%sMB  ← 최소치(1000MB) 미달\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
-        elif [ "$_REMOTE_RAM_MB" -lt 1500 ]; then
-            printf "  %-16s: \033[33m%sMB  ← kexec 실패 가능 (권장 1500MB)\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
-        else
-            printf "  %-16s: %sMB\n" "RAM" "$_REMOTE_RAM_MB"
-        fi
+        _print_ram_line
         printf "  %s\n" "────────────────────────────────────────────────"
         printf "  \033[2m%-42s %s\033[0m\n" "hosts/${_HOSTNAME}.nix"  "유지"
         printf "  \033[2m%-42s %s\033[0m\n" "hosts/${_HOSTNAME}.toml" "disk/boot 재감지 후 업데이트"
@@ -526,15 +523,7 @@ run_setup() {
         printf "  %-16s: %s  \033[2m(TOML)\033[0m\n"              "system"     "$_SYSTEM"
         printf "  %-16s: %s  \033[2m(TOML, 재감지 예정)\033[0m\n" "diskDevice" "$_DISK_DEVICE"
         printf "  %-16s: %s  \033[2m(TOML, 재감지 예정)\033[0m\n" "bootLoader" "$_BOOT_LOADER"
-        if [ "$_REMOTE_RAM_MB" -eq -1 ]; then
-            printf "  %-16s: \033[2m알 수 없음\033[0m\n" "RAM"
-        elif [ "$_REMOTE_RAM_MB" -lt 1000 ]; then
-            printf "  %-16s: \033[31m%sMB  ← 최소치(1000MB) 미달\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
-        elif [ "$_REMOTE_RAM_MB" -lt 1500 ]; then
-            printf "  %-16s: \033[33m%sMB  ← kexec 실패 가능 (권장 1500MB)\033[0m\n" "RAM" "$_REMOTE_RAM_MB"
-        else
-            printf "  %-16s: %sMB\n" "RAM" "$_REMOTE_RAM_MB"
-        fi
+        _print_ram_line
         printf "  %s\n" "────────────────────────────────────────────────"
         printf "  \033[2m%-42s %s\033[0m\n" "hosts/${_HOSTNAME}.nix" "유지"
         if [ "$_IP" != "$_TOML_IP" ] || [ "${_SSH_KEY/#$HOME/~}" != "$_TOML_SSH_KEY" ]; then
