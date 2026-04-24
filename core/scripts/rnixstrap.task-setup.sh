@@ -463,17 +463,6 @@ _run_install() {
     run_deploy_rs
 }
 
-# ── 기본 SSH 키 생성 (gh auth login 첫 실행 EROFS 방지) ──────────────────────
-# $1: SSH 유저. 키가 이미 있으면 건너뜀.
-_ensure_default_ssh_key() {
-    local u="${1:-root}"
-    # ~/.config/gh/ 사전 생성 — 없는 상태에서 gh가 생성 시도하면 EROFS 발생
-    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-        '[ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -q
-         mkdir -p ~/.config/gh' 2>/dev/null || true
-    log_msg "Done" "기본 SSH 키 준비 완료 (gh auth login용)"
-}
-
 # ── 설치 + 레포 전송 + 원격 nixup os (standalone 모델) ───────────────────────
 # nixos-anywhere 이후 NixOS가 root SSH를 "no"로 설정하므로 primary user 사용
 _run_install_standalone() {
@@ -488,7 +477,6 @@ _run_install_standalone() {
     run_nixup_os_remote "$_nixos_user"
     wait_for_ssh "$_nixos_user"   # sshd 재시작 후 재연결 대기
     finalize_standalone_repo "$_nixos_user"
-    _ensure_default_ssh_key "$_nixos_user"
 }
 
 # ── RAM 표시 라인 출력 헬퍼 ──────────────────────────────────────────────────

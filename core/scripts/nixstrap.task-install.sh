@@ -298,21 +298,6 @@ _install_nixos() {
     return "$_rc"
 }
 
-_gen_default_ssh_key() {
-    local key_path="/mnt/home/$USERNAME/.ssh/id_ed25519"
-    local ssh_dir="/mnt/home/$USERNAME/.ssh"
-    local gh_dir="/mnt/home/$USERNAME/.config/gh"
-    # ~/.config/gh/ 사전 생성 — 없는 상태에서 gh가 생성 시도하면 EROFS 발생
-    mkdir -p "$gh_dir"
-    [ -f "$key_path" ] && return
-    mkdir -p "$ssh_dir"
-    chmod 700 "$ssh_dir"
-    ssh-keygen -t ed25519 -f "$key_path" -N "" -C "${USERNAME}@${HOST}" -q 2>/dev/null
-    nixos-enter --root /mnt --command \
-        "chown -R $USERNAME:users /home/$USERNAME/.ssh /home/$USERNAME/.config" 2>/dev/null || true
-    log_msg "Done" "기본 SSH 키 생성: ~/.ssh/id_ed25519 (gh auth login 첫 실행용)"
-}
-
 _post_process() {
     log_msg "Done" "사용자 '$USERNAME' 의 설치 후 작업 실행 중..."
     mkdir -p "/mnt/home/$USERNAME/"
@@ -345,9 +330,8 @@ phase2_execute() {
     _generate_hw_config     # 13. hardware.nix → BUILD_DIR에 직접 생성
     _install_nixos          # 14. nixos-install
     _post_process           # 15. mv, chown, symlink
-    _gen_default_ssh_key    # 16. 기본 SSH 키 생성 (gh auth login 첫 실행 EROFS 방지)
-    _save_deploy_pem        # 17. PEM → ~/.ssh/ (자동 생성 키만)
-    _commit_deploy_files    # 18. pub key + TOML 커밋 + push 시도
+    _save_deploy_pem        # 16. PEM → ~/.ssh/ (자동 생성 키만)
+    _commit_deploy_files    # 17. pub key + TOML 커밋 + push 시도
 
     echo ""
     log_msg "Success" "설치 완료. 재부팅 → TTY 로그인 → 'nixup home' → 재로그인."
