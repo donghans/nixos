@@ -323,6 +323,7 @@ _write_standalone_files() {
 
 # ── 레포 → 원격 서버 전송 ─────────────────────────────────────────────────────
 # git archive: 커밋된 파일만 포함. hardware.nix는 미커밋이므로 별도 scp.
+# .git은 git archive에 포함되지 않으므로 별도 tar로 전송 (git pull 가능하도록).
 # $1: SSH 유저 (기본값: root). root 아닐 경우 sudo 사용.
 transfer_repo_to_remote() {
     local u="${1:-root}"
@@ -331,6 +332,10 @@ transfer_repo_to_remote() {
     git -C "$NIXOS_PATH" archive HEAD \
         | ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
               "${pfx}mkdir -p /opt/nixos && ${pfx}tar xf - -C /opt/nixos"
+    # .git 디렉터리 전송 — git pull 가능하도록
+    tar czf - -C "$NIXOS_PATH" .git \
+        | ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+              "${pfx}tar xzf - -C /opt/nixos"
     # hardware.nix: scp는 sudo 미지원 → /tmp 경유 후 sudo mv
     scp -i "$_SSH_KEY" "${_SSH_OPTS[@]}" \
         "$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.hardware.nix" \
