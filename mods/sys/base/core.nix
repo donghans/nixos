@@ -117,7 +117,7 @@ mkPartOf "mods.sys.base" ({
       };
       # (목적: gh auth login 시 git 프로토콜 질문 없이 SSH로 고정)
       # (이유: gh auth login은 config.yml의 git_protocol 값을 무시하고 항상 HTTPS를 기본 선택으로 표시)
-      zsh.initExtra = ''
+      zsh.initContent = ''
         gh() {
           if [[ "$1" == "auth" && "$2" == "login" ]]; then
             command gh auth login --git-protocol ssh "''${@:3}"
