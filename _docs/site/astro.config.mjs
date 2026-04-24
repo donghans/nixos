@@ -133,7 +133,7 @@ export default defineConfig({
         {
           label: '튜토리얼',
           items: [
-            { label: '시스템 이식', link: 'tutorials/first-install' },
+            { label: '첫 번째 호스트 설정', link: 'tutorials/first-install' },
           ],
         },
         {
@@ -153,12 +153,9 @@ export default defineConfig({
         {
           label: '이해하기',
           items: [
-            { label: '개요', link: 'explanation/overview' },
-            { label: '아키텍처', link: 'explanation/architecture' },
-            { label: 'Mods 내부 원리', link: 'explanation/mods-internals' },
-            { label: '핵심 메커니즘', link: 'explanation/mechanisms' },
-            { label: 'nixup 라이프사이클', link: 'explanation/lifecycle-nixup' },
-            { label: 'nixstrap 라이프사이클', link: 'explanation/lifecycle-nixstrap' },
+            { label: '아키텍처와 설계 결정', link: 'explanation/architecture' },
+            { label: '내부 원리', link: 'explanation/internals' },
+            { label: '실행 라이프사이클', link: 'explanation/lifecycle' },
           ],
         },
       ],

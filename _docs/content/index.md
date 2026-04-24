@@ -12,7 +12,7 @@ TOML 선언 한 파일로 NixOS 호스트를 정의하고, 프리셋 한 줄로 
 
 처음 이 프로젝트를 사용하는 분을 위한 단계별 안내입니다.
 
-- **[시스템 이식 가이드](./tutorials/first-install.md)** — Fork, 전역 설정, `nixstrap` 설치까지의 전 과정
+- **[첫 번째 NixOS 호스트 설정](./tutorials/first-install.md)** — Fork, Live USB 설치, 첫 변경 적용까지의 전 과정
 
 ### 작업 가이드
 
@@ -32,9 +32,6 @@ TOML 선언 한 파일로 NixOS 호스트를 정의하고, 프리셋 한 줄로 
 
 프레임워크의 작동 원리를 설명하는 심층 문서입니다.
 
-- **[개요](./explanation/overview.md)** — 4개 핵심 레이어 요약 및 문서 인덱스
-- **[아키텍처](./explanation/architecture.md)** — CLI Engine, Metadata, Logic Core, Mods Layer
-  - **[Mods 내부 원리](./explanation/mods-internals.md)** — 모듈 스캐닝, enable 계층, autoWrap, Dual-Context
-- **[핵심 메커니즘](./explanation/mechanisms.md)** — 빌드 격리, 락 전략, 패키지 복구
-- **[nixup 라이프사이클](./explanation/lifecycle-nixup.md)** — 명령어 입력부터 시스템 적용까지의 4단계 흐름
-- **[nixstrap 라이프사이클](./explanation/lifecycle-nixstrap.md)** — 신규 기기 부트스트랩 설치 흐름
+- **[아키텍처와 설계 결정](./explanation/architecture.md)** — 4개 레이어 구조, 디렉터리 구성, 설계 선택의 이유
+- **[내부 원리](./explanation/internals.md)** — Mods 스캐닝, enable 계층, 빌드 격리, 잠금 전략
+- **[실행 라이프사이클](./explanation/lifecycle.md)** — nixup / nixstrap 단계별 실행 흐름

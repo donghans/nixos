@@ -28,7 +28,7 @@ run_check_task() {
     log_exec "nix" ">" "shellcheck"
     # Temporarily set +e so shellcheck errors don't crash the script immediately
     set +e
-    shellcheck "$NIXOS_PATH/core/scripts/"*.sh "$NIXOS_PATH/nixstrap.sh" "$NIXOS_PATH/nixup-iso.sh"
+    shellcheck "$NIXOS_PATH/core/scripts/"*.sh "$NIXOS_PATH/nixstrap.sh"
     SHELLCHECK_RESULT=$?
     set -e
 

@@ -1,17 +1,11 @@
 # Mod API 레퍼런스
 
-> 실전 예시 및 추가/삭제 절차는 [Mod 만들기](../how-to/create-mod.md) 참조
-> 내부 작동 원리(스캐닝, enable 계층, autoWrap 등)는 [Mods 내부 원리](../explanation/mods-internals.md) 참조
+> 실전 예시 및 추가/삭제 절차는 [Mod 만들기](../how-to/create-mod.md) 참조  
+> 내부 작동 원리(스캐닝, enable 계층, autoWrap 등)는 [내부 원리](../explanation/internals.md) 참조
 
 ---
 
-## 헬퍼 선택 기준
-
-| 상황 | 헬퍼 | 예시 |
-|------|------|------|
-| 독립적으로 켜고 끌 수 있는 기능 | `mkMod` | docker, bluetooth |
-| 부모 도메인이 켜지면 같이 켜지는 기능 | `mkModOf` | vivaldi (gui의 자식) |
-| 부모와 항상 같이 움직이는 서브파트 | `mkPartOf` | fuzzel (gui의 일부) |
+--8<-- "_fragments/mods/helper-table.md"
 
 **Dual-Context**: 모든 모듈은 NixOS(`os` 블록)와 Home Manager(`hm` 블록) 양쪽에 자동 로드됩니다. 한 파일에서 `os = {...}; hm = {...};`를 선언하면 각 컨텍스트에 맞게 분기 적용됩니다.
 

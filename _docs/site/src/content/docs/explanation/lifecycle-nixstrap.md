@@ -109,7 +109,7 @@ flowchart TD
 
 ## 사전 초기화 · sync-remote
 
-`./nixstrap.sh` 또는 `./nixup-iso.sh` 실행 직후, Phase 1 입력 수집에 앞서 `nixstrap.lib-repo.py sync-remote`가 자동으로 실행됩니다.
+`./nixstrap.sh` 실행 직후, Phase 1 입력 수집에 앞서 `nixstrap.lib-repo.py sync-remote`가 자동으로 실행됩니다.
 
 | 단계 | 동작 |
 |------|------|

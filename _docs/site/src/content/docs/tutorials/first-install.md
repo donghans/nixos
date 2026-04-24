@@ -19,7 +19,7 @@ cd nixos
 
 ## 2. 전역 설정 (`hosts/_base.toml`)
 
-`./nixstrap.sh`(또는 `./nixup-iso.sh`) 실행 시 **자동으로 초기화**됩니다. 직접 실행하면 다음을 처리합니다:
+`./nixstrap.sh` 실행 시 **자동으로 초기화**됩니다. 직접 실행하면 다음을 처리합니다:
 
 - `git.nixosRepo` — git remote origin에서 `owner/repo` 자동 감지·갱신
 - `git.name` / `git.email` — GitHub API로 자동 채우기 (API 접근 불가 시 대화형 입력)
@@ -44,8 +44,6 @@ nixosRepo = "<your-username>/nixos"         # Fork한 저장소 (owner/repo)
 
 ## 3. 설치
 
-### 경로 A: 표준 NixOS Live USB (범용)
-
 NixOS 공식 ISO를 USB에 구워 부팅한 뒤:
 
 ```bash
@@ -65,40 +63,7 @@ cd nixos
 - **파티션 모드**: 기존 파티션 직접 지정(mode 1) 또는 전체 디스크·빈 공간 범위로 신규 생성(mode 2) 중 선택
 - **params 저장/복원**: review 확인 후 설치 파라미터를 `/root/nixstrap-params.env`에 저장. 네트워크 오류 등으로 실패 후 재시도 시 이전 설정을 불러와 확인/수정 후 재개 가능
 
----
 
-### 경로 B: 커스텀 ISO 빌드 (기존 NixOS 환경)
-
-nixstrap이 포함된 커스텀 live GUI ISO를 빌드합니다. 부팅 직후 이 레포지토리의 Workstation 환경(Hyprland)으로 부팅되며, 설치 명령이 자동으로 안내됩니다.
-
-```bash
-./nixup-iso.sh        # x86_64
-./nixup-iso.sh --arm  # aarch64
-```
-
-> nixup이 아직 설치되지 않아도 `nix-shell` 쉬뱅을 통해 필요한 도구를 자동으로 가져옵니다.
-
-빌드 완료 후 `.build/` 폴더의 ISO 파일을 USB에 구워 부팅하면, kitty 터미널에 설치 안내가 자동으로 표시됩니다.
-(터미널을 닫았거나 추가로 열어야 할 경우: `Super + P` → kitty 검색)
-
-```bash
-nixstrap   # 호스트·파티션 선택을 대화형으로 안내
-```
-
-> **기본 단축키 (Hyprland)**
->
-> | 단축키 | 동작 |
-> |--------|------|
-> | `Super + P` | 앱 런처 (fuzzel) — kitty 등 앱 실행 |
-> | `Super + Q` | 현재 창 닫기 |
-> | `Super + F` | 플로팅 모드 토글 |
-> | `Super + L` | 화면 잠금 (hyprlock) |
-> | `Super + 1~0` | 워크스페이스 1~10 이동 |
-> | `Super + Shift + Q` | Hyprland 종료 (로그인 화면으로 이동) |
-> | `Super + 마우스 좌클릭 드래그` | 창 이동 |
-> | `Super + 마우스 우클릭 드래그` | 창 크기 조절 |
->
-> `Super`는 키보드의 Windows/Command 키입니다. 전체 단축키는 `mods/gui/base/core.bind.nix`를 참고하세요.
 
 ---
 
