@@ -110,12 +110,18 @@ _create_host_profile() {
     local _type="desktop"
     [ "${_PRESET:-}" = "server" ] && _type="server"
 
+    # 대상 머신 RAM 감지 (nixstrap은 대상 머신에서 직접 실행되므로 /proc/meminfo = 정확한 값)
+    local _ram_line=""
+    local _ram_gb
+    _ram_gb=$(awk '/^MemTotal:/ {printf "%d", int(($2 + 1048575) / 1048576)}' /proc/meminfo 2>/dev/null || true)
+    [ -n "$_ram_gb" ] && _ram_line=$'\nramGb = '"$_ram_gb"
+
     if [[ "$_IS_VM" == "true" ]]; then
-        printf 'type = "%s"\npreset = "%s"%s%s\n\n[mods.sys.services]\nincus-guest = true\nincus = false\n' \
-            "$_type" "$_PRESET" "$_sv_line" "$_username_line" > "$HOST_TOML"
+        printf 'type = "%s"\npreset = "%s"%s%s%s\n\n[mods.sys.services]\nincus-guest = true\nincus = false\n' \
+            "$_type" "$_PRESET" "$_sv_line" "$_username_line" "$_ram_line" > "$HOST_TOML"
         log_msg "Config" "$HOST.toml 에서 incus-guest 활성화, incus 비활성화 (가상화 환경)"
     else
-        printf 'type = "%s"\npreset = "%s"%s%s\n' "$_type" "$_PRESET" "$_sv_line" "$_username_line" > "$HOST_TOML"
+        printf 'type = "%s"\npreset = "%s"%s%s%s\n' "$_type" "$_PRESET" "$_sv_line" "$_username_line" "$_ram_line" > "$HOST_TOML"
     fi
 
     # deploy-rs 설정 — sshKey는 관리 머신 기준 경로 (자동 생성 시 표준 경로 사용)

@@ -114,9 +114,9 @@ for entry in sorted(os.listdir(hosts_dir)):
     for k, v in host.get("mods", {}).items():
         mods[k] = v
 
-    # ramGb: /proc/meminfo에서 자동 감지 (host.toml 입력 무시)
-    # swap을 직접 지정하려면 swapGb를 사용하세요.
-    ram_gb = detect_ram_gb()
+    # ramGb: host.toml 명시 우선 → 없으면 /proc/meminfo 자동 감지 (관리 머신 기준)
+    # 원격 호스트는 nixstrap/rnixstrap이 설치 시점에 host.toml에 기재함
+    ram_gb = host.get("ramGb") or detect_ram_gb()
 
     deploy_section = host.get("deploy", None)
     if deploy_section and "sshKey" in deploy_section:
