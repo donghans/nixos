@@ -467,8 +467,10 @@ _run_install() {
 # $1: SSH 유저. 키가 이미 있으면 건너뜀.
 _ensure_default_ssh_key() {
     local u="${1:-root}"
+    # ~/.config/gh/ 사전 생성 — 없는 상태에서 gh가 생성 시도하면 EROFS 발생
     ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-        '[ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -q' 2>/dev/null || true
+        '[ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -q
+         mkdir -p ~/.config/gh' 2>/dev/null || true
     log_msg "Done" "기본 SSH 키 준비 완료 (gh auth login용)"
 }
 

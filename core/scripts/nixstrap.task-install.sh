@@ -300,13 +300,16 @@ _install_nixos() {
 
 _gen_default_ssh_key() {
     local key_path="/mnt/home/$USERNAME/.ssh/id_ed25519"
-    [ -f "$key_path" ] && return
     local ssh_dir="/mnt/home/$USERNAME/.ssh"
+    local gh_dir="/mnt/home/$USERNAME/.config/gh"
+    # ~/.config/gh/ 사전 생성 — 없는 상태에서 gh가 생성 시도하면 EROFS 발생
+    mkdir -p "$gh_dir"
+    [ -f "$key_path" ] && return
     mkdir -p "$ssh_dir"
     chmod 700 "$ssh_dir"
     ssh-keygen -t ed25519 -f "$key_path" -N "" -C "${USERNAME}@${HOST}" -q 2>/dev/null
     nixos-enter --root /mnt --command \
-        "chown $USERNAME:users /home/$USERNAME/.ssh/id_ed25519 /home/$USERNAME/.ssh/id_ed25519.pub" 2>/dev/null || true
+        "chown -R $USERNAME:users /home/$USERNAME/.ssh /home/$USERNAME/.config" 2>/dev/null || true
     log_msg "Done" "기본 SSH 키 생성: ~/.ssh/id_ed25519 (gh auth login 첫 실행용)"
 }
 
