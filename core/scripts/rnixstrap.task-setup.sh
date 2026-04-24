@@ -368,7 +368,7 @@ transfer_repo_to_remote() {
             "mkdir -p ~/.ssh && ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null && \
              rm -rf ~/nixos_clone && \
              git clone --depth=1 --branch '${_branch}' '${_origin}' ~/nixos_clone && \
-             sudo mv ~/nixos_clone /opt/nixos && \
+             sudo mkdir -p /opt && sudo mv ~/nixos_clone /opt/nixos && \
              sudo chown -R ${u}:users /opt/nixos"
     fi
     # hardware.nix: GitHub push 전일 수 있으므로 항상 직접 전송
