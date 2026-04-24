@@ -265,10 +265,24 @@ run_nixos_anywhere() {
         "${_SSH_USER}@${_IP}"
     log_exec "n-aw" "<" "nixos-anywhere: $_HOSTNAME"
 
-    # 생성된 hardware.nix를 소스 레포로 역복사 (이후 rnixup이 사용)
+    # 생성된 hardware.nix를 소스 레포로 역복사 후 커밋
+    # 커밋하면 git archive HEAD에 포함되므로 transfer_repo_to_remote에서 별도 scp 불필요
     mkdir -p "$NIXOS_PATH/hosts/deploy"
     cp "$hw_path" "$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.hardware.nix"
-    log_msg "Done" "hardware.nix 저장: hosts/deploy/${_HOSTNAME}.hardware.nix"
+    git -C "$NIXOS_PATH" \
+        -c user.name="rnixstrap" -c user.email="rnixstrap@localhost" \
+        add "hosts/deploy/${_HOSTNAME}.hardware.nix" 2>/dev/null || true
+    if ! git -C "$NIXOS_PATH" diff --cached --quiet 2>/dev/null; then
+        if git -C "$NIXOS_PATH" \
+            -c user.name="rnixstrap" -c user.email="rnixstrap@localhost" \
+            commit -m "feat: ${_HOSTNAME} hardware.nix 추가/갱신" 2>/dev/null; then
+            log_msg "Done" "hardware.nix 커밋 완료: hosts/deploy/${_HOSTNAME}.hardware.nix"
+        else
+            log_msg "Notice" "hardware.nix 커밋 실패 — 수동 커밋 필요"
+        fi
+    else
+        log_msg "Done" "hardware.nix 변경 없음 (이미 최신)"
+    fi
 }
 
 # ── 7. SSH known_hosts 기존 항목 제거 ────────────────────────────────────────
@@ -329,9 +343,9 @@ _write_standalone_files() {
 }
 
 # ── 레포 → 원격 서버 전송 ─────────────────────────────────────────────────────
-# git archive: 커밋된 파일만 포함. hardware.nix는 미커밋이므로 별도 scp.
-# .git은 전송하지 않음 — 레포 크기가 클 수 있고 (pack 파일 포함), finalize 단계에서
-# git init + remote add로 설정한 뒤 gh auth login 후 git fetch --depth=1로 동기화.
+# git archive HEAD: 커밋된 파일만 포함 (hardware.nix는 run_nixos_anywhere에서 커밋됨).
+# .git은 전송하지 않음 — finalize 단계에서 git init + remote add로 설정한 뒤
+# gh auth login 후 git fetch --depth=1로 동기화.
 # $1: SSH 유저 (기본값: root). root 아닐 경우 sudo 사용.
 transfer_repo_to_remote() {
     local u="${1:-root}"
@@ -340,12 +354,6 @@ transfer_repo_to_remote() {
     git -C "$NIXOS_PATH" archive HEAD \
         | ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
               "${pfx}mkdir -p /opt/nixos && ${pfx}tar xf - -C /opt/nixos"
-    # hardware.nix: scp는 sudo 미지원 → /tmp 경유 후 sudo mv
-    scp -i "$_SSH_KEY" "${_SSH_OPTS[@]}" \
-        "$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.hardware.nix" \
-        "${u}@${_IP}:/tmp/${_HOSTNAME}.hardware.nix"
-    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-        "${pfx}mkdir -p /opt/nixos/hosts/deploy && ${pfx}mv /tmp/${_HOSTNAME}.hardware.nix /opt/nixos/hosts/deploy/"
     # nixup이 일반 유저로 실행되므로 레포 소유권을 해당 유저로 변경
     [ "$u" != "root" ] && ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
         "sudo chown -R ${u}:users /opt/nixos"
