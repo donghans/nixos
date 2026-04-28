@@ -81,6 +81,9 @@ in {
       # step-ca는 같은 서버에서 실행되므로 localhost로 해석
       networking.hosts."127.0.0.1" = ["c.772610158.xyz"];
 
+      # Cloudflare DNS-01 TXT 레코드 전파 확인을 위해 공개 DNS 추가
+      networking.nameservers = ["1.1.1.1" "8.8.8.8"];
+
       # == Caddy reverse proxy ==
       services.caddy.extraConfig = ''
         PLACEHOLDER_HEADSCALE_DOMAIN {
