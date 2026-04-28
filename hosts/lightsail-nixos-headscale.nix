@@ -78,6 +78,9 @@ in {
         roleArn = "arn:aws:iam::732799293614:role/StepCaRolesAnywhereRole";
       };
 
+      # step-ca는 같은 서버에서 실행되므로 localhost로 해석
+      networking.hosts."127.0.0.1" = ["c.772610158.xyz"];
+
       # == Caddy reverse proxy ==
       services.caddy.extraConfig = ''
         PLACEHOLDER_HEADSCALE_DOMAIN {
