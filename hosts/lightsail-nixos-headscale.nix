@@ -20,10 +20,31 @@ in {
     # step-ca: 시크릿 존재 시에만 유닛 생성
     (lib.mkIf secretsReady {
       environment.etc."step-ca/root_ca.crt".text = ''
-        PLACEHOLDER_ROOT_CA_PEM
+        -----BEGIN CERTIFICATE-----
+        MIIBkjCCATmgAwIBAgIQZrFUQgbIq/vvhfCHPsPT3DAKBggqhkjOPQQDAjAoMQ4w
+        DAYDVQQKEwVNeSBDQTEWMBQGA1UEAxMNTXkgQ0EgUm9vdCBDQTAeFw0yNjA0Mjgw
+        MTA4MjNaFw0zNjA0MjUwMTA4MjNaMCgxDjAMBgNVBAoTBU15IENBMRYwFAYDVQQD
+        Ew1NeSBDQSBSb290IENBMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+zHuKfWq
+        0yEF+wGiU6/4PuPkcQbXczJZPHZUQatPHy8G/o8GA7bveEFQA4utxV5ollRH6hW4
+        +07r561MaaGQw6NFMEMwDgYDVR0PAQH/BAQDAgEGMBIGA1UdEwEB/wQIMAYBAf8C
+        AQEwHQYDVR0OBBYEFFlHSrguhGthbTPkFN5fI+ym7I4xMAoGCCqGSM49BAMCA0cA
+        MEQCIDm6DkHEoJg/rseNnLVPOMP46KXwkv47FMuxgjX4DQ7TAiAYo4SVLZXiqLC/
+        rHh+DyUggEIjn6lbnsijLSEXOBkLig==
+        -----END CERTIFICATE-----
       '';
       environment.etc."step-ca/intermediate_ca.crt".text = ''
-        PLACEHOLDER_INTERMEDIATE_CA_PEM
+        -----BEGIN CERTIFICATE-----
+        MIIBvjCCAWOgAwIBAgIRAPdJPX2YTxrEjAn58MeCVdYwCgYIKoZIzj0EAwIwKDEO
+        MAwGA1UEChMFTXkgQ0ExFjAUBgNVBAMTDU15IENBIFJvb3QgQ0EwHhcNMjYwNDI4
+        MDEwODI0WhcNMzYwNDI1MDEwODI0WjAwMQ4wDAYDVQQKEwVNeSBDQTEeMBwGA1UE
+        AxMVTXkgQ0EgSW50ZXJtZWRpYXRlIENBMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD
+        QgAEMPt8DZFXQ3CmOTI46AsVjX1Q5x9EdVK8Quk4gt1MUQKUzUOqTTdaus2E43Q2
+        zOoNpQYuqxHJmgG5y2DUzNJg36NmMGQwDgYDVR0PAQH/BAQDAgEGMBIGA1UdEwEB
+        /wQIMAYBAf8CAQAwHQYDVR0OBBYEFIpKghvgwYQZDjm9BtQUVABgpVERMB8GA1Ud
+        IwQYMBaAFFlHSrguhGthbTPkFN5fI+ym7I4xMAoGCCqGSM49BAMCA0kAMEYCIQDj
+        cHdgKsmLr9xvpJfT3+DP7xv984gYrwAqSNl8ecaPUgIhAIu7UMLNEXNcA5OX35St
+        Ba7wbv+GGReaRBAtEo33fGgh
+        -----END CERTIFICATE-----
       '';
       services.step-ca = {
         enable = true;
@@ -34,7 +55,7 @@ in {
           root = "/etc/step-ca/root_ca.crt";
           crt = "/etc/step-ca/intermediate_ca.crt";
           key = keyFile;
-          dnsNames = ["ca.PLACEHOLDER_TAILSCALE_DOMAIN"];
+          dnsNames = ["c.772610158.xyz"];
           db = {
             type = "badger";
             dataSource = "/var/lib/step-ca/db";
@@ -61,7 +82,7 @@ in {
       services.headscale = {
         enable = true;
         settings = {
-          server_url = "https://PLACEHOLDER_HEADSCALE_DOMAIN";
+          server_url = "https://e2.772610158.xyz";
           listen_addr = "127.0.0.1:8080";
           grpc_listen_addr = "127.0.0.1:50443";
           metrics_listen_addr = "127.0.0.1:9090";
@@ -77,9 +98,11 @@ in {
       # == AWS IAM Roles Anywhere ==
       mods.sys.services.aws-roles-anywhere = {
         domain = "r.772610158.xyz";
-        trustAnchorArn = "arn:aws:rolesanywhere:ap-northeast-2:732799293614:trust-anchor/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
-        profileArn = "arn:aws:rolesanywhere:ap-northeast-2:732799293614:profile/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
-        roleArn = "arn:aws:iam::732799293614:role/XXXXXX";
+        caServer = "https://c.772610158.xyz:8443/acme/acme/directory";
+        caCertFile = "/etc/step-ca/root_ca.crt";
+        trustAnchorArn = "arn:aws:rolesanywhere:ap-northeast-2:732799293614:trust-anchor/77dd2115-b7a2-4490-b15b-db5f4709c4e5";
+        profileArn = "arn:aws:rolesanywhere:ap-northeast-2:732799293614:profile/c56e7711-ec84-400c-a641-8d222685184f";
+        roleArn = "arn:aws:iam::732799293614:role/StepCaRolesAnywhereRole";
       };
 
       # == Caddy reverse proxy ==
