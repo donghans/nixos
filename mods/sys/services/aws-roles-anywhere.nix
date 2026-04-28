@@ -96,6 +96,7 @@ mkMod __curPos "AWS IAM Roles Anywhere — cert-based temporary credentials" ({c
         inherit (cfg) dnsProvider;
         environmentFile = cfg.tokenFile;
         group = "aws-access";
+        keyType = "rsa2048";
       }
       // lib.optionalAttrs (cfg.caServer != null) {
         server = cfg.caServer;
