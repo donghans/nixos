@@ -106,7 +106,7 @@ mkMod __curPos "AWS IAM Roles Anywhere — cert-based temporary credentials" ({c
     users.groups.aws-access = {};
     users.users.${config.workspace.username}.extraGroups = ["aws-access"];
 
-    environment.systemPackages = [pkgs.aws-signing-helper];
+    environment.systemPackages = [pkgs.aws-signing-helper pkgs.awscli2];
 
     environment.etc."aws/config".text = ''
       [default]
