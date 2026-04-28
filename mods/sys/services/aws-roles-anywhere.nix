@@ -87,11 +87,6 @@ mkMod __curPos "AWS IAM Roles Anywhere — cert-based temporary credentials" ({c
       default = null;
       description = "내부 CA 루트 인증서 PEM. caServer 사용 시 시스템 트러스트에 추가됨.";
     };
-    caCertFile = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
-      default = null;
-      description = "내부 CA 루트 인증서 파일 경로. caCert 대신 파일로 지정할 때 사용.";
-    };
   };
   os = {
     security.acme.acceptTerms = true;
@@ -107,7 +102,6 @@ mkMod __curPos "AWS IAM Roles Anywhere — cert-based temporary credentials" ({c
       };
 
     security.pki.certificates = lib.optional (cfg.caCert != null) cfg.caCert;
-    security.pki.certificateFiles = lib.optional (cfg.caCertFile != null) cfg.caCertFile;
 
     users.groups.aws-access = {};
     users.users.${config.workspace.username}.extraGroups = ["aws-access"];
