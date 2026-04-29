@@ -111,12 +111,7 @@ mkMod __curPos "AWS IAM Roles Anywhere — cert-based temporary credentials" ({c
 
     environment.etc."aws/config".text = ''
       [default]
-      credential_process = ${pkgs.aws-signing-helper}/bin/aws_signing_helper credential-process \
-        --certificate /var/lib/acme/${cfg.domain}/cert.pem \
-        --private-key /var/lib/acme/${cfg.domain}/key.pem \
-        --trust-anchor-arn ${cfg.trustAnchorArn} \
-        --profile-arn ${cfg.profileArn} \
-        --role-arn ${cfg.roleArn}
+      credential_process = ${pkgs.aws-signing-helper}/bin/aws_signing_helper credential-process --certificate /var/lib/acme/${cfg.domain}/cert.pem --private-key /var/lib/acme/${cfg.domain}/key.pem --trust-anchor-arn ${cfg.trustAnchorArn} --profile-arn ${cfg.profileArn} --role-arn ${cfg.roleArn}
       region = ${cfg.awsRegion}
     '';
 
