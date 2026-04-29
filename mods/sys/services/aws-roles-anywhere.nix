@@ -97,6 +97,7 @@ mkMod __curPos "AWS IAM Roles Anywhere — cert-based temporary credentials" ({c
         environmentFile = cfg.tokenFile;
         group = "aws-access";
         keyType = "rsa2048";
+        extraLegoRunFlags = ["--dns.resolvers=1.1.1.1:53"];
       }
       // lib.optionalAttrs (cfg.caServer != null) {
         server = cfg.caServer;

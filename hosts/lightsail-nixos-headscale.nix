@@ -84,6 +84,16 @@ in {
       # Cloudflare DNS-01 TXT 레코드 전파 확인을 위해 공개 DNS 추가
       networking.nameservers = ["1.1.1.1" "8.8.8.8"];
 
+      # systemd-resolved가 NXDOMAIN을 캐시하지 않도록 (step-ca DNS-01 검증 실패 방지)
+      services.resolved.extraConfig = "Cache=no-negative";
+
+      # DHCP에서 AWS VPC DNS(172.26.0.2)를 기본 라우터로 쓰지 않도록
+      systemd.network.networks."05-ens5" = {
+        matchConfig.Name = "ens5";
+        networkConfig.DHCP = "ipv4";
+        dhcpV4Config.UseDNS = false;
+      };
+
       # == Caddy reverse proxy ==
       services.caddy.extraConfig = ''
         PLACEHOLDER_HEADSCALE_DOMAIN {
