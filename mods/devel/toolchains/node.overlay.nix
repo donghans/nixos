@@ -6,15 +6,20 @@ _final: prev: let
   prismaDetectionScript = ''
     curr="''$PWD"
     while [ "''$curr" != "/" ]; do
-      if [ -d "''$curr/node_modules/@prisma/engines" ]; then
-        export PRISMA_ENGINES_DIR="''$curr/node_modules/@prisma/engines"
-        export PRISMA_QUERY_ENGINE_LIBRARY=$(find "''$PRISMA_ENGINES_DIR" -name "libquery_engine-*" | head -n 1)
-        export PRISMA_QUERY_ENGINE_BINARY=$(find "''$PRISMA_ENGINES_DIR" -name "query-engine-*" | head -n 1)
-        export PRISMA_SCHEMA_ENGINE_BINARY=$(find "''$PRISMA_ENGINES_DIR" -name "schema-engine-*" | head -n 1)
+      engines_dir="''$curr/node_modules/@prisma/engines"
+      if [ -d "''$engines_dir" ]; then
+        export PRISMA_ENGINES_DIR="''$engines_dir"
+        _lib=$(find "''$engines_dir" -name "libquery_engine-*.so.node" | head -n 1)
+        [ -n "''$_lib" ] && export PRISMA_QUERY_ENGINE_LIBRARY="''$_lib"
+        _bin=$(find "''$engines_dir" -maxdepth 1 -name "query-engine-*" ! -name "*.so*" ! -name "*.node" | head -n 1)
+        [ -n "''$_bin" ] && export PRISMA_QUERY_ENGINE_BINARY="''$_bin"
+        _schema=$(find "''$engines_dir" -maxdepth 1 -name "schema-engine-*" ! -name "*.so*" ! -name "*.node" | head -n 1)
+        [ -n "''$_schema" ] && export PRISMA_SCHEMA_ENGINE_BINARY="''$_schema"
         break
       fi
       curr=$(dirname "''$curr")
     done
+    unset _lib _bin _schema
   '';
 
   # (목적: Node 환경에 Prisma 탐색 및 PNPM 글로벌 최적화 변수 주입)
