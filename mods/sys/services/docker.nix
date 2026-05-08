@@ -21,5 +21,6 @@ mkMod __curPos "Docker Daemon and tools" ({cfg, ...}: {
     virtualisation.docker.rootless.enable = lib.mkIf cfg.rootless true;
     virtualisation.docker.rootless.setSocketVariable = lib.mkIf cfg.rootless true;
     users.users.${config.workspace.username}.extraGroups = lib.mkIf (!cfg.rootless) ["docker"];
+    boot.kernel.sysctl."net.ipv4.ip_unprivileged_port_start" = lib.mkIf cfg.rootless 80;
   };
 })
