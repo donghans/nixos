@@ -109,15 +109,22 @@ mkPartOf "mods.sys.base" ({
       home-manager.enable = true;
       git = {
         enable = true;
-        settings = {
-          user.name = config.workspace.gitName;
-          user.email = config.workspace.gitEmail;
-          url."git@github.com:".insteadOf = "https://github.com/";
-        };
+        settings = lib.mkMerge [
+          {
+            user.name = config.workspace.gitName;
+            user.email = config.workspace.gitEmail;
+          }
+          # SSH URL 리다이렉트: 로컬 워크스테이션에만 적용
+          # 원격 호스트(deploy-rs / standalone)는 public 레포를 HTTPS로 pull
+          (lib.mkIf (!config.workspace.isRemote) {
+            url."git@github.com:".insteadOf = "https://github.com/";
+          })
+        ];
       };
       # (목적: gh auth login 시 git 프로토콜 질문 없이 SSH로 고정)
       # (이유: gh auth login은 config.yml의 git_protocol 값을 무시하고 항상 HTTPS를 기본 선택으로 표시)
-      zsh.initContent = ''
+      # (범위: 로컬 워크스테이션에만 — 원격 호스트는 gh 인증 불필요)
+      zsh.initContent = lib.mkIf (!config.workspace.isRemote) ''
         gh() {
           if [[ "$1" == "auth" && "$2" == "login" ]]; then
             command gh auth login --git-protocol ssh "''${@:3}"

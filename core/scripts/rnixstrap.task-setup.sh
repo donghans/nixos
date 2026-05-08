@@ -343,8 +343,8 @@ _write_standalone_files() {
 }
 
 # ── 레포 → 원격 서버 전송 ─────────────────────────────────────────────────────
-# SSH 에이전트 포워딩(-A)으로 로컬 GitHub SSH 키를 원격에서 사용해 git clone.
 # depth=1 shallow clone: .git 최소화 + origin 트래킹 설정 완료 → git pull 즉시 사용 가능.
+# public 레포이므로 무인증 HTTPS clone 사용 (SSH 에이전트 포워딩 불필요).
 # 일반 유저는 /opt에 직접 쓸 수 없고 sudo는 에이전트 소켓을 상속하지 않으므로
 # ~/nixos_clone에 클론 후 sudo mv로 이동.
 # hardware.nix: GitHub push 전일 수 있으므로 clone 후 항상 직접 전송.
@@ -358,16 +358,21 @@ transfer_repo_to_remote() {
         exit 1
     fi
     _branch=$(git -C "$NIXOS_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+
+    # SSH URL → HTTPS 변환 (워크스테이션 origin이 git@ 형식일 경우 대비)
+    local _https_origin="$_origin"
+    [[ "$_origin" == git@github.com:* ]] && \
+        _https_origin="https://github.com/${_origin#git@github.com:}"
+    [[ "$_https_origin" != *.git ]] && _https_origin="${_https_origin}.git"
+
     log_msg "Task" "레포 클론 중 (/opt/nixos, depth=1)..."
     if [ "$u" = "root" ]; then
-        ssh -A -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "root@${_IP}" \
-            "mkdir -p ~/.ssh && ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null && \
-             git clone --depth=1 --branch '${_branch}' '${_origin}' /opt/nixos"
+        ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "root@${_IP}" \
+            "git clone --depth=1 --branch '${_branch}' '${_https_origin}' /opt/nixos"
     else
-        ssh -A -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-            "mkdir -p ~/.ssh && ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null && \
-             rm -rf ~/nixos_clone && \
-             git clone --depth=1 --branch '${_branch}' '${_origin}' ~/nixos_clone && \
+        ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+            "rm -rf ~/nixos_clone && \
+             git clone --depth=1 --branch '${_branch}' '${_https_origin}' ~/nixos_clone && \
              sudo mkdir -p /opt && sudo mv ~/nixos_clone /opt/nixos && \
              sudo chown -R ${u}:users /opt/nixos"
     fi
