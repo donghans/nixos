@@ -5,8 +5,7 @@
     "openssl"
   ],
   "env": {
-    "PNPM_PACKAGE_IMPORT_METHOD": "reflink",
-    "PNPM_SHAMEFULLY_HOIST": "true"
+    "PNPM_STORE_DIR": "~/.local/share/pnpm/store"
   },
   "init_hook": [
     "curr=$PWD; while [ \"$curr\" != \"/\" ]; do if [ -d \"$curr/node_modules/@prisma/engines\" ]; then export PRISMA_ENGINES_DIR=\"$curr/node_modules/@prisma/engines\"; export PRISMA_QUERY_ENGINE_LIBRARY=$(find \"$PRISMA_ENGINES_DIR\" -name \"libquery_engine-*\" | head -n 1); export PRISMA_QUERY_ENGINE_BINARY=$(find \"$PRISMA_ENGINES_DIR\" -name \"query-engine-*\" | head -n 1); break; fi; curr=$(dirname \"$curr\"); done",

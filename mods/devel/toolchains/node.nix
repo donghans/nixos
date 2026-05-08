@@ -11,10 +11,24 @@ mkModOf "mods.devel" __curPos "Node.js toolchain" ({
       pnpm-yarn-wrapper
     ];
 
+    xdg.configFile."pnpm/rc".text = ''
+      # store — btrfs CoW 유지
+      store-dir=/home/${config.workspace.username}/.local/share/pnpm/store
+      package-import-method=clone
+
+      # npm-compatible flat node_modules (no .pnpm/, no symlinks)
+      node-linker=hoisted
+
+      # workspace: 없이도 로컬 패키지 우선 링크 (npm 동작)
+      link-workspace-packages=true
+
+      # peer deps — npm v7+ 동작
+      auto-install-peers=true
+      strict-peer-dependencies=false
+    '';
+
     home.sessionVariables = {
-      PNPM_PACKAGE_IMPORT_METHOD = "reflink"; # (이유: Btrfs CoW 활용 성능 최적화)
-      PNPM_PUBLIC_HOIST_PATTERN = "*";
-      PNPM_SHAMEFULLY_HOIST = "true"; # (이유: 패키지 호이스팅 호환성 극대화)
+      # pnpm 공식 env var — 스크립트/CI에서 rc 없이도 스토어 경로 인식
       PNPM_STORE_DIR = "/home/${config.workspace.username}/.local/share/pnpm/store";
     };
 
