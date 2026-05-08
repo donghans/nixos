@@ -15,23 +15,27 @@ _run_init() {
     local _default_repo="${_login:+${_login}/}nix-secrets"
 
     log_msg "Input" "레포 이름 (Enter = 기본값, org/repo 형태도 가능)"
-    printf '  [%s]: ' "$_default_repo"
     local _input
-    read -re _input
+    # read -p로 프롬프트를 readline에 전달해야 백스페이스가 프롬프트 앞으로 넘어가지 않음
+    read -rep "  [$_default_repo]: " _input
     local _repo="${_input:-$_default_repo}"
+    # owner 없이 입력한 경우 (예: "my-secrets") → 자동으로 "<login>/my-secrets"으로 보완
+    [[ "$_repo" != */* ]] && _repo="${_login}/${_repo}"
 
-    # age 키 생성
-    local _key_file
-    _key_file=$(mktemp /tmp/nix-secrets.age.key.XXXXXX)
-    chmod 600 "$_key_file"
+    # age 키 생성 — ~/.local/share/nix-secrets/ 에 영구 저장 (재부팅 후에도 유지)
+    local _slug="${_repo//\//-}"
+    local _key_dir="$HOME/.local/share/nix-secrets"
+    local _key_file="$_key_dir/${_slug}.age.key"
+    mkdir -p "$_key_dir"
+    chmod 700 "$_key_dir"
     printf '\n'
     log_msg "Task" "age 전용 키 생성 중..."
-    age-keygen -o "$_key_file" 2>/dev/null
+    age-keygen -o "$_key_file" || { log_msg "Error" "age 키 생성 실패"; exit 1; }
+    chmod 600 "$_key_file"
     local _pubkey
-    _pubkey=$(age-keygen -y "$_key_file")
+    _pubkey=$(age-keygen -y "$_key_file") || { log_msg "Error" "공개키 추출 실패"; exit 1; }
 
     # 키 경로 캐싱
-    local _slug="${_repo//\//-}"
     local _cache="$HOME/.cache/nix-secrets/${_slug}.key-path"
     mkdir -p "$(dirname "$_cache")"
     printf '%s' "$_key_file" > "$_cache"
