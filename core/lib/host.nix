@@ -169,6 +169,9 @@
               (pkgs'.writeShellScriptBin "rnixstrap" ''
                 exec /etc/nixos/core/scripts/rnixstrap.sh "$@"
               '')
+              (pkgs'.writeShellScriptBin "nixsec" ''
+                exec /etc/nixos/core/scripts/nixsec.sh "$@"
+              '')
               (pkgs'.runCommand "nixup-man" {} ''
                 mkdir -p $out/share/man/man1
                 cp ${../scripts/man/nixup.1} $out/share/man/man1/nixup.1
