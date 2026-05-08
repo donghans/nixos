@@ -3,6 +3,8 @@
 #
 # deploy.nodes 전체를 deploy-rs 네이티브 병렬로 배포.
 # 변수 의존: BUILD_DIR, JSON_DIR
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/rnixup.lib-secrets.sh"
 
 
 # ── SSH 키 파일 누락 사전 확인 ────────────────────────────────────────────────
@@ -166,6 +168,17 @@ _run_deploy_task() {
     # dry-activate + 사용자 확인 완료 후부터 시간 측정
     _START_TIME=$(date +%s)
     _START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
+
+    # ── 시크릿 주입 (선택) ────────────────────────────────────────────────────
+    if _any_remote_secrets_exist; then
+        printf "\n"
+        read -rp "$(_log_prompt)시크릿을 서버에 주입하시겠습니까? (y/N): " _inject
+        if [[ "${_inject:-N}" =~ ^[Yy]$ ]]; then
+            inject_all_remote_secrets
+        else
+            log_msg "Notice" "시크릿 주입 건너뜀."
+        fi
+    fi
 
     # ── 실제 배포 ─────────────────────────────────────────────────────────────
     log_msg "Task" "$deploy_count remote host(s) 배포 시작..."

@@ -75,6 +75,7 @@ _BOOTSTRAP_SSH_USER=""  # .bootstrap.env에서 로드 (standalone 기본값)
 
 # ── lib 로드 ──────────────────────────────────────────────────────────────────
 source "$SCRIPT_DIR/lib-build.sh"
+source "$SCRIPT_DIR/rnixup.lib-secrets.sh"
 source "$SCRIPT_DIR/rnixstrap.lib-input.sh"
 source "$SCRIPT_DIR/rnixstrap.task-setup.sh"
 

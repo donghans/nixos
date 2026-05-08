@@ -26,9 +26,9 @@
 # * ARN은 문자열이라 toConfig를 거치지 못하므로 반드시 nix 파일에 직접 선언
 #
 # [서버에 배치할 시크릿 — 배포 전 1회]
-# sudo mkdir -p /var/lib/secrets
-# echo 'CF_DNS_API_TOKEN=<토큰>' | sudo tee /var/lib/secrets/cloudflare-token
-# sudo chmod 600 /var/lib/secrets/cloudflare-token
+# sudo mkdir -p /var/lib/nix-secrets/cloudflare
+# echo 'CF_DNS_API_TOKEN=<토큰>' | sudo tee /var/lib/nix-secrets/cloudflare/token
+# sudo chmod 600 /var/lib/nix-secrets/cloudflare/token
 # * Cloudflare 토큰 권한: Zone / DNS / Edit (해당 도메인만)
 #
 # [인스턴스 교체 시]
@@ -70,7 +70,7 @@ mkMod __curPos "AWS IAM Roles Anywhere — cert-based temporary credentials" ({c
     };
     tokenFile = lib.mkOption {
       type = lib.types.str;
-      default = "/var/lib/secrets/cloudflare-token";
+      default = "/var/lib/nix-secrets/cloudflare/token";
       description = "Path to env file with CF_DNS_API_TOKEN=... (one line)";
     };
     awsRegion = lib.mkOption {
