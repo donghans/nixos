@@ -97,11 +97,31 @@ in {
               "2606:4700:4700::1001"
             ];
             extra_records = [
-              {name = "opnsense.i.772610158.xyz";    type = "A"; value = "192.168.1.1";}
-              {name = "headscale.i.772610158.xyz";   type = "A"; value = "192.168.1.2";}
-              {name = "vaultwarden.i.772610158.xyz"; type = "A"; value = "192.168.1.3";}
-              {name = "proxmox.i.772610158.xyz";     type = "A"; value = "192.168.1.222";}
-              {name = "veve.i.772610158.xyz";        type = "A"; value = "192.168.1.12";}
+              {
+                name = "opnsense.i.772610158.xyz";
+                type = "A";
+                value = "192.168.1.1";
+              }
+              {
+                name = "headscale.i.772610158.xyz";
+                type = "A";
+                value = "192.168.1.2";
+              }
+              {
+                name = "vaultwarden.i.772610158.xyz";
+                type = "A";
+                value = "192.168.1.3";
+              }
+              {
+                name = "proxmox.i.772610158.xyz";
+                type = "A";
+                value = "192.168.1.222";
+              }
+              {
+                name = "veve.i.772610158.xyz";
+                type = "A";
+                value = "192.168.1.12";
+              }
             ];
           };
 

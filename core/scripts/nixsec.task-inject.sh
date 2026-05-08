@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # nixsec.task-inject.sh — 원격 주입 / 워크스테이션 로컬 적용 / age 키 복구
+# shellcheck disable=SC1090,SC1091
 
 # secrets.json 보유 호스트 목록 수집
 _collect_secret_hosts() {
@@ -172,8 +173,8 @@ _run_key_restore() {
     # 레포 선택
     local -a _repos=()
     mapfile -t _repos < <(
-        find "$NIXOS_PATH/hosts/deploy" -name "secrets.json" | \
-        xargs jq -r '.groups[].repo' 2>/dev/null | sort -u
+        find "$NIXOS_PATH/hosts/deploy" -name "secrets.json" -print0 | \
+        xargs -0 jq -r '.groups[].repo' 2>/dev/null | sort -u
     )
 
     local _repo=""

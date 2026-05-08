@@ -3,8 +3,8 @@
 
 # 사용 가능한 레포 목록 수집 (secrets.json에서)
 _collect_repos() {
-    find "$NIXOS_PATH/hosts/deploy" -name "secrets.json" -type f \
-        | xargs jq -r '.groups[].repo' 2>/dev/null \
+    find "$NIXOS_PATH/hosts/deploy" -name "secrets.json" -type f -print0 \
+        | xargs -0 jq -r '.groups[].repo' 2>/dev/null \
         | sort -u
 }
 
@@ -70,8 +70,9 @@ _run_upload() {
     # 그룹 선택
     local -a _groups=()
     mapfile -t _groups < <(
-        find "$NIXOS_PATH/hosts/deploy" -name "secrets.json" | \
-        xargs jq -r --arg r "$_repo" \
+        # shellcheck disable=SC2016
+        find "$NIXOS_PATH/hosts/deploy" -name "secrets.json" -print0 | \
+        xargs -0 jq -r --arg r "$_repo" \
             'if .groups then .groups | to_entries[] | select(.value.repo == $r) | .key else empty end' \
             2>/dev/null | sort -u
     )
@@ -92,8 +93,9 @@ _run_upload() {
     # 시크릿 경로 선택
     local -a _existing_secrets=()
     mapfile -t _existing_secrets < <(
-        find "$NIXOS_PATH/hosts/deploy" -name "secrets.json" | \
-        xargs jq -r --arg r "$_repo" --arg g "$_group" \
+        # shellcheck disable=SC2016
+        find "$NIXOS_PATH/hosts/deploy" -name "secrets.json" -print0 | \
+        xargs -0 jq -r --arg r "$_repo" --arg g "$_group" \
             'if .groups[$g] and .groups[$g].repo == $r then .groups[$g].secrets | keys[] else empty end' \
             2>/dev/null | sort -u
     )

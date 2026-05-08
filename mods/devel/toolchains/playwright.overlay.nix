@@ -59,9 +59,9 @@ in {
       LD_LIBRARY_PATH = chromiumLibs;
     };
     bins = with prev; [
-      nodePassthrough  # shim의 'exec node ...'가 bare node로 해석되도록 PATH 앞에 주입
-      xdg-utils        # chromium 링크 오픈
-      dbus             # dbus-launch
+      nodePassthrough # shim의 'exec node ...'가 bare node로 해석되도록 PATH 앞에 주입
+      xdg-utils # chromium 링크 오픈
+      dbus # dbus-launch
     ];
   };
 }

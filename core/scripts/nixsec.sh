@@ -1,6 +1,7 @@
 #!/usr/bin/env nix-shell
 #!nix-shell -i bash -I nixpkgs=flake:nixpkgs -p age gh jq
 # nixsec — nix-secrets 관리 도구 (완전 대화형)
+# shellcheck disable=SC1008,SC1091,SC2034
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
