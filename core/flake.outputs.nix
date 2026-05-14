@@ -21,12 +21,16 @@
     if builtins.isBool val
     then {enable = val;}
     else if builtins.isAttrs val
-    then
+    then let
+      # enable 키가 있으면 모듈 옵션 attrset → bool을 그대로 통과
+      # enable 키가 없으면 모듈 참조 레벨 → bool은 enable 플래그로 해석
+      isModuleConfig = val ? enable;
+    in
       nixpkgs.lib.mapAttrs (
         k: v:
           if k == "enable" && builtins.isBool v
           then v
-          else if builtins.isBool v
+          else if isModuleConfig && builtins.isBool v
           then v
           else toConfig v
       )
