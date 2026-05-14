@@ -175,8 +175,8 @@ in {
         requires = ["headscale-oidc-secret.service"];
       };
 
-      # STUN (DERP 직접 연결 보조)
-      networking.firewall.allowedUDPPorts = [3478];
+      # Lightsail 네트워크 방화벽이 외부 트래픽을 제어하므로 NixOS 방화벽은 비활성화
+      networking.firewall.enable = false;
 
       # == AWS IAM Roles Anywhere ==
       mods.sys.services.aws-roles-anywhere = {
@@ -207,12 +207,18 @@ in {
       };
 
       # == Caddy reverse proxy ==
-      services.caddy.extraConfig = ''
-        ${headscaleDomain} {
-          reverse_proxy /web* localhost:80
-          reverse_proxy * localhost:8080
-        }
-      '';
+      mods.sys.services.caddy = {
+        configText = ''
+          ${headscaleDomain} {
+            reverse_proxy /web* localhost:80
+            reverse_proxy * localhost:8080
+          }
+        '';
+        reloadUser = "ec2-user";
+      };
+
+      # landing page 배포 스크립트가 사용하는 작업 디렉터리
+      systemd.tmpfiles.rules = ["d /opt/landings 0755 ec2-user users -"];
     }
   ];
 })
