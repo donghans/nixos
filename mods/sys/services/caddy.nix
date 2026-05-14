@@ -27,7 +27,14 @@ mkMod __curPos "Caddy Web Server with reverse proxy support" ({
         '';
       };
       # /etc/caddy/sites/ 은 NixOS가 관리하지 않는 동적 vhost 파일 보관 디렉터리
-      systemd.tmpfiles.rules = ["d /etc/caddy/sites 0755 root root -"];
+      # reloadUser가 설정되면 해당 유저가 직접 SCP로 파일을 배포할 수 있도록 소유권 부여
+      systemd.tmpfiles.rules = [
+        "d /etc/caddy/sites 0755 ${
+          if cfg.reloadUser != null
+          then cfg.reloadUser
+          else "root"
+        } root -"
+      ];
       networking.firewall.allowedTCPPorts = [80 443];
     }
     (lib.mkIf (cfg.reloadUser != null) {
