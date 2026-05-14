@@ -15,3 +15,7 @@ bootLoader = "grub-uefi"
 [mods.sys.services]
 caddy              = true
 aws-roles-anywhere = true
+
+[mods.sys.services.docker]
+enable   = true
+rootless = false
