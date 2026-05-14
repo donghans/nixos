@@ -26,6 +26,8 @@
         k: v:
           if k == "enable" && builtins.isBool v
           then v
+          else if builtins.isBool v
+          then v
           else toConfig v
       )
       val
