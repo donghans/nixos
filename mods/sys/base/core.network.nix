@@ -28,8 +28,8 @@ in {
       };
       # (목적: 온라인 대기 비활성화로 부팅 속도 향상)
       systemd.network.wait-online.enable = false;
-      # (목적: eth0/ens5 등 이름 무관하게 이더넷 인터페이스 DHCP 자동 설정)
-      systemd.network.networks."10-ethernet" = {
+      # (목적: eth0/ens5 등 이름 무관하게 이더넷 인터페이스 DHCP 자동 설정, 90으로 낮은 우선순위 유지)
+      systemd.network.networks."90-ethernet" = {
         matchConfig.Type = "ether";
         networkConfig.DHCP = "ipv4";
       };
