@@ -89,7 +89,8 @@ mkMod __curPos "Tailscale Mesh VPN" ({
             ${lib.optionalString (cfg.preauthLoginServer != "") ''--login-server="${cfg.preauthLoginServer}"''} \
             --accept-routes \
             ${lib.optionalString cfg.advertiseExitNode "--advertise-exit-node"} \
-            ${lib.optionalString (cfg.advertiseRoutes != []) "--advertise-routes=${lib.concatStringsSep "," cfg.advertiseRoutes}"}
+            ${lib.optionalString (cfg.advertiseRoutes != []) "--advertise-routes=${lib.concatStringsSep "," cfg.advertiseRoutes}"} \
+            --reset
         '';
       };
     }))
