@@ -1,16 +1,8 @@
 # lightsail-nixos-headscale 호스트 설정
 # SSH 공개키는 hosts/deploy/lightsail-nixos-headscale.pub 에서 자동 로드됩니다.
-#
-# [nixup os 전 시크릿 주입]
-#   scp intermediate_ca.key  root@<ip>:/var/lib/nix-secrets/step-ca/
-#   scp password             root@<ip>:/var/lib/nix-secrets/step-ca/
-#
-# [SSM Parameter Store — 배포 전 1회]
-#   aws ssm put-parameter --name /headscale/oidc_client_secret --type SecureString --value <secret>
 {
   mkHostConfiguration,
   lib,
-  pkgs,
   ...
 }:
 mkHostConfiguration (_: let
@@ -19,7 +11,7 @@ mkHostConfiguration (_: let
   rootCaPem = builtins.readFile ./deploy/lightsail-nixos-headscale.root-ca.crt;
   intermediateCaPem = builtins.readFile ./deploy/lightsail-nixos-headscale.intermediate-ca.crt;
   headscaleDomain = "e2.772610158.xyz";
-  oidcClientSecretFile = "/run/nix-secrets/headscale/oidc_client_secret";
+  oidcClientSecretFile = "/var/lib/nix-secrets/headscale/oidc_client_secret";
 in {
   os = lib.mkMerge [
     {
@@ -144,36 +136,6 @@ in {
           taildrop.enabled = true;
           unix_socket_permission = "0660";
         };
-      };
-
-      # 부팅 시 SSM Parameter Store에서 OIDC 시크릿을 가져와 tmpfs에 기록
-      # /run/ 은 재부팅마다 초기화되므로 매 부팅 시 fresh 취득
-      systemd.services.headscale-oidc-secret = {
-        description = "Fetch headscale OIDC client secret from SSM Parameter Store";
-        before = ["headscale.service"];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-          RuntimeDirectory = "nix-secrets/headscale";
-          RuntimeDirectoryMode = "0711";
-          Environment = "AWS_CONFIG_FILE=/etc/aws/config";
-          ExecStart = pkgs.writeShellScript "headscale-fetch-oidc-secret" ''
-            ${pkgs.awscli2}/bin/aws ssm get-parameter \
-              --name "/headscale/oidc_client_secret" \
-              --with-decryption \
-              --query "Parameter.Value" \
-              --output text \
-              > "${oidcClientSecretFile}"
-            chmod 400 "${oidcClientSecretFile}"
-            chown headscale "${oidcClientSecretFile}"
-          '';
-        };
-      };
-
-      # headscale은 OIDC 시크릿 fetch가 성공해야만 기동
-      systemd.services.headscale = {
-        after = ["headscale-oidc-secret.service"];
-        requires = ["headscale-oidc-secret.service"];
       };
 
       users.users.ec2-user.extraGroups = ["headscale"];
