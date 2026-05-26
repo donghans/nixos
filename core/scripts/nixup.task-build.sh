@@ -123,11 +123,12 @@ run_build_task() {
         _activate_os "$NIX_BUILD_RESULT" "$ACTION"
         _show_nvd_diff "$pre_store" "$NIX_BUILD_RESULT" "os"
         # switch 완료 후 누락된 preauth key 로컬 배포 (headscale SSH 키 필요 시 프롬프트)
+        # 새 key가 실제로 배포됐을 때만 tailscale-autoauth 재시작 (이미 인증된 경우 불필요)
         if [ "$ACTION" == "switch" ]; then
             check_preauth_keys_local "$HOST_ID" ""
-            # oneshot 서비스는 한 번 실행 후 "exited" 상태로 남으므로 재시작 필요
-            # (이미 인증된 경우 서비스 내부에서 즉시 exit 0)
-            sudo systemctl restart tailscale-autoauth 2>/dev/null || true
+            if [ "${PREAUTH_KEYS_DEPLOYED:-false}" = true ]; then
+                sudo systemctl restart tailscale-autoauth 2>/dev/null || true
+            fi
         fi
     fi
 
