@@ -24,7 +24,6 @@ mkHostConfiguration (_: let
     metrics_listen_addr = "127.0.0.1:9090";
     log.level = "info";
     noise.private_key_path = "/var/lib/headscale/noise_private.key";
-    derp.server.private_key_path = "/var/lib/headscale/derp_server_private.key";
     prefixes = {
       v4 = "10.127.0.0/17";
       allocation = "sequential";
@@ -36,6 +35,7 @@ mkHostConfiguration (_: let
     derp = {
       server = {
         enabled = true;
+        private_key_path = "/var/lib/headscale/derp_server_private.key";
         region_id = 999;
         region_code = "headscale";
         region_name = "Headscale Embedded DERP";
@@ -139,94 +139,9 @@ in {
     }
     {
       # == headscale ==
-      services.headscale = {
-        enable = true;
-        settings = {
-          server_url = "https://${headscaleDomain}";
-          listen_addr = "127.0.0.1:8080";
-          grpc_listen_addr = "127.0.0.1:50443";
-          metrics_listen_addr = "127.0.0.1:9090";
-          log.level = "info";
-
-          prefixes = {
-            v4 = "10.127.0.0/17";
-            v6 = "fd7a:115c:a1e0::/48";
-            allocation = "sequential";
-          };
-
-          derp = {
-            server = {
-              enabled = true;
-              region_id = 999;
-              region_code = "headscale";
-              region_name = "Headscale Embedded DERP";
-              stun_listen_addr = "0.0.0.0:3478";
-              automatically_add_embedded_derp_region = true;
-            };
-            urls = ["https://controlplane.tailscale.com/derpmap/default"];
-            auto_update_enabled = true;
-            update_frequency = "3h";
-          };
-
-          dns = {
-            magic_dns = true;
-            base_domain = "i.772610158.xyz";
-            override_local_dns = true;
-            nameservers.global = [
-              "1.1.1.1"
-              "1.0.0.1"
-              "2606:4700:4700::1111"
-              "2606:4700:4700::1001"
-            ];
-            extra_records = [
-              {
-                name = "opnsense.i.772610158.xyz";
-                type = "A";
-                value = "192.168.1.1";
-              }
-              {
-                name = "headscale.i.772610158.xyz";
-                type = "A";
-                value = "192.168.1.2";
-              }
-              {
-                name = "vaultwarden.i.772610158.xyz";
-                type = "A";
-                value = "192.168.1.3";
-              }
-              {
-                name = "proxmox.i.772610158.xyz";
-                type = "A";
-                value = "192.168.1.222";
-              }
-              {
-                name = "veve.i.772610158.xyz";
-                type = "A";
-                value = "192.168.1.12";
-              }
-            ];
-          };
-
-          oidc = {
-            only_start_if_oidc_is_available = true;
-            issuer = "https://accounts.google.com";
-            client_id = "170530185854-nelsine6eg1casd7hl669taueriv16q6.apps.googleusercontent.com";
-            client_secret_path = oidcClientSecretFile;
-            scope = ["openid" "profile" "email"];
-            email_verified_required = true;
-            extra_params.prompt = "select_account";
-            allowed_domains = ["bitstep.it"];
-            user_scope_strip_domain = true;
-            pkce = {
-              enabled = true;
-              method = "S256";
-            };
-          };
-
-          taildrop.enabled = true;
-          unix_socket_permission = "0660";
-        };
-      };
+      # settings는 headscaleConfigFile로 직접 관리 (v6 prefix 제거 목적)
+      # enable = true: user/group/socket/StateDirectory 등 모듈 인프라만 활용
+      services.headscale.enable = true;
 
       # v6 없는 custom config로 실행하도록 script override
       systemd.services.headscale.script = lib.mkForce ''
