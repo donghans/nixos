@@ -136,32 +136,34 @@ ask_deploy_config() {
     [ "${_PRESET:-}" != "server" ] && return
 
     printf "\n"
-    _pick "원격 관리(deploy-rs) 설정:" \
-        "예  — SSH 키 설정 (rnixup으로 원격 배포 가능)" \
-        "아니오  — 로컬 관리만"
+    local _input
+    read -rep "$(_log_prompt)SSH 키/PEM 경로 (Enter = 없음): " _input
+    _input="${_input/#\~/$HOME}"
 
-    if [ "$REPLY" -eq 0 ]; then
-        _DEPLOY_ENABLED=true
-        printf "\n"
-        local _input
-        while true; do
-            read -rep "$(_log_prompt)관리 머신의 SSH 키 경로 (비워두면 자동 생성): " _input
-            _input="${_input:-}"
-            [ -z "$_input" ] && break
-            _input="${_input/#\~/$HOME}"
-            [ -f "$_input" ] && break
+    if [ -n "$_input" ]; then
+        if [ ! -f "$_input" ]; then
             log_msg "Error" "파일을 찾을 수 없습니다: $_input"
-        done
-        if [ -n "$_input" ]; then
-            _DEPLOY_SSH_KEY="$_input"
-            log_msg "Config" "SSH 키: $_DEPLOY_SSH_KEY"
-        else
+            ask_deploy_config
+            return
+        fi
+        _SSH_ACCESS_MODE="existing-key"
+        _DEPLOY_ENABLED=false
+        _DEPLOY_SSH_KEY="$_input"
+        log_msg "Config" "SSH 키: $_DEPLOY_SSH_KEY"
+    else
+        local _gen
+        read -rp "$(_log_prompt)원격 SSH 접속용 키를 자동 생성하시겠습니까? (y/N): " _gen
+        if [[ "${_gen:-N}" =~ ^[Yy]$ ]]; then
+            _SSH_ACCESS_MODE="deploy-rs"
+            _DEPLOY_ENABLED=true
             _DEPLOY_SSH_KEY=""
             log_msg "Config" "SSH 키: (설치 시 자동 생성 → ~/.ssh/${HOST:-<hostname>}_ed25519)"
+        else
+            _SSH_ACCESS_MODE="password"
+            _DEPLOY_ENABLED=false
+            _DEPLOY_SSH_KEY=""
+            log_msg "Config" "SSH 키: 없음 (비밀번호 인증)"
         fi
-    else
-        _DEPLOY_ENABLED=false
-        _DEPLOY_SSH_KEY=""
     fi
 }
 
@@ -169,12 +171,23 @@ ask_password() {
     local _preview_user _pw _pw2
     _preview_user=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" username "$REPO_TMP" "${HOST:-}" 2>/dev/null || true)
     local _label="${_preview_user:-user}"
+    local _is_server=false
+    [[ "${_PRESET:-}" == "server" || "${_HOST_TYPE:-}" == "server" ]] && _is_server=true
+
     printf "\n"
-    log_msg "Notice" "'$_label' 로그인 비밀번호 설정 (Enter 두 번 누르면 건너뜀):"
+    if [ "$_is_server" = true ]; then
+        log_msg "Notice" "'$_label' 로그인 비밀번호 설정 (서버: 필수):"
+    else
+        log_msg "Notice" "'$_label' 로그인 비밀번호 설정 (Enter 두 번 누르면 건너뜀):"
+    fi
     while true; do
         read -rsp "$(_log_prompt)비밀번호: " _pw
         printf "\n"
         if [ -z "$_pw" ]; then
+            if [ "$_is_server" = true ]; then
+                log_msg "Error" "서버는 비밀번호가 필수입니다. 반드시 설정하세요."
+                continue
+            fi
             read -rp "$(_log_prompt)비밀번호 설정을 건너뛰시겠습니까? (y/N): " _skip
             if [[ "${_skip:-N}" =~ ^[Yy]$ ]]; then
                 _USER_PASSWORD=""
@@ -244,10 +257,11 @@ show_summary() {
     if [ "$_HOST_IS_NEW" = true ]; then
         local _sv_display="${_STATE_VERSION:-rolling}"
         printf "  4. %-11s:  %s  (stateVersion: %s)\n" "프리셋" "${_PRESET:-workstation}" "$_sv_display"
-        if [ "${_DEPLOY_ENABLED:-false}" = true ]; then
-            local _key_disp="${_DEPLOY_SSH_KEY:-(자동 생성)}"
-            printf "     %-11s   deploy-rs: 활성  키: %s\n" "" "$_key_disp"
-        fi
+        case "${_SSH_ACCESS_MODE:-}" in
+            "password")     printf "     %-11s   SSH: 비밀번호 전용\n" "" ;;
+            "existing-key") printf "     %-11s   SSH: 키 — %s\n" "" "${_DEPLOY_SSH_KEY:-(미설정)}" ;;
+            "deploy-rs")    printf "     %-11s   SSH: 키 — %s\n" "" "${_DEPLOY_SSH_KEY:-(자동 생성)}" ;;
+        esac
     else
         printf "  4. %-11s:  %s  (레포에서)\n" "프리셋" "${_HOST_PRESET_FROM_REPO:-?}"
     fi
@@ -278,6 +292,7 @@ save_params() {
         printf '_BOOT_END=%s\n'               "$_BOOT_END"
         printf '_NEW_BOOT_NUM=%s\n'           "$_NEW_BOOT_NUM"
         printf '_NEW_ROOT_NUM=%s\n'           "$_NEW_ROOT_NUM"
+        printf '_SSH_ACCESS_MODE=%s\n'             "$_SSH_ACCESS_MODE"
         printf '_DEPLOY_ENABLED=%s\n'             "$_DEPLOY_ENABLED"
         printf '_DEPLOY_SSH_KEY=%s\n'             "$_DEPLOY_SSH_KEY"
         printf '_DEPLOY_KEY_WAS_GENERATED=%s\n'   "$_DEPLOY_KEY_WAS_GENERATED"

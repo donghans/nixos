@@ -146,7 +146,10 @@ _create_host_profile() {
 }
 
 _setup_deploy_pubkey() {
-    [ "${_DEPLOY_ENABLED:-false}" != true ] && return
+    local _mode="${_SSH_ACCESS_MODE:-}"
+    # 구버전 세션 호환: _SSH_ACCESS_MODE 없이 _DEPLOY_ENABLED=true이면 deploy-rs로 처리
+    [ -z "$_mode" ] && [ "${_DEPLOY_ENABLED:-false}" = true ] && _mode="deploy-rs"
+    [[ "$_mode" != "existing-key" && "$_mode" != "deploy-rs" ]] && return
 
     local deploy_dir="/mnt/etc/nixos/hosts/deploy"
     mkdir -p "$deploy_dir"
@@ -160,9 +163,9 @@ _setup_deploy_pubkey() {
             exit 1
         fi
         printf '%s %s\n' "$pub_key" "$HOST" > "$deploy_dir/${HOST}.pub"
-        log_msg "Done" "deploy-rs pub key 등록: hosts/deploy/${HOST}.pub"
+        log_msg "Done" "SSH pub key 등록: hosts/deploy/${HOST}.pub"
     else
-        # 신규 키 생성
+        # 신규 키 생성 (deploy-rs 전용)
         local key_tmp="/tmp/nixstrap-deploy-$$"
         rm -f "$key_tmp" "${key_tmp}.pub"
         ssh-keygen -t ed25519 -f "$key_tmp" -N "" -C "$HOST" >/dev/null 2>&1
@@ -194,10 +197,19 @@ _save_deploy_pem() {
 }
 
 _commit_deploy_files() {
-    [ "${_DEPLOY_ENABLED:-false}" != true ] && return
+    local _mode="${_SSH_ACCESS_MODE:-}"
+    [ -z "$_mode" ] && [ "${_DEPLOY_ENABLED:-false}" = true ] && _mode="deploy-rs"
+    [[ "$_mode" != "existing-key" && "$_mode" != "deploy-rs" ]] && return
+
+    local _commit_msg
+    if [[ "$_mode" == "deploy-rs" ]]; then
+        _commit_msg="feat: ${HOST} deploy-rs 설정 추가"
+    else
+        _commit_msg="feat: ${HOST} SSH 공개키 등록"
+    fi
 
     local repo_dir="/mnt/home/$USERNAME/nixos"
-    log_msg "Git" "deploy-rs 설정 파일 커밋 중..."
+    log_msg "Git" "SSH 설정 파일 커밋 중..."
 
     git -C "$repo_dir" \
         -c user.name="nixstrap" -c user.email="nixstrap@localhost" \
@@ -210,7 +222,7 @@ _commit_deploy_files() {
 
     if git -C "$repo_dir" \
         -c user.name="nixstrap" -c user.email="nixstrap@localhost" \
-        commit -m "feat: ${HOST} deploy-rs 설정 추가" 2>/dev/null; then
+        commit -m "$_commit_msg" 2>/dev/null; then
         log_msg "Done" "커밋 완료"
         if git -C "$repo_dir" push 2>/dev/null; then
             log_msg "Done" "push 완료"
@@ -220,7 +232,7 @@ _commit_deploy_files() {
     else
         log_msg "Notice" "커밋 실패 — 첫 부팅 후 수동 커밋 필요:"
         log_msg "Notice" "  git add hosts/deploy/${HOST}.pub hosts/${HOST}.toml"
-        log_msg "Notice" "  git commit -m 'feat: ${HOST} deploy-rs 설정 추가'"
+        log_msg "Notice" "  git commit -m '${_commit_msg}'"
     fi
 }
 

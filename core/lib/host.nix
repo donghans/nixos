@@ -193,6 +193,9 @@
                 if hostCtx.metaConfig.hasDeployRs
                 then "prohibit-password"
                 else "no";
+              # (pub key 있으면 키 전용, 없으면 비밀번호 허용 — deploy-rs/standalone/password 모두 커버)
+              settings.PasswordAuthentication =
+                !(builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub);
             };
 
             # (목적: deploy-rs 호스트에만 root SSH 키 주입 — standalone은 root login 비활성화이므로 불필요)
