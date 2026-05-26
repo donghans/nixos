@@ -49,7 +49,7 @@ mkHostConfiguration (_: {
           - tailscale up --authkey=$PREAUTH_KEY --login-server=https://e.772610158.xyz --accept-routes"
                 fi
 
-                incus launch ubuntu:24.04 ubuntu-2404 --vm \
+                incus launch images:ubuntu/noble ubuntu-2404 --vm \
                   -c limits.cpu=8 \
                   -c limits.memory=32GiB \
                   -d root,size=160GiB \
