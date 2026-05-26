@@ -59,7 +59,7 @@ mkHostConfiguration (_: {
           STATUS=$(incus info ubuntu-2404 2>/dev/null | awk '/^Status:/{print $2}')
           [ "$STATUS" = "RUNNING" ] && incus stop ubuntu-2404 --force
           incus config device remove ubuntu-2404 eth0 2>/dev/null || true
-          incus config device add ubuntu-2404 eth0 nic nictype=bridged parent=br-lan
+          incus config device add ubuntu-2404 eth0 nic nictype=bridged parent=br-lan mtu=1400
           [ "$STATUS" = "RUNNING" ] && incus start ubuntu-2404
           exit 0
         fi
@@ -74,7 +74,7 @@ mkHostConfiguration (_: {
           -c limits.cpu=8 \
           -c limits.memory=32GiB \
           -d root,size=160GiB \
-          -d eth0,type=nic,nictype=bridged,parent=br-lan
+          -d eth0,type=nic,nictype=bridged,parent=br-lan,mtu=1400
       '';
     };
 
@@ -92,8 +92,8 @@ mkHostConfiguration (_: {
         TimeoutStartSec = "180";
       };
       script = ''
-        # 이미 설치됐으면 건너뜀
-        if incus exec ubuntu-2404 -- which tailscale &>/dev/null; then
+        # tailscale이 이미 연결됐으면 건너뜀
+        if incus exec ubuntu-2404 -- tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'; then
           exit 0
         fi
 
@@ -109,21 +109,25 @@ mkHostConfiguration (_: {
           exit 1
         fi
 
-        # openssh 설치 + 활성화
+        # openssh 설치 + 활성화 (idempotent)
         # PermitEmptyPasswords yes: tailscale이 인증 레이어이므로 VM 패스워드 불필요
-        incus exec ubuntu-2404 -- apt-get update -qq
-        incus exec ubuntu-2404 -- apt-get install -y openssh-server
-        incus exec ubuntu-2404 -- bash -c "
-          sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sed -i 's/^#\?PermitEmptyPasswords.*/PermitEmptyPasswords yes/' /etc/ssh/sshd_config
-          passwd -d ubuntu
-          systemctl enable --now ssh
-          systemctl reload ssh
-        "
+        if ! incus exec ubuntu-2404 -- which sshd &>/dev/null; then
+          incus exec ubuntu-2404 -- apt-get update -qq
+          incus exec ubuntu-2404 -- apt-get install -y openssh-server
+          incus exec ubuntu-2404 -- bash -c "
+            sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+            sed -i 's/^#\?PermitEmptyPasswords.*/PermitEmptyPasswords yes/' /etc/ssh/sshd_config
+            passwd -d ubuntu
+            systemctl enable --now ssh
+            systemctl reload ssh
+          "
+        fi
 
-        # tailscale 설치
-        incus exec ubuntu-2404 -- sh -c \
-          "curl -fsSL https://tailscale.com/install.sh | sh"
+        # tailscale 설치 (idempotent)
+        if ! incus exec ubuntu-2404 -- which tailscale &>/dev/null; then
+          incus exec ubuntu-2404 -- sh -c \
+            "curl -fsSL https://tailscale.com/install.sh | sh"
+        fi
 
         # preauth key가 있으면 tailscale 인증
         PREAUTH_KEY_FILE="/var/lib/nix-secrets/tailscale/system/devserver.preauth-key"
