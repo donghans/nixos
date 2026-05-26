@@ -21,6 +21,14 @@ mkMod __curPos "Incus hypervisor" ({config, ...}: {
         }
       '';
     };
+    # (목적: incus TAP 장치를 systemd-networkd가 가로채지 않도록 명시 제외)
+    # incus가 VM용 TAP(tap*, tape* 등)을 생성하면 90-ethernet.network(Type=ether, DHCP=ipv4)가
+    # 해당 TAP을 먼저 잡아 incusbr0 bridge slave 등록을 해제해 버림 → VM이 DHCP IP를 못 받음.
+    # 20번 우선순위로 TAP 인터페이스를 Unmanaged 처리해 incus가 직접 브리지에 연결하도록 함.
+    systemd.network.networks."20-incus-tap" = {
+      matchConfig.Name = "tap*";
+      linkConfig.Unmanaged = true;
+    };
     # VM이 IPv6 RA를 브리지로 보낼 때 호스트 IPv6 라우팅이 바뀌는 것을 방지
     # (RA를 수락하면 Tailscale 등 호스트 IPv6 연결이 끊김)
     boot.kernel.sysctl."net.ipv6.conf.incusbr0.accept_ra" = 0;

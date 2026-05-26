@@ -29,6 +29,12 @@ mkHostConfiguration (_: {
                   exit 0
                 fi
 
+                # ubuntu remote 없으면 등록 (공식 cloud image, cloud-init 포함)
+                if ! incus remote list --format=csv | cut -d, -f1 | grep -qx "ubuntu"; then
+                  incus remote add ubuntu https://cloud-images.ubuntu.com/releases \
+                    --protocol=simplestreams --public
+                fi
+
                 PREAUTH_KEY_FILE="/var/lib/nix-secrets/tailscale/system/devserver.preauth-key"
 
                 # cloud-init user-data 작성
@@ -49,7 +55,7 @@ mkHostConfiguration (_: {
           - tailscale up --authkey=$PREAUTH_KEY --login-server=https://e.772610158.xyz --accept-routes"
                 fi
 
-                incus launch images:ubuntu/noble ubuntu-2404 --vm \
+                incus launch ubuntu:24.04 ubuntu-2404 --vm \
                   -c limits.cpu=8 \
                   -c limits.memory=32GiB \
                   -d root,size=160GiB \
