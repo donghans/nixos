@@ -15,10 +15,33 @@ mkHostConfiguration (_: {
       advertiseRoutes = ["192.168.11.0/24"];
     };
 
+    # eth0 → br-lan 브리지 슬레이브 (incus VM이 실제 LAN IP 받도록)
+    systemd.network.netdevs."10-br-lan" = {
+      netdevConfig = {
+        Kind = "bridge";
+        Name = "br-lan";
+      };
+    };
+
+    systemd.network.networks."10-eth0-bridge" = {
+      matchConfig.Name = "eth0";
+      networkConfig.Bridge = "br-lan";
+      linkConfig.RequiredForOnline = "enslaved";
+    };
+
+    systemd.network.networks."20-br-lan" = {
+      matchConfig.Name = "br-lan";
+      networkConfig.DHCP = "ipv4";
+      linkConfig.RequiredForOnline = "routable";
+    };
+
+    # br-lan 통과 트래픽 허용 (incus VM ↔ host/tailscale)
+    networking.firewall.trustedInterfaces = ["br-lan"];
+
     # ubuntu:24.04는 cloud-init 미포함 미니멀 이미지 → incus exec으로 직접 설치
     systemd.services.incus-create-ubuntu-vm = {
       description = "Create Ubuntu 24.04 Incus VM if not exists";
-      after = ["incus-startup.service"];
+      after = ["incus-startup.service" "systemd-networkd.service"];
       requires = ["incus-startup.service"];
       wantedBy = ["multi-user.target"];
       path = [pkgs.incus pkgs.curl pkgs.coreutils];
@@ -28,6 +51,16 @@ mkHostConfiguration (_: {
       };
       script = ''
         if incus info ubuntu-2404 &>/dev/null; then
+          # 기존 VM이 br-lan을 쓰고 있으면 종료
+          if incus config show ubuntu-2404 --expanded 2>/dev/null | grep -q 'parent: br-lan'; then
+            exit 0
+          fi
+          # NIC를 br-lan으로 교체
+          STATUS=$(incus info ubuntu-2404 2>/dev/null | awk '/^Status:/{print $2}')
+          [ "$STATUS" = "RUNNING" ] && incus stop ubuntu-2404 --force
+          incus config device remove ubuntu-2404 eth0 2>/dev/null || true
+          incus config device add ubuntu-2404 eth0 nic nictype=bridged parent=br-lan
+          [ "$STATUS" = "RUNNING" ] && incus start ubuntu-2404
           exit 0
         fi
 
@@ -40,7 +73,8 @@ mkHostConfiguration (_: {
         incus launch ubuntu:24.04 ubuntu-2404 --vm \
           -c limits.cpu=8 \
           -c limits.memory=32GiB \
-          -d root,size=160GiB
+          -d root,size=160GiB \
+          -d eth0,type=nic,nictype=bridged,parent=br-lan
       '';
     };
 
