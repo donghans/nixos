@@ -10,7 +10,7 @@ mkHostConfiguration (_: let
   passwordFile = "/var/lib/nix-secrets/step-ca/password";
   rootCaPem = builtins.readFile ./deploy/lightsail-nixos-headscale.root-ca.crt;
   intermediateCaPem = builtins.readFile ./deploy/lightsail-nixos-headscale.intermediate-ca.crt;
-  headscaleDomain = "e2.772610158.xyz";
+  headscaleDomain = "e.772610158.xyz";
   oidcClientSecretFile = "/var/lib/nix-secrets/headscale/oidc_client_secret";
 in {
   os = lib.mkMerge [

@@ -480,6 +480,7 @@ _run_install() {
     renew_host_key
     wait_for_ssh
     inject_secrets "$_HOSTNAME" "root" "$_IP" "$_SSH_KEY" "${_SSH_OPTS_POST[@]}"
+    check_preauth_keys_remote "$_HOSTNAME" "$_IP" "root" "$_SSH_KEY" "${_SSH_OPTS_POST[@]}"
     run_deploy_rs
 }
 
@@ -512,6 +513,7 @@ _run_install_standalone() {
     renew_host_key
     wait_for_ssh "$_nixos_user"
     inject_secrets "$_HOSTNAME" "$_nixos_user" "$_IP" "$_SSH_KEY" "${_SSH_OPTS_POST[@]}"
+    check_preauth_keys_remote "$_HOSTNAME" "$_IP" "$_nixos_user" "$_SSH_KEY" "${_SSH_OPTS_POST[@]}"
     transfer_repo_to_remote "$_nixos_user"
     set_remote_env "$_nixos_user"
     run_nixup_os_remote "$_nixos_user"

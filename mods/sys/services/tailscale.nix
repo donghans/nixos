@@ -6,45 +6,88 @@ mkMod __curPos "Tailscale Mesh VPN" ({
   lib,
   ...
 }: {
-  os = {
-    services.tailscale.enable = true;
-    services.tailscale.extraSetFlags = ["--operator=${config.workspace.username}"];
-    # nixos-fw의 기본 정책이 drop이라 tailscale0 인터페이스에서 오는
-    # 트래픽도 차단됨 → 노드 간 접근이 안 되므로 trusted로 지정
-    networking.firewall.trustedInterfaces = ["tailscale0"];
-    networking.nftables.enable = true;
-    # (목적: Tailscale WireGuard 캡슐화로 인한 MTU 축소 대응)
-    # WireGuard는 패킷당 ~60 바이트 오버헤드를 추가하므로,
-    # tailscale0 경유 TCP 연결의 MSS를 경로 MTU에 맞게 클램프.
-    # - forward: VM/컨테이너 등 포워드 트래픽 (incusbr0 → tailscale0)
-    # - output: 호스트 자신이 개시하는 TCP 연결 (git clone, SSH 등)
-    # 이 규칙이 없으면 TLS ClientHello 같은 큰 패킷이 드롭되어
-    # 연결이 무한히 대기 상태가 됨.
-    networking.nftables.tables.tailscale-mss = {
-      family = "inet";
-      content = ''
-        chain forward {
-          type filter hook forward priority mangle;
-          oifname "tailscale0" tcp flags syn tcp option maxseg size set rt mtu
-          iifname "tailscale0" tcp flags syn tcp option maxseg size set rt mtu
-        }
-        chain output {
-          type filter hook output priority mangle;
-          oifname "tailscale0" tcp flags syn tcp option maxseg size set rt mtu
-        }
-      '';
+  options = {
+    preauthUser = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "headscale 유저명 (preauth key 파일 경로 결정)";
     };
-    # (목적: 물리 인터페이스 MTU를 1400으로 낮춰 Tailscale WireGuard 오버헤드 수용)
-    # WireGuard 캡슐화 오버헤드(~60 바이트)가 더해져도 업스트림 MTU(1500)를 초과하지 않도록
-    # 물리 인터페이스 MTU를 미리 줄여둠. → 대용량 패킷 유실(TLS 타임아웃 등) 방지
-    # .link 파일은 udev가 인터페이스 초기화 시 적용하므로
-    # NetworkManager·systemd-networkd 모두에서 동작함.
-    # en*/eth*: 유선 이더넷, wl*: 무선랜 (veth·bridge·tailscale0 등 가상 인터페이스는 미매칭)
-    systemd.network.links."10-tailscale-mtu" = {
-      matchConfig.OriginalName = "en* eth* wl*";
-      linkConfig.MTUBytes = "1400";
+    preauthName = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "preauth key 식별자 (파일명)";
+    };
+    preauthLoginServer = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      description = "headscale 서버 URL (비어있으면 공식 Tailscale 사용)";
+    };
+    advertiseExitNode = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "exit node로 광고할지 여부";
     };
   };
+  os = lib.mkMerge [
+    {
+      services.tailscale.enable = true;
+      services.tailscale.extraSetFlags = ["--operator=${config.workspace.username}"];
+      # nixos-fw의 기본 정책이 drop이라 tailscale0 인터페이스에서 오는
+      # 트래픽도 차단됨 → 노드 간 접근이 안 되므로 trusted로 지정
+      networking.firewall.trustedInterfaces = ["tailscale0"];
+      networking.nftables.enable = true;
+      # (목적: Tailscale WireGuard 캡슐화로 인한 MTU 축소 대응)
+      networking.nftables.tables.tailscale-mss = {
+        family = "inet";
+        content = ''
+          chain forward {
+            type filter hook forward priority mangle;
+            oifname "tailscale0" tcp flags syn tcp option maxseg size set rt mtu
+            iifname "tailscale0" tcp flags syn tcp option maxseg size set rt mtu
+          }
+          chain output {
+            type filter hook output priority mangle;
+            oifname "tailscale0" tcp flags syn tcp option maxseg size set rt mtu
+          }
+        '';
+      };
+      # (목적: 물리 인터페이스 MTU를 1400으로 낮춰 Tailscale WireGuard 오버헤드 수용)
+      systemd.network.links."10-tailscale-mtu" = {
+        matchConfig.OriginalName = "en* eth* wl*";
+        linkConfig.MTUBytes = "1400";
+      };
+    }
+    # preauth key 파일로 자동 인증하는 oneshot 서비스
+    (lib.mkIf (cfg.preauthUser != null && cfg.preauthName != null) (let
+      keyFile = "/var/lib/nix-secrets/tailscale/${cfg.preauthUser}/${cfg.preauthName}.preauth-key";
+    in {
+      systemd.services.tailscale-autoauth = {
+        description = "Tailscale automatic authentication via preauth key";
+        after = ["tailscaled.service" "network-online.target"];
+        wants = ["network-online.target"];
+        requires = ["tailscaled.service"];
+        wantedBy = ["multi-user.target"];
+        path = [pkgs.tailscale];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = ''
+          if tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'; then
+            exit 0
+          fi
+          if [[ ! -f "${keyFile}" ]]; then
+            exit 0
+          fi
+          tailscale up \
+            --authkey="$(cat "${keyFile}")" \
+            ${lib.optionalString (cfg.preauthLoginServer != "") ''--login-server="${cfg.preauthLoginServer}"''} \
+            --accept-routes \
+            ${lib.optionalString cfg.advertiseExitNode "--advertise-exit-node"}
+        '';
+      };
+    }))
+  ];
   # HM 사이드: GUI 활성화 시 Tailscale 시스템 트레이 실행
   hm = lib.mkIf (cfg.enable && config.mods.gui.enable) {
     wayland.windowManager.hyprland.settings.exec-once = lib.mkOrder 500 [

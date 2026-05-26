@@ -146,6 +146,7 @@ for entry in sorted(os.listdir(hosts_dir)):
         "rollingStateVersion": rolling_state_version,
         "isRolling": is_rolling,
         "mods": mods,
+        "preauthKeys": host.get("preauth-keys", []),
     }
     print(f"{hostname}  stateVersion={state_version}  isRolling={is_rolling}")
 

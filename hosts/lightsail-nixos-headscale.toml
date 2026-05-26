@@ -12,6 +12,11 @@ diskDevice = "/dev/nvme0n1"
 bootDevice = "/dev/nvme0n1"
 bootLoader = "grub-uefi"
 
+[headscale]
+domain   = "e.772610158.xyz"
+ssh-user = "ec2-user"
+ssh-key  = "~/.ssh/rnixup/lightsail-nixos-headscale.pem"
+
 [mods.sys.services]
 caddy              = true
 aws-roles-anywhere = true

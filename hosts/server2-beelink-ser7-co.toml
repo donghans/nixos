@@ -1,0 +1,15 @@
+type      = "server"
+preset    = "server"
+username  = "admin"
+
+[[preauth-keys]]
+user = "donghans"
+name = "exitscale"
+
+[[preauth-keys]]
+user = "donghans"
+name = "devserver"
+
+[mods.sys.services]
+incus     = true
+tailscale = true

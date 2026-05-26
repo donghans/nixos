@@ -5,6 +5,7 @@
 # 변수 의존: BUILD_DIR, JSON_DIR
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/rnixup.lib-secrets.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/nixstrap.lib-preauth.sh"
 
 
 # ── SSH 키 파일 누락 사전 확인 ────────────────────────────────────────────────
@@ -177,6 +178,17 @@ _run_deploy_task() {
             inject_all_remote_secrets
         else
             log_msg "Notice" "시크릿 주입 건너뜀."
+        fi
+    fi
+
+    # ── Preauth key 생성·배포 (선택) ─────────────────────────────────────────
+    if _any_remote_preauth_keys_needed; then
+        printf "\n"
+        read -rp "$(_log_prompt)Preauth key를 생성/배포하시겠습니까? (y/N): " _inject_preauth
+        if [[ "${_inject_preauth:-N}" =~ ^[Yy]$ ]]; then
+            check_all_preauth_keys_remote
+        else
+            log_msg "Notice" "Preauth key 생성 건너뜀."
         fi
     fi
 
