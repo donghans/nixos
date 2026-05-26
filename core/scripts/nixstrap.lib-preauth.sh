@@ -2,8 +2,9 @@
 # nixstrap.lib-preauth.sh — headscale preauth key 생성 및 배포 라이브러리
 #
 # 공개 인터페이스:
-#   check_preauth_keys_local  <hostname>
-#       nixstrap 전용 — resolved.json에서 preauth-keys 읽어 /mnt/var/lib/... 에 배포
+#   check_preauth_keys_local  <hostname> [root_prefix]
+#       로컬 배포 — resolved.json에서 preauth-keys 읽어 <root_prefix>/var/lib/... 에 배포
+#       root_prefix 기본값: /mnt (nixstrap), 빈 문자열 전달 시 / (nixup os)
 #   check_preauth_keys_remote <hostname> <ip> <ssh_user> <ssh_key> [ssh_opts...]
 #       rnixstrap 전용 — 원격 호스트에 SSH로 배포
 #   check_all_preauth_keys_remote
@@ -19,8 +20,15 @@
 _HS_CONN_ASKED=false    # true: 이미 연결 정보를 입력받음
 _HS_DOMAIN=""           # headscale 서버 도메인/IP
 _HS_SSH_USER=""         # headscale 서버 SSH 유저
-_HS_SSH_KEY=""          # headscale 서버 SSH 키 경로
+_HS_SSH_KEY=""          # headscale 서버 SSH 키 경로 (/tmp 복사본)
 _HS_SSH_KEY_DEFAULT=""  # TOML에서 읽은 기본 키 경로
+_HS_SSH_KEY_TMP=""      # /tmp 복사본 경로 (호출 스크립트 trap에서 삭제)
+
+# 호출 스크립트의 기존 _trap_cleanup / EXIT trap에서 호출
+preauth_cleanup_tmp_key() {
+    [ -n "${_HS_SSH_KEY_TMP:-}" ] && rm -f "$_HS_SSH_KEY_TMP" 2>/dev/null || true
+    _HS_SSH_KEY_TMP=""
+}
 
 # ── 내부 헬퍼 ────────────────────────────────────────────────────────────────
 
@@ -109,6 +117,15 @@ _ask_headscale_connection() {
         return 1
     fi
 
+    # FAT16/32/exFAT 등 권한 미지원 파일시스템 대응:
+    # SSH는 600/400 이상 열린 키를 거부하므로 /tmp에 복사 후 chmod 400 적용
+    local _key_tmp
+    _key_tmp=$(mktemp /tmp/hs-key-XXXXXX)
+    cp "$_HS_SSH_KEY" "$_key_tmp"
+    chmod 400 "$_key_tmp"
+    _HS_SSH_KEY_TMP="$_key_tmp"
+    _HS_SSH_KEY="$_key_tmp"
+
     _HS_CONN_ASKED=true
     log_msg "Done" "연결 정보 입력 완료 (세션 내 재사용됨)"
 }
@@ -176,10 +193,13 @@ _generate_preauth_key() {
 
 # ── 공개 함수 ────────────────────────────────────────────────────────────────
 
-# nixstrap 전용: /mnt/var/lib/nix-secrets/tailscale/ 에 배포
+# 로컬 배포: <root_prefix>/var/lib/nix-secrets/tailscale/ 에 배포
 # $1 = hostname
+# $2 = root_prefix (기본값: /mnt — nixstrap용, 빈 문자열 = 실행 중인 시스템에 직접 배포)
 check_preauth_keys_local() {
     local _hostname="$1"
+    local _root="${2-/mnt}"  # 미전달 시 /mnt, 빈 문자열 전달 시 ""
+
     local _resolved
     _resolved=$(_preauth_resolved_json) || {
         log_msg "Warn" "resolved.json 미발견 — preauth key 배포 건너뜀"
@@ -198,7 +218,7 @@ check_preauth_keys_local() {
         local _user _name _dest
         _user=$(echo "$_keys_json" | jq -r ".[$_i].user")
         _name=$(echo "$_keys_json" | jq -r ".[$_i].name")
-        _dest="/mnt/var/lib/nix-secrets/tailscale/${_user}/${_name}.preauth-key"
+        _dest="${_root}/var/lib/nix-secrets/tailscale/${_user}/${_name}.preauth-key"
         if [ ! -f "$_dest" ]; then
             _any_missing=true
             break
@@ -215,9 +235,9 @@ check_preauth_keys_local() {
         local _user _name _dest
         _user=$(echo "$_keys_json" | jq -r ".[$_i].user")
         _name=$(echo "$_keys_json" | jq -r ".[$_i].name")
-        _dest="/mnt/var/lib/nix-secrets/tailscale/${_user}/${_name}.preauth-key"
+        _dest="${_root}/var/lib/nix-secrets/tailscale/${_user}/${_name}.preauth-key"
         if [ -f "$_dest" ]; then
-            log_msg "Notice" "이미 존재: ${_dest#/mnt}"
+            log_msg "Notice" "이미 존재: ${_dest#"${_root}"}"
             _i=$(( _i + 1 ))
             continue
         fi
@@ -226,7 +246,7 @@ check_preauth_keys_local() {
         sudo mkdir -p "$(dirname "$_dest")"
         printf '%s' "$REPLY_PREAUTH_KEY" | sudo tee "$_dest" > /dev/null
         sudo chmod 600 "$_dest"
-        log_msg "Done" "배포 완료: ${_dest#/mnt}"
+        log_msg "Done" "배포 완료: ${_dest#"${_root}"}"
         _i=$(( _i + 1 ))
     done
 }

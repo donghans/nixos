@@ -58,6 +58,7 @@ _NIXOS_INSTALL_PID=""  # setsid로 실행한 nixos-install PID (종료 시 kill 
 # -- 인터럽트·종료 처리 --
 _trap_cleanup() {
     _USER_PASSWORD=""
+    preauth_cleanup_tmp_key 2>/dev/null || true
     tput cnorm 2>/dev/null || true
     stty sane 2>/dev/null || true
     if [ -n "${_NIXOS_INSTALL_PID:-}" ]; then

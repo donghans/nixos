@@ -212,6 +212,7 @@ handle_signal() {
 # 10. Cleanup (EXIT trap 핸들러 — 실행 요약 및 후처리)
 cleanup() {
     [ -n "${SUDO_KEEPALIVE_PID:-}" ] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    preauth_cleanup_tmp_key 2>/dev/null || true
 
     if [ "$IS_SUCCESS" != true ]; then
         log_msg "Error" "비정상 종료."

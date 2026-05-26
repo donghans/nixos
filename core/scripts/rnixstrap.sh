@@ -82,6 +82,7 @@ source "$SCRIPT_DIR/rnixstrap.task-setup.sh"
 
 # ── Cleanup trap ──────────────────────────────────────────────────────────────
 _cleanup() {
+    preauth_cleanup_tmp_key 2>/dev/null || true
     _print_summary
     tput cnorm 2>/dev/null || true
     stty sane 2>/dev/null || true
