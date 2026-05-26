@@ -11,6 +11,7 @@ mkHostConfiguration (_: {
       preauthName = "exitscale";
       preauthLoginServer = "https://e.772610158.xyz";
       advertiseExitNode = true;
+      advertiseRoutes = ["192.168.11.0/24"];
     };
 
     systemd.services.incus-create-ubuntu-vm = {

@@ -27,6 +27,11 @@ mkMod __curPos "Tailscale Mesh VPN" ({
       default = false;
       description = "exit node로 광고할지 여부";
     };
+    advertiseRoutes = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      description = "광고할 서브넷 라우트 목록 (예: [\"192.168.11.0/24\"])";
+    };
   };
   os = lib.mkMerge [
     {
@@ -83,7 +88,8 @@ mkMod __curPos "Tailscale Mesh VPN" ({
             --authkey="$(cat "${keyFile}")" \
             ${lib.optionalString (cfg.preauthLoginServer != "") ''--login-server="${cfg.preauthLoginServer}"''} \
             --accept-routes \
-            ${lib.optionalString cfg.advertiseExitNode "--advertise-exit-node"}
+            ${lib.optionalString cfg.advertiseExitNode "--advertise-exit-node"} \
+            ${lib.optionalString (cfg.advertiseRoutes != []) "--advertise-routes=${lib.concatStringsSep "," cfg.advertiseRoutes}"}
         '';
       };
     }))
