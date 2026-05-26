@@ -23,19 +23,21 @@ apply_lock_strategy() {
             nix flake update --refresh --flake "path:$build_dir"
             log_exec "nix" "<" "nix flake update"
         fi
-        
+
         if [ ! -f "$final_source_lock" ] || ! cmp -s "$final_source_lock" "$target_lock"; then
             cp "$target_lock" "$final_source_lock"
             # shellcheck disable=SC2034
             LOCK_CHANGED=true
-            log_msg "Lock" "lock file updated"
+            log_msg "Lock" "lock 파일 업데이트됨"
         fi
     else
         # Stable Strategy
         if [ -f "$final_source_lock" ]; then
             cp "$final_source_lock" "$target_lock"
         else
-            log_msg "Error" "lock not found: $final_source_lock"
+            log_msg "Error" "lock 파일을 찾을 수 없습니다: $final_source_lock"
+            log_msg "Error" "  → rolling에서 stable로 처음 전환한 경우, 초기 lock을 수동으로 생성하세요:"
+            log_msg "Error" "    cp .locks/_rolling.lock $final_source_lock"
             exit 1
         fi
     fi
