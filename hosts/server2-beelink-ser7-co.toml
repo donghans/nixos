@@ -3,11 +3,11 @@ preset    = "server"
 username  = "admin"
 
 [[preauth-keys]]
-user = "donghans"
+user = "system"
 name = "exitscale"
 
 [[preauth-keys]]
-user = "donghans"
+user = "system"
 name = "devserver"
 
 [mods.sys.services]

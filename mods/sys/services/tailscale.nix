@@ -10,7 +10,7 @@ mkMod __curPos "Tailscale Mesh VPN" ({
     preauthUser = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
-      description = "headscale 유저명 (preauth key 파일 경로 결정)";
+      description = "headscale user/namespace (preauth key 파일 경로: /var/lib/nix-secrets/tailscale/<user>/<name>.preauth-key)";
     };
     preauthName = lib.mkOption {
       type = lib.types.nullOr lib.types.str;

@@ -7,7 +7,7 @@ mkHostConfiguration (_: {
   os = {
     # tailscale 모듈 옵션 (문자열이라 toConfig 제약으로 toml 경유 불가 → nix에서 직접 설정)
     mods.sys.services.tailscale = {
-      preauthUser = "donghans";
+      preauthUser = "system";
       preauthName = "exitscale";
       preauthLoginServer = "https://e.772610158.xyz";
       advertiseExitNode = true;
@@ -29,7 +29,7 @@ mkHostConfiguration (_: {
                   exit 0
                 fi
 
-                PREAUTH_KEY_FILE="/var/lib/nix-secrets/tailscale/donghans/devserver.preauth-key"
+                PREAUTH_KEY_FILE="/var/lib/nix-secrets/tailscale/system/devserver.preauth-key"
 
                 # cloud-init user-data 작성
                 CLOUD_INIT=$(cat <<'EOF'

@@ -113,10 +113,49 @@ _ask_headscale_connection() {
     log_msg "Done" "연결 정보 입력 완료 (세션 내 재사용됨)"
 }
 
+# headscale user 조회 → 없으면 생성 → REPLY_USER_ID에 numeric ID 저장
+# headscale v0.27+: -u/--user는 uint(숫자 ID)
+_lookup_or_create_headscale_user() {
+    local _hs_user="$1"
+
+    local _list_out
+    _list_out=$(ssh \
+        -i "$_HS_SSH_KEY" \
+        -o StrictHostKeyChecking=no \
+        -o ConnectTimeout=15 \
+        "${_HS_SSH_USER}@${_HS_DOMAIN}" \
+        "sudo headscale users list -n '${_hs_user}' --output json 2>/dev/null") \
+        || { log_msg "Error" "headscale SSH 접속 실패 (user 조회)"; return 1; }
+
+    REPLY_USER_ID=$(echo "$_list_out" | jq -r '(if type == "array" then .[0] else . end).id // empty' 2>/dev/null)
+
+    if [ -z "${REPLY_USER_ID:-}" ]; then
+        log_msg "Task" "headscale user '${_hs_user}' 없음 — 생성 중..."
+        local _create_out
+        _create_out=$(ssh \
+            -i "$_HS_SSH_KEY" \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=15 \
+            "${_HS_SSH_USER}@${_HS_DOMAIN}" \
+            "sudo headscale users create '${_hs_user}' --output json") \
+            || { log_msg "Error" "headscale user 생성 실패"; return 1; }
+
+        REPLY_USER_ID=$(echo "$_create_out" | jq -r '(if type == "array" then .[0] else . end).id // empty')
+        if [ -z "${REPLY_USER_ID:-}" ]; then
+            log_msg "Error" "headscale user 생성 후 ID 획득 실패. 응답: $_create_out"
+            return 1
+        fi
+        log_msg "Done" "headscale user '${_hs_user}' 생성 완료 (ID: ${REPLY_USER_ID})"
+    fi
+}
+
 # headscale SSH로 preauth key 생성 → REPLY_PREAUTH_KEY
 _generate_preauth_key() {
     local _hs_user="$1" _key_name="$2"
     log_msg "Task" "headscale preauth key 생성 중: user=${_hs_user}, name=${_key_name}"
+
+    REPLY_USER_ID=""
+    _lookup_or_create_headscale_user "$_hs_user" || return 1
 
     local _json_out
     _json_out=$(ssh \
@@ -124,8 +163,8 @@ _generate_preauth_key() {
         -o StrictHostKeyChecking=no \
         -o ConnectTimeout=15 \
         "${_HS_SSH_USER}@${_HS_DOMAIN}" \
-        "sudo headscale preauthkeys create -u '${_hs_user}' --reusable=false --expiration 24h --output json") \
-        || { log_msg "Error" "headscale SSH 접속 실패"; return 1; }
+        "sudo headscale preauthkeys create -u ${REPLY_USER_ID} --expiration 24h --output json") \
+        || { log_msg "Error" "headscale SSH 접속 실패 (key 생성)"; return 1; }
 
     REPLY_PREAUTH_KEY=$(echo "$_json_out" | jq -r '.key // empty')
     if [ -z "${REPLY_PREAUTH_KEY:-}" ]; then
