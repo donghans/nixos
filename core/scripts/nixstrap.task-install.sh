@@ -328,6 +328,17 @@ _post_process() {
     # home-manager 첫 실행 마커 — 첫 로그인 시 경고 표시용
     touch "/mnt/home/$USERNAME/.nixstrap-first-run"
     nixos-enter --root /mnt --command "chown $USERNAME:users /home/$USERNAME/.nixstrap-first-run"
+
+    # git@github.com:user/repo.git → https://github.com/user/repo.git 변환
+    # (nixstrap 설치 서버에는 GitHub SSH 키가 없으므로 nixup os 시 git pull 가능하도록)
+    local _repo_dir="/mnt/home/$USERNAME/nixos"
+    local _ssh_url
+    _ssh_url=$(git -C "$_repo_dir" remote get-url origin 2>/dev/null || true)
+    if [[ "$_ssh_url" == git@github.com:* ]]; then
+        local _https_url="https://github.com/${_ssh_url#git@github.com:}"
+        git -C "$_repo_dir" remote set-url origin "$_https_url"
+        log_msg "Git" "remote URL → HTTPS: $_https_url"
+    fi
 }
 
 phase2_execute() {
