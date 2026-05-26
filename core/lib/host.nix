@@ -255,6 +255,29 @@
               ++ [(import hostCtx.homeConfig)];
           };
         }
+        # (목적: ISO home-manager를 NixOS 모듈로 통합 — 'nixos' 유저에 Hyprland/zsh 설정 적용)
+        # (이유: ISO는 standalone HM 없이 부팅되므로 NixOS 모듈로 통합해야 dotfile 생성됨)
+        ++ nixpkgs.lib.optional isISO
+        {
+          imports = [inputs.home-manager.nixosModules.home-manager];
+          home-manager = {
+            useGlobalPkgs = true;
+            useUserPackages = true;
+            extraSpecialArgs =
+              {
+                forOS = false;
+                isISO = true;
+                inherit inputs;
+                inherit (hostCtx) metaConfig unstable unstable-fallback;
+              }
+              // modArgs;
+            users.${hostCtx.metaConfig.username}.imports =
+              [./workspace-options.nix {workspace = hostCtx.metaConfig;}]
+              ++ recursiveImportDir ../../mods
+              ++ hmModules
+              ++ [(import hostCtx.homeConfig)];
+          };
+        }
         # (목적: 원격 호스트 primary user 생성 + 콘솔 SSH 키 주입)
         # (별도 모듈로 분리: 같은 attrset 내 users.users.root.xxx 와 충돌 방지)
         ++ nixpkgs.lib.optional hostCtx.metaConfig.isRemote

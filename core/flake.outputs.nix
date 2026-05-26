@@ -105,6 +105,7 @@
       # ISO는 ephemeral 환경이므로 resolver 없이 base.toml의 rollingStateVersion으로 고정
       workspaceMeta = workspaceMeta // {stateVersion = workspaceMeta.rollingStateVersion;};
       # ISO는 resolver를 거치지 않으므로 iso 프리셋을 직접 주입
+      # hmModules: HM 컨텍스트에도 mods 활성화 플래그 주입 (mkPartOf cfg.enable 조건 충족)
       extraModules = [
         {mods = toConfig allPresets.iso.mods;}
         ({
@@ -118,6 +119,7 @@
             presetsJsonPath = ../presets.json;
           })
       ];
+      hmModules = [{mods = toConfig allPresets.iso.mods;}];
     };
 
   # == Per-host 공통 바인딩 헬퍼 (nixosConfigurations + homeConfigurations 공유) ==
