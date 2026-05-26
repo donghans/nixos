@@ -193,9 +193,11 @@
                 if hostCtx.metaConfig.hasDeployRs
                 then "prohibit-password"
                 else "no";
-              # (pub key 있으면 키 전용, 없으면 비밀번호 허용 — deploy-rs/standalone/password 모두 커버)
+              # (pub key 없는 password-only 서버: core.network.nix의 false를 오버라이드해 비밀번호 SSH 허용)
+              # (pub key 있는 경우: core.network.nix의 false가 그대로 적용됨)
               settings.PasswordAuthentication =
-                !(builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub);
+                nixpkgs.lib.mkIf (!(builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub))
+                (nixpkgs.lib.mkForce true);
             };
 
             # (목적: deploy-rs 호스트에만 root SSH 키 주입 — standalone은 root login 비활성화이므로 불필요)
