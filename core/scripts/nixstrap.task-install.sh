@@ -87,6 +87,8 @@ _mount_partitions() {
 _move_repo() {
     log_msg "Git" "레포지터리를 /mnt/etc/nixos 로 이동 중..."
     mkdir -p /mnt/etc
+    # REPO_TMP가 CWD 안에 있을 경우(./nixstrap.sh 직접 실행 시) mv 후 getcwd 실패 방지
+    cd /
     mv "$REPO_TMP" /mnt/etc/nixos
 }
 
