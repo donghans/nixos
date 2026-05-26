@@ -76,9 +76,16 @@ mkHostConfiguration (_: {
         fi
 
         # openssh 설치 + 활성화
+        # PermitEmptyPasswords yes: tailscale이 인증 레이어이므로 VM 패스워드 불필요
         incus exec ubuntu-2404 -- apt-get update -qq
         incus exec ubuntu-2404 -- apt-get install -y openssh-server
-        incus exec ubuntu-2404 -- systemctl enable --now ssh
+        incus exec ubuntu-2404 -- bash -c "
+          sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sed -i 's/^#\?PermitEmptyPasswords.*/PermitEmptyPasswords yes/' /etc/ssh/sshd_config
+          passwd -d ubuntu
+          systemctl enable --now ssh
+          systemctl reload ssh
+        "
 
         # tailscale 설치
         incus exec ubuntu-2404 -- sh -c \
