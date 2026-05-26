@@ -61,6 +61,7 @@ in {
 
           prefixes = {
             v4 = "10.127.0.0/17";
+            v6 = null;
             allocation = "sequential";
           };
 
