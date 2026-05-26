@@ -109,22 +109,22 @@ mkPartOf "mods.sys.base" ({
       home-manager.enable = true;
       git = {
         enable = true;
-        settings = lib.mkMerge [
-          {
-            user.name = config.workspace.gitName;
-            user.email = config.workspace.gitEmail;
-          }
-          # SSH URL 리다이렉트: 로컬 워크스테이션에만 적용
-          # 원격 호스트(deploy-rs / standalone)는 public 레포를 HTTPS로 pull
-          (lib.mkIf (!config.workspace.isRemote) {
-            url."git@github.com:".insteadOf = "https://github.com/";
-          })
-        ];
+        settings = {
+          user.name = config.workspace.gitName;
+          user.email = config.workspace.gitEmail;
+        };
       };
-      # (목적: gh auth login 시 git 프로토콜 질문 없이 SSH로 고정)
-      # (이유: gh auth login은 config.yml의 git_protocol 값을 무시하고 항상 HTTPS를 기본 선택으로 표시)
-      # (범위: 로컬 워크스테이션에만 — 원격 호스트는 gh 인증 불필요)
-      zsh.initContent = lib.mkIf (!config.workspace.isRemote) ''
+      # (목적: gh auth 설정 시 GitHub HTTPS URL → SSH 리다이렉트 활성화)
+      # (이유: 정적 git settings는 nixup home 시점에 고정되므로 런타임 gh auth 여부를 반영 불가)
+      # (방식: GIT_CONFIG_* 환경변수로 동적 주입 — gh hosts.yml에 github.com 항목 있을 때만)
+      # (목적2: gh auth login 시 git 프로토콜 질문 없이 SSH로 고정)
+      zsh.initContent = ''
+        if [[ -f "''${HOME}/.config/gh/hosts.yml" ]] && \
+           grep -q "github.com" "''${HOME}/.config/gh/hosts.yml" 2>/dev/null; then
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="url.git@github.com:.insteadOf"
+          export GIT_CONFIG_VALUE_0="https://github.com/"
+        fi
         gh() {
           if [[ "$1" == "auth" && "$2" == "login" ]]; then
             command gh auth login --git-protocol ssh "''${@:3}"
