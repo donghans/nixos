@@ -44,7 +44,7 @@ mkHostConfiguration (_: {
       after = ["incus-startup.service" "systemd-networkd.service"];
       requires = ["incus-startup.service"];
       wantedBy = ["multi-user.target"];
-      path = [pkgs.incus pkgs.curl pkgs.coreutils];
+      path = [pkgs.incus pkgs.curl pkgs.coreutils pkgs.gawk];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
