@@ -200,13 +200,24 @@ def cmd_update_repo(args):
 
 def cmd_username(args):
     repo_tmp = args[0]
+    host = args[1] if len(args) > 1 else None
     base_path = os.path.join(repo_tmp, "hosts", "_base.toml")
     try:
         with open(base_path, "rb") as f:
             base = tomllib.load(f)
-        print(base.get("username", ""))
+        base_user = base.get("username", "")
     except Exception:
-        print("")
+        base_user = ""
+    if host:
+        host_path = os.path.join(repo_tmp, "hosts", f"{host}.toml")
+        try:
+            with open(host_path, "rb") as f:
+                h = tomllib.load(f)
+            print(h.get("username", base_user))
+            return
+        except Exception:
+            pass
+    print(base_user)
 
 
 def cmd_list_hosts(args):

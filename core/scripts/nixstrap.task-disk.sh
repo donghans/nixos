@@ -163,10 +163,16 @@ ask_partitions() {
 
         _BOOT_END=$(python3 "$SCRIPT_DIR/nixstrap.lib-part.py" boot-end "$_PART_START" "$_BOOT_SIZE")
 
-        # 기존 파티션 수로 새 파티션 번호 계산
-        _OLD_PART_COUNT=$(parted -m "$_DISK" unit MiB print 2>/dev/null | grep -c '^[0-9]' || echo "0")
-        _NEW_BOOT_NUM=$((_OLD_PART_COUNT + 1))
-        _NEW_ROOT_NUM=$((_OLD_PART_COUNT + 2))
+        # 파티션 번호 계산: wipe 시 빈 테이블에서 1번부터, 아니면 기존 파티션 다음부터
+        if [[ "$_WIPE" == "true" ]]; then
+            _NEW_BOOT_NUM=1
+            _NEW_ROOT_NUM=2
+        else
+            local _OLD_PART_COUNT
+            _OLD_PART_COUNT=$(parted -m "$_DISK" unit MiB print 2>/dev/null | grep -c '^[0-9]' || echo "0")
+            _NEW_BOOT_NUM=$((_OLD_PART_COUNT + 1))
+            _NEW_ROOT_NUM=$((_OLD_PART_COUNT + 2))
+        fi
 
         # nvme/mmcblk은 숫자로 끝나는 디스크명에 'p' 삽입 필요 (nvme0n1p1 vs sda1)
         if [[ "$_DISK" =~ [0-9]$ ]]; then

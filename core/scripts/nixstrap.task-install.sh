@@ -235,15 +235,14 @@ _resolve_metadata() {
 }
 
 _extract_username() {
-    local BASE_TOML="/mnt/etc/nixos/hosts/_base.toml"
-    if [ ! -f "$BASE_TOML" ]; then
-        log_msg "Error" "클론된 레포지터리에서 $BASE_TOML 을 찾을 수 없습니다."
+    local resolved="$RESOLVE_TMP/resolved.json"
+    if [ ! -f "$resolved" ]; then
+        log_msg "Error" "resolved.json 미발견: $resolved"
         exit 1
     fi
-    USERNAME=$(BASE_TOML="$BASE_TOML" python3 -c \
-        "import tomllib, os; print(tomllib.load(open(os.environ['BASE_TOML'],'rb'))['username'])")
-    if [ -z "$USERNAME" ]; then
-        log_msg "Error" "$BASE_TOML 에서 username 추출에 실패했습니다."
+    USERNAME=$(jq -r --arg h "$HOST" '.[$h].username' "$resolved")
+    if [ -z "$USERNAME" ] || [ "$USERNAME" = "null" ]; then
+        log_msg "Error" "resolved.json에서 username 추출 실패 (host=$HOST)"
         exit 1
     fi
 }

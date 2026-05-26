@@ -7,7 +7,9 @@
   # 1. lib 파일들을 Nix store에 바이트 복사 (문자열 인터폴레이션 없음 → 비 ASCII 안전)
   nixstrap-libs = pkgs.runCommand "nixstrap-libs" {} ''
     mkdir -p $out
+    cp ${./scripts/lib-ui.sh}               $out/lib-ui.sh
     cp ${./scripts/nixstrap.lib-ui.sh}       $out/nixstrap.lib-ui.sh
+    cp ${./scripts/nixstrap.lib-preauth.sh}  $out/nixstrap.lib-preauth.sh
     cp ${./scripts/nixstrap.task-input.sh}   $out/nixstrap.task-input.sh
     cp ${./scripts/nixstrap.task-disk.sh}    $out/nixstrap.task-disk.sh
     cp ${./scripts/nixstrap.task-install.sh} $out/nixstrap.task-install.sh

@@ -167,7 +167,7 @@ ask_deploy_config() {
 
 ask_password() {
     local _preview_user _pw _pw2
-    _preview_user=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" username "$REPO_TMP" 2>/dev/null || true)
+    _preview_user=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" username "$REPO_TMP" "${HOST:-}" 2>/dev/null || true)
     local _label="${_preview_user:-user}"
     printf "\n"
     log_msg "Notice" "'$_label' 로그인 비밀번호 설정 (Enter 두 번 누르면 건너뜀):"
@@ -213,6 +213,9 @@ show_summary() {
             printf "     %-11s   사용자명: %s\n" "" "$_uname_display"
         else
             printf "  2. %-11s:  %s  [%s] %s\n" "호스트명" "$HOST" "${_HOST_TYPE:-?}" "${_HOST_PRESET_FROM_REPO:-?}"
+            local _existing_user
+            _existing_user=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" username "$REPO_TMP" "$HOST" 2>/dev/null || true)
+            printf "     %-11s   사용자명: %s\n" "" "${_existing_user:-_base.toml에서}"
             if [ "$_IS_VM" = true ]; then
                 printf "     %-11s   VM 감지됨 — host.toml 기존 파일 유지, incus 설정 변경 없음\n" ""
             fi
