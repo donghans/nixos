@@ -175,6 +175,8 @@ in {
         requires = ["headscale-oidc-secret.service"];
       };
 
+      users.users.ec2-user.extraGroups = ["headscale"];
+
       # Lightsail 네트워크 방화벽이 외부 트래픽을 제어하므로 NixOS 방화벽은 비활성화
       networking.firewall.enable = false;
 
