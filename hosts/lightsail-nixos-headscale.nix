@@ -142,6 +142,7 @@ in {
           };
 
           taildrop.enabled = true;
+          unix_socket_permission = "0660";
         };
       };
 
