@@ -25,7 +25,7 @@ mkHostConfiguration (_: let
     log.level = "info";
     noise.private_key_path = "/var/lib/headscale/noise_private.key";
     prefixes = {
-      v4 = "10.127.0.0/17";
+      v4 = "100.64.0.0/10";
       allocation = "sequential";
     };
     database = {
