@@ -8,9 +8,14 @@ mkPartOf "mods.sys.base" ({
   useNM = config.workspace.type == "desktop" || config.workspace.type == "laptop";
 in {
   os = lib.mkMerge [
+    # 모든 호스트 공통
+    {
+      services.resolved.enable = true;
+    }
     # Desktop / Laptop → NetworkManager
     (lib.mkIf useNM {
       networking.networkmanager.enable = true;
+      networking.networkmanager.dns = "systemd-resolved";
       networking.useDHCP = false;
       # (목적: NM 온라인 대기 비활성화로 부팅 속도 향상)
       systemd.services.NetworkManager-wait-online.enable = false;
@@ -21,7 +26,6 @@ in {
     (lib.mkIf (!useNM) {
       networking.useNetworkd = true;
       networking.useDHCP = false;
-      services.resolved.enable = true;
       services.openssh = {
         enable = true;
         settings.PasswordAuthentication = false;
