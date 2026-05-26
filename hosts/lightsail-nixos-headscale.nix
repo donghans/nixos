@@ -141,7 +141,14 @@ in {
       # == headscale ==
       # settings는 headscaleConfigFile로 직접 관리 (v6 prefix 제거 목적)
       # enable = true: user/group/socket/StateDirectory 등 모듈 인프라만 활용
-      services.headscale.enable = true;
+      # magic_dns = false: 모듈 assertion(base_domain 필수) 우회용 — 실제 설정은 headscaleConfigFile
+      services.headscale = {
+        enable = true;
+        settings.dns = {
+          magic_dns = true;
+          base_domain = "i.772610158.xyz";
+        };
+      };
 
       # v6 없는 custom config로 실행하도록 script override
       systemd.services.headscale.script = lib.mkForce ''
