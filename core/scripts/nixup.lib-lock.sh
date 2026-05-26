@@ -36,8 +36,8 @@ apply_lock_strategy() {
             cp "$final_source_lock" "$target_lock"
         else
             log_msg "Error" "lock 파일을 찾을 수 없습니다: $final_source_lock"
-            log_msg "Error" "  → rolling에서 stable로 처음 전환한 경우, 초기 lock을 수동으로 생성하세요:"
-            log_msg "Error" "    cp .locks/_rolling.lock $final_source_lock"
+            log_msg "Error" "  → 초기 lock을 수동으로 생성하세요:"
+            log_msg "Error" "    cp $(dirname "$final_source_lock")/_rolling.lock $final_source_lock"
             exit 1
         fi
     fi
