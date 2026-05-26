@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/nixstrap.lib-preauth.sh"
 
 # 빌드 전/후 store path를 직접 비교하여 패키지 변경사항 출력

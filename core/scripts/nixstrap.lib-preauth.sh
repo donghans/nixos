@@ -23,7 +23,7 @@ _HS_SSH_USER=""         # headscale 서버 SSH 유저
 _HS_SSH_KEY=""          # headscale 서버 SSH 키 경로 (/tmp 복사본)
 _HS_SSH_KEY_DEFAULT=""  # TOML에서 읽은 기본 키 경로
 _HS_SSH_KEY_TMP=""      # /tmp 복사본 경로 (호출 스크립트 trap에서 삭제)
-PREAUTH_KEYS_DEPLOYED=false  # 이번 세션에서 새 key를 배포했으면 true
+export PREAUTH_KEYS_DEPLOYED=false  # 이번 세션에서 새 key를 배포했으면 true
 
 # 호출 스크립트의 기존 _trap_cleanup / EXIT trap에서 호출
 preauth_cleanup_tmp_key() {
@@ -248,7 +248,7 @@ check_preauth_keys_local() {
         printf '%s' "$REPLY_PREAUTH_KEY" | sudo tee "$_dest" > /dev/null
         sudo chmod 600 "$_dest"
         log_msg "Done" "배포 완료: ${_dest#"${_root}"}"
-        PREAUTH_KEYS_DEPLOYED=true
+        export PREAUTH_KEYS_DEPLOYED=true
         _i=$(( _i + 1 ))
     done
 }
