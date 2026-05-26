@@ -1,4 +1,6 @@
 # Server Preset
+# stateVersion 명시 → isRolling = false (서버는 stable nixpkgs 고정)
+stateVersion = "25.11"
 
 [mods.sys]
 base = true
