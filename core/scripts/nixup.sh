@@ -14,6 +14,11 @@ if [ -f "$ENV_FILE" ] && [ -z "${NIXUP_DOTENV_LOADED:-}" ]; then
     exec dotenv -e "$ENV_FILE" -- "$0" "$@"
 fi
 
+if [ "$(id -u)" -eq 0 ]; then
+    echo "nixup은 root로 실행할 수 없습니다. sudo 없이 실행하세요." >&2
+    exit 1
+fi
+
 source "$SCRIPT_DIR/nixup.lib-ui.sh"
 source "$SCRIPT_DIR/lib-build.sh"
 source "$SCRIPT_DIR/nixup.lib-lock.sh"
