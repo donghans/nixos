@@ -105,6 +105,7 @@ in {
       };
       script = ''
         if incus exec ${lxcName} -- tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'; then
+          incus exec ${lxcName} -- tailscale set --hostname="${vmName}" 2>/dev/null || true
           exit 0
         fi
 
@@ -177,6 +178,7 @@ in {
         else
           echo "WARNING: preauthKeyFile not found at ${preauthKeyFile}" >&2
         fi
+        incus exec ${lxcName} -- tailscale set --hostname="${vmName}"
       '';
     };
 
