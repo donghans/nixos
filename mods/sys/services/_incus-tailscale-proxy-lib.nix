@@ -64,8 +64,9 @@ in {
 
         incus launch images:alpine/3.21 ${lxcName} \
           -c security.nesting=true \
-          -d eth0,type=nic,nictype=bridged,parent=br-lan,mtu=1400 \
-          -d eth1,type=nic,nictype=bridged,parent=${internalBridge},mtu=1400
+          -d eth0,type=nic,nictype=bridged,parent=br-lan,mtu=1400
+
+        incus config device add ${lxcName} eth1 nic nictype=bridged parent=${internalBridge} mtu=1400
       '';
     };
 
