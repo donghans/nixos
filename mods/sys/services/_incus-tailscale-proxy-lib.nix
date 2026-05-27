@@ -62,11 +62,20 @@ in {
             --protocol=simplestreams --public
         fi
 
-        incus launch images:alpine/3.21 ${lxcName} \
-          -c security.nesting=true \
-          -d eth0,type=nic,nictype=bridged,parent=br-lan,mtu=1400
+        incus launch images:alpine/3.21 ${lxcName} -c security.nesting=true
 
+        # 컨테이너가 초기화되는 동안 잠깐 대기
+        sleep 2
+        incus stop ${lxcName} --force 2>/dev/null || true
+
+        # 기본 프로필의 eth0(incusbr0) 제거 후 br-lan 브리지로 교체
+        incus config device remove ${lxcName} eth0 2>/dev/null || true
+        incus config device add ${lxcName} eth0 nic nictype=bridged parent=br-lan mtu=1400
+
+        # internal bridge용 eth1 추가
         incus config device add ${lxcName} eth1 nic nictype=bridged parent=${internalBridge} mtu=1400
+
+        incus start ${lxcName}
       '';
     };
 
