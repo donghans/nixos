@@ -51,16 +51,21 @@ in {
       script = ''
         if incus info ${lxcName} &>/dev/null; then
           if incus config show ${lxcName} --expanded 2>/dev/null | grep -q 'parent: ${internalBridge}'; then
-            # eth0이 macvlan인지 확인 (networkd 간섭 회피용); bridged이면 교체
-            if ! incus config show ${lxcName} --expanded 2>/dev/null | grep -q 'nictype: macvlan'; then
+            # LXC NIC은 모두 macvlan을 사용해야 함 (incus 6.x가 unmanaged bridge에 veth를 붙이지 않음)
+            # eth0 또는 eth1 중 nictype=bridged인 것이 있으면 macvlan으로 교체
+            NEED_FIX=0
+            incus config show ${lxcName} --expanded 2>/dev/null | grep -q 'nictype: bridged' && NEED_FIX=1
+            if [ "\$NEED_FIX" = "1" ]; then
               incus stop ${lxcName} --force 2>/dev/null || true
               incus config device remove ${lxcName} eth0 2>/dev/null || true
+              incus config device remove ${lxcName} eth1 2>/dev/null || true
               incus config device add ${lxcName} eth0 nic nictype=macvlan parent=br-lan mtu=1400
+              incus config device add ${lxcName} eth1 nic nictype=macvlan parent=${internalBridge} mtu=1400
               incus start ${lxcName}
             fi
             exit 0
           fi
-          incus config device add ${lxcName} eth1 nic nictype=bridged parent=${internalBridge} mtu=1400 2>/dev/null || true
+          incus config device add ${lxcName} eth1 nic nictype=macvlan parent=${internalBridge} mtu=1400 2>/dev/null || true
           exit 0
         fi
 
@@ -76,12 +81,12 @@ in {
         incus stop ${lxcName} --force 2>/dev/null || true
 
         # 기본 프로필의 eth0(incusbr0) 제거 후 br-lan macvlan으로 교체
-        # (bridged 대신 macvlan: systemd-networkd가 br-lan veth를 제거하는 문제 회피)
+        # incus 6.x는 unmanaged bridge에 veth를 붙이지 않음 → LXC NIC은 모두 macvlan 사용
         incus config device remove ${lxcName} eth0 2>/dev/null || true
         incus config device add ${lxcName} eth0 nic nictype=macvlan parent=br-lan mtu=1400
 
-        # internal bridge용 eth1 추가
-        incus config device add ${lxcName} eth1 nic nictype=bridged parent=${internalBridge} mtu=1400
+        # internal bridge용 eth1 (macvlan: 같은 이유로 bridged 대신)
+        incus config device add ${lxcName} eth1 nic nictype=macvlan parent=${internalBridge} mtu=1400
 
         incus start ${lxcName}
       '';
