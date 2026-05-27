@@ -1,0 +1,12 @@
+# AWS EC2 t4g.micro — IMDS / IAM Instance Profile 테스트 호스트
+# ec2-nixos-headscale 전환 전 동작 확인용
+# 연결 정보: ~/.ssh/rnixup/ec2-imds-test.bootstrap.env
+preset     = "server"
+type       = "server"
+system     = "aarch64-linux"
+username   = "ec2-user"
+swapGb     = 0
+tmpfsSize  = "0"
+diskDevice = "/dev/nvme0n1"
+bootDevice = "/dev/nvme0n1"
+bootLoader = "grub-uefi"

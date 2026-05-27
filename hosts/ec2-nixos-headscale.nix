@@ -134,7 +134,7 @@ mkHostConfiguration (_: {
     systemd.network.networks."05-ens5" = {
       matchConfig.Name = "ens5";
       networkConfig.DHCP = "ipv4";
-      routes = [{ routeConfig = { Destination = "169.254.169.254/32"; Scope = "link"; }; }];
+      routes = [{ Destination = "169.254.169.254/32"; Scope = "link"; }];
       dhcpV4Config.UseDNS = false;
     };
     networking.nameservers = ["1.1.1.1" "8.8.8.8"];
