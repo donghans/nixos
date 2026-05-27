@@ -51,6 +51,13 @@ in {
       script = ''
         if incus info ${lxcName} &>/dev/null; then
           if incus config show ${lxcName} --expanded 2>/dev/null | grep -q 'parent: ${internalBridge}'; then
+            # eth0이 macvlan인지 확인 (networkd 간섭 회피용); bridged이면 교체
+            if ! incus config show ${lxcName} --expanded 2>/dev/null | grep -q 'nictype: macvlan'; then
+              incus stop ${lxcName} --force 2>/dev/null || true
+              incus config device remove ${lxcName} eth0 2>/dev/null || true
+              incus config device add ${lxcName} eth0 nic nictype=macvlan parent=br-lan mtu=1400
+              incus start ${lxcName}
+            fi
             exit 0
           fi
           incus config device add ${lxcName} eth1 nic nictype=bridged parent=${internalBridge} mtu=1400 2>/dev/null || true
@@ -68,9 +75,10 @@ in {
         sleep 2
         incus stop ${lxcName} --force 2>/dev/null || true
 
-        # 기본 프로필의 eth0(incusbr0) 제거 후 br-lan 브리지로 교체
+        # 기본 프로필의 eth0(incusbr0) 제거 후 br-lan macvlan으로 교체
+        # (bridged 대신 macvlan: systemd-networkd가 br-lan veth를 제거하는 문제 회피)
         incus config device remove ${lxcName} eth0 2>/dev/null || true
-        incus config device add ${lxcName} eth0 nic nictype=bridged parent=br-lan mtu=1400
+        incus config device add ${lxcName} eth0 nic nictype=macvlan parent=br-lan mtu=1400
 
         # internal bridge용 eth1 추가
         incus config device add ${lxcName} eth1 nic nictype=bridged parent=${internalBridge} mtu=1400
@@ -101,6 +109,16 @@ in {
         done
         if ! incus exec ${lxcName} -- true 2>/dev/null; then
           echo "${lxcName} exec not ready after 120s" >&2
+          exit 1
+        fi
+
+        # eth0 DHCP IP 대기 (macvlan은 빠르나 안전 마진)
+        for i in $(seq 1 12); do
+          incus exec ${lxcName} -- ip addr show eth0 2>/dev/null | grep -q 'inet ' && break
+          sleep 5
+        done
+        if ! incus exec ${lxcName} -- ip addr show eth0 2>/dev/null | grep -q 'inet '; then
+          echo "${lxcName} eth0 no IPv4 after 60s" >&2
           exit 1
         fi
 
