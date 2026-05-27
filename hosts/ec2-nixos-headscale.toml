@@ -1,0 +1,20 @@
+# AWS EC2 t4g.micro — headscale 컨트롤 플레인
+# IAM Instance Profile로 AWS 인증 (Roles Anywhere / step-ca 불필요)
+# litestream → S3 자동 백업 (Instance Profile 자격증명 사용)
+preset     = "server"
+type       = "server"
+system     = "aarch64-linux"
+username   = "ec2-user"
+swapGb     = 0
+tmpfsSize  = "0"
+diskDevice = "/dev/nvme0n1"
+bootDevice = "/dev/nvme0n1"
+bootLoader = "grub-uefi"
+
+[headscale]
+domain   = "e2.772610158.xyz"
+ssh-user = "ec2-user"
+ssh-key  = "~/.ssh/rnixup/ec2-nixos-headscale.pem"
+
+[mods.sys.services]
+caddy = true
