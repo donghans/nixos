@@ -4,8 +4,23 @@
   lib,
   ...
 }:
+let
+  mkTailscaleProxy = import ../mods/sys/services/_incus-tailscale-proxy-lib.nix {inherit lib pkgs;};
+in
 mkHostConfiguration (_: {
   os = {
+    imports = [
+      (mkTailscaleProxy "devserver" {
+        vmName         = "ubuntu-2404";
+        internalBridge = "incusbr-devserver";
+        lxcIp          = "10.0.1.1";
+        vmIp           = "10.0.1.2";
+        internalSubnet = "10.0.1.0/24";
+        preauthKeyFile = "/var/lib/nix-secrets/tailscale/system/devserver.preauth-key";
+        loginServer    = "https://e.772610158.xyz";
+      })
+    ];
+
     # tailscale 모듈 옵션 (문자열이라 toConfig 제약으로 toml 경유 불가 → nix에서 직접 설정)
     mods.sys.services.tailscale = {
       preauthUser = "system";
@@ -37,18 +52,6 @@ mkHostConfiguration (_: {
 
     # br-lan 통과 트래픽 허용 (incus VM ↔ host/tailscale)
     networking.firewall.trustedInterfaces = ["br-lan"];
-
-    mods.sys.services."incus-tailscale-proxy" = {
-      proxies.devserver = {
-        vmName         = "ubuntu-2404";
-        internalBridge = "incusbr-devserver";
-        lxcIp          = "10.0.1.1";
-        vmIp           = "10.0.1.2";
-        internalSubnet = "10.0.1.0/24";
-        preauthKeyFile = "/var/lib/nix-secrets/tailscale/system/devserver.preauth-key";
-        loginServer    = "https://e.772610158.xyz";
-      };
-    };
 
     # ubuntu:24.04는 cloud-init 미포함 미니멀 이미지 → incus exec으로 직접 설치
     systemd.services.incus-create-ubuntu-vm = {
