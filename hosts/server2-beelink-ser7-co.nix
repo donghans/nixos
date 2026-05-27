@@ -38,6 +38,18 @@ mkHostConfiguration (_: {
     # br-lan 통과 트래픽 허용 (incus VM ↔ host/tailscale)
     networking.firewall.trustedInterfaces = ["br-lan"];
 
+    mods.sys.services."incus-tailscale-proxy" = {
+      proxies.devserver = {
+        vmName         = "ubuntu-2404";
+        internalBridge = "incusbr-devserver";
+        lxcIp          = "10.0.1.1";
+        vmIp           = "10.0.1.2";
+        internalSubnet = "10.0.1.0/24";
+        preauthKeyFile = "/var/lib/nix-secrets/tailscale/system/devserver.preauth-key";
+        loginServer    = "https://e.772610158.xyz";
+      };
+    };
+
     # ubuntu:24.04는 cloud-init 미포함 미니멀 이미지 → incus exec으로 직접 설치
     systemd.services.incus-create-ubuntu-vm = {
       description = "Create Ubuntu 24.04 Incus VM if not exists";
@@ -51,8 +63,10 @@ mkHostConfiguration (_: {
       };
       script = ''
         if incus info ubuntu-2404 &>/dev/null; then
-          # 기존 VM이 br-lan을 쓰고 있으면 종료
-          if incus config show ubuntu-2404 --expanded 2>/dev/null | grep -q 'parent: br-lan'; then
+          CONFIG=$(incus config show ubuntu-2404 --expanded 2>/dev/null)
+          # br-lan이든 internal bridge든 이미 설정된 경우 종료
+          if echo "$CONFIG" | grep -q 'parent: br-lan' \
+              || echo "$CONFIG" | grep -qE 'parent: incusbr-'; then
             exit 0
           fi
           # NIC를 br-lan으로 교체
@@ -78,66 +92,46 @@ mkHostConfiguration (_: {
       '';
     };
 
-    # VM 생성 후 openssh + tailscale 설치 (incus exec 방식 — cloud-init 불필요)
+    # VM 생성 후 openssh 설치 (incus exec 방식 — cloud-init 불필요)
+    # tailscale은 devserver-proxy LXC가 대신 담당
     systemd.services.incus-setup-ubuntu-vm = {
-      description = "Setup openssh and tailscale in Ubuntu 24.04 VM";
-      after = ["incus-create-ubuntu-vm.service"];
-      requires = ["incus-create-ubuntu-vm.service"];
+      description = "Setup openssh in Ubuntu 24.04 VM";
+      after = ["incus-update-vm-nic-devserver.service"];
+      requires = ["incus-update-vm-nic-devserver.service"];
       wantedBy = ["multi-user.target"];
       path = [pkgs.incus pkgs.coreutils pkgs.gnugrep];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        # IP 확보까지 최대 3분 대기
-        TimeoutStartSec = "180";
+        TimeoutStartSec = "300";
       };
       script = ''
-        # tailscale이 이미 연결됐으면 건너뜀
-        if incus exec ubuntu-2404 -- tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'; then
+        # sshd가 이미 설치돼 있으면 건너뜀
+        if incus exec ubuntu-2404 -- which sshd &>/dev/null; then
           exit 0
         fi
 
-        # VM이 IP를 받을 때까지 대기 (최대 120초)
-        for i in $(seq 1 24); do
-          IP=$(incus list ubuntu-2404 --format=csv -c4 2>/dev/null | grep -oE '([0-9]+\.){3}[0-9]+' | head -1)
-          [ -n "$IP" ] && break
+        # VM agent가 응답할 때까지 대기 (NIC 교체 후 재부팅 시간 포함)
+        for i in $(seq 1 36); do
+          incus exec ubuntu-2404 -- true 2>/dev/null && break
           sleep 5
         done
 
-        if [ -z "''${IP:-}" ]; then
-          echo "ubuntu-2404: IP 미확보 — setup 건너뜀" >&2
+        if ! incus exec ubuntu-2404 -- true 2>/dev/null; then
+          echo "ubuntu-2404: agent 미응답 — setup 건너뜀" >&2
           exit 1
         fi
 
-        # openssh 설치 + 활성화 (idempotent)
-        # PermitEmptyPasswords yes: tailscale이 인증 레이어이므로 VM 패스워드 불필요
-        if ! incus exec ubuntu-2404 -- which sshd &>/dev/null; then
-          incus exec ubuntu-2404 -- apt-get update -qq
-          incus exec ubuntu-2404 -- apt-get install -y openssh-server
-          incus exec ubuntu-2404 -- bash -c "
-            sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-            sed -i 's/^#\?PermitEmptyPasswords.*/PermitEmptyPasswords yes/' /etc/ssh/sshd_config
-            passwd -d ubuntu
-            systemctl enable --now ssh
-            systemctl reload ssh
-          "
-        fi
-
-        # tailscale 설치 (idempotent)
-        if ! incus exec ubuntu-2404 -- which tailscale &>/dev/null; then
-          incus exec ubuntu-2404 -- sh -c \
-            "curl -fsSL https://tailscale.com/install.sh | sh"
-        fi
-
-        # preauth key가 있으면 tailscale 인증
-        PREAUTH_KEY_FILE="/var/lib/nix-secrets/tailscale/system/devserver.preauth-key"
-        if [ -f "$PREAUTH_KEY_FILE" ]; then
-          PREAUTH_KEY=$(cat "$PREAUTH_KEY_FILE")
-          incus exec ubuntu-2404 -- tailscale up \
-            --authkey="$PREAUTH_KEY" \
-            --login-server="https://e.772610158.xyz" \
-            --accept-routes
-        fi
+        # PermitEmptyPasswords yes: LXC proxy가 인증 레이어이므로 VM 패스워드 불필요
+        incus exec ubuntu-2404 -- apt-get update -qq
+        incus exec ubuntu-2404 -- apt-get install -y openssh-server
+        incus exec ubuntu-2404 -- bash -c "
+          sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sed -i 's/^#\?PermitEmptyPasswords.*/PermitEmptyPasswords yes/' /etc/ssh/sshd_config
+          passwd -d ubuntu
+          systemctl enable --now ssh
+          systemctl reload ssh
+        "
       '';
     };
   };

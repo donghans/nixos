@@ -11,5 +11,6 @@ user = "system"
 name = "devserver"
 
 [mods.sys.services]
-incus     = true
-tailscale = true
+incus                 = true
+tailscale             = true
+incus-tailscale-proxy = true
