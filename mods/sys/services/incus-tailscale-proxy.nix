@@ -1,6 +1,7 @@
-{mkMod, pkgs, lib, ...}:
-mkMod __curPos "Incus Tailscale Proxy — LXC-based tailscale ingress for Incus VMs" ({cfg, pkgs, lib, ...}:
+{lib, pkgs, config, ...}:
 let
+  cfg = config.mods.sys.services."incus-tailscale-proxy";
+
   mkProxyConfig = name: proxyCfg:
     let
       lxcName = "${name}-proxy";
@@ -205,47 +206,52 @@ NETPLAN
       };
     };
 in {
-  options.proxies = lib.mkOption {
-    type = lib.types.attrsOf (lib.types.submodule {
-      options = {
-        vmName = lib.mkOption {
-          type = lib.types.str;
-          description = "Incus VM name to proxy";
+  options.mods.sys.services."incus-tailscale-proxy" = {
+    enable = lib.mkEnableOption "Incus Tailscale Proxy — LXC-based tailscale ingress for Incus VMs";
+    proxies = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule {
+        options = {
+          vmName = lib.mkOption {
+            type = lib.types.str;
+            description = "Incus VM name to proxy";
+          };
+          internalBridge = lib.mkOption {
+            type = lib.types.str;
+            description = "Internal bridge name (e.g. incusbr-devserver)";
+          };
+          lxcIp = lib.mkOption {
+            type = lib.types.str;
+            description = "LXC static IP on internal bridge (gateway for VM)";
+          };
+          vmIp = lib.mkOption {
+            type = lib.types.str;
+            description = "VM static IP on internal bridge";
+          };
+          internalSubnet = lib.mkOption {
+            type = lib.types.str;
+            description = "Internal subnet CIDR (e.g. 10.0.1.0/24)";
+          };
+          preauthKeyFile = lib.mkOption {
+            type = lib.types.str;
+            description = "Host path to tailscale preauth key file";
+          };
+          loginServer = lib.mkOption {
+            type = lib.types.str;
+            description = "Headscale server URL";
+          };
+          enableLanForward = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = "Also DNAT from eth0 (br-lan) to vmIp";
+          };
         };
-        internalBridge = lib.mkOption {
-          type = lib.types.str;
-          description = "Internal bridge name (e.g. incusbr-devserver)";
-        };
-        lxcIp = lib.mkOption {
-          type = lib.types.str;
-          description = "LXC static IP on internal bridge (gateway for VM)";
-        };
-        vmIp = lib.mkOption {
-          type = lib.types.str;
-          description = "VM static IP on internal bridge";
-        };
-        internalSubnet = lib.mkOption {
-          type = lib.types.str;
-          description = "Internal subnet CIDR (e.g. 10.0.1.0/24)";
-        };
-        preauthKeyFile = lib.mkOption {
-          type = lib.types.str;
-          description = "Host path to tailscale preauth key file";
-        };
-        loginServer = lib.mkOption {
-          type = lib.types.str;
-          description = "Headscale server URL";
-        };
-        enableLanForward = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-          description = "Also DNAT from eth0 (br-lan) to vmIp";
-        };
-      };
-    });
-    default = {};
-    description = "Attribute set of proxy configs, keyed by proxy name";
+      });
+      default = {};
+      description = "Attribute set of proxy configs, keyed by proxy name";
+    };
   };
 
-  os = lib.mkIf cfg.enable (lib.mkMerge (lib.mapAttrsToList mkProxyConfig cfg.proxies));
-})
+  config = lib.mkIf cfg.enable (
+    lib.mkMerge (lib.mapAttrsToList mkProxyConfig cfg.proxies)
+  );
+}
