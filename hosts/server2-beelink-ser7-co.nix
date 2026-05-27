@@ -12,7 +12,7 @@ mkHostConfiguration (_: {
     imports = [
       (mkTailscaleProxy "devserver" {
         vmName         = "ubuntu-2404";
-        internalBridge = "incusbr-devserver";
+        internalBridge = "incusbr-dev";
         lxcIp          = "10.0.1.1";
         vmIp           = "10.0.1.2";
         internalSubnet = "10.0.1.0/24";
