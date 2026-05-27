@@ -174,11 +174,12 @@ in {
           incus exec ${lxcName} -- tailscale up \
             --authkey="$PREAUTH_KEY" \
             --login-server="${loginServer}" \
-            --accept-routes
+            --accept-routes \
+            --hostname="${vmName}"
         else
           echo "WARNING: preauthKeyFile not found at ${preauthKeyFile}" >&2
+          incus exec ${lxcName} -- tailscale set --hostname="${vmName}"
         fi
-        incus exec ${lxcName} -- tailscale set --hostname="${vmName}"
       '';
     };
 
