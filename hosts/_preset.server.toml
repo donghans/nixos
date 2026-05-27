@@ -20,7 +20,8 @@ caddy          = false
 bluetooth        = false
 docker           = false
 nix-cache-proxy    = false
-aws-roles-anywhere = false
+aws-roles-anywhere      = false
+incus-tailscale-proxy   = false
 
 [mods.gui]
 enable = false
