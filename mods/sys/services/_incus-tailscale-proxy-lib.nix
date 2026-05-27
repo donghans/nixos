@@ -96,12 +96,11 @@ in {
         fi
 
         for i in $(seq 1 24); do
-          STATUS=$(incus info ${lxcName} 2>/dev/null | awk '/^Status:/{print $2}')
-          [ "$STATUS" = "RUNNING" ] && break
+          incus exec ${lxcName} -- true 2>/dev/null && break
           sleep 5
         done
-        if [ "$STATUS" != "RUNNING" ]; then
-          echo "${lxcName} not RUNNING after 120s" >&2
+        if ! incus exec ${lxcName} -- true 2>/dev/null; then
+          echo "${lxcName} exec not ready after 120s" >&2
           exit 1
         fi
 
