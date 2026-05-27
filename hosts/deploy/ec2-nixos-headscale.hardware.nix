@@ -4,9 +4,9 @@
 {
   imports = [];
 
-  boot.initrd.availableKernelModules = [ "nvme" "xen_blkfront" "xen_netfront" ];
+  boot.initrd.availableKernelModules = [ "nvme" ];
   boot.initrd.kernelModules          = [];
-  boot.kernelModules                 = [];
+  boot.kernelModules                 = [ "ena" ];
   boot.extraModulePackages           = [];
 
   networking.useDHCP = lib.mkDefault true;

@@ -21,16 +21,20 @@
 
 ```
 인터넷
-  ├── e2.772610158.xyz → EC2 t4g.micro (aarch64, ap-northeast-2)
-  │     headscale 컨트롤 플레인
-  │     IAM Instance Profile → AWS 자격증명 (자동, 별도 설정 불필요)
-  │     litestream → S3 (headscale DB 실시간 백업)
-  │     월 ~$8 (인스턴스 $6.1 + EBS $1.6)
-  │
-  └── d.r.772610158.xyz → Lightsail $5 (x86_64, ap-northeast-2)
-        derper DERP 릴레이 (TCP 443 / UDP 3478 STUN)
-        tailscale exit node (headscale 클라이언트)
-        월 $5, 1TB 포함 트래픽 / 초과 $0.09/GB
+  └── Lightsail $5 (공인 IP, ap-northeast-2)
+        e2.772610158.xyz → Caddy → EC2 사설 IP:8080 (headscale 프록시)
+        d.r.772610158.xyz → derper DERP 릴레이 (TCP 443 / UDP 3478 STUN)
+        tailscale exit node
+        월 $5, 1TB 포함 트래픽
+          │
+          │ VPC Peering (Lightsail VPC ↔ default VPC)
+          │
+  EC2 t4g.micro (사설 IP only, aarch64, ap-northeast-2)
+        headscale 컨트롤 플레인 (127.0.0.1:8080, 외부 노출 없음)
+        IAM Instance Profile → AWS 자격증명 (자동, 별도 설정 불필요)
+        litestream → S3 (headscale DB 실시간 백업)
+        월 ~$8 (인스턴스 $6.1 + EBS $1.6)
+        SSH 접근: EIP 임시 부착 (설치/유지보수 시) → 평소엔 Tailscale IP
 
 합계: ~$13/월  (현재 $20 → $7 절감 + Roles Anywhere 복잡도 제거)
 ```
@@ -77,25 +81,39 @@ AWS 콘솔 → IAM → 역할 → 역할 만들기
 }
 ```
 
-### 3. EC2 인스턴스 생성
+### 3. Lightsail VPC Peering 활성화
+
+```
+Lightsail 콘솔 → Account → Advanced → Enable VPC peering (ap-northeast-2)
+```
+
+활성화 후 Lightsail 인스턴스에 사설 IP가 생김. 메모: `LIGHTSAIL_PRIVATE_IP=<사설 IPv4>`
+
+### 4. EC2 인스턴스 생성
 
 ```
 AWS 콘솔 → EC2 → 인스턴스 시작
   AMI: Amazon Linux 2023 (ARM)  ← nix 설치 후 nixstrap으로 NixOS 덮어씀
   인스턴스 유형: t4g.micro
+  네트워크: default VPC  ← VPC peering이 default VPC와 연결됨
+  퍼블릭 IP 자동 할당: 비활성화  ← 사설 IP만 사용
   키 페어: 새로 생성 → ec2-nixos-headscale → ~/.ssh/rnixup/ec2-nixos-headscale.pem 저장
   IAM 인스턴스 프로파일: ec2-headscale-role (위에서 생성)
   스토리지: gp3 20GB
   보안 그룹:
-    - TCP 22 (SSH, 내 IP만)
-    - TCP 443 (HTTPS)
-    - TCP 80 (HTTP, Let's Encrypt 갱신용)
-    - UDP 41641 (tailscale WireGuard, 선택)
+    - TCP 22  (SSH, EIP 부착 시 내 IP + Lightsail 사설 IP)
+    - TCP 8080 (headscale, Lightsail 사설 IP만)
 ```
 
-인스턴스 생성 후 퍼블릭 IP 메모: `EC2_IP=<퍼블릭 IPv4>`
+인스턴스 생성 후 사설 IP 메모: `EC2_PRIVATE_IP=<사설 IPv4>`
 
-### 4. Lightsail $5 인스턴스 생성
+EIP 생성 및 임시 부착 (rnixstrap 설치용):
+```
+AWS 콘솔 → EC2 → Elastic IPs → 탄력적 IP 주소 할당 → 인스턴스에 연결
+```
+`EC2_EIP=<탄력적 IP>`
+
+### 5. Lightsail $5 인스턴스 생성
 
 ```
 AWS 콘솔 → Lightsail → 인스턴스 생성
@@ -116,26 +134,28 @@ UDP 3478 — STUN
 UDP 41641 — tailscale WireGuard
 ```
 
-인스턴스 퍼블릭 IP 메모: `LIGHTSAIL_DERP_IP=<퍼블릭 IPv4>`
+인스턴스 퍼블릭 IP 메모: `LIGHTSAIL_IP=<퍼블릭 IPv4>`
 
-### 5. Cloudflare DNS 레코드 추가
+### 6. Cloudflare DNS 레코드 추가
 
 Cloudflare 대시보드 → 772610158.xyz → DNS 레코드:
 ```
-A  e2.772610158.xyz   →  <EC2_IP>              프록시: OFF (DNS only)
-A  d.r.772610158.xyz  →  <LIGHTSAIL_DERP_IP>   프록시: OFF (DNS only)
+A  e2.772610158.xyz   →  <LIGHTSAIL_IP>   프록시: OFF (DNS only)  ← headscale 도메인도 Lightsail
+A  d.r.772610158.xyz  →  <LIGHTSAIL_IP>   프록시: OFF (DNS only)
 ```
 
-EC2 IP는 단계 3, Lightsail DERP IP는 단계 4에서 확인.
+두 도메인 모두 Lightsail 공인 IP를 가리킴. EC2는 공인 IP 없음.
 
 ---
 
 ## EC2 headscale 설치
 
-### 6. EC2에 nix 설치
+> EIP가 부착된 상태에서 진행. 설치 완료 + Tailscale 등록 후 EIP 제거.
+
+### 7. EC2에 nix 설치
 
 ```bash
-EC2_IP=<퍼블릭 IPv4>
+EC2_IP=$EC2_EIP  # 탄력적 IP 사용
 ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@$EC2_IP
 
 # 서버에서:
@@ -143,11 +163,11 @@ curl -L https://nixos.org/nix/install | sh -s -- --daemon
 exit
 ```
 
-### 7. rnixstrap으로 NixOS 설치
+### 8. rnixstrap으로 NixOS 설치
 
 ```bash
 # 로컬 머신에서:
-EC2_IP=<퍼블릭 IPv4>
+EC2_IP=$EC2_EIP  # 탄력적 IP 사용
 
 # nixos 레포 sync 후 원격 실행
 ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@$EC2_IP \
@@ -163,7 +183,7 @@ nixstrap 대화형 프롬프트:
 
 설치 완료 후 SSH public key가 `hosts/deploy/ec2-nixos-headscale.pub`에 자동 생성됨.
 
-### 8. agenix 시크릿 재암호화
+### 9. agenix 시크릿 재암호화
 
 새 서버의 SSH 호스트 키를 시크릿 레포에 추가해야 OIDC secret을 복호화 가능:
 
@@ -176,7 +196,7 @@ ssh-keyscan -t ed25519 $EC2_IP
 nixsec  # 기존 방식대로
 ```
 
-### 9. OIDC 시크릿 배포
+### 10. OIDC 시크릿 배포
 
 ```bash
 # 기존 Lightsail 서버에서 OIDC 시크릿 확인 후 새 EC2에 배포
@@ -192,12 +212,12 @@ ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@$EC2_IP \
 
 ---
 
-## Lightsail $5 DERP 설치 (Amazon Linux 2023, NixOS 미사용)
+## Lightsail $5 DERP + headscale 프록시 설치
 
 > nixos-anywhere는 최소 1.5GB RAM 필요 → Lightsail $5 (512MB)에서 불가.  
 > Amazon Linux 2023 기본 이미지에 셸 스크립트로 직접 구성.
 
-### 10. headscale에서 preauth key 생성
+### 11. headscale에서 preauth key 생성
 
 ```bash
 # EC2 headscale이 이미 가동 중인 경우:
@@ -210,7 +230,7 @@ ssh -i ~/.ssh/rnixup/lightsail-nixos-headscale.pem ec2-user@<OLD_LIGHTSAIL_IP> \
   "sudo headscale preauthkeys create -u system --expiration 24h"
 ```
 
-### 11. 설정 스크립트 업로드 + 실행
+### 12. 설정 스크립트 업로드 + 실행
 
 ```bash
 DERP_IP=<LIGHTSAIL_DERP_IP>
@@ -231,7 +251,38 @@ ssh -i $PEM ec2-user@$DERP_IP \
 - derper 바이너리 다운로드 (tailscale 릴리즈에서 추출)
 - derper systemd 서비스 등록 + Let's Encrypt 인증서 자동 발급
 
-### 12. headscale에서 exit node 경로 승인
+### 13. Lightsail Caddy에 headscale 프록시 추가
+
+EC2 사설 IP를 확인한 후 Lightsail의 Caddy 설정에 추가:
+
+```
+# lightsail-nixos-derp.nix (또는 배포 스크립트)에서 Caddy 설정:
+e2.772610158.xyz {
+  reverse_proxy http://<EC2_PRIVATE_IP>:8080
+}
+
+d.r.772610158.xyz {
+  # 기존 DERP 설정
+}
+```
+
+Lightsail Caddy 설정 반영 후 Lightsail에서 확인:
+```bash
+curl -s https://e2.772610158.xyz/health  # headscale health endpoint
+```
+
+### 14. EIP 제거 (Tailscale 등록 완료 후)
+
+```
+AWS 콘솔 → EC2 → Elastic IPs → 인스턴스에서 분리 → 주소 해제
+```
+
+이후 EC2 접근은 Tailscale IP로만:
+```bash
+ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@<TAILSCALE_IP>
+```
+
+### 15. headscale에서 exit node 경로 승인
 
 ```bash
 ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@$EC2_IP \
@@ -245,7 +296,7 @@ ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@$EC2_IP \
 
 ## 헤드스케일 마이그레이션
 
-### 13. headscale DB를 기존 서버에서 복사
+### 16. headscale DB를 기존 서버에서 복사
 
 ```bash
 # 기존 headscale DB 백업
@@ -269,7 +320,7 @@ ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@$EC2_IP \
    sudo systemctl restart headscale"
 ```
 
-### 14. EC2에서 headscale 동작 확인
+### 17. EC2에서 headscale 동작 확인
 
 ```bash
 ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@$EC2_IP
@@ -277,15 +328,15 @@ ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@$EC2_IP
   sudo systemctl status headscale litestream
 ```
 
-### 15. Cloudflare DNS 전파 확인
+### 18. Cloudflare DNS 전파 확인
 
-단계 5에서 추가한 레코드가 전파됐는지 확인:
+단계 6에서 추가한 레코드가 전파됐는지 확인:
 ```bash
-dig e2.772610158.xyz +short    # EC2 IP 반환 확인
-dig d.r.772610158.xyz +short   # Lightsail DERP IP 반환 확인
+dig e2.772610158.xyz +short    # Lightsail IP 반환 확인
+dig d.r.772610158.xyz +short   # Lightsail IP 반환 확인
 ```
 
-### 16. preauth 라이브러리 업데이트
+### 19. preauth 라이브러리 업데이트
 
 `core/scripts/nixstrap.lib-preauth.sh`에서 headscale 위치 참조 파일을 변경:
 
@@ -307,7 +358,7 @@ git push
 
 ## 검증
 
-### 17. 전체 동작 확인
+### 20. 전체 동작 확인
 
 ```bash
 # headscale 노드 목록 (EC2에서)
@@ -332,14 +383,14 @@ aws ssm describe-instance-information --region ap-northeast-2
 
 ## 기존 Lightsail $20 정리 (검증 완료 후)
 
-### 18. 기존 서버 종료
+### 21. 기존 서버 종료
 
 ```bash
 # 1주일 이상 신규 구성 안정 확인 후 진행
 # AWS 콘솔 → Lightsail → lightsail-nixos-headscale 인스턴스 → 삭제
 ```
 
-### 19. 불필요한 리소스 정리
+### 22. 불필요한 리소스 정리
 
 - Roles Anywhere Trust Anchor (AWS 콘솔 → IAM Roles Anywhere)
 - Roles Anywhere Profile / Role

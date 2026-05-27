@@ -130,13 +130,7 @@ mkHostConfiguration (_: {
     };
 
     # == EC2 네트워크 설정 ==
-    # IMDSv2 라우트: IAM Instance Profile 접근에 필요
-    systemd.network.networks."05-ens5" = {
-      matchConfig.Name = "ens5";
-      networkConfig.DHCP = "ipv4";
-      routes = [{ Destination = "169.254.169.254/32"; Scope = "link"; }];
-      dhcpV4Config.UseDNS = false;
-    };
+    # IMDS 라우트는 DHCP가 자동 처리 — 별도 설정 불필요
     networking.nameservers = ["1.1.1.1" "8.8.8.8"];
     services.resolved.extraConfig = "Cache=no-negative";
 
