@@ -16,6 +16,3 @@ bootLoader = "grub-uefi"
 domain   = "e2.772610158.xyz"
 ssh-user = "ec2-user"
 ssh-key  = "~/.ssh/rnixup/ec2-nixos-headscale.pem"
-
-[mods.sys.services]
-caddy = true
