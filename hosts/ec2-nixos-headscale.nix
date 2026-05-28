@@ -10,16 +10,15 @@
 }:
 let
   headscaleDomain      = "e2.772610158.xyz";
-  derpDomain           = "d.r.772610158.xyz";
   oidcClientSecretFile = "/var/lib/nix-secrets/headscale/oidc_client_secret";
-  s3BackupBucket       = "PLACEHOLDER-headscale-backup";  # 실제 S3 버킷명으로 교체
+  s3BackupBucket       = "headscale-backup-732799293614-ap-northeast-2-an";
 
   headscaleConfigFile = (pkgs.formats.yaml {}).generate "headscale.yaml" {
     disable_check_updates = true;
     unix_socket            = "/run/headscale/headscale.sock";
     unix_socket_permission = "0660";
     server_url             = "https://${headscaleDomain}";
-    listen_addr            = "127.0.0.1:8080";
+    listen_addr            = "0.0.0.0:8080";  # Lightsail VPC 백본에서 포워딩 받음
     grpc_listen_addr       = "127.0.0.1:50443";
     metrics_listen_addr    = "127.0.0.1:9090";
     log.level              = "info";
@@ -33,7 +32,7 @@ let
       sqlite.path  = "/var/lib/headscale/db.sqlite";
     };
     derp = {
-      server.enabled     = false;  # DERP 릴레이는 lightsail-nixos-derp에서 운영
+      server.enabled     = false;  # DERP 릴레이는 lightsail-headscale에서 운영
       urls               = ["https://controlplane.tailscale.com/derpmap/default"];
       paths              = ["/etc/headscale/derp-custom.yaml"];
       auto_update_enabled = true;
@@ -87,7 +86,7 @@ mkHostConfiguration (_: {
     '';
     users.users.ec2-user.extraGroups = ["headscale"];
 
-    # == 커스텀 DERP 맵 (lightsail-nixos-derp 서버) ==
+    # == 커스텀 DERP 맵 (lightsail-headscale — headscale 도메인과 동일) ==
     environment.etc."headscale/derp-custom.yaml".text = ''
       regions:
         900:
@@ -97,7 +96,7 @@ mkHostConfiguration (_: {
           nodes:
             - name: 900a
               regionid: 900
-              hostname: ${derpDomain}
+              hostname: ${headscaleDomain}
               stunport: 3478
               derpport: 443
     '';
@@ -139,17 +138,6 @@ mkHostConfiguration (_: {
 
     # == SSM Session Manager (Instance Profile 자동 인증) ==
     services.amazon-ssm-agent.enable = true;
-
-    # == Caddy 리버스 프록시 ==
-    mods.sys.services.caddy = {
-      configText = ''
-        ${headscaleDomain} {
-          reverse_proxy /web* localhost:80
-          reverse_proxy * localhost:8080
-        }
-      '';
-      reloadUser = "ec2-user";
-    };
 
     systemd.tmpfiles.rules = ["d /opt/landings 0755 ec2-user users -"];
   };

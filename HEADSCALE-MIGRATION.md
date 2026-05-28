@@ -21,16 +21,18 @@
 
 ```
 인터넷
-  └── Lightsail $5 (공인 IP, ap-northeast-2)
-        e2.772610158.xyz → Caddy → EC2 사설 IP:8080 (headscale 프록시)
-        d.r.772610158.xyz → derper DERP 릴레이 (TCP 443 / UDP 3478 STUN)
-        tailscale exit node
-        월 $5, 1TB 포함 트래픽
+  └── e2.772610158.xyz → Lightsail $5 (공인 IP, ap-northeast-2)
+        ├── Caddy :443 (TLS 종료)
+        │     ├── /derp* → localhost:3340 (derper HTTP 모드)
+        │     └── * → EC2 사설 IP:8080 (VPC 백본, 무료)
+        ├── derper STUN UDP :3478
+        ├── tailscale exit node
+        └── 월 $5, 1TB 포함 트래픽
           │
           │ VPC Peering (Lightsail VPC ↔ default VPC)
           │
   EC2 t4g.micro (사설 IP only, aarch64, ap-northeast-2)
-        headscale 컨트롤 플레인 (127.0.0.1:8080, 외부 노출 없음)
+        headscale 컨트롤 플레인 (0.0.0.0:8080, 외부 노출 없음)
         IAM Instance Profile → AWS 자격증명 (자동, 별도 설정 불필요)
         litestream → S3 (headscale DB 실시간 백업)
         월 ~$8 (인스턴스 $6.1 + EBS $1.6)
@@ -101,7 +103,7 @@ AWS 콘솔 → EC2 → 인스턴스 시작
   IAM 인스턴스 프로파일: ec2-headscale-role (위에서 생성)
   스토리지: gp3 20GB
   보안 그룹:
-    - TCP 22  (SSH, EIP 부착 시 내 IP + Lightsail 사설 IP)
+    - TCP 22  (SSH, EIP 부착 시 내 IP만)
     - TCP 8080 (headscale, Lightsail 사설 IP만)
 ```
 
@@ -118,19 +120,19 @@ AWS 콘솔 → EC2 → Elastic IPs → 탄력적 IP 주소 할당 → 인스턴�
 ```
 AWS 콘솔 → Lightsail → 인스턴스 생성
   리전: 서울 (ap-northeast-2)
-  OS: Amazon Linux 2023  ← nix 설치 후 nixstrap으로 NixOS 덮어씀
+  OS: Amazon Linux 2023  ← NixOS 미사용, 셸 스크립트로 직접 구성
   플랜: $5 (1GB RAM, 1TB 전송)
-  인스턴스 이름: lightsail-nixos-derp
+  인스턴스 이름: lightsail-headscale
 ```
 
-키 페어: 기존 키 또는 새로 생성 → `~/.ssh/rnixup/lightsail-nixos-derp.pem`
+키 페어: 기존 키 또는 새로 생성 → `~/.ssh/rnixup/lightsail-headscale.pem`
 
 Lightsail 방화벽 설정 (인스턴스 → 네트워킹 탭):
 ```
 TCP 22   — SSH
-TCP 80   — ACME Let's Encrypt
-TCP 443  — DERP relay
-UDP 3478 — STUN
+TCP 80   — ACME Let's Encrypt (Caddy)
+TCP 443  — headscale + DERP relay (Caddy TLS 종료)
+UDP 3478 — STUN (derper 직접)
 UDP 41641 — tailscale WireGuard
 ```
 
@@ -140,11 +142,10 @@ UDP 41641 — tailscale WireGuard
 
 Cloudflare 대시보드 → 772610158.xyz → DNS 레코드:
 ```
-A  e2.772610158.xyz   →  <LIGHTSAIL_IP>   프록시: OFF (DNS only)  ← headscale 도메인도 Lightsail
-A  d.r.772610158.xyz  →  <LIGHTSAIL_IP>   프록시: OFF (DNS only)
+A  e2.772610158.xyz  →  <LIGHTSAIL_IP>  프록시: OFF (DNS only)
 ```
 
-두 도메인 모두 Lightsail 공인 IP를 가리킴. EC2는 공인 IP 없음.
+모든 외부 트래픽(headscale + DERP)이 Lightsail 단일 IP로 진입. EC2는 공인 IP 없음.
 
 ---
 
@@ -212,7 +213,7 @@ ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@$EC2_IP \
 
 ---
 
-## Lightsail $5 DERP + headscale 프록시 설치
+## Lightsail $5 설치 (Amazon Linux 2023, NixOS 미사용)
 
 > nixos-anywhere는 최소 1.5GB RAM 필요 → Lightsail $5 (512MB)에서 불가.  
 > Amazon Linux 2023 기본 이미지에 셸 스크립트로 직접 구성.
@@ -233,23 +234,24 @@ ssh -i ~/.ssh/rnixup/lightsail-nixos-headscale.pem ec2-user@<OLD_LIGHTSAIL_IP> \
 ### 12. 설정 스크립트 업로드 + 실행
 
 ```bash
-DERP_IP=<LIGHTSAIL_DERP_IP>
-PEM=~/.ssh/rnixup/lightsail-nixos-derp.pem
+LIGHTSAIL_IP=<LIGHTSAIL_IP>
+PEM=~/.ssh/rnixup/lightsail-headscale.pem
 PREAUTH_KEY=<위에서_생성한_키>
+EC2_PRIVATE_IP=<EC2_프라이빗_IPv4>
 
 # 스크립트 업로드
-scp -i $PEM hosts/deploy/lightsail-derp-setup.sh ec2-user@$DERP_IP:/tmp/
+scp -i $PEM hosts/deploy/lightsail-headscale-setup.sh ec2-user@$LIGHTSAIL_IP:/tmp/
 
 # 서버에서 root로 실행
-ssh -i $PEM ec2-user@$DERP_IP \
-  "sudo bash /tmp/lightsail-derp-setup.sh '$PREAUTH_KEY'"
+ssh -i $PEM ec2-user@$LIGHTSAIL_IP \
+  "sudo bash /tmp/lightsail-headscale-setup.sh '$PREAUTH_KEY' '$EC2_PRIVATE_IP'"
 ```
 
 스크립트가 자동으로 처리하는 항목:
 - tailscale 설치 + headscale 등록 (exit node 광고)
 - IP 포워딩 활성화
-- derper 바이너리 다운로드 (tailscale 릴리즈에서 추출)
-- derper systemd 서비스 등록 + Let's Encrypt 인증서 자동 발급
+- derper 바이너리 다운로드 (tailscale 릴리즈에서 추출), HTTP 모드(--dev)로 실행
+- Caddy 설치 + TLS 종료 + 라우팅 설정 (DERP → 로컬, headscale → EC2 private IP)
 
 ### 13. Lightsail Caddy에 headscale 프록시 추가
 
@@ -287,7 +289,7 @@ ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@<TAILSCALE_IP>
 ```bash
 ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@$EC2_IP \
   "sudo headscale routes list"
-# derp-relay의 exit-route ID 확인 후:
+# lightsail-headscale의 exit-route ID 확인 후:
 ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@$EC2_IP \
   "sudo headscale routes enable -r <ROUTE_ID>"
 ```
@@ -333,7 +335,6 @@ ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@$EC2_IP
 단계 6에서 추가한 레코드가 전파됐는지 확인:
 ```bash
 dig e2.772610158.xyz +short    # Lightsail IP 반환 확인
-dig d.r.772610158.xyz +short   # Lightsail IP 반환 확인
 ```
 
 ### 19. preauth 라이브러리 업데이트
@@ -373,7 +374,7 @@ ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@$EC2_IP \
 tailscale debug derp --node 900a
 
 # exit node 확인
-tailscale exit-node list  # derp-relay 표시 확인
+tailscale exit-node list  # lightsail-headscale 표시 확인
 
 # SSM 확인
 aws ssm describe-instance-information --region ap-northeast-2
@@ -401,12 +402,15 @@ aws ssm describe-instance-information --region ap-northeast-2
 
 ## 주의사항
 
-- **derper 바이너리**: `lightsail-derp-setup.sh`이 tailscale 릴리즈 tarball에서 자동 추출.  
+- **derper 바이너리**: `lightsail-headscale-setup.sh`이 tailscale 릴리즈 tarball에서 자동 추출.  
   릴리즈에 포함되지 않은 버전이면 스크립트가 명시적으로 오류를 출력하고 대안을 안내함.
 
-- **DERP 인증서**: derper가 Let's Encrypt 인증서를 `/var/lib/derper/`에 저장.  
-  `d.r.772610158.xyz`의 Cloudflare DNS가 Lightsail IP를 가리켜야 ACME 발급 성공.  
-  DNS 레코드가 없거나 전파 전이면 derper 서비스가 인증서 발급 실패로 시작 안 됨.
+- **TLS 인증서**: Caddy가 `e2.772610158.xyz`에 대한 Let's Encrypt 인증서를 자동 발급·갱신.  
+  Cloudflare DNS가 Lightsail IP를 가리켜야 ACME 발급 성공.  
+  DNS 전파 전이면 caddy 서비스가 인증서 발급 실패로 시작 안 됨.
+
+- **derper HTTP 모드**: derper는 `--dev` 플래그로 HTTP localhost:3340에서 동작 (TLS 없음).  
+  외부 TLS는 Caddy가 전담, derper는 STUN UDP:3478만 직접 외부 노출.
 
 - **headscale noise key**: 기존 DB를 복사하면 noise private key도 기존 것 사용.  
   새 서버에서 `/var/lib/headscale/noise_private.key`가 없으면 headscale이 새로 생성  
