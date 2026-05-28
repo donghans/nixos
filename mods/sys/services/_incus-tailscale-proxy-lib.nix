@@ -7,8 +7,10 @@
 #   in mkHostConfiguration (_: {
 #     os.imports = [(mkTailscaleProxy "devserver" { vmName = "ubuntu-2404"; ... })];
 #   })
-{lib, pkgs}:
-name: {
+{
+  lib,
+  pkgs,
+}: name: {
   vmName,
   internalBridge,
   lxcIp,
@@ -35,15 +37,15 @@ in {
       };
       linkConfig.RequiredForOnline = "no";
     };
-    networking.firewall.trustedInterfaces = [ internalBridge ];
+    networking.firewall.trustedInterfaces = [internalBridge];
     boot.kernel.sysctl."net.ipv6.conf.${internalBridge}.accept_ra" = 0;
 
     systemd.services."incus-create-${lxcName}" = {
       description = "Create Alpine LXC proxy container ${lxcName} if not exists";
-      after = [ "incus-startup.service" "systemd-networkd.service" ];
-      requires = [ "incus-startup.service" ];
-      wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.incus pkgs.coreutils pkgs.gnugrep ];
+      after = ["incus-startup.service" "systemd-networkd.service"];
+      requires = ["incus-startup.service"];
+      wantedBy = ["multi-user.target"];
+      path = [pkgs.incus pkgs.coreutils pkgs.gnugrep];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
@@ -94,10 +96,10 @@ in {
 
     systemd.services."incus-setup-${lxcName}" = {
       description = "Setup tailscale and iptables in ${lxcName} LXC";
-      after = [ "incus-create-${lxcName}.service" ];
-      requires = [ "incus-create-${lxcName}.service" ];
-      wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.incus pkgs.coreutils pkgs.gnugrep pkgs.gawk ];
+      after = ["incus-create-${lxcName}.service"];
+      requires = ["incus-create-${lxcName}.service"];
+      wantedBy = ["multi-user.target"];
+      path = [pkgs.incus pkgs.coreutils pkgs.gnugrep pkgs.gawk];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
@@ -185,73 +187,73 @@ in {
 
     systemd.services."incus-update-vm-nic-${name}" = {
       description = "Move ${vmName} NIC from br-lan to ${internalBridge}";
-      after = [ "incus-create-${lxcName}.service" "systemd-networkd.service" ];
-      requires = [ "incus-create-${lxcName}.service" ];
-      wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.incus pkgs.coreutils pkgs.gnugrep pkgs.gawk pkgs.findutils ];
+      after = ["incus-create-${lxcName}.service" "systemd-networkd.service"];
+      requires = ["incus-create-${lxcName}.service"];
+      wantedBy = ["multi-user.target"];
+      path = [pkgs.incus pkgs.coreutils pkgs.gnugrep pkgs.gawk pkgs.findutils];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
         TimeoutStartSec = "300";
       };
       script = ''
-        if incus config show ${vmName} --expanded 2>/dev/null | grep -q 'parent: ${internalBridge}'; then
-          exit 0
-        fi
+                if incus config show ${vmName} --expanded 2>/dev/null | grep -q 'parent: ${internalBridge}'; then
+                  exit 0
+                fi
 
-        if ! incus info ${vmName} &>/dev/null; then
-          echo "VM ${vmName} not found, skipping NIC update" >&2
-          exit 1
-        fi
+                if ! incus info ${vmName} &>/dev/null; then
+                  echo "VM ${vmName} not found, skipping NIC update" >&2
+                  exit 1
+                fi
 
-        STATUS=$(incus info ${vmName} 2>/dev/null | awk '/^Status:/{print $2}')
-        if [ "$STATUS" = "RUNNING" ]; then
-          incus stop ${vmName} --force
-          for i in $(seq 1 12); do
-            STATUS=$(incus info ${vmName} 2>/dev/null | awk '/^Status:/{print $2}')
-            [ "$STATUS" = "STOPPED" ] && break
-            sleep 5
-          done
-        fi
+                STATUS=$(incus info ${vmName} 2>/dev/null | awk '/^Status:/{print $2}')
+                if [ "$STATUS" = "RUNNING" ]; then
+                  incus stop ${vmName} --force
+                  for i in $(seq 1 12); do
+                    STATUS=$(incus info ${vmName} 2>/dev/null | awk '/^Status:/{print $2}')
+                    [ "$STATUS" = "STOPPED" ] && break
+                    sleep 5
+                  done
+                fi
 
-        incus config device remove ${vmName} eth0 2>/dev/null || true
-        incus config device add ${vmName} eth0 nic \
-          nictype=bridged parent=${internalBridge} mtu=1400
+                incus config device remove ${vmName} eth0 2>/dev/null || true
+                incus config device add ${vmName} eth0 nic \
+                  nictype=bridged parent=${internalBridge} mtu=1400
 
-        incus start ${vmName}
+                incus start ${vmName}
 
-        for i in $(seq 1 36); do
-          incus exec ${vmName} -- true 2>/dev/null && break
-          sleep 5
-        done
+                for i in $(seq 1 36); do
+                  incus exec ${vmName} -- true 2>/dev/null && break
+                  sleep 5
+                done
 
-        if ! incus exec ${vmName} -- true 2>/dev/null; then
-          echo "VM ${vmName} agent not reachable after 180s" >&2
-          exit 1
-        fi
+                if ! incus exec ${vmName} -- true 2>/dev/null; then
+                  echo "VM ${vmName} agent not reachable after 180s" >&2
+                  exit 1
+                fi
 
-        NETPLAN_TMP=$(mktemp)
-        cat > "$NETPLAN_TMP" << 'NETPLAN'
-network:
-  version: 2
-  ethernets:
-    internal:
-      match:
-        name: 'en*'
-      set-name: eth0
-      addresses:
-        - ${vmIp}/24
-      routes:
-        - to: default
-          via: ${lxcIp}
-      nameservers:
-        addresses: [1.1.1.1, 8.8.8.8]
-NETPLAN
-        incus file push "$NETPLAN_TMP" ${vmName}/etc/netplan/50-incus-static.yaml --uid 0 --gid 0 --mode 0600
-        rm "$NETPLAN_TMP"
+                NETPLAN_TMP=$(mktemp)
+                cat > "$NETPLAN_TMP" << 'NETPLAN'
+        network:
+          version: 2
+          ethernets:
+            internal:
+              match:
+                name: 'en*'
+              set-name: eth0
+              addresses:
+                - ${vmIp}/24
+              routes:
+                - to: default
+                  via: ${lxcIp}
+              nameservers:
+                addresses: [1.1.1.1, 8.8.8.8]
+        NETPLAN
+                incus file push "$NETPLAN_TMP" ${vmName}/etc/netplan/50-incus-static.yaml --uid 0 --gid 0 --mode 0600
+                rm "$NETPLAN_TMP"
 
-        incus exec ${vmName} -- find /etc/netplan -name "*.yaml" -not -name "50-incus-static.yaml" -delete
-        incus exec ${vmName} -- netplan apply
+                incus exec ${vmName} -- find /etc/netplan -name "*.yaml" -not -name "50-incus-static.yaml" -delete
+                incus exec ${vmName} -- netplan apply
       '';
     };
   };
