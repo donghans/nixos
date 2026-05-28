@@ -223,6 +223,14 @@ ask_ssh_key() {
     while true; do
         printf "\n"
         local _key_default="${_TOML_SSH_KEY:-${_BOOTSTRAP_SSH_KEY:-}}"
+        # ~/.ssh/rnixup/<hostname>.* 에 이미 복사된 키가 있으면 기본값으로 사용
+        if [ -z "$_key_default" ]; then
+            local _f
+            for _f in "$HOME/.ssh/rnixup/${_HOSTNAME}."*; do
+                [[ "$_f" == *.env ]] && continue
+                [ -f "$_f" ] && _key_default="$_f" && break
+            done
+        fi
         local _key_prompt
         if [ -n "$_key_default" ]; then
             _key_prompt="$(_log_prompt_rl)SSH .pem 키 파일 경로 [현재: $_key_default] (Tab 자동완성): "
