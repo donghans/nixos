@@ -2,6 +2,7 @@
 # IAM Instance Profile로 AWS 인증 (Roles Anywhere / step-ca 불필요)
 # litestream → S3 자동 백업 (Instance Profile 자격증명 사용)
 # 연결 정보: ~/.ssh/rnixup/ec2-nixos-headscale.bootstrap.env
+cloud      = "aws"
 preset     = "server"
 type       = "server"
 system     = "aarch64-linux"

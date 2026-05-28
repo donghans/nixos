@@ -99,7 +99,7 @@ with lib; {
       cloudProvider = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Cloud provider identifier (e.g. \"aws\"). Auto-injected from deploy.cloud in host.toml. Enables vendor-specific modules.";
+        description = "Cloud provider identifier (e.g. \"aws\"). Set via top-level cloud field in host.toml. Enables vendor-specific modules (kernel params, SSM agent, etc).";
       };
     };
   };

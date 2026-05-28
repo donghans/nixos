@@ -15,9 +15,6 @@ mkHostConfiguration (_: {
     # EC2 보안그룹이 외부 트래픽 제어 — NixOS 방화벽 비활성화
     networking.firewall.enable = false;
 
-    # == SSM Session Manager (Instance Profile 자동 인증) ==
-    services.amazon-ssm-agent.enable = true;
-
     systemd.tmpfiles.rules = ["d /opt/landings 0755 ec2-user users -"];
   };
   hm = {};

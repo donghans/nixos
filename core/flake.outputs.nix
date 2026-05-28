@@ -137,7 +137,7 @@
         bootLoader = resolved.bootLoader or "systemd-boot";
         hasDeployRs = (resolved.deploy or null) != null;
         isRemote = (resolved.deploy or null) != null || resolved.type == "server";
-        cloudProvider = resolved.deploy.cloud or null;
+        cloudProvider = resolved.cloud or null;
       };
     presetMods = allPresets.${resolved.preset}.mods;
     mergedMods = nixpkgs.lib.recursiveUpdate presetMods resolved.mods;

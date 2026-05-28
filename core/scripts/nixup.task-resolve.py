@@ -123,6 +123,8 @@ for entry in sorted(os.listdir(hosts_dir)):
         deploy_section = dict(deploy_section)
         deploy_section["sshKey"] = os.path.expanduser(deploy_section["sshKey"])
 
+    cloud_provider = host.get("cloud") or (deploy_section or {}).get("cloud")
+
     all_resolved[hostname] = {
         "hostname": hostname,
         "system": host.get("system", base["system"]),
@@ -132,6 +134,7 @@ for entry in sorted(os.listdir(hosts_dir)):
         "tmpfsSize": host.get("tmpfsSize"),  # None → Nix 기본값 적용 ("100%")
         "zramPercent": host.get("zramPercent"),  # None → Nix 기본값 적용 (50)
         "bootLoader": host.get("bootLoader", "systemd-boot"),
+        "cloud": cloud_provider,             # None → 클라우드 설정 미적용
         "deploy": deploy_section,            # None → 로컬 호스트 (배포 대상 아님)
         "diskDevice":    host.get("diskDevice",    base["diskDevice"]),
         "bootDevice":    host.get("bootDevice",    base["bootDevice"]),
