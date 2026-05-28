@@ -4,6 +4,7 @@
   ...
 }: let
   base = mkModOf "mods.gui" __curPos "Custom Notification Logger" ({
+    cfg,
     config,
     pkgs,
     lib,
