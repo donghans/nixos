@@ -17,6 +17,7 @@
     metrics_listen_addr = "127.0.0.1:9090";
     log.level = "info";
     noise.private_key_path = "/var/lib/headscale/noise_private.key";
+    derp.server.private_key_path = "/var/lib/headscale/derp_server_private.key";
     prefixes = {
       v4 = "100.64.0.0/10";
       allocation = "sequential";
