@@ -34,7 +34,7 @@ mkMod __curPos "Tailscale Mesh VPN" ({
     };
   };
   os = lib.mkMerge [
-    {
+    (lib.mkIf cfg.enable {
       services.tailscale.enable = true;
       services.tailscale.extraSetFlags = ["--operator=${config.workspace.username}"];
       # nixos-fw의 기본 정책이 drop이라 tailscale0 인터페이스에서 오는
@@ -61,9 +61,9 @@ mkMod __curPos "Tailscale Mesh VPN" ({
         matchConfig.OriginalName = "en* eth* wl*";
         linkConfig.MTUBytes = "1400";
       };
-    }
+    })
     # preauth key 파일로 자동 인증하는 oneshot 서비스
-    (lib.mkIf (cfg.preauthUser != null && cfg.preauthName != null) (let
+    (lib.mkIf (cfg.enable && cfg.preauthUser != null && cfg.preauthName != null) (let
       keyFile = "/var/lib/nix-secrets/tailscale/${cfg.preauthUser}/${cfg.preauthName}.preauth-key";
     in {
       systemd.services.tailscale-autoauth = {

@@ -84,7 +84,7 @@
   in {
     os = lib.mkMerge [
       # cfg.enable → svcCfg.enable 캐스케이드 (NixOS 컨텍스트)
-      {services.custom-notify-logger.enable = lib.mkDefault true;}
+      (lib.mkIf cfg.enable {services.custom-notify-logger.enable = lib.mkDefault true;})
 
       (lib.mkIf svcCfg.enable {
         # 전역 로그 디렉터리 생성 (Sticky Bit + 실행 권한만 부여 → 타 사용자 파일 목록 열람 차단)
@@ -121,7 +121,7 @@
     ];
     hm = lib.mkMerge [
       # cfg.enable → svcCfg.enable 캐스케이드 (HM 컨텍스트)
-      {services.custom-notify-logger.enable = lib.mkDefault true;}
+      (lib.mkIf cfg.enable {services.custom-notify-logger.enable = lib.mkDefault true;})
 
       (lib.mkIf svcCfg.enable {
         # == Home Manager: 사용자 서비스 등록 (섹션별 중첩 키 구조) ==
