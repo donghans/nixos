@@ -29,6 +29,8 @@ in
         advertiseRoutes = ["192.168.11.0/24"];
       };
 
+      services.tailscale.useRoutingFeatures = "server";
+
       # eth0 → br-lan 브리지 슬레이브 (incus VM이 실제 LAN IP 받도록)
       systemd.network.netdevs."10-br-lan" = {
         netdevConfig = {
