@@ -26,9 +26,17 @@
       sqlite.path = "/var/lib/headscale/db.sqlite";
     };
     derp = {
-      server.enabled = false; # DERP 릴레이는 lightsail-headscale에서 운영
+      server = {
+        enabled = true;
+        # Caddy(Lightsail $5) → EC2:8080으로 프록시됨
+        # stun_port: -1 = 비활성화 (EC2에 공인 IP 없어 UDP 미지원)
+        region_id = 900;
+        region_code = "kr-ec2";
+        region_name = "Korea (EC2)";
+        stun_port = -1;
+      };
       urls = ["https://controlplane.tailscale.com/derpmap/default"];
-      paths = ["/etc/headscale/derp-custom.yaml"];
+      paths = [];
       auto_update_enabled = true;
       update_frequency = "3h";
     };
@@ -108,20 +116,7 @@ in {
     "z ${oidcClientSecretFile} 0640 headscale headscale -"
   ];
 
-  # == 커스텀 DERP 맵 (lightsail-headscale — headscale 도메인과 동일) ==
-  environment.etc."headscale/derp-custom.yaml".text = ''
-    regions:
-      900:
-        regionid: 900
-        regioncode: kr-lightsail
-        regionname: Korea (Lightsail)
-        nodes:
-          - name: 900a
-            regionid: 900
-            hostname: ${headscaleDomain}
-            stunport: 3478
-            derpport: 443
-  '';
+  # 커스텀 DERP 맵 제거 — headscale 내장 DERP(server.enabled=true) 사용
 
   # == litestream → S3 (headscale DB 실시간 백업) ==
   # IAM Instance Profile 자격증명 자동 사용 — 별도 키 불필요
