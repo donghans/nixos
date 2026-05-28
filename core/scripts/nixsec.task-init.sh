@@ -14,10 +14,8 @@ _run_init() {
     _login=$(gh api user --jq '.login' 2>/dev/null || true)
     local _default_repo="${_login:+${_login}/}nix-secrets"
 
-    log_msg "Input" "레포 이름 (Enter = 기본값, org/repo 형태도 가능)"
     local _input
-    # read -p로 프롬프트를 readline에 전달해야 백스페이스가 프롬프트 앞으로 넘어가지 않음
-    read -rep "  [$_default_repo]: " _input
+    read -rep "$(_log_prompt_rl)레포 이름 [$_default_repo] (org/repo 형태도 가능, Enter = 기본값): " _input
     local _repo="${_input:-$_default_repo}"
     # owner 없이 입력한 경우 (예: "my-secrets") → 자동으로 "<login>/my-secrets"으로 보완
     [[ "$_repo" != */* ]] && _repo="${_login}/${_repo}"

@@ -38,6 +38,15 @@ _resolve_ssh_info() {
         _INJ_SSH_KEY="${_BOOTSTRAP_SSH_KEY:-}"
         _INJ_SSH_USER="${_BOOTSTRAP_SSH_USER:-root}"
     fi
+
+    # ~/.ssh/rnixup/<hostname>.* 에서 키 자동 탐색 (rnixstrap 패턴)
+    if [ -z "$_INJ_SSH_KEY" ]; then
+        local _f
+        for _f in "$HOME/.ssh/rnixup/${hostname}."*; do
+            [[ "$_f" == *.env ]] && continue
+            [ -f "$_f" ] && _INJ_SSH_KEY="$_f" && break
+        done
+    fi
 }
 
 _run_remote_inject() {
@@ -52,8 +61,7 @@ _run_remote_inject() {
     local -a _host_labels=("${_hosts[@]}" "직접 입력")
     _pick "대상 호스트 선택:" "${_host_labels[@]}"
     if [ "$REPLY" -ge "${#_hosts[@]}" ]; then
-        log_msg "Input" "호스트명: "
-        read -re _hostname
+        read -rep "$(_log_prompt_rl)호스트명: " _hostname
     else
         _hostname="${_hosts[$REPLY]}"
     fi
@@ -62,23 +70,20 @@ _run_remote_inject() {
     _resolve_ssh_info "$_hostname"
 
     if [ -z "$_INJ_IP" ]; then
-        log_msg "Input" "IP 또는 호스트명: "
-        read -re _INJ_IP
+        read -rep "$(_log_prompt_rl)IP 또는 호스트명: " _INJ_IP
     else
         log_msg "Notice" "IP: $_INJ_IP (자동 조회)"
     fi
 
     if [ -z "$_INJ_SSH_KEY" ]; then
-        log_msg "Input" "SSH 키 파일 경로 (Tab 완성): "
-        read -re _INJ_SSH_KEY
+        read -rep "$(_log_prompt_rl)SSH 키 파일 경로 (Tab 완성): " _INJ_SSH_KEY
         _INJ_SSH_KEY="${_INJ_SSH_KEY/#\~/$HOME}"
     else
         log_msg "Notice" "SSH 키: $_INJ_SSH_KEY (자동 조회)"
     fi
 
     if [ -z "$_INJ_SSH_USER" ]; then
-        log_msg "Input" "SSH 유저명 (기본값 root): "
-        read -re _INJ_SSH_USER
+        read -rep "$(_log_prompt_rl)SSH 유저명 (기본값 root): " _INJ_SSH_USER
         _INJ_SSH_USER="${_INJ_SSH_USER:-root}"
     else
         log_msg "Notice" "SSH 유저: $_INJ_SSH_USER (자동 조회)"
@@ -110,8 +115,7 @@ _run_local_apply() {
 
     if [ ! -f "$_config_file" ]; then
         log_msg "Notice" "현재 호스트($_cur_host)의 secrets.json이 없습니다."
-        log_msg "Input" "호스트명 직접 입력: "
-        read -re _cur_host
+        read -rep "$(_log_prompt_rl)호스트명 직접 입력: " _cur_host
         _config_file="$NIXOS_PATH/hosts/deploy/${_cur_host}.secrets/secrets.json"
         [ -f "$_config_file" ] || { log_msg "Error" "secrets.json 없음: $_config_file"; exit 1; }
     else
@@ -188,20 +192,17 @@ _run_key_restore() {
         local -a _labels=("${_repos[@]}" "직접 입력")
         _pick "레포 선택:" "${_labels[@]}"
         if [ "$REPLY" -ge "${#_repos[@]}" ]; then
-            log_msg "Input" "레포 이름 (예: owner/nix-secrets): "
-            read -re _repo
+            read -rep "$(_log_prompt_rl)레포 이름 (예: owner/nix-secrets): " _repo
         else
             _repo="${_repos[$REPLY]}"
         fi
     else
-        log_msg "Input" "레포 이름 (예: owner/nix-secrets): "
-        read -re _repo
+        read -rep "$(_log_prompt_rl)레포 이름 (예: owner/nix-secrets): " _repo
     fi
 
     printf '\n'
-    log_msg "Input" "Google Drive에서 내려받은 age 키 파일 경로 (Tab 완성):"
     local _key_path
-    read -re _key_path
+    read -rep "$(_log_prompt_rl)Google Drive에서 내려받은 age 키 파일 경로 (Tab 완성): " _key_path
     _key_path="${_key_path/#\~/$HOME}"
     [ -f "$_key_path" ] || { log_msg "Error" "파일 없음: $_key_path"; exit 1; }
 

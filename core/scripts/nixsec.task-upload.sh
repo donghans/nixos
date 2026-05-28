@@ -54,14 +54,12 @@ _run_upload() {
 
     if [ "${#_repos[@]}" -eq 0 ]; then
         log_msg "Notice" "secrets.json에서 레포를 찾을 수 없습니다. 직접 입력합니다."
-        log_msg "Input" "레포 이름 (예: owner/nix-secrets): "
-        read -re _repo
+        read -rep "$(_log_prompt_rl)레포 이름 (예: owner/nix-secrets): " _repo
     else
         local -a _repo_labels=("${_repos[@]}" "직접 입력")
         _pick "레포 선택:" "${_repo_labels[@]}"
         if [ "$REPLY" -ge "${#_repos[@]}" ]; then
-            log_msg "Input" "레포 이름: "
-            read -re _repo
+            read -rep "$(_log_prompt_rl)레포 이름: " _repo
         else
             _repo="${_repos[$REPLY]}"
         fi
@@ -84,8 +82,7 @@ _run_upload() {
 
     _pick "그룹 선택:" "${_group_labels[@]}"
     if [ "$REPLY" -ge "${#_groups[@]}" ]; then
-        log_msg "Input" "그룹명: "
-        read -re _group
+        read -rep "$(_log_prompt_rl)그룹명: " _group
     else
         _group="${_groups[$REPLY]}"
     fi
@@ -105,14 +102,12 @@ _run_upload() {
         local -a _secret_labels=("${_existing_secrets[@]}" "새 경로 직접 입력")
         _pick "업로드할 시크릿 경로 선택:" "${_secret_labels[@]}"
         if [ "$REPLY" -ge "${#_existing_secrets[@]}" ]; then
-            log_msg "Input" "레포 내 경로 (예: hostname/group/secret-name): "
-            read -re _remote_path
+            read -rep "$(_log_prompt_rl)레포 내 경로 (예: hostname/group/secret-name): " _remote_path
         else
             _remote_path="${_existing_secrets[$REPLY]}"
         fi
     else
-        log_msg "Input" "레포 내 경로 (예: hostname/group/secret-name): "
-        read -re _remote_path
+        read -rep "$(_log_prompt_rl)레포 내 경로 (예: hostname/group/secret-name): " _remote_path
     fi
 
     # 소스 선택
@@ -130,22 +125,20 @@ _run_upload() {
 
     case "$REPLY" in
         0)
-            log_msg "Input" "파일 경로 (Tab 완성): "
             local _local_file
-            read -re _local_file
+            read -rep "$(_log_prompt_rl)파일 경로 (Tab 완성): " _local_file
             _local_file="${_local_file/#\~/$HOME}"
             [ -f "$_local_file" ] || { log_msg "Error" "파일 없음: $_local_file"; exit 1; }
             cp "$_local_file" "$_tmp_file"
             ;;
         1)
-            log_msg "Input" "내용 입력 (입력 후 Enter, Ctrl-D로 완료):"
+            log_msg "Input" "내용 입력 (입력 후 Enter, Ctrl-D로 완료):"  # cat은 프롬프트 분리 유지
             cat > "$_tmp_file"
             ;;
         2)
             command -v aws &>/dev/null || { log_msg "Error" "aws CLI가 필요합니다."; exit 1; }
-            log_msg "Input" "SSM 파라미터 경로 (예: /nix-secrets/step-ca/key): "
             local _ssm_path
-            read -re _ssm_path
+            read -rep "$(_log_prompt_rl)SSM 파라미터 경로 (예: /nix-secrets/step-ca/key): " _ssm_path
             log_msg "Task" "SSM에서 가져오는 중..."
             aws ssm get-parameter \
                 --name "$_ssm_path" \
