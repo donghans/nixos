@@ -80,18 +80,24 @@ _fetch_group_secrets() {
         mkdir -p "$(dirname "$dest")"
 
         log_msg "Task" "[$group] fetch: $remote"
-        if ! gh api "repos/$repo/contents/${remote}.age" --jq '.content' \
-                | base64 -d \
+        local _fetch_err
+        _fetch_err=$(mktemp)
+        local _blob_sha
+        _blob_sha=$(gh api "repos/$repo/contents/${remote}.age" --jq '.sha' 2>"$_fetch_err")
+        if ! { gh api "repos/$repo/git/blobs/$_blob_sha" --jq '.content' \
+                | tr -d '\n' | base64 -d \
                 | age -d -i "$REPLY_AGE_KEY" \
-                > "$dest" 2>/dev/null; then
+                > "$dest"; } 2>>"$_fetch_err"; then
             log_msg "Warn" "[$group] fetch 실패: $remote"
+            [ -s "$_fetch_err" ] && sed 's/^/  /' "$_fetch_err" >&2
+            rm -f "$_fetch_err"
             printf '  로컬 파일로 대신 입력하시겠습니까? (y/N): '
             local _fallback
-            read -r _fallback
+            read -r _fallback < /dev/tty
             if [[ "${_fallback:-N}" =~ ^[Yy]$ ]]; then
                 while true; do
                     printf '  파일 경로 (Tab 완성): '
-                    read -re _fallback
+                    read -re _fallback < /dev/tty
                     _fallback="${_fallback/#\~/$HOME}"
                     [ -f "$_fallback" ] && break
                     printf '  오류: 파일 없음: %s\n' "$_fallback"
@@ -101,6 +107,8 @@ _fetch_group_secrets() {
                 log_msg "Error" "[$group] 시크릿 fetch 실패, 배포 중단"
                 exit 1
             fi
+        else
+            rm -f "$_fetch_err"
         fi
         chmod 600 "$dest"
     done < <(printf '%s' "$config" | jq -r --arg g "$group" \
