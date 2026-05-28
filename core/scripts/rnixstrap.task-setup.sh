@@ -340,6 +340,19 @@ _write_standalone_files() {
     _update_toml_disk_boot_if_changed
     extract_pub_key
     write_pub_key_file
+    # pub key 자동 커밋 (hardware.nix와 동일한 패턴 — 미푸시 상태이므로 transfer_repo_to_remote에서 직접 전송도 병행)
+    git -C "$NIXOS_PATH" \
+        -c user.name="rnixstrap" -c user.email="rnixstrap@localhost" \
+        add "hosts/deploy/${_HOSTNAME}.pub" 2>/dev/null || true
+    if ! git -C "$NIXOS_PATH" diff --cached --quiet 2>/dev/null; then
+        if git -C "$NIXOS_PATH" \
+            -c user.name="rnixstrap" -c user.email="rnixstrap@localhost" \
+            commit -m "feat: ${_HOSTNAME} pub key 추가/갱신" 2>/dev/null; then
+            log_msg "Done" "pub key 커밋 완료: hosts/deploy/${_HOSTNAME}.pub"
+        else
+            log_msg "Notice" "pub key 커밋 실패 — 수동 커밋 필요"
+        fi
+    fi
 }
 
 # ── 레포 → 원격 서버 전송 ─────────────────────────────────────────────────────
@@ -376,15 +389,23 @@ transfer_repo_to_remote() {
              sudo mkdir -p /opt && sudo mv ~/nixos_clone /opt/nixos && \
              sudo chown -R ${u}:users /opt/nixos"
     fi
-    # hardware.nix: GitHub push 전일 수 있으므로 항상 직접 전송
-    local hw_src="$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.hardware.nix"
+    # hardware.nix + pub key: GitHub push 전일 수 있으므로 항상 직접 전송
     local pfx; [ "$u" = "root" ] && pfx="" || pfx="sudo "
-    if [ -f "$hw_src" ]; then
+    local hw_src="$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.hardware.nix"
+    local pub_src="$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.pub"
+    if [ -f "$hw_src" ] || [ -f "$pub_src" ]; then
         ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
             "${pfx}mkdir -p /opt/nixos/hosts/deploy"
+    fi
+    if [ -f "$hw_src" ]; then
         ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
             "${pfx}sh -c 'cat > /opt/nixos/hosts/deploy/${_HOSTNAME}.hardware.nix'" \
             < "$hw_src"
+    fi
+    if [ -f "$pub_src" ]; then
+        ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+            "${pfx}sh -c 'cat > /opt/nixos/hosts/deploy/${_HOSTNAME}.pub'" \
+            < "$pub_src"
     fi
     log_msg "Done" "레포 클론 완료"
 }
