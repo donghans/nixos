@@ -29,11 +29,11 @@
       server = {
         enabled = true;
         # Caddy(Lightsail $5) → EC2:8080으로 프록시됨
-        # stun_port: -1 = 비활성화 (EC2에 공인 IP 없어 UDP 미지원)
+        # STUN: 리슨만 함, EC2 공인 IP 없어 외부 접근 불가 (Tailscale 기본 STUN 사용)
         region_id = 900;
         region_code = "kr-ec2";
         region_name = "Korea (EC2)";
-        stun_port = -1;
+        stun_listen_addr = "0.0.0.0:3478";
       };
       urls = ["https://controlplane.tailscale.com/derpmap/default"];
       paths = [];
