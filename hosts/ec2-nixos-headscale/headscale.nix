@@ -103,6 +103,11 @@ in {
   '';
   users.users.ec2-user.extraGroups = ["headscale"];
 
+  # inject_secrets가 root:root 600으로 생성하므로 매 활성화 시 소유자 교정
+  systemd.tmpfiles.rules = [
+    "z ${oidcClientSecretFile} 0640 headscale headscale -"
+  ];
+
   # == 커스텀 DERP 맵 (lightsail-headscale — headscale 도메인과 동일) ==
   environment.etc."headscale/derp-custom.yaml".text = ''
     regions:
