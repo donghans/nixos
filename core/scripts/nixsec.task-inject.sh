@@ -76,7 +76,13 @@ _run_remote_inject() {
         log_msg "Notice" "SSH 키: $_INJ_SSH_KEY (자동 조회)"
     fi
 
-    _INJ_SSH_USER="${_INJ_SSH_USER:-root}"
+    if [ -z "$_INJ_SSH_USER" ]; then
+        log_msg "Input" "SSH 유저명 (기본값 root): "
+        read -re _INJ_SSH_USER
+        _INJ_SSH_USER="${_INJ_SSH_USER:-root}"
+    else
+        log_msg "Notice" "SSH 유저: $_INJ_SSH_USER (자동 조회)"
+    fi
 
     local ssh_opts=(
         -o StrictHostKeyChecking=yes
