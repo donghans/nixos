@@ -17,7 +17,7 @@ mkMod __curPos "Caddy Web Server with reverse proxy support" ({
     };
   };
   os = lib.mkMerge [
-    {
+    (lib.mkIf cfg.enable {
       services.caddy = {
         enable = true;
         # /etc/caddy/sites/*.caddy 는 외부 배포 스크립트가 동적으로 추가하는 vhost 파일
@@ -36,8 +36,8 @@ mkMod __curPos "Caddy Web Server with reverse proxy support" ({
         } root -"
       ];
       networking.firewall.allowedTCPPorts = [80 443];
-    }
-    (lib.mkIf (cfg.reloadUser != null) {
+    })
+    (lib.mkIf (cfg.enable && cfg.reloadUser != null) {
       security.sudo.extraRules = [
         {
           users = [cfg.reloadUser];
