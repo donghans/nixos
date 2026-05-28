@@ -154,9 +154,9 @@ _transfer_secrets() {
     [ "$ssh_user" != "root" ] && sudo_pfx="sudo "
 
     log_msg "Task" "시크릿 전송 중 → $hostname ($ip)"
-    tar -C "$staging" -cpf - . | \
+    tar -C "$staging" -cf - . | \
         ssh -i "$ssh_key" "${ssh_opts[@]}" "${ssh_user}@${ip}" \
-            "${sudo_pfx}tar -C / -xpf - --no-same-owner"
+            "${sudo_pfx}tar -C / -xf - --no-same-owner --no-overwrite-dir"
     log_msg "Done" "시크릿 전송 완료"
 }
 
