@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Lightsail $5 headscale 프론트엔드 + DERP 릴레이 + tailscale exit node
+# Lightsail $5 headscale 프론트엔드 + STUN DNAT + tailscale exit node
 # OS: Amazon Linux 2023 (NixOS 미사용)
 #
 # 역할:
-#   - Caddy (TLS 종료): e2.772610158.xyz:443
-#     ├── /derp* → localhost:3340 (derper HTTP 모드)
-#     └── * → EC2 private IP:8080 (headscale 컨트롤 플레인, VPC 백본)
-#   - derper: HTTP 모드 (--dev), STUN UDP:3478
+#   - Caddy (TLS 종료): e.772610158.xyz:443 → EC2 private IP:8080 (headscale)
+#   - iptables DNAT: UDP 3478 → EC2 private IP:3478 (headscale 내장 STUN)
 #   - tailscale exit node: headscale에 등록
 #
 # 사전 조건:
 #   - Lightsail ↔ EC2 VPC 피어링 활성화 (Lightsail 콘솔 → 계정 → 고급)
+#   - EC2 보안 그룹: UDP 3478 인바운드 허용 (Lightsail VPC 대역 172.26.0.0/16)
 #   - headscale에서 preauth key 생성:
 #       ssh -i ~/.ssh/rnixup/ec2-nixos-headscale.pem ec2-user@<EC2_IP> \
 #         "sudo headscale preauthkeys create -u system --expiration 24h"
@@ -35,7 +34,7 @@ if ! command -v tailscale &>/dev/null; then
     curl -fsSL https://tailscale.com/install.sh | sh
 fi
 
-# ── 2. IP 포워딩 (exit node 필수) ─────────────────────────────────────────────
+# ── 2. IP 포워딩 (exit node + DNAT 필수) ──────────────────────────────────────
 echo "==> IP 포워딩 설정..."
 cat > /etc/sysctl.d/99-forwarding.conf << 'EOF'
 net.ipv4.ip_forward = 1
@@ -53,67 +52,7 @@ tailscale up \
     --hostname="lightsail-headscale" \
     --accept-routes
 
-# ── 4. derper 바이너리 설치 ───────────────────────────────────────────────────
-if [ ! -f /usr/local/bin/derper ]; then
-    echo "==> derper 바이너리 설치 중..."
-    TS_VERSION=$(tailscale version | awk 'NR==1{print $1}')
-    ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-    TGZ="tailscale_${TS_VERSION}_linux_${ARCH}.tgz"
-    TMPDIR=$(mktemp -d)
-
-    curl -fsSL \
-        "https://github.com/tailscale/tailscale/releases/download/v${TS_VERSION}/${TGZ}" \
-        -o "$TMPDIR/$TGZ"
-    tar -xzf "$TMPDIR/$TGZ" -C "$TMPDIR"
-
-    DERPER_BIN="$TMPDIR/tailscale_${TS_VERSION}_linux_${ARCH}/derper"
-    if [ ! -f "$DERPER_BIN" ]; then
-        echo "ERROR: derper가 tailscale ${TS_VERSION} 릴리즈에 포함되지 않음" >&2
-        echo "대안: ec2-nixos-headscale.nix의 derp.server.enabled = true 로 되돌리고" >&2
-        echo "      headscale 내장 DERP를 사용하세요 (EC2 데이터 전송비 발생)." >&2
-        rm -rf "$TMPDIR"
-        exit 1
-    fi
-
-    install -m 755 "$DERPER_BIN" /usr/local/bin/derper
-    rm -rf "$TMPDIR"
-fi
-
-# ── 5. derper 실행 사용자 생성 ────────────────────────────────────────────────
-id derper &>/dev/null || useradd -r -s /bin/false -d /var/lib/derper derper
-mkdir -p /var/lib/derper
-chown derper:derper /var/lib/derper
-
-# ── 6. derper systemd 서비스 (HTTP 모드, --dev = Caddy 뒤에서 동작) ──────────
-# --dev: localhost:3340 HTTP 서버 (TLS 없음, 리버스 프록시 전용)
-# STUN은 --dev 와 무관하게 UDP 3478에서 독립 동작
-cat > /etc/systemd/system/derper.service << EOF
-[Unit]
-Description=Tailscale DERP relay server
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-ExecStart=/usr/local/bin/derper \
-  --hostname=${HEADSCALE_DOMAIN} \
-  --dev \
-  --stun \
-  --stun-port=3478 \
-  --verify-clients=false
-StateDirectory=derper
-WorkingDirectory=/var/lib/derper
-User=derper
-Group=derper
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-Restart=on-failure
-RestartSec=5s
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# ── 7. Caddy 설치 ─────────────────────────────────────────────────────────────
+# ── 4. Caddy 설치 ─────────────────────────────────────────────────────────────
 if ! command -v caddy &>/dev/null; then
     echo "==> Caddy 설치 중..."
     dnf install -y 'dnf-command(copr)'
@@ -121,12 +60,10 @@ if ! command -v caddy &>/dev/null; then
     dnf install -y caddy
 fi
 
-# ── 8. Caddy 설정 (TLS 종료 + 라우팅) ────────────────────────────────────────
+# ── 5. Caddy 설정 (TLS 종료 + headscale 프록시) ───────────────────────────────
+# DERP WebSocket(/derp)도 headscale이 8080에서 처리하므로 별도 라우팅 불필요
 cat > /etc/caddy/Caddyfile << EOF
 ${HEADSCALE_DOMAIN} {
-    @derp path /derp /derp/*
-    reverse_proxy @derp http://localhost:3340
-
     reverse_proxy * http://${EC2_PRIVATE_IP}:8080 {
         header_up Host {host}
         header_up X-Forwarded-For {remote_host}
@@ -136,16 +73,35 @@ ${HEADSCALE_DOMAIN} {
 EOF
 
 systemctl daemon-reload
-systemctl enable --now derper
 systemctl enable --now caddy
+
+# ── 6. iptables DNAT: UDP 3478 → EC2 headscale STUN ──────────────────────────
+# headscale 내장 STUN은 UDP이므로 Caddy(TCP)로 프록시 불가.
+# Lightsail 공인 IP로 들어오는 UDP 3478을 EC2 사설 IP로 포워딩.
+echo "==> iptables DNAT 설정..."
+
+if ! iptables -t nat -C PREROUTING -p udp --dport 3478 \
+    -j DNAT --to-destination "${EC2_PRIVATE_IP}:3478" 2>/dev/null; then
+    iptables -t nat -A PREROUTING -p udp --dport 3478 \
+        -j DNAT --to-destination "${EC2_PRIVATE_IP}:3478"
+fi
+if ! iptables -t nat -C POSTROUTING -p udp -d "${EC2_PRIVATE_IP}" \
+    --dport 3478 -j MASQUERADE 2>/dev/null; then
+    iptables -t nat -A POSTROUTING -p udp -d "${EC2_PRIVATE_IP}" \
+        --dport 3478 -j MASQUERADE
+fi
+
+dnf install -y iptables-services 2>/dev/null || true
+iptables-save > /etc/sysconfig/iptables
+systemctl enable iptables
 
 # ── 완료 ─────────────────────────────────────────────────────────────────────
 echo ""
 echo "==> 설정 완료"
 echo "    tailscale 상태: $(tailscale status 2>/dev/null | head -1)"
-echo "    derper:         $(systemctl is-active derper)"
 echo "    caddy:          $(systemctl is-active caddy)"
+echo "    iptables DNAT:  $(iptables -t nat -L PREROUTING -n | grep 3478 | head -1)"
 echo ""
 echo "headscale에서 exit node 승인 필요:"
-echo "  sudo headscale routes list"
+echo "  sudo headscale nodes list-routes"
 echo "  sudo headscale routes enable -r <ROUTE_ID>"
