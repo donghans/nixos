@@ -19,8 +19,8 @@
 #   sudo bash lightsail-headscale-setup.sh <PREAUTH_KEY> <EC2_PRIVATE_IP>
 set -euo pipefail
 
-HEADSCALE_URL="https://e2.772610158.xyz"
-HEADSCALE_DOMAIN="e2.772610158.xyz"
+HEADSCALE_URL="https://e.772610158.xyz"
+HEADSCALE_DOMAIN="e.772610158.xyz"
 PREAUTH_KEY="${1:-}"
 EC2_PRIVATE_IP="${2:-}"
 

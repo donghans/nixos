@@ -14,6 +14,6 @@ bootDevice = "/dev/nvme0n1"
 bootLoader = "grub-uefi"
 
 [headscale]
-domain   = "e2.772610158.xyz"
+domain   = "e.772610158.xyz"
 ssh-user = "ec2-user"
 ssh-key  = "~/.ssh/rnixup/ec2-nixos-headscale.pem"

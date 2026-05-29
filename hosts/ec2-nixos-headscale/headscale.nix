@@ -3,7 +3,7 @@
   lib,
   ...
 }: let
-  headscaleDomain = "e2.772610158.xyz";
+  headscaleDomain = "e.772610158.xyz";
   oidcClientSecretFile = "/var/lib/nix-secrets/headscale/oidc_client_secret";
   s3BackupBucket = "headscale-backup-732799293614-ap-northeast-2-an";
 
