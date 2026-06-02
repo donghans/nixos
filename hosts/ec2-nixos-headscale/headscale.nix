@@ -7,6 +7,27 @@
   oidcClientSecretFile = "/var/lib/nix-secrets/headscale/oidc_client_secret";
   s3BackupBucket = "headscale-backup-732799293614-ap-northeast-2-an";
 
+  # exit node 활성화 시 tailscale이 DERP relay IP(/32)를 exclusion route로 추가할 때
+  # IPv4 필드가 없으면 DNS resolve 타이밍 문제로 누락될 수 있어 static IP를 명시
+  derpStaticIpv4Json = pkgs.writeText "derp-static-ipv4.json" (builtins.toJSON {
+    Regions."900" = {
+      RegionID = 900;
+      RegionCode = "kr-ec2";
+      RegionName = "Korea (EC2)";
+      Nodes = [
+        {
+          Name = "900a";
+          RegionID = 900;
+          HostName = headscaleDomain;
+          IPv4 = "52.79.193.53";
+          DERPPort = 443;
+          STUNPort = 3478;
+          STUNOnly = false;
+        }
+      ];
+    };
+  });
+
   headscaleConfigFile = (pkgs.formats.yaml {}).generate "headscale.yaml" {
     disable_check_updates = true;
     unix_socket = "/run/headscale/headscale.sock";
@@ -37,7 +58,7 @@
         stun_listen_addr = "0.0.0.0:3478";
       };
       urls = ["https://controlplane.tailscale.com/derpmap/default"];
-      paths = [];
+      paths = ["${derpStaticIpv4Json}"];
       auto_update_enabled = true;
       update_frequency = "3h";
     };
@@ -117,7 +138,7 @@ in {
     "z ${oidcClientSecretFile} 0640 headscale headscale -"
   ];
 
-  # 커스텀 DERP 맵 제거 — headscale 내장 DERP(server.enabled=true) 사용
+  # headscale 내장 DERP(server.enabled=true) + static IPv4 명시 (derp.paths로 region 900 override)
 
   # == litestream → S3 (headscale DB 실시간 백업) ==
   # IAM Instance Profile 자격증명 자동 사용 — 별도 키 불필요
