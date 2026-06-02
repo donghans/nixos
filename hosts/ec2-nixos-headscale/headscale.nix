@@ -16,7 +16,7 @@
       RegionName = "Korea (EC2)";
       Nodes = [
         {
-          Name = "900a";
+          Name = "900";
           RegionID = 900;
           HostName = headscaleDomain;
           IPv4 = "52.79.193.53";
