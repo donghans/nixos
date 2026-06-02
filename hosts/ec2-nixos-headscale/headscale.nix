@@ -12,19 +12,19 @@
   # → 같은 엔드포인트를 별도 region(901)으로 추가해 static IPv4를 DERP map에 노출
   # headscale paths는 YAML 파싱(yaml.v3) → 맵 키가 int 타입이어야 함, JSON 문자열 키 불가
   derpStaticIpv4Json = pkgs.writeText "derp-static-ipv4.yaml" ''
-    Regions:
+    regions:
       901:
-        RegionID: 901
-        RegionCode: kr-ec2-ip
-        RegionName: Korea (EC2) IP
-        Nodes:
-          - Name: 901a
-            RegionID: 901
-            HostName: ${headscaleDomain}
-            IPv4: 52.79.193.53
-            DERPPort: 443
-            STUNPort: 3478
-            STUNOnly: false
+        regionid: 901
+        regioncode: kr-ec2-ip
+        regionname: Korea (EC2) IP
+        nodes:
+          - name: 901a
+            regionid: 901
+            hostname: ${headscaleDomain}
+            ipv4: 52.79.193.53
+            derpport: 443
+            stunport: 3478
+            stunonly: false
   '';
 
   headscaleConfigFile = (pkgs.formats.yaml {}).generate "headscale.yaml" {
