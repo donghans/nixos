@@ -8,16 +8,17 @@
   s3BackupBucket = "headscale-backup-732799293614-ap-northeast-2-an";
 
   # exit node 활성화 시 tailscale이 DERP relay IP(/32)를 exclusion route로 추가할 때
-  # IPv4 필드가 없으면 DNS resolve 타이밍 문제로 누락될 수 있어 static IP를 명시
+  # built-in DERP server(region 900)는 paths를 override해서 IPv4를 주입할 수 없음
+  # → 같은 엔드포인트를 별도 region(901)으로 추가해 static IPv4를 DERP map에 노출
   derpStaticIpv4Json = pkgs.writeText "derp-static-ipv4.json" (builtins.toJSON {
-    Regions."900" = {
-      RegionID = 900;
-      RegionCode = "kr-ec2";
-      RegionName = "Korea (EC2)";
+    Regions."901" = {
+      RegionID = 901;
+      RegionCode = "kr-ec2-ip";
+      RegionName = "Korea (EC2) IP";
       Nodes = [
         {
-          Name = "900";
-          RegionID = 900;
+          Name = "901a";
+          RegionID = 901;
           HostName = headscaleDomain;
           IPv4 = "52.79.193.53";
           DERPPort = 443;
