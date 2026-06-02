@@ -37,6 +37,11 @@ mkMod __curPos "Tailscale Mesh VPN" ({
     (lib.mkIf cfg.enable {
       services.tailscale.enable = true;
       services.tailscale.extraSetFlags = ["--operator=${config.workspace.username}"];
+      # exit node 클라이언트로 동작 시 exit node에서 돌아오는 패킷(src=1.1.1.1 등)이
+      # tailscale0으로 들어오는데, 기본 strict rpfilter가 이를 drop함
+      # → loose로 변경해 출구 인터페이스 일치 여부 검사 없이 라우트 존재 여부만 확인
+      # (서버 역할 호스트는 useRoutingFeatures = "server"로 덮어쓰면 됨)
+      services.tailscale.useRoutingFeatures = lib.mkDefault "client";
       # nixos-fw의 기본 정책이 drop이라 tailscale0 인터페이스에서 오는
       # 트래픽도 차단됨 → 노드 간 접근이 안 되므로 trusted로 지정
       networking.firewall.trustedInterfaces = ["tailscale0"];
