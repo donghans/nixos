@@ -31,6 +31,12 @@ in
 
       services.tailscale.useRoutingFeatures = "server";
 
+      # exit node 포워딩: NixOS nftables forward chain 기본 policy가 drop이라
+      # trustedInterfaces는 INPUT만 허용 → FORWARD는 명시적으로 추가 필요
+      networking.firewall.extraForwardRules = ''
+        iifname "tailscale0" accept
+      '';
+
       # eth0 → br-lan 브리지 슬레이브 (incus VM이 실제 LAN IP 받도록)
       systemd.network.netdevs."10-br-lan" = {
         netdevConfig = {
