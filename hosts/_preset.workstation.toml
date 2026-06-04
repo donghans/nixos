@@ -19,6 +19,7 @@ incus-tailscale-proxy  = false
 caddy            = false
 nix-cache-proxy    = false
 aws-roles-anywhere = false
+print-co           = true
 
 [mods.gui]
 enable = true

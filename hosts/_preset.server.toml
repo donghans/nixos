@@ -21,6 +21,7 @@ bluetooth        = false
 docker           = false
 nix-cache-proxy    = false
 aws-roles-anywhere      = false
+print-co                = false
 incus-tailscale-proxy   = false
 
 [mods.gui]
