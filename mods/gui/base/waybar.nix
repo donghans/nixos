@@ -8,7 +8,7 @@ mkPartOf "mods.gui" ({
   hm = {
     # waybar 세션 시작
     wayland.windowManager.hyprland.settings.exec-once = lib.mkOrder 900 [
-      "uwsm app -- ${pkgs.waybar}/bin/waybar"
+      "uwsm app -- sh -c 'sleep 2 && ${pkgs.waybar}/bin/waybar'"
     ];
 
     programs.waybar.enable = true;
