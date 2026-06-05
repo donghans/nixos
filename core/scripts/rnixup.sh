@@ -1,5 +1,5 @@
 #!/usr/bin/env nix-shell
-#!nix-shell -i bash -I nixpkgs=flake:nixpkgs -p jq python3
+#!nix-shell -i bash -I nixpkgs=flake:nixpkgs -p jq python3 age gh
 # shellcheck disable=SC1008,SC1091,SC2034
 set -euo pipefail
 

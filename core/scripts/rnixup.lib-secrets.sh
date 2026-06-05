@@ -26,12 +26,18 @@ _get_secrets_config() {
     cat "$f"
 }
 
-# resolved.json의 deploy 호스트 중 secrets.json이 있으면 true
+# resolved.json의 deploy 호스트 중 실제 주입 가능한 항목(groups 또는 from-new.sh)이 있으면 true
 _any_remote_secrets_exist() {
     local resolved_json="$JSON_DIR/resolved.json"
     local hostname
     while IFS= read -r hostname; do
-        _get_secrets_config "$hostname" &>/dev/null && return 0
+        local config
+        config=$(_get_secrets_config "$hostname") || continue
+        local group_count
+        group_count=$(printf '%s' "$config" | jq -r '(.groups // {}) | length' 2>/dev/null) || continue
+        [ "${group_count:-0}" -gt 0 ] && return 0
+        local secrets_dir="$NIXOS_PATH/hosts/deploy/${hostname}.secrets"
+        find "$secrets_dir" -name "from-new.sh" -type f 2>/dev/null | grep -q . && return 0
     done < <(jq -r 'to_entries[] | select(.value.deploy != null) | .key' "$resolved_json")
     return 1
 }
@@ -51,7 +57,7 @@ _resolve_age_key_for_repo() {
         log_msg "Input" "[$repo] age 키가 필요합니다."
         printf '  Google Drive에서 nix-secrets.age.key를 내려받은 후 경로를 입력하세요.\n'
         printf '  파일 경로 (Tab 완성): '
-        read -re key_path
+        read -re key_path < /dev/tty
         key_path="${key_path/#\~/$HOME}"
         [ -f "$key_path" ] || { log_msg "Error" "파일 없음: $key_path"; exit 1; }
         mkdir -p "$(dirname "$cache")"
@@ -129,7 +135,7 @@ _select_entries() {
         repo=$(printf '%s' "$config" | jq -r --arg g "$group" '.groups[$g].repo')
         secret_count=$(printf '%s' "$config" | jq -r --arg g "$group" '.groups[$g].secrets | length')
         check_args+=("group:$group" "${group}  (${secret_count}개 시크릿, ${repo})")
-    done < <(printf '%s' "$config" | jq -r '.groups | keys[]')
+    done < <(printf '%s' "$config" | jq -r '(.groups // {}) | keys[]')
 
     local secrets_dir="$NIXOS_PATH/hosts/deploy/${hostname}.secrets"
     while IFS= read -r new_script; do
@@ -157,6 +163,9 @@ _transfer_secrets() {
     tar -C "$staging" -cf - . | \
         ssh -i "$ssh_key" "${ssh_opts[@]}" "${ssh_user}@${ip}" \
             "${sudo_pfx}tar -C / -xf - --no-same-owner --no-overwrite-dir"
+    # 전송 후 tmpfiles 규칙 적용 (소유자·권한 교정)
+    ssh -i "$ssh_key" "${ssh_opts[@]}" "${ssh_user}@${ip}" \
+        "${sudo_pfx}systemd-tmpfiles --create" 2>/dev/null || true
     log_msg "Done" "시크릿 전송 완료"
 }
 
@@ -175,7 +184,7 @@ _upload_generated_secrets() {
     printf '\n'
     printf '  발급된 시크릿을 nix-secrets 레포에도 업로드하시겠습니까? (y/N): '
     local _ans
-    read -r _ans
+    read -r _ans < /dev/tty
     [[ "${_ans:-N}" =~ ^[Yy]$ ]] || return 0
 
     log_msg "Task" "레포 공개키 조회 중..."

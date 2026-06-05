@@ -91,9 +91,9 @@ _pick() {
     while true; do
         local i
         for ((i=0; i<draw_lines; i++)); do tput cuu1 || true; done
-        IFS= read -rsn1 key
+        IFS= read -rsn1 key < /dev/tty
         if [[ "$key" == $'\x1b' ]]; then
-            IFS= read -rsn2 seq || true
+            IFS= read -rsn2 seq < /dev/tty || true
             key+="$seq"
         fi
         case "$key" in
@@ -145,9 +145,9 @@ _check() {
     while true; do
         local i
         for ((i=0; i<count; i++)); do tput cuu1 || true; done
-        IFS= read -rsn1 key
+        IFS= read -rsn1 key < /dev/tty
         if [[ "$key" == $'\x1b' ]]; then
-            IFS= read -rsn2 seq || true
+            IFS= read -rsn2 seq < /dev/tty || true
             key+="$seq"
         fi
         case "$key" in
