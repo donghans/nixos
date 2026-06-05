@@ -5,7 +5,21 @@ export ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=8"
 # (목적: 제안이 있으면 Tab으로 즉시 수락, 없으면 표준 자동완성 실행)
 _smart_tab() {
   if [[ -n "$POSTDISPLAY" ]]; then
-    zle autosuggest-accept
+    local suggestion="$POSTDISPLAY"
+    # 다음 구분자(/ 공백 - _) 위치 찾기
+    local i=1
+    while [[ $i -le ${#suggestion} ]]; do
+      local ch="${suggestion[$i]}"
+      if [[ "$ch" == "/" || "$ch" == " " || "$ch" == "-" || "$ch" == "_" ]]; then
+        LBUFFER+="${suggestion[1,$i]}"
+        POSTDISPLAY="${suggestion[$((i+1)),-1]}"
+        return
+      fi
+      (( i++ ))
+    done
+    # 구분자 없으면 나머지 전체 수락
+    LBUFFER+="$suggestion"
+    POSTDISPLAY=""
   else
     zle expand-or-complete
   fi
