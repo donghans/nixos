@@ -13,6 +13,9 @@ diskDevice = "/dev/nvme0n1"
 bootDevice = "/dev/nvme0n1"
 bootLoader = "grub-uefi"
 
+[mods.sys.services]
+tailscale = true
+
 [headscale]
 domain   = "e.772610158.xyz"
 ssh-user = "ec2-user"

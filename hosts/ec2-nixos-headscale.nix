@@ -5,7 +5,10 @@
 {mkHostConfiguration, ...}:
 mkHostConfiguration (_: {
   os = {
-    imports = [./ec2-nixos-headscale/headscale.nix];
+    imports = [
+      ./ec2-nixos-headscale/headscale.nix
+      ./ec2-nixos-headscale/eni-forwarding.nix
+    ];
 
     # == EC2 네트워크 설정 ==
     # IMDS 라우트는 DHCP가 자동 처리 — 별도 설정 불필요
