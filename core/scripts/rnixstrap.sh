@@ -67,6 +67,7 @@ _WRITE_ONLY=false       # true = 파일 작업만 하고 설치 없이 종료
 _SSH_USER="root"        # nixos-anywhere bootstrap 접속 유저
 _TOML_IP=""             # 기존 호스트 TOML에서 로드 ([deploy] 있는 경우)
 _TOML_SSH_KEY=""        # 기존 호스트 TOML에서 로드 ([deploy] 있는 경우)
+_TOML_SSH_USER=""       # 기존 호스트 TOML에서 로드 ([deploy].sshUser)
 _TOML_BOOT_LOADER=""    # 기존 호스트 TOML에서 로드
 _TOML_DISK_DEVICE=""    # 기존 호스트 TOML에서 로드
 _BOOTSTRAP_IP=""        # .bootstrap.env에서 로드 (standalone 기본값)
@@ -111,6 +112,8 @@ elif [ "$_HOST_HAS_DEPLOY" = false ]; then
     ask_ip              # _BOOTSTRAP_IP 기본값
     ask_ssh_key         # _BOOTSTRAP_SSH_KEY 기본값
 else
+    # [deploy].sshUser가 TOML에 있으면 적용, 없으면 root 유지
+    [ -n "$_TOML_SSH_USER" ] && _SSH_USER="$_TOML_SSH_USER"
     ask_ip        # 기존 TOML IP를 기본값으로, 변경 가능
     ask_ssh_key   # 기존 TOML 키를 기본값으로, 변경 가능
 fi

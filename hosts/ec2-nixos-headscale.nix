@@ -19,6 +19,19 @@ mkHostConfiguration (_: {
     networking.firewall.enable = false;
 
     systemd.tmpfiles.rules = ["d /opt/landings 0755 ec2-user users -"];
+
+    # deploy-rs: ec2-user로 SSH → root로 sudo 실행 (nixos activation용)
+    security.sudo.extraRules = [
+      {
+        users = ["ec2-user"];
+        commands = [
+          {
+            command = "ALL";
+            options = ["NOPASSWD"];
+          }
+        ];
+      }
+    ];
   };
   hm = {};
 })

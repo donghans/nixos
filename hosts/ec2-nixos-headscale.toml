@@ -13,6 +13,11 @@ diskDevice = "/dev/nvme0n1"
 bootDevice = "/dev/nvme0n1"
 bootLoader = "grub-uefi"
 
+[deploy]
+ip      = "43.201.166.32"
+sshKey  = "/home/donghans/.ssh/rnixup/ec2-nixos-headscale.pem"
+sshUser = "ec2-user"
+
 [mods.sys.services]
 tailscale = true
 

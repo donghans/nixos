@@ -258,7 +258,7 @@ in {
         inherit name;
         value = {
           hostname = resolved.deploy.ip;
-          sshUser = "root";
+          sshUser = resolved.deploy.sshUser or "root";
           sshOpts = [
             "-i"
             resolved.deploy.sshKey
@@ -267,6 +267,8 @@ in {
           ];
           profiles.system = {
             user = "root";
+            magicRollback = true;
+            autoRollback = true;
             path =
               deploy-rs.lib.${resolved.system}.activate.nixos
               nixosConfigurationsAll.${name};

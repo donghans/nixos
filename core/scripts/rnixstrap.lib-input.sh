@@ -38,6 +38,7 @@ with open(sys.argv[1], "rb") as f:
 deploy = d.get("deploy", {})
 print(deploy.get("ip", ""))
 print(deploy.get("sshKey", ""))
+print(deploy.get("sshUser", ""))
 print(d.get("bootLoader", ""))
 print(d.get("diskDevice", ""))
 print(d.get("system", "x86_64-linux"))
@@ -46,11 +47,12 @@ EOF
     mapfile -t _toml_fields <<< "$result"
     _TOML_IP="${_toml_fields[0]:-}"
     _TOML_SSH_KEY="${_toml_fields[1]:-}"
-    _TOML_BOOT_LOADER="${_toml_fields[2]:-}"
-    _TOML_DISK_DEVICE="${_toml_fields[3]:-}"
+    _TOML_SSH_USER="${_toml_fields[2]:-}"
+    _TOML_BOOT_LOADER="${_toml_fields[3]:-}"
+    _TOML_DISK_DEVICE="${_toml_fields[4]:-}"
     _BOOT_LOADER="$_TOML_BOOT_LOADER"
     _DISK_DEVICE="$_TOML_DISK_DEVICE"
-    _SYSTEM="${_toml_fields[4]:-x86_64-linux}"
+    _SYSTEM="${_toml_fields[5]:-x86_64-linux}"
     log_msg "Init" "TOML 로드: ip=${_TOML_IP}, system=${_SYSTEM}, boot=${_BOOT_LOADER}"
 }
 
