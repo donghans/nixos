@@ -141,22 +141,33 @@ in {
 
   # == litestream → S3 (headscale DB 실시간 백업) ==
   # IAM Instance Profile 자격증명 자동 사용 — 별도 키 불필요
-  systemd.services.litestream = {
+  systemd.services.litestream = let
+    litestreamConfig = pkgs.writeText "litestream.yaml" ''
+      dbs:
+        - path: /var/lib/headscale/db.sqlite
+          replicas:
+            - url: s3://${s3BackupBucket}/headscale/db
+              region: ap-northeast-2
+    '';
+    restoreScript = pkgs.writeShellScript "litestream-restore" ''
+      if [ ! -f /var/lib/headscale/db.sqlite ]; then
+        echo "headscale DB 없음, S3에서 복구 시도..."
+        ${pkgs.litestream}/bin/litestream restore \
+          -if-replica-exists \
+          -config ${litestreamConfig} \
+          /var/lib/headscale/db.sqlite \
+          && echo "복구 완료" || echo "복구 대상 없음 (첫 배포)"
+      fi
+    '';
+  in {
     description = "Litestream SQLite replication";
     wantedBy = ["multi-user.target"];
     after = ["network-online.target"];
     wants = ["network-online.target"];
     before = ["headscale.service"];
     serviceConfig = {
-      ExecStart =
-        "${pkgs.litestream}/bin/litestream replicate "
-        + "-config ${pkgs.writeText "litestream.yaml" ''
-          dbs:
-            - path: /var/lib/headscale/db.sqlite
-              replicas:
-                - url: s3://${s3BackupBucket}/headscale/db
-                  region: ap-northeast-2
-        ''}";
+      ExecStartPre = "${restoreScript}";
+      ExecStart = "${pkgs.litestream}/bin/litestream replicate -config ${litestreamConfig}";
       Restart = "on-failure";
       User = "headscale";
       StateDirectory = "headscale";
