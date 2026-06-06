@@ -4,15 +4,15 @@
   #
   # t4g.micro ENI 구조: eth1 primary IP (EIP-1 → Mac Studio)
   #                     eth1 secondary IP (EIP-2 → Incus VM)
-  eth1PrimaryIp = null; #"172.31.60.101"; # eth1 primary private IP  (예: "172.31.x.10")
-  eth1SecondaryIp = null; #"172.31.51.159"; # eth1 secondary private IP (예: "172.31.x.11")
-  eth1Gateway = null; #"172.31.48.1"; # subnet gateway            (예: "172.31.x.1")
+  eth1PrimaryIp = "172.31.60.101"; # eth1 primary private IP  (예: "172.31.x.10")
+  eth1SecondaryIp = "172.31.51.159"; # eth1 secondary private IP (예: "172.31.x.11")
+  eth1Gateway = "172.31.48.1"; # subnet gateway            (예: "172.31.x.1")
   subnetPrefix = 20; # subnet prefix 길이
   # ─────────────────────────────────────────────────────────────
 
   # headscale nodes list 로 확인한 실제 Tailscale IP 기입
-  macStudioTs = null; #"100.64.0.5"; # Mac Studio Tailscale IP
-  incusVmTs = null; #"100.64.0.12"; # Incus VM Tailscale IP
+  macStudioTs = "100.64.0.5"; # Mac Studio Tailscale IP
+  incusVmTs = "100.64.0.12"; # Incus VM Tailscale IP
 
   hasEni = eth1PrimaryIp != null && eth1SecondaryIp != null && eth1Gateway != "";
 in {
