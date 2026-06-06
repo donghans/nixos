@@ -123,3 +123,38 @@ bindkey "^[[1;5C" forward-word   # Ctrl+Right
 bindkey "^[[1;5D" backward-word  # Ctrl+Left
 bindkey "^[[1;3C" forward-word   # Alt+Right (터미널 종류에 따라 Ctrl 대신 Alt로 전달됨)
 bindkey "^[[1;3D" backward-word  # Alt+Left
+
+# == Kitty SSH Integration ==
+# kitty 터미널에서 ssh 접속 시 terminfo 자동 설치 후 깨끗한 세션으로 재접속
+kssh() {
+  # $@ 에서 hostname 이후 커맨드 부분을 제외한 접속 인자만 추출
+  local conn_args=()
+  local found_host=false
+  local i=1
+  while (( i <= $# )); do
+    local arg="${@[$i]}"
+    if [[ $found_host == true ]]; then
+      break
+    elif [[ "$arg" == -* ]]; then
+      conn_args+=("$arg")
+      # 인자를 하나 더 받는 옵션 (-i, -p, -o 등)
+      if [[ "$arg" =~ ^-[bcDEeFIiJLlmopQRSWw]$ ]]; then
+        (( i++ ))
+        conn_args+=("${@[$i]}")
+      fi
+    else
+      conn_args+=("$arg")
+      found_host=true
+    fi
+    (( i++ ))
+  done
+
+  # terminfo 없을 때만 kitty kitten으로 설치
+  command ssh "${conn_args[@]}" "ls ~/.terminfo/x/xterm-kitty" &>/dev/null \
+    || kitty +kitten ssh "${conn_args[@]}" true
+
+  # 원본 인자 전체로 깨끗하게 재접속 (커맨드 포함 시 그대로 전달)
+  command ssh "$@"
+}
+
+[[ "$TERM" == "xterm-kitty" ]] && alias ssh='kssh'
