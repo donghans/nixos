@@ -4,10 +4,6 @@ username  = "admin"
 
 [[preauth-keys]]
 user = "system"
-name = "exitscale"
-
-[[preauth-keys]]
-user = "system"
 name = "devserver"
 
 [mods.sys.services]

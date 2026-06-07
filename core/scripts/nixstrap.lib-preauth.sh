@@ -57,11 +57,17 @@ _preauth_resolved_json() {
     fi
 }
 
-# lightsail-nixos-headscale.toml에서 [headscale] 기본값 읽기
+# [headscale] 기본값 읽기
+# 우선순위: ec2-nixos-headscale.toml → lightsail-nixos-headscale.toml (fallback)
 _read_headscale_defaults() {
     local _toml
-    _toml="$(_preauth_repo_root)/hosts/lightsail-nixos-headscale.toml"
-    if [ ! -f "$_toml" ]; then
+    local _root
+    _root="$(_preauth_repo_root)/hosts"
+    if [ -f "${_root}/ec2-nixos-headscale.toml" ]; then
+        _toml="${_root}/ec2-nixos-headscale.toml"
+    elif [ -f "${_root}/lightsail-nixos-headscale.toml" ]; then
+        _toml="${_root}/lightsail-nixos-headscale.toml"
+    else
         return
     fi
 

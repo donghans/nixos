@@ -269,6 +269,7 @@ in {
             user = "root";
             magicRollback = true;
             autoRollback = true;
+            activationTimeout = 600;
             path =
               deploy-rs.lib.${resolved.system}.activate.nixos
               nixosConfigurationsAll.${name};
