@@ -8,6 +8,7 @@ mkHostConfiguration (_: {
       ./headscale-vps/caddy.nix
       ./headscale-vps/github-backup.nix
       ./headscale-vps/docker.nix
+      ./headscale-vps/ip-forwarding.nix
     ];
 
     headscale.domain = "e.772610158.xyz";
@@ -20,7 +21,8 @@ mkHostConfiguration (_: {
     networking.firewall = {
       enable = true;
       allowedTCPPorts = [22 80 443];
-      allowedUDPPorts = [3478]; # STUN
+      allowedTCPPortRanges = [{from = 8000; to = 8999;}];
+      allowedUDPPorts = [3478 41641]; # STUN, WireGuard/tailscale
     };
 
     users.users.admin.openssh.authorizedKeys.keyFiles = [
