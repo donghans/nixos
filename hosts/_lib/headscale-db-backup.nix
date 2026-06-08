@@ -105,6 +105,8 @@ in {
   config = lib.mkIf cfg.enable {
     systemd.tmpfiles.rules = [
       "d ${cfg.repoDir} 0700 headscale headscale -"
+      # inject_secrets가 root:root 600으로 생성하므로 매 활성화 시 소유자 교정
+      "z ${cfg.privateKeyFile} 0640 headscale headscale -"
     ];
 
     systemd.services.headscale-db-backup = {
