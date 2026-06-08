@@ -4,6 +4,29 @@
 
 ---
 
+## 진행 현황
+
+| # | 항목 | 상태 |
+|---|---|---|
+| 1 | GitHub를 통한 headscale DB 보관 | ✅ 완료 |
+| 2 | Headscale → Vultr 단일 인스턴스 이전 | ✅ 완료 |
+| 3 | tailscale state 파일 → headscale-backup 관리 | ✅ 완료 |
+| 4 | 부트스트랩 키 관리 (GitHub Apps + age) | ✅ 코드 완료 / ⏳ GitHub Apps 설치 3개 수동 미완 |
+| 4.5 | nixsec 레포 이전 (`aws-headscale-secrets` → `headscale-vps-secrets`) | ⏳ TODO 2 완료 후 진행 |
+| 5 | 공인 IP 포워딩 (DMZ) — mac studio / ubuntu-2404 | ⬜ 미시작 |
+| 6 | Vultr 인스턴스 스펙 (수동 생성) | ✅ 참조용 |
+
+### 다음 작업
+
+1. **TODO 4 마무리** — GitHub Apps 웹 콘솔에서 설치 3개 생성:
+   - Installation A: `headscale-vps-secrets` repo (TODO 4.5 먼저 or 임시 `aws-headscale-secrets`)
+   - Installation B: `headscale-backup` repo — 이미 존재(ID: 138797641), 확인만
+   - Installation C: nixos config repo
+2. **TODO 4.5** — EC2 종료 후 `aws-headscale-secrets` → `headscale-vps-secrets` 이전
+3. **TODO 5** — Vultr secondary IP + 공인 IP 포워딩
+
+---
+
 ## 1. GitHub를 통한 headscale DB 보관
 
 ### 배경
