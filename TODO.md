@@ -28,7 +28,7 @@ DB 내용이 대부분 공개키 + 메타데이터. preauthkey/API key 제거 �
 
 ### 작업
 
-- [ ] GitHub Apps 생성 (headscale-backup repo write 권한)
+- [ ] GitHub Apps 생성 → TODO 4 참조 (Installation B: headscale-backup repo write)
 - [ ] headscale-backup GitHub repo 생성
 - [ ] Vultr headscale NixOS 설정에 백업 systemd timer 추가:
 
@@ -37,7 +37,7 @@ DB 내용이 대부분 공개키 + 메타데이터. preauthkey/API key 제거 �
     script = ''
       sqlite3 /var/lib/headscale/db.sqlite .dump \
         > /var/lib/nix-secrets/headscale/headscale.sql
-      cd /path/to/nixos-repo
+      cd /path/to/headscale-backup-repo
       git add headscale/headscale.sql
       git diff --cached --quiet || git commit -m "chore: headscale db backup"
       git push
@@ -283,4 +283,3 @@ imports = [
 | 플랜 | Regular Cloud Compute, 1 vCPU / 2GB RAM (vc2-1c-2gb, $10/월) |
 | OS | Debian 12 또는 Ubuntu 22.04 (nixos-anywhere로 덮어씀) |
 | 호스트명 | headscale-vps |
-| Secondary IP | 2개 추가 신청 (mac studio용, ubuntu-2404용) |
