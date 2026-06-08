@@ -23,7 +23,7 @@ mkHostConfiguration (_: {
 
     # SSH 접근: nixos-anywhere 재설치 후 cloud-init 없이도 키 유지
     users.users.ec2-user.openssh.authorizedKeys.keyFiles = [
-      ./deploy/ec2-nixos-headscale.pub
+      ./_deploy/ec2-nixos-headscale.pub
     ];
 
     # deploy-rs: ec2-user로 SSH → root로 sudo 실행 (nixos activation용)

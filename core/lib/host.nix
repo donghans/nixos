@@ -105,10 +105,10 @@
     hmModules = hostInfo.hmModules    or [];
     hostCtx = mkHostContext (hostInfo // {inherit isISO;});
 
-    # remote 호스트는 per-host hardware.nix(hosts/deploy/<hostname>.hardware.nix)를 우선 사용.
+    # remote 호스트는 per-host hardware.nix(hosts/_deploy/<hostname>.hardware.nix)를 우선 사용.
     # 파일이 없거나 로컬 호스트이면 공용 hardware.nix(BUILD_DIR 루트)로 fallback.
     _isRemote = hostInfo.isRemote or false;
-    _remoteHwPath = ../../hosts/deploy/${hostInfo.hostname}.hardware.nix;
+    _remoteHwPath = ../../hosts/_deploy/${hostInfo.hostname}.hardware.nix;
     _hwModule =
       if _isRemote && builtins.pathExists _remoteHwPath
       then _remoteHwPath
@@ -196,7 +196,7 @@
               # (pub key 없는 password-only 서버: core.network.nix의 false를 오버라이드해 비밀번호 SSH 허용)
               # (pub key 있는 경우: core.network.nix의 false가 그대로 적용됨)
               settings.PasswordAuthentication =
-                nixpkgs.lib.mkIf (!(builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub))
+                nixpkgs.lib.mkIf (!(builtins.pathExists ../../hosts/_deploy/${hostInfo.hostname}.pub))
                 (nixpkgs.lib.mkForce true);
             };
 
@@ -204,8 +204,8 @@
             users.users.root.openssh.authorizedKeys.keyFiles =
               nixpkgs.lib.optional
               (hostCtx.metaConfig.hasDeployRs
-                && builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub)
-              ../../hosts/deploy/${hostInfo.hostname}.pub;
+                && builtins.pathExists ../../hosts/_deploy/${hostInfo.hostname}.pub)
+              ../../hosts/_deploy/${hostInfo.hostname}.pub;
 
             # (목적: deploy-rs가 root로 nix copy 실행 — root는 기본 trusted-user)
             nix.settings.trusted-users =
@@ -292,8 +292,8 @@
             extraGroups = ["wheel"];
             openssh.authorizedKeys.keyFiles =
               nixpkgs.lib.optional
-              (builtins.pathExists ../../hosts/deploy/${hostInfo.hostname}.pub)
-              ../../hosts/deploy/${hostInfo.hostname}.pub;
+              (builtins.pathExists ../../hosts/_deploy/${hostInfo.hostname}.pub)
+              ../../hosts/_deploy/${hostInfo.hostname}.pub;
           };
         }
         ++ extraModules;

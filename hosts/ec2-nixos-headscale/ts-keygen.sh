@@ -21,7 +21,7 @@ source "$NIXOS_PATH/core/scripts/nixsec.task-upload.sh"
 # ── secrets.json에서 ts-state 항목 자동 스캔 ──────────────────────────────────
 # 레포 경로가 ts-state 또는 tailscaled.state로 끝나는 항목 수집
 mapfile -t _ALL_PATHS < <(
-    find "$NIXOS_PATH/hosts/deploy" -name "secrets.json" -print0 \
+    find "$NIXOS_PATH/hosts/_deploy" -name "secrets.json" -print0 \
         | xargs -0 jq -r '
             .groups[].secrets
             | to_entries[]

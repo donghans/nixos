@@ -57,12 +57,12 @@ extract_pub_key() {
     log_msg "Done" "공개키 추출 완료"
 }
 
-# ── 1.5. 공개키 파일 저장 → hosts/deploy/<hostname>.pub ──────────────────────
+# ── 1.5. 공개키 파일 저장 → hosts/_deploy/<hostname>.pub ──────────────────────
 write_pub_key_file() {
-    local deploy_dir="$NIXOS_PATH/hosts/deploy"
+    local deploy_dir="$NIXOS_PATH/hosts/_deploy"
     mkdir -p "$deploy_dir"
     printf '%s\n' "$_PUB_KEY" > "$deploy_dir/${_HOSTNAME}.pub"
-    log_msg "Done" "공개키 저장: hosts/deploy/${_HOSTNAME}.pub"
+    log_msg "Done" "공개키 저장: hosts/_deploy/${_HOSTNAME}.pub"
 }
 
 # ── 2. TOML 생성 ─────────────────────────────────────────────────────────────
@@ -252,9 +252,9 @@ run_nixos_anywhere() {
 
     # hardware.nix를 원격에서 생성 (타깃 머신의 hw config)
     # --generate-hardware-config: 타깃 머신에서 nixos-generate-config 실행 후 로컬에 저장
-    # hosts/deploy/<hostname>.hardware.nix 에 저장 (flake에서 per-host 경로로 참조)
-    mkdir -p "$BUILD_DIR/hosts/deploy"
-    local hw_path="$BUILD_DIR/hosts/deploy/${_HOSTNAME}.hardware.nix"
+    # hosts/_deploy/<hostname>.hardware.nix 에 저장 (flake에서 per-host 경로로 참조)
+    mkdir -p "$BUILD_DIR/hosts/_deploy"
+    local hw_path="$BUILD_DIR/hosts/_deploy/${_HOSTNAME}.hardware.nix"
 
     log_exec "n-aw" ">" "nixos-anywhere: $_HOSTNAME"
     NIX_SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" \
@@ -267,16 +267,16 @@ run_nixos_anywhere() {
 
     # 생성된 hardware.nix를 소스 레포로 역복사 후 커밋
     # 커밋하면 git archive HEAD에 포함되므로 transfer_repo_to_remote에서 별도 scp 불필요
-    mkdir -p "$NIXOS_PATH/hosts/deploy"
-    cp "$hw_path" "$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.hardware.nix"
+    mkdir -p "$NIXOS_PATH/hosts/_deploy"
+    cp "$hw_path" "$NIXOS_PATH/hosts/_deploy/${_HOSTNAME}.hardware.nix"
     git -C "$NIXOS_PATH" \
         -c user.name="rnixstrap" -c user.email="rnixstrap@localhost" \
-        add "hosts/deploy/${_HOSTNAME}.hardware.nix" 2>/dev/null || true
+        add "hosts/_deploy/${_HOSTNAME}.hardware.nix" 2>/dev/null || true
     if ! git -C "$NIXOS_PATH" diff --cached --quiet 2>/dev/null; then
         if git -C "$NIXOS_PATH" \
             -c user.name="rnixstrap" -c user.email="rnixstrap@localhost" \
             commit -m "feat: ${_HOSTNAME} hardware.nix 추가/갱신" 2>/dev/null; then
-            log_msg "Done" "hardware.nix 커밋 완료: hosts/deploy/${_HOSTNAME}.hardware.nix"
+            log_msg "Done" "hardware.nix 커밋 완료: hosts/_deploy/${_HOSTNAME}.hardware.nix"
         else
             log_msg "Notice" "hardware.nix 커밋 실패 — 수동 커밋 필요"
         fi
@@ -343,12 +343,12 @@ _write_standalone_files() {
     # pub key 자동 커밋 (hardware.nix와 동일한 패턴 — 미푸시 상태이므로 transfer_repo_to_remote에서 직접 전송도 병행)
     git -C "$NIXOS_PATH" \
         -c user.name="rnixstrap" -c user.email="rnixstrap@localhost" \
-        add "hosts/deploy/${_HOSTNAME}.pub" 2>/dev/null || true
+        add "hosts/_deploy/${_HOSTNAME}.pub" 2>/dev/null || true
     if ! git -C "$NIXOS_PATH" diff --cached --quiet 2>/dev/null; then
         if git -C "$NIXOS_PATH" \
             -c user.name="rnixstrap" -c user.email="rnixstrap@localhost" \
             commit -m "feat: ${_HOSTNAME} pub key 추가/갱신" 2>/dev/null; then
-            log_msg "Done" "pub key 커밋 완료: hosts/deploy/${_HOSTNAME}.pub"
+            log_msg "Done" "pub key 커밋 완료: hosts/_deploy/${_HOSTNAME}.pub"
         else
             log_msg "Notice" "pub key 커밋 실패 — 수동 커밋 필요"
         fi
@@ -391,20 +391,20 @@ transfer_repo_to_remote() {
     fi
     # hardware.nix + pub key: GitHub push 전일 수 있으므로 항상 직접 전송
     local pfx; [ "$u" = "root" ] && pfx="" || pfx="sudo "
-    local hw_src="$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.hardware.nix"
-    local pub_src="$NIXOS_PATH/hosts/deploy/${_HOSTNAME}.pub"
+    local hw_src="$NIXOS_PATH/hosts/_deploy/${_HOSTNAME}.hardware.nix"
+    local pub_src="$NIXOS_PATH/hosts/_deploy/${_HOSTNAME}.pub"
     if [ -f "$hw_src" ] || [ -f "$pub_src" ]; then
         ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-            "${pfx}mkdir -p /opt/nixos/hosts/deploy"
+            "${pfx}mkdir -p /opt/nixos/hosts/_deploy"
     fi
     if [ -f "$hw_src" ]; then
         ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-            "${pfx}sh -c 'cat > /opt/nixos/hosts/deploy/${_HOSTNAME}.hardware.nix'" \
+            "${pfx}sh -c 'cat > /opt/nixos/hosts/_deploy/${_HOSTNAME}.hardware.nix'" \
             < "$hw_src"
     fi
     if [ -f "$pub_src" ]; then
         ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
-            "${pfx}sh -c 'cat > /opt/nixos/hosts/deploy/${_HOSTNAME}.pub'" \
+            "${pfx}sh -c 'cat > /opt/nixos/hosts/_deploy/${_HOSTNAME}.pub'" \
             < "$pub_src"
     fi
     log_msg "Done" "레포 클론 완료"

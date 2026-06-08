@@ -4,7 +4,7 @@
 
 # secrets.json 보유 호스트 목록 수집
 _collect_secret_hosts() {
-    find "$NIXOS_PATH/hosts/deploy" -name "secrets.json" -type f | \
+    find "$NIXOS_PATH/hosts/_deploy" -name "secrets.json" -type f | \
         sed 's|.*/\(.*\)\.secrets/secrets\.json|\1|' | sort
 }
 
@@ -111,12 +111,12 @@ _run_local_apply() {
     # 현재 호스트명으로 secrets.json 탐색
     local _cur_host
     _cur_host=$(hostname -s)
-    local _config_file="$NIXOS_PATH/hosts/deploy/${_cur_host}.secrets/secrets.json"
+    local _config_file="$NIXOS_PATH/hosts/_deploy/${_cur_host}.secrets/secrets.json"
 
     if [ ! -f "$_config_file" ]; then
         log_msg "Notice" "현재 호스트($_cur_host)의 secrets.json이 없습니다."
         read -rep "$(_log_prompt_rl)호스트명 직접 입력: " _cur_host
-        _config_file="$NIXOS_PATH/hosts/deploy/${_cur_host}.secrets/secrets.json"
+        _config_file="$NIXOS_PATH/hosts/_deploy/${_cur_host}.secrets/secrets.json"
         [ -f "$_config_file" ] || { log_msg "Error" "secrets.json 없음: $_config_file"; exit 1; }
     else
         log_msg "Notice" "호스트: $_cur_host"
@@ -183,7 +183,7 @@ _run_key_restore() {
     # 레포 선택
     local -a _repos=()
     mapfile -t _repos < <(
-        find "$NIXOS_PATH/hosts/deploy" -name "secrets.json" -print0 | \
+        find "$NIXOS_PATH/hosts/_deploy" -name "secrets.json" -print0 | \
         xargs -0 jq -r '.groups[].repo' 2>/dev/null | sort -u
     )
 

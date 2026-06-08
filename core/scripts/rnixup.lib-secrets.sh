@@ -6,7 +6,7 @@
 #   inject_all_remote_secrets          (rnixup용 — resolved.json 기반)
 #   _any_remote_secrets_exist          (rnixup용 — secrets.json 유무 확인)
 #
-# secrets.json 포맷 (hosts/deploy/<hostname>.secrets/secrets.json):
+# secrets.json 포맷 (hosts/_deploy/<hostname>.secrets/secrets.json):
 #   {
 #     "groups": {
 #       "<group>": {
@@ -21,7 +21,7 @@
 # secrets.json 내용 반환. 없으면 return 1
 _get_secrets_config() {
     local hostname="$1"
-    local f="$NIXOS_PATH/hosts/deploy/${hostname}.secrets/secrets.json"
+    local f="$NIXOS_PATH/hosts/_deploy/${hostname}.secrets/secrets.json"
     [ -f "$f" ] || return 1
     cat "$f"
 }
@@ -36,7 +36,7 @@ _any_remote_secrets_exist() {
         local group_count
         group_count=$(printf '%s' "$config" | jq -r '(.groups // {}) | length' 2>/dev/null) || continue
         [ "${group_count:-0}" -gt 0 ] && return 0
-        local secrets_dir="$NIXOS_PATH/hosts/deploy/${hostname}.secrets"
+        local secrets_dir="$NIXOS_PATH/hosts/_deploy/${hostname}.secrets"
         find "$secrets_dir" -name "from-new.sh" -type f 2>/dev/null | grep -q . && return 0
     done < <(jq -r 'to_entries[] | select(.value.deploy != null) | .key' "$resolved_json")
     return 1
@@ -137,7 +137,7 @@ _select_entries() {
         check_args+=("group:$group" "${group}  (${secret_count}개 시크릿, ${repo})")
     done < <(printf '%s' "$config" | jq -r '(.groups // {}) | keys[]')
 
-    local secrets_dir="$NIXOS_PATH/hosts/deploy/${hostname}.secrets"
+    local secrets_dir="$NIXOS_PATH/hosts/_deploy/${hostname}.secrets"
     while IFS= read -r new_script; do
         local grp_name
         grp_name=$(basename "$(dirname "$new_script")")

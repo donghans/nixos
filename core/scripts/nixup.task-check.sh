@@ -7,7 +7,7 @@ run_check_task() {
     log_msg "Task" "1단계: 미사용 코드 검사 (deadnix)"
     log_exec "nix" ">" "deadnix"
     # *.hardware.nix: nixos-generate-config 생성 파일 — 미사용 lambda arg 경고 무시
-    mapfile -t _hw_excludes < <(find "$NIXOS_PATH/hosts/deploy" -name "*.hardware.nix" 2>/dev/null)
+    mapfile -t _hw_excludes < <(find "$NIXOS_PATH/hosts/_deploy" -name "*.hardware.nix" 2>/dev/null)
     if [ ${#_hw_excludes[@]} -gt 0 ]; then
         deadnix "$NIXOS_PATH" --exclude "${_hw_excludes[@]}"
     else

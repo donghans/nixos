@@ -3,7 +3,7 @@
 # 사용법: mkHostConfiguration에서 os.imports에 결과를 삽입.
 #
 # 예:
-#   let mkTailscaleProxy = import ../mods/sys/services/_incus-tailscale-proxy-lib.nix {inherit lib pkgs;};
+#   let mkTailscaleProxy = import ./_lib/incus-tailscale-proxy.nix {inherit lib pkgs;};
 #   in mkHostConfiguration (_: {
 #     os.imports = [(mkTailscaleProxy "devserver" { vmName = "ubuntu-2404"; ... })];
 #   })

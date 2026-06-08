@@ -151,7 +151,7 @@ _setup_deploy_pubkey() {
     [ -z "$_mode" ] && [ "${_DEPLOY_ENABLED:-false}" = true ] && _mode="deploy-rs"
     [[ "$_mode" != "existing-key" && "$_mode" != "deploy-rs" ]] && return
 
-    local deploy_dir="/mnt/etc/nixos/hosts/deploy"
+    local deploy_dir="/mnt/etc/nixos/hosts/_deploy"
     mkdir -p "$deploy_dir"
 
     if [ -n "${_DEPLOY_SSH_KEY:-}" ]; then
@@ -163,7 +163,7 @@ _setup_deploy_pubkey() {
             exit 1
         fi
         printf '%s %s\n' "$pub_key" "$HOST" > "$deploy_dir/${HOST}.pub"
-        log_msg "Done" "SSH pub key 등록: hosts/deploy/${HOST}.pub"
+        log_msg "Done" "SSH pub key 등록: hosts/_deploy/${HOST}.pub"
     else
         # 신규 키 생성 (deploy-rs 전용)
         local key_tmp="/tmp/nixstrap-deploy-$$"
@@ -172,7 +172,7 @@ _setup_deploy_pubkey() {
         cp "${key_tmp}.pub" "$deploy_dir/${HOST}.pub"
         _DEPLOY_SSH_KEY="$key_tmp"
         _DEPLOY_KEY_WAS_GENERATED=true
-        log_msg "Done" "SSH 키 생성 및 pub key 등록: hosts/deploy/${HOST}.pub"
+        log_msg "Done" "SSH 키 생성 및 pub key 등록: hosts/_deploy/${HOST}.pub"
     fi
 }
 
@@ -213,7 +213,7 @@ _commit_deploy_files() {
 
     git -C "$repo_dir" \
         -c user.name="nixstrap" -c user.email="nixstrap@localhost" \
-        add "hosts/deploy/${HOST}.pub" "hosts/${HOST}.toml" 2>/dev/null || true
+        add "hosts/_deploy/${HOST}.pub" "hosts/${HOST}.toml" 2>/dev/null || true
 
     if git -C "$repo_dir" diff --cached --quiet 2>/dev/null; then
         log_msg "Notice" "커밋할 변경사항 없음"
@@ -231,7 +231,7 @@ _commit_deploy_files() {
         fi
     else
         log_msg "Notice" "커밋 실패 — 첫 부팅 후 수동 커밋 필요:"
-        log_msg "Notice" "  git add hosts/deploy/${HOST}.pub hosts/${HOST}.toml"
+        log_msg "Notice" "  git add hosts/_deploy/${HOST}.pub hosts/${HOST}.toml"
         log_msg "Notice" "  git commit -m '${_commit_msg}'"
     fi
 }

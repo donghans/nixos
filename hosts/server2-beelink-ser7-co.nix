@@ -4,7 +4,7 @@
   lib,
   ...
 }: let
-  mkTailscaleProxy = import ../mods/sys/services/_incus-tailscale-proxy-lib.nix {inherit lib pkgs;};
+  mkTailscaleProxy = import ./_lib/incus-tailscale-proxy.nix {inherit lib pkgs;};
 in
   mkHostConfiguration (_: {
     os = {

@@ -16,7 +16,6 @@ docker             = false
 incus                  = false
 incus-win11            = false
 incus-guest            = true
-incus-tailscale-proxy  = false
 caddy              = false
 nix-cache-proxy    = false
 aws-roles-anywhere = false
