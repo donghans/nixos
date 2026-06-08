@@ -78,13 +78,11 @@ _BOOTSTRAP_SSH_USER=""  # .bootstrap.env에서 로드 (standalone 기본값)
 # ── lib 로드 ──────────────────────────────────────────────────────────────────
 source "$SCRIPT_DIR/lib-build.sh"
 source "$SCRIPT_DIR/rnixup.lib-secrets.sh"
-source "$SCRIPT_DIR/nixstrap.lib-preauth.sh"
 source "$SCRIPT_DIR/rnixstrap.lib-input.sh"
 source "$SCRIPT_DIR/rnixstrap.task-setup.sh"
 
 # ── Cleanup trap ──────────────────────────────────────────────────────────────
 _cleanup() {
-    preauth_cleanup_tmp_key 2>/dev/null || true
     _print_summary
     tput cnorm 2>/dev/null || true
     stty sane 2>/dev/null || true

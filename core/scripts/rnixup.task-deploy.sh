@@ -5,7 +5,6 @@
 # 변수 의존: BUILD_DIR, JSON_DIR
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/rnixup.lib-secrets.sh"
-source "$(dirname "${BASH_SOURCE[0]}")/nixstrap.lib-preauth.sh"
 
 
 # ── SSH 키 파일 누락 사전 확인 ────────────────────────────────────────────────

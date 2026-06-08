@@ -9,7 +9,6 @@
     mkdir -p $out
     cp ${./scripts/lib-ui.sh}               $out/lib-ui.sh
     cp ${./scripts/nixstrap.lib-ui.sh}       $out/nixstrap.lib-ui.sh
-    cp ${./scripts/nixstrap.lib-preauth.sh}  $out/nixstrap.lib-preauth.sh
     cp ${./scripts/nixstrap.task-input.sh}   $out/nixstrap.task-input.sh
     cp ${./scripts/nixstrap.task-disk.sh}    $out/nixstrap.task-disk.sh
     cp ${./scripts/nixstrap.task-install.sh} $out/nixstrap.task-install.sh
