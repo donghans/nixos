@@ -200,17 +200,6 @@ _run_deploy_task() {
         fi
     fi
 
-    # ── Preauth key 생성·배포 (선택) ─────────────────────────────────────────
-    if _any_remote_preauth_keys_needed; then
-        printf "\n"
-        read -rp "$(_log_prompt)Preauth key를 생성/배포하시겠습니까? (y/N): " _inject_preauth
-        if [[ "${_inject_preauth:-N}" =~ ^[Yy]$ ]]; then
-            check_all_preauth_keys_remote
-        else
-            log_msg "Notice" "Preauth key 생성 건너뜀."
-        fi
-    fi
-
     # ── 실제 배포 ─────────────────────────────────────────────────────────────
     log_msg "Task" "$deploy_count remote host(s) 배포 시작..."
     log_exec "d-rs" ">" "$_deploy_label"
