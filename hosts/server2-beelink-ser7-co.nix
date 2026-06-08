@@ -9,6 +9,12 @@ in
   mkHostConfiguration (_: {
     os = {
       imports = [
+        (mkTailscaleProxy "mac-studio" {
+          vmName = "mac-studio-proxy";
+          vmIp = "192.168.11.202";
+          stateFile = "/var/lib/nix-secrets/tailscale/system/mac-studio-proxy.state";
+          enableLanForward = false;
+        })
         (mkTailscaleProxy "devserver" {
           vmName = "ubuntu-2404";
           internalBridge = "incusbr-dev";
