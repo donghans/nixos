@@ -75,9 +75,23 @@ _run_remote_inject() {
         log_msg "Notice" "IP: $_INJ_IP (자동 조회)"
     fi
 
+    local _use_password=false
     if [ -z "$_INJ_SSH_KEY" ]; then
-        read -rep "$(_log_prompt_rl)SSH 키 파일 경로 (Tab 완성): " _INJ_SSH_KEY
-        _INJ_SSH_KEY="${_INJ_SSH_KEY/#\~/$HOME}"
+        printf '\n'
+        _pick "SSH 인증 방식:" "키 파일 (.pem)" "비밀번호"
+        if [ "$REPLY" -eq 0 ]; then
+            read -rep "$(_log_prompt_rl)SSH 키 파일 경로 (Tab 완성): " _INJ_SSH_KEY
+            _INJ_SSH_KEY="${_INJ_SSH_KEY/#\~/$HOME}"
+        else
+            _use_password=true
+            local _inj_pass=""
+            while [ -z "$_inj_pass" ]; do
+                read -srp "$(_log_prompt)SSH 비밀번호: " _inj_pass
+                printf '\n'
+                [ -z "$_inj_pass" ] && log_msg "Error" "비밀번호를 입력하세요."
+            done
+            _SECRETS_SSH_PASS="$_inj_pass"
+        fi
     else
         log_msg "Notice" "SSH 키: $_INJ_SSH_KEY (자동 조회)"
     fi
@@ -89,12 +103,25 @@ _run_remote_inject() {
         log_msg "Notice" "SSH 유저: $_INJ_SSH_USER (자동 조회)"
     fi
 
-    local ssh_opts=(
-        -o StrictHostKeyChecking=yes
-        -o BatchMode=yes
-        -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
-        -o LogLevel=ERROR
-    )
+    # 비밀번호 인증 시 BatchMode=no, PasswordAuthentication=yes
+    local ssh_opts
+    if "$_use_password"; then
+        ssh_opts=(
+            -o StrictHostKeyChecking=yes
+            -o BatchMode=no
+            -o PasswordAuthentication=yes
+            -o PubkeyAuthentication=no
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o LogLevel=ERROR
+        )
+    else
+        ssh_opts=(
+            -o StrictHostKeyChecking=yes
+            -o BatchMode=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o LogLevel=ERROR
+        )
+    fi
 
     # lib-secrets.sh 로드 (inject_secrets 사용)
     local _lib="$SCRIPT_DIR/rnixup.lib-secrets.sh"

@@ -45,8 +45,26 @@ _SSH_OPTS_POST=(
 # 초기값 = bootstrap. wait_for_ssh 완료 후 POST로 전환됨.
 _SSH_OPTS=("${_SSH_OPTS_BOOTSTRAP[@]}")
 
+# ── SSH 래퍼: _SSH_PASS 설정 시 sshpass, 아니면 키 파일 인증 ─────────────────
+_ssh() {
+    if [ -n "${_SSH_PASS:-}" ]; then
+        sshpass -f <(printf '%s' "$_SSH_PASS") \
+            ssh -o PasswordAuthentication=yes -o PubkeyAuthentication=no \
+            -o BatchMode=no "$@"
+    else
+        ssh -i "$_SSH_KEY" "$@"
+    fi
+}
+
 # ── 1. 공개키 추출 → _PUB_KEY 변수에 저장 ────────────────────────────────────
+# 비밀번호 인증 시 _SSH_KEY가 배포 키(ask_deploy_key)로 설정됐으면 그 키에서 추출
+# _SSH_KEY가 비어있으면 스킵 (NixOS authorized key 없이 설치)
 extract_pub_key() {
+    if [ -z "${_SSH_KEY:-}" ]; then
+        log_msg "Warn" "SSH 키 없음 — authorized key 등록을 건너뜁니다."
+        _PUB_KEY=""
+        return
+    fi
     log_msg "Prep" "공개키 추출 중 (ssh-keygen -y)..."
     _PUB_KEY=$(ssh-keygen -y -f "$_SSH_KEY" 2>/dev/null)
     if [ -z "$_PUB_KEY" ]; then
@@ -96,7 +114,7 @@ generate_toml() {
         printf '\n'
         printf '[deploy]\n'
         printf 'ip          = "%s"\n' "$_IP"
-        printf 'sshKey      = "%s"\n' "${_SSH_KEY/#$HOME/~}"
+        [ -n "${_SSH_KEY:-}" ] && printf 'sshKey      = "%s"\n' "${_SSH_KEY/#$HOME/~}"
         printf '\n'
         printf '[mods.sys.services]\n'
         for svc in "${all_services[@]}"; do
@@ -175,7 +193,7 @@ run_resolve_and_prepare() {
 # ── 5. RAM 사전 감지 (review 출력 전 호출, 실패 시 _REMOTE_RAM_MB=-1 유지) ──────
 _probe_ram() {
     local out
-    out=$(ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" -o ConnectTimeout=8 \
+    out=$(_ssh "${_SSH_OPTS[@]}" -o ConnectTimeout=8 \
         "${_SSH_USER}@${_IP}" \
         "awk '/MemTotal/{print int(\$2/1024)}' /proc/meminfo" \
         2>/dev/null) || true
@@ -186,7 +204,7 @@ _probe_ram() {
 probe_disk_and_boot() {
     log_msg "Prep" "원격 디스크·부트 타입 감지 중..."
     local remote_out
-    remote_out=$(ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" -o ConnectTimeout=10 \
+    remote_out=$(_ssh "${_SSH_OPTS[@]}" -o ConnectTimeout=10 \
         "${_SSH_USER}@${_IP}" \
         'test -d /sys/firmware/efi && echo uefi || echo bios; lsblk -dn -o NAME,TYPE 2>/dev/null | awk '"'"'$2=="disk" && $1!~/^zram/{print "/dev/"$1; exit}'"'"'' \
         2>/dev/null) || true
@@ -233,13 +251,13 @@ EOF
 
 probe_ssh() {
     log_msg "Prep" "SSH 연결 확인 중 (${_SSH_USER}@$_IP)..."
-    if ! ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" -o ConnectTimeout=15 \
+    if ! _ssh "${_SSH_OPTS[@]}" -o ConnectTimeout=15 \
              "${_SSH_USER}@${_IP}" true 2>/dev/null; then
         log_msg "Error" "SSH 연결 실패: ${_SSH_USER}@${_IP}"
         log_msg "Notice" "확인 사항:"
         log_msg "Notice" "  • 인스턴스가 실행 중인지 확인"
         log_msg "Notice" "  • 보안 그룹 / 방화벽에서 포트 22(SSH) 개방 여부"
-        log_msg "Notice" "  • 키 파일 권한: chmod 600 \"$_SSH_KEY\""
+        [ -z "${_SSH_PASS:-}" ] && log_msg "Notice" "  • 키 파일 권한: chmod 600 \"$_SSH_KEY\""
         exit 1
     fi
     log_msg "Done" "SSH 연결 확인"
@@ -257,13 +275,25 @@ run_nixos_anywhere() {
     local hw_path="$BUILD_DIR/hosts/_deploy/${_HOSTNAME}.hardware.nix"
 
     log_exec "n-aw" ">" "nixos-anywhere: $_HOSTNAME"
-    NIX_SSHOPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" \
-    nix run "github:nix-community/nixos-anywhere" -- \
-        --flake "path:${BUILD_DIR}#${_HOSTNAME}" \
-        --generate-hardware-config nixos-generate-config "$hw_path" \
-        -i "$_SSH_KEY" \
-        "${_SSH_USER}@${_IP}"
+    local _base_sshopts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+    if [ -n "${_SSH_PASS:-}" ]; then
+        NIX_SSHOPTS="$_base_sshopts -o PasswordAuthentication=yes -o PubkeyAuthentication=no -o BatchMode=no" \
+        sshpass -f <(printf '%s' "$_SSH_PASS") \
+        nix run "github:nix-community/nixos-anywhere" -- \
+            --flake "path:${BUILD_DIR}#${_HOSTNAME}" \
+            --generate-hardware-config nixos-generate-config "$hw_path" \
+            "${_SSH_USER}@${_IP}"
+    else
+        NIX_SSHOPTS="$_base_sshopts" \
+        nix run "github:nix-community/nixos-anywhere" -- \
+            --flake "path:${BUILD_DIR}#${_HOSTNAME}" \
+            --generate-hardware-config nixos-generate-config "$hw_path" \
+            -i "$_SSH_KEY" \
+            "${_SSH_USER}@${_IP}"
+    fi
     log_exec "n-aw" "<" "nixos-anywhere: $_HOSTNAME"
+    # NixOS 설치 완료 — 이후 접속은 NixOS 키 인증으로 전환
+    _SSH_PASS=""
 
     # 생성된 hardware.nix를 소스 레포로 역복사 후 커밋
     # 커밋하면 git archive HEAD에 포함되므로 transfer_repo_to_remote에서 별도 scp 불필요
@@ -303,7 +333,7 @@ wait_for_ssh() {
     deadline=$(( start + 600 ))
     while true; do
         attempt=$((attempt + 1))
-        if ssh -i "$_SSH_KEY" "${_SSH_OPTS_BOOTSTRAP[@]}" -o ConnectTimeout=5 \
+        if _ssh "${_SSH_OPTS_BOOTSTRAP[@]}" -o ConnectTimeout=5 \
                "${poll_user}@$_IP" true 2>/dev/null; then
             local elapsed=$(( $(date +%s) - start ))
             # SSH 응답 확인 → 새 호스트 키 등록 후 이후 연결은 known_hosts 검증으로 전환
@@ -380,10 +410,10 @@ transfer_repo_to_remote() {
 
     log_msg "Task" "레포 클론 중 (/opt/nixos, depth=1)..."
     if [ "$u" = "root" ]; then
-        ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "root@${_IP}" \
+        _ssh "${_SSH_OPTS[@]}" "root@${_IP}" \
             "git clone --depth=1 --branch '${_branch}' '${_https_origin}' /opt/nixos"
     else
-        ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+        _ssh "${_SSH_OPTS[@]}" "${u}@${_IP}" \
             "rm -rf ~/nixos_clone && \
              git clone --depth=1 --branch '${_branch}' '${_https_origin}' ~/nixos_clone && \
              sudo mkdir -p /opt && sudo mv ~/nixos_clone /opt/nixos && \
@@ -394,16 +424,16 @@ transfer_repo_to_remote() {
     local hw_src="$NIXOS_PATH/hosts/_deploy/${_HOSTNAME}.hardware.nix"
     local pub_src="$NIXOS_PATH/hosts/_deploy/${_HOSTNAME}.pub"
     if [ -f "$hw_src" ] || [ -f "$pub_src" ]; then
-        ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+        _ssh "${_SSH_OPTS[@]}" "${u}@${_IP}" \
             "${pfx}mkdir -p /opt/nixos/hosts/_deploy"
     fi
     if [ -f "$hw_src" ]; then
-        ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+        _ssh "${_SSH_OPTS[@]}" "${u}@${_IP}" \
             "${pfx}sh -c 'cat > /opt/nixos/hosts/_deploy/${_HOSTNAME}.hardware.nix'" \
             < "$hw_src"
     fi
     if [ -f "$pub_src" ]; then
-        ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+        _ssh "${_SSH_OPTS[@]}" "${u}@${_IP}" \
             "${pfx}sh -c 'cat > /opt/nixos/hosts/_deploy/${_HOSTNAME}.pub'" \
             < "$pub_src"
     fi
@@ -415,7 +445,7 @@ transfer_repo_to_remote() {
 set_remote_env() {
     local u="${1:-root}"
     local pfx; [ "$u" = "root" ] && pfx="" || pfx="sudo "
-    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+    _ssh "${_SSH_OPTS[@]}" "${u}@${_IP}" \
         "${pfx}bash -c 'echo NIXUP_LAST_HOST=${_HOSTNAME} > /opt/nixos/.env'"
     log_msg "Done" "원격 .env: NIXUP_LAST_HOST=${_HOSTNAME}"
 }
@@ -429,7 +459,7 @@ run_nixup_os_remote() {
     log_msg "Task" "원격 nixup os 실행 중..."
     log_exec "nixup" ">" "nixup os: $_HOSTNAME"
     local _exit=0
-    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+    _ssh "${_SSH_OPTS[@]}" "${u}@${_IP}" \
         "/opt/nixos/core/scripts/nixup.sh os" || _exit=$?
     log_exec "nixup" "<" "nixup os: $_HOSTNAME"
     if [ "$_exit" -eq 255 ]; then
@@ -449,7 +479,7 @@ run_nixup_os_remote() {
 finalize_standalone_repo() {
     local u="${1:-root}"
     log_msg "Task" "레포를 홈 디렉터리로 이동 중 (/opt/nixos → ~/nixos)..."
-    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+    _ssh "${_SSH_OPTS[@]}" "${u}@${_IP}" \
         "sudo bash -s -- '${u}'" <<'REMOTE'
 NIXOS_USER="$1"
 USER_HOME=$(getent passwd "$NIXOS_USER" | cut -d: -f6)
@@ -513,7 +543,7 @@ run_nixup_home_remote() {
     log_msg "Task" "원격 nixup home 실행 중..."
     log_exec "nixup" ">" "nixup home: $_HOSTNAME"
     local _exit=0
-    ssh -i "$_SSH_KEY" "${_SSH_OPTS[@]}" "${u}@${_IP}" \
+    _ssh "${_SSH_OPTS[@]}" "${u}@${_IP}" \
         '$HOME/nixos/core/scripts/nixup.sh home' || _exit=$?
     log_exec "nixup" "<" "nixup home: $_HOSTNAME"
     if [ "$_exit" -ne 0 ]; then

@@ -264,6 +264,61 @@ ask_ssh_key() {
     done
 }
 
+# ── ask_deploy_key ────────────────────────────────────────────────────────────
+# 비밀번호 bootstrap 시 NixOS authorized key 등록 + post-bootstrap SSH 접속용 키 입력
+# _SSH_KEY 설정 (공개키 등록용), _SSH_PASS는 이미 설정된 상태
+ask_deploy_key() {
+    printf "\n"
+    log_msg "Notice" "NixOS 설치 후 SSH 접속 및 authorized key 등록을 위한 키가 필요합니다."
+    while true; do
+        local _key_prompt="$(_log_prompt_rl)배포용 SSH 키 파일 경로 (Tab 자동완성, Enter=건너뜀): "
+        local _input=""
+        read -rep "$_key_prompt" _input
+        _input="${_input// /}"
+        _input="${_input/#\~/$HOME}"
+        if [ -z "$_input" ]; then
+            log_msg "Warn" "배포 키 없음 — NixOS 설치 후 SSH 키 인증이 설정되지 않습니다."
+            break
+        fi
+        if [ ! -f "$_input" ]; then
+            log_msg "Error" "파일 없음: $_input"; continue
+        fi
+        _SSH_KEY="$_input"
+        local perms
+        perms=$(stat -c "%a" "$_SSH_KEY" 2>/dev/null || stat -f "%OLp" "$_SSH_KEY" 2>/dev/null || echo "unknown")
+        if [ "$perms" != "600" ] && [ "$perms" != "400" ]; then
+            log_msg "Warn" "키 파일 권한: $perms (권장: 600)"
+        fi
+        _copy_key_to_rnixup
+        log_msg "Done" "배포 키: $_SSH_KEY"
+        break
+    done
+}
+
+# ── ask_ssh_auth ──────────────────────────────────────────────────────────────
+# SSH 인증 방식 선택: 키 파일 또는 비밀번호
+# _SSH_KEY 또는 _SSH_PASS 설정
+ask_ssh_auth() {
+    printf "\n"
+    _pick "SSH 인증 방식:" \
+        "키 파일 (.pem)   — 표준 SSH 키 인증" \
+        "비밀번호          — 초기 VPS 접속 등"
+    if [ "$REPLY" -eq 0 ]; then
+        ask_ssh_key
+    else
+        printf "\n"
+        local _pass=""
+        while [ -z "$_pass" ]; do
+            read -srp "$(_log_prompt)SSH 비밀번호: " _pass
+            printf '\n'
+            [ -z "$_pass" ] && log_msg "Error" "비밀번호를 입력하세요."
+        done
+        _SSH_PASS="$_pass"
+        log_msg "Done" "비밀번호 인증 선택됨"
+        ask_deploy_key
+    fi
+}
+
 # ── ask_system ────────────────────────────────────────────────────────────────
 ask_system() {
     printf "\n"

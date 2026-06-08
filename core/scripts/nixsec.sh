@@ -1,5 +1,5 @@
 #!/usr/bin/env nix-shell
-#!nix-shell -i bash -I nixpkgs=flake:nixpkgs -p age gh jq
+#!nix-shell -i bash -I nixpkgs=flake:nixpkgs -p age gh jq curl openssl sshpass
 # nixsec — nix-secrets 관리 도구 (완전 대화형)
 # shellcheck disable=SC1008,SC1091,SC2034
 set -euo pipefail

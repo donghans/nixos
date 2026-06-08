@@ -1,5 +1,5 @@
 #!/usr/bin/env nix-shell
-#!nix-shell -i bash -I nixpkgs=flake:nixpkgs -p jq python3 git openssh age
+#!nix-shell -i bash -I nixpkgs=flake:nixpkgs -p jq python3 git openssh age curl openssl sshpass
 # shellcheck disable=SC1008,SC1091,SC2034,SC2154
 set -euo pipefail
 
@@ -65,6 +65,7 @@ _ALL_SERVICES=(
 )
 _WRITE_ONLY=false       # true = 파일 작업만 하고 설치 없이 종료
 _SSH_USER="root"        # nixos-anywhere bootstrap 접속 유저
+_SSH_PASS=""            # 비밀번호 인증 시 설정 (키 인증이면 비움)
 _TOML_IP=""             # 기존 호스트 TOML에서 로드 ([deploy] 있는 경우)
 _TOML_SSH_KEY=""        # 기존 호스트 TOML에서 로드 ([deploy] 있는 경우)
 _TOML_SSH_USER=""       # 기존 호스트 TOML에서 로드 ([deploy].sshUser)
@@ -102,14 +103,14 @@ select_or_create_hostname
 if [ "$_HOST_IS_NEW" = true ]; then
     ask_ssh_user
     ask_ip
-    ask_ssh_key
+    ask_ssh_auth
     ask_system
     ask_services
 elif [ "$_HOST_HAS_DEPLOY" = false ]; then
     load_bootstrap_env  # ~/.ssh/rnixup/<hostname>.bootstrap.env → _BOOTSTRAP_* 변수
     ask_ssh_user        # _BOOTSTRAP_SSH_USER 기본값
     ask_ip              # _BOOTSTRAP_IP 기본값
-    ask_ssh_key         # _BOOTSTRAP_SSH_KEY 기본값
+    ask_ssh_auth        # _BOOTSTRAP_SSH_KEY 기본값
 else
     # cloud 호스트(AWS 등)는 TOML sshUser가 부트스트랩 유저이기도 함 (ec2-user 등)
     # VPS/bare-metal은 root가 부트스트랩 유저 — deploy-rs는 resolved.json에서 독립적으로 읽음
