@@ -10,6 +10,7 @@ mkHostConfiguration (_: {
       ./headscale-vps/docker.nix
     ];
 
+    headscale.domain = "e.772610158.xyz";
     headscale.staticIpv4 = "141.164.59.97";
 
     networking.nameservers = ["1.1.1.1" "8.8.8.8"];

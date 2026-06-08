@@ -20,6 +20,6 @@ sshUser = "admin"
 tailscale = true
 
 [headscale]
-domain   = "e2.772610158.xyz"
+domain   = "e.772610158.xyz"
 ssh-user = "admin"
 ssh-key  = "~/.ssh/rnixup/headscale-vps.pem"

@@ -116,8 +116,8 @@ in {
   options.headscale = {
     domain = lib.mkOption {
       type = lib.types.str;
-      default = "e2.772610158.xyz";
-      description = "e2 스테이징 기본값 — 운영 전환 시 headscale-vps.nix에서 e.772610158.xyz로 변경";
+      default = "e.772610158.xyz";
+      description = "headscale 컨트롤 플레인 도메인";
     };
     staticIpv4 = lib.mkOption {
       type = lib.types.str;
