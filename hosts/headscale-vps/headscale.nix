@@ -116,7 +116,6 @@ in {
   options.headscale = {
     domain = lib.mkOption {
       type = lib.types.str;
-      default = "e.772610158.xyz";
       description = "headscale 컨트롤 플레인 도메인";
     };
     staticIpv4 = lib.mkOption {

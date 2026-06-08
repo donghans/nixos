@@ -18,8 +18,3 @@ sshUser = "admin"
 
 [mods.sys.services]
 tailscale = true
-
-[headscale]
-domain   = "e.772610158.xyz"
-ssh-user = "admin"
-ssh-key  = "~/.ssh/rnixup/headscale-vps.pem"
