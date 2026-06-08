@@ -4,72 +4,7 @@
 
 ---
 
-## 1. Headscale → Vultr 단일 인스턴스 이전
-
-> **전제조건: TODO 2 (GitHub DB backup) 동작 확인 완료 후 진행**
-
-### 배경
-
-현재 구조: EC2 (headscale) + Lightsail (proxy) + S3 (DB 백업) — 세 서비스로 분산  
-목표 구조: Vultr 단일 인스턴스 하나로 통합
-
-**이전 이유:**
-- S3 의존성이 사라지면 EC2를 쓸 이유가 없음
-- Lightsail은 IP 1개 고정 → 추가 IP 대응 어려움
-- Vultr: 대표님 선호, 2GB RAM $10/월 + 2TB 트래픽 포함, 관리 단순화
-- 장애 시 Lightsail 하나 띄우고 Cloudflare DNS A레코드만 변경하면 복구 가능
-  - nixos-anywhere로 fresh 서버에 NixOS 즉시 설치 가능 (disaster recovery 경로 명확)
-
-### 인스턴스 스펙
-
-| 항목 | 값 |
-|---|---|
-| 프로바이더 | Vultr |
-| 플랜 | Regular Performance 2GB ($10/월) |
-| 리전 | 서울 (icn) |
-| OS | NixOS (nixos-anywhere로 설치) |
-| 트래픽 | 2TB/월 포함 |
-
-### 실행 서비스
-
-- headscale (control plane)
-- DERP relay (현재 kr-ec2 relay 대체)
-- nginx (프록시, e.772610158.xyz 인증서 종단)
-
-### e2 스테이징 플로우 (중단 최소화 전략)
-
-`e.772610158.xyz`는 사내 서빙 중 → 직접 전환하지 않고 e2로 먼저 검증 후 DNS 교체.
-
-```
-1. Vultr 인스턴스 생성, headscale config server_url = e2.772610158.xyz
-   (Cloudflare DNS: e2.772610158.xyz A → Vultr IP)
-2. 관리자 본인만 e2에 tailscale 등록해 동작 검증
-   (SSH 연결, 멀티 NIC, DERP relay 등 안정화 확인)
-3. 검증 완료 → headscale DB를 EC2 → Vultr로 덤프/복원
-   (sqlite3 /var/lib/headscale/db.sqlite .dump > headscale.sql → 신규 서버에서 sqlite3 db.sqlite < headscale.sql)
-4. headscale config server_url = e.772610158.xyz 로 변경 후 nixup
-5. Cloudflare DNS: e.772610158.xyz A → Vultr IP 변경
-   기존 클라이언트들은 DNS 변경만으로 자동으로 Vultr headscale에 연결됨
-6. EC2 + Lightsail 종료
-```
-
-### 작업
-
-- [ ] Vultr 인스턴스 생성 (vultr-cli 스크립트 작성, 루트에 `vultr-setup.sh`)
-- [ ] `hosts/headscale-vps.nix` 생성 (`ec2-nixos-headscale` 기반으로 재작성)
-  - `headscaleDomain`을 NixOS option으로 분리 (e2↔e 한 줄 전환용)
-  - DERP region name "Korea (EC2)" → "Korea (VPS)"로 교체
-  - `users.users.ec2-user` 제거 (EC2 특화 설정)
-  - litestream/S3 백업 → GitHub 백업 timer로 교체 (TODO 2)
-  - ip-forwarder 설정 (`hosts/_lib/ip-forwarder.nix` 활용)
-- [ ] `hosts/headscale-vps.toml` 생성
-- [ ] e2 스테이징: Cloudflare e2.772610158.xyz DNS 추가 후 검증
-- [ ] e2 검증 완료 후 DB 이전 + e.772610158.xyz DNS 교체
-- [ ] EC2 + Lightsail 인스턴스 종료
-
----
-
-## 2. GitHub를 통한 headscale DB 보관
+## 1. GitHub를 통한 headscale DB 보관
 
 ### 배경
 
@@ -119,6 +54,71 @@ DB 내용이 대부분 공개키 + 메타데이터. preauthkey/API key 제거 �
 
 ---
 
+## 2. Headscale → Vultr 단일 인스턴스 이전
+
+> **전제조건: TODO 1 (GitHub DB backup) 동작 확인 완료 후 진행**
+
+### 배경
+
+현재 구조: EC2 (headscale) + Lightsail (proxy) + S3 (DB 백업) — 세 서비스로 분산  
+목표 구조: Vultr 단일 인스턴스 하나로 통합
+
+**이전 이유:**
+- S3 의존성이 사라지면 EC2를 쓸 이유가 없음
+- Lightsail은 IP 1개 고정 → 추가 IP 대응 어려움
+- Vultr: 대표님 선호, 2GB RAM $10/월 + 2TB 트래픽 포함, 관리 단순화
+- 장애 시 Lightsail 하나 띄우고 Cloudflare DNS A레코드만 변경하면 복구 가능
+  - nixos-anywhere로 fresh 서버에 NixOS 즉시 설치 가능 (disaster recovery 경로 명확)
+
+### 인스턴스 스펙
+
+| 항목 | 값 |
+|---|---|
+| 프로바이더 | Vultr |
+| 플랜 | Regular Performance 2GB ($10/월) |
+| 리전 | 서울 (icn) |
+| OS | NixOS (nixos-anywhere로 설치) |
+| 트래픽 | 2TB/월 포함 |
+
+### 실행 서비스
+
+- headscale (control plane)
+- DERP relay (현재 kr-ec2 relay 대체)
+- nginx (프록시, e.772610158.xyz 인증서 종단)
+
+### e2 스테이징 플로우 (중단 최소화 전략)
+
+`e.772610158.xyz`는 사내 서빙 중 → 직접 전환하지 않고 e2로 먼저 검증 후 DNS 교체.
+
+```
+1. Vultr 인스턴스 생성, headscale config server_url = e2.772610158.xyz
+   (Cloudflare DNS: e2.772610158.xyz A → Vultr IP)
+2. 관리자 본인만 e2에 tailscale 등록해 동작 검증
+   (SSH 연결, 멀티 NIC, DERP relay 등 안정화 확인)
+3. 검증 완료 → headscale DB를 EC2 → Vultr로 덤프/복원
+   (sqlite3 /var/lib/headscale/db.sqlite .dump > headscale.sql → 신규 서버에서 sqlite3 db.sqlite < headscale.sql)
+4. headscale config server_url = e.772610158.xyz 로 변경 후 nixup
+5. Cloudflare DNS: e.772610158.xyz A → Vultr IP 변경
+   기존 클라이언트들은 DNS 변경만으로 자동으로 Vultr headscale에 연결됨
+6. EC2 + Lightsail 종료
+```
+
+### 작업
+
+- [ ] Vultr 인스턴스 생성 (TODO 6 스펙 참조, 웹 콘솔에서 수동 생성)
+- [ ] `hosts/headscale-vps.nix` 생성 (`ec2-nixos-headscale` 기반으로 재작성)
+  - `headscaleDomain`을 NixOS option으로 분리 (e2↔e 한 줄 전환용)
+  - DERP region name "Korea (EC2)" → "Korea (VPS)"로 교체
+  - `users.users.ec2-user` 제거 (EC2 특화 설정)
+  - litestream/S3 백업 → GitHub 백업 timer로 교체 (TODO 1)
+  - ip-forwarder 설정 (`hosts/_lib/ip-forwarder.nix` 활용)
+- [ ] `hosts/headscale-vps.toml` 생성
+- [ ] e2 스테이징: Cloudflare e2.772610158.xyz DNS 추가 후 검증
+- [ ] e2 검증 완료 후 DB 이전 + e.772610158.xyz DNS 교체
+- [ ] EC2 + Lightsail 인스턴스 종료
+
+---
+
 ## 3. tailscale state 파일 → nixsec 관리
 
 ### 배경
@@ -129,7 +129,7 @@ state 파일을 agenix로 관리하면 재배포/하드웨어 교체 시 동일 
 
 ### headscale DB와의 대칭성
 
-- headscale DB (노드 레코드) → GitHub (TODO 2)
+- headscale DB (노드 레코드) → GitHub (TODO 1)
 - tailscale state 파일 (노드 신원) → nixsec repo (agenix, private)
 - 양쪽 모두 git 기반 → NixOS + GitHub + 키 파일만으로 완전 재건 가능
 
