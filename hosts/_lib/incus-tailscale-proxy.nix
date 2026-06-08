@@ -22,8 +22,13 @@
   enableLanForward ? true,
 }: let
   lxcName = "${name}-proxy";
-  # internal bridge 없으면 vmIp/32를 masquerade 대상으로 사용
-  masqueradeSubnet = if internalSubnet != null then internalSubnet else "${vmIp}/32";
+  # internal bridge 모드: 내부 서브넷에서 나가는 트래픽을 LXC LAN IP로 masquerade
+  # LAN target 모드: mac-studio 등 물리 머신으로 가는 트래픽을 LXC LAN IP로 masquerade
+  #   → mac-studio가 응답을 LXC로 돌려보내야 conntrack이 동작함
+  masqueradeRule =
+    if internalSubnet != null
+    then "-s ${internalSubnet} -o eth0 -j MASQUERADE"
+    else "-d ${vmIp} -o eth0 -j MASQUERADE";
 in {
   config = lib.mkMerge [
     {
@@ -142,7 +147,7 @@ in {
           ''}
           incus exec ${lxcName} -- sh -c 'iptables -C FORWARD -d ${vmIp} -j ACCEPT 2>/dev/null || iptables -A FORWARD -d ${vmIp} -j ACCEPT'
           incus exec ${lxcName} -- sh -c 'iptables -C FORWARD -s ${vmIp} -j ACCEPT 2>/dev/null || iptables -A FORWARD -s ${vmIp} -j ACCEPT'
-          incus exec ${lxcName} -- sh -c 'iptables -t nat -C POSTROUTING -s ${masqueradeSubnet} -o eth0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s ${masqueradeSubnet} -o eth0 -j MASQUERADE'
+          incus exec ${lxcName} -- sh -c 'iptables -t nat -C POSTROUTING ${masqueradeRule} 2>/dev/null || iptables -t nat -A POSTROUTING ${masqueradeRule}'
 
           # 재부팅 영속화 스크립트
           incus exec ${lxcName} -- mkdir -p /etc/local.d
@@ -158,7 +163,7 @@ in {
           ''}
           incus exec ${lxcName} -- sh -c 'echo "iptables -A FORWARD -d ${vmIp} -j ACCEPT 2>/dev/null || true" >> /etc/local.d/proxy.start'
           incus exec ${lxcName} -- sh -c 'echo "iptables -A FORWARD -s ${vmIp} -j ACCEPT 2>/dev/null || true" >> /etc/local.d/proxy.start'
-          incus exec ${lxcName} -- sh -c 'echo "iptables -t nat -A POSTROUTING -s ${masqueradeSubnet} -o eth0 -j MASQUERADE 2>/dev/null || true" >> /etc/local.d/proxy.start'
+          incus exec ${lxcName} -- sh -c 'echo "iptables -t nat -A POSTROUTING ${masqueradeRule} 2>/dev/null || true" >> /etc/local.d/proxy.start'
           incus exec ${lxcName} -- chmod +x /etc/local.d/proxy.start
           incus exec ${lxcName} -- rc-update add local default
 
