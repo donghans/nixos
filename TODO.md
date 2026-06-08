@@ -32,9 +32,9 @@ DB 내용이 대부분 공개키 + 메타데이터. preauthkey/API key 제거 �
 
 ### 작업
 
-- [ ] GitHub Apps 생성 → TODO 4 참조 (Installation B: headscale-backup repo write)
-- [ ] headscale-backup GitHub repo 생성
-- [ ] Vultr headscale NixOS 설정에 백업 systemd timer 추가:
+- [x] GitHub Apps 생성 → TODO 4 참조 (Installation B: headscale-backup repo write)
+- [x] headscale-backup GitHub repo 생성
+- [x] Vultr headscale NixOS 설정에 백업 systemd timer 추가 (EC2에서 검증 완료, hosts/_lib/headscale-db-backup.nix):
 
   ```nix
   systemd.services.headscale-db-backup = {
@@ -54,7 +54,7 @@ DB 내용이 대부분 공개키 + 메타데이터. preauthkey/API key 제거 �
   };
   ```
 
-- [ ] 복구 절차 문서화: `sqlite3 db.sqlite < headscale.sql`
+- [x] 복구 절차 문서화: `sqlite3 db.sqlite < headscale.sql`
 
 ---
 
