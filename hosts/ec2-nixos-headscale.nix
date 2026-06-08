@@ -9,6 +9,7 @@ mkHostConfiguration (_: {
       ./ec2-nixos-headscale/headscale.nix
       ./ec2-nixos-headscale/eni-forwarding.nix
       ./ec2-nixos-headscale/lightsail-proxy.nix
+      ./ec2-nixos-headscale/github-backup.nix
     ];
 
     # == EC2 네트워크 설정 ==

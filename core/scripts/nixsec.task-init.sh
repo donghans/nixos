@@ -27,11 +27,16 @@ _run_init() {
     mkdir -p "$_key_dir"
     chmod 700 "$_key_dir"
     printf '\n'
-    log_msg "Task" "age 전용 키 생성 중..."
-    age-keygen -o "$_key_file" || { log_msg "Error" "age 키 생성 실패"; exit 1; }
-    chmod 600 "$_key_file"
     local _pubkey
-    _pubkey=$(age-keygen -y "$_key_file") || { log_msg "Error" "공개키 추출 실패"; exit 1; }
+    if [ -f "$_key_file" ]; then
+        log_msg "Notice" "기존 age 키 재사용: $_key_file"
+        _pubkey=$(age-keygen -y "$_key_file") || { log_msg "Error" "공개키 추출 실패"; exit 1; }
+    else
+        log_msg "Task" "age 전용 키 생성 중..."
+        age-keygen -o "$_key_file" || { log_msg "Error" "age 키 생성 실패"; exit 1; }
+        chmod 600 "$_key_file"
+        _pubkey=$(age-keygen -y "$_key_file") || { log_msg "Error" "공개키 추출 실패"; exit 1; }
+    fi
 
     # 키 경로 캐싱
     local _cache="$HOME/.cache/nix-secrets/${_slug}.key-path"
@@ -41,23 +46,38 @@ _run_init() {
     log_msg "Notice" "공개키: $_pubkey"
     log_msg "Notice" "개인키: $_key_file"
 
-    # GitHub 레포 생성
+    # GitHub 레포 생성 (이미 존재하면 기존 레포 사용)
     printf '\n'
-    log_msg "Task" "GitHub 프라이빗 레포 생성 중: $_repo"
-    gh repo create "$_repo" --private 2>/dev/null || {
-        log_msg "Error" "레포 생성 실패 (이미 존재하거나 권한 없음)"; exit 1
-    }
+    log_msg "Task" "GitHub 프라이빗 레포 준비 중: $_repo"
+    if gh repo create "$_repo" --private 2>/dev/null; then
+        log_msg "Notice" "새 레포 생성됨"
+    elif gh repo view "$_repo" &>/dev/null; then
+        log_msg "Notice" "레포 이미 존재 — 기존 레포에 .pubkey 업로드"
+    else
+        log_msg "Error" "레포 생성 실패 (권한 없음)"; exit 1
+    fi
 
-    # .pubkey 업로드
+    # .pubkey 업로드 (기존 파일 있으면 SHA 포함해서 업데이트)
     log_msg "Task" ".pubkey 업로드 중..."
     local _encoded
     _encoded=$(printf '%s\n' "$_pubkey" | base64 | tr -d '\n')
-    gh api "repos/$_repo/contents/.pubkey" \
-        -X PUT \
-        -f message="init: add age public key" \
-        -f content="$_encoded" \
-        &>/dev/null
-    log_msg "Done" "레포 생성 완료: https://github.com/$_repo"
+    local _existing_sha
+    _existing_sha=$(gh api "repos/$_repo/contents/.pubkey" --jq '.sha' 2>/dev/null || true)
+    if [ -n "$_existing_sha" ]; then
+        gh api "repos/$_repo/contents/.pubkey" \
+            -X PUT \
+            -f message="chore: update age public key" \
+            -f content="$_encoded" \
+            -f sha="$_existing_sha" \
+            &>/dev/null
+    else
+        gh api "repos/$_repo/contents/.pubkey" \
+            -X PUT \
+            -f message="init: add age public key" \
+            -f content="$_encoded" \
+            &>/dev/null
+    fi
+    log_msg "Done" "레포 준비 완료: https://github.com/$_repo"
 
     printf '\n'
     printf '════════════════════════════════════════════════════════\n'
