@@ -20,6 +20,8 @@ _check_ssh_keys() {
 
     while IFS=$'\t' read -r hostname keypath; do
         [ -z "$hostname" ] && continue
+        # 단일 호스트 모드: 대상 외 스킵
+        [ -n "${DEPLOY_NODE:-}" ] && [ "$hostname" != "$DEPLOY_NODE" ] && continue
         # .hostignore에 등록된 호스트는 스킵
         if [ -f "$hostignore" ] && grep -qxF "$hostname" "$hostignore" 2>/dev/null; then
             continue
@@ -146,15 +148,33 @@ _run_deploy_task() {
         exit 1
     fi
 
+    # 단일 호스트 모드: 존재 확인 후 카운트 재설정
+    local _deploy_label
+    if [ -n "${DEPLOY_NODE:-}" ]; then
+        local _node_exists
+        _node_exists=$(jq -r --arg h "$DEPLOY_NODE" '.[$h].deploy // empty' "$resolved_json")
+        if [ -z "$_node_exists" ]; then
+            log_msg "Error" "호스트 '$DEPLOY_NODE'를 찾을 수 없습니다. 'rnixup list'로 확인하세요."
+            exit 1
+        fi
+        deploy_count=1
+        _deploy_label="$DEPLOY_NODE"
+    else
+        _deploy_label="all nodes"
+    fi
+
     _check_ssh_keys
 
     # ── dry-activate ──────────────────────────────────────────────────────────
+    local _deploy_target="path:${BUILD_DIR}"
+    [ -n "${DEPLOY_NODE:-}" ] && _deploy_target="path:${BUILD_DIR}#${DEPLOY_NODE}"
+
     log_msg "Task" "원격 호스트 ${deploy_count}개 dry-activate 중..."
     log_exec "d-rs" ">" "dry-activate"
     nix run "github:serokell/deploy-rs" -- \
         --skip-checks \
         --dry-activate \
-        "path:${BUILD_DIR}"
+        "$_deploy_target"
     log_exec "d-rs" "<" "dry-activate"
 
     # ── 배포 확인 ─────────────────────────────────────────────────────────────
@@ -194,11 +214,11 @@ _run_deploy_task() {
 
     # ── 실제 배포 ─────────────────────────────────────────────────────────────
     log_msg "Task" "$deploy_count remote host(s) 배포 시작..."
-    log_exec "d-rs" ">" "all nodes"
+    log_exec "d-rs" ">" "$_deploy_label"
     nix run "github:serokell/deploy-rs" -- \
         --skip-checks \
-        "path:${BUILD_DIR}"
-    log_exec "d-rs" "<" "all nodes"
+        "$_deploy_target"
+    log_exec "d-rs" "<" "$_deploy_label"
     log_msg "Done" "$deploy_count 호스트 배포 완료"
 }
 

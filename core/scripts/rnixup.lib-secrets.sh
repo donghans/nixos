@@ -31,6 +31,7 @@ _any_remote_secrets_exist() {
     local resolved_json="$JSON_DIR/resolved.json"
     local hostname
     while IFS= read -r hostname; do
+        [ -n "${DEPLOY_NODE:-}" ] && [ "$hostname" != "$DEPLOY_NODE" ] && continue
         local config
         config=$(_get_secrets_config "$hostname") || continue
         local group_count
@@ -267,6 +268,7 @@ inject_all_remote_secrets() {
     local hostname
 
     while IFS= read -r hostname; do
+        [ -n "${DEPLOY_NODE:-}" ] && [ "$hostname" != "$DEPLOY_NODE" ] && continue
         _get_secrets_config "$hostname" &>/dev/null || continue
 
         local ip ssh_key username

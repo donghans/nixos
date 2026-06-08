@@ -19,8 +19,9 @@ _print_help() {
     printf "${_LOG_PREFIX_COLOR}${_LOG_PREFIX}${NC} ${CYAN}%-9s${NC} | 원격 NixOS 배포 도구\n" "Help"
     printf "\n"
     printf "  사용법:\n"
-    printf "    rnixup        — dry-activate 미리보기 후 확인 → 전체 호스트 배포\n"
-    printf "    rnixup list   — 설정된 원격 호스트 목록 출력\n"
+    printf "    rnixup                — dry-activate 미리보기 후 확인 → 전체 호스트 배포\n"
+    printf "    rnixup <hostname>     — 특정 호스트만 배포\n"
+    printf "    rnixup list           — 설정된 원격 호스트 목록 출력\n"
     printf "\n"
     printf "  팁: 새 원격 호스트 추가는 'rnixstrap'을 사용하세요.\n"
     printf "\n"
@@ -28,6 +29,7 @@ _print_help() {
 
 # ── 인자 파싱 ─────────────────────────────────────────────────────────────────
 SUBCOMMAND="${1:-}"
+export DEPLOY_NODE=""
 
 case "$SUBCOMMAND" in
     --help|-h)
@@ -41,8 +43,8 @@ case "$SUBCOMMAND" in
         # 전체 배포
         ;;
     *)
-        log_msg "Error" "알 수 없는 서브커맨드: '$SUBCOMMAND'. 사용: rnixup / rnixup list / rnixup --help"
-        exit 1
+        # 호스트명 지정 단일 배포
+        DEPLOY_NODE="$SUBCOMMAND"
         ;;
 esac
 
@@ -73,10 +75,14 @@ if [ "$SUBCOMMAND" = "list" ]; then
 fi
 
 # ── 배너 ──────────────────────────────────────────────────────────────────────
-_deploy_count=$(jq '[to_entries[] | select(.value.deploy != null)] | length' "$JSON_DIR/resolved.json")
 log_msg "Init" "원격 NixOS 배포 도구"
 log_msg "Init" "명령어:  deploy-rs (dry-activate → deploy)"
-log_msg "Init" "호스트:   ${_deploy_count}개"
+if [ -n "$DEPLOY_NODE" ]; then
+    log_msg "Init" "호스트:   ${DEPLOY_NODE} (단일)"
+else
+    _deploy_count=$(jq '[to_entries[] | select(.value.deploy != null)] | length' "$JSON_DIR/resolved.json")
+    log_msg "Init" "호스트:   ${_deploy_count}개"
+fi
 
 # ── 트랩 ──────────────────────────────────────────────────────────────────────
 trap 'handle_signal SIGINT'  INT
