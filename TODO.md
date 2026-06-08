@@ -258,7 +258,7 @@ headscale nodes register --user system --key <nodekey>  # admin 승인
 
 ---
 
-## 4.5. nixsec 레포 이전: `aws-headscale-secrets` → `headscale-vps-secrets`
+## 4.5. nixsec 레포 이전: `aws-headscale-secrets` → `BITSTEP-IT/headscale-secrets` ✅
 
 ### 배경
 
@@ -268,16 +268,12 @@ EC2 이전(TODO 2) 완료 후 `donghans/aws-headscale-secrets`라는 이름이 �
 
 ### 작업
 
-> **전제조건: TODO 2 (EC2 + Lightsail 종료) 완료 후 진행**
-
-- [ ] GitHub repo rename: `donghans/aws-headscale-secrets` → `donghans/headscale-vps-secrets`
-  - (rename은 URL redirect가 유지되나, 명시적으로 참조를 갱신해야 안전)
-- [ ] `headscale-vps.secrets/secrets.json`의 `headscale` 그룹 repo 경로 수정:
-  - `donghans/aws-headscale-secrets` → `donghans/headscale-vps-secrets`
-  - secret 키 경로도 필요 시 정리 (`headscale-vps/headscale/oidc_client_secret` 유지)
-- [ ] `ec2-nixos-headscale.secrets/secrets.json` 삭제 (EC2 종료 후 불필요)
-- [ ] GitHub Apps Installation A를 신규 repo 기준으로 생성 (→ TODO 4 Installation A 완료)
-- [ ] `headscale-vps.secrets/secrets.json` `headscale` 그룹에 `installationId` 채우기
+- [x] GitHub repo rename: `donghans/aws-headscale-secrets` → `BITSTEP-IT/headscale-secrets`
+- [x] `headscale-vps.secrets/secrets.json`의 `headscale` 그룹 repo 경로 수정
+  - `BITSTEP-IT/headscale-secrets`, `installationId: "138797641"` (headscale-backup과 동일 Installation)
+- [x] `ec2-nixos-headscale.secrets/secrets.json` 삭제
+- [x] GitHub Apps Installation에 headscale-secrets 레포 추가
+- [x] `headscale-vps.secrets/secrets.json` `headscale` 그룹에 `installationId` 채우기
 
 ---
 
