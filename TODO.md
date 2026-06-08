@@ -19,7 +19,11 @@ headscale DB (SQLite)
   → sqlite3 db.sqlite .dump → headscale.sql (텍스트, git diff 가능)
   → systemd timer (hourly)
   → git commit + push (GitHub Apps 키로 인증)
-  → private GitHub repo
+  → headscale-backup/db/ (private GitHub repo)
+
+tailscale state 파일 (각 노드)
+  → age 암호화
+  → headscale-backup/state/ (동일 repo)
 ```
 
 DB 내용이 대부분 공개키 + 메타데이터. preauthkey/API key 제거 시 사실상 공개 무방한 데이터.  
@@ -119,7 +123,7 @@ DB 내용이 대부분 공개키 + 메타데이터. preauthkey/API key 제거 �
 
 ---
 
-## 3. tailscale state 파일 → nixsec 관리
+## 3. tailscale state 파일 → headscale-backup 관리
 
 ### 배경
 
@@ -129,9 +133,9 @@ state 파일을 agenix로 관리하면 재배포/하드웨어 교체 시 동일 
 
 ### headscale DB와의 대칭성
 
-- headscale DB (노드 레코드) → GitHub (TODO 1)
-- tailscale state 파일 (노드 신원) → nixsec repo (agenix, private)
-- 양쪽 모두 git 기반 → NixOS + GitHub + 키 파일만으로 완전 재건 가능
+- headscale DB (노드 레코드) → headscale-backup/db/ (plaintext)
+- tailscale state 파일 (노드 신원) → headscale-backup/state/ (age 암호화)
+- 한 레포에서 headscale 복구에 필요한 모든 것 관리 → disaster recovery 단일 참조점
 
 ### 지원 시나리오 및 위험도
 
@@ -161,20 +165,20 @@ headscale nodes register --user system --key <nodekey>  # admin 승인
   - server2-beelink-ser7-co (100.64.0.2)
   - proxmox-ct101 / headscale-uxtxvylp (100.64.0.7) — headscale에 이미 등록됨, 192.168.1.0/24 route 승인 완료
   - headscale-vps (이전 후)
-- [ ] nixsec repo에 agenix 시크릿으로 추가:
+- [ ] headscale-backup repo에 age 시크릿으로 추가:
   ```
-  tailscale/state-server2-beelink-ser7-co.age
-  tailscale/state-proxmox-ct101.age
-  tailscale/state-headscale-vps.age
+  state/server2-beelink-ser7-co.age
+  state/proxmox-ct101.age
+  state/headscale-vps.age
   ```
 - [ ] 각 호스트의 `hosts/_deploy/<hostname>.secrets/secrets.json`에 주입 설정 추가:
   ```json
   {
     "groups": {
       "tailscale": {
-        "repo": "org/nixsec",
+        "repo": "org/headscale-backup",
         "secrets": {
-          "tailscale/state-<hostname>": "var/lib/tailscale/tailscaled.state"
+          "state/<hostname>": "var/lib/tailscale/tailscaled.state"
         }
       }
     }
@@ -182,7 +186,7 @@ headscale nodes register --user system --key <nodekey>  # admin 승인
   ```
 - [ ] inject_secrets → nixos-rebuild 순서에서 tailscaled 재시작 확인
   (inject 후 nixos-rebuild switch가 tailscaled를 재시작하면서 injected state를 읽음)
-- [ ] nixsec박제 완료 후: `tailscale.nix`에서 preauthkey 관련 로직 제거
+- [ ] state파일 박제 완료 후: `tailscale.nix`에서 preauthkey 관련 로직 제거
   - `preauthUser`, `preauthName` 옵션 제거
   - `tailscale-autoauth` 서비스에서 `--authkey` 플래그 제거
   - `nixstrap.lib-preauth.sh`, `check_preauth_keys_*` 함수 사용 호스트 정리
@@ -195,10 +199,10 @@ headscale nodes register --user system --key <nodekey>  # admin 승인
 
 | 키 | 역할 | 비고 |
 |---|---|---|
-| **age 개인키** | nixsec 복호화 | 영구, 로테이션 거의 없음 |
+| **age 개인키** | headscale-backup/nixsec 복호화 | 영구, 로테이션 거의 없음 |
 | **GitHub Apps 키 (RSA/JWT)** | repo 클론/push 인증 | 독립적으로 로테이션 가능, user 비종속 |
 
-두 키를 분리 유지. 합칠 경우 GitHub Apps 키 교체 시 nixsec 전체 재암호화가 필요해짐.
+두 키를 분리 유지. 합칠 경우 GitHub Apps 키 교체 시 age 시크릿 전체 재암호화가 필요해짐.
 
 **인증 방식: GitHub Apps (확정)**
 - PAT: user 종속 + 낮은 엔트로피 → 기각
@@ -208,23 +212,24 @@ headscale nodes register --user system --key <nodekey>  # admin 승인
 **부트스트랩 흐름 (rnixstrap):**
 ```
 1. rnixstrap 실행 (age 키 + GitHub Apps 키 입력)
-2. nixsec repo clone (GitHub Apps 키로 인증)
-3. age 키로 nixsec 복호화 → secrets 획득
+2. headscale-backup repo clone (GitHub Apps 키로 인증) → tailscale state 획득
+   nixsec repo clone (GitHub Apps 키로 인증) → 기타 secrets 획득
+3. age 키로 headscale-backup/state/*.age 복호화 → tailscale state 획득
 4. nixos-anywhere or nixos-rebuild switch
 5. inject_secrets로 tailscale state 등 주입
-6. 노드 연결 (TODO 3 nixsec박제 완료 후 preauthkey 불필요)
+6. 노드 연결 (TODO 3 state파일 박제 완료 후 preauthkey 불필요)
 ```
 
-### nixsec repo 공개 여부
+### headscale-backup repo 공개 여부
 
-**private 유지 (결정 완료)**. tailscale state 파일(Curve25519 private key) 포함 → 암호화 + private 둘 다 필요.  
+**private 유지**. tailscale state 파일(Curve25519 private key)이 age 암호화돼 있더라도 암호화된 blob 자체를 노출하지 않는 것이 원칙.  
 접근 자체를 막는 것이 암호화 강도에 의존하는 것보다 우수한 보안 전략.
 
 ### 작업
 
 - [ ] GitHub Apps 생성:
   - Installation A: nixsec repo → contents read-only
-  - Installation B: headscale-backup repo → contents write
+  - Installation B: headscale-backup repo → contents read+write (DB 백업 push + state 복원 read)
   - Installation C: nixos repo → contents read-only (deploy-rs 빌드용)
 - [ ] rnixstrap에 GitHub Apps JWT 토큰 발급 로직 추가 (현재는 gh CLI 의존)
 
