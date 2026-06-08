@@ -7,6 +7,7 @@ mkHostConfiguration (_: {
       ./headscale-vps/headscale.nix
       ./headscale-vps/caddy.nix
       ./headscale-vps/github-backup.nix
+      ./headscale-vps/docker.nix
     ];
 
     headscale.staticIpv4 = "141.164.59.97";
