@@ -1,0 +1,25 @@
+# Vultr Regular Cloud Compute 2GB — headscale 컨트롤 플레인
+# EC2+Lightsail+S3 → Vultr 단일 인스턴스로 통합
+# DB 백업: GitHub Apps (litestream/S3 불필요)
+preset     = "server"
+type       = "server"
+system     = "x86_64-linux"
+username   = "admin"
+swapGb     = 2
+tmpfsSize  = "0"
+diskDevice = "/dev/vda"
+bootDevice = "/dev/vda"
+bootLoader = "grub-uefi"
+
+[deploy]
+ip      = "141.164.59.97"
+sshKey  = "/home/donghans/.ssh/rnixup/headscale-vps.pem"
+sshUser = "admin"
+
+[mods.sys.services]
+tailscale = true
+
+[headscale]
+domain   = "e2.772610158.xyz"
+ssh-user = "admin"
+ssh-key  = "~/.ssh/rnixup/headscale-vps.pem"

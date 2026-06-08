@@ -1,0 +1,146 @@
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}: let
+  headscaleDomain = config.headscale.domain;
+  oidcClientSecretFile = "/var/lib/nix-secrets/headscale/oidc_client_secret";
+
+  # exit node 사용 클라이언트가 DERP relay IP를 exclusion route로 추가할 수 있도록
+  # region 900(내장 DERP)에는 static IPv4가 없으므로 별도 region(901)으로 노출
+  derpStaticIpv4Json = pkgs.writeText "derp-static-ipv4.yaml" ''
+    regions:
+      901:
+        regionid: 901
+        regioncode: kr-vps-ip
+        regionname: Korea (VPS) IP
+        nodes:
+          - name: 901a
+            regionid: 901
+            hostname: ${headscaleDomain}
+            ipv4: ${config.headscale.staticIpv4}
+            derpport: 443
+            stunport: 3478
+            stunonly: false
+  '';
+
+  headscaleConfigFile = (pkgs.formats.yaml {}).generate "headscale.yaml" {
+    disable_check_updates = true;
+    unix_socket = "/run/headscale/headscale.sock";
+    unix_socket_permission = "0660";
+    server_url = "https://${headscaleDomain}";
+    listen_addr = "127.0.0.1:8080"; # nginx가 localhost로 프록시
+    grpc_listen_addr = "127.0.0.1:50443";
+    metrics_listen_addr = "127.0.0.1:9090";
+    log.level = "info";
+    noise.private_key_path = "/var/lib/headscale/noise_private.key";
+    derp.server.private_key_path = "/var/lib/headscale/derp_server_private.key";
+    prefixes = {
+      v4 = "100.64.0.0/10";
+      allocation = "sequential";
+    };
+    database = {
+      type = "sqlite3";
+      sqlite.path = "/var/lib/headscale/db.sqlite";
+    };
+    derp = {
+      server = {
+        enabled = true;
+        region_id = 900;
+        region_code = "kr-vps";
+        region_name = "Korea (VPS)";
+        stun_listen_addr = "0.0.0.0:3478";
+      };
+      urls = ["https://controlplane.tailscale.com/derpmap/default"];
+      paths = ["${derpStaticIpv4Json}"];
+      auto_update_enabled = true;
+      update_frequency = "3h";
+    };
+    dns = {
+      magic_dns = true;
+      base_domain = "i.772610158.xyz";
+      override_local_dns = true;
+      nameservers.global = [
+        "1.1.1.1"
+        "1.0.0.1"
+        "2606:4700:4700::1111"
+        "2606:4700:4700::1001"
+      ];
+      extra_records = [
+        {
+          name = "opnsense.i.772610158.xyz";
+          type = "A";
+          value = "192.168.1.1";
+        }
+        {
+          name = "headscale.i.772610158.xyz";
+          type = "A";
+          value = "192.168.1.2";
+        }
+        {
+          name = "vaultwarden.i.772610158.xyz";
+          type = "A";
+          value = "192.168.1.3";
+        }
+        {
+          name = "proxmox.i.772610158.xyz";
+          type = "A";
+          value = "192.168.1.222";
+        }
+        {
+          name = "veve.i.772610158.xyz";
+          type = "A";
+          value = "192.168.1.12";
+        }
+      ];
+    };
+    oidc = {
+      only_start_if_oidc_is_available = true;
+      issuer = "https://accounts.google.com";
+      client_id = "170530185854-nelsine6eg1casd7hl669taueriv16q6.apps.googleusercontent.com";
+      client_secret_path = oidcClientSecretFile;
+      scope = ["openid" "profile" "email"];
+      email_verified_required = true;
+      extra_params.prompt = "select_account";
+      allowed_domains = ["bitstep.it"];
+      user_scope_strip_domain = true;
+      pkce = {
+        enabled = true;
+        method = "S256";
+      };
+    };
+    taildrop.enabled = true;
+  };
+in {
+  options.headscale = {
+    domain = lib.mkOption {
+      type = lib.types.str;
+      default = "e2.772610158.xyz";
+      description = "e2 스테이징 기본값 — 운영 전환 시 headscale-vps.nix에서 e.772610158.xyz로 변경";
+    };
+    staticIpv4 = lib.mkOption {
+      type = lib.types.str;
+      default = "0.0.0.0";
+      description = "DERP map region 901용 공인 IPv4 (exit node 클라이언트 exclusion route용)";
+    };
+  };
+
+  config = {
+    services.headscale = {
+      enable = true;
+      settings.dns = {
+        magic_dns = true;
+        base_domain = "i.772610158.xyz";
+      };
+    };
+    systemd.services.headscale.script = lib.mkForce ''
+      exec ${pkgs.headscale}/bin/headscale serve --config ${headscaleConfigFile}
+    '';
+    users.users.admin.extraGroups = ["headscale"];
+
+    systemd.tmpfiles.rules = [
+      "z ${oidcClientSecretFile} 0640 headscale headscale -"
+    ];
+  };
+}

@@ -42,6 +42,7 @@ print(deploy.get("sshUser", ""))
 print(d.get("bootLoader", ""))
 print(d.get("diskDevice", ""))
 print(d.get("system", "x86_64-linux"))
+print(d.get("cloud", ""))
 EOF
 )
     mapfile -t _toml_fields <<< "$result"
@@ -53,6 +54,7 @@ EOF
     _BOOT_LOADER="$_TOML_BOOT_LOADER"
     _DISK_DEVICE="$_TOML_DISK_DEVICE"
     _SYSTEM="${_toml_fields[5]:-x86_64-linux}"
+    _TOML_CLOUD="${_toml_fields[6]:-}"
     log_msg "Init" "TOML 로드: ip=${_TOML_IP}, system=${_SYSTEM}, boot=${_BOOT_LOADER}"
 }
 

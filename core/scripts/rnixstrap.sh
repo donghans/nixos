@@ -68,6 +68,7 @@ _SSH_USER="root"        # nixos-anywhere bootstrap 접속 유저
 _TOML_IP=""             # 기존 호스트 TOML에서 로드 ([deploy] 있는 경우)
 _TOML_SSH_KEY=""        # 기존 호스트 TOML에서 로드 ([deploy] 있는 경우)
 _TOML_SSH_USER=""       # 기존 호스트 TOML에서 로드 ([deploy].sshUser)
+_TOML_CLOUD=""          # 기존 호스트 TOML에서 로드 (cloud = "aws" 등, 없으면 "")
 _TOML_BOOT_LOADER=""    # 기존 호스트 TOML에서 로드
 _TOML_DISK_DEVICE=""    # 기존 호스트 TOML에서 로드
 _BOOTSTRAP_IP=""        # .bootstrap.env에서 로드 (standalone 기본값)
@@ -112,8 +113,9 @@ elif [ "$_HOST_HAS_DEPLOY" = false ]; then
     ask_ip              # _BOOTSTRAP_IP 기본값
     ask_ssh_key         # _BOOTSTRAP_SSH_KEY 기본값
 else
-    # [deploy].sshUser가 TOML에 있으면 적용, 없으면 root 유지
-    [ -n "$_TOML_SSH_USER" ] && _SSH_USER="$_TOML_SSH_USER"
+    # cloud 호스트(AWS 등)는 TOML sshUser가 부트스트랩 유저이기도 함 (ec2-user 등)
+    # VPS/bare-metal은 root가 부트스트랩 유저 — deploy-rs는 resolved.json에서 독립적으로 읽음
+    [ -n "$_TOML_CLOUD" ] && [ -n "$_TOML_SSH_USER" ] && _SSH_USER="$_TOML_SSH_USER"
     ask_ip        # 기존 TOML IP를 기본값으로, 변경 가능
     ask_ssh_key   # 기존 TOML 키를 기본값으로, 변경 가능
 fi
