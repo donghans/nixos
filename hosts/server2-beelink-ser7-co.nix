@@ -15,14 +15,12 @@ in
           lxcIp = "10.0.1.1";
           vmIp = "10.0.1.2";
           internalSubnet = "10.0.1.0/24";
-          preauthKeyFile = "/var/lib/nix-secrets/tailscale/system/devserver.preauth-key";
-          loginServer = "https://e.772610158.xyz";
+          stateFile = "/var/lib/nix-secrets/tailscale/system/devserver.state";
         })
       ];
 
       # tailscale 모듈 옵션 (문자열이라 toConfig 제약으로 toml 경유 불가 → nix에서 직접 설정)
       mods.sys.services.tailscale = {
-        preauthLoginServer = "https://e.772610158.xyz";
         advertiseExitNode = true;
         advertiseRoutes = ["192.168.11.0/24"];
       };

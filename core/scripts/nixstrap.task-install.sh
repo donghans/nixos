@@ -2,7 +2,6 @@
 # nixstrap.task-install.sh — Phase 2 설치 실행 함수
 # shellcheck disable=SC1091
 
-source "$SCRIPT_DIR/nixstrap.lib-preauth.sh"
 
 _cleanup_mounts() {
     # 재시도 시 이전 마운트가 남아있으면 mkfs.*가 "contains a mounted filesystem"으로 실패함
@@ -357,7 +356,6 @@ phase2_execute() {
     _generate_hw_config     # 13. hardware.nix → BUILD_DIR에 직접 생성
     _install_nixos          # 14. nixos-install
     _post_process           # 15. mv, chown, symlink
-    check_preauth_keys_local "$HOST"  # 16. preauth key 생성·배포 → /mnt/var/lib/...
     _save_deploy_pem        # 17. PEM → ~/.ssh/ (자동 생성 키만)
     _commit_deploy_files    # 18. pub key + TOML 커밋 + push 시도
 

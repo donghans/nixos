@@ -7,21 +7,6 @@ mkMod __curPos "Tailscale Mesh VPN" ({
   ...
 }: {
   options = {
-    preauthUser = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = "headscale user/namespace (preauth key 파일 경로: /var/lib/nix-secrets/tailscale/<user>/<name>.preauth-key)";
-    };
-    preauthName = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = "preauth key 식별자 (파일명)";
-    };
-    preauthLoginServer = lib.mkOption {
-      type = lib.types.str;
-      default = "";
-      description = "headscale 서버 URL (비어있으면 공식 Tailscale 사용)";
-    };
     advertiseExitNode = lib.mkOption {
       type = lib.types.bool;
       default = false;
@@ -67,38 +52,6 @@ mkMod __curPos "Tailscale Mesh VPN" ({
         linkConfig.MTUBytes = "1400";
       };
     })
-    # preauth key 파일로 자동 인증하는 oneshot 서비스
-    (lib.mkIf (cfg.enable && cfg.preauthUser != null && cfg.preauthName != null) (let
-      keyFile = "/var/lib/nix-secrets/tailscale/${cfg.preauthUser}/${cfg.preauthName}.preauth-key";
-    in {
-      systemd.services.tailscale-autoauth = {
-        description = "Tailscale automatic authentication via preauth key";
-        after = ["tailscaled.service" "network-online.target"];
-        wants = ["network-online.target"];
-        requires = ["tailscaled.service"];
-        wantedBy = ["multi-user.target"];
-        path = [pkgs.tailscale];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-        };
-        script = ''
-          if tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'; then
-            exit 0
-          fi
-          if [[ ! -f "${keyFile}" ]]; then
-            exit 0
-          fi
-          tailscale up \
-            --authkey="$(cat "${keyFile}")" \
-            ${lib.optionalString (cfg.preauthLoginServer != "") ''--login-server="${cfg.preauthLoginServer}"''} \
-            --accept-routes \
-            ${lib.optionalString cfg.advertiseExitNode "--advertise-exit-node"} \
-            ${lib.optionalString (cfg.advertiseRoutes != []) "--advertise-routes=${lib.concatStringsSep "," cfg.advertiseRoutes}"} \
-            --reset
-        '';
-      };
-    }))
   ];
   # HM 사이드: GUI 활성화 시 Tailscale 시스템 트레이 실행
   hm = lib.mkIf (cfg.enable && config.mods.gui.enable) {

@@ -16,8 +16,7 @@
   lxcIp,
   vmIp,
   internalSubnet,
-  preauthKeyFile,
-  loginServer,
+  stateFile,
   enableLanForward ? true,
 }: let
   lxcName = "${name}-proxy";
@@ -169,18 +168,16 @@ in {
 
         # tailscale 활성화
         incus exec ${lxcName} -- rc-update add tailscale default
-        incus exec ${lxcName} -- rc-service tailscale start
 
-        if [ -f "${preauthKeyFile}" ]; then
-          PREAUTH_KEY=$(cat "${preauthKeyFile}")
-          incus exec ${lxcName} -- tailscale up \
-            --authkey="$PREAUTH_KEY" \
-            --login-server="${loginServer}" \
-            --accept-routes \
-            --hostname="${vmName}"
-        else
-          echo "WARNING: preauthKeyFile not found at ${preauthKeyFile}" >&2
+        if [ -f "${stateFile}" ]; then
+          incus exec ${lxcName} -- mkdir -p /var/lib/tailscale
+          incus file push "${stateFile}" ${lxcName}/var/lib/tailscale/tailscaled.state \
+            --uid 0 --gid 0 --mode 0600
+          incus exec ${lxcName} -- rc-service tailscale start
           incus exec ${lxcName} -- tailscale set --hostname="${vmName}"
+        else
+          echo "WARNING: stateFile not found at ${stateFile}" >&2
+          incus exec ${lxcName} -- rc-service tailscale start
         fi
       '';
     };

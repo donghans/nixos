@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 # shellcheck disable=SC1091
-source "$SCRIPT_DIR/nixstrap.lib-preauth.sh"
 
 # 빌드 전/후 store path를 직접 비교하여 패키지 변경사항 출력
 # pre_store와 new_store를 직접 받아 비교 → 모든 액션(switch/test/build)에서 동작
@@ -123,14 +122,6 @@ run_build_task() {
         # shellcheck disable=SC2153  # ACTION은 nixup.sh에서 전역으로 설정됨
         _activate_os "$NIX_BUILD_RESULT" "$ACTION"
         _show_nvd_diff "$pre_store" "$NIX_BUILD_RESULT" "os"
-        # switch 완료 후 누락된 preauth key 로컬 배포 (headscale SSH 키 필요 시 프롬프트)
-        # 새 key가 실제로 배포됐을 때만 tailscale-autoauth 재시작 (이미 인증된 경우 불필요)
-        if [ "$ACTION" == "switch" ]; then
-            check_preauth_keys_local "$HOST_ID" ""
-            if [ "${PREAUTH_KEYS_DEPLOYED:-false}" = true ]; then
-                sudo systemctl restart tailscale-autoauth 2>/dev/null || true
-            fi
-        fi
     fi
 
     if [ "$TARGET_PROFILE" == "home" ] || [ "$TARGET_PROFILE" == "all" ]; then
