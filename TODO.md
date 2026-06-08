@@ -228,10 +228,33 @@ headscale nodes register --user system --key <nodekey>  # admin 승인
 ### 작업
 
 - [ ] GitHub Apps 생성:
-  - Installation A: nixsec repo → contents read-only
+  - Installation A: `headscale-vps-secrets` repo (→ TODO 4.5 완료 후) → contents read-only
   - Installation B: headscale-backup repo → contents read+write (DB 백업 push + state 복원 read)
   - Installation C: nixos repo → contents read-only (deploy-rs 빌드용)
-- [ ] rnixstrap에 GitHub Apps JWT 토큰 발급 로직 추가 (현재는 gh CLI 의존)
+- [x] rnixstrap에 GitHub Apps JWT 토큰 발급 로직 추가 (gh api → curl + JWT, 폴백 유지)
+
+---
+
+## 4.5. nixsec 레포 이전: `aws-headscale-secrets` → `headscale-vps-secrets`
+
+### 배경
+
+EC2 이전(TODO 2) 완료 후 `donghans/aws-headscale-secrets`라는 이름이 부적합해짐.  
+현재 이 레포에 있는 secrets 중 Vultr 이후에도 필요한 것은 `oidc_client_secret` 하나뿐.  
+`ec2-keypair`, `lightsail` 그룹은 EC2/Lightsail 종료와 함께 사용 종료.
+
+### 작업
+
+> **전제조건: TODO 2 (EC2 + Lightsail 종료) 완료 후 진행**
+
+- [ ] GitHub repo rename: `donghans/aws-headscale-secrets` → `donghans/headscale-vps-secrets`
+  - (rename은 URL redirect가 유지되나, 명시적으로 참조를 갱신해야 안전)
+- [ ] `headscale-vps.secrets/secrets.json`의 `headscale` 그룹 repo 경로 수정:
+  - `donghans/aws-headscale-secrets` → `donghans/headscale-vps-secrets`
+  - secret 키 경로도 필요 시 정리 (`headscale-vps/headscale/oidc_client_secret` 유지)
+- [ ] `ec2-nixos-headscale.secrets/secrets.json` 삭제 (EC2 종료 후 불필요)
+- [ ] GitHub Apps Installation A를 신규 repo 기준으로 생성 (→ TODO 4 Installation A 완료)
+- [ ] `headscale-vps.secrets/secrets.json` `headscale` 그룹에 `installationId` 채우기
 
 ---
 
