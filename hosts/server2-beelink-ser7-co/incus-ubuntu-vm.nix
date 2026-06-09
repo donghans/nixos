@@ -99,8 +99,13 @@ in {
       incus launch images:ubuntu/24.04 ubuntu-2404 --vm \
         -c limits.cpu=4 \
         -c limits.memory=16GiB \
-        -d root,size=64GiB \
-        -d eth0,type=nic,nictype=bridged,parent=br-lan,mtu=1400
+        -d root,size=64GiB
+
+      # -d eth0,type=nic,... 형식은 최신 incus에서 파싱 오류 → 별도 추가
+      incus stop ubuntu-2404 --force 2>/dev/null || true
+      incus config device remove ubuntu-2404 eth0 2>/dev/null || true
+      incus config device add ubuntu-2404 eth0 nic nictype=bridged parent=br-lan mtu=1400
+      incus start ubuntu-2404
     '';
   };
 
