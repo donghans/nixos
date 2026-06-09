@@ -518,6 +518,8 @@ inject_secrets() {
 
 # rnixup용: resolved.json 기반으로 deploy 호스트 전체에 inject
 inject_all_remote_secrets() {
+    # rnixup 흐름에서는 항상 전체 그룹 자동 선택 (대화형 선택 없음)
+    export NIXSEC_NONINTERACTIVE=1
     local resolved_json="$JSON_DIR/resolved.json"
     local hostname
 
