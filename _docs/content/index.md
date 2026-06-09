@@ -26,6 +26,8 @@ TOML 선언 한 파일로 NixOS 호스트를 정의하고, 프리셋 한 줄로 
 명령어와 API를 조회하는 문서입니다.
 
 - **[nixup 명령어](./reference/nixup-commands.md)** — 서브커맨드, 플래그, 로그 경로
+- **[rnixup/rnixstrap 명령어](./reference/rnixup-commands.md)** — 원격 배포·설치 플래그, 비대화형 모드, `.strap.json` 형식
+- **[nixsec 명령어](./reference/nixsec-commands.md)** — 시크릿 관리 CLI, 비대화형 업로드·주입
 - **[Mod API](./reference/mod-api.md)** — `mkMod`/`mkModOf`/`mkPartOf`/`mkNamedMod` 시그니처 및 파라미터
 
 ### 이해하기

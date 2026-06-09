@@ -162,7 +162,19 @@ nixup clean --all
 rnixup
 ```
 
-dry-activate 미리보기를 먼저 보여준 뒤 확인을 요청합니다.
+dry-activate 미리보기를 먼저 보여준 뒤 확인을 요청합니다. 확인 후 `hosts/_deploy/<hostname>.secrets/secrets.json`에 정의된 시크릿을 자동으로 확인하여 변경된 파일만 서버에 전송한 뒤 deploy-rs로 배포합니다. (→ [nixsec 명령어](../reference/nixsec-commands.md) 참조)
+
+### 변경 내용을 먼저 확인하고 나중에 적용하고 싶을 때
+
+```bash
+# 1단계: dry-activate만 실행 (배포 없음)
+rnixup headscale-vps --dry-run-only
+
+# 2단계: 결과 확인 후 바로 배포 (dry-activate 없이)
+rnixup headscale-vps --apply-only
+```
+
+`--apply-only`는 CI 환경이나 이미 dry-run으로 검토한 후 바로 적용할 때 유용합니다.
 
 ### 등록된 원격 호스트 목록을 확인할 때
 
@@ -193,6 +205,40 @@ rnixstrap
 ```
 
 서버 IP, SSH 키, 서비스 구성을 대화형으로 입력하면 nixos-anywhere로 원격 설치됩니다. 완료 후 일상 배포는 `rnixup`을 사용합니다.
+
+### 비대화형으로 원격 서버를 설치할 때
+
+설정 파일을 미리 준비한 뒤 한 줄로 실행합니다:
+
+```bash
+# 설정 파일 준비
+cat > ~/.ssh/rnixup/new-server.strap.json <<'EOF'
+{
+  "ip": "1.2.3.4",
+  "sshKey": "~/.ssh/rnixup/new-server.pem",
+  "system": "x86_64-linux",
+  "services": ["caddy"]
+}
+EOF
+
+rnixstrap --hostname new-server
+```
+
+파일 작업(TOML · `.nix` 생성)만 먼저 수행하고 싶으면 `--write-only`를 추가합니다.
+
+### 기존 원격 호스트를 재설치할 때
+
+`hosts/<hostname>.toml`에 `[deploy]` 섹션이 있는 호스트는 별도 설정 파일 없이 재설치할 수 있습니다:
+
+```bash
+rnixstrap --hostname headscale-vps
+```
+
+IP와 SSH 키를 TOML에서 자동으로 불러옵니다.
+
+:::note
+`.strap.json` 형식과 설정 로드 우선순위는 [rnixup/rnixstrap 명령어 레퍼런스](../reference/rnixup-commands.md)를 참조하세요.
+:::
 
 ---
 

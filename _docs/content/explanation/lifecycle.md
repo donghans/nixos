@@ -141,11 +141,24 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 | system | `x86_64-linux` / `aarch64-linux` (신규 호스트만) |
 | 서비스 | headscale 등 선택적 활성화 (신규 호스트만) |
 
+#### 비대화형 모드
+
+`--hostname HOST` 인수를 주면 Phase 1 입력 수집 전체를 건너뛰고 아래 소스에서 자동으로 값을 채웁니다:
+
+| 우선순위 | 소스 |
+|---------|------|
+| 1 | `~/.ssh/rnixup/<hostname>.strap.json` |
+| 2 | `hosts/<hostname>.toml` (기존 호스트, `[deploy]` 섹션 있음) |
+| 3 | `~/.ssh/rnixup/<hostname>.bootstrap.env` (standalone 호스트) |
+
+신규 호스트에서 `ip` 또는 `sshKey`가 없으면 에러로 종료합니다.
+
 **run_setup 순서:**
 
 1. `_probe_ram`: SSH로 서버 RAM 사전 측정 (kexec 최소 1000MB 확인)
-2. 설정 확인 · 선택: 바로 진행 / 쓰기만 / 취소 — **타이머는 선택 직후부터 시작**
+2. 설정 확인 · 선택: 바로 진행 / 쓰기만 / 취소 — **타이머는 선택 직후부터 시작** (비대화형 시 자동 진행)
 3. 파일 작업: `hosts/<hostname>.toml` · `hosts/<hostname>.nix` 생성 또는 업데이트
 4. SSH 정보 추출: 서버에서 공개키 추출 → `hosts/deploy/<hostname>.pub` 저장
 5. nixos-anywhere: 서버에 원격 파티셔닝 + NixOS 설치. 생성된 `hardware.nix`를 `hosts/deploy/<hostname>.hardware.nix`로 레포에 역복사
-6. deploy-rs 배포: 설치 완료 후 rnixup으로 초기 설정 배포
+6. 시크릿 주입: `hosts/_deploy/<hostname>.secrets/secrets.json` 기반으로 변경된 파일만 자동 전송
+7. deploy-rs 배포: 설치 완료 후 rnixup으로 초기 설정 배포
