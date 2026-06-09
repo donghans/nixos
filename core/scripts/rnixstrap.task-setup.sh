@@ -531,7 +531,8 @@ _run_install() {
     run_nixos_anywhere
     renew_host_key
     wait_for_ssh
-    inject_secrets "$_HOSTNAME" "root" "$_IP" "$_SSH_KEY" "${_SSH_OPTS_POST[@]}"
+    # 설치 중 모든 시크릿 그룹 자동 주입 (그룹 선택 UI 없음)
+    NIXSEC_NONINTERACTIVE=1 inject_secrets "$_HOSTNAME" "root" "$_IP" "$_SSH_KEY" "${_SSH_OPTS_POST[@]}"
     run_deploy_rs
 }
 
@@ -564,7 +565,8 @@ _run_install_standalone() {
     run_nixos_anywhere
     renew_host_key
     wait_for_ssh "$_nixos_user"
-    inject_secrets "$_HOSTNAME" "$_nixos_user" "$_IP" "$_SSH_KEY" "${_SSH_OPTS_POST[@]}"
+    # 설치 중 모든 시크릿 그룹 자동 주입 (그룹 선택 UI 없음)
+    NIXSEC_NONINTERACTIVE=1 inject_secrets "$_HOSTNAME" "$_nixos_user" "$_IP" "$_SSH_KEY" "${_SSH_OPTS_POST[@]}"
     transfer_repo_to_remote "$_nixos_user"
     set_remote_env "$_nixos_user"
     run_nixup_os_remote "$_nixos_user"

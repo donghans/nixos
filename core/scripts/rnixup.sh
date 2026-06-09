@@ -19,34 +19,32 @@ _print_help() {
     printf "${_LOG_PREFIX_COLOR}${_LOG_PREFIX}${NC} ${CYAN}%-9s${NC} | 원격 NixOS 배포 도구\n" "Help"
     printf "\n"
     printf "  사용법:\n"
-    printf "    rnixup                — dry-activate 미리보기 후 확인 → 전체 호스트 배포\n"
-    printf "    rnixup <hostname>     — 특정 호스트만 배포\n"
-    printf "    rnixup list           — 설정된 원격 호스트 목록 출력\n"
+    printf "    rnixup                         — dry-activate 미리보기 후 확인 → 전체 호스트 배포\n"
+    printf "    rnixup <hostname>              — 특정 호스트만 배포\n"
+    printf "    rnixup [hostname] --dry-run-only — dry-activate 결과만 출력 후 종료\n"
+    printf "    rnixup [hostname] --apply-only   — dry-activate 없이 시크릿 주입 + 배포\n"
+    printf "    rnixup list                    — 설정된 원격 호스트 목록 출력\n"
     printf "\n"
     printf "  팁: 새 원격 호스트 추가는 'rnixstrap'을 사용하세요.\n"
     printf "\n"
 }
 
 # ── 인자 파싱 ─────────────────────────────────────────────────────────────────
-SUBCOMMAND="${1:-}"
 export DEPLOY_NODE=""
+export _DRY_RUN_ONLY=false
+export _APPLY_ONLY=false
+SUBCOMMAND=""
 
-case "$SUBCOMMAND" in
-    --help|-h)
-        _print_help
-        exit 0
-        ;;
-    list)
-        # resolve 후 목록 출력 (아래에서 처리)
-        ;;
-    "")
-        # 전체 배포
-        ;;
-    *)
-        # 호스트명 지정 단일 배포
-        DEPLOY_NODE="$SUBCOMMAND"
-        ;;
-esac
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --help|-h)      _print_help; exit 0 ;;
+        list)           SUBCOMMAND=list; shift ;;
+        --dry-run-only) _DRY_RUN_ONLY=true; shift ;;
+        --apply-only)   _APPLY_ONLY=true; shift ;;
+        -*) log_msg "Error" "알 수 없는 옵션: $1  (도움말: rnixup --help)"; exit 1 ;;
+        *)  DEPLOY_NODE="$1"; shift ;;
+    esac
+done
 
 # ── 세션 락 획득 ──────────────────────────────────────────────────────────────
 acquire_lock

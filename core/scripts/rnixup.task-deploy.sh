@@ -168,36 +168,38 @@ _run_deploy_task() {
     local _deploy_target="path:${BUILD_DIR}"
     [ -n "${DEPLOY_NODE:-}" ] && _deploy_target="path:${BUILD_DIR}#${DEPLOY_NODE}"
 
-    log_msg "Task" "원격 호스트 ${deploy_count}개 dry-activate 중..."
-    log_exec "d-rs" ">" "dry-activate"
-    nix run "github:serokell/deploy-rs" -- \
-        --skip-checks \
-        --dry-activate \
-        "$_deploy_target"
-    log_exec "d-rs" "<" "dry-activate"
+    if [[ "${_APPLY_ONLY:-false}" != true ]]; then
+        log_msg "Task" "원격 호스트 ${deploy_count}개 dry-activate 중..."
+        log_exec "d-rs" ">" "dry-activate"
+        nix run "github:serokell/deploy-rs" -- \
+            --skip-checks \
+            --dry-activate \
+            "$_deploy_target"
+        log_exec "d-rs" "<" "dry-activate"
 
-    # ── 배포 확인 ─────────────────────────────────────────────────────────────
-    printf "\n"
-    read -rp "$(_log_prompt)위 변경사항을 배포하시겠습니까? (Y/n): " _confirm
-    _confirm="${_confirm:-Y}"
-    if [[ ! "$_confirm" =~ ^[Yy]$ ]]; then
-        log_msg "Notice" "배포 취소됨."
-        exit 0
+        # --dry-run-only: 미리보기만 하고 종료
+        if [[ "${_DRY_RUN_ONLY:-false}" == true ]]; then
+            log_msg "Done" "dry-run 완료. 배포하려면 --apply-only로 재실행하세요."
+            return 0
+        fi
+
+        # ── 배포 확인 ─────────────────────────────────────────────────────────
+        printf "\n"
+        read -rp "$(_log_prompt)위 변경사항을 배포하시겠습니까? (Y/n): " _confirm
+        _confirm="${_confirm:-Y}"
+        if [[ ! "$_confirm" =~ ^[Yy]$ ]]; then
+            log_msg "Notice" "배포 취소됨."
+            exit 0
+        fi
     fi
 
     # dry-activate + 사용자 확인 완료 후부터 시간 측정
     _START_TIME=$(date +%s)
     _START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
 
-    # ── 시크릿 주입 (선택) ────────────────────────────────────────────────────
+    # ── 시크릿 주입 (변경된 파일만 자동 전송) ────────────────────────────────
     if _any_remote_secrets_exist; then
-        printf "\n"
-        read -rp "$(_log_prompt)시크릿을 서버에 주입하시겠습니까? (y/N): " _inject
-        if [[ "${_inject:-N}" =~ ^[Yy]$ ]]; then
-            inject_all_remote_secrets
-        else
-            log_msg "Notice" "시크릿 주입 건너뜀."
-        fi
+        inject_all_remote_secrets
     fi
 
     # ── 실제 배포 ─────────────────────────────────────────────────────────────
