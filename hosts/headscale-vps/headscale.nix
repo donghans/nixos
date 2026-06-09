@@ -17,7 +17,6 @@
     metrics_listen_addr = "127.0.0.1:9090";
     log.level = "info";
     noise.private_key_path = "/var/lib/headscale/noise_private.key";
-    derp.server.private_key_path = "/var/lib/headscale/derp_server_private.key";
     prefixes = {
       v4 = "100.64.0.0/10";
       allocation = "sequential";
@@ -33,6 +32,7 @@
         region_code = "kr-vps";
         region_name = "Korea (VPS)";
         stun_listen_addr = "0.0.0.0:3478";
+        private_key_path = "/var/lib/headscale/derp_server_private.key";
         # exit node 클라이언트가 DERP relay IP를 exclusion route로 추가할 수 있도록 공인 IPv4 노출
         ipv4 = config.headscale.staticIpv4;
       };
@@ -111,6 +111,8 @@ in {
   config = {
     services.headscale = {
       enable = true;
+      # NixOS 모듈 assertion 통과용 (magic_dns=true 기본값 → base_domain 필수)
+      # 실제 런타임 설정은 위의 headscaleConfigFile이 담당 (lib.mkForce로 덮어씀)
       settings.dns = {
         magic_dns = true;
         base_domain = "i.772610158.xyz";
