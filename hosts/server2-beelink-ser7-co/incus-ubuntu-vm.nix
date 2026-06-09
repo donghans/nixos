@@ -96,16 +96,17 @@ in {
         exit 0
       fi
 
-      incus launch images:ubuntu/24.04 ubuntu-2404 --vm \
+      # ubuntu remote 없으면 등록
+      if ! incus remote list --format=csv | cut -d, -f1 | grep -qx "ubuntu"; then
+        incus remote add ubuntu https://cloud-images.ubuntu.com/releases \
+          --protocol=simplestreams --public
+      fi
+
+      incus launch ubuntu:24.04 ubuntu-2404 --vm \
         -c limits.cpu=4 \
         -c limits.memory=16GiB \
-        -d root,size=64GiB
-
-      # -d eth0,type=nic,... 형식은 최신 incus에서 파싱 오류 → 별도 추가
-      incus stop ubuntu-2404 --force 2>/dev/null || true
-      incus config device remove ubuntu-2404 eth0 2>/dev/null || true
-      incus config device add ubuntu-2404 eth0 nic nictype=bridged parent=br-lan mtu=1400
-      incus start ubuntu-2404
+        -d root,size=64GiB \
+        -d eth0,type=nic,nictype=bridged,parent=br-lan,mtu=1400
     '';
   };
 
@@ -115,6 +116,8 @@ in {
     description = "Setup openssh in Ubuntu 24.04 VM";
     after = ["incus-update-vm-nic-ubuntu-2404.service"];
     requires = ["incus-update-vm-nic-ubuntu-2404.service"];
+    # incus-create-ubuntu-vm 재시작 시(VM 재생성) 함께 재실행
+    partOf = ["incus-create-ubuntu-vm.service"];
     wantedBy = ["multi-user.target"];
     path = [pkgs.incus pkgs.coreutils pkgs.gnugrep];
     serviceConfig = {
@@ -138,6 +141,13 @@ in {
         echo "ubuntu-2404: agent 미응답 — setup 건너뜀" >&2
         exit 1
       fi
+
+      # hostname 설정 (이미지 빌드 시스템 임시값 덮어쓰기)
+      incus exec ubuntu-2404 -- hostnamectl set-hostname ubuntu-2404
+      incus exec ubuntu-2404 -- bash -c "
+        sed -i 's/distrobuilder-[^ ]*/ubuntu-2404/g' /etc/hosts
+        echo ubuntu-2404 > /etc/hostname
+      "
 
       # PermitEmptyPasswords yes: LXC proxy가 인증 레이어이므로 VM 패스워드 불필요
       incus exec ubuntu-2404 -- apt-get update -qq
