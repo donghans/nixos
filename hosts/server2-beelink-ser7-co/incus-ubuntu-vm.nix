@@ -37,25 +37,21 @@
     # restic: 오늘 스냅샷의 btrfs 서브볼륨을 직접 백업 (VM 실행 중에도 일관성 보장)
     export RESTIC_REPOSITORY="$RESTIC_REPO"
     export RESTIC_PASSWORD_FILE="/var/lib/nix-secrets/backup/restic-password"
-    SFTP_CMD="${pkgs.openssh}/bin/ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -s sftp"
+    SSH_ARGS="-i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
-    ${pkgs.restic}/bin/restic \
-      -o sftp.command="$SFTP_CMD bitstep@mac-studio" \
-      snapshots &>/dev/null \
-      || ${pkgs.restic}/bin/restic \
-           -o sftp.command="$SFTP_CMD bitstep@mac-studio" \
-           init
+    restic() {
+      ${pkgs.restic}/bin/restic \
+        -o "sftp.args=$SSH_ARGS" \
+        "$@"
+    }
+
+    restic snapshots &>/dev/null || restic init
 
     echo "ubuntu-2404-backup: mac-studio로 백업 중..."
-    # 오늘 로컬 스냅샷 경로 백업 (btrfs CoW 덕에 VM 실행 중에도 일관된 상태)
-    ${pkgs.restic}/bin/restic \
-      -o sftp.command="$SFTP_CMD bitstep@mac-studio" \
-      backup "$SNAP_PATH/$SNAP_NAME"
+    restic backup "$SNAP_PATH/$SNAP_NAME"
 
     # 30일 초과 원격 백업 정리
-    ${pkgs.restic}/bin/restic \
-      -o sftp.command="$SFTP_CMD bitstep@mac-studio" \
-      forget --keep-daily 30 --prune --quiet
+    restic forget --keep-daily 30 --prune --quiet
 
     echo "ubuntu-2404-backup: 완료"
   '';
