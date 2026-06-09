@@ -1,29 +1,13 @@
 # Vultr 2GB — headscale 컨트롤 플레인
 # EC2+Lightsail+S3 통합 대체 — nginx TLS 직접 종단, GitHub DB 백업
 {mkHostConfiguration, ...}:
-mkHostConfiguration (_: {
+mkHostConfiguration ({config, ...}: {
   os = {
     imports = [
       ./headscale-vps/headscale.nix
-      ./headscale-vps/caddy.nix
-      ./headscale-vps/github-backup.nix
-      ./headscale-vps/docker.nix
+      ./headscale-vps/headscale-db-backup.nix
       ./headscale-vps/ip-forwarding.nix
     ];
-
-    headscale.domain = "e.772610158.xyz";
-    headscale.staticIpv4 = "141.164.59.97";
-
-    networking.nameservers = ["1.1.1.1" "8.8.8.8"];
-    services.resolved.extraConfig = "Cache=no-negative";
-
-    # Vultr에는 보안그룹 없음 → NixOS 방화벽 직접 제어
-    networking.firewall = {
-      enable = true;
-      allowedTCPPorts = [22 80 443];
-      allowedTCPPortRanges = [{from = 8000; to = 8999;}];
-      allowedUDPPorts = [3478 41641]; # STUN, WireGuard/tailscale
-    };
 
     users.users.admin.openssh.authorizedKeys.keyFiles = [
       ./_deploy/headscale-vps.pub
@@ -40,6 +24,61 @@ mkHostConfiguration (_: {
         ];
       }
     ];
+
+    networking.nameservers = ["1.1.1.1" "8.8.8.8"];
+    services.resolved.extraConfig = "Cache=no-negative";
+
+    # Vultr에는 보안그룹 없음 → NixOS 방화벽 직접 제어
+    networking.firewall = {
+      enable = true;
+      allowedTCPPorts = [22 80 443];
+      allowedTCPPortRanges = [{from = 8000; to = 8999;}];
+      allowedUDPPorts = [3478 41641]; # STUN, WireGuard/tailscale
+    };
+
+    headscale.domain = "e.772610158.xyz";
+    headscale.staticIpv4 = "141.164.59.97";
+
+    services.headscale-db-backup = {
+      enable = true;
+      appId = "3995077";
+      installationId = "138797641";
+      privateKeyFile = "/var/lib/nix-secrets/github-apps/private-key.pem";
+      repoUrl = "https://github.com/BITSTEP-IT/headscale-backup.git";
+    };
+
+    services.caddy = {
+      enable = true;
+      globalConfig = ''
+        email 772610158.xyz@gmail.com
+      '';
+      # GHA가 SCP로 배포하는 동적 vhost 파일 로드
+      extraConfig = ''
+        import /etc/caddy/sites/*.caddy
+      '';
+      virtualHosts.${config.headscale.domain}.extraConfig = ''
+        reverse_proxy 127.0.0.1:8080
+      '';
+    };
+
+    systemd.tmpfiles.rules = [
+      "d /etc/caddy/sites 0755 admin root -"
+      "d /home/admin/landings 0755 admin users -"
+    ];
+
+    virtualisation.docker.enable = true;
+    virtualisation.docker.autoPrune.enable = true;
+    virtualisation.docker.daemon.settings.dns = ["8.8.8.8" "8.8.4.4"];
+    users.users.admin.extraGroups = ["docker"];
+
+    # Docker 28+는 iptables 대신 nftables로 NAT 관리
+    networking.nftables.enable = true;
+
+    # systemd-networkd가 Docker veth/브리지를 가로채 br-*가 NO-CARRIER 되는 현상 방지
+    systemd.network.networks."20-docker-veth" = {
+      matchConfig.Name = "veth* br-* docker*";
+      linkConfig.Unmanaged = true;
+    };
   };
   hm = {};
 })
