@@ -45,23 +45,23 @@ in {
         script = ''
           if incus info ${lxcName} &>/dev/null; then
             ${lib.optionalString (internalBridge != null) ''
-              if incus config show ${lxcName} --expanded 2>/dev/null | grep -q 'parent: ${internalBridge}'; then
-                # LXC NIC은 모두 macvlan을 사용해야 함 (incus 6.x가 unmanaged bridge에 veth를 붙이지 않음)
-                # eth0 또는 eth1 중 nictype=bridged인 것이 있으면 macvlan으로 교체
-                NEED_FIX=0
-                incus config show ${lxcName} --expanded 2>/dev/null | grep -q 'nictype: bridged' && NEED_FIX=1
-                if [ "$NEED_FIX" = "1" ]; then
-                  incus stop ${lxcName} --force 2>/dev/null || true
-                  incus config device remove ${lxcName} eth0 2>/dev/null || true
-                  incus config device remove ${lxcName} eth1 2>/dev/null || true
-                  incus config device add ${lxcName} eth0 nic nictype=macvlan parent=br-lan mtu=1400
-                  incus config device add ${lxcName} eth1 nic nictype=macvlan parent=${internalBridge} mtu=1400
-                  incus start ${lxcName}
-                fi
-                exit 0
+            if incus config show ${lxcName} --expanded 2>/dev/null | grep -q 'parent: ${internalBridge}'; then
+              # LXC NIC은 모두 macvlan을 사용해야 함 (incus 6.x가 unmanaged bridge에 veth를 붙이지 않음)
+              # eth0 또는 eth1 중 nictype=bridged인 것이 있으면 macvlan으로 교체
+              NEED_FIX=0
+              incus config show ${lxcName} --expanded 2>/dev/null | grep -q 'nictype: bridged' && NEED_FIX=1
+              if [ "$NEED_FIX" = "1" ]; then
+                incus stop ${lxcName} --force 2>/dev/null || true
+                incus config device remove ${lxcName} eth0 2>/dev/null || true
+                incus config device remove ${lxcName} eth1 2>/dev/null || true
+                incus config device add ${lxcName} eth0 nic nictype=macvlan parent=br-lan mtu=1400
+                incus config device add ${lxcName} eth1 nic nictype=macvlan parent=${internalBridge} mtu=1400
+                incus start ${lxcName}
               fi
-              incus config device add ${lxcName} eth1 nic nictype=macvlan parent=${internalBridge} mtu=1400 2>/dev/null || true
-            ''}
+              exit 0
+            fi
+            incus config device add ${lxcName} eth1 nic nictype=macvlan parent=${internalBridge} mtu=1400 2>/dev/null || true
+          ''}
             exit 0
           fi
 

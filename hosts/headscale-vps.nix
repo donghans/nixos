@@ -32,7 +32,12 @@ mkHostConfiguration ({config, ...}: {
     networking.firewall = {
       enable = true;
       allowedTCPPorts = [22 80 443];
-      allowedTCPPortRanges = [{from = 8000; to = 8999;}];
+      allowedTCPPortRanges = [
+        {
+          from = 8000;
+          to = 8999;
+        }
+      ];
       allowedUDPPorts = [3478 41641]; # STUN, WireGuard/tailscale
     };
 

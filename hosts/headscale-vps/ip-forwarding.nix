@@ -1,12 +1,18 @@
 {lib, ...}: {
   imports = [
     ((import ../_lib/ip-forwarder.nix {inherit lib;}) {
-      interface    = "eth0";
-      gateway      = "141.164.58.1";
+      interface = "eth0";
+      gateway = "141.164.58.1";
       subnetPrefix = 32;
       forwards = [
-        { publicIp = "141.164.53.13";  targetTs = "100.64.0.15"; }  # mac studio
-        { publicIp = "158.247.252.54"; targetTs = "100.64.0.5"; }  # ubuntu-2404
+        {
+          publicIp = "141.164.53.13";
+          targetTs = "100.64.0.15";
+        } # mac studio
+        {
+          publicIp = "158.247.252.54";
+          targetTs = "100.64.0.5";
+        } # ubuntu-2404
       ];
     })
   ];
