@@ -33,6 +33,19 @@ in
       networking.firewall.extraForwardRules = ''
         iifname "tailscale0" accept
       '';
+
+      # TODO: 공인 IP 또는 포트포워딩(TCP 443, UDP 3478) 확보 시 독립 DERP 서버 고려
+      # headscale-vps 트래픽 분산 목적 — 현재는 Double-NAT 환경이라 적용 불가
+      # 활성화 시 headscale-vps headscale.nix의 derp.paths에 이 서버 region YAML 추가 필요
+      #
+      # services.tailscale.derper = {
+      #   enable = true;
+      #   domain = "derp.YOURDOMAIN.com";  # 공인 도메인 필요
+      #   configureNginx = true;            # nginx 역프록시 + Let's Encrypt 자동 설정
+      #   openFirewall = true;
+      #   stunPort = 3478;
+      #   verifyClients = true;             # headscale 노드만 허용
+      # };
     };
     hm = {};
   })

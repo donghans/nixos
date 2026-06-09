@@ -7,24 +7,6 @@
   headscaleDomain = config.headscale.domain;
   oidcClientSecretFile = "/var/lib/nix-secrets/headscale/oidc_client_secret";
 
-  # exit node 사용 클라이언트가 DERP relay IP를 exclusion route로 추가할 수 있도록
-  # region 900(내장 DERP)에는 static IPv4가 없으므로 별도 region(901)으로 노출
-  derpStaticIpv4Json = pkgs.writeText "derp-static-ipv4.yaml" ''
-    regions:
-      901:
-        regionid: 901
-        regioncode: kr-vps-ip
-        regionname: Korea (VPS) IP
-        nodes:
-          - name: 901a
-            regionid: 901
-            hostname: ${headscaleDomain}
-            ipv4: ${config.headscale.staticIpv4}
-            derpport: 443
-            stunport: 3478
-            stunonly: false
-  '';
-
   headscaleConfigFile = (pkgs.formats.yaml {}).generate "headscale.yaml" {
     disable_check_updates = true;
     unix_socket = "/run/headscale/headscale.sock";
@@ -51,9 +33,10 @@
         region_code = "kr-vps";
         region_name = "Korea (VPS)";
         stun_listen_addr = "0.0.0.0:3478";
+        # exit node 클라이언트가 DERP relay IP를 exclusion route로 추가할 수 있도록 공인 IPv4 노출
+        ipv4 = config.headscale.staticIpv4;
       };
       urls = ["https://controlplane.tailscale.com/derpmap/default"];
-      paths = ["${derpStaticIpv4Json}"];
       auto_update_enabled = true;
       update_frequency = "3h";
     };
@@ -121,7 +104,7 @@ in {
     staticIpv4 = lib.mkOption {
       type = lib.types.str;
       default = "0.0.0.0";
-      description = "DERP map region 901용 공인 IPv4 (exit node 클라이언트 exclusion route용)";
+      description = "embedded DERP server(region 900)에 노출할 공인 IPv4 (exit node 클라이언트 exclusion route용)";
     };
   };
 
