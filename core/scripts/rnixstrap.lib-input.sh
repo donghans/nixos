@@ -271,7 +271,8 @@ ask_deploy_key() {
     printf "\n"
     log_msg "Notice" "NixOS 설치 후 SSH 접속 및 authorized key 등록을 위한 키가 필요합니다."
     while true; do
-        local _key_prompt="$(_log_prompt_rl)배포용 SSH 키 파일 경로 (Tab 자동완성, Enter=건너뜀): "
+        local _key_prompt
+        _key_prompt="$(_log_prompt_rl)배포용 SSH 키 파일 경로 (Tab 자동완성, Enter=건너뜀): "
         local _input=""
         read -rep "$_key_prompt" _input
         _input="${_input// /}"

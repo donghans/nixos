@@ -204,6 +204,7 @@ _probe_ram() {
 probe_disk_and_boot() {
     log_msg "Prep" "원격 디스크·부트 타입 감지 중..."
     local remote_out
+    # shellcheck disable=SC2016
     remote_out=$(_ssh "${_SSH_OPTS[@]}" -o ConnectTimeout=10 \
         "${_SSH_USER}@${_IP}" \
         'test -d /sys/firmware/efi && echo uefi || echo bios; lsblk -dn -o NAME,TYPE 2>/dev/null | awk '"'"'$2=="disk" && $1!~/^zram/{print "/dev/"$1; exit}'"'"'' \
@@ -543,6 +544,7 @@ run_nixup_home_remote() {
     log_msg "Task" "원격 nixup home 실행 중..."
     log_exec "nixup" ">" "nixup home: $_HOSTNAME"
     local _exit=0
+    # shellcheck disable=SC2016
     _ssh "${_SSH_OPTS[@]}" "${u}@${_IP}" \
         '$HOME/nixos/core/scripts/nixup.sh home' || _exit=$?
     log_exec "nixup" "<" "nixup home: $_HOSTNAME"
