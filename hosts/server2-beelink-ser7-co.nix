@@ -24,6 +24,8 @@ in
         advertiseRoutes = ["192.168.11.0/24"];
       };
 
+      # mods 기본값은 "client" (rpfilter loose) → exit node 서버는 "server"로 덮어씀
+      # "server": 커널 IP forwarding 활성화 (advertiseExitNode 동작에 필수)
       services.tailscale.useRoutingFeatures = "server";
 
       # exit node 포워딩: NixOS nftables forward chain 기본 policy가 drop이라
@@ -31,29 +33,6 @@ in
       networking.firewall.extraForwardRules = ''
         iifname "tailscale0" accept
       '';
-
-      # eth0 → br-lan 브리지 슬레이브 (incus VM이 실제 LAN IP 받도록)
-      systemd.network.netdevs."10-br-lan" = {
-        netdevConfig = {
-          Kind = "bridge";
-          Name = "br-lan";
-        };
-      };
-
-      systemd.network.networks."10-eth0-bridge" = {
-        matchConfig.Name = "eth0";
-        networkConfig.Bridge = "br-lan";
-        linkConfig.RequiredForOnline = "enslaved";
-      };
-
-      systemd.network.networks."20-br-lan" = {
-        matchConfig.Name = "br-lan";
-        networkConfig.DHCP = "ipv4";
-        linkConfig.RequiredForOnline = "routable";
-      };
-
-      # br-lan 통과 트래픽 허용 (incus VM ↔ host/tailscale)
-      networking.firewall.trustedInterfaces = ["br-lan"];
     };
     hm = {};
   })

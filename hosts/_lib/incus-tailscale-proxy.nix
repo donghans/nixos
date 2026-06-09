@@ -32,6 +32,27 @@
 in {
   config = lib.mkMerge [
     {
+      # eth0 → br-lan 브리지 슬레이브: proxy LXC들이 실제 LAN IP를 받기 위한 기반
+      # 동일 설정이 여러 proxy 호출에서 중복 선언돼도 NixOS가 동일값 str 병합으로 처리
+      systemd.network.netdevs."10-br-lan" = {
+        netdevConfig = {
+          Kind = "bridge";
+          Name = "br-lan";
+        };
+      };
+      systemd.network.networks."10-eth0-bridge" = {
+        matchConfig.Name = "eth0";
+        networkConfig.Bridge = "br-lan";
+        linkConfig.RequiredForOnline = "enslaved";
+      };
+      systemd.network.networks."20-br-lan" = {
+        matchConfig.Name = "br-lan";
+        networkConfig.DHCP = "ipv4";
+        linkConfig.RequiredForOnline = "routable";
+      };
+      # br-lan 통과 트래픽 허용 (proxy LXC ↔ host/tailscale)
+      networking.firewall.trustedInterfaces = ["br-lan"];
+
       systemd.services."incus-create-${lxcName}" = {
         description = "Create Alpine LXC proxy container ${lxcName} if not exists";
         after = ["incus-startup.service" "systemd-networkd.service"];
