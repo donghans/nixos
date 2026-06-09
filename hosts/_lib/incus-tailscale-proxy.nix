@@ -41,6 +41,14 @@ in {
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
+          # 시스템 종료 시엔 컨테이너 보존, activation/수동 stop 시엔 삭제하여 좀비 방지
+          ExecStop = pkgs.writeShellScript "incus-delete-${lxcName}" ''
+            if ${pkgs.systemd}/bin/systemctl is-active --quiet \
+                shutdown.target reboot.target halt.target poweroff.target 2>/dev/null; then
+              exit 0
+            fi
+            ${pkgs.incus}/bin/incus delete ${lxcName} --force 2>/dev/null || true
+          '';
         };
         script = ''
           if incus info ${lxcName} &>/dev/null; then
@@ -94,6 +102,7 @@ in {
         description = "Setup tailscale and iptables in ${lxcName} LXC";
         after = ["incus-create-${lxcName}.service"];
         requires = ["incus-create-${lxcName}.service"];
+        partOf = ["incus-create-${lxcName}.service"];
         wantedBy = ["multi-user.target"];
         path = [pkgs.incus pkgs.coreutils pkgs.gnugrep pkgs.gawk];
         serviceConfig = {
