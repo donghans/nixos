@@ -226,7 +226,89 @@ _select_entries() {
 
     [ "${#check_args[@]}" -eq 0 ] && { REPLY_CHECKED=(); return; }
 
+    # 비대화형 모드: 전체 항목 자동 선택
+    if [[ "${NIXSEC_NONINTERACTIVE:-}" == "1" ]]; then
+        REPLY_CHECKED=()
+        local entry
+        for entry in "${check_args[@]}"; do
+            # check_args는 KEY LABEL 쌍 — 짝수 인덱스(0,2,4...)가 key
+            [[ "$entry" == group:* || "$entry" == new:* ]] && REPLY_CHECKED+=("$entry")
+        done
+        log_msg "Notice" "비대화형: 전체 ${#REPLY_CHECKED[@]}개 항목 선택"
+        return
+    fi
+
     _check "주입할 시크릿 선택  ($hostname)  기본=건너뜀" "${check_args[@]}"
+}
+
+# inject 전에 서버 파일 해시 비교 — 변경 없는 파일을 staging에서 제거해 불필요한 전송 방지
+# $1=staging, $2=ssh_user, $3=ip, $4=ssh_key, $5...=ssh_opts
+# SSH 실패 시 warning 후 전체 전송 fallback (안전 우선)
+_filter_stale_secrets() {
+    local staging="$1" ssh_user="$2" ip="$3" ssh_key="$4"
+    shift 4
+    local ssh_opts=("$@")
+    local sudo_pfx=""
+    [ "$ssh_user" != "root" ] && sudo_pfx="sudo "
+
+    # staging 내 파일 목록 (상대경로)
+    local -a rel_paths=()
+    while IFS= read -r f; do
+        rel_paths+=("$f")
+    done < <(find "$staging" -type f | sed "s|^${staging}/||" | sort)
+    [ "${#rel_paths[@]}" -eq 0 ] && return 0
+
+    # 서버 경로 목록 구성 (단일 따옴표로 공백 대비)
+    local server_paths_str=""
+    for rp in "${rel_paths[@]}"; do
+        server_paths_str="$server_paths_str '/$rp'"
+    done
+
+    log_msg "Task" "서버 파일 해시 확인 중 (${#rel_paths[@]}개)..."
+    local remote_out=""
+    # shellcheck disable=SC2016
+    local ssh_cmd="for f in $server_paths_str; do ${sudo_pfx}sha256sum \"\$f\" 2>/dev/null || printf 'MISSING  %s\n' \"\$f\"; done"
+
+    if [ -n "${_SECRETS_SSH_PASS:-}" ]; then
+        remote_out=$(sshpass -f <(printf '%s' "$_SECRETS_SSH_PASS") \
+            ssh -o PasswordAuthentication=yes -o PubkeyAuthentication=no \
+            "${ssh_opts[@]}" "${ssh_user}@${ip}" "$ssh_cmd" 2>/dev/null) || true
+    else
+        remote_out=$(ssh -i "$ssh_key" "${ssh_opts[@]}" "${ssh_user}@${ip}" \
+            "$ssh_cmd" 2>/dev/null) || true
+    fi
+
+    if [ -z "$remote_out" ]; then
+        log_msg "Warn" "서버 해시 확인 실패 — 전체 전송으로 fallback"
+        return 0
+    fi
+
+    # 로컬 해시와 비교 후 동일 파일 제거
+    for rp in "${rel_paths[@]}"; do
+        local server_path="/$rp"
+        local local_hash
+        local_hash=$(sha256sum "$staging/$rp" | awk '{print $1}')
+
+        # remote_out에서 해당 경로 항목 파싱 (awk: 마지막 필드가 경로와 일치하는 줄)
+        local remote_entry
+        remote_entry=$(printf '%s\n' "$remote_out" | awk -v p="$server_path" '$NF==p{print; exit}')
+
+        if [ -z "$remote_entry" ]; then
+            log_msg "Task" "신규: $server_path"
+        elif [[ "$remote_entry" == MISSING* ]]; then
+            log_msg "Task" "신규: $server_path"
+        else
+            local remote_hash
+            remote_hash=$(awk '{print $1}' <<< "$remote_entry")
+            if [ "$local_hash" = "$remote_hash" ]; then
+                rm -f "$staging/$rp"
+                log_msg "Skip" "변경 없음: $server_path"
+            else
+                log_msg "Task" "갱신: $server_path"
+            fi
+        fi
+    done
+    return 0
 }
 
 # staging 디렉터리를 원격 호스트에 tar pipe로 전송
@@ -382,6 +464,15 @@ inject_secrets() {
     done
 
     [ "$any_fetched" -eq 0 ] && return 0
+
+    # 변경 없는 파일 제거 (stale 체크)
+    _filter_stale_secrets "$staging" "$ssh_user" "$ip" "$ssh_key" "${ssh_opts[@]}"
+
+    # staging이 비어있으면 전송 스킵
+    if [ -z "$(find "$staging" -type f -print -quit 2>/dev/null)" ]; then
+        log_msg "Done" "변경된 시크릿 없음 — 전송 건너뜀"
+        return 0
+    fi
 
     _transfer_secrets "$hostname" "$ssh_user" "$ip" "$ssh_key" "${ssh_opts[@]}"
 }

@@ -53,6 +53,30 @@ _run_remote_inject() {
     log_msg "Task" "원격 호스트에 시크릿 주입"
     printf '\n'
 
+    # ── 비대화형 모드 ──────────────────────────────────────────────────────────
+    if [[ -n "${NIXSEC_HOSTNAME:-}" ]]; then
+        local _hostname="$NIXSEC_HOSTNAME"
+        _resolve_ssh_info "$_hostname"
+        [[ -z "$_INJ_IP"      ]] && { log_msg "Error" "IP 자동 조회 실패 ($_hostname). resolved.json 또는 bootstrap.env 확인."; exit 1; }
+        [[ -z "$_INJ_SSH_KEY" ]] && { log_msg "Error" "SSH 키 자동 조회 실패 ($_hostname)."; exit 1; }
+        _INJ_SSH_USER="${_INJ_SSH_USER:-root}"
+        log_msg "Notice" "비대화형 inject: $_hostname @ $_INJ_IP (사용자: $_INJ_SSH_USER)"
+
+        local _lib="$SCRIPT_DIR/rnixup.lib-secrets.sh"
+        [ -f "$_lib" ] || { log_msg "Error" "rnixup.lib-secrets.sh 없음"; exit 1; }
+        source "$_lib"
+
+        local _ssh_opts=(
+            -o StrictHostKeyChecking=yes
+            -o BatchMode=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o LogLevel=ERROR
+        )
+        inject_secrets "$_hostname" "$_INJ_SSH_USER" "$_INJ_IP" "$_INJ_SSH_KEY" "${_ssh_opts[@]}"
+        return
+    fi
+
+    # ── 대화형 모드 ────────────────────────────────────────────────────────────
     # 대상 호스트 선택
     local -a _hosts=()
     mapfile -t _hosts < <(_collect_secret_hosts)

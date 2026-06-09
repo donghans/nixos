@@ -47,6 +47,52 @@ _run_upload() {
     log_msg "Task" "시크릿 업로드"
     printf '\n'
 
+    # ── 비대화형 모드 ──────────────────────────────────────────────────────────
+    # 파라미터가 하나라도 있으면 전부 있어야 함 (일부만 있으면 에러)
+    local _any_param=0
+    [[ -n "${NIXSEC_REPO:-}"        ]] && _any_param=1
+    [[ -n "${NIXSEC_GROUP:-}"       ]] && _any_param=1
+    [[ -n "${NIXSEC_REMOTE_PATH:-}" ]] && _any_param=1
+    [[ -n "${NIXSEC_FILE:-}"        ]] && _any_param=1
+    [[ -n "${NIXSEC_STDIN:-}"       ]] && _any_param=1
+
+    if [ "$_any_param" -eq 1 ]; then
+        local -a _missing=()
+        [[ -z "${NIXSEC_REPO:-}"        ]] && _missing+=("--repo")
+        [[ -z "${NIXSEC_GROUP:-}"       ]] && _missing+=("--group")
+        [[ -z "${NIXSEC_REMOTE_PATH:-}" ]] && _missing+=("--remote-path")
+        [[ -z "${NIXSEC_FILE:-}" && -z "${NIXSEC_STDIN:-}" ]] && _missing+=("--file 또는 --stdin")
+        if [ "${#_missing[@]}" -gt 0 ]; then
+            log_msg "Error" "비대화형 모드: 누락 파라미터: ${_missing[*]}"
+            exit 1
+        fi
+
+        local _tmp_file
+        _tmp_file=$(mktemp)
+        chmod 600 "$_tmp_file"
+        # shellcheck disable=SC2064
+        trap "rm -f '$_tmp_file'" RETURN
+
+        if [[ -n "${NIXSEC_STDIN:-}" ]]; then
+            log_msg "Task" "stdin에서 시크릿 읽는 중..."
+            cat > "$_tmp_file"
+        else
+            local _src="${NIXSEC_FILE}"
+            _src="${_src/#\~/$HOME}"
+            [ -f "$_src" ] || { log_msg "Error" "파일 없음: $_src"; exit 1; }
+            cp "$_src" "$_tmp_file"
+        fi
+
+        log_msg "Task" "레포 공개키 조회 중..."
+        local _pubkey
+        _pubkey=$(_get_repo_pubkey "$NIXSEC_REPO") || {
+            log_msg "Error" ".pubkey 조회 실패. nixsec 초기화가 완료됐는지 확인하세요."; exit 1
+        }
+        _upload_encrypted "$NIXSEC_REPO" "$NIXSEC_REMOTE_PATH" "$_tmp_file" "$_pubkey"
+        return
+    fi
+
+    # ── 대화형 모드 ────────────────────────────────────────────────────────────
     # 레포 선택
     local -a _repos=()
     mapfile -t _repos < <(_collect_repos)
