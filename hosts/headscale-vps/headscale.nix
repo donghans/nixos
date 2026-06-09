@@ -125,6 +125,9 @@ in {
 
     systemd.tmpfiles.rules = [
       "z ${oidcClientSecretFile} 0640 headscale headscale -"
+      # inject_secrets가 root:root로 전송하므로 매 활성화 시 소유자 교정
+      "z /var/lib/headscale/noise_private.key 0600 headscale headscale -"
+      "z /var/lib/headscale/derp_server_private.key 0600 headscale headscale -"
     ];
   };
 }
