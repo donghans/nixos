@@ -96,13 +96,7 @@ in {
         exit 0
       fi
 
-      # ubuntu remote 없으면 등록
-      if ! incus remote list --format=csv | cut -d, -f1 | grep -qx "ubuntu"; then
-        incus remote add ubuntu https://cloud-images.ubuntu.com/releases \
-          --protocol=simplestreams --public
-      fi
-
-      incus launch ubuntu:24.04 ubuntu-2404 --vm \
+      incus launch images:ubuntu/24.04 ubuntu-2404 --vm \
         -c limits.cpu=4 \
         -c limits.memory=16GiB \
         -d root,size=64GiB \
