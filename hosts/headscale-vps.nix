@@ -44,6 +44,12 @@ mkHostConfiguration ({config, ...}: {
     headscale.domain = "e.772610158.xyz";
     headscale.staticIpv4 = "141.164.59.97";
 
+    mods.sys.services.tailscale = {
+      enable = true;
+      acceptRoutes = true;
+      stateFile = "/var/lib/nix-secrets/tailscale/system/headscale-vps.state";
+    };
+
     services.headscale-db-backup = {
       enable = true;
       appId = "3995077";
