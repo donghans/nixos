@@ -40,13 +40,17 @@ _resolve_ssh_info() {
     fi
 
     # ~/.ssh/rnixup/<hostname>.* 에서 키 자동 탐색 (rnixstrap 패턴)
+    # && 단락평가 표현식 전체가 set -e를 트리거할 수 있으므로 if/continue 패턴 사용
     if [ -z "$_INJ_SSH_KEY" ]; then
         local _f
         for _f in "$HOME/.ssh/rnixup/${hostname}."*; do
-            [[ "$_f" == *.env ]] && continue
-            [ -f "$_f" ] && _INJ_SSH_KEY="$_f" && break
+            if [[ "$_f" == *.env ]]; then continue; fi
+            if [ ! -f "$_f" ]; then continue; fi
+            _INJ_SSH_KEY="$_f"
+            break
         done
     fi
+    return 0
 }
 
 _run_remote_inject() {
@@ -54,11 +58,26 @@ _run_remote_inject() {
     printf '\n'
 
     # ── 비대화형 모드 ──────────────────────────────────────────────────────────
+    # 환경변수 우선, 플래그로 덮어씀:
+    #   NIXSEC_HOSTNAME  또는  --hostname
+    #   NIXSEC_IP        또는  --ip          (resolved.json 대체)
+    #   NIXSEC_USER      또는  --user        (기본값 root)
+    #   NIXSEC_SSH_KEY   또는  --ssh-key
+    #   NIXSEC_PASSWORD  또는  --password    (키 대신 비밀번호 인증)
     if [[ -n "${NIXSEC_HOSTNAME:-}" ]]; then
         local _hostname="$NIXSEC_HOSTNAME"
         _resolve_ssh_info "$_hostname"
-        [[ -z "$_INJ_IP"      ]] && { log_msg "Error" "IP 자동 조회 실패 ($_hostname). resolved.json 또는 bootstrap.env 확인."; exit 1; }
-        [[ -z "$_INJ_SSH_KEY" ]] && { log_msg "Error" "SSH 키 자동 조회 실패 ($_hostname)."; exit 1; }
+
+        # 플래그로 명시된 값으로 자동조회 결과 덮어씀
+        [[ -n "${NIXSEC_IP:-}"       ]] && _INJ_IP="$NIXSEC_IP"
+        [[ -n "${NIXSEC_USER:-}"     ]] && _INJ_SSH_USER="$NIXSEC_USER"
+        [[ -n "${NIXSEC_SSH_KEY:-}"  ]] && _INJ_SSH_KEY="$NIXSEC_SSH_KEY"
+        [[ -n "${NIXSEC_PASSWORD:-}" ]] && _SECRETS_SSH_PASS="$NIXSEC_PASSWORD" && _INJ_SSH_KEY=""
+
+        [[ -z "$_INJ_IP" ]] && { log_msg "Error" "IP 자동 조회 실패 ($_hostname). --ip 또는 resolved.json/bootstrap.env 확인."; exit 1; }
+        if [[ -z "$_INJ_SSH_KEY" ]] && [[ -z "${_SECRETS_SSH_PASS:-}" ]]; then
+            log_msg "Error" "SSH 인증 정보 없음 ($_hostname). --ssh-key 또는 --password 지정 필요."; exit 1
+        fi
         _INJ_SSH_USER="${_INJ_SSH_USER:-root}"
         log_msg "Notice" "비대화형 inject: $_hostname @ $_INJ_IP (사용자: $_INJ_SSH_USER)"
 
@@ -66,12 +85,24 @@ _run_remote_inject() {
         [ -f "$_lib" ] || { log_msg "Error" "rnixup.lib-secrets.sh 없음"; exit 1; }
         source "$_lib"
 
-        local _ssh_opts=(
-            -o StrictHostKeyChecking=yes
-            -o BatchMode=yes
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
-            -o LogLevel=ERROR
-        )
+        local _ssh_opts
+        if [[ -n "${_SECRETS_SSH_PASS:-}" ]]; then
+            _ssh_opts=(
+                -o StrictHostKeyChecking=no
+                -o BatchMode=no
+                -o PasswordAuthentication=yes
+                -o PubkeyAuthentication=no
+                -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+                -o LogLevel=ERROR
+            )
+        else
+            _ssh_opts=(
+                -o StrictHostKeyChecking=yes
+                -o BatchMode=yes
+                -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+                -o LogLevel=ERROR
+            )
+        fi
         inject_secrets "$_hostname" "$_INJ_SSH_USER" "$_INJ_IP" "$_INJ_SSH_KEY" "${_ssh_opts[@]}"
         return
     fi
@@ -85,7 +116,8 @@ _run_remote_inject() {
     local -a _host_labels=("${_hosts[@]}" "직접 입력")
     _pick "대상 호스트 선택:" "${_host_labels[@]}"
     if [ "$REPLY" -ge "${#_hosts[@]}" ]; then
-        read -rep "$(_log_prompt_rl)호스트명: " _hostname
+        printf '%s' "$(_log_prompt)호스트명: "
+        read -r _hostname < /dev/tty
     else
         _hostname="${_hosts[$REPLY]}"
     fi
@@ -94,7 +126,8 @@ _run_remote_inject() {
     _resolve_ssh_info "$_hostname"
 
     if [ -z "$_INJ_IP" ]; then
-        read -rep "$(_log_prompt_rl)IP 또는 호스트명: " _INJ_IP
+        printf '%s' "$(_log_prompt)IP 또는 호스트명: "
+        read -r _INJ_IP < /dev/tty
     else
         log_msg "Notice" "IP: $_INJ_IP (자동 조회)"
     fi
@@ -104,13 +137,15 @@ _run_remote_inject() {
         printf '\n'
         _pick "SSH 인증 방식:" "키 파일 (.pem)" "비밀번호"
         if [ "$REPLY" -eq 0 ]; then
-            read -rep "$(_log_prompt_rl)SSH 키 파일 경로 (Tab 완성): " _INJ_SSH_KEY
+            printf '%s' "$(_log_prompt)SSH 키 파일 경로: "
+            read -r _INJ_SSH_KEY < /dev/tty
             _INJ_SSH_KEY="${_INJ_SSH_KEY/#\~/$HOME}"
         else
             _use_password=true
             local _inj_pass=""
             while [ -z "$_inj_pass" ]; do
-                read -srp "$(_log_prompt)SSH 비밀번호: " _inj_pass
+                printf '%s' "$(_log_prompt)SSH 비밀번호: "
+                read -rs _inj_pass < /dev/tty || true
                 printf '\n'
                 [ -z "$_inj_pass" ] && log_msg "Error" "비밀번호를 입력하세요."
             done
@@ -121,7 +156,8 @@ _run_remote_inject() {
     fi
 
     if [ -z "$_INJ_SSH_USER" ]; then
-        read -rep "$(_log_prompt_rl)SSH 유저명 (기본값 root): " _INJ_SSH_USER
+        printf '%s' "$(_log_prompt)SSH 유저명 (기본값 root): "
+        read -r _INJ_SSH_USER < /dev/tty
         _INJ_SSH_USER="${_INJ_SSH_USER:-root}"
     else
         log_msg "Notice" "SSH 유저: $_INJ_SSH_USER (자동 조회)"

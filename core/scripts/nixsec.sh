@@ -14,6 +14,7 @@ _LOG_PREFIX="NIXSEC"
 _START_TIME=$(date +%s)
 _START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
 trap '_print_summary' EXIT
+trap 'log_msg "Error" "명령 실패 (line ${LINENO}): ${BASH_COMMAND}"' ERR
 
 printf '\n'
 log_msg "Init" "nix-secrets 관리 도구"
@@ -28,7 +29,7 @@ command -v jq  &>/dev/null || { log_msg "Error" "jq가 필요합니다.   nix-sh
 # 사용법:
 #   nixsec.sh upload --repo OWNER/REPO --group GROUP --remote-path PATH --file FILE
 #   nixsec.sh upload --repo OWNER/REPO --group GROUP --remote-path PATH --stdin
-#   nixsec.sh inject --hostname HOST [--group GROUP]
+#   nixsec.sh inject --hostname HOST [--group GROUP] [--ip IP] [--user USER] [--ssh-key PATH] [--password PW]
 if [ $# -gt 0 ]; then
     _subcmd="$1"; shift
     export NIXSEC_NONINTERACTIVE=1
@@ -41,6 +42,10 @@ if [ $# -gt 0 ]; then
             --file)        export NIXSEC_FILE="$2";        shift 2 ;;
             --stdin)       export NIXSEC_STDIN=1;          shift   ;;
             --hostname)    export NIXSEC_HOSTNAME="$2";    shift 2 ;;
+            --ip)          export NIXSEC_IP="$2";          shift 2 ;;
+            --user)        export NIXSEC_USER="$2";        shift 2 ;;
+            --ssh-key)     export NIXSEC_SSH_KEY="$2";     shift 2 ;;
+            --password)    export NIXSEC_PASSWORD="$2";    shift 2 ;;
             *) log_msg "Error" "알 수 없는 옵션: $1"
                log_msg "Notice" "사용법: nixsec.sh [upload|inject] [옵션...]"
                exit 1 ;;

@@ -3,6 +3,62 @@
   lib,
   ...
 }: let
+  backupScript = pkgs.writeShellScript "ubuntu-2404-backup" ''
+    set -euo pipefail
+    INSTANCE="ubuntu-2404"
+    SNAP_PREFIX="daily-"
+    SNAP_LOCAL_KEEP=7
+    SNAP_NAME="$SNAP_PREFIX$(date +%Y-%m-%d)"
+    SNAP_PATH="/var/lib/incus/storage-pools/default/virtual-machines-snapshots/$INSTANCE"
+    SSH_KEY="/var/lib/nix-secrets/backup/ssh-key"
+    RESTIC_REPO="sftp:bitstep@mac-studio:/Users/bitstep/backups/ubuntu-2404"
+
+    if ! ${pkgs.incus}/bin/incus info "$INSTANCE" &>/dev/null; then
+      echo "ubuntu-2404-backup: $INSTANCE 없음, 건너뜀"
+      exit 0
+    fi
+
+    # 로컬 btrfs 스냅샷 (빠른 복구용, 7일 롤링)
+    if ! ${pkgs.incus}/bin/incus snapshot list "$INSTANCE" --format csv \
+        | cut -d, -f1 | grep -qx "$SNAP_NAME"; then
+      echo "ubuntu-2404-backup: 스냅샷 생성 → $SNAP_NAME"
+      ${pkgs.incus}/bin/incus snapshot create "$INSTANCE" "$SNAP_NAME"
+    fi
+    SNAPS=$(${pkgs.incus}/bin/incus snapshot list "$INSTANCE" --format csv \
+      | cut -d, -f1 | grep "^$SNAP_PREFIX" | sort)
+    COUNT=$(echo "$SNAPS" | grep -c . || true)
+    if [ "$COUNT" -gt "$SNAP_LOCAL_KEEP" ]; then
+      echo "$SNAPS" | head -n $(( COUNT - SNAP_LOCAL_KEEP )) | while read -r snap; do
+        echo "ubuntu-2404-backup: 로컬 스냅샷 삭제 → $snap"
+        ${pkgs.incus}/bin/incus snapshot delete "$INSTANCE" "$snap"
+      done
+    fi
+
+    # restic: 오늘 스냅샷의 btrfs 서브볼륨을 직접 백업 (VM 실행 중에도 일관성 보장)
+    export RESTIC_REPOSITORY="$RESTIC_REPO"
+    export RESTIC_PASSWORD_FILE="/var/lib/nix-secrets/backup/restic-password"
+    SFTP_CMD="${pkgs.openssh}/bin/ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -s sftp"
+
+    ${pkgs.restic}/bin/restic \
+      -o sftp.command="$SFTP_CMD bitstep@mac-studio" \
+      snapshots &>/dev/null \
+      || ${pkgs.restic}/bin/restic \
+           -o sftp.command="$SFTP_CMD bitstep@mac-studio" \
+           init
+
+    echo "ubuntu-2404-backup: mac-studio로 백업 중..."
+    # 오늘 로컬 스냅샷 경로 백업 (btrfs CoW 덕에 VM 실행 중에도 일관된 상태)
+    ${pkgs.restic}/bin/restic \
+      -o sftp.command="$SFTP_CMD bitstep@mac-studio" \
+      backup "$SNAP_PATH/$SNAP_NAME"
+
+    # 30일 초과 원격 백업 정리
+    ${pkgs.restic}/bin/restic \
+      -o sftp.command="$SFTP_CMD bitstep@mac-studio" \
+      forget --keep-daily 30 --prune --quiet
+
+    echo "ubuntu-2404-backup: 완료"
+  '';
   mkTailscaleProxy = import ../_lib/incus-tailscale-proxy.nix {inherit lib pkgs;};
 in {
   imports = [
@@ -99,5 +155,26 @@ in {
         systemctl reload ssh
       "
     '';
+  };
+
+  systemd.services.ubuntu-2404-backup = {
+    description = "ubuntu-2404 incremental backup to mac-studio";
+    after = ["incus-startup.service" "network-online.target"];
+    wants = ["network-online.target"];
+    path = [pkgs.incus pkgs.restic pkgs.openssh pkgs.coreutils pkgs.gnugrep];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${backupScript}";
+    };
+  };
+
+  systemd.timers.ubuntu-2404-backup = {
+    description = "ubuntu-2404 backup timer";
+    wantedBy = ["timers.target"];
+    timerConfig = {
+      OnCalendar = "daily";
+      Persistent = true;
+      RandomizedDelaySec = "30min";
+    };
   };
 }

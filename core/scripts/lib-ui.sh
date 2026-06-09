@@ -99,7 +99,11 @@ _pick() {
         case "$key" in
             $'\x1b[A') ((sel > 0)) && sel=$((sel - 1)) ;;
             $'\x1b[B') ((sel < count - 1)) && sel=$((sel + 1)) ;;
-            '') break ;;
+            '')
+                # raw mode에서 Enter는 \r로 읽히며 터미널이 \r\n을 전송했을 때
+                # \n이 버퍼에 잔류해 이후 cooked-mode read를 즉시 리턴시킴 → 드레인
+                IFS= read -rsn1 -t 0.05 _drain_nl < /dev/tty 2>/dev/null || true
+                break ;;
         esac
         _redraw_pick
     done
@@ -160,7 +164,9 @@ _check() {
                     selected[cur]="true"
                 fi
                 ;;
-            '') break ;;
+            '')
+                IFS= read -rsn1 -t 0.05 _drain_nl < /dev/tty 2>/dev/null || true
+                break ;;
         esac
         _redraw_check
     done

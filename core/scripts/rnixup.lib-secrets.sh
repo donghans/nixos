@@ -75,22 +75,33 @@ _resolve_age_key_for_repo() {
     REPLY_AGE_KEY="$key_path"
 }
 
-# GitHub Apps PEM 경로 캐싱 (age 키 패턴과 동일)
-# 캐시: ~/.cache/nix-secrets/github-apps.pem-path  →  REPLY_GITHUB_APPS_PEM 설정
+# GitHub Apps PEM 경로 캐싱 (appId별 독립 캐시)
+# $1=app_id  →  REPLY_GITHUB_APPS_PEM 설정
+# 캐시: ~/.cache/nix-secrets/github-apps.<appId>.pem-path
 _resolve_github_apps_pem() {
-    local cache="$HOME/.cache/nix-secrets/github-apps.pem-path"
+    local app_id="$1"
+    local cache="$HOME/.cache/nix-secrets/github-apps.${app_id}.pem-path"
+
+    # 구버전 전역 캐시 자동 마이그레이션 (최초 1회)
+    local _legacy="$HOME/.cache/nix-secrets/github-apps.pem-path"
+    if [ ! -f "$cache" ] && [ -f "$_legacy" ]; then
+        mkdir -p "$(dirname "$cache")"
+        cp "$_legacy" "$cache"
+        log_msg "Notice" "PEM 캐시 마이그레이션: github-apps.pem-path → github-apps.${app_id}.pem-path"
+    fi
+
     local pem_path=""
     [ -f "$cache" ] && pem_path=$(cat "$cache")
     if [ ! -f "${pem_path:-}" ]; then
         printf '\n'
-        log_msg "Input" "GitHub Apps 개인키 (PEM) 경로를 입력하세요."
+        log_msg "Input" "GitHub Apps(${app_id}) 개인키 (PEM) 경로를 입력하세요."
         printf '  파일 경로 (Tab 완성): '
         read -re pem_path < /dev/tty
         pem_path="${pem_path/#\~/$HOME}"
         [ -f "$pem_path" ] || { log_msg "Error" "파일 없음: $pem_path"; exit 1; }
         mkdir -p "$(dirname "$cache")"
         printf '%s' "$pem_path" > "$cache"
-        log_msg "Notice" "PEM 경로 캐싱됨 → 다음 실행부터 자동 사용"
+        log_msg "Notice" "PEM 경로 캐싱됨 (appId=${app_id}) → 다음 실행부터 자동 사용"
     fi
     REPLY_GITHUB_APPS_PEM="$pem_path"
 }
@@ -143,12 +154,13 @@ _fetch_group_secrets() {
     _resolve_age_key_for_repo "$repo"
 
     # GitHub Apps 토큰 발급 (appId + installationId 둘 다 있을 때만)
+    # 그룹 레벨 appId 우선, 없으면 최상위 appId 사용
     local _apps_token=""
     local _app_id _inst_id
-    _app_id=$(printf '%s' "$config" | jq -r '.appId // empty')
+    _app_id=$(printf '%s' "$config" | jq -r --arg g "$group" '.groups[$g].appId // .appId // empty')
     _inst_id=$(printf '%s' "$config" | jq -r --arg g "$group" '.groups[$g].installationId // empty')
     if [ -n "$_app_id" ] && [ -n "$_inst_id" ]; then
-        _resolve_github_apps_pem
+        _resolve_github_apps_pem "$_app_id"
         _apps_token=$(_github_apps_token "$_app_id" "$_inst_id" "$REPLY_GITHUB_APPS_PEM")
     fi
 
@@ -270,9 +282,20 @@ _filter_stale_secrets() {
     local ssh_cmd="for f in $server_paths_str; do ${sudo_pfx}sha256sum \"\$f\" 2>/dev/null || printf 'MISSING  %s\n' \"\$f\"; done"
 
     if [ -n "${_SECRETS_SSH_PASS:-}" ]; then
-        remote_out=$(sshpass -f <(printf '%s' "$_SECRETS_SSH_PASS") \
-            ssh -o PasswordAuthentication=yes -o PubkeyAuthentication=no \
-            "${ssh_opts[@]}" "${ssh_user}@${ip}" "$ssh_cmd" 2>/dev/null) || true
+        local _ssh_pw=(sshpass -f <(printf '%s' "$_SECRETS_SSH_PASS")
+            ssh -o PasswordAuthentication=yes -o PubkeyAuthentication=no
+            "${ssh_opts[@]}" "${ssh_user}@${ip}")
+        if [ "$ssh_user" != "root" ]; then
+            # sudo 비밀번호를 파이프 없이 전달하기 위해 SUDO_ASKPASS 사용
+            local _ap="/tmp/.nixsec_ask_$$"
+            local _escaped_pw
+            _escaped_pw=$(printf '%s' "$_SECRETS_SSH_PASS" | sed "s/'/'\\\\''/g")
+            "${_ssh_pw[@]}" "printf '%s\n' '$_escaped_pw' > '$_ap' && chmod 700 '$_ap'" 2>/dev/null || true
+            remote_out=$("${_ssh_pw[@]}" \
+                "SUDO_ASKPASS='$_ap' sudo -A bash -c '$ssh_cmd'; rm -f '$_ap'" 2>/dev/null) || true
+        else
+            remote_out=$("${_ssh_pw[@]}" "$ssh_cmd" 2>/dev/null) || true
+        fi
     else
         remote_out=$(ssh -i "$ssh_key" "${ssh_opts[@]}" "${ssh_user}@${ip}" \
             "$ssh_cmd" 2>/dev/null) || true
@@ -324,15 +347,30 @@ _transfer_secrets() {
 
     log_msg "Task" "시크릿 전송 중 → $hostname ($ip)"
     if [ -n "${_SECRETS_SSH_PASS:-}" ]; then
-        tar -C "$staging" -cf - . | \
-            sshpass -f <(printf '%s' "$_SECRETS_SSH_PASS") \
-            ssh -o PasswordAuthentication=yes -o PubkeyAuthentication=no \
-            "${ssh_opts[@]}" "${ssh_user}@${ip}" \
-            "${sudo_pfx}tar -C / -xf - --no-same-owner --no-overwrite-dir"
-        sshpass -f <(printf '%s' "$_SECRETS_SSH_PASS") \
-            ssh -o PasswordAuthentication=yes -o PubkeyAuthentication=no \
-            "${ssh_opts[@]}" "${ssh_user}@${ip}" \
-            "${sudo_pfx}systemd-tmpfiles --create" 2>/dev/null || true
+        local _ssh_pw=(sshpass -f <(printf '%s' "$_SECRETS_SSH_PASS")
+            ssh -o PasswordAuthentication=yes -o PubkeyAuthentication=no
+            "${ssh_opts[@]}" "${ssh_user}@${ip}")
+
+        if [ "$ssh_user" != "root" ]; then
+            # sudo가 stdin(tar pipe)과 충돌하므로 SUDO_ASKPASS 패턴 사용:
+            # 원격에 임시 askpass 스크립트를 만들어 sudo -A로 인증
+            local _ap="/tmp/.nixsec_ask_$$"
+            local _escaped_pw
+            _escaped_pw=$(printf '%s' "$_SECRETS_SSH_PASS" | sed "s/'/'\\\\''/g")
+            "${_ssh_pw[@]}" "printf '%s\n' '$_escaped_pw' > '$_ap' && chmod 700 '$_ap'"
+
+            tar -C "$staging" -cf - . | \
+                "${_ssh_pw[@]}" \
+                "SUDO_ASKPASS='$_ap' sudo -A tar -C / -xf - --no-same-owner --no-overwrite-dir"
+
+            "${_ssh_pw[@]}" \
+                "SUDO_ASKPASS='$_ap' sudo -A systemd-tmpfiles --create 2>/dev/null || true; rm -f '$_ap'"
+        else
+            tar -C "$staging" -cf - . | \
+                "${_ssh_pw[@]}" \
+                "tar -C / -xf - --no-same-owner --no-overwrite-dir"
+            "${_ssh_pw[@]}" "systemd-tmpfiles --create" 2>/dev/null || true
+        fi
     else
         tar -C "$staging" -cf - . | \
             ssh -i "$ssh_key" "${ssh_opts[@]}" "${ssh_user}@${ip}" \
@@ -357,12 +395,13 @@ _upload_generated_secrets() {
     [ -z "$repo" ] || [ "$repo" = "null" ] && return 0
 
     # GitHub Apps 토큰 발급
+    # 그룹 레벨 appId 우선, 없으면 최상위 appId 사용
     local _apps_token=""
     local _app_id _inst_id
-    _app_id=$(printf '%s' "$config" | jq -r '.appId // empty')
+    _app_id=$(printf '%s' "$config" | jq -r --arg g "$grp_name" '.groups[$g].appId // .appId // empty')
     _inst_id=$(printf '%s' "$config" | jq -r --arg g "$grp_name" '.groups[$g].installationId // empty')
     if [ -n "$_app_id" ] && [ -n "$_inst_id" ]; then
-        _resolve_github_apps_pem
+        _resolve_github_apps_pem "$_app_id"
         _apps_token=$(_github_apps_token "$_app_id" "$_inst_id" "$REPLY_GITHUB_APPS_PEM")
     fi
 
