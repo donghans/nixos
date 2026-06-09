@@ -16,7 +16,15 @@ if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
     printf "${_LOG_PREFIX_COLOR}${_LOG_PREFIX}${NC} ${CYAN}%-9s${NC} | 원격 NixOS 호스트 초기 설치 도구\n" "Help"
     printf "\n"
     printf "  사용법:\n"
-    printf "    rnixstrap     — 대화형으로 새 호스트 추가 또는 기존 호스트 재설치\n"
+    printf "    rnixstrap                      — 대화형으로 새 호스트 추가 또는 기존 호스트 재설치\n"
+    printf "    rnixstrap --hostname HOST       — 비대화형 (설정은 .strap.json 또는 TOML에서 로드)\n"
+    printf "    rnixstrap --hostname HOST --write-only\n"
+    printf "\n"
+    printf "  비대화형 설정 파일:\n"
+    printf "    ~/.ssh/rnixup/{hostname}.strap.json\n"
+    printf '    { "ip": "1.2.3.4", "sshKey": "~/.ssh/key.pem", "sshUser": "root",\n'
+    printf '      "system": "x86_64-linux", "bootLoader": "grub-uefi",\n'
+    printf '      "diskDevice": "/dev/vda", "services": ["caddy", "docker"] }\n'
     printf "\n"
     printf "  흐름:\n"
     printf "    새 호스트:    공급자/IP/키/서비스 입력 → 설정 확인 → 선택\n"
@@ -32,11 +40,18 @@ if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
     exit 0
 fi
 
-# 파라미터 없이 실행 — 불필요한 인자 거부
-if [ $# -gt 0 ]; then
-    log_msg "Error" "rnixstrap은 파라미터를 받지 않습니다. 도움말: rnixstrap --help"
-    exit 1
-fi
+# ── 파라미터 파싱 ─────────────────────────────────────────────────────────────
+_RNIXSTRAP_HOSTNAME_ARG=""
+_RNIXSTRAP_WRITE_ONLY_ARG=false
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --hostname)  _RNIXSTRAP_HOSTNAME_ARG="$2"; shift 2 ;;
+        --write-only) _RNIXSTRAP_WRITE_ONLY_ARG=true; shift ;;
+        --help|-h) ;; # 위에서 처리됨
+        *) log_msg "Error" "알 수 없는 옵션: $1  (도움말: rnixstrap --help)"; exit 1 ;;
+    esac
+done
 
 # ── 상수 ──────────────────────────────────────────────────────────────────────
 BUILD_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/nixos/build"
@@ -97,7 +112,97 @@ log_msg "Init" "원격 NixOS 호스트 초기 설치 도구"
 log_msg "Init" "새 호스트 추가 또는 기존 호스트 재설치를 진행합니다."
 printf "\n"
 
-# ── Phase 1: 입력 수집 ────────────────────────────────────────────────────────
+# ── 비대화형 모드 ─────────────────────────────────────────────────────────────
+if [[ -n "$_RNIXSTRAP_HOSTNAME_ARG" ]]; then
+    _HOSTNAME="$_RNIXSTRAP_HOSTNAME_ARG"
+    [ "$_RNIXSTRAP_WRITE_ONLY_ARG" = true ] && _WRITE_ONLY=true
+
+    # strap.json 로드 (존재하면)
+    _strap_json="$HOME/.ssh/rnixup/${_HOSTNAME}.strap.json"
+    if [ -f "$_strap_json" ]; then
+        log_msg "Init" "strap.json 로드: $_strap_json"
+        _j_ip=$(jq -r '.ip // empty'          "$_strap_json")
+        _j_key=$(jq -r '.sshKey // empty'     "$_strap_json")
+        _j_user=$(jq -r '.sshUser // empty'   "$_strap_json")
+        _j_pass=$(jq -r '.sshPass // empty'   "$_strap_json")
+        _j_system=$(jq -r '.system // empty'  "$_strap_json")
+        _j_boot=$(jq -r '.bootLoader // empty' "$_strap_json")
+        _j_disk=$(jq -r '.diskDevice // empty' "$_strap_json")
+        _j_wo=$(jq -r '.writeOnly // empty'   "$_strap_json")
+        mapfile -t _j_services < <(jq -r '.services // [] | .[]' "$_strap_json")
+
+        [[ -n "$_j_ip"     ]] && _IP="$_j_ip"
+        [[ -n "$_j_key"    ]] && _SSH_KEY="${_j_key/#\~/$HOME}"
+        [[ -n "$_j_user"   ]] && _SSH_USER="$_j_user"
+        [[ -n "$_j_pass"   ]] && _SSH_PASS="$_j_pass"
+        [[ -n "$_j_system" ]] && _SYSTEM="$_j_system"
+        [[ -n "$_j_boot"   ]] && _BOOT_LOADER="$_j_boot"
+        [[ -n "$_j_disk"   ]] && _DISK_DEVICE="$_j_disk"
+        [[ "$_j_wo" == "true" ]] && _WRITE_ONLY=true
+        [ "${#_j_services[@]}" -gt 0 ] && _SERVICES=("${_j_services[@]}")
+
+        # services 유효성 검사
+        for _svc in "${_SERVICES[@]}"; do
+            _valid=false
+            for (( _i=0; _i<${#_ALL_SERVICES[@]}; _i+=2 )); do
+                [[ "${_ALL_SERVICES[$_i]}" == "$_svc" ]] && _valid=true && break
+            done
+            [[ "$_valid" == false ]] && {
+                log_msg "Error" "알 수 없는 서비스: $_svc (허용: caddy tailscale docker nix-cache-proxy)"
+                exit 1
+            }
+        done
+    fi
+
+    # TOML 존재 여부로 host 타입 결정
+    _toml_path="$NIXOS_PATH/hosts/${_HOSTNAME}.toml"
+    if [ -f "$_toml_path" ]; then
+        if grep -q '^\[deploy\]' "$_toml_path" 2>/dev/null; then
+            # 기존 deploy 호스트
+            _HOST_IS_NEW=false
+            _HOST_HAS_DEPLOY=true
+            _load_toml_values  # _TOML_IP, _TOML_SSH_KEY, _TOML_SSH_USER 등 설정
+            # TOML 기본값을 strap.json/args보다 낮은 우선순위로 적용
+            [[ -z "$_IP"       ]] && _IP="$_TOML_IP"
+            [[ -z "$_SSH_KEY"  ]] && _SSH_KEY="${_TOML_SSH_KEY/#\~/$HOME}"
+            [[ -z "$_SSH_USER" || "$_SSH_USER" == "root" ]] && \
+                [[ -n "$_TOML_SSH_USER" ]] && _SSH_USER="$_TOML_SSH_USER"
+            [ -n "$_TOML_CLOUD" ] && [ -n "$_TOML_SSH_USER" ] && _SSH_USER="$_TOML_SSH_USER"
+            log_msg "Done" "기존 호스트 (재설치): $_HOSTNAME"
+        else
+            # standalone 호스트
+            _HOST_IS_NEW=false
+            _HOST_HAS_DEPLOY=false
+            _load_toml_type
+            load_bootstrap_env
+            [[ -z "$_IP"      ]] && _IP="$_BOOTSTRAP_IP"
+            [[ -z "$_SSH_KEY" ]] && _SSH_KEY="${_BOOTSTRAP_SSH_KEY/#\~/$HOME}"
+            [[ -z "$_SSH_USER" || "$_SSH_USER" == "root" ]] && \
+                [[ -n "$_BOOTSTRAP_SSH_USER" ]] && _SSH_USER="$_BOOTSTRAP_SSH_USER"
+            log_msg "Done" "기존 호스트 (standalone bootstrap): $_HOSTNAME"
+        fi
+    else
+        # 신규 호스트
+        _HOST_IS_NEW=true
+        _HOST_HAS_DEPLOY=true
+        [[ -z "$_IP" ]] && {
+            log_msg "Error" "신규 호스트 '$_HOSTNAME': ip 필수 (strap.json에 \"ip\" 추가)"
+            exit 1
+        }
+        [[ -z "$_SSH_KEY" && -z "$_SSH_PASS" ]] && {
+            log_msg "Error" "신규 호스트 '$_HOSTNAME': sshKey 또는 sshPass 필수"
+            exit 1
+        }
+        log_msg "Done" "신규 호스트: $_HOSTNAME"
+    fi
+
+    export RNIXSTRAP_NONINTERACTIVE=1
+    log_msg "Notice" "비대화형 모드: hostname=$_HOSTNAME ip=$_IP user=$_SSH_USER"
+    run_setup
+    exit 0
+fi
+
+# ── Phase 1: 대화형 입력 수집 ─────────────────────────────────────────────────
 select_or_create_hostname
 
 if [ "$_HOST_IS_NEW" = true ]; then

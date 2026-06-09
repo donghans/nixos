@@ -657,28 +657,37 @@ run_setup() {
         log_msg "Error" "RAM ${_REMOTE_RAM_MB}MB — nixos-anywhere kexec 최소 1000MB 필요"
         log_msg "Notice" "  인스턴스를 더 높은 사양으로 업그레이드한 후 재시도하세요."
         printf "\n"
-        _pick "다음 단계를 선택하세요:" \
-            "쓰기만     — 파일 작업만 하고 종료 (설치 불가)" \
-            "취소       — 아무것도 하지 않고 종료"
-        [ "$REPLY" -eq 1 ] && { printf "\n"; log_msg "Notice" "취소되었습니다."; exit 0; }
-        _WRITE_ONLY=true
+        if [[ "${RNIXSTRAP_NONINTERACTIVE:-}" == "1" ]]; then
+            log_msg "Warn" "비대화형: RAM 부족 — 쓰기만 모드로 자동 전환"
+            _WRITE_ONLY=true
+        else
+            _pick "다음 단계를 선택하세요:" \
+                "쓰기만     — 파일 작업만 하고 종료 (설치 불가)" \
+                "취소       — 아무것도 하지 않고 종료"
+            [ "$REPLY" -eq 1 ] && { printf "\n"; log_msg "Notice" "취소되었습니다."; exit 0; }
+            _WRITE_ONLY=true
+        fi
     else
         [ "$_REMOTE_RAM_MB" -ne -1 ] && [ "$_REMOTE_RAM_MB" -lt 1500 ] && {
             printf "\n"
             log_msg "Warn" "RAM ${_REMOTE_RAM_MB}MB — kexec 실패 가능성 있음 (권장: 1500MB 이상)"
         }
-        local _proceed_label
-        if [ "${_HOST_HAS_DEPLOY:-true}" = false ]; then
-            _proceed_label="바로 진행  — nixos-anywhere 설치 + 레포 클론 + nixup os + nixup home"
+        if [[ "${RNIXSTRAP_NONINTERACTIVE:-}" == "1" ]]; then
+            log_msg "Notice" "비대화형: $([ "$_WRITE_ONLY" = true ] && echo '쓰기만' || echo '바로 진행')"
         else
-            _proceed_label="바로 진행  — nixos-anywhere 설치 + deploy-rs 배포"
+            local _proceed_label
+            if [ "${_HOST_HAS_DEPLOY:-true}" = false ]; then
+                _proceed_label="바로 진행  — nixos-anywhere 설치 + 레포 클론 + nixup os + nixup home"
+            else
+                _proceed_label="바로 진행  — nixos-anywhere 설치 + deploy-rs 배포"
+            fi
+            _pick "다음 단계를 선택하세요:" \
+                "$_proceed_label" \
+                "쓰기만     — 파일 작업만 하고 종료" \
+                "취소       — 아무것도 하지 않고 종료"
+            [ "$REPLY" -eq 2 ] && { printf "\n"; log_msg "Notice" "취소되었습니다."; exit 0; }
+            [ "$REPLY" -eq 1 ] && _WRITE_ONLY=true || _WRITE_ONLY=false
         fi
-        _pick "다음 단계를 선택하세요:" \
-            "$_proceed_label" \
-            "쓰기만     — 파일 작업만 하고 종료" \
-            "취소       — 아무것도 하지 않고 종료"
-        [ "$REPLY" -eq 2 ] && { printf "\n"; log_msg "Notice" "취소되었습니다."; exit 0; }
-        [ "$REPLY" -eq 1 ] && _WRITE_ONLY=true || _WRITE_ONLY=false
     fi
 
     # 대화형 선택 완료 후부터 시간 측정
