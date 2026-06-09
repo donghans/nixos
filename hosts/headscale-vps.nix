@@ -47,7 +47,7 @@ mkHostConfiguration ({config, ...}: {
     mods.sys.services.tailscale = {
       enable = true;
       acceptRoutes = true;
-      stateFile = "/var/lib/nix-secrets/tailscale/system/headscale-vps.state";
+      # state는 nixsec가 /var/lib/tailscale/tailscaled.state 로 직접 주입
     };
 
     services.headscale-db-backup = {
