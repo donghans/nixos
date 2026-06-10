@@ -72,6 +72,53 @@ mkHostConfiguration ({config, ...}: {
       '';
     };
 
+    environment.etc."caddy/sites/class24.caddy".text = ''
+      class24.co.kr {
+          request_body {
+              max_size 50MB
+          }
+          handle /api/* {
+              uri strip_prefix /api
+              reverse_proxy 100.64.0.18:3000 {
+                  transport http {
+                      read_timeout 300s
+                  }
+              }
+          }
+          handle {
+              reverse_proxy 100.64.0.18:4000
+          }
+      }
+      admin.class24.co.kr {
+          request_body {
+              max_size 50MB
+          }
+          handle /api/* {
+              uri strip_prefix /api
+              reverse_proxy 100.64.0.18:5100 {
+                  transport http {
+                      read_timeout 300s
+                  }
+              }
+          }
+          handle {
+              reverse_proxy 100.64.0.18:5000
+          }
+      }
+    '';
+
+    environment.etc."caddy/sites/minigame.caddy".text = ''
+      minigame.whosfan.io {
+          handle /api* {
+              reverse_proxy 100.64.0.3:3000
+          }
+          handle {
+              root * /home/admin/cardgame-webgl/webgl
+              file_server
+          }
+      }
+    '';
+
     systemd.tmpfiles.rules = [
       "d /etc/caddy/sites 0755 admin root -"
       "d /home/admin/landings 0755 admin users -"
