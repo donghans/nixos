@@ -109,13 +109,7 @@ mkHostConfiguration ({config, ...}: {
 
     environment.etc."caddy/sites/minigame.caddy".text = ''
       minigame.whosfan.io {
-          handle /api* {
-              reverse_proxy 100.64.0.3:3000
-          }
-          handle {
-              root * /home/admin/cardgame-webgl/webgl
-              file_server
-          }
+          reverse_proxy 100.64.0.3:3000
       }
     '';
 
