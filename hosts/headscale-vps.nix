@@ -109,7 +109,7 @@ mkHostConfiguration ({config, ...}: {
 
     environment.etc."caddy/sites/minigame.caddy".text = ''
       minigame.whosfan.io {
-          reverse_proxy 100.64.0.3:3000
+          reverse_proxy 100.64.0.3:80
       }
     '';
 

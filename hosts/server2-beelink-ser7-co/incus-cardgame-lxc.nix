@@ -76,12 +76,15 @@ in {
       fi
 
       incus exec cardgame -- apk update -q
-      incus exec cardgame -- apk add --no-cache nodejs npm mariadb mariadb-client openssh tailscale iptables
+      incus exec cardgame -- apk add --no-cache nodejs npm mariadb mariadb-client nginx openssh tailscale iptables
 
       # MariaDB 초기화
       incus exec cardgame -- mysql_install_db --user=mysql --datadir=/var/lib/mysql
       incus exec cardgame -- rc-update add mariadb default
       incus exec cardgame -- rc-service mariadb start
+
+      # nginx (WebGL 정적 파일 서빙 + API 프록시)
+      incus exec cardgame -- rc-update add nginx default
 
       # SSH (수동 배포용)
       incus exec cardgame -- rc-update add sshd default
