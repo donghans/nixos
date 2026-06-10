@@ -83,6 +83,7 @@
       # SSH (수동 배포용)
       incus exec adx -- rc-update add sshd default
       incus exec adx -- sh -c 'printf "PermitRootLogin yes\nPasswordAuthentication yes\nPermitEmptyPasswords yes\n" >> /etc/ssh/sshd_config'
+      incus exec adx -- passwd -d root
       incus exec adx -- rc-service sshd start
 
       # IP forwarding (tailscale 필요)
