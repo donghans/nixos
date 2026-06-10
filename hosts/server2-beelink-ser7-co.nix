@@ -19,6 +19,7 @@ in
         ./server2-beelink-ser7-co/incus-cardgame-lxc.nix
         ./server2-beelink-ser7-co/incus-adx-lxc.nix
         ./server2-beelink-ser7-co/incus-class24-lxc.nix
+        ./server2-beelink-ser7-co/incus-lxc-backup.nix
       ];
 
       # tailscale 모듈 옵션 (문자열이라 toConfig 제약으로 toml 경유 불가 → nix에서 직접 설정)
