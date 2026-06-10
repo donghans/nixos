@@ -127,6 +127,12 @@ bindkey "^[[1;3D" backward-word  # Alt+Left
 # == Kitty SSH Integration ==
 # kitty 터미널에서 ssh 접속 시 terminfo 자동 설치 후 깨끗한 세션으로 재접속
 kssh() {
+  # stdin이 TTY가 아니면 (스크립트, Claude Code 등) kitty 통합 없이 바로 접속
+  if [[ ! -t 0 ]]; then
+    command ssh "$@"
+    return
+  fi
+
   # $@ 에서 hostname 이후 커맨드 부분을 제외한 접속 인자만 추출
   local conn_args=()
   local found_host=false
