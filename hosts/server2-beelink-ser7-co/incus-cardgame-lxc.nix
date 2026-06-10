@@ -85,7 +85,7 @@ in {
 
       # SSH (수동 배포용)
       incus exec cardgame -- rc-update add sshd default
-      incus exec cardgame -- sh -c 'echo "PermitRootLogin yes" >> /etc/ssh/sshd_config'
+      incus exec cardgame -- sh -c 'printf "PermitRootLogin yes\nPasswordAuthentication yes\nPermitEmptyPasswords yes\n" >> /etc/ssh/sshd_config'
       incus exec cardgame -- rc-service sshd start
 
       # IP forwarding (tailscale 필요)

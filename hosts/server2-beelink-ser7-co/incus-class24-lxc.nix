@@ -82,7 +82,7 @@
 
       # SSH (수동 배포용)
       incus exec class24 -- rc-update add sshd default
-      incus exec class24 -- sh -c 'echo "PermitRootLogin yes" >> /etc/ssh/sshd_config'
+      incus exec class24 -- sh -c 'printf "PermitRootLogin yes\nPasswordAuthentication yes\nPermitEmptyPasswords yes\n" >> /etc/ssh/sshd_config'
       incus exec class24 -- rc-service sshd start
 
       # IP forwarding (tailscale 필요)
