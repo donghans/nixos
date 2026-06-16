@@ -113,6 +113,13 @@ mkHostConfiguration ({config, ...}: {
       }
     '';
 
+    # genple.ai — tailscale IP는 LXC 생성 후 `incus exec genple -- tailscale ip -4`로 확인
+    # environment.etc."caddy/sites/genple.caddy".text = ''
+    #   genple.ai {
+    #       reverse_proxy 100.64.0.XX:80
+    #   }
+    # '';
+
     systemd.tmpfiles.rules = [
       "d /etc/caddy/sites 0755 admin root -"
       "d /home/admin/landings 0755 admin users -"
