@@ -41,7 +41,7 @@ mkPartOf "mods.sys.base" ({
     CPU_SCALING_GOVERNOR_ON_AC = "performance"; # 데스크탑은 항상 AC — 성능 우선
     CPU_ENERGY_PERF_POLICY_ON_AC = "balance_performance";
     WIFI_PWR_ON_AC = "off"; # (이유: Wi-Fi 절전 시 주기적 연결 끊김 방지)
-    RUNTIME_PM_ON_AC = "auto"; # PCIe 디바이스 런타임 절전 (커널 드라이버 판단에 맡김)
+    RUNTIME_PM_ON_AC = "off"; # (이유: PCIe NIC 슬립 후 wake-up 지연으로 인한 간헐적 핑 튐 방지)
     MAX_LOST_WORK_SECS_ON_AC = 15; # dirty page writeback 최대 지연 15s
   };
 
@@ -58,10 +58,16 @@ mkPartOf "mods.sys.base" ({
     then laptopSettings
     else desktopSettings;
 in {
-  os = lib.mkIf enableTlp {
-    services.tlp = {
-      enable = true;
-      settings = tlpSettings;
-    };
-  };
+  os = lib.mkMerge [
+    (lib.mkIf enableTlp {
+      services.tlp = {
+        enable = true;
+        settings = tlpSettings;
+      };
+    })
+    (lib.mkIf (!isServer && !isRpi && !isVm) {
+      # (이유: TLP WIFI_PWR_ON_AC = "off"만으로는 NM이 재부팅 후 자체 값으로 덮어쓸 수 있음)
+      networking.networkmanager.wifi.powersave = false;
+    })
+  ];
 })
