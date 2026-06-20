@@ -26,7 +26,7 @@ mkHostConfiguration ({config, ...}: {
     ];
 
     networking.nameservers = ["1.1.1.1" "8.8.8.8"];
-    services.resolved.extraConfig = "Cache=no-negative";
+    services.resolved.settings.Resolve.Cache = "no-negative";
 
     # Vultr에는 보안그룹 없음 → NixOS 방화벽 직접 제어
     networking.firewall = {

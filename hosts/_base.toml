@@ -1,6 +1,6 @@
 system              = "x86_64-linux"
 username            = "donghans"
-rollingStateVersion = "25.11"
+rollingStateVersion = "26.05"
 diskDevice          = "/dev/disk/by-label/nixos"
 bootDevice          = "/dev/disk/by-label/boot"
 # bootLoader        = "grub-uefi"   # 부트로더: "systemd-boot"(기본) | "grub-bios" | "grub-uefi"

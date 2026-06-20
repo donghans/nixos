@@ -19,12 +19,18 @@
     pkgs = import nixpkgs {
       localSystem = system;
       config.allowUnfree = true;
+      config.permittedInsecurePackages = [
+        "electron-39.8.10"
+      ];
       overlays = customOverlays;
     };
 
     unstable = import nixpkgs-unstable {
       localSystem = system;
       config.allowUnfree = true;
+      config.permittedInsecurePackages = [
+        "electron-39.8.10"
+      ];
     };
 
     # .env 파일에서 특정 키의 값을 읽어오는 간단한 헬퍼
@@ -53,6 +59,9 @@
         }) {
           localSystem = system;
           config.allowUnfree = true;
+          config.permittedInsecurePackages = [
+            "electron-39.8.10"
+          ];
         }
       else unstable;
 
@@ -150,6 +159,9 @@
             workspace = hostCtx.metaConfig;
             nixpkgs.overlays = customOverlays;
             nixpkgs.config.allowUnfree = true;
+            nixpkgs.config.permittedInsecurePackages = [
+              "electron-39.8.10"
+            ];
 
             # (목적: mkWrapper의 NIX_LD/NIX_LD_LIBRARY_PATH가 실제로 동작하기 위한 전제조건)
             # (이유: NixOS에 /lib64/ld-linux-x86-64.so.2 stub이 없으면 외부 바이너리가 실행 불가.

@@ -5,8 +5,8 @@
     # == Input Channels ==
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
 
-    nixpkgs.url      =                "github:nixos/nixpkgs/nixos-25.11";
-    home-manager.url = "github:nix-community/home-manager/release-25.11";
+    nixpkgs.url      =                "github:nixos/nixpkgs/nixos-26.05";
+    home-manager.url = "github:nix-community/home-manager/release-26.05";
 
     # (목적: HM이 시스템과 동일한 Nixpkgs 버전을 사용하도록 강제)
     home-manager.inputs.nixpkgs.follows = "nixpkgs";

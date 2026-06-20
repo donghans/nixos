@@ -116,6 +116,9 @@ in {
       settings.dns = {
         magic_dns = true;
         base_domain = "i.772610158.xyz";
+        nameservers = {
+          global = ["1.1.1.1"];
+        };
       };
     };
     systemd.services.headscale.script = lib.mkForce ''
