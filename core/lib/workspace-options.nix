@@ -76,6 +76,11 @@ with lib; {
         type = types.str;
         description = "NixOS/Home-Manager state version";
       };
+      pkgsVersion = mkOption {
+        type = types.str;
+        description = "Nixpkgs channel version used for building this host";
+      };
+
       nixCacheAddr = mkOption {
         type = types.str;
         default = "";

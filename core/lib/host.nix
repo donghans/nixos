@@ -16,11 +16,18 @@
     workspaceMeta,
     ...
   }: let
-    pkgs = import nixpkgs {
+    pkgsVersionClean = builtins.replaceStrings ["."] [""] workspaceMeta.pkgsVersion;
+    selectedNixpkgs = inputs."nixpkgs-${pkgsVersionClean}" or inputs.nixpkgs;
+    selectedHomeManager = inputs."home-manager-${pkgsVersionClean}" or inputs.home-manager;
+
+    pkgs = import selectedNixpkgs {
       localSystem = system;
       config.allowUnfree = true;
       config.permittedInsecurePackages = [
         "electron-39.8.10"
+        "docker-28.5.2"
+        "incus-lts-6.0.6-unstable-2026-03-27"
+        "incus-lts-client-6.0.6-unstable-2026-03-27"
       ];
       overlays = customOverlays;
     };
@@ -30,6 +37,9 @@
       config.allowUnfree = true;
       config.permittedInsecurePackages = [
         "electron-39.8.10"
+        "docker-28.5.2"
+        "incus-lts-6.0.6-unstable-2026-03-27"
+        "incus-lts-client-6.0.6-unstable-2026-03-27"
       ];
     };
 
@@ -61,6 +71,9 @@
           config.allowUnfree = true;
           config.permittedInsecurePackages = [
             "electron-39.8.10"
+            "docker-28.5.2"
+            "incus-lts-6.0.6-unstable-2026-03-27"
+            "incus-lts-client-6.0.6-unstable-2026-03-27"
           ];
         }
       else unstable;
@@ -105,6 +118,7 @@
   in {
     inherit homeUser homeConfig metaConfig unstable unstable-fallback pkgs;
     inherit hasUnifiedHost unifiedHostFile;
+    inherit selectedNixpkgs selectedHomeManager;
   };
 
   # == Host Generator ==
@@ -136,7 +150,7 @@
         _hwModule
       ];
   in
-    nixpkgs.lib.nixosSystem {
+    hostCtx.selectedNixpkgs.lib.nixosSystem {
       specialArgs =
         {
           forOS = true;
@@ -161,6 +175,9 @@
             nixpkgs.config.allowUnfree = true;
             nixpkgs.config.permittedInsecurePackages = [
               "electron-39.8.10"
+              "docker-28.5.2"
+              "incus-lts-6.0.6-unstable-2026-03-27"
+              "incus-lts-client-6.0.6-unstable-2026-03-27"
             ];
 
             # (목적: mkWrapper의 NIX_LD/NIX_LD_LIBRARY_PATH가 실제로 동작하기 위한 전제조건)
@@ -253,7 +270,7 @@
         # (이유: deploy-rs는 root로 실행하므로 standalone HM 활성화 시 USER 불일치 오류 발생)
         ++ nixpkgs.lib.optional hostCtx.metaConfig.isRemote
         {
-          imports = [inputs.home-manager.nixosModules.home-manager];
+          imports = [hostCtx.selectedHomeManager.nixosModules.home-manager];
           home-manager = {
             useGlobalPkgs = true;
             useUserPackages = true;
@@ -276,7 +293,7 @@
         # (이유: ISO는 standalone HM 없이 부팅되므로 NixOS 모듈로 통합해야 dotfile 생성됨)
         ++ nixpkgs.lib.optional isISO
         {
-          imports = [inputs.home-manager.nixosModules.home-manager];
+          imports = [hostCtx.selectedHomeManager.nixosModules.home-manager];
           home-manager = {
             useGlobalPkgs = true;
             useUserPackages = true;

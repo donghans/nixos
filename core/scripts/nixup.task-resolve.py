@@ -13,8 +13,19 @@
 
 import json
 import os
+import re
 import sys
 import tomllib
+
+
+def get_valid_pkgs_versions(flake_nix_path):
+    if not os.path.exists(flake_nix_path):
+        return []
+    with open(flake_nix_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    versions = re.findall(r'nixpkgs-(\d{4})', content)
+    formatted = sorted(list(set(f"{v[:2]}.{v[2:]}" for v in versions)))
+    return formatted
 
 
 def detect_ram_gb():
@@ -47,6 +58,10 @@ def write_json(path, data):
 
 # == presets.json 생성 ==
 # hosts/_preset.*.toml → presets.json (Nix가 읽는 JSON 형식)
+flake_nix_path = os.path.join(src_path, "core/flake.nix")
+valid_versions = get_valid_pkgs_versions(flake_nix_path)
+print(f"Valid pkgsVersions from flake.nix: {valid_versions}")
+
 hosts_dir = f"{src_path}/hosts"
 all_presets = {}
 
@@ -59,12 +74,14 @@ for entry in sorted(os.listdir(hosts_dir)):
 
     # stateVersion 미지정 → None (rolling)
     state_version = preset_data.get("stateVersion", None)
+    pkgs_version = preset_data.get("pkgsVersion", None)
     all_presets[preset_name] = {
         "stateVersion": state_version,
+        "pkgsVersion": pkgs_version,
         "mods": preset_data.get("mods", {}),
         "explicitOptional": preset_data.get("explicitOptional", {}).get("paths", []),
     }
-    print(f"preset:{preset_name}  stateVersion={state_version}")
+    print(f"preset:{preset_name}  stateVersion={state_version}  pkgsVersion={pkgs_version}")
 
 presets_path = os.path.join(target_path, "presets.json")
 write_json(presets_path, all_presets)
@@ -109,6 +126,15 @@ for entry in sorted(os.listdir(hosts_dir)):
     state_version = host.get("stateVersion", preset["stateVersion"]) or rolling_state_version
     is_rolling = host.get("stateVersion") is None and preset["stateVersion"] is None
 
+    # pkgsVersion: host.toml 명시 > preset.pkgsVersion > stateVersion
+    pkgs_version = host.get("pkgsVersion", preset.get("pkgsVersion")) or state_version
+
+    # 검증: valid_versions가 비어있지 않다면(flake.nix 파싱 성공 시) 검증 수행
+    if valid_versions and pkgs_version not in valid_versions:
+        print(f"Error: '{host_toml_path}' 의 pkgsVersion='{pkgs_version}' 은 flake.nix 에 선언되지 않았습니다.", file=sys.stderr)
+        print(f"       사용 가능한 pkgsVersion: {', '.join(valid_versions)}", file=sys.stderr)
+        sys.exit(1)
+
     # mods: host.toml 오버라이드만 (프리셋 mods는 flake.nix가 presets.json에서 병합)
     mods = {}
     for k, v in host.get("mods", {}).items():
@@ -146,12 +172,13 @@ for entry in sorted(os.listdir(hosts_dir)):
         "username": host.get("username", base["username"]),
         "git": {**base.get("git", {}), **host.get("git", {})},
         "stateVersion": state_version,       # 항상 non-null (rolling 시 rollingStateVersion 폴백)
+        "pkgsVersion": pkgs_version,
         "rollingStateVersion": rolling_state_version,
         "isRolling": is_rolling,
         "mods": mods,
         "preauthKeys": host.get("preauth-keys", []),
     }
-    print(f"{hostname}  stateVersion={state_version}  isRolling={is_rolling}")
+    print(f"{hostname}  stateVersion={state_version}  pkgsVersion={pkgs_version}  isRolling={is_rolling}")
 
 resolved_path = os.path.join(target_path, "resolved.json")
 write_json(resolved_path, all_resolved)

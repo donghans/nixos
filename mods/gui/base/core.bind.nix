@@ -97,11 +97,11 @@ in {
       end
 
       -- Mouse drag (bindm)
-      hl.bind("SUPER + mouse:272", hl.dsp.window.move(), { mouse = true })
+      hl.bind("SUPER + mouse:272", hl.dsp.window.drag(), { mouse = true })
       hl.bind("SUPER + mouse:273", hl.dsp.window.resize(), { mouse = true })
 
       -- Release bindings (bindr)
-      hl.bind("SUPER_SHIFT + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"), { release = true })
+      hl.bind("SUPER + SHIFT + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"), { release = true })
 
       -- Gestures
       hl.gesture({

@@ -99,7 +99,7 @@ mkHostConfiguration ({
 
   hm = {
     wayland.windowManager.hyprland = {
-      touchpadToggleKey = "$mainMod CTRL, XF86TouchpadToggle";
+      touchpadToggleKey = "SUPER + CTRL, XF86TouchpadToggle";
       lidSwitchOnExtraCmd = "tlp bat";
       lidSwitchOffExtraCmd = "tlp start";
       settings = {
@@ -110,7 +110,7 @@ mkHostConfiguration ({
 
         input.touchpad = {
           natural_scroll = true;
-          tap-to-click = true;
+          tap_to_click = true;
           disable_while_typing = true;
         };
       };
