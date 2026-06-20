@@ -9,6 +9,7 @@ mkPartOf "mods.gui" ({lib, ...}: {
       input = {
         kb_layout = "kr";
         kb_options = "korean:ralt_hangul,korean:rctrl_hanja";
+        resolve_binds_by_sym = true;
 
         follow_mouse = 1;
 

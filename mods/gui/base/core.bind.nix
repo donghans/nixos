@@ -45,24 +45,24 @@ in {
       local capture_active_window = "${captureActiveWindow}/bin/hypr-capture-active"
 
       -- 기본 키바인딩
-      hl.bind("SUPER + Q", hl.dsp.exec_raw("killactive"))
-      hl.bind("SUPER + SHIFT + Q", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch exit"))
-      hl.bind("SUPER + F", hl.dsp.exec_raw("togglefloating"))
+      hl.bind("SUPER + Q", hl.dsp.window.close())
+      hl.bind("SUPER + SHIFT + Q", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'"))
+      hl.bind("SUPER + F", hl.dsp.window.float({ action = "toggle" }))
       hl.bind("SUPER + P", hl.dsp.exec_cmd(fuzzel))
       hl.bind("SUPER + V", hl.dsp.exec_cmd(cliphist .. " list | " .. fuzzel .. " --dmenu | " .. cliphist .. " decode | " .. wl_copy))
       hl.bind("SUPER + L", hl.dsp.exec_cmd("hyprlock"))
       hl.bind("SUPER + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"))
 
       -- Special workspace
-      hl.bind("SUPER + S", hl.dsp.exec_raw("togglespecialworkspace magic"))
-      hl.bind("SUPER + SHIFT + S", hl.dsp.exec_raw("movetoworkspace special:magic"))
+      hl.bind("SUPER + S", hl.dsp.workspace.toggle_special("magic"))
+      hl.bind("SUPER + SHIFT + S", hl.dsp.window.move({ workspace = "special:magic" }))
 
       -- Scroll through existing workspaces
-      hl.bind("SUPER + mouse_down", hl.dsp.exec_raw("workspace r-1"))
-      hl.bind("SUPER + mouse_up", hl.dsp.exec_raw("workspace r+1"))
-      hl.bind("SUPER + SHIFT + mouse_down", hl.dsp.exec_raw("movetoworkspace r-1"))
-      hl.bind("SUPER + SHIFT + CTRL + mouse_down", hl.dsp.exec_raw("movetoworkspacesilent r-1"))
-      hl.bind("SUPER + SHIFT + CTRL + mouse_up", hl.dsp.exec_raw("movetoworkspacesilent r+1"))
+      hl.bind("SUPER + mouse_down", hl.dsp.focus({ workspace = "r-1" }))
+      hl.bind("SUPER + mouse_up", hl.dsp.focus({ workspace = "r+1" }))
+      hl.bind("SUPER + SHIFT + mouse_down", hl.dsp.window.move({ workspace = "r-1" }))
+      hl.bind("SUPER + SHIFT + CTRL + mouse_down", hl.dsp.window.move({ workspace = "r-1", follow = false }))
+      hl.bind("SUPER + SHIFT + CTRL + mouse_up", hl.dsp.window.move({ workspace = "r+1", follow = false }))
 
       -- Swap workspaces
       hl.bind("SUPER + SHIFT + mouse:274", hl.dsp.exec_cmd(swap_monitors))
@@ -78,11 +78,11 @@ in {
 
       -- Workspace 1-10
       for i = 1, 9 do
-        hl.bind("SUPER + " .. tostring(i), hl.dsp.exec_raw("workspace " .. tostring(i)))
-        hl.bind("SUPER + SHIFT + " .. tostring(i), hl.dsp.exec_raw("movetoworkspace " .. tostring(i)))
+        hl.bind("SUPER + " .. tostring(i), hl.dsp.focus({ workspace = tostring(i) }))
+        hl.bind("SUPER + SHIFT + " .. tostring(i), hl.dsp.window.move({ workspace = tostring(i) }))
       end
-      hl.bind("SUPER + 0", hl.dsp.exec_raw("workspace 10"))
-      hl.bind("SUPER + SHIFT + 0", hl.dsp.exec_raw("movetoworkspace 10"))
+      hl.bind("SUPER + 0", hl.dsp.focus({ workspace = "10" }))
+      hl.bind("SUPER + SHIFT + 0", hl.dsp.window.move({ workspace = "10" }))
 
       -- Focus arrows
       local directions = {
@@ -92,8 +92,10 @@ in {
         down = "d"
       }
       for key, dir in pairs(directions) do
-        hl.bind("SUPER + " .. key, hl.dsp.exec_raw("movefocus " .. dir))
-        hl.bind("SUPER + " .. key, hl.dsp.exec_raw("alterzorder top"))
+        hl.bind("SUPER + " .. key, function()
+          hl.dispatch(hl.dsp.focus({ direction = dir }))
+          hl.dispatch(hl.dsp.window.alter_zorder({ mode = "top" }))
+        end)
       end
 
       -- Mouse drag (bindm)

@@ -83,8 +83,8 @@
           "${config.wayland.windowManager.hyprland.touchpadToggleKey}, exec, ${toggleTouchpad}/bin/hypr-toggle-touchpad"
 
           # 덮개 스위치 (로그인 잠금 및 전원 관리)
-          ", switch:on:Lid Switch, exec, loginctl lock-session && hyprctl dispatch dpms off${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd != "") " && ${config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd}"}"
-          ", switch:off:Lid Switch, exec, hyprctl dispatch dpms on${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd != "") " && ${config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd}"}"
+          ", switch:on:Lid Switch, exec, loginctl lock-session && hyprctl dispatch \"hl.dsp.dpms({ action = 'disable' })\"${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd != "") " && ${config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd}"}"
+          ", switch:off:Lid Switch, exec, hyprctl dispatch \"hl.dsp.dpms({ action = 'enable' })\"${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd != "") " && ${config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd}"}"
         ];
       };
     };
