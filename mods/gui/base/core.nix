@@ -30,6 +30,7 @@ mkPartOf "mods.gui" ({
     (lib.mkIf config.mods.gui.enable {
       wayland.windowManager.hyprland.enable = true;
       wayland.windowManager.hyprland.package = pkgs.hyprland;
+      wayland.windowManager.hyprland.configType = "hyprlang";
 
       wayland.windowManager.hyprland.systemd = {
         enable = false;
