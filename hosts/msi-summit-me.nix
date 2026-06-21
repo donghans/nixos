@@ -99,7 +99,7 @@ mkHostConfiguration ({
 
   hm = {
     wayland.windowManager.hyprland = {
-      touchpadToggleKey = "SUPER + CTRL, XF86TouchpadToggle";
+      touchpadToggleKey = "SUPER + CTRL, F24";
       lidSwitchOnExtraCmd = "tlp bat";
       lidSwitchOffExtraCmd = "tlp start";
       settings = {

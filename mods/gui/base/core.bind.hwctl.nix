@@ -50,13 +50,13 @@
 
       if [ "$CURRENT_STATUS" = "true" ]; then
         while read -r dev; do
-          hyprctl keyword "device[$dev]:enabled" false
+          hyprctl eval "hl.device({ name = \"$dev\", enabled = false })"
         done <<< "$DEVICES"
         echo "false" > "$STATUS_FILE"
         ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:touchpad -u low "Touchpad" "Disabled"
       else
         while read -r dev; do
-          hyprctl keyword "device[$dev]:enabled" true
+          hyprctl eval "hl.device({ name = \"$dev\", enabled = true })"
         done <<< "$DEVICES"
         echo "true" > "$STATUS_FILE"
         ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:touchpad -u low "Touchpad" "Enabled"
