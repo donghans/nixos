@@ -119,7 +119,7 @@ _final: prev: let
         [ -f "pnpm-lock.yaml" ] && mv "pnpm-lock.yaml" "''$LOCK_DIR/"
       fi
 
-      pnpm --lockfile-dir="''$LOCK_DIR" "$@"
+      pnpm --lockfile-dir="''$LOCK_DIR" --virtual-store-dir="''$PWD/node_modules/.pnpm" "$@"
       PNPM_EXIT=$?
 
       GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
@@ -145,7 +145,7 @@ _final: prev: let
       fi
     fi
 
-    pnpm install --frozen-lockfile --lockfile-dir="''$LOCK_DIR"
+    pnpm install --frozen-lockfile --lockfile-dir="''$LOCK_DIR" --virtual-store-dir="''$PWD/node_modules/.pnpm"
     exit $?
   '');
 
