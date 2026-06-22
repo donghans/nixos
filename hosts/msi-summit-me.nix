@@ -25,7 +25,7 @@ mkHostConfiguration ({
         "i915.enable_psr=1"
         "pci=nocrs" # (이유: ACPI 리소스 할당 충돌 방지 및 Firmware Bug 메시지 완화)
         "irqpoll" # (이유: 노트북 터치패드 인터럽트 충돌 방지 및 하드웨어 응답성 향상)
-        "i2c_designware.disable_ps=1" # (이유: I2C 컨트롤러 절전 비활성화)
+        # i2c_designware.disable_ps=1 은 kernel 6.18+ 에서 모듈 자체가 없어 무효 → 아래 udev 룰로 대체
         "psmouse.synaptics_intertouch=1" # (이유: 구형 PS/2 대신 I2C/SMBus 사용 강제)
         "i8042.nopnp=1" # (이유: 구형 PS/2 포트 자동 탐색 충돌 방지)
       ];
@@ -45,6 +45,14 @@ mkHostConfiguration ({
     };
 
     services.libinput.enable = true;
+
+    # (이유: TLP RUNTIME_PM_DENYLIST는 TLP 서비스 시작 후 적용되어 부팅 초기 probe 시점엔 늦음.
+    #  kernel 6.18+ 에서 i2c_designware 모듈이 없어 disable_ps 파라미터도 무효가 됨.
+    #  I2C 컨트롤러(0x51e8)가 runtime suspend 상태로 터치패드 probe 실패 방지를 위해
+    #  udev add 타이밍에 직접 power/control=on 강제.)
+    services.udev.extraRules = ''
+      ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x8086", ATTR{device}=="0x51e8", ATTR{power/control}="on"
+    '';
 
     # == Services & Hardware ==
     # (목적: 부팅 시 I2C 버스 간섭 방지)
@@ -67,7 +75,7 @@ mkHostConfiguration ({
 
       # (이유: I2C 터치패드 디바이스 런타임 절전 제외)
       RUNTIME_PM_DENYLIST = "00:12.0 00:15.0";
-      RUNTIME_PM_DRIVER_DENYLIST = "i2c_designware intel_ishtp intel_ishtp_hid intel_lpss_pci";
+      RUNTIME_PM_DRIVER_DENYLIST = "intel-lpss intel_ishtp intel_ishtp_hid";
     };
 
     # == Power Management & Interfaces ==

@@ -64,6 +64,14 @@
     '';
   in {
     hm = {
+      # 스크립트를 home.packages에 명시적으로 추가해 HM 클로저에 포함시킴
+      # (settings.bindl 문자열 내 스토어 경로는 의존성 추적에서 누락될 수 있음)
+      home.packages = lib.optionals (config.workspace.type == "laptop") [
+        toggleTouchpad
+        volumeControl
+        brightnessControl
+      ];
+
       wayland.windowManager.hyprland.settings = {
         # == Generic Media Bindings ==
         bindel =
