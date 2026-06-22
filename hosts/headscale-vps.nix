@@ -4,8 +4,8 @@
 mkHostConfiguration ({config, ...}: {
   os = {
     imports = [
-      ./headscale-vps/headscale.nix
-      ./headscale-vps/headscale-db-backup.nix
+      ./headscale-vps/e-772610158-xyz.nix
+      ./headscale-vps/e-772610158-xyz-db-backup.nix
       ./headscale-vps/ip-forwarding.nix
     ];
 

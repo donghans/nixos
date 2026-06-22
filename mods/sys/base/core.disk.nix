@@ -7,6 +7,7 @@ mkPartOf "mods.sys.base" ({
 }: let
   inherit (config.workspace) bootLoader;
   inherit (config.workspace) diskDevice;
+  isRpi = config.workspace.type == "rpi";
 
   btrfsOpts = subvol: [
     "subvol=${subvol}"
@@ -36,8 +37,8 @@ mkPartOf "mods.sys.base" ({
   };
 in {
   os = lib.mkMerge [
-    # == 로컬 호스트 (bootLoader="systemd-boot") — 수동 fileSystems 선언 ==
-    (lib.mkIf (bootLoader == "systemd-boot") {
+    # == 로컬 호스트 (bootLoader="systemd-boot", 비-RPi) — 수동 fileSystems 선언 ==
+    (lib.mkIf (bootLoader == "systemd-boot" && !isRpi) {
       fileSystems."/boot" = {
         device = config.workspace.bootDevice;
         fsType = "vfat";
@@ -127,6 +128,46 @@ in {
           };
         };
       };
+    })
+
+    # == Raspberry Pi — disko: FAT32 /boot/firmware + btrfs root ==
+    # (목적: RPi는 EFI 미지원으로 extlinux 사용, firmware 파티션 필수)
+    (lib.mkIf isRpi {
+      disko.devices.disk.main = {
+        device = diskDevice;
+        type = "disk";
+        content = {
+          type = "gpt";
+          partitions = {
+            firmware = {
+              size = "512M";
+              type = "EF00"; # FAT32 (RPi firmware/kernel/dtb)
+              content = {
+                type = "filesystem";
+                format = "vfat";
+                mountpoint = "/boot/firmware";
+                mountOptions = ["fmask=0137" "dmask=0027"];
+              };
+            };
+            root = {
+              size = "100%";
+              content = {
+                type = "btrfs";
+                extraArgs = ["-L" "nixos" "-f"];
+                subvolumes = btrfsSubvols;
+              };
+            };
+          };
+        };
+      };
+
+      services.btrfs.autoScrub = {
+        enable = true;
+        interval = "weekly";
+        fileSystems = ["/"];
+      };
+      services.fstrim.enable = true;
+      environment.systemPackages = with pkgs; [btrfs-progs];
     })
   ];
 })
