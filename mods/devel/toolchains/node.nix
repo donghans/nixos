@@ -9,6 +9,7 @@ mkModOf "mods.devel" __curPos "Node.js toolchain" ({
       node-wrapped
       pnpm-wrapped
       pnpm-yarn-wrapper
+      pnpm-npm-wrapper
     ];
 
     xdg.configFile."pnpm/rc".text = ''
@@ -25,6 +26,12 @@ mkModOf "mods.devel" __curPos "Node.js toolchain" ({
       # peer deps — npm v7+ 동작
       auto-install-peers=true
       strict-peer-dependencies=false
+
+      # npm alias(pnpm)가 packageManager 필드를 보고 거부하지 않도록
+      package-manager-strict=false
+
+      # build script 허용 여부를 물어보는 pnpm-workspace.yaml 자동 생성 방지
+      dangerously-allow-all-builds=true
     '';
 
     home.sessionVariables = {
@@ -33,7 +40,6 @@ mkModOf "mods.devel" __curPos "Node.js toolchain" ({
     };
 
     home.shellAliases = {
-      npm = "pnpm";
       npx = "pnpm dlx";
     };
   };
