@@ -128,10 +128,12 @@ _final: prev: let
         mkdir -p "$(dirname "''$EXCLUDE")"
         grep -qxF 'pnpm-lock.yaml' "''$EXCLUDE" 2>/dev/null \
           || echo 'pnpm-lock.yaml' >> "''$EXCLUDE"
+        grep -qxF 'pnpm-workspace.yaml' "''$EXCLUDE" 2>/dev/null \
+          || echo 'pnpm-workspace.yaml' >> "''$EXCLUDE"
       fi
 
       if [ -f "package.json" ]; then
-        ${prev.nodejs_24}/bin/npm install --package-lock-only --ignore-scripts 2>/dev/null || true
+        ${prev.nodejs_24}/bin/npm install --package-lock-only --ignore-scripts --legacy-peer-deps 2>/dev/null || true
       fi
 
       exit $PNPM_EXIT
