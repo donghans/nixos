@@ -69,7 +69,39 @@ _final: prev: let
           trap 'rm -f "pnpm-workspace.yaml"' EXIT INT TERM
         fi
       fi
-      pnpm "$@"
+      # Translate npm workspace flags (-w/--workspace) → pnpm --filter <pkg> <cmd>
+      # --filter must precede the subcommand (pnpm --filter X run test, NOT pnpm run test --filter X)
+      PNPM_FILTERS=()
+      PNPM_REST=()
+      while [ $# -gt 0 ]; do
+        case "''$1" in
+          -w)
+            if [ -d "./''$2" ]; then
+              PNPM_FILTERS+=("--filter" "./''$2")
+            else
+              PNPM_FILTERS+=("--filter" "''$2")
+            fi
+            shift 2 ;;
+          --workspace=*)
+            _WS="''${1#--workspace=}"
+            if [ -d "./''$_WS" ]; then
+              PNPM_FILTERS+=("--filter" "./''$_WS")
+            else
+              PNPM_FILTERS+=("--filter" "''$_WS")
+            fi
+            shift ;;
+          --workspace)
+            if [ -d "./''$2" ]; then
+              PNPM_FILTERS+=("--filter" "./''$2")
+            else
+              PNPM_FILTERS+=("--filter" "''$2")
+            fi
+            shift 2 ;;
+          *)
+            PNPM_REST+=("''$1"); shift ;;
+        esac
+      done
+      pnpm "''${PNPM_FILTERS[@]}" "''${PNPM_REST[@]}"
       exit $?
     fi
 
@@ -133,7 +165,20 @@ _final: prev: let
       fi
 
       if [ -f "package.json" ]; then
-        ${prev.nodejs_24}/bin/npm install --package-lock-only --ignore-scripts --legacy-peer-deps 2>/dev/null || true
+        LOCK_GEN_PWD="''$PWD"
+        LOCK_TMP=$(mktemp -d)
+        find "''$LOCK_GEN_PWD" -name "package.json" \
+          ! -path "*/node_modules/*" ! -path "*/src-tauri/*" | \
+        while IFS= read -r pj; do
+          rel=$(echo "''$pj" | sed "s|^''$LOCK_GEN_PWD/||")
+          target_dir=$(dirname "''$rel")
+          mkdir -p "''$LOCK_TMP/''$target_dir"
+          sed 's/"workspace:\([^"]*\)"/"\1"/g' "''$pj" > "''$LOCK_TMP/''$rel"
+        done
+        (cd "''$LOCK_TMP" && ${prev.nodejs_24}/bin/npm install \
+          --package-lock-only --ignore-scripts --legacy-peer-deps 2>/dev/null) \
+          && cp "''$LOCK_TMP/package-lock.json" "''$LOCK_GEN_PWD/" 2>/dev/null || true
+        rm -rf "''$LOCK_TMP"
       fi
 
       exit $PNPM_EXIT
