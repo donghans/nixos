@@ -107,8 +107,8 @@ _final: prev: let
 
     # --- lock / ci 공통 준비 ---
     LOCK_HASH=$(printf '%s' "''$PWD" | md5sum | cut -c1-8)
-    LOCK_DIR="/tmp/pnpm-locks/''$LOCK_HASH"
-    WS_TMP="/tmp/pnpm-workspaces/''$LOCK_HASH/pnpm-workspace.yaml"
+    LOCK_DIR="''${XDG_CACHE_HOME:-''$HOME/.cache}/pnpm-locks/''$LOCK_HASH"
+    WS_TMP="''${XDG_CACHE_HOME:-''$HOME/.cache}/pnpm-workspaces/''$LOCK_HASH/pnpm-workspace.yaml"
     mkdir -p "''$LOCK_DIR" "$(dirname "''$WS_TMP")"
 
     # pnpm-workspace.yaml: 우리가 생성한 경우에만 EXIT 시 삭제
@@ -151,8 +151,29 @@ _final: prev: let
         [ -f "pnpm-lock.yaml" ] && mv "pnpm-lock.yaml" "''$LOCK_DIR/"
       fi
 
-      pnpm --lockfile-dir="''$LOCK_DIR" --virtual-store-dir="''$PWD/node_modules/.pnpm" --prefer-frozen-lockfile "$@"
-      PNPM_EXIT=$?
+      shift  # CMD 제거 → $@ = flags + pkg names
+      if [ "''$CMD" = "install" ] || [ "''$CMD" = "i" ]; then
+        # non-flag arg 있으면 패키지 추가 → pnpm add, 없으면 pnpm install
+        HAS_PKG=0
+        for arg in "''$@"; do
+          case "''$arg" in -*) ;; *) HAS_PKG=1; break ;; esac
+        done
+        if [ "''$HAS_PKG" = "1" ]; then
+          cp "''$LOCK_DIR/pnpm-lock.yaml" pnpm-lock.yaml 2>/dev/null || true
+          pnpm add "''$@"
+          PNPM_EXIT=$?
+          [ -f pnpm-lock.yaml ] && mv pnpm-lock.yaml "''$LOCK_DIR/"
+        else
+          pnpm --lockfile-dir="''$LOCK_DIR" install "''$@"
+          PNPM_EXIT=$?
+        fi
+      else
+        # add/remove/update/link/unlink: CMD가 pnpm 동사로 직접 사용
+        cp "''$LOCK_DIR/pnpm-lock.yaml" pnpm-lock.yaml 2>/dev/null || true
+        pnpm "''$CMD" "''$@"
+        PNPM_EXIT=$?
+        [ -f pnpm-lock.yaml ] && mv pnpm-lock.yaml "''$LOCK_DIR/"
+      fi
 
       GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
       if [ -n "''$GIT_DIR" ]; then
@@ -192,7 +213,7 @@ _final: prev: let
       fi
     fi
 
-    pnpm install --frozen-lockfile --lockfile-dir="''$LOCK_DIR" --virtual-store-dir="''$PWD/node_modules/.pnpm"
+    pnpm install --frozen-lockfile --lockfile-dir="''$LOCK_DIR"
     exit $?
   '');
 
