@@ -199,7 +199,10 @@ _final: prev: let
           rm -f "''$LOCK_DIR/pnpm-lock.yaml"
         fi
       fi
-      if [ ! -f "''$LOCK_DIR/pnpm-lock.yaml" ] && [ -f "''$WS_ROOT/package-lock.json" ]; then
+      # "link": true 항목이 있으면 pnpm import가 workspace 패키지를 레지스트리에서 찾으려 해서 실패
+      HAS_WORKSPACE_LINKS=0
+      grep -q '"link"[[:space:]]*:[[:space:]]*true' "''$WS_ROOT/package-lock.json" 2>/dev/null && HAS_WORKSPACE_LINKS=1
+      if [ "''$HAS_WORKSPACE_LINKS" = "0" ] && [ ! -f "''$LOCK_DIR/pnpm-lock.yaml" ] && [ -f "''$WS_ROOT/package-lock.json" ]; then
         (cd "''$WS_ROOT" && pnpm import 2>/dev/null)
         [ -f "''$WS_ROOT/pnpm-lock.yaml" ] && mv "''$WS_ROOT/pnpm-lock.yaml" "''$LOCK_DIR/"
       fi
@@ -221,8 +224,57 @@ _final: prev: let
           PNPM_EXIT=$?
           [ -f "''$WS_ROOT/pnpm-lock.yaml" ] && mv "''$WS_ROOT/pnpm-lock.yaml" "''$LOCK_DIR/"
         else
-          (cd "''$WS_ROOT" && pnpm --lockfile-dir="''$LOCK_DIR" install "''$@")
-          PNPM_EXIT=$?
+          # workspace link("link": true) 항목이 있으면 --lockfile-dir 외부 경로에서
+          # 상대경로 해석 불가 → WS_ROOT에 lockfile 생성 후 캐시로 이동
+          if [ "''$HAS_WORKSPACE_LINKS" = "1" ]; then
+            rm -f "''$LOCK_DIR/pnpm-lock.yaml"
+            # pnpm v11에서 link-workspace-packages 제거됨 → "*" → "workspace:*" 임시 패치
+            NPM_WS_ROOT="''$WS_ROOT" node -e "
+              const fs = require('fs'), path = require('path');
+              const wsRoot = process.env.NPM_WS_ROOT;
+              try {
+                const lock = JSON.parse(fs.readFileSync(path.join(wsRoot,'package-lock.json'),'utf8'));
+                const wsNames = [];
+                for (const [k,v] of Object.entries(lock.packages||{})) { if (v.link) wsNames.push(k.slice(13)); }
+                if (!wsNames.length) process.exit(0);
+                function walk(dir) {
+                  let r = [];
+                  try { for (const e of fs.readdirSync(dir,{withFileTypes:true})) {
+                    if (['node_modules','src-tauri','.git'].includes(e.name)) continue;
+                    const f = path.join(dir,e.name);
+                    if (e.isDirectory()) r=r.concat(walk(f)); else if (e.name==='package.json') r.push(f);
+                  }} catch {}
+                  return r;
+                }
+                for (const pj of walk(wsRoot)) {
+                  let c = fs.readFileSync(pj,'utf8'), orig = c;
+                  for (const n of wsNames) { c = c.split('\"'+n+'\": \"*\"').join('\"'+n+'\": \"workspace:*\"'); }
+                  if (c !== orig) { fs.writeFileSync(pj+'.npm-wrapper-bak', orig); fs.writeFileSync(pj,c); }
+                }
+              } catch {}
+            " 2>/dev/null
+            (cd "''$WS_ROOT" && pnpm install "''$@")
+            PNPM_EXIT=$?
+            # workspace:* 패치 복원
+            NPM_WS_ROOT="''$WS_ROOT" node -e "
+              const fs = require('fs'), path = require('path');
+              const wsRoot = process.env.NPM_WS_ROOT;
+              function walk(dir) {
+                let r = [];
+                try { for (const e of fs.readdirSync(dir,{withFileTypes:true})) {
+                  if (['node_modules','src-tauri','.git'].includes(e.name)) continue;
+                  const f = path.join(dir,e.name);
+                  if (e.isDirectory()) r=r.concat(walk(f)); else if (e.name.endsWith('.npm-wrapper-bak')) r.push(f);
+                }} catch {}
+                return r;
+              }
+              for (const b of walk(wsRoot)) fs.renameSync(b, b.slice(0,-16));
+            " 2>/dev/null
+            [ -f "''$WS_ROOT/pnpm-lock.yaml" ] && mv "''$WS_ROOT/pnpm-lock.yaml" "''$LOCK_DIR/"
+          else
+            (cd "''$WS_ROOT" && pnpm --lockfile-dir="''$LOCK_DIR" install "''$@")
+            PNPM_EXIT=$?
+          fi
         fi
       else
         # add/remove/update/link/unlink: CMD가 pnpm 동사로 직접 사용
