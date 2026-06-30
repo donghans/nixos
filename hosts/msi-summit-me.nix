@@ -5,6 +5,8 @@ mkHostConfiguration ({
   ...
 }: {
   os = {
+    imports = [./msi-summit-me/touchpad-watchdog.nix];
+
     # llm-utils-project 관련 테스트를 위해 임시로 열어둔 포트
     networking.firewall.allowedTCPPorts = [7681];
 
@@ -23,11 +25,14 @@ mkHostConfiguration ({
       kernelModules = ["ec_sys"];
       kernelParams = [
         "i915.enable_psr=1"
-        "pci=nocrs" # (이유: ACPI 리소스 할당 충돌 방지 및 Firmware Bug 메시지 완화)
-        "irqpoll" # (이유: 노트북 터치패드 인터럽트 충돌 방지 및 하드웨어 응답성 향상)
-        # i2c_designware.disable_ps=1 은 kernel 6.18+ 에서 모듈 자체가 없어 무효 → 아래 udev 룰로 대체
-        "psmouse.synaptics_intertouch=1" # (이유: 구형 PS/2 대신 I2C/SMBus 사용 강제)
-        "i8042.nopnp=1" # (이유: 구형 PS/2 포트 자동 탐색 충돌 방지)
+        # pci=nocrs 제거 (2026-06-30): 의도였던 firmware-bug/리소스충돌 완화 효과가 전무했고
+        #   (실재 firmware bug는 CPU토폴로지·WMI 뿐, PCI 충돌 0건), ACPI _CRS 무시 → E820 사용이
+        #   오히려 LPSS I2C(00:15.0) 컨트롤러 hang(controller timed out)의 유력 원인으로 판단됨.
+        "irqpoll" # (이유: 인터럽트 스톰/누락 IRQ를 폴링으로 정리 — 제거 시 발열·배터리소모 악화 체감하여 유지)
+        # 정리(2026-06-30): 아래 두 파라미터 제거.
+        #   - psmouse.synaptics_intertouch=1 : psmouse 모듈을 blacklist 했고 터치패드는 i2c_hid_acpi라 무효(no-op)
+        #   - i8042.nopnp=1 : i8042는 터치패드(I2C)가 아닌 내장 키보드용 — 터치패드 문제와 무관
+        # 참고: i2c_designware.disable_ps=1 은 kernel 6.18+ 에서 모듈이 없어 무효 → udev 룰로 대체
       ];
 
       blacklistedKernelModules = [
