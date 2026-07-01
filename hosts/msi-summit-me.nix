@@ -62,7 +62,7 @@ mkHostConfiguration ({
     # == Services & Hardware ==
     # (목적: 부팅 시 I2C 버스 간섭 방지)
     networking.modemmanager.enable = false;
-    services.fprintd.enable = false; # (이유: 지문 인식 초기화 시 프리징 방지)
+    services.fprintd.enable = true; # (Goodix 27c6:6094 MOC 지문 센서 — libfprint goodixmoc 드라이버로 동작 확인됨)
 
     # (참고: TLP 기본 laptop 프로파일은 mods/sys/base/os/_power.nix에서 적용됨)
     # MSI 전용 TLP quirk 추가 설정
