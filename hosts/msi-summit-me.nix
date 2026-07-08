@@ -55,8 +55,14 @@ mkHostConfiguration ({
     #  kernel 6.18+ 에서 i2c_designware 모듈이 없어 disable_ps 파라미터도 무효가 됨.
     #  I2C 컨트롤러(0x51e8)가 runtime suspend 상태로 터치패드 probe 실패 방지를 위해
     #  udev add 타이밍에 직접 power/control=on 강제.)
+    #
+    # (이유: idma64.0과 i2c_designware.0이 IRQ 27을 공유하는데, DMA 모드에서 spurious interrupt가
+    #  발생하면 irqpoll 없이는 발열/배터리 문제, irqpoll 있으면 I2C 상태머신 타이밍 어긋남 →
+    #  "controller timed out" storm. idma64.0을 언바인드해 i2c_designware를 PIO 모드로 강제하면
+    #  IRQ 27 단독 소유 → 두 문제 동시 해결 기대.)
     services.udev.extraRules = ''
       ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x8086", ATTR{device}=="0x51e8", ATTR{power/control}="on"
+      ACTION=="bind", SUBSYSTEM=="platform", KERNEL=="idma64.0", RUN+="${pkgs.bash}/bin/sh -c 'echo idma64.0 > /sys/bus/platform/drivers/idma64/unbind'"
     '';
 
     # == Services & Hardware ==
