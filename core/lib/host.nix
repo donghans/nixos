@@ -190,6 +190,26 @@
               pkgs' = nixpkgs.legacyPackages.${hostInfo.system};
             in [
               (pkgs'.writeShellScriptBin "nixup" ''
+                # nix-shell 진입(~8초) 전에 sudo 선취득
+                _pf_has_build=false
+                for _pf_arg in "$@"; do
+                  case "$_pf_arg" in -b|--build) _pf_has_build=true; break ;; esac
+                done
+                _pf_needs_sudo=false
+                case "''${1:-}" in
+                  os|"")
+                    [ "$_pf_has_build" = false ] && _pf_needs_sudo=true ;;
+                  clean)
+                    for _pf_arg in "$@"; do
+                      case "$_pf_arg" in --all|-a) _pf_needs_sudo=true; break ;; esac
+                    done ;;
+                  -*)
+                    [ "$_pf_has_build" = false ] && _pf_needs_sudo=true ;;
+                esac
+                if [ "$_pf_needs_sudo" = true ]; then
+                  sudo -v
+                fi
+                unset _pf_needs_sudo _pf_has_build _pf_arg
                 exec /etc/nixos/core/scripts/nixup.sh "$@"
               '')
               (pkgs'.writeShellScriptBin "rnixup" ''
