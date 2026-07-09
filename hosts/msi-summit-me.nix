@@ -101,6 +101,11 @@ mkHostConfiguration ({
     # (목적: Wi-Fi 네트워크 절전 방지)
     networking.networkmanager.wifi.powersave = false;
 
+    programs.appimage = {
+      enable = true;
+      binfmt = true;
+    };
+
     environment.systemPackages = with pkgs; [
       intel-media-driver
       libva-vdpau-driver
