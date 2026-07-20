@@ -121,12 +121,11 @@ mkHostConfiguration ({config, ...}: {
       }
     '';
 
-    # demo.genple.ai — tailscale IP는 genple-demo LXC join 후 `incus exec genple-demo -- tailscale ip -4`로 확인
-    # environment.etc."caddy/sites/genple-demo.caddy".text = ''
-    #   demo.genple.ai {
-    #       reverse_proxy 100.64.0.XX:80
-    #   }
-    # '';
+    environment.etc."caddy/sites/genple-demo.caddy".text = ''
+      demo.genple.ai {
+          reverse_proxy 100.64.0.24:80
+      }
+    '';
 
     systemd.tmpfiles.rules = [
       "d /etc/caddy/sites 0755 admin root -"
