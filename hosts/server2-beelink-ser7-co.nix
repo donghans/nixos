@@ -40,6 +40,19 @@ in
         iifname "tailscale0" accept
       '';
 
+      # demo.genple.ai — tailscale 내부 전용 (DNS가 100.64.0.24를 직접 가리킴, headscale-vps 안 거침)
+      # tls internal: 공인 DNS-01 불가(Squarespace ACME API 미지원) → Caddy 자체 로컬 CA로 HTTPS만 확보
+      # (프론트엔드가 crypto.randomUUID() 사용 → secure context 필요해 plain HTTP 불가)
+      services.caddy = {
+        enable = true;
+        virtualHosts."demo.genple.ai".extraConfig = ''
+          bind 100.64.0.2
+          tls internal
+          reverse_proxy 100.64.0.24:80
+        '';
+      };
+      networking.firewall.interfaces.tailscale0.allowedTCPPorts = [80 443];
+
       # TODO: 공인 IP 또는 포트포워딩(TCP 443, UDP 3478) 확보 시 독립 DERP 서버 고려
       # headscale-vps 트래픽 분산 목적 — 현재는 Double-NAT 환경이라 적용 불가
       # 활성화 시 headscale-vps headscale.nix의 derp.paths에 이 서버 region YAML 추가 필요
