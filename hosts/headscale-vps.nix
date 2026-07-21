@@ -121,7 +121,6 @@ mkHostConfiguration ({config, ...}: {
       }
     '';
 
-    # TODO: shopify-dk-sync LXC가 tailscale에 join한 뒤 실제 할당된 IP로 교체
     environment.etc."caddy/sites/shopify-dk-sync.caddy".text = ''
       whosfanstore-webhook.qubitic.com {
           reverse_proxy 100.64.0.25:9100
