@@ -2,9 +2,7 @@
   pkgs,
   lib,
   ...
-}: let
-  ghaDeployPubkey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE+wohrKeeEb5wnwgBuIQKl8EevQxtERTgnhzikTMdCm gha-deploy@shopify-dk-sync";
-in {
+}: {
   systemd.services.incus-create-shopify-dk-sync = {
     description = "Create shopify-dk-sync Alpine LXC if not exists";
     after = ["incus-startup.service" "systemd-networkd.service"];
@@ -82,13 +80,10 @@ in {
       incus exec shopify-dk-sync -- rc-update add docker default
       incus exec shopify-dk-sync -- rc-service docker start
 
-      # SSH (수동 배포용 — 비밀번호 없이 접속, GHA는 아래 전용 배포 키로 접속)
+      # SSH (수동 배포용 — 비밀번호 없이 접속)
       incus exec shopify-dk-sync -- rc-update add sshd default
       incus exec shopify-dk-sync -- sh -c 'printf "PermitRootLogin yes\nPasswordAuthentication yes\nPermitEmptyPasswords yes\n" >> /etc/ssh/sshd_config'
       incus exec shopify-dk-sync -- passwd -d root
-      incus exec shopify-dk-sync -- sh -c 'mkdir -p /root/.ssh && chmod 700 /root/.ssh'
-      incus exec shopify-dk-sync -- sh -c 'grep -qxF "${ghaDeployPubkey}" /root/.ssh/authorized_keys 2>/dev/null || echo "${ghaDeployPubkey}" >> /root/.ssh/authorized_keys'
-      incus exec shopify-dk-sync -- chmod 600 /root/.ssh/authorized_keys
       incus exec shopify-dk-sync -- rc-service sshd start
 
       # IP forwarding (tailscale 필요)
