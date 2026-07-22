@@ -1,3 +1,6 @@
 type       = "laptop"
 preset     = "workstation"
 bootDevice = "/dev/disk/by-label/ESP"
+
+[mods.sys.services]
+tailpass = true
