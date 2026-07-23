@@ -22,8 +22,13 @@
 # 한계:
 #   - UDP 릴레이는 게이트웨이 SOCKS5 서버가 UDP ASSOCIATE를 구현해야 동작한다
 #     (미구현 서버면 이 프록시를 안 타고 그대로 나간다 — TCP만 되던 예전과 동일).
-#   - nft 리다이렉트는 `meta skuid`로 로그인 유저(uid 1000)의 트래픽만 잡는다 —
-#     root로 도는 시스템 서비스(sshd 등)는 건드리지 않아 안전.
+#   - nft 리다이렉트는 로그인 유저(uid 1000)뿐 아니라 root(uid 0)도 잡는다.
+#     (이유) tailscaled(root로 도는 시스템 서비스)가 헤드스케일 서버로 direct 접속을
+#     시도하다 핫스팟 게이트웨이가 비-프록시 트래픽을 막아 "context deadline exceeded"로
+#     로그인이 실패하는 문제 발견(2026-07-23) — root도 같이 리다이렉트해야 해결됨.
+#     redsocks 프로세스 자신의 GW_IP:1080 상향 접속은 GW_IP가 보통 privateRanges(10/8,
+#     192.168/16 등)에 속해 앞단 return 규칙에서 먼저 걸러지므로 리다이렉트 루프 없음.
+#     (GW_IP가 privateRanges 밖의 공인 IP인 특이 케이스라면 루프 위험 있으니 확인 필요.)
 #   - NetworkManager dispatcher는 root로 실행되므로 systemctl --user는 runuser로
 #     대상 유저 세션에 진입해 XDG_RUNTIME_DIR을 맞춰줘야 한다. 이미 실행 중인
 #     프로세스는 nft 리다이렉트는 즉시 적용되지만(커널 레벨), 환경변수 쪽은 새로
@@ -133,6 +138,9 @@ in {
               $NFT flush chain ip ${nftTable} output
               $NFT add rule ip ${nftTable} output ip daddr '{ ${privateRanges} }' return
               $NFT add rule ip ${nftTable} output meta skuid "$USER_UID" tcp dport != ${toString redsocksPort} redirect to :${toString redsocksPort}
+              # root(uid 0, tailscaled 등 시스템 서비스)도 동일하게 리다이렉트 — 위 privateRanges
+              # return 규칙이 먼저 걸리므로 redsocks 자신의 GW_IP:1080 상향 접속과는 안 겹침.
+              $NFT add rule ip ${nftTable} output meta skuid 0 tcp dport != ${toString redsocksPort} redirect to :${toString redsocksPort}
 
               # UDP: 로컬 발신 패킷을 lo로 재라우팅해 PREROUTING에서 TPROXY로 캡처.
               $IP rule add fwmark ${fwmark} lookup ${rtTable} 2>/dev/null
@@ -145,6 +153,7 @@ in {
               $NFT flush chain inet ${nftUdpTable} prerouting
               $NFT add rule inet ${nftUdpTable} output ip daddr '{ ${privateRanges} }' return
               $NFT add rule inet ${nftUdpTable} output meta skuid "$USER_UID" udp dport != ${toString redudpPort} meta mark set ${fwmark}
+              $NFT add rule inet ${nftUdpTable} output meta skuid 0 udp dport != ${toString redudpPort} meta mark set ${fwmark}
               $NFT add rule inet ${nftUdpTable} prerouting meta mark ${fwmark} meta l4proto udp tproxy to :${toString redudpPort}
             fi
             ;;
