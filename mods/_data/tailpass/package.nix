@@ -1,17 +1,19 @@
 /*
-  tailpass-app — 이미 빌드된 .deb(`./build.sh app`이 만든
+  tailpass-app(로드맵 F 이후 egui/eframe 네이티브 앱, 구 clients/app-native) —
+  이미 빌드된 .deb(`./build.sh app`이 만든
   `target/release/bundle/deb/Tailpass_<version>_amd64.deb`)를 autoPatchelfHook으로
-  재포장하는 파생물. nixpkgs의 vscode/discord류와 동일한 패턴 — Tauri/webkit2gtk/tss-esapi
-  등 네이티브 의존성을 Nix로 처음부터 재빌드하지 않고, 이미 검증된 Docker 기반 빌드
-  파이프라인(build.sh)의 산출물을 그대로 신뢰한다.
+  재포장하는 파생물. nixpkgs의 vscode/discord류와 동일한 패턴 — tss-esapi 등 네이티브
+  의존성을 Nix로 처음부터 재빌드하지 않고, 이미 검증된 Docker 기반 빌드 파이프라인
+  (build.sh)의 산출물을 그대로 신뢰한다. (webview 시절 필요했던 webkitgtk_4_1/
+  libsoup_3 의존성은 로드맵 F에서 webview 자체를 제거하며 함께 뺐다.)
 
   postinst.sh/AppRun.template이 하던 systemd 유닛·D-Bus 정책·polkit daemon-setup
   action·계정 생성은 이 파생물에 포함하지 않는다 — deploy/nix/modules/{daemon,authagent}.nix
   NixOS 모듈이 선언적으로 대체한다. daemon-setup.policy(계정 설치용 pkexec 트리거)는
   NixOS 배포에서 완전히 무의미하므로 설치하지 않는다.
 
-  .deb 안의 실제 파일 배치는 `dpkg-deb -x`로 실측 확인했다(로드맵 B 이후 이 파일 배치는
-  clients/app/src-tauri/Cargo.toml의 [package.metadata.packager.deb]/externalBinaries
+  .deb 안의 실제 파일 배치는 `dpkg-deb -x`로 실측 확인했다(이 파일 배치는
+  clients/app/Cargo.toml의 [package.metadata.packager.deb]/externalBinaries
   설정 + deploy/inject-deb-scripts.sh가 만드는데, 최종 산출물로 어디에 떨어지는지는
   소스만 봐서는 알 수 없어 실제 .deb를 풀어 확인함).
 */
@@ -20,13 +22,11 @@
 , autoPatchelfHook
 , makeWrapper
 , dpkg
-, webkitgtk_4_1
 , gtk3
 , glib
 , cairo
 , gdk-pixbuf
 , dbus
-, libsoup_3
 , tpm2-tss
 , systemd
 , libayatana-appindicator
@@ -35,8 +35,34 @@
 , libGL
 , xdg-utils
 , desktop-file-utils
+, xdotool
+, runCommand
 , debSrc
 }:
+
+# tailpass-app(Docker/Ubuntu 22.04 빌드)이 링크한 libxdo.so.3를 채워주는 호환
+# 심볼릭 링크. nixpkgs 리비전에 따라 xdotool 패키지가 제공하는 SONAME이
+# libxdo.so.3(구버전 xdotool 3.x, 이 심볼릭 링크가 사실상 불필요)이거나
+# libxdo.so.4(신버전 xdotool 4.x)일 수 있어 — 실제로 이 저장소의 flake.lock
+# 고정 리비전(753cc8a3a874)은 4.x인데, `nix flake update`로 갱신되는 다른 환경
+# (예: ~/nixos)의 nixpkgs-unstable은 여전히 3.x였다 — 둘 다 대응하도록 실제
+# 존재하는 파일을 찾아 링크한다. muda(tray-icon의 전이 의존성)가 쓰는 libxdo
+# API 표면은 xdo_new/xdo_get_active_window 등 오래 안정적인 소수 함수뿐이라
+# 3.x→4.x 사이에서도 동작할 가능성이 높다고 보지만, **실제 ABI 호환성은
+# 검증하지 못했다** — 트레이 아이콘 클릭/메뉴 동작을 실기에서 반드시 확인할 것.
+let
+  libxdoCompat = runCommand "libxdo-compat" { } ''
+    mkdir -p $out/lib
+    if [ -e "${xdotool}/lib/libxdo.so.3" ]; then
+      ln -s "${xdotool}/lib/libxdo.so.3" $out/lib/libxdo.so.3
+    elif [ -e "${xdotool}/lib/libxdo.so.4" ]; then
+      ln -s "${xdotool}/lib/libxdo.so.4" $out/lib/libxdo.so.3
+    else
+      echo "libxdo-compat: ${xdotool}에서 libxdo.so.{3,4}를 찾지 못했습니다" >&2
+      exit 1
+    fi
+  '';
+in
 
 stdenv.mkDerivation {
   pname = "tailpass-app";
@@ -53,15 +79,20 @@ stdenv.mkDerivation {
   # tailpass-daemon/tailpass-daemon-nm/tailpass-cli는 glibc/libgcc뿐이라 추가 buildInputs
   # 불필요 — autoPatchelfHook이 자동으로 처리한다.
   buildInputs = [
-    webkitgtk_4_1
     gtk3
     glib
     cairo
     gdk-pixbuf
     dbus
-    libsoup_3
     tpm2-tss
     systemd # libudev.so.1 (tailpass-ceremony)
+    # libxdo.so.3 — tray-icon(egui 네이티브 앱)의 전이 의존성 muda가 링크하는
+    # ELF NEEDED 라이브러리(dlopen이 아니라 실제 링크 의존성이라 autoPatchelfHook이
+    # 직접 잡아냄). webview 시절엔 Tauri의 tray 구현이 이 의존성을 요구하지 않아
+    # package.nix에 없었는데, 로드맵 F 전환 후 처음 nix 빌드를 시도하며 발견됐다.
+    # 이 flake.lock 리비전의 xdotool 패키지는 libxdo.so.4만 제공해(SONAME 불일치)
+    # 위 libxdoCompat 심볼릭 링크 파생물을 대신 buildInputs에 넣는다.
+    libxdoCompat
   ];
 
   # 아래 라이브러리들은 전부 ELF NEEDED가 아니라 런타임 dlopen()으로 찾는다 —
@@ -76,28 +107,22 @@ stdenv.mkDerivation {
   # buildInputs에 넣어도 autoPatchelfHook이 rpath에 안 넣어주므로(ELF가 이 라이브러리들을
   # NEEDED로 선언하지 않음) makeWrapper로 LD_LIBRARY_PATH를 직접 주입해야 한다.
   #
-  # tailpass-app 전용 추가 조치:
-  #   - PATH: tauri-plugin-deep-link가 Linux에서 `tailpass://` 스킴 등록에
-  #     xdg-mime/update-desktop-database를 Command::new(...)로 셸아웃한다(크레이트
-  #     문서에 명시된 요구사항). PATH에 없으면 "deep link register failed: No such
-  #     file or directory (os error 2)"로 조용히 실패한다(앱 실행 자체는 안 막음).
-  #
-  # 한때 WEBKIT_DISABLE_COMPOSITING_MODE/WEBKIT_DISABLE_DMABUF_RENDERER를 스케일
-  # 오류의 표준 우회책으로 넣었었으나(WebKitGTK의 DMA-BUF 가속 렌더러가 스케일 팩터를
-  # 잘못 계산하는 문제), 실기 확인 결과 진짜 원인은 아래 __EGL_VENDOR_LIBRARY_DIRS
-  # 미설정이었다. AppImage(deploy/AppRun.template)는 이 두 변수를 전혀 설정하지
-  # 않는데도 정상 배율로 렌더링되므로, 이 패키지만 WebKitGTK을 비가속 경로로 강제
-  # 진입시켜 AppImage와 다른 스케일 계산 경로를 타게 만드는 원인일 가능성이 있어
-  # 제거했다 — EGL vendor dir 픽스만으로 AppImage와 동일한 가속 경로를 타는지 실기
-  # 재검증 필요.
+  # (역사적 기록 — 로드맵 F 이전 webview tailpass-app 시절의 조사) 한때
+  # WEBKIT_DISABLE_COMPOSITING_MODE/WEBKIT_DISABLE_DMABUF_RENDERER를 UI가 흰
+  # 사각형으로 렌더링되던 문제의 표준 우회책으로 넣었었으나, 실기 확인 결과 진짜
+  # 원인은 아래 __EGL_VENDOR_LIBRARY_DIRS 미설정이었다(이 버그 조사가 결국
+  # `_metadocs/claude/plan/roadmap/app-native-ui-migration.md`의 webview 제거
+  # 결정으로 이어졌다). webview 자체는 로드맵 F에서 제거됐지만, tailpass-app이
+  # 지금은 egui/glow(OpenGL)로 렌더링하므로 EGL vendor dir 문제 자체는 여전히
+  # 유효한 우려라 이 픽스는 유지한다 — glow도 GLVND를 거치는 동일 계열 렌더
+  # 경로이기 때문.
   #
   # AppImage(deploy/AppRun.template)와의 결정적 차이: AppRun은
   # `/run/opengl-driver/share/glvnd/egl_vendor.d`(NixOS가 실제 GPU 드라이버에 맞춰
   # 관리하는 GLVND EGL vendor ICD 심볼릭 링크, hardware.graphics.enable)를
   # __EGL_VENDOR_LIBRARY_DIRS로 명시한다. 이게 없으면 GLVND가 이 패키지에 딸려온
   # nixpkgs 범용 libGL/Mesa의 기본 vendor.d(호스트의 실제 GPU 드라이버와 다를 수
-  # 있음)로 폴백해 WebKitGTK의 EGL 컴포지팅 경로가 스케일 팩터를 잘못 계산 —
-  # AppImage에서는 정상인데 이 패키지에서만 UI가 축소되어 보인 실제 원인.
+  # 있음)로 폴백해 EGL 컴포지팅 경로가 스케일 팩터를 잘못 계산할 수 있다.
   # /run/opengl-driver는 빌드 시점이 아니라 대상 머신에서만 존재 여부를 알 수
   # 있으므로 --set(빌드 시 고정값)이 아니라 --run(실행 시 조건부 export)으로 넣는다.
   postFixup = let
