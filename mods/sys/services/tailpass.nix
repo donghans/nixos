@@ -27,6 +27,12 @@ let
         users = [ config.workspace.username ];
       };
       services.tailpass-authagent.enable = true;
+      # on-demand SSH 서명 사이드카(로드맵 ssh-agent-ondemand Plan 1) — 이 옵션
+      # 자체가 유일한 opt-in 체크포인트다: 켜지면 이 머신의 모든 로그인 세션에서
+      # tailpass-sshagent가 자동 시작되고 systemctl --user set-environment로
+      # SSH_AUTH_SOCK을 그쪽으로 돌린다(이미 열려 있던 셸엔 재로그인 후 반영).
+      # 기존 tailpass-cli ssh inject와는 무관하게 병행 동작.
+      services.tailpass-sshagent.enable = true;
       environment.systemPackages = [ tailpassApp ];
     };
     # xdg.mimeApps.enable(mods/gui/base/xdg.nix)로 ~/.config/mimeapps.list가 HM

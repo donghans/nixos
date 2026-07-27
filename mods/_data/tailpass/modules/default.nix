@@ -1,10 +1,6 @@
 /*
-  services.tailpass-daemon / services.tailpass-authagent NixOS 모듈 묶음.
-
-  /home/donghans/tailpass/deploy/nix/에서 그대로 vendoring한 사본이다(flake input
-  없이 pure eval 안에서 쓰기 위함 — tailpass 저장소 자체를 flake input으로 끌어오면
-  target/ 39GB가 통째로 복사되거나 --impure가 필요해짐). tailpass 쪽 deploy/nix/*.nix가
-  바뀌면 이 디렉터리(../ 포함 mods/_data/tailpass/)를 수동으로 다시 복사해야 한다.
+  services.tailpass-daemon / services.tailpass-authagent / services.tailpass-sshagent
+  NixOS 모듈 묶음. flake.nix가 nixosModules.default로 노출한다.
 */
 { tailpassPackage }:
 
@@ -18,6 +14,7 @@
   imports = [
     ./daemon.nix
     ./authagent.nix
+    ./sshagent.nix
     ../native-messaging-host.nix
     ../fonts.nix
   ];

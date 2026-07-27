@@ -76,8 +76,9 @@ stdenv.mkDerivation {
   nativeBuildInputs = [ autoPatchelfHook makeWrapper dpkg ];
 
   # ldd 실측 기반 (tailpass-app, tailpass-authagent, tailpass-ceremony의 미해결 의존성).
-  # tailpass-daemon/tailpass-daemon-nm/tailpass-cli는 glibc/libgcc뿐이라 추가 buildInputs
-  # 불필요 — autoPatchelfHook이 자동으로 처리한다.
+  # tailpass-daemon/tailpass-daemon-nm/tailpass-cli/tailpass-sshagent는 glibc/libgcc뿐이라
+  # 추가 buildInputs 불필요 — autoPatchelfHook이 자동으로 처리한다(sshagent는 egui/GUI
+  # 의존성이 전혀 없는 순수 백그라운드 프로세스라 daemon류와 동일 계열).
   buildInputs = [
     gtk3
     glib
@@ -165,7 +166,8 @@ stdenv.mkDerivation {
       usr/bin/tailpass-daemon-nm \
       usr/bin/tailpass-cli \
       usr/bin/tailpass-authagent \
-      usr/bin/tailpass-ceremony
+      usr/bin/tailpass-ceremony \
+      usr/bin/tailpass-sshagent
 
     # 로드맵 B(cargo-packager 이전) 이후 데스크톱 파일명이 productName(Tailpass)이
     # 아니라 패키지/바이너리명(tailpass-app) 기준으로 바뀌었다 — 실제 .deb를 풀어
