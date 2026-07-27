@@ -30,13 +30,14 @@ let
       environment.systemPackages = [ tailpassApp ];
     };
     # xdg.mimeApps.enable(mods/gui/base/xdg.nix)로 ~/.config/mimeapps.list가 HM
-    # 관리 심볼릭 링크(nix store, 읽기전용)라, tailpass-app이 런타임에
-    # `xdg-mime default`로 tailpass:// 스킴을 스스로 등록하려 하면
-    # "Read-only file system"으로 실패한다(tauri-plugin-deep-link가 내부적으로
-    # xdg-mime을 셸아웃 — deploy/nix/package.nix 주석 참조, 실패해도 앱 실행은
-    # 안 막는 경고일 뿐). HM 쪽에서 선언적으로 등록해 실질적으로 동작하게 한다.
+    # 관리 심볼릭 링크(nix store, 읽기전용)라, nix로 설치한 tailpass-app은
+    # deploy/AppRun.template(AppImage 전용)의 `xdg-mime default` 자가 등록 로직을
+    # 타지 않는다 — HM 쪽에서 선언적으로 등록해야 실제로 동작한다. 파일명은 실제
+    # 설치되는 tailpass-app.desktop과 일치해야 한다(deploy/nix/package.nix 191~193행
+    # 주석 참조 — cargo-packager 전환 이후 productName인 Tailpass.desktop이 아니라
+    # 패키지명 기준으로 바뀜).
     hm = {
-      xdg.mimeApps.defaultApplications."x-scheme-handler/tailpass" = [ "Tailpass.desktop" ];
+      xdg.mimeApps.defaultApplications."x-scheme-handler/tailpass" = [ "tailpass-app.desktop" ];
     };
   });
 in
