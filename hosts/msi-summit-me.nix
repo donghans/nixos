@@ -121,32 +121,6 @@ mkHostConfiguration ({
       (writeShellScriptBin "turbo-off" ''
         echo -en '\x04' | sudo dd of="/sys/kernel/debug/ec/ec0/io" bs=1 seek=152 count=1 conv=notrunc 2>/dev/null
       '')
-
-      # (목적: tailpass App은 AppImage로 배포되어 /usr/share/polkit-1/actions에
-      #  정책을 자동 설치하지 못함 — environment.systemPackages로 등록해 NixOS의
-      #  polkit actions 심링크 팜(/run/current-system/sw/share/polkit-1/actions)에
-      #  편입시킨다. 원본: ~/tailpass/clients/app/src-tauri/resources/it.bitstep.tailpass.policy)
-      (writeTextDir "share/polkit-1/actions/it.bitstep.tailpass.policy" ''
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE policyconfig PUBLIC
-          "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
-          "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
-        <policyconfig>
-          <vendor>Bitstep</vendor>
-          <vendor_url>https://tailpass.bitstep.it</vendor_url>
-          <action id="it.bitstep.tailpass.unlock">
-            <description xml:lang="ko">Tailpass 잠금 해제</description>
-            <description>Tailpass Unlock</description>
-            <message xml:lang="ko">Tailpass 잠금 해제를 위해 인증이 필요합니다</message>
-            <message>Authentication is required to unlock Tailpass</message>
-            <defaults>
-              <allow_any>auth_self</allow_any>
-              <allow_inactive>auth_self</allow_inactive>
-              <allow_active>auth_self</allow_active>
-            </defaults>
-          </action>
-        </policyconfig>
-      '')
     ];
   };
 
