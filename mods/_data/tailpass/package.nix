@@ -126,6 +126,22 @@ stdenv.mkDerivation {
   # 있음)로 폴백해 EGL 컴포지팅 경로가 스케일 팩터를 잘못 계산할 수 있다.
   # /run/opengl-driver는 빌드 시점이 아니라 대상 머신에서만 존재 여부를 알 수
   # 있으므로 --set(빌드 시 고정값)이 아니라 --run(실행 시 조건부 export)으로 넣는다.
+  #
+  # GSETTINGS_SCHEMA_DIR — 실기 확인된 크래시(GLib-GIO-ERROR "No GSettings
+  # schemas are installed on the system", G_LOG_LEVEL_ERROR라 즉시 abort):
+  # PEM 업로드 파일 다이얼로그(rfd의 gtk3 백엔드, GtkFileChooserDialog)가
+  # `org.gtk.Settings.FileChooser` 스키마를 조회하는데, 이 파생물은
+  # `wrapGAppsHook3`(nixpkgs가 GTK 앱에 흔히 쓰는 표준 훅 — buildInputs를
+  # 스캔해 GSETTINGS_SCHEMA_DIR/XDG_DATA_DIRS를 자동으로 채워줌) 없이
+  # autoPatchelfHook + 수동 wrapProgram만 쓰므로 이 환경변수가 통째로 비어
+  # 있었다. wrapGAppsHook3를 새로 얹으면 이미 있는 수동 wrapProgram 호출과
+  # 순서/중복 문제가 생길 수 있어(둘 다 $out/bin/*를 wrapProgram으로 감쌈),
+  # 이미 buildInputs에 있는 gtk3의 스키마 경로만 정확히 짚어 직접 주입하는
+  # 쪽을 택한다. `glib.getSchemaPath`는 버전 문자열을 하드코딩하지 않고
+  # `${pkg}/share/gsettings-schemas/${pkg.name}/glib-2.0/schemas`를 계산해주는
+  # nixpkgs 표준 헬퍼라 gtk3 버전이 올라가도 깨지지 않는다(직접
+  # `nix eval`로 실측: `${gtk3}/share/gsettings-schemas/gtk+3-<ver>/glib-2.0/schemas/gschemas.compiled`
+  # 안에 org.gtk.Settings.FileChooser.gschema.xml 포함 확인).
   postFixup = let
     runtimeLibPath = lib.makeLibraryPath [
       libayatana-appindicator
@@ -138,13 +154,16 @@ stdenv.mkDerivation {
         export __EGL_VENDOR_LIBRARY_DIRS="/run/opengl-driver/share/glvnd/egl_vendor.d:$__EGL_VENDOR_LIBRARY_DIRS"
       fi
     '';
+    gtk3SchemaPath = glib.getSchemaPath gtk3;
   in ''
     wrapProgram $out/bin/tailpass-app \
       --prefix LD_LIBRARY_PATH : ${runtimeLibPath} \
       --prefix PATH : ${lib.makeBinPath [ xdg-utils desktop-file-utils ]} \
+      --set GSETTINGS_SCHEMA_DIR ${lib.escapeShellArg gtk3SchemaPath} \
       --run ${lib.escapeShellArg eglVendorRunSnippet}
     wrapProgram $out/bin/tailpass-ceremony \
       --prefix LD_LIBRARY_PATH : ${runtimeLibPath} \
+      --set GSETTINGS_SCHEMA_DIR ${lib.escapeShellArg gtk3SchemaPath} \
       --run ${lib.escapeShellArg eglVendorRunSnippet}
   '';
 
