@@ -1,3 +1,6 @@
 type       = "desktop"
 preset     = "workstation"
 bootDevice = "/dev/disk/by-uuid/C125-54BB"
+
+[mods.sys.services]
+tailpass = true
