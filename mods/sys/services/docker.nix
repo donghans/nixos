@@ -21,7 +21,12 @@ mkMod __curPos "Docker Daemon and tools" ({cfg, ...}: {
       virtualisation.docker.autoPrune.enable = lib.mkIf (!cfg.rootless) true;
       virtualisation.docker.rootless.enable = lib.mkIf cfg.rootless true;
       virtualisation.docker.rootless.setSocketVariable = lib.mkIf cfg.rootless true;
-      virtualisation.docker.rootless.daemon.settings = lib.mkIf cfg.rootless {dns = ["8.8.8.8" "8.8.4.4"];};
+      virtualisation.docker.rootless.daemon.settings = lib.mkIf cfg.rootless {
+        dns = ["8.8.8.8" "8.8.4.4"];
+        # btrfs 네이티브 CoW 레이어 공유 활성화 (genple-new backlog
+        # 1785507667-docker-btrfs-storage-driver-cow 사전 작업, 2026-08-01)
+        storage-driver = "btrfs";
+      };
       users.users.${config.workspace.username}.extraGroups = lib.mkIf (!cfg.rootless) ["docker"];
       boot.kernel.sysctl."net.ipv4.ip_unprivileged_port_start" = lib.mkIf cfg.rootless 80;
     }
