@@ -164,3 +164,15 @@ kssh() {
 }
 
 [[ "$TERM" == "xterm-kitty" ]] && alias ssh='kssh'
+
+# == Background Throttle ==
+# (목적: 대용량 다운로드/수동 컴파일/스트레스 테스트 등을 background.slice(cgroup, 저우선순위)에
+#        던져서 실행 — Wayland/터미널 등 인터랙티브 세션의 CPU/IO를 뺏지 않게 함)
+# (참고: background.slice 정의는 mods/sys/base/core.cgroups.nix)
+bgrun() {
+  if [[ $# -eq 0 ]]; then
+    echo "사용법: bgrun <command> [args...]" >&2
+    return 1
+  fi
+  systemd-run --user --scope --slice=background.slice --nice=15 -- "$@"
+}

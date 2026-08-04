@@ -51,6 +51,11 @@ with lib; {
         default = null;
         description = "ZRAM pool size as percentage of physical RAM. Default: 50.";
       };
+      cpuCount = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = "Logical CPU core count. host.toml에 명시 필요 (자동 감지 없음) — CPUQuota 등 코어 수 기반 cgroup 계산에 사용.";
+      };
       diskDevice = mkOption {
         type = types.str;
         description = "Btrfs root partition device path (e.g. /dev/disk/by-label/nixos)";

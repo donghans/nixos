@@ -1,6 +1,7 @@
 type       = "laptop"
 preset     = "workstation"
 bootDevice = "/dev/disk/by-label/ESP"
+cpuCount   = 16
 
 [mods.sys.services]
 tailpass = true

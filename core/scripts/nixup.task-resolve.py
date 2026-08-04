@@ -159,6 +159,7 @@ for entry in sorted(os.listdir(hosts_dir)):
         "swapGb": host.get("swapGb"),       # None → Nix 기본값 적용 (ceil(ramGb*0.75))
         "tmpfsSize": host.get("tmpfsSize"),  # None → Nix 기본값 적용 ("100%")
         "zramPercent": host.get("zramPercent"),  # None → Nix 기본값 적용 (50)
+        "cpuCount": host.get("cpuCount"),   # None → CPUQuota 등 코어수 기반 계산 skip (자동 감지 없음, host.toml에 명시 필요)
         "bootLoader": host.get("bootLoader", "systemd-boot"),
         "cloud": cloud_provider,             # None → 클라우드 설정 미적용
         "deploy": deploy_section,            # None → 로컬 호스트 (배포 대상 아님)

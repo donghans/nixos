@@ -139,6 +139,7 @@
         swapGb = resolved.swapGb      or null;
         tmpfsSize = resolved.tmpfsSize   or null;
         zramPercent = resolved.zramPercent or null;
+        cpuCount = resolved.cpuCount or null;
         bootLoader = resolved.bootLoader or "systemd-boot";
         hasDeployRs = (resolved.deploy or null) != null;
         isRemote = (resolved.deploy or null) != null || resolved.type == "server";

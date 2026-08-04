@@ -61,6 +61,13 @@ mkPartOf "mods.sys.base" ({
       };
     };
 
+    # (목적: nixos-rebuild/nix build 등 빌드 프로세스가 데스크탑 반응성을 잠식하지 않도록 우선순위 하향)
+    # (이유: nice/ionice는 fork() 시 자식 프로세스(실제 빌더)에도 상속되므로 nix-daemon 자체만 낮춰도 충분)
+    systemd.services.nix-daemon.serviceConfig = {
+      Nice = 15;
+      IOSchedulingClass = lib.mkForce "idle"; # (nixpkgs 기본값 "best-effort"보다 낮춤)
+    };
+
     # (목적: x86_64 호스트에서 aarch64 크로스 빌드 지원.
     #         QEMU binfmt_misc 커널 등록 및 nix.settings.extra-platforms 자동 추가.)
     boot.binfmt.emulatedSystems = lib.mkIf (pkgs.stdenv.hostPlatform.system == "x86_64-linux") [

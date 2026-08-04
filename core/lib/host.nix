@@ -104,6 +104,7 @@
       swapGb = hostInfo.swapGb      or null;
       tmpfsSize = hostInfo.tmpfsSize   or null;
       zramPercent = hostInfo.zramPercent or null;
+      cpuCount = hostInfo.cpuCount or null;
       bootLoader = hostInfo.bootLoader or "systemd-boot";
       isRemote = hostInfo.isRemote      or false;
       hasDeployRs = hostInfo.hasDeployRs  or false;
