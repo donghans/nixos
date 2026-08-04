@@ -61,6 +61,18 @@ _format_root() {
         btrfs subvolume create /mnt/@home
         btrfs subvolume create /mnt/@nix
         btrfs subvolume create /mnt/@log
+        # (목적: 워크스테이션은 docker(btrfs storage-driver)+incus 컨테이너/이미지가 같은
+        #        볼륨에서 빈번히 생성/삭제되는데, full qgroup 모드는 이때마다 무거운 backref
+        #        역추적을 해서 btrfs-cleaner가 상시 부하에 걸림(2026-08-04 msi-summit-me
+        #        실측 — 이미지 197개/79GB 누적 후 qgroup 삭제 backlog 수천 개, CPU만 태우고
+        #        디스크 I/O 없이 며칠도 안 끝날 수준). squota(simple quota)는 extent를
+        #        "처음 만든 subvolume 소유"로만 단순 기록해 이 오버헤드를 회피하면서도
+        #        subvolume/프로젝트별 용량 제한(btrfs qgroup limit)은 그대로 지원 — 서버는
+        #        정밀한 공유/전용 추적(snapshot 위주 워크플로우)이 더 맞을 수 있어 제외)
+        if [[ "${_PRESET:-}" == "workstation" ]]; then
+            log_msg "Disk" "워크스테이션 프리셋 — btrfs squota(simple quota) 활성화 중..."
+            btrfs quota enable -s /mnt
+        fi
         umount /mnt
         log_exec "disk" "<" "mkfs.btrfs"
     else
