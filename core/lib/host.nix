@@ -222,6 +222,12 @@
               (pkgs'.writeShellScriptBin "nixsec" ''
                 exec /etc/nixos/core/scripts/nixsec.sh "$@"
               '')
+              (pkgs'.writeShellScriptBin "nixos-iocost-calibrate" ''
+                # fio/pv를 PATH에 묻혀서 nix-shell 진입 없이 바로 동작하게 함 —
+                # sudo가 PATH를 리셋하므로 env로 명시 전달
+                export PATH="${pkgs'.fio}/bin:${pkgs'.pv}/bin:$PATH"
+                exec sudo env "PATH=$PATH" /etc/nixos/core/scripts/iocost-calibrate.sh "$@"
+              '')
               (pkgs'.runCommand "nixup-man" {} ''
                 mkdir -p $out/share/man/man1
                 cp ${../scripts/man/nixup.1} $out/share/man/man1/nixup.1

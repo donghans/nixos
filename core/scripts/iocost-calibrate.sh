@@ -38,8 +38,8 @@ for cmd in findmnt pv dd fio lsblk; do
 done
 if [[ ${#missing[@]} -gt 0 ]]; then
   echo "필요한 명령이 없습니다: ${missing[*]}" >&2
-  echo "nix-shell -p fio pv 안에서 sudo로 실행하세요. 예:" >&2
-  echo "  nix-shell -p fio pv --run 'sudo env \"PATH=\$PATH\" $0 ${1:-}'" >&2
+  echo "nixos-iocost-calibrate 로 실행하면 fio/pv가 자동으로 PATH에 잡힙니다." >&2
+  echo "이 스크립트를 직접 실행 중이라면: nix-shell -p fio pv --run 'sudo env \"PATH=\$PATH\" $0 ${1:-}'" >&2
   exit 1
 fi
 
