@@ -63,9 +63,11 @@ mkMod __curPos "Tailscale Mesh VPN" ({
     })
   ];
   # HM 사이드: GUI 활성화 시 Tailscale 시스템 트레이 실행
+  # (이유: 기본 uwsm scope는 Restart 정책이 없어 프로세스가 죽으면 세션 끝날 때까지
+  #  복구가 안 됨 → -t service -p Restart=on-failure로 재시작 정책 부여)
   hm = lib.mkIf (cfg.enable && config.mods.gui.enable) {
     wayland.windowManager.hyprland.settings.exec-once = lib.mkOrder 500 [
-      "uwsm app -- ${pkgs.tailscale}/bin/tailscale systray"
+      "uwsm app -t service -p Restart=on-failure -p RestartSec=2 -- ${pkgs.tailscale}/bin/tailscale systray"
     ];
   };
 })
