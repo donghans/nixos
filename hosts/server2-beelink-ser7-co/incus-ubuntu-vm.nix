@@ -105,7 +105,7 @@ in {
       incus launch ubuntu:24.04 ubuntu-2404 --vm \
         -c limits.cpu=4 \
         -c limits.memory=16GiB \
-        -d root,size=64GiB \
+        -d root,size=128GiB \
         -d eth0,type=nic,nictype=bridged,parent=br-lan,mtu=1400
     '';
   };
