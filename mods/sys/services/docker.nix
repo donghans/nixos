@@ -5,7 +5,11 @@
   unstable,
   ...
 }:
-mkMod __curPos "Docker Daemon and tools" ({cfg, ...}: {
+mkMod __curPos "Docker Daemon and tools" ({
+  cfg,
+  pkgs,
+  ...
+}: {
   options.rootless = lib.mkOption {
     type = lib.types.bool;
     default = true;
@@ -14,6 +18,53 @@ mkMod __curPos "Docker Daemon and tools" ({cfg, ...}: {
 
   os = lib.mkMerge [
     {
+      # (목적: 컨테이너 안에서 apk/npm 등이 DNS 응답의 AAAA 레코드를 골라 붙으려다
+      #        실패하는 문제 방지 — rootless netns(slirp4netns)에는 IPv6 경로가
+      #        전혀 없는데(호스트 자체도 핫스팟에서는 IPv6 라우트가 없음, 2026-08-24 실측),
+      #        apk 등 일부 클라이언트는 AAAA 응답을 받으면 A로 폴백하지 않고 그대로
+      #        연결 시도하다 타임아웃 → "DNS: transient error"로 오진단됨.
+      #        고정 IP(10.255.255.53)를 가진 더미 인터페이스에 AAAA를 걸러주는
+      #        로컬 dnsmasq를 띄우고, 컨테이너 DNS를 그쪽으로 돌려서 원천 차단.
+      #        고정 IP를 쓰는 이유: Tailscale IP(100.64.0.4)는 재등록 시 바뀔 수 있어
+      #        하드코딩하기 부적합 — dockerd 전용 IP를 별도로 소유)
+      # (주의: 이 호스트는 systemd-networkd가 아니라 NetworkManager를 쓰므로
+      #        systemd.network.netdevs는 무시됨(2026-08-24 실측: systemd-networkd.service
+      #        자체가 존재하지 않아 dnsmasq가 "unknown interface dockerdns0"로 죽음)
+      #        → networkd에 의존하지 않는 순수 iproute2 oneshot으로 더미 인터페이스 생성)
+      systemd.services.docker-dns-dummy-iface = {
+        description = "dockerdns0 dummy interface for AAAA-filtering local resolver";
+        wantedBy = ["multi-user.target"];
+        before = ["dnsmasq.service"];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          ExecStart = pkgs.writeShellScript "docker-dns-dummy-iface-start" ''
+            set -e
+            ${pkgs.iproute2}/bin/ip link show dockerdns0 >/dev/null 2>&1 || \
+              ${pkgs.iproute2}/bin/ip link add dockerdns0 type dummy
+            ${pkgs.iproute2}/bin/ip addr replace 10.255.255.53/32 dev dockerdns0
+            ${pkgs.iproute2}/bin/ip link set dockerdns0 up
+          '';
+          ExecStop = pkgs.writeShellScript "docker-dns-dummy-iface-stop" ''
+            ${pkgs.iproute2}/bin/ip link del dockerdns0 || true
+          '';
+        };
+      };
+      services.dnsmasq = {
+        enable = true;
+        settings = {
+          interface = ["dockerdns0"];
+          bind-interfaces = true;
+          no-resolv = true;
+          no-hosts = true;
+          server = ["100.100.100.100"];
+          filter-AAAA = true;
+        };
+      };
+      systemd.services.dnsmasq = {
+        after = ["docker-dns-dummy-iface.service"];
+        requires = ["docker-dns-dummy-iface.service"];
+      };
       nixpkgs.overlays = [
         (_final: _prev: {inherit (unstable) docker-compose;})
       ];
@@ -22,7 +73,15 @@ mkMod __curPos "Docker Daemon and tools" ({cfg, ...}: {
       virtualisation.docker.rootless.enable = lib.mkIf cfg.rootless true;
       virtualisation.docker.rootless.setSocketVariable = lib.mkIf cfg.rootless true;
       virtualisation.docker.rootless.daemon.settings = lib.mkIf cfg.rootless {
-        dns = ["8.8.8.8" "8.8.4.4"];
+        # (이유: 모바일 핫스팟 테더링에서 공용 DNS(8.8.8.8/8.8.4.4)로 나가는 순수 UDP/53 질의를
+        #        통신사가 드롭하는 것을 2026-08-24 실측 확인 — raw UDP DNS 질의로 8.8.8.8/1.1.1.1은
+        #        타임아웃, 100.100.100.100(Tailscale MagicDNS, WireGuard 터널로 캡슐화되어
+        #        통신사가 일반 DNS 트래픽으로 식별 못함)은 정상 응답. 안정적인 공유기 환경에서는
+        #        원래도 문제없이 동작하던 값이라 회귀 없음.
+        #        다만 100.100.100.100을 그대로 쓰면 AAAA 응답 때문에 apk 등이 실패하는
+        #        문제가 남아있어(위 dnsmasq 참고), 최종적으로는 그 필터를 거친
+        #        10.255.255.53을 사용)
+        dns = ["10.255.255.53"];
         # btrfs 네이티브 CoW 레이어 공유 활성화 (genple-new backlog
         # 1785507667-docker-btrfs-storage-driver-cow 사전 작업, 2026-08-01)
         storage-driver = "btrfs";
@@ -85,7 +144,9 @@ mkMod __curPos "Docker Daemon and tools" ({cfg, ...}: {
     # 그리고 veth/브리지 인터페이스를 systemd-networkd가 가로채지 않도록 20번으로 명시 제외
     (lib.mkIf (!cfg.rootless) {
       networking.nftables.enable = true;
-      virtualisation.docker.daemon.settings.dns = ["8.8.8.8" "8.8.4.4"];
+      # (이유: 위 rootless 분기와 동일 — 모바일 핫스팟에서 8.8.8.8/8.8.4.4 UDP/53 질의가
+      #        통신사에 의해 드롭되는 문제 회피 + AAAA 필터링, 2026-08-24)
+      virtualisation.docker.daemon.settings.dns = ["10.255.255.53"];
       systemd.network.networks."20-docker-veth" = {
         matchConfig.Name = "veth* br-* docker*";
         linkConfig.Unmanaged = true;
