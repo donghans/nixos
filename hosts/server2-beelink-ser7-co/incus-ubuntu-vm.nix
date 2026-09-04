@@ -7,7 +7,11 @@
     set -euo pipefail
     INSTANCE="ubuntu-2404"
     SNAP_PREFIX="daily-"
-    SNAP_LOCAL_KEEP=7
+    # 2026-09-04: 7→1 — 로컬 스냅샷은 오늘치 1개만 둔다(빠른 롤백용). 이력은 로컬에 쌓지 않고
+    # mac-studio restic 저장소(30일 보관, 아래)가 전담한다. 원인: btrfs 쿼터(256GiB)가 매일
+    # 스냅샷 7개 누적으로 꽉 차 ubuntu-2404 VM 파일시스템이 I/O 에러로 죽는 사고가 있었다 —
+    # 로컬 스냅샷이 원본과 같은 쿼터를 그대로 물려받아 실사용량을 배로 불렸다.
+    SNAP_LOCAL_KEEP=1
     SNAP_NAME="$SNAP_PREFIX$(date +%Y-%m-%d)"
     SNAP_PATH="/var/lib/incus/storage-pools/default/virtual-machines-snapshots/$INSTANCE"
     SSH_KEY="/var/lib/nix-secrets/backup/ssh-key"
