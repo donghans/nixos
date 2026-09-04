@@ -4,8 +4,8 @@
 mkHostConfiguration ({config, ...}: {
   os = {
     imports = [
-      ./headscale-vps/headscale.nix
-      ./headscale-vps/headscale-db-backup.nix
+      ./headscale-vps/e-772610158-xyz.nix
+      ./headscale-vps/e-772610158-xyz-db-backup.nix
       ./headscale-vps/ip-forwarding.nix
     ];
 
@@ -26,7 +26,9 @@ mkHostConfiguration ({config, ...}: {
     ];
 
     networking.nameservers = ["1.1.1.1" "8.8.8.8"];
-    services.resolved.extraConfig = "Cache=no-negative";
+    services.resolved.extraConfig = ''
+      Cache=no-negative
+    '';
 
     # Vultr에는 보안그룹 없음 → NixOS 방화벽 직접 제어
     networking.firewall = {
@@ -116,6 +118,12 @@ mkHostConfiguration ({config, ...}: {
     environment.etc."caddy/sites/genple.caddy".text = ''
       genple.ai {
           reverse_proxy 100.64.0.20:80
+      }
+    '';
+
+    environment.etc."caddy/sites/shopify-dk-sync.caddy".text = ''
+      whosfanstore-webhook.qubitic.com {
+          reverse_proxy 100.64.0.25:9100
       }
     '';
 

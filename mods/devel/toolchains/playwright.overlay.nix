@@ -63,20 +63,20 @@ _final: prev: let
     libxml2
     zlib
     # X11 / XCB — headless 모드에서도 Chromium이 요구하는 라이브러리들
-    xorg.libxcb
-    xorg.libXext
-    xorg.libX11
-    xorg.libXcomposite
-    xorg.libXdamage
-    xorg.libXfixes
-    xorg.libXrandr
-    xorg.libXrender
-    xorg.libXi
-    xorg.libXtst
-    xorg.libxshmfence
-    xorg.libXau
-    xorg.libXdmcp
-    xorg.libXcursor
+    libxcb
+    libxext
+    libx11
+    libxcomposite
+    libxdamage
+    libxfixes
+    libxrandr
+    libxrender
+    libxi
+    libxtst
+    libxshmfence
+    libxau
+    libxdmcp
+    libxcursor
   ]);
 in {
   playwright-wrapped = prev.mkWrapper {

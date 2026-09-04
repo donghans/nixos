@@ -9,6 +9,7 @@ mkPartOf "mods.gui" ({lib, ...}: {
       input = {
         kb_layout = "kr";
         kb_options = "korean:ralt_hangul,korean:rctrl_hanja";
+        resolve_binds_by_sym = true;
 
         follow_mouse = 1;
 
@@ -35,7 +36,6 @@ mkPartOf "mods.gui" ({lib, ...}: {
       };
 
       dwindle = {
-        pseudotile = true;
         preserve_split = true;
       };
 
@@ -45,37 +45,61 @@ mkPartOf "mods.gui" ({lib, ...}: {
       };
     };
 
-    wayland.windowManager.hyprland.settings.windowrulev2 = [
-      # 모든 창을 기본적으로 플로팅
-      "float, class:.*"
+    wayland.windowManager.hyprland.extraConfig = ''
+      -- 모든 창을 기본적으로 플로팅
+      hl.window_rule({ match = { class = ".*" }, float = true })
 
-      "nofocus, class:^$, title:^$, xwayland:1, floating:1, fullscreen:0, pinned:0"
+      hl.window_rule({
+        match = { class = "^$", title = "^$", xwayland = true, float = true, fullscreen = false, pin = false },
+        no_initial_focus = true
+      })
 
-      # Authentication Prompts (Gnome Keyring, Polkit)
-      "float, class:^(gcr-prompter)$"
-      "dimaround, class:^(gcr-prompter)$"
-      "center, class:^(gcr-prompter)$"
-      "stayfocused, class:^(gcr-prompter)$"
-      "pin, class:^(gcr-prompter)$"
+      -- Authentication Prompts (Gnome Keyring, Polkit)
+      hl.window_rule({
+        match = { class = "^(gcr-prompter)$" },
+        float = true,
+        dim_around = true,
+        center = true,
+        stay_focused = true,
+        pin = true
+      })
 
-      "float, class:^(org.gnome.PolkitAgent1.*)$"
-      "dimaround, class:^(org.gnome.PolkitAgent1.*)$"
-      "center, class:^(org.gnome.PolkitAgent1.*)$"
-      "stayfocused, class:^(org.gnome.PolkitAgent1.*)$"
+      hl.window_rule({
+        match = { class = "^(org.gnome.PolkitAgent1.*)$" },
+        float = true,
+        dim_around = true,
+        center = true,
+        stay_focused = true
+      })
 
-      "float, class:hyprland-run"
-      "move 20 100%-120, class:hyprland-run"
+      hl.window_rule({
+        match = { class = "hyprland-run" },
+        float = true,
+        move = "20 100%-120"
+      })
 
-      # 1. JetBrains의 모든 팝업(툴팁, 자동완성)에 대해 애니메이션 끄기 (깜빡임의 주원인)
-      "noanim, class:^(jetbrains-.*)$, title:^(win.*)$"
+      -- 1. JetBrains의 모든 팝업(툴팁, 자동완성)에 대해 애니메이션 끄기 (깜빡임의 주원인)
+      hl.window_rule({
+        match = { class = "^(jetbrains-.*)$", title = "^(win.*)$" },
+        no_anim = true
+      })
 
-      # 2. 팝업이 포커스를 뺏지 않도록 설정하되, '내용'은 볼 수 있게 함
-      "noinitialfocus, class:^(jetbrains-.*)$, title:^(win.*)$"
-      "stayfocused, class:^(jetbrains-.*)$, title:^(?!win.*)$"
+      -- 2. 팝업이 포커스를 뺏지 않도록 설정하되, '내용'은 볼 수 있게 함
+      hl.window_rule({
+        match = { class = "^(jetbrains-.*)$", title = "^(win.*)$" },
+        no_initial_focus = true
+      })
+      hl.window_rule({
+        match = { class = "^(jetbrains-.*)$", title = "^(?!win.*)$" },
+        stay_focused = true
+      })
 
-      # 3. XWayland에서의 부동 소수점 반올림 문제 해결 (간혹 도움이 됨)
-      "rounding 0, class:^(jetbrains-.*)$, title:^(win.*)$"
-    ];
+      -- 3. XWayland에서의 부동 소수점 반올림 문제 해결 (간혹 도움이 됨)
+      hl.window_rule({
+        match = { class = "^(jetbrains-.*)$", title = "^(win.*)$" },
+        rounding = 0
+      })
+    '';
 
     # == Hide Clutter in Application Menu ==
     # (목적: 사용 빈도가 낮거나 배경에서 실행되는 도구들의 실행 아이콘을 숨겨 메뉴를 정리)

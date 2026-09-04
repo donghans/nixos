@@ -5,6 +5,12 @@ mkHostConfiguration ({
   ...
 }: {
   os = {
+    imports = [
+      ./msi-summit-me/touchpad-watchdog.nix
+      ./msi-summit-me/hotspot-proxy-dispatcher.nix
+      ./msi-summit-me/io-cost.nix
+    ];
+
     # llm-utils-project 관련 테스트를 위해 임시로 열어둔 포트
     networking.firewall.allowedTCPPorts = [7681];
 
@@ -23,11 +29,14 @@ mkHostConfiguration ({
       kernelModules = ["ec_sys"];
       kernelParams = [
         "i915.enable_psr=1"
-        "pci=nocrs" # (이유: ACPI 리소스 할당 충돌 방지 및 Firmware Bug 메시지 완화)
-        "irqpoll" # (이유: 노트북 터치패드 인터럽트 충돌 방지 및 하드웨어 응답성 향상)
-        "i2c_designware.disable_ps=1" # (이유: I2C 컨트롤러 절전 비활성화)
-        "psmouse.synaptics_intertouch=1" # (이유: 구형 PS/2 대신 I2C/SMBus 사용 강제)
-        "i8042.nopnp=1" # (이유: 구형 PS/2 포트 자동 탐색 충돌 방지)
+        # pci=nocrs 제거 (2026-06-30): 의도였던 firmware-bug/리소스충돌 완화 효과가 전무했고
+        #   (실재 firmware bug는 CPU토폴로지·WMI 뿐, PCI 충돌 0건), ACPI _CRS 무시 → E820 사용이
+        #   오히려 LPSS I2C(00:15.0) 컨트롤러 hang(controller timed out)의 유력 원인으로 판단됨.
+        "irqpoll" # (이유: 인터럽트 스톰/누락 IRQ를 폴링으로 정리 — 제거 시 발열·배터리소모 악화 체감하여 유지)
+        # 정리(2026-06-30): 아래 두 파라미터 제거.
+        #   - psmouse.synaptics_intertouch=1 : psmouse 모듈을 blacklist 했고 터치패드는 i2c_hid_acpi라 무효(no-op)
+        #   - i8042.nopnp=1 : i8042는 터치패드(I2C)가 아닌 내장 키보드용 — 터치패드 문제와 무관
+        # 참고: i2c_designware.disable_ps=1 은 kernel 6.18+ 에서 모듈이 없어 무효 → udev 룰로 대체
       ];
 
       blacklistedKernelModules = [
@@ -46,10 +55,24 @@ mkHostConfiguration ({
 
     services.libinput.enable = true;
 
+    # (이유: TLP RUNTIME_PM_DENYLIST는 TLP 서비스 시작 후 적용되어 부팅 초기 probe 시점엔 늦음.
+    #  kernel 6.18+ 에서 i2c_designware 모듈이 없어 disable_ps 파라미터도 무효가 됨.
+    #  I2C 컨트롤러(0x51e8)가 runtime suspend 상태로 터치패드 probe 실패 방지를 위해
+    #  udev add 타이밍에 직접 power/control=on 강제.)
+    #
+    # (이유: idma64.0과 i2c_designware.0이 IRQ 27을 공유하는데, DMA 모드에서 spurious interrupt가
+    #  발생하면 irqpoll 없이는 발열/배터리 문제, irqpoll 있으면 I2C 상태머신 타이밍 어긋남 →
+    #  "controller timed out" storm. idma64.0을 언바인드해 i2c_designware를 PIO 모드로 강제하면
+    #  IRQ 27 단독 소유 → 두 문제 동시 해결 기대.)
+    services.udev.extraRules = ''
+      ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x8086", ATTR{device}=="0x51e8", ATTR{power/control}="on"
+      ACTION=="bind", SUBSYSTEM=="platform", KERNEL=="idma64.0", RUN+="${pkgs.bash}/bin/sh -c 'echo idma64.0 > /sys/bus/platform/drivers/idma64/unbind'"
+    '';
+
     # == Services & Hardware ==
     # (목적: 부팅 시 I2C 버스 간섭 방지)
     networking.modemmanager.enable = false;
-    services.fprintd.enable = false; # (이유: 지문 인식 초기화 시 프리징 방지)
+    services.fprintd.enable = true; # (Goodix 27c6:6094 MOC 지문 센서 — libfprint goodixmoc 드라이버로 동작 확인됨)
 
     # (참고: TLP 기본 laptop 프로파일은 mods/sys/base/os/_power.nix에서 적용됨)
     # MSI 전용 TLP quirk 추가 설정
@@ -67,7 +90,7 @@ mkHostConfiguration ({
 
       # (이유: I2C 터치패드 디바이스 런타임 절전 제외)
       RUNTIME_PM_DENYLIST = "00:12.0 00:15.0";
-      RUNTIME_PM_DRIVER_DENYLIST = "i2c_designware intel_ishtp intel_ishtp_hid intel_lpss_pci";
+      RUNTIME_PM_DRIVER_DENYLIST = "intel-lpss intel_ishtp intel_ishtp_hid";
     };
 
     # == Power Management & Interfaces ==
@@ -81,6 +104,11 @@ mkHostConfiguration ({
 
     # (목적: Wi-Fi 네트워크 절전 방지)
     networking.networkmanager.wifi.powersave = false;
+
+    programs.appimage = {
+      enable = true;
+      binfmt = true;
+    };
 
     environment.systemPackages = with pkgs; [
       intel-media-driver
@@ -99,7 +127,7 @@ mkHostConfiguration ({
 
   hm = {
     wayland.windowManager.hyprland = {
-      touchpadToggleKey = "$mainMod CTRL, XF86TouchpadToggle";
+      touchpadToggleKey = "SUPER + CTRL, F24";
       lidSwitchOnExtraCmd = "tlp bat";
       lidSwitchOffExtraCmd = "tlp start";
       settings = {
@@ -110,7 +138,7 @@ mkHostConfiguration ({
 
         input.touchpad = {
           natural_scroll = true;
-          tap-to-click = true;
+          tap_to_click = true;
           disable_while_typing = true;
         };
       };

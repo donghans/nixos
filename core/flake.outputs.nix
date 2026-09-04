@@ -1,6 +1,5 @@
 {
   nixpkgs,
-  home-manager,
   deploy-rs,
   ...
 } @ inputs: let
@@ -87,6 +86,7 @@
     gitName = anyResolved.git.name;
     gitEmail = anyResolved.git.email;
     inherit (anyResolved.git) nixosRepo;
+    pkgsVersion = anyResolved.pkgsVersion or anyResolved.rollingStateVersion;
   };
 
   # == Builders ==
@@ -103,7 +103,12 @@
       type = "desktop";
       isISO = true;
       # ISO는 ephemeral 환경이므로 resolver 없이 base.toml의 rollingStateVersion으로 고정
-      workspaceMeta = workspaceMeta // {stateVersion = workspaceMeta.rollingStateVersion;};
+      workspaceMeta =
+        workspaceMeta
+        // {
+          stateVersion = workspaceMeta.rollingStateVersion;
+          pkgsVersion = workspaceMeta.rollingStateVersion;
+        };
       # ISO는 resolver를 거치지 않으므로 iso 프리셋을 직접 주입
       # hmModules: HM 컨텍스트에도 mods 활성화 플래그 주입 (mkPartOf cfg.enable 조건 충족)
       extraModules = [
@@ -129,11 +134,12 @@
       workspaceMeta
       // {
         inherit (resolved) hostname type username;
-        inherit (resolved) stateVersion;
+        inherit (resolved) stateVersion pkgsVersion;
         ramGb = resolved.ramGb       or null;
         swapGb = resolved.swapGb      or null;
         tmpfsSize = resolved.tmpfsSize   or null;
         zramPercent = resolved.zramPercent or null;
+        cpuCount = resolved.cpuCount or null;
         bootLoader = resolved.bootLoader or "systemd-boot";
         hasDeployRs = (resolved.deploy or null) != null;
         isRemote = (resolved.deploy or null) != null || resolved.type == "server";
@@ -181,11 +187,13 @@
   homeConfigurationsAll = builtins.listToAttrs (nixpkgs.lib.concatMap (name: let
       h = mkPerHostBindings name;
       inherit (h) resolved perHostMeta modsModule rootModsModule coverageModule;
+      pkgsVersionClean = builtins.replaceStrings ["."] [""] resolved.pkgsVersion;
+      selectedHomeManager = inputs."home-manager-${pkgsVersionClean}" or inputs.home-manager;
       hostCtx = mkHostContext (resolved // {workspaceMeta = perHostMeta;});
     in [
       {
         name = "${resolved.username}@${name}";
-        value = home-manager.lib.homeManagerConfiguration {
+        value = selectedHomeManager.lib.homeManagerConfiguration {
           inherit (hostCtx) pkgs;
           extraSpecialArgs =
             {
@@ -203,7 +211,7 @@
       }
       {
         name = "root@${name}";
-        value = home-manager.lib.homeManagerConfiguration {
+        value = selectedHomeManager.lib.homeManagerConfiguration {
           inherit (hostCtx) pkgs;
           extraSpecialArgs =
             {

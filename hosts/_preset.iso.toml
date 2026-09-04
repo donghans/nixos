@@ -20,6 +20,7 @@ caddy              = false
 nix-cache-proxy    = false
 aws-roles-anywhere = false
 print-co           = false
+tailpass           = false
 
 [mods.gui]
 enable = true

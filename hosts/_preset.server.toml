@@ -1,6 +1,7 @@
 # Server Preset
 # stateVersion 명시 → isRolling = false (서버는 stable nixpkgs 고정)
 stateVersion = "25.11"
+pkgsVersion = "25.11"
 
 [mods.sys]
 base = true
@@ -22,6 +23,7 @@ docker           = false
 nix-cache-proxy    = false
 aws-roles-anywhere      = false
 print-co                = false
+tailpass                = false
 
 [mods.gui]
 enable = false

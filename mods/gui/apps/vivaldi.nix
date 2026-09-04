@@ -18,7 +18,6 @@ in {
     home.packages = [
       ((unstable.vivaldi.override {
           proprietaryCodecs = true;
-          inherit (unstable) vivaldi-ffmpeg-codecs;
           commandLineArgs = ["--lang=ko"];
         }).overrideAttrs (old: {
           postInstall =

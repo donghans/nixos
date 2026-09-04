@@ -22,7 +22,7 @@ _final: prev: let
     unset _lib _bin _schema
   '';
 
-  # (목적: Node 환경에 Prisma 탐색 및 PNPM 글로벌 최적화 변수 주입)
+  # (목적: Node 환경에 Prisma 탐색 및 LD_LIBRARY_PATH 주입)
   wrapNode = pkg: binName: (prev.mkWrapper {
     inherit pkg binName;
     libs = with prev; [stdenv.cc.cc openssl];
@@ -30,32 +30,63 @@ _final: prev: let
     run = prismaDetectionScript;
   });
 
-  # (목적: yarn 명령어를 pnpm으로 대리 실행하는 호환성 래퍼)
-  yarnPnpmWrapper = prev.writeShellScriptBin "yarn" ''
-    if [ -f "yarn.lock" ]; then
-      if [ -d ".git" ]; then
-        EXCLUDE_FILE=".git/info/exclude"
-        mkdir -p "$(dirname "$EXCLUDE_FILE")"
-        for item in "pnpm-lock.yaml" "node_modules"; do
-          if ! grep -q "$item" "$EXCLUDE_FILE" 2>/dev/null; then
-            echo "$item" >> "$EXCLUDE_FILE"
-          fi
-        done
-      fi
+  # (목적: 프로젝트 node_modules 경로를 registry에 추적하고 duperemove로 Btrfs block dedup)
+  npmNodeDedup = prev.writeShellScriptBin "npm-node-dedup" ''
+    set -euo pipefail
+    REGISTRY_DIR="''${XDG_DATA_HOME:-''$HOME/.local/share}/npm-node-dedup"
+    REGISTRY="''$REGISTRY_DIR/registry"
+    HASH_DIR="''${XDG_CACHE_HOME:-''$HOME/.cache}/npm-node-dedup"
+    HASHFILE="''$HASH_DIR/dedup.db"
+    mkdir -p "''$REGISTRY_DIR" "''$HASH_DIR"
 
-      if [ ! -f "pnpm-lock.yaml" ]; then
-        echo "💡 [pnpm-wrapper] yarn.lock 감지: pnpm-lock.yaml을 생성합니다..."
-        pnpm import
-      fi
-
-      echo "🚀 [pnpm-wrapper] pnpm을 통해 명령어를 실행합니다: $@"
-      exec pnpm "$@"
-    else
-      exec pnpm "$@"
+    PROJ_DIR="''${INIT_CWD:-''$PWD}"
+    PROJ_NM="''$PROJ_DIR/node_modules"
+    if [ -f "''$PROJ_DIR/package.json" ] && [ -d "''$PROJ_NM" ]; then
+      grep -qxF "''$PROJ_NM" "''$REGISTRY" 2>/dev/null || echo "''$PROJ_NM" >> "''$REGISTRY"
     fi
+
+    [ -f "''$REGISTRY" ] || exit 0
+    VALID=()
+    while IFS= read -r nm; do
+      [ -z "''$nm" ] && continue
+      proj=$(dirname "''$nm")
+      if [ -d "''$nm" ] && [ -f "''$proj/package.json" ]; then
+        VALID+=("''$nm")
+      fi
+    done < "''$REGISTRY"
+    printf '%s\n' "''${VALID[@]}" > "''$REGISTRY"
+
+    [ "''${#VALID[@]}" -ge 2 ] || exit 0
+    duperemove -r -d --hashfile="''$HASHFILE" "''${VALID[@]}" 2>/dev/null || true
   '';
+
+  # (목적: 순정 npm pass-through + install 시 prefer-dedupe 인라인 주입 + prune + dedup)
+  npmWrapper = prev.lib.hiPrio (prev.writeShellScriptBin "npm" ''
+    REAL_NPM="${prev.nodejs_24}/bin/npm"
+    CMD="''${1:-}"
+
+    case "''$CMD" in
+      install|i)
+        shift
+        "''$REAL_NPM" install --prefer-dedupe "$@"
+        EXIT=$?
+        [ "''$EXIT" -eq 0 ] && "''$REAL_NPM" prune 2>/dev/null || true
+        [ "''$EXIT" -eq 0 ] && npm-node-dedup 2>/dev/null || true
+        exit "''$EXIT"
+        ;;
+      ci)
+        "''$REAL_NPM" "$@"
+        EXIT=$?
+        [ "''$EXIT" -eq 0 ] && npm-node-dedup 2>/dev/null || true
+        exit "''$EXIT"
+        ;;
+      *)
+        exec "''$REAL_NPM" "$@"
+        ;;
+    esac
+  '');
 in {
   node-wrapped = wrapNode prev.nodejs_24 "node";
-  pnpm-wrapped = wrapNode prev.pnpm "pnpm";
-  pnpm-yarn-wrapper = yarnPnpmWrapper;
+  npm-wrapper = npmWrapper;
+  npm-node-dedup = npmNodeDedup;
 }

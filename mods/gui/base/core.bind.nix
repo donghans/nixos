@@ -33,73 +33,85 @@ mkPartOf "mods.gui" ({
   '';
 in {
   hm = {
-    wayland.windowManager.hyprland.settings = {
-      bind =
-        [
-          "$mainMod, Q, killactive,"
-          "$mainMod SHIFT, Q, exec, command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch exit"
-          "$mainMod, F, togglefloating,"
-          "$mainMod, P, exec, ${fuzzel}"
-          "$mainMod, V, exec, ${cliphist} list | ${fuzzel} --dmenu | ${cliphist} decode | ${wl-copy}"
-          "$mainMod, L, exec, hyprlock"
-          "$mainMod, Hangul, exec, systemctl --user restart app-org.fcitx.Fcitx5@autostart"
+    wayland.windowManager.hyprland.extraConfig = ''
+      -- absolute paths from Nix
+      local fuzzel = "${fuzzel}"
+      local cliphist = "${cliphist}"
+      local wl_copy = "${wl-copy}"
+      local swap_monitors = "${swapMonitors}/bin/hypr-swap-monitors"
+      local grim = "${grim}"
+      local slurp = "${slurp}"
+      local satty = "${satty}"
+      local capture_active_window = "${captureActiveWindow}/bin/hypr-capture-active"
 
-          # Special workspace
-          "$mainMod, S, togglespecialworkspace, magic"
-          "$mainMod SHIFT, S, movetoworkspace, special:magic"
+      -- 기본 키바인딩
+      hl.bind("SUPER + Q", hl.dsp.window.close())
+      hl.bind("SUPER + SHIFT + Q", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'"))
+      hl.bind("SUPER + F", hl.dsp.window.float({ action = "toggle" }))
+      hl.bind("SUPER + P", hl.dsp.exec_cmd(fuzzel))
+      hl.bind("SUPER + V", hl.dsp.exec_cmd(cliphist .. " list | " .. fuzzel .. " --dmenu | " .. cliphist .. " decode | " .. wl_copy))
+      hl.bind("SUPER + L", hl.dsp.exec_cmd("hyprlock"))
+      hl.bind("SUPER + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"))
 
-          # Scroll through existing workspaces with mainMod + scroll
-          "$mainMod, mouse_down, workspace, r-1"
-          "$mainMod, mouse_up, workspace, r+1"
-          "$mainMod SHIFT, mouse_down, movetoworkspace, r-1"
-          "$mainMod SHIFT, mouse_up, movetoworkspace, r+1"
-          "$mainMod SHIFT CTRL, mouse_down, movetoworkspacesilent, r-1"
-          "$mainMod SHIFT CTRL, mouse_up, movetoworkspacesilent, r+1"
+      -- Special workspace
+      hl.bind("SUPER + S", hl.dsp.workspace.toggle_special("magic"))
+      hl.bind("SUPER + SHIFT + S", hl.dsp.window.move({ workspace = "special:magic" }))
 
-          # Swap workspaces (active monitor <=> latest inactive monitor)
-          "$mainMod SHIFT, mouse:274, exec, ${swapMonitors}/bin/hypr-swap-monitors"
+      -- Scroll through existing workspaces
+      hl.bind("SUPER + mouse_down", hl.dsp.focus({ workspace = "r-1" }))
+      hl.bind("SUPER + mouse_up", hl.dsp.focus({ workspace = "r+1" }))
+      hl.bind("SUPER + SHIFT + mouse_down", hl.dsp.window.move({ workspace = "r-1" }))
+      hl.bind("SUPER + SHIFT + mouse_up", hl.dsp.window.move({ workspace = "r+1" }))
+      hl.bind("SUPER + SHIFT + CTRL + mouse_down", hl.dsp.window.move({ workspace = "r-1", follow = false }))
+      hl.bind("SUPER + SHIFT + CTRL + mouse_up", hl.dsp.window.move({ workspace = "r+1", follow = false }))
 
-          # Misc
-          ", Print, exec, ${grim} -g \"$(${slurp})\" - | ${satty} --filename -"
-          "CTRL, Print, exec, ${captureActiveWindow}/bin/hypr-capture-active"
-          "SHIFT, Print, exec, ${grim} - | ${satty} --filename -"
-        ]
-        ++ lib.optionals config.services.custom-notify-logger.enable [
-          "$mainMod, N, exec, ls -tr ${config.services.custom-notify-logger.logDir}/$USER.log* 2>/dev/null | xargs -r zcat -f | tac | ${fuzzel} --dmenu --width 150 --placeholder \"Search 30-day History...\""
-        ]
-        ++ (
-          # Workspace N
-          builtins.concatMap (key: let
-            ws =
-              if key == "0"
-              then "10"
-              else key;
-          in [
-            "$mainMod, ${key}, workspace, ${ws}"
-            "$mainMod SHIFT, ${key}, movetoworkspace, ${ws}"
-          ]) ["1" "2" "3" "4" "5" "6" "7" "8" "9" "0"]
-        )
-        ++ (
-          # Focus arrows
-          # (주의: substring 0 1은 Hyprland movefocus 방향 약어를 추출하는 트릭
-          #  "left"→"l", "right"→"r", "up"→"u", "down"→"d" — 모두 첫 글자가 방향 약어와 일치)
-          builtins.concatMap (key: [
-            "$mainMod, ${key}, movefocus, ${builtins.substring 0 1 key}"
-            "$mainMod, ${key}, alterzorder, top"
-          ]) ["left" "right" "up" "down"]
-        );
+      -- Swap workspaces
+      hl.bind("SUPER + SHIFT + mouse:274", hl.dsp.exec_cmd(swap_monitors))
 
-      bindm = [
-        "$mainMod, mouse:272, movewindow"
-        "$mainMod, mouse:273, resizewindow"
-      ];
+      -- Misc
+      hl.bind("Print", hl.dsp.exec_cmd(grim .. " -g \"$(" .. slurp .. ")\" - | " .. satty .. " --filename -"))
+      hl.bind("CTRL + Print", hl.dsp.exec_cmd(capture_active_window))
+      hl.bind("SHIFT + Print", hl.dsp.exec_cmd(grim .. " - | " .. satty .. " --filename -"))
 
-      bindr = [
-        "SUPER_SHIFT, Hangul, exec, systemctl --user restart app-org.fcitx.Fcitx5@autostart"
-      ];
+      ${lib.optionalString config.services.custom-notify-logger.enable ''
+        hl.bind("SUPER + N", hl.dsp.exec_cmd("ls -tr ${config.services.custom-notify-logger.logDir}/$USER.log* 2>/dev/null | xargs -r zcat -f | tac | " .. fuzzel .. " --dmenu --width 150 --placeholder \"Search 30-day History...\""))
+      ''}
 
-      # 터치패드 제스쳐, 3손가락 쓸어넘기로 워크스페이스 전환
-      gesture = "3, horizontal, workspace";
-    };
+      -- Workspace 1-10
+      for i = 1, 9 do
+        hl.bind("SUPER + " .. tostring(i), hl.dsp.focus({ workspace = tostring(i) }))
+        hl.bind("SUPER + SHIFT + " .. tostring(i), hl.dsp.window.move({ workspace = tostring(i) }))
+      end
+      hl.bind("SUPER + 0", hl.dsp.focus({ workspace = "10" }))
+      hl.bind("SUPER + SHIFT + 0", hl.dsp.window.move({ workspace = "10" }))
+
+      -- Focus arrows
+      local directions = {
+        left = "l",
+        right = "r",
+        up = "u",
+        down = "d"
+      }
+      for key, dir in pairs(directions) do
+        hl.bind("SUPER + " .. key, function()
+          hl.dispatch(hl.dsp.focus({ direction = dir }))
+          hl.dispatch(hl.dsp.window.alter_zorder({ mode = "top" }))
+        end)
+      end
+
+      -- Mouse drag (bindm)
+      hl.bind("SUPER + mouse:272", hl.dsp.window.drag(), { mouse = true })
+      hl.bind("SUPER + mouse:273", hl.dsp.window.resize(), { mouse = true })
+
+      -- Release bindings (bindr)
+      hl.bind("SUPER + SHIFT + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"), { release = true })
+
+      -- Gestures
+      hl.gesture({
+        fingers = 3,
+        direction = "horizontal",
+        action = "workspace"
+      })
+    '';
   };
 })

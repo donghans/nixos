@@ -95,13 +95,38 @@ if [ "$_action_flags" -gt 1 ]; then
 fi
 unset _action_flags
 
-# 3. Logging & Lock
+# 3. Trap & Sudo 사전 인증 (인자 파싱 직후 — 가능한 빨리 sudo 획득)
+# trap을 먼저 등록해야 keepalive 시작 후 조기 exit 시에도 cleanup()이 호출됨
+trap 'handle_signal SIGINT' INT
+trap 'handle_signal SIGTERM' TERM
+trap cleanup EXIT
+
+SUDO_KEEPALIVE_PID=""
+_needs_sudo=false
+if { [ "$TARGET_PROFILE" = "os" ] || [ "$TARGET_PROFILE" = "all" ]; } && [ "$ACTION" != "build" ]; then
+    _needs_sudo=true
+fi
+if [ "$DO_CLEAN" = true ] && [ "$CLEAN_TARGET" = "all" ]; then
+    _needs_sudo=true
+fi
+if [ "$_needs_sudo" = true ]; then
+    sudo -v
+    ( while true; do sudo -n true; sleep 60; done ) &
+    SUDO_KEEPALIVE_PID=$!
+fi
+unset _needs_sudo
+
+# sudo 획득(또는 불필요) 이후부터 시간 측정 — 인증 대기 시간 제외
+_START_TIME=$(date +%s)
+_START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
+
+# 4. Logging & Lock
 exec 3>&1
 LOG_TIMESTAMP=$(date +%Y%m%dT%H%M%S)
 setup_logging "$(resolve_log_name)"
 acquire_lock
 
-# 4. Resolve & Host Detection
+# 5. Resolve & Host Detection
 mkdir -p "$JSON_DIR"
 python3 -B "$SCRIPT_DIR/nixup.task-resolve.py" "$NIXOS_PATH" "$JSON_DIR" >/dev/null
 
@@ -121,35 +146,11 @@ if [ "$DO_CLEAN" != true ] && [ "$TARGET_PROFILE" != "fix-unstable" ]; then
     HOST_SPECIFIC_LOCK="$LOCK_STORE_DIR/$( [ "$IS_ROLLING" == "true" ] && echo "_rolling.lock" || echo "$HOST_ID.lock" )"
 fi
 
-# 5. Banner & Trap
+# 6. Banner
 print_init_banner
 IS_SUCCESS=false
-trap 'handle_signal SIGINT' INT
-trap 'handle_signal SIGTERM' TERM
-trap cleanup EXIT
 
-# 5.5. Sudo 사전 인증 (빌드 완료 전 타임아웃 방지)
-SUDO_KEEPALIVE_PID=""
-_needs_sudo=false
-if { [ "$TARGET_PROFILE" = "os" ] || [ "$TARGET_PROFILE" = "all" ]; } && [ "$ACTION" != "build" ]; then
-    _needs_sudo=true
-fi
-if [ "$DO_CLEAN" = true ] && [ "$CLEAN_TARGET" = "all" ]; then
-    _needs_sudo=true
-fi
-if [ "$_needs_sudo" = true ]; then
-    log_msg "Notice" "sudo 인증 중..."
-    sudo -v
-    ( while true; do sudo -n true; sleep 60; done ) &
-    SUDO_KEEPALIVE_PID=$!
-fi
-unset _needs_sudo
-
-# sudo 획득(또는 불필요) 이후부터 시간 측정 — 인증 대기 시간 제외
-_START_TIME=$(date +%s)
-_START_TIME_STR=$(date "+%Y-%m-%d %H:%M:%S")
-
-# 6. Routing
+# 7. Routing
 if [ "$DO_CLEAN" = true ]; then
     log_exec "nix" ">" "clean generations (keep last $CLEAN_KEEP)"
 

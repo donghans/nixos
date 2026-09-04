@@ -1,3 +1,15 @@
-type   = "rpi"
-preset = "server"
-system = "aarch64-linux"
+type          = "rpi"
+preset        = "server"
+system        = "aarch64-linux"
+diskDevice    = "/dev/sda"
+pkgsVersion   = "26.05"
+stateVersion  = "26.05"
+
+[deploy]
+ip      = "192.168.0.2" # 타겟 머신의 IP 주소로 변경해서 사용하세요.
+sshKey  = "/home/donghans/.ssh/rnixup/rpi-4b-me.pem" # 로컬의 SSH 개인키 경로
+sshUser = "root"
+
+[mods.sys.services]
+tailscale   = true
+caddy       = true

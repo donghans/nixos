@@ -19,7 +19,7 @@ mkPartOf "mods.gui" (_: {
         blur.enabled = false;
       };
 
-      animations.enabled = "no";
+      animations.enabled = false;
 
       misc = {
         force_default_wallpaper = -1;

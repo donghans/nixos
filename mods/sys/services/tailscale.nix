@@ -28,7 +28,9 @@ mkMod __curPos "Tailscale Mesh VPN" ({
       services.tailscale.enable = true;
       services.tailscale.extraSetFlags =
         ["--operator=${config.workspace.username}"]
-        ++ lib.optionals cfg.acceptRoutes ["--accept-routes"];
+        ++ lib.optionals cfg.acceptRoutes ["--accept-routes"]
+        ++ lib.optionals cfg.advertiseExitNode ["--advertise-exit-node"]
+        ++ lib.optionals (cfg.advertiseRoutes != []) ["--advertise-routes=${lib.concatStringsSep "," cfg.advertiseRoutes}"];
       # exit node 클라이언트로 동작 시 exit node에서 돌아오는 패킷(src=1.1.1.1 등)이
       # tailscale0으로 들어오는데, 기본 strict rpfilter가 이를 drop함
       # → loose로 변경해 출구 인터페이스 일치 여부 검사 없이 라우트 존재 여부만 확인
@@ -61,9 +63,11 @@ mkMod __curPos "Tailscale Mesh VPN" ({
     })
   ];
   # HM 사이드: GUI 활성화 시 Tailscale 시스템 트레이 실행
+  # (이유: 기본 uwsm scope는 Restart 정책이 없어 프로세스가 죽으면 세션 끝날 때까지
+  #  복구가 안 됨 → -t service -p Restart=on-failure로 재시작 정책 부여)
   hm = lib.mkIf (cfg.enable && config.mods.gui.enable) {
     wayland.windowManager.hyprland.settings.exec-once = lib.mkOrder 500 [
-      "uwsm app -- ${pkgs.tailscale}/bin/tailscale systray"
+      "uwsm app -t service -p Restart=on-failure -p RestartSec=2 -- ${pkgs.tailscale}/bin/tailscale systray"
     ];
   };
 })

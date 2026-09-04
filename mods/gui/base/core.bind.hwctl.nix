@@ -50,13 +50,13 @@
 
       if [ "$CURRENT_STATUS" = "true" ]; then
         while read -r dev; do
-          hyprctl keyword "device[$dev]:enabled" false
+          hyprctl eval "hl.device({ name = \"$dev\", enabled = false })"
         done <<< "$DEVICES"
         echo "false" > "$STATUS_FILE"
         ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:touchpad -u low "Touchpad" "Disabled"
       else
         while read -r dev; do
-          hyprctl keyword "device[$dev]:enabled" true
+          hyprctl eval "hl.device({ name = \"$dev\", enabled = true })"
         done <<< "$DEVICES"
         echo "true" > "$STATUS_FILE"
         ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:touchpad -u low "Touchpad" "Enabled"
@@ -64,6 +64,14 @@
     '';
   in {
     hm = {
+      # 스크립트를 home.packages에 명시적으로 추가해 HM 클로저에 포함시킴
+      # (settings.bindl 문자열 내 스토어 경로는 의존성 추적에서 누락될 수 있음)
+      home.packages = lib.optionals (config.workspace.type == "laptop") [
+        toggleTouchpad
+        volumeControl
+        brightnessControl
+      ];
+
       wayland.windowManager.hyprland.settings = {
         # == Generic Media Bindings ==
         bindel =
@@ -83,8 +91,8 @@
           "${config.wayland.windowManager.hyprland.touchpadToggleKey}, exec, ${toggleTouchpad}/bin/hypr-toggle-touchpad"
 
           # 덮개 스위치 (로그인 잠금 및 전원 관리)
-          ", switch:on:Lid Switch, exec, loginctl lock-session && hyprctl dispatch dpms off${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd != "") " && ${config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd}"}"
-          ", switch:off:Lid Switch, exec, hyprctl dispatch dpms on${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd != "") " && ${config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd}"}"
+          ", switch:on:Lid Switch, exec, loginctl lock-session && hyprctl dispatch \"hl.dsp.dpms({ action = 'disable' })\"${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd != "") " && ${config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd}"}"
+          ", switch:off:Lid Switch, exec, hyprctl dispatch \"hl.dsp.dpms({ action = 'enable' })\"${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd != "") " && ${config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd}"}"
         ];
       };
     };

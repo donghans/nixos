@@ -16,15 +16,31 @@
     workspaceMeta,
     ...
   }: let
-    pkgs = import nixpkgs {
+    pkgsVersionClean = builtins.replaceStrings ["."] [""] workspaceMeta.pkgsVersion;
+    selectedNixpkgs = inputs."nixpkgs-${pkgsVersionClean}" or inputs.nixpkgs;
+    selectedHomeManager = inputs."home-manager-${pkgsVersionClean}" or inputs.home-manager;
+
+    pkgs = import selectedNixpkgs {
       localSystem = system;
       config.allowUnfree = true;
+      config.permittedInsecurePackages = [
+        "electron-39.8.10"
+        "docker-28.5.2"
+        "incus-lts-6.0.6-unstable-2026-03-27"
+        "incus-lts-client-6.0.6-unstable-2026-03-27"
+      ];
       overlays = customOverlays;
     };
 
     unstable = import nixpkgs-unstable {
       localSystem = system;
       config.allowUnfree = true;
+      config.permittedInsecurePackages = [
+        "electron-39.8.10"
+        "docker-28.5.2"
+        "incus-lts-6.0.6-unstable-2026-03-27"
+        "incus-lts-client-6.0.6-unstable-2026-03-27"
+      ];
     };
 
     # .env 파일에서 특정 키의 값을 읽어오는 간단한 헬퍼
@@ -53,6 +69,12 @@
         }) {
           localSystem = system;
           config.allowUnfree = true;
+          config.permittedInsecurePackages = [
+            "electron-39.8.10"
+            "docker-28.5.2"
+            "incus-lts-6.0.6-unstable-2026-03-27"
+            "incus-lts-client-6.0.6-unstable-2026-03-27"
+          ];
         }
       else unstable;
 
@@ -82,6 +104,7 @@
       swapGb = hostInfo.swapGb      or null;
       tmpfsSize = hostInfo.tmpfsSize   or null;
       zramPercent = hostInfo.zramPercent or null;
+      cpuCount = hostInfo.cpuCount or null;
       bootLoader = hostInfo.bootLoader or "systemd-boot";
       isRemote = hostInfo.isRemote      or false;
       hasDeployRs = hostInfo.hasDeployRs  or false;
@@ -96,6 +119,7 @@
   in {
     inherit homeUser homeConfig metaConfig unstable unstable-fallback pkgs;
     inherit hasUnifiedHost unifiedHostFile;
+    inherit selectedNixpkgs selectedHomeManager;
   };
 
   # == Host Generator ==
@@ -127,7 +151,7 @@
         _hwModule
       ];
   in
-    nixpkgs.lib.nixosSystem {
+    hostCtx.selectedNixpkgs.lib.nixosSystem {
       specialArgs =
         {
           forOS = true;
@@ -150,6 +174,12 @@
             workspace = hostCtx.metaConfig;
             nixpkgs.overlays = customOverlays;
             nixpkgs.config.allowUnfree = true;
+            nixpkgs.config.permittedInsecurePackages = [
+              "electron-39.8.10"
+              "docker-28.5.2"
+              "incus-lts-6.0.6-unstable-2026-03-27"
+              "incus-lts-client-6.0.6-unstable-2026-03-27"
+            ];
 
             # (목적: mkWrapper의 NIX_LD/NIX_LD_LIBRARY_PATH가 실제로 동작하기 위한 전제조건)
             # (이유: NixOS에 /lib64/ld-linux-x86-64.so.2 stub이 없으면 외부 바이너리가 실행 불가.
@@ -161,6 +191,26 @@
               pkgs' = nixpkgs.legacyPackages.${hostInfo.system};
             in [
               (pkgs'.writeShellScriptBin "nixup" ''
+                # nix-shell 진입(~8초) 전에 sudo 선취득
+                _pf_has_build=false
+                for _pf_arg in "$@"; do
+                  case "$_pf_arg" in -b|--build) _pf_has_build=true; break ;; esac
+                done
+                _pf_needs_sudo=false
+                case "''${1:-}" in
+                  os|"")
+                    [ "$_pf_has_build" = false ] && _pf_needs_sudo=true ;;
+                  clean)
+                    for _pf_arg in "$@"; do
+                      case "$_pf_arg" in --all|-a) _pf_needs_sudo=true; break ;; esac
+                    done ;;
+                  -*)
+                    [ "$_pf_has_build" = false ] && _pf_needs_sudo=true ;;
+                esac
+                if [ "$_pf_needs_sudo" = true ]; then
+                  sudo -v
+                fi
+                unset _pf_needs_sudo _pf_has_build _pf_arg
                 exec /etc/nixos/core/scripts/nixup.sh "$@"
               '')
               (pkgs'.writeShellScriptBin "rnixup" ''
@@ -171,6 +221,12 @@
               '')
               (pkgs'.writeShellScriptBin "nixsec" ''
                 exec /etc/nixos/core/scripts/nixsec.sh "$@"
+              '')
+              (pkgs'.writeShellScriptBin "nixos-iocost-calibrate" ''
+                # fio/pv를 PATH에 묻혀서 nix-shell 진입 없이 바로 동작하게 함 —
+                # sudo가 PATH를 리셋하므로 env로 명시 전달
+                export PATH="${pkgs'.fio}/bin:${pkgs'.pv}/bin:$PATH"
+                exec sudo env "PATH=$PATH" /etc/nixos/core/scripts/iocost-calibrate.sh "$@"
               '')
               (pkgs'.runCommand "nixup-man" {} ''
                 mkdir -p $out/share/man/man1
@@ -241,7 +297,7 @@
         # (이유: deploy-rs는 root로 실행하므로 standalone HM 활성화 시 USER 불일치 오류 발생)
         ++ nixpkgs.lib.optional hostCtx.metaConfig.isRemote
         {
-          imports = [inputs.home-manager.nixosModules.home-manager];
+          imports = [hostCtx.selectedHomeManager.nixosModules.home-manager];
           home-manager = {
             useGlobalPkgs = true;
             useUserPackages = true;
@@ -264,7 +320,7 @@
         # (이유: ISO는 standalone HM 없이 부팅되므로 NixOS 모듈로 통합해야 dotfile 생성됨)
         ++ nixpkgs.lib.optional isISO
         {
-          imports = [inputs.home-manager.nixosModules.home-manager];
+          imports = [hostCtx.selectedHomeManager.nixosModules.home-manager];
           home-manager = {
             useGlobalPkgs = true;
             useUserPackages = true;
