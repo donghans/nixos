@@ -163,6 +163,37 @@ in {
         systemctl enable --now ssh
         systemctl reload ssh
       "
+
+      # 도커 이미지/빌드캐시 자동 정리 — ~/nixos mods/sys/services/docker.nix의 정책과 동일
+      # (48h 지난 이미지 정리 + 빌드캐시 20GB 상한). 2026-09-04: 이 VM 하나에 11개 프로젝트가
+      # 같이 돌면서 아무도 정리를 안 해 이미지 178GB(147GB 회수가능) · 빌드캐시 153GB(100%
+      # 회수가능)까지 쌓여 btrfs 쿼터를 꽉 채운 사고 재발 방지. 도커 자체 설치는 이 스크립트
+      # 밖에서 이뤄지므로(선언 안 됨 — 별도 부채), 이 타이머는 도커가 이미 설치돼 있다고 가정한다.
+      incus exec ubuntu-2404 -- bash -c \"cat > /etc/systemd/system/docker-prune.service\" <<'UNIT'
+[Unit]
+Description=Prune unused Docker images and build cache
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker image prune -af --filter until=48h
+ExecStart=/usr/bin/docker builder prune -af --keep-storage=20GB
+UNIT
+      incus exec ubuntu-2404 -- bash -c \"cat > /etc/systemd/system/docker-prune.timer\" <<'UNIT'
+[Unit]
+Description=Daily Docker image/build-cache cleanup
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target
+UNIT
+      incus exec ubuntu-2404 -- systemctl daemon-reload
+      incus exec ubuntu-2404 -- systemctl enable --now docker-prune.timer
     '';
   };
 
