@@ -193,7 +193,7 @@ in {
       # 같이 돌면서 아무도 정리를 안 해 이미지 178GB(147GB 회수가능) · 빌드캐시 153GB(100%
       # 회수가능)까지 쌓여 btrfs 쿼터를 꽉 채운 사고 재발 방지. (도커 설치 자체는 바로 위
       # 블록에서 선언됨 — 2026-09-04부로 더 이상 별도 부채 아님.)
-      incus exec ubuntu-2404 -- bash -c \"cat > /etc/systemd/system/docker-prune.service\" <<'UNIT'
+      incus exec ubuntu-2404 -- bash -c "cat > /etc/systemd/system/docker-prune.service" <<'UNIT'
 [Unit]
 Description=Prune unused Docker images and build cache
 After=docker.service
@@ -204,7 +204,7 @@ Type=oneshot
 ExecStart=/usr/bin/docker image prune -af --filter until=48h
 ExecStart=/usr/bin/docker builder prune -af --keep-storage=20GB
 UNIT
-      incus exec ubuntu-2404 -- bash -c \"cat > /etc/systemd/system/docker-prune.timer\" <<'UNIT'
+      incus exec ubuntu-2404 -- bash -c "cat > /etc/systemd/system/docker-prune.timer" <<'UNIT'
 [Unit]
 Description=Daily Docker image/build-cache cleanup
 
