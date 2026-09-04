@@ -51,6 +51,14 @@ mkPartOf "mods.sys.base" ({
         max-jobs = "auto";
         trusted-users = ["root" "@wheel"];
         experimental-features = ["nix-command" "flakes"];
+        # (목적: deploy-rs는 nixpkgs 소속이 아니라 별도 flake(github:serokell/deploy-rs)라
+        #        cache.nixos.org에 미리 빌드된 게 없다 — 이 캐시가 없으면 매번 소스(Rust →
+        #        crates.io 의존성)부터 빌드해야 한다. 2026-09-04: 이 구멍 때문에 crates.io가
+        #        막힌 네트워크(headscale-vps·server2·이 워크스테이션 전부 403 확인)에서
+        #        rnixup 배포가 전면 불가능했던 사고. deploy-rs 프로젝트가 매일 밤 자동으로
+        #        여러 시스템용 빌드를 이 cachix에 올려주므로 등록만 하면 재발하지 않는다.
+        extra-substituters = ["https://deploy-rs.cachix.org"];
+        extra-trusted-public-keys = ["deploy-rs.cachix.org-1:xfNobmiwF/vzvK1gpfediPwpdIP0rpDV2rYqx40zdSI="];
       };
 
       gc = {
