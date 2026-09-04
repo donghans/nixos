@@ -130,45 +130,69 @@ in {
       TimeoutStartSec = "300";
     };
     script = ''
-      # sshd가 이미 설치돼 있으면 건너뜀
-      if incus exec ubuntu-2404 -- which sshd &>/dev/null; then
+      # sshd 설치는 최초 1회만 (이후는 건너뜀). 도커 설치/정리 타이머는 아래에서
+      # 별도로 idempotent 체크하므로, sshd가 이미 있다고 전체를 건너뛰지 않는다 —
+      # 안 그러면 이미 프로비저닝된 VM엔 새로 추가한 도커 선언이 영영 반영되지 않는다.
+      if ! incus exec ubuntu-2404 -- which sshd &>/dev/null; then
+        # VM agent가 응답할 때까지 대기 (NIC 교체 후 재부팅 시간 포함)
+        for i in $(seq 1 36); do
+          incus exec ubuntu-2404 -- true 2>/dev/null && break
+          sleep 5
+        done
+
+        if ! incus exec ubuntu-2404 -- true 2>/dev/null; then
+          echo "ubuntu-2404: agent 미응답 — setup 건너뜀" >&2
+          exit 1
+        fi
+
+        # hostname 설정 (이미지 빌드 시스템 임시값 덮어쓰기)
+        incus exec ubuntu-2404 -- hostnamectl set-hostname ubuntu-2404
+        incus exec ubuntu-2404 -- bash -c "
+          sed -i 's/distrobuilder-[^ ]*/ubuntu-2404/g' /etc/hosts
+          echo ubuntu-2404 > /etc/hostname
+        "
+
+        # PermitEmptyPasswords yes: LXC proxy가 인증 레이어이므로 VM 패스워드 불필요
+        incus exec ubuntu-2404 -- apt-get update -qq
+        incus exec ubuntu-2404 -- apt-get install -y openssh-server
+        incus exec ubuntu-2404 -- bash -c "
+          sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sed -i 's/^#\?PermitEmptyPasswords.*/PermitEmptyPasswords yes/' /etc/ssh/sshd_config
+          passwd -d ubuntu
+          systemctl enable --now ssh
+          systemctl reload ssh
+        "
+      fi
+
+      # VM agent가 응답 안 하면(예: 방금 위 블록을 건너뛰고 VM이 꺼져있는 등) 이후 단계도 의미 없음
+      if ! incus exec ubuntu-2404 -- true 2>/dev/null; then
+        echo "ubuntu-2404: agent 미응답 — 도커 설치/정리 건너뜀" >&2
         exit 0
       fi
 
-      # VM agent가 응답할 때까지 대기 (NIC 교체 후 재부팅 시간 포함)
-      for i in $(seq 1 36); do
-        incus exec ubuntu-2404 -- true 2>/dev/null && break
-        sleep 5
-      done
-
-      if ! incus exec ubuntu-2404 -- true 2>/dev/null; then
-        echo "ubuntu-2404: agent 미응답 — setup 건너뜀" >&2
-        exit 1
+      # 도커 설치 — 이 VM에서 여러 프로젝트를 docker compose로 굴리는 용도로
+      # 실사용 중이나(대표님 워크로드), 지금까지 선언 안 된 수동 설치였다. 2026-09-04:
+      # 재현성을 위해 선언하되, 이미 설치돼 있으면 apt가 그냥 스킵하므로(idempotent)
+      # 이미 떠 있는 이 VM의 도커/컨테이너/이미지에는 영향이 없다 — VM이 새로 만들어질
+      # 때만 실제로 새로 설치된다. 공식 저장소(get.docker.com 방식) 사용.
+      if ! incus exec ubuntu-2404 -- which docker &>/dev/null; then
+        incus exec ubuntu-2404 -- bash -c "
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+          echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \$(. /etc/os-release && echo \"\$VERSION_CODENAME\") stable\" \
+            > /etc/apt/sources.list.d/docker.list
+          apt-get update -qq
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          systemctl enable --now docker
+        "
       fi
-
-      # hostname 설정 (이미지 빌드 시스템 임시값 덮어쓰기)
-      incus exec ubuntu-2404 -- hostnamectl set-hostname ubuntu-2404
-      incus exec ubuntu-2404 -- bash -c "
-        sed -i 's/distrobuilder-[^ ]*/ubuntu-2404/g' /etc/hosts
-        echo ubuntu-2404 > /etc/hostname
-      "
-
-      # PermitEmptyPasswords yes: LXC proxy가 인증 레이어이므로 VM 패스워드 불필요
-      incus exec ubuntu-2404 -- apt-get update -qq
-      incus exec ubuntu-2404 -- apt-get install -y openssh-server
-      incus exec ubuntu-2404 -- bash -c "
-        sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-        sed -i 's/^#\?PermitEmptyPasswords.*/PermitEmptyPasswords yes/' /etc/ssh/sshd_config
-        passwd -d ubuntu
-        systemctl enable --now ssh
-        systemctl reload ssh
-      "
 
       # 도커 이미지/빌드캐시 자동 정리 — ~/nixos mods/sys/services/docker.nix의 정책과 동일
       # (48h 지난 이미지 정리 + 빌드캐시 20GB 상한). 2026-09-04: 이 VM 하나에 11개 프로젝트가
       # 같이 돌면서 아무도 정리를 안 해 이미지 178GB(147GB 회수가능) · 빌드캐시 153GB(100%
-      # 회수가능)까지 쌓여 btrfs 쿼터를 꽉 채운 사고 재발 방지. 도커 자체 설치는 이 스크립트
-      # 밖에서 이뤄지므로(선언 안 됨 — 별도 부채), 이 타이머는 도커가 이미 설치돼 있다고 가정한다.
+      # 회수가능)까지 쌓여 btrfs 쿼터를 꽉 채운 사고 재발 방지. (도커 설치 자체는 바로 위
+      # 블록에서 선언됨 — 2026-09-04부로 더 이상 별도 부채 아님.)
       incus exec ubuntu-2404 -- bash -c \"cat > /etc/systemd/system/docker-prune.service\" <<'UNIT'
 [Unit]
 Description=Prune unused Docker images and build cache
