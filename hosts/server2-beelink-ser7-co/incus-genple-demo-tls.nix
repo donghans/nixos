@@ -37,11 +37,20 @@
       # dns_manual 모드라 실제 갱신 시엔 사람이 TXT를 다시 넣어야 동작함)
       incus exec genple-demo -- sh -c '[ -x /root/.acme.sh/acme.sh ] || curl -s https://get.acme.sh | sh -s email=donghans@bitstep.it'
 
-      incus exec genple-demo -- mkdir -p /root/certs/demo.genple.ai
+      # 인증서는 /root(700, root 전용) 아래가 아니라 /etc/caddy/certs 아래 caddy
+      # 소유로 직접 설치한다 — caddy 서비스는 openrc에서 command_user=caddy:caddy로
+      # 뜨기 때문에, /root 아래 두면 caddy 프로세스가 자기 인증서를 읽지 못해
+      # "permission denied"로 죽는다(2026-09-09, genple-dev 최초 설치 때 이 문제로
+      # 재현·확인. genple-demo는 최초 설정 당시 이미 이 경로로 수동 정정돼 있었음).
+      incus exec genple-demo -- mkdir -p /etc/caddy/certs/demo.genple.ai
+      incus exec genple-demo -- chown -R caddy:caddy /etc/caddy/certs
 
       incus exec genple-demo -- sh -c 'cat > /etc/caddy/Caddyfile' <<'CADDYFILE'
+      {
+          auto_https disable_redirects
+      }
       demo.genple.ai {
-          tls /root/certs/demo.genple.ai/fullchain.cer /root/certs/demo.genple.ai/demo.genple.ai.key
+          tls /etc/caddy/certs/demo.genple.ai/fullchain.cer /etc/caddy/certs/demo.genple.ai/demo.genple.ai.key
           reverse_proxy 127.0.0.1:80
       }
       CADDYFILE
@@ -57,10 +66,10 @@
       echo "   → 출력된 TXT 레코드(_acme-challenge.demo.genple.ai)를 Squarespace DNS에 추가" >&2
       echo "2) TXT 전파 확인 후 (dig TXT _acme-challenge.demo.genple.ai) 같은 명령 다시 실행" >&2
       echo "3) incus exec genple-demo -- /root/.acme.sh/acme.sh --install-cert -d demo.genple.ai \\" >&2
-      echo "     --cert-file /root/certs/demo.genple.ai/cert.cer \\" >&2
-      echo "     --key-file /root/certs/demo.genple.ai/demo.genple.ai.key \\" >&2
-      echo "     --fullchain-file /root/certs/demo.genple.ai/fullchain.cer \\" >&2
-      echo "     --reloadcmd 'rc-service caddy restart'" >&2
+      echo "     --cert-file /etc/caddy/certs/demo.genple.ai/cert.cer \\" >&2
+      echo "     --key-file /etc/caddy/certs/demo.genple.ai/demo.genple.ai.key \\" >&2
+      echo "     --fullchain-file /etc/caddy/certs/demo.genple.ai/fullchain.cer \\" >&2
+      echo "     --reloadcmd 'chown -R caddy:caddy /etc/caddy/certs && rc-service caddy restart'" >&2
       echo "4) incus exec genple-demo -- rc-service caddy start" >&2
       echo "" >&2
       echo "90일 인증서 → 만료 전(약 60일차) 같은 1~3 절차 반복 필요 (Squarespace TXT 자동화 불가)" >&2
