@@ -26,6 +26,7 @@ in
         ./server2-beelink-ser7-co/incus-genple-dev-tls.nix
         ./server2-beelink-ser7-co/incus-shopify-dk-sync-lxc.nix
         ./server2-beelink-ser7-co/incus-zupzup-lxc.nix
+        ./server2-beelink-ser7-co/incus-dms-lxc.nix
         ./server2-beelink-ser7-co/incus-lxc-backup.nix
       ];
 
