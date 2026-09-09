@@ -127,6 +127,24 @@ mkHostConfiguration ({config, ...}: {
       }
     '';
 
+    # dms(문서관리시스템) — server2-beelink-ser7-co의 dms LXC(100.64.0.33)에 다른
+    # 작업자가 web/api/onlyoffice/converter를 채워넣을 예정. 서비스가 아직 없어도
+    # 도메인만 미리 연결해둔다.
+    environment.etc."caddy/sites/dms.caddy".text = ''
+      web.dms.772610158.xyz {
+          reverse_proxy 100.64.0.33:3000
+      }
+      api.dms.772610158.xyz {
+          reverse_proxy 100.64.0.33:4000
+      }
+      onlyoffice.dms.772610158.xyz {
+          reverse_proxy 100.64.0.33:8082
+      }
+      converter.dms.772610158.xyz {
+          reverse_proxy 100.64.0.33:3050
+      }
+    '';
+
     systemd.tmpfiles.rules = [
       "d /etc/caddy/sites 0755 admin root -"
       "d /home/admin/landings 0755 admin users -"
