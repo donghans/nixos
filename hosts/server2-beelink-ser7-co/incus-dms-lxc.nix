@@ -78,10 +78,22 @@
       fi
 
       incus exec dms -- apt-get update -qq
-      incus exec dms -- apt-get install -y docker.io docker-compose-v2 openssh-server iptables git rsync curl
+      incus exec dms -- apt-get install -y openssh-server iptables git rsync curl
 
-      # Docker
-      incus exec dms -- systemctl enable --now docker
+      # Docker — Ubuntu 배포판 docker.io(구버전 고정)가 아니라 docker.com 공식 저장소
+      # 사용. incus-ubuntu-vm.nix와 동일한 이유: docker-compose-plugin이 apt 기본
+      # 저장소보다 훨씬 최신(예: 2026-09 기준 apt는 2.40.x, 공식 저장소는 5.x)이라
+      # 다른 작업자가 최신 compose 문법을 그대로 쓸 수 있게 하기 위함.
+      incus exec dms -- bash -c "
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        chmod a+r /etc/apt/keyrings/docker.asc
+        echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \$(. /etc/os-release && echo \"\$VERSION_CODENAME\") stable\" \
+          > /etc/apt/sources.list.d/docker.list
+        apt-get update -qq
+        apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+        systemctl enable --now docker
+      "
 
       # SSH (수동 배포용)
       incus exec dms -- sh -c '
