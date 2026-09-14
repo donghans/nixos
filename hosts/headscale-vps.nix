@@ -128,19 +128,51 @@ mkHostConfiguration ({config, ...}: {
     '';
 
     # dms(문서관리시스템) — server2-beelink-ser7-co의 dms LXC(100.64.0.33)에 다른
-    # 작업자가 web/api/onlyoffice/converter를 채워넣을 예정. 서비스가 아직 없어도
-    # 도메인만 미리 연결해둔다.
+    # 작업자가 web/api/onlyoffice/converter를 채워넣을 예정.
+    #
+    # tailscale 내부망 전용으로 바꾼 구조 (2026-09-14):
+    # - 예전엔 headscale-vps 공인 IP(80/443)로 그대로 노출 → 인터넷 전체에서 접근 가능했음
+    # - 지금은 Caddy가 headscale-vps 자신의 tailscale IP(100.64.0.14)에만 bind
+    #   → 공인 인터페이스에는 이 vhost가 아예 존재하지 않아 tailnet 밖에서는 접속 불가
+    # - Cloudflare DNS(772610158.xyz)의 A 레코드도 100.64.0.14로 돌려둬야 함 (프록시 OFF)
+    # - TLS는 Caddy 자체 auto_https 대신 security.acme(Cloudflare DNS-01)로 발급 —
+    #   dev.genple.ai/demo.genple.ai와 동일한 트릭(공인 도메인 + DNS-01 + CGNAT IP A레코드)이지만
+    #   여기서는 컨테이너 자신이 아니라 headscale-vps가 TLS 종단 + 라우팅을 대신 함
+    security.acme.acceptTerms = true;
+    security.acme.defaults.email = "772610158.xyz@gmail.com";
+    security.acme.certs = let
+      mkDmsCert = {}: {
+        dnsProvider = "cloudflare";
+        environmentFile = "/var/lib/nix-secrets/cloudflare/token";
+        group = "caddy";
+        reloadServices = ["caddy.service"];
+      };
+    in {
+      "web.dms.772610158.xyz" = mkDmsCert {};
+      "api.dms.772610158.xyz" = mkDmsCert {};
+      "onlyoffice.dms.772610158.xyz" = mkDmsCert {};
+      "converter.dms.772610158.xyz" = mkDmsCert {};
+    };
+
     environment.etc."caddy/sites/dms.caddy".text = ''
       web.dms.772610158.xyz {
+          bind 100.64.0.14
+          tls /var/lib/acme/web.dms.772610158.xyz/cert.pem /var/lib/acme/web.dms.772610158.xyz/key.pem
           reverse_proxy 100.64.0.33:3000
       }
       api.dms.772610158.xyz {
+          bind 100.64.0.14
+          tls /var/lib/acme/api.dms.772610158.xyz/cert.pem /var/lib/acme/api.dms.772610158.xyz/key.pem
           reverse_proxy 100.64.0.33:4000
       }
       onlyoffice.dms.772610158.xyz {
+          bind 100.64.0.14
+          tls /var/lib/acme/onlyoffice.dms.772610158.xyz/cert.pem /var/lib/acme/onlyoffice.dms.772610158.xyz/key.pem
           reverse_proxy 100.64.0.33:8082
       }
       converter.dms.772610158.xyz {
+          bind 100.64.0.14
+          tls /var/lib/acme/converter.dms.772610158.xyz/cert.pem /var/lib/acme/converter.dms.772610158.xyz/key.pem
           reverse_proxy 100.64.0.33:3050
       }
     '';
