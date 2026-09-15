@@ -5,8 +5,10 @@
 base = true
 
 [mods.sys.utils]
-nfd   = true
-trash = true
+nfd     = true
+trash   = true
+archive = true
+sshpass = true
 
 [mods.sys.services]
 bluetooth      = true
@@ -23,6 +25,10 @@ tailpass           = false
 
 [mods.gui]
 enable = true
+
+[mods.gui.utils]
+notify-logger   = true
+nemo-fileroller = true
 
 [mods.devel]
 enable = true

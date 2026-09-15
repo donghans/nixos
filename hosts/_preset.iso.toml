@@ -6,8 +6,10 @@
 base       = true
 
 [mods.sys.utils]
-nfd   = false
-trash = false
+nfd     = false
+trash   = false
+archive = false
+sshpass = false
 
 [mods.sys.services]
 bluetooth          = true
@@ -31,6 +33,10 @@ slack         = false
 bitwarden     = false
 speedcrunch   = true
 incus-vm      = false
+
+[mods.gui.utils]
+notify-logger   = true
+nemo-fileroller = false
 
 [mods.devel]
 enable = false
