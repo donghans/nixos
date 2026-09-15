@@ -28,7 +28,7 @@ enable = true
 
 [mods.gui.utils]
 notify-logger   = true
-nemo-fileroller = true
+xarchiver       = true
 
 [mods.devel]
 enable = true

@@ -36,7 +36,7 @@ incus-vm      = false
 
 [mods.gui.utils]
 notify-logger   = true
-nemo-fileroller = false
+xarchiver       = false
 
 [mods.devel]
 enable = false
