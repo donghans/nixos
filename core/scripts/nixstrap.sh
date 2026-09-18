@@ -116,7 +116,7 @@ fi
 
 # -- Phase 1: 입력 수집 --
 if load_params; then
-    : # params 로드됨 — review_loop에서 확인/수정
+    ensure_repo_present || exit 1
 else
     if [ -n "${NIXOS_REPO_PATH:-}" ]; then
         REPO_TMP="$NIXOS_REPO_PATH"

@@ -126,8 +126,15 @@ for entry in sorted(os.listdir(hosts_dir)):
     state_version = host.get("stateVersion", preset["stateVersion"]) or rolling_state_version
     is_rolling = host.get("stateVersion") is None and preset["stateVersion"] is None
 
-    # pkgsVersion: host.toml 명시 > preset.pkgsVersion > stateVersion
-    pkgs_version = host.get("pkgsVersion", preset.get("pkgsVersion")) or state_version
+    # pkgsVersion: host.toml 명시 > host.toml이 stateVersion을 오버라이드했다면 그 값 > preset.pkgsVersion > stateVersion
+    # (주의: host가 stateVersion만 오버라이드하고 pkgsVersion을 안 썼을 때, preset의 pkgsVersion 고정값이
+    #  그대로 이겨버리면 stateVersion과 pkgsVersion이 어긋나 home-manager 빌드가 깨짐)
+    if "pkgsVersion" in host:
+        pkgs_version = host["pkgsVersion"]
+    elif "stateVersion" in host:
+        pkgs_version = host["stateVersion"]
+    else:
+        pkgs_version = preset.get("pkgsVersion") or state_version
 
     # 검증: valid_versions가 비어있지 않다면(flake.nix 파싱 성공 시) 검증 수행
     if valid_versions and pkgs_version not in valid_versions:

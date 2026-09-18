@@ -3,6 +3,26 @@
 
 # ── 입력 수집 ──────────────────────────────────────────────────────────────────
 
+# 세션 재개(load_params) 시 REPO_TMP 재확인.
+# 이전 실행이 실패/중단되면 _trap_cleanup이 REPO_TMP를 무조건 삭제하므로,
+# 저장된 세션을 불러왔을 때 레포가 실제로 남아있는지 확인하고 없으면 조용히 재클론한다.
+ensure_repo_present() {
+    [ -f "$REPO_TMP/hosts/_base.toml" ] && return 0
+    if [ -z "${NIXOS_REPO:-}" ]; then
+        log_msg "Error" "저장된 세션에 레포지터리 정보가 없습니다."
+        return 1
+    fi
+    log_msg "Notice" "이전 세션의 레포 클론이 남아있지 않음 — $NIXOS_REPO 재클론 중..."
+    rm -rf "$REPO_TMP"
+    log_exec "git" ">" "git clone"
+    if git clone "https://github.com/$NIXOS_REPO.git" "$REPO_TMP"; then
+        log_exec "git" "<" "git clone"
+        return 0
+    fi
+    log_msg "Error" "레포 재클론 실패: $NIXOS_REPO"
+    return 1
+}
+
 ask_repo_and_clone() {
     local _prompt _input
     while true; do
