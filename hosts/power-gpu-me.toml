@@ -6,3 +6,6 @@ ramGb = 4
 [deploy]
 ip     = ""
 sshKey = "~/.ssh/power-gpu-me_ed25519"
+
+[mods.sys.services]
+tailscale = true

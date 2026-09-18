@@ -1,0 +1,2 @@
+{mkHostConfiguration, ...}:
+mkHostConfiguration ({...}: { os = {}; hm = {}; })
