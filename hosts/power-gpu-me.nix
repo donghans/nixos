@@ -30,10 +30,11 @@ mkHostConfiguration ({
       linkConfig.MTUBytes = "1400";
     };
 
-    # llama-cpp(Qwen2.5-3B 로컬 LLM 서버용, record-stt 파이프라인 stage4/Stage7)가
-    # environment.systemPackages에 없어서 GC 보호를 못 받다가 몇 차례 사라짐 - 여기에 등록해
-    # 매번 수동 재빌드하지 않도록 고정 (2026-09-22).
-    environment.systemPackages = [pkgs.whisper-cpp pkgs.llama-cpp];
+    # llama-cpp(Qwen2.5-3B 로컬 LLM 서버용, record-stt 파이프라인 stage4/Stage7)와
+    # ffmpeg(record-stt 오디오 정규화/턴 슬라이싱 단계에서 사용)가 environment.systemPackages에
+    # 없어서 GC 보호를 못 받다가 몇 차례 사라짐 - 여기에 등록해 매번 수동 재빌드하지
+    # 않도록 고정 (2026-09-22, ffmpeg는 Phase 3 파일럿 중 추가로 사라진 게 발견되어 같은 날 등록).
+    environment.systemPackages = [pkgs.whisper-cpp pkgs.llama-cpp pkgs.ffmpeg];
   };
   hm = {};
 })
