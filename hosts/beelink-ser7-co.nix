@@ -42,15 +42,27 @@ mkHostConfiguration (_: {
       enable = true;
       binfmt = true;
     };
-  };
 
-  hm = {
-    # (목적: 5분간 미입력 시 자동 잠금)
-    services.hypridle.settings.listener = [
-      {
-        timeout = 300; # 5분간 미입력 시
-        on-timeout = "loginctl lock-session";
-      }
+    # tailscale 전용 SSH (키 인증만, 비밀번호 인증 금지).
+    # trustedInterfaces=["tailscale0"](mods.sys.services.tailscale.nix)가 이미
+    # tailscale0을 방화벽 포트 필터링 없이 전부 허용하므로 allowedTCPPorts 추가 불필요.
+    services.openssh = {
+      enable = true;
+      settings.PasswordAuthentication = false;
+    };
+    # https://github.com/donghans.keys 스냅샷 (2026-09-23). 새 기기 키 추가 시 갱신 필요.
+    users.users.donghans.openssh.authorizedKeys.keys = [
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ1YJosBS9gFitroCvqGaBfUZRFkkMfj70JORbtYOn6B"
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINowCEezaabmN5jiHeaqg/6pigiBOJuY4zfeMZid51dr"
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGUwXjmMv73U2vbZzhWhb1Zq764VqJvxsA8cOgrFpA03"
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFfJ+1WOERxR/hBFrcgD2qGpNYXiU//1T4s6VRYkTRd1"
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKNt4JfcNz40HGSr4Md6lp68onJN+jOmPzywxJWadBZu"
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGImQmvdFWS2JhmyFzNiCT/Qet/D7uUm2AjmLhlB7ilw"
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGbd69iMfSzCznT+/B1C2vQK2Jh8Go74ylZ3DQ5I/epg"
     ];
   };
+
+  # (참고: 5분 미입력 자동잠금(hypridle) 제거 — wayvnc가 화면 캡처 중인데
+  # hyprlock이 뜨면 wlroots 보안 정책상 screencopy가 막혀 wayvnc가 죽는 문제 때문.
+  # 수동 잠금(hyprlock 단축키)은 여전히 가능. tailscale 전용 SSH/VNC로 접근 경계는 유지됨.)
 })

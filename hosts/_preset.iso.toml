@@ -37,6 +37,7 @@ incus-vm      = false
 [mods.gui.utils]
 notify-logger   = true
 xarchiver       = false
+wayvnc          = false
 
 [mods.devel]
 enable = false
