@@ -9,3 +9,6 @@ sshKey = "~/.ssh/power-gpu-me_ed25519"
 
 [mods.sys.services]
 tailscale = true
+
+[mods.devel.apps]
+llm-cli = true
