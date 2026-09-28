@@ -16,6 +16,7 @@ in
           enableLanForward = false;
         })
         ./server2-beelink-ser7-co/incus-ubuntu-vm.nix
+        ./server2-beelink-ser7-co/incus-snb-lxc.nix
         ./server2-beelink-ser7-co/incus-cardgame-lxc.nix
         ./server2-beelink-ser7-co/incus-adx-lxc.nix
         ./server2-beelink-ser7-co/incus-class24-lxc.nix

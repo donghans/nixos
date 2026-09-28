@@ -115,6 +115,12 @@ mkHostConfiguration ({config, ...}: {
       }
     '';
 
+    environment.etc."caddy/sites/snb.caddy".text = ''
+      snb.772610158.xyz {
+          reverse_proxy 100.64.0.37:4010
+      }
+    '';
+
     environment.etc."caddy/sites/genple.caddy".text = ''
       genple.ai {
           reverse_proxy 100.64.0.20:80
