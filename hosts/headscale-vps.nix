@@ -116,7 +116,12 @@ mkHostConfiguration ({config, ...}: {
     '';
 
     environment.etc."caddy/sites/snb.caddy".text = ''
-      snb.772610158.xyz {
+      ap.sn.772610158.xyz {
+          reverse_proxy 100.64.0.37:4010
+      }
+
+      ad.sn.772610158.xyz {
+          redir / /admin
           reverse_proxy 100.64.0.37:4010
       }
     '';
