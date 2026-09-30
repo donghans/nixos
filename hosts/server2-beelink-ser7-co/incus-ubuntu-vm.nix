@@ -25,6 +25,11 @@
     # 로컬 btrfs 스냅샷 (빠른 복구용, 7일 롤링)
     if ! ${pkgs.incus}/bin/incus snapshot list "$INSTANCE" --format csv \
         | cut -d, -f1 | grep -qx "$SNAP_NAME"; then
+      # 2026-09-28: 스냅샷 뜨기 전에 fstrim으로 게스트가 이미 지운 블록을 먼저 반환한다.
+      # 게스트 fstrim.timer는 주 1회뿐이라, 트림 안 된 블록까지 매일 스냅샷에 같이 얼어붙어
+      # 실사용량은 안 느는데도 btrfs 쿼터만 계속 누적되다 400GiB를 채워 VM이 I/O 에러로
+      # 죽는 사고가 있었다 (root.img 335G→fstrim 후 182G로 실측 확인).
+      ${pkgs.incus}/bin/incus exec "$INSTANCE" -- fstrim -av || echo "ubuntu-2404-backup: fstrim 실패, 계속 진행"
       echo "ubuntu-2404-backup: 스냅샷 생성 → $SNAP_NAME"
       ${pkgs.incus}/bin/incus snapshot create "$INSTANCE" "$SNAP_NAME"
     fi
