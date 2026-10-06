@@ -111,10 +111,32 @@ mkMod __curPos "Docker Daemon and tools" ({
         CPUWeight = 150;
         IOWeight = 150;
       };
+      # (목적: hotspot-proxy-dispatcher.nix가 핫스팟 연결 시 systemd --user 매니저의 전역
+      #        환경변수(http_proxy 등)에 SOCKS5 프록시를 세팅하는데, 그 타이밍에 docker.service가
+      #        (재)시작되면 그 프록시 env를 프로세스에 그대로 상속해버린다. 이후 핫스팟 연결이
+      #        끊겨 디스패처의 "down" 액션이 매니저 환경변수는 원복해도, 이미 그 env를 상속해
+      #        떠 있는 docker.service 프로세스 자체는 재시작시키지 않아 손대지 못한다(디스패처
+      #        자체 주석 "환경변수 쪽은 새로 실행되는 프로세스부터 적용된다" 참조) — 결과적으로
+      #        일반 wifi로 돌아온 뒤에도 dockerd가 이미 사라진 핫스팟 게이트웨이의 프록시로
+      #        이미지 pull을 시도하다 전부 타임아웃되는 사고 재현(2026-10-06, docker.service가
+      #        4시간 넘게 떠 있는 동안 프록시 env가 화석처럼 남아있었음 — 재시작으로 해소 확인).
+      #        docker.service는 이 env가 전혀 필요 없다 — 핫스팟에서의 실제 프록시 경유는
+      #        hotspot-proxy-dispatcher.nix의 nft 리다이렉트(uid 1000 아웃바운드 TCP/UDP를
+      #        커널 레벨에서 투명하게 가로챔)가 전담하고, 이건 프로세스가 proxy env를 읽는지와
+      #        무관하게 항상 적용된다. 그래서 docker.service 시작 시점의 전역 환경변수에
+      #        프록시가 섞여 있어도 무조건 벗겨내 이 재발 자체를 원천 차단한다.)
       systemd.user.services.docker.serviceConfig = lib.mkIf cfg.rootless {
         Slice = "docker.slice";
         Nice = 15; # (nice 상향 = 우선순위 하향, fork로 모든 컨테이너 프로세스에 상속)
         IOSchedulingClass = "idle";
+        UnsetEnvironment = [
+          "http_proxy"
+          "https_proxy"
+          "all_proxy"
+          "HTTP_PROXY"
+          "HTTPS_PROXY"
+          "ALL_PROXY"
+        ];
       };
 
       # (목적: rootless는 !cfg.rootless 분기의 virtualisation.docker.autoPrune 같은 내장
