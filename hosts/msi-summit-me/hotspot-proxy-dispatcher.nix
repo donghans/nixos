@@ -110,12 +110,20 @@ in {
                 "HTTP_PROXY=$PROXY_URL" "HTTPS_PROXY=$PROXY_URL" "ALL_PROXY=$PROXY_URL" \
                 "no_proxy=localhost,127.0.0.1,::1" "NO_PROXY=localhost,127.0.0.1,::1"
 
+              # redsocks_conn_max 기본값 128 — Docker(여러 스택 동시 구동 시 컨테이너
+              # 아웃바운드까지 전부 이걸 타므로) 트래픽으로 쉽게 소진돼 "reached
+              # redsocks_conn_max limit"로 신규 연결이 백오프되다 DNS/TCP가 타임아웃되는
+              # 현상 실측(2026-09-23). 주의: 이 heredoc은 redsocks.conf로 그대로 쓰이는데
+              # redsocks 설정 파서는 '#' 주석을 지원하지 않아(2026-09-23 한 번 이걸로
+              # "file parsing error ... unexpected char"로 서비스가 통째로 죽음) 여기
+              # 안에는 절대 주석을 넣지 말 것 — 설명은 전부 nix 소스 쪽(바깥)에 둘 것.
               cat > ${redsocksConf} <<EOF
         base {
             log_debug = off;
             log_info = off;
             daemon = off;
             redirector = iptables;
+            redsocks_conn_max = 1024;
         }
         redsocks {
             local_ip = 127.0.0.1;
