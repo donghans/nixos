@@ -276,6 +276,14 @@
               (hostCtx.metaConfig.isRemote && !hostCtx.metaConfig.hasDeployRs)
               false;
 
+            # (목적: 로컬 인터랙티브 호스트 — Claude Code 등이 명령마다 새 pty/세션을 쓰면서
+            #   sudo 타임스탬프가 tty/세션 단위(tty_tickets 기본값)로 쪼개져 캐시가 재사용 안 되는 문제 방지)
+            # (이유: 원격 호스트는 이미 passwordless sudo라 해당 없음 → 로컬에만 적용)
+            # (주의: 사용자 전체가 아니라 primary user 한정으로 스코프 — Defaults:<user> timestamp_type=global)
+            security.sudo.extraConfig = nixpkgs.lib.mkIf (!hostCtx.metaConfig.isRemote) ''
+              Defaults:${hostCtx.metaConfig.username} timestamp_type=global
+            '';
+
             # (목적: 로컬 호스트 primary user — 신규 설치 시 빈 비밀번호로 첫 부팅 로그인 허용)
             # (이후 passwd 실행하면 shadow 갱신 — mutableUsers=true 기본값)
             # (ISO는 nixos 유저를 installation-cd-graphical-base.nix에서 별도 관리하므로 제외)
