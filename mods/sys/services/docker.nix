@@ -16,8 +16,14 @@ mkMod __curPos "Docker Daemon and tools" ({
     description = "Use rootless Docker (per-user daemon). Set false for system-wide daemon + docker group.";
   };
 
+  # (주의: os가 mkMerge라서 mkNamedMod의 autoWrap(plain attrset → mkIf cfg.enable)이 적용되지 않는다 —
+  #        _type이 있으면 그대로 통과시키기 때문. 그래서 각 블록에 cfg.enable 조건을 직접 걸어야 한다.
+  #        예전에는 첫 블록에 이 조건이 없어서 mods.sys.services.docker = false인 호스트(서버 프리셋 기본값)에도
+  #        rootless docker, docker-prune, 아래 dnsmasq/더미 인터페이스 등이 전부 설치됐다. 2026-10-08 power-gpu-me에서
+  #        발견: 이미지/컨테이너 0개인데 docker.service가 떠 있었고, networkd 호스트에서는 더미 인터페이스를 networkd가
+  #        DHCP 대상으로 가져가 주소가 사라지기도 했다.)
   os = lib.mkMerge [
-    {
+    (lib.mkIf cfg.enable {
       # (목적: 컨테이너 안에서 apk/npm 등이 DNS 응답의 AAAA 레코드를 골라 붙으려다
       #        실패하는 문제 방지 — rootless netns(slirp4netns)에는 IPv6 경로가
       #        전혀 없는데(호스트 자체도 핫스팟에서는 IPv6 라우트가 없음, 2026-08-24 실측),
@@ -161,10 +167,10 @@ mkMod __curPos "Docker Daemon and tools" ({
         };
         wantedBy = ["timers.target"];
       };
-    }
+    })
     # 시스템 데몬은 컨테이너 아웃바운드 NAT에 nftables 필요 (Docker 28 네이티브 지원)
     # 그리고 veth/브리지 인터페이스를 systemd-networkd가 가로채지 않도록 20번으로 명시 제외
-    (lib.mkIf (!cfg.rootless) {
+    (lib.mkIf (cfg.enable && !cfg.rootless) {
       networking.nftables.enable = true;
       # (이유: 위 rootless 분기와 동일 — 모바일 핫스팟에서 8.8.8.8/8.8.4.4 UDP/53 질의가
       #        통신사에 의해 드롭되는 문제 회피 + AAAA 필터링, 2026-08-24)
