@@ -35,6 +35,12 @@ mkHostConfiguration ({
     # 없어서 GC 보호를 못 받다가 몇 차례 사라짐 - 여기에 등록해 매번 수동 재빌드하지
     # 않도록 고정 (2026-09-22, ffmpeg는 Phase 3 파일럿 중 추가로 사라진 게 발견되어 같은 날 등록).
     environment.systemPackages = [pkgs.whisper-cpp pkgs.llama-cpp pkgs.ffmpeg];
+
+    # record-stt-capture의 avcap-preview(사용자 systemd 서비스)가 로그인 세션 없이도 계속 떠 있도록 linger 선언.
+    # 지금까지는 `loginctl enable-linger`를 수동으로 해 둔 상태였다(없으면 마지막 SSH 세션이 끊길 때 서비스가 같이 죽음).
+    # 참고: nixpkgs 25.11 소스 기준 linger를 선언하지 않으면(null) NixOS는 이 사용자의 linger를 건드리지 않으므로
+    # 수동 설정도 재빌드 후 유지된다. 이 선언은 재설치/새 호스트에서 같은 상태가 재현되게 하기 위한 것.
+    users.users.${config.workspace.username}.linger = true;
   };
   hm = {};
 })
