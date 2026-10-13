@@ -30,6 +30,36 @@ mkHostConfiguration ({
       linkConfig.MTUBytes = "1400";
     };
 
+    # == 무선랜 (USB Realtek 802.11ax, 0bda:b831 / rtw89_8852bu) ==
+    # (목적: 유선 연결이 불가능한 환경 대비. iwd로 연결하고 SSID/PSK는 iwctl로 1회 등록
+    #   → /var/lib/iwd에 저장되므로 이사/네트워크 변경 시에도 nix 설정을 건드리지 않음)
+    # (참고: 연결 방법은 `sudo iwctl station wlan0 connect <SSID>`)
+    networking.wireless.iwd = {
+      enable = true;
+      # (이유: IP 설정은 systemd-networkd가 담당)
+      settings.General.EnableNetworkConfiguration = false;
+    };
+    # (이유: 0bda:b831은 mainline rtw89 USB ID 테이블에 없어 자동 로드/바인딩되지 않음.
+    #   8852BU 호환이라는 가정하에 모듈을 올리고 new_id로 수동 바인딩 — 안 되면 칩이 다른 것)
+    boot.kernelModules = ["rtw89_8852bu"];
+    systemd.services.rtw89-b831-bind = {
+      description = "Bind Realtek 0bda:b831 USB WiFi to rtw89_8852bu";
+      wantedBy = ["multi-user.target"];
+      after = ["systemd-modules-load.service"];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        # (참고: 이미 등록돼 있으면 write가 실패하므로 무시)
+        ExecStart = "${pkgs.runtimeShell} -c 'echo 0bda b831 > /sys/bus/usb/drivers/rtw89_8852bu/new_id || true'";
+      };
+    };
+    # (목적: 유선(metric 1024)보다 무선을 우선 경로로 사용)
+    systemd.network.networks."91-wireless" = {
+      matchConfig.Type = "wlan";
+      networkConfig.DHCP = "ipv4";
+      dhcpV4Config.RouteMetric = 600;
+    };
+
     # llama-cpp(Qwen2.5-3B 로컬 LLM 서버용, record-stt 파이프라인 stage4/Stage7)와
     # ffmpeg(record-stt 오디오 정규화/턴 슬라이싱 단계에서 사용)가 environment.systemPackages에
     # 없어서 GC 보호를 못 받다가 몇 차례 사라짐 - 여기에 등록해 매번 수동 재빌드하지

@@ -1,11 +1,10 @@
 type = "server"
 preset = "server"
 stateVersion = "25.11"
+# (이유: USB 무선랜(Realtek 0bda:b831)이 rtw89 USB 드라이버를 필요로 하는데 25.11의 6.12 커널엔 없음.
+#   stateVersion은 기존 설치 상태 호환 때문에 25.11 유지, 빌드용 nixpkgs만 26.05로 올려 6.18 커널 사용)
+pkgsVersion = "26.05"
 ramGb = 4
-
-[deploy]
-ip     = ""
-sshKey = "~/.ssh/power-gpu-me_ed25519"
 
 [mods.sys.services]
 tailscale = true
