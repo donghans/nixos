@@ -41,6 +41,9 @@ mkHostConfiguration ({
     };
     # (이유: 0bda:b831은 mainline rtw89 USB ID 테이블에 없어 자동 로드/바인딩되지 않음.
     #   8852BU 호환이라는 가정하에 모듈을 올리고 new_id로 수동 바인딩 — 안 되면 칩이 다른 것)
+    # (주의: new_id에 "vendor product"만 쓰면 driver_info가 비어 rtw89_usb_probe가 NULL 역참조로
+    #   커널 oops를 냄 (2026-10-13 실측, 6.18.35). 반드시 "vendor product intclass refVendor refProduct"
+    #   형식으로 mainline에 등록된 8852BU ID(0bda:b832)의 driver_info를 복사해야 함)
     boot.kernelModules = ["rtw89_8852bu"];
     systemd.services.rtw89-b831-bind = {
       description = "Bind Realtek 0bda:b831 USB WiFi to rtw89_8852bu";
@@ -50,7 +53,7 @@ mkHostConfiguration ({
         Type = "oneshot";
         RemainAfterExit = true;
         # (참고: 이미 등록돼 있으면 write가 실패하므로 무시)
-        ExecStart = "${pkgs.runtimeShell} -c 'echo 0bda b831 > /sys/bus/usb/drivers/rtw89_8852bu/new_id || true'";
+        ExecStart = "${pkgs.runtimeShell} -c 'echo \"0bda b831 ff 0bda b832\" > /sys/bus/usb/drivers/rtw89_8852bu/new_id || true'";
       };
     };
     # (목적: 유선(metric 1024)보다 무선을 우선 경로로 사용)
