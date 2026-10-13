@@ -39,9 +39,9 @@ _NEW_ROOT_NUM=""
 _PRESET="workstation"
 _STATE_VERSION=""  # 신규 호스트: 비어있으면 rolling, 값 있으면 host.toml에 기재
 _HOST_USERNAME=""  # 신규 호스트: 비어있으면 _base.toml fallback, 값 있으면 host.toml에 기재
-_DEPLOY_ENABLED=false         # true: server 신규 호스트에서 deploy-rs 설정
-_DEPLOY_SSH_KEY=""            # 관리 머신 SSH 키 경로 (비어있으면 Phase 2에서 자동 생성)
-_DEPLOY_KEY_WAS_GENERATED=false  # Phase 2에서 자동 생성했을 때 true → PEM 저장 대상
+_SSH_ACCESS_MODE=""           # server 신규 호스트: existing-key | generate-key | password
+_SSH_KEY_FILE=""              # existing-key 모드에서 공개키를 추출할 키 파일 경로
+_SSH_KEY_GENERATED=false      # generate-key 모드로 Phase 2에서 키를 만들었을 때 true → 개인키 저장 대상
 REPO_TMP="/tmp/nixos-setup-repo"
 PARAMS_FILE="${PARAMS_FILE:-/root/nixstrap-params.env}"
 _USER_PASSWORD=""  # ask_password에서 설정, _post_process에서 적용 후 즉시 비움 (파일 저장 안 함)
@@ -126,7 +126,7 @@ else
     select_host
     [ "$_HOST_IS_NEW" = true ] && ask_preset
     [ "$_HOST_IS_NEW" = true ] && ask_state_version
-    [ "$_HOST_IS_NEW" = true ] && ask_deploy_config
+    [ "$_HOST_IS_NEW" = true ] && ask_ssh_access
     ask_partitions
 fi
 review_loop

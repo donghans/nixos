@@ -37,7 +37,7 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 호스트 설정을 구성하는 수많은 파일이 하나로 합쳐지는 단계입니다.
 
 1. **Host Specific Loading**: `hosts/<hostname>.nix`가 먼저 로드됩니다. 프리셋 mods는 flake.nix가 `resolved.json`과 `presets.json`을 병합하여 `modsModule`로 주입합니다.
-2. **Inheritance**: 기기별 하드웨어 설정(`hardware.nix`)이 `.build/` 환경에서 임포트됩니다. 원격 호스트(`isRemote=true`)는 `hosts/deploy/<hostname>.hardware.nix`를 우선 탐색합니다.
+2. **Inheritance**: 기기별 하드웨어 설정(`hardware.nix`)이 `.build/` 환경에서 임포트됩니다. 원격 호스트(`isRemote=true`)는 `hosts/_deploy/<hostname>.hardware.nix`를 우선 탐색합니다.
 3. **Mix-in**: `core/lib/mods.nix`의 `recursiveImportDir`이 `mods/` 하위를 재귀 탐색하여 sys, gui, devel 세 도메인을 모두 로드합니다.
 4. **Coverage Check**: flake.nix가 주입한 `coverageModule`의 `assertions`가 평가됩니다. 누락 옵션 또는 형제 완전성 위반 감지 시 즉시 오류를 발생시킵니다.
 
@@ -85,6 +85,15 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 1. **레포 준비**: `NIXOS_REPO_PATH`가 설정된 경우(`./nixstrap.sh` 실행) 현재 레포 경로를 그대로 사용합니다.
 2. **호스트 선택**: `select_host`로 기존 호스트를 선택하거나 새 이름을 입력합니다. 신규 호스트라면 `ask_preset`으로 `workstation` / `server` 중 프리셋을 지정하고, `ask_host_username`으로 호스트별 username을 입력합니다.
 3. **릴리즈 고정**: `ask_state_version`으로 NixOS 릴리즈를 고정하거나 rolling으로 유지합니다.
+4. **SSH 접속 방식** (신규 `server` 프리셋 호스트만): `ask_ssh_access`로 원격 접속용 키를 정합니다.
+
+    | 모드 | 동작 |
+    |------|------|
+    | `existing-key` | 지정한 키 파일에서 공개키를 추출해 `hosts/_deploy/<hostname>.pub`에 등록 |
+    | `generate-key` | 설치 중 키를 새로 만들어 공개키를 등록하고, 개인키는 `~/.ssh/<hostname>_ed25519`에 저장 (첫 부팅 후 관리 머신으로 복사하고 서버의 사본은 삭제) |
+    | `password` | 키를 등록하지 않음 (비밀번호 SSH 허용) |
+
+    어느 모드든 nixstrap은 `host.toml`에 `[deploy]`를 쓰지 않습니다. nixstrap으로 설치한 서버는 서버 안에서 `nixup`으로 직접 관리하는 standalone 호스트이고, `rnixup` 배포 대상으로 쓰려면 `[deploy]`를 직접 추가하거나 `rnixstrap`으로 설치합니다.
 
 **파티셔닝:**
 
@@ -158,7 +167,7 @@ Nix 언어가 코드를 읽어 최종 시스템 명세(Derivation)를 도출하�
 1. `_probe_ram`: SSH로 서버 RAM 사전 측정 (kexec 최소 1000MB 확인)
 2. 설정 확인 · 선택: 바로 진행 / 쓰기만 / 취소 — **타이머는 선택 직후부터 시작** (비대화형 시 자동 진행)
 3. 파일 작업: `hosts/<hostname>.toml` · `hosts/<hostname>.nix` 생성 또는 업데이트
-4. SSH 정보 추출: 서버에서 공개키 추출 → `hosts/deploy/<hostname>.pub` 저장
-5. nixos-anywhere: 서버에 원격 파티셔닝 + NixOS 설치. 생성된 `hardware.nix`를 `hosts/deploy/<hostname>.hardware.nix`로 레포에 역복사
+4. SSH 정보 추출: 서버에서 공개키 추출 → `hosts/_deploy/<hostname>.pub` 저장
+5. nixos-anywhere: 서버에 원격 파티셔닝 + NixOS 설치. 생성된 `hardware.nix`를 `hosts/_deploy/<hostname>.hardware.nix`로 레포에 역복사
 6. 시크릿 주입: `hosts/_deploy/<hostname>.secrets/secrets.json` 기반으로 변경된 파일만 자동 전송
 7. deploy-rs 배포: 설치 완료 후 rnixup으로 초기 설정 배포

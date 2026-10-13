@@ -140,15 +140,6 @@ _create_host_profile() {
         printf 'type = "%s"\npreset = "%s"%s%s%s\n' "$_type" "$_PRESET" "$_sv_line" "$_username_line" "$_ram_line" > "$HOST_TOML"
     fi
 
-    # deploy-rs 설정 — sshKey는 관리 머신 기준 경로 (자동 생성 시 표준 경로 사용)
-    if [ "${_DEPLOY_ENABLED:-false}" = true ]; then
-        # shellcheck disable=SC2088  # 틸드는 TOML 값용 리터럴 문자열 (런타임 확장 불필요)
-        local _key_ref="~/.ssh/${HOST}_ed25519"
-        [ -n "${_DEPLOY_SSH_KEY:-}" ] && _key_ref="${_DEPLOY_SSH_KEY/#$HOME/~}"
-        printf '\n[deploy]\nip     = ""\nsshKey = "%s"\n' "$_key_ref" >> "$HOST_TOML"
-        log_msg "Config" "deploy-rs [deploy] 섹션 추가 (ip는 첫 부팅 후 설정)"
-    fi
-
     # 최소 통합 호스트 파일 — os/hm 블록 분리 (mkHostConfiguration 패턴)
     printf '{mkHostConfiguration, ...}:\nmkHostConfiguration ({...}: { os = {}; hm = {}; })\n' > "$HOST_NIX"
 
@@ -156,46 +147,45 @@ _create_host_profile() {
     log_msg "Config" "호스트 프로파일 생성: $HOST (preset=$_PRESET, stateVersion=$_sv_info)"
 }
 
-_setup_deploy_pubkey() {
+# SSH 공개키를 hosts/_deploy/<host>.pub 에 등록 (host.nix가 primary user의 authorized_keys로 주입)
+# - existing-key: _SSH_KEY_FILE에서 공개키 추출 / generate-key: 새 키 생성
+# - [deploy] 섹션은 만들지 않음 (스탠드얼론 서버: root 로그인 비활성, nixup으로 서버에서 직접 관리)
+_setup_ssh_pubkey() {
     local _mode="${_SSH_ACCESS_MODE:-}"
-    # 구버전 세션 호환: _SSH_ACCESS_MODE 없이 _DEPLOY_ENABLED=true이면 deploy-rs로 처리
-    [ -z "$_mode" ] && [ "${_DEPLOY_ENABLED:-false}" = true ] && _mode="deploy-rs"
-    [[ "$_mode" != "existing-key" && "$_mode" != "deploy-rs" ]] && return
+    [[ "$_mode" != "existing-key" && "$_mode" != "generate-key" ]] && return
 
-    local deploy_dir="/mnt/etc/nixos/hosts/_deploy"
-    mkdir -p "$deploy_dir"
+    local pub_dir="/mnt/etc/nixos/hosts/_deploy"
+    mkdir -p "$pub_dir"
 
-    if [ -n "${_DEPLOY_SSH_KEY:-}" ]; then
-        # 기존 키 사용 — pub key 추출
+    if [ "$_mode" = "existing-key" ]; then
         local pub_key
-        pub_key=$(ssh-keygen -y -f "$_DEPLOY_SSH_KEY" 2>/dev/null)
+        pub_key=$(ssh-keygen -y -f "$_SSH_KEY_FILE" 2>/dev/null)
         if [ -z "$pub_key" ]; then
-            log_msg "Error" "SSH 공개키 추출 실패: $_DEPLOY_SSH_KEY"
+            log_msg "Error" "SSH 공개키 추출 실패: $_SSH_KEY_FILE"
             exit 1
         fi
-        printf '%s %s\n' "$pub_key" "$HOST" > "$deploy_dir/${HOST}.pub"
+        printf '%s %s\n' "$pub_key" "$HOST" > "$pub_dir/${HOST}.pub"
         log_msg "Done" "SSH pub key 등록: hosts/_deploy/${HOST}.pub"
     else
-        # 신규 키 생성 (deploy-rs 전용)
-        local key_tmp="/tmp/nixstrap-deploy-$$"
+        local key_tmp="/tmp/nixstrap-ssh-$$"
         rm -f "$key_tmp" "${key_tmp}.pub"
         ssh-keygen -t ed25519 -f "$key_tmp" -N "" -C "$HOST" >/dev/null 2>&1
-        cp "${key_tmp}.pub" "$deploy_dir/${HOST}.pub"
-        _DEPLOY_SSH_KEY="$key_tmp"
-        _DEPLOY_KEY_WAS_GENERATED=true
+        cp "${key_tmp}.pub" "$pub_dir/${HOST}.pub"
+        _SSH_KEY_FILE="$key_tmp"
+        _SSH_KEY_GENERATED=true
         log_msg "Done" "SSH 키 생성 및 pub key 등록: hosts/_deploy/${HOST}.pub"
     fi
 }
 
-_save_deploy_pem() {
-    [ "${_DEPLOY_KEY_WAS_GENERATED:-false}" != true ] && return
+_save_ssh_pem() {
+    [ "${_SSH_KEY_GENERATED:-false}" != true ] && return
 
     local ssh_dir="/mnt/home/$USERNAME/.ssh"
     mkdir -p "$ssh_dir"
     chmod 700 "$ssh_dir"
 
     local pem_name="${HOST}_ed25519"
-    cp "$_DEPLOY_SSH_KEY" "$ssh_dir/$pem_name"
+    cp "$_SSH_KEY_FILE" "$ssh_dir/$pem_name"
     chmod 600 "$ssh_dir/$pem_name"
     nixos-enter --root /mnt --command \
         "chown -R $USERNAME:users /home/$USERNAME/.ssh"
@@ -204,20 +194,15 @@ _save_deploy_pem() {
     log_msg "Done" "SSH 프라이빗 키 저장: ~/.ssh/$pem_name"
     log_msg "Notice" "▶  첫 부팅 후 관리 머신으로 복사하세요:"
     log_msg "Notice" "   scp ${USERNAME}@<IP>:~/.ssh/${pem_name} ~/.ssh/${pem_name}"
-    log_msg "Notice" "   복사 후 TOML [deploy].ip와 sshKey를 관리 머신 기준으로 업데이트하세요."
+    log_msg "Notice" "   복사 후 서버의 사본은 삭제하세요: ssh ${USERNAME}@<IP> rm ~/.ssh/${pem_name}"
+    log_msg "Notice" "   (rnixup 배포 대상으로 쓰려면 host.toml에 [deploy] 섹션을 직접 추가하세요)"
 }
 
-_commit_deploy_files() {
+_commit_ssh_files() {
     local _mode="${_SSH_ACCESS_MODE:-}"
-    [ -z "$_mode" ] && [ "${_DEPLOY_ENABLED:-false}" = true ] && _mode="deploy-rs"
-    [[ "$_mode" != "existing-key" && "$_mode" != "deploy-rs" ]] && return
+    [[ "$_mode" != "existing-key" && "$_mode" != "generate-key" ]] && return
 
-    local _commit_msg
-    if [[ "$_mode" == "deploy-rs" ]]; then
-        _commit_msg="feat: ${HOST} deploy-rs 설정 추가"
-    else
-        _commit_msg="feat: ${HOST} SSH 공개키 등록"
-    fi
+    local _commit_msg="feat: ${HOST} SSH 공개키 등록"
 
     local repo_dir="/mnt/home/$USERNAME/nixos"
     log_msg "Git" "SSH 설정 파일 커밋 중..."
@@ -360,16 +345,16 @@ phase2_execute() {
     _format_root            # 5. Btrfs 포맷 + 서브볼륨
     _mount_partitions       # 6. 마운트
     _move_repo              # 7. /tmp/nixos-setup-repo → /mnt/etc/nixos
-    _create_host_profile    # 8. 신규 호스트 프로파일 생성 ([deploy] 섹션 포함)
-    _setup_deploy_pubkey    # 9. deploy-rs pub key 생성/저장 (deploy-rs 시만)
+    _create_host_profile    # 8. 신규 호스트 프로파일 생성
+    _setup_ssh_pubkey       # 9. SSH pub key 등록 (existing-key/generate-key 시만)
     _resolve_metadata       # 10. nixup.task-resolve.py 실행 → RESOLVE_TMP
     _extract_username       # 11. base.toml → USERNAME
     _prepare_build_dir      # 12. /tmp/nixos-build 구성 (BUILD_DIR 설정됨, pub key 포함)
     _generate_hw_config     # 13. hardware.nix → BUILD_DIR에 직접 생성
     _install_nixos          # 14. nixos-install
     _post_process           # 15. mv, chown, symlink
-    _save_deploy_pem        # 17. PEM → ~/.ssh/ (자동 생성 키만)
-    _commit_deploy_files    # 18. pub key + TOML 커밋 + push 시도
+    _save_ssh_pem           # 17. PEM → ~/.ssh/ (generate-key 모드만)
+    _commit_ssh_files       # 18. pub key + TOML 커밋 + push 시도
 
     echo ""
     log_msg "Success" "설치 완료. 재부팅 → TTY 로그인 → 'nixup home' → 재로그인."

@@ -99,7 +99,7 @@ with lib; {
       isRemote = mkOption {
         type = types.bool;
         default = false;
-        description = "True if this host is a remote deploy-rs target (has [deploy] section in host.toml). Auto-injected from resolved.json.";
+        description = "True if this host is managed remotely: it has a [deploy] section (deploy-rs target) or type = \"server\" (standalone, nixup runs on the host itself). Auto-injected from resolved.json.";
       };
       hasDeployRs = mkOption {
         type = types.bool;

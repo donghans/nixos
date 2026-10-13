@@ -150,8 +150,10 @@ ask_state_version() {
     fi
 }
 
-ask_deploy_config() {
-    # 신규 server 프리셋 호스트에만 적용
+# SSH 접속 방식 선택 (신규 server 프리셋 호스트 전용)
+# - _SSH_ACCESS_MODE: existing-key(기존 키 지정) | generate-key(설치 시 자동 생성) | password
+# - 어느 모드든 host.toml에 [deploy]는 쓰지 않음 (rnixup 배포 대상은 rnixstrap 또는 수동 추가)
+ask_ssh_access() {
     [ "${_HOST_IS_NEW:-false}" != true ] && return
     [ "${_PRESET:-}" != "server" ] && return
 
@@ -163,25 +165,22 @@ ask_deploy_config() {
     if [ -n "$_input" ]; then
         if [ ! -f "$_input" ]; then
             log_msg "Error" "파일을 찾을 수 없습니다: $_input"
-            ask_deploy_config
+            ask_ssh_access
             return
         fi
         _SSH_ACCESS_MODE="existing-key"
-        _DEPLOY_ENABLED=false
-        _DEPLOY_SSH_KEY="$_input"
-        log_msg "Config" "SSH 키: $_DEPLOY_SSH_KEY"
+        _SSH_KEY_FILE="$_input"
+        log_msg "Config" "SSH 키: $_SSH_KEY_FILE"
     else
         local _gen
         read -rp "$(_log_prompt)원격 SSH 접속용 키를 자동 생성하시겠습니까? (y/N): " _gen
         if [[ "${_gen:-N}" =~ ^[Yy]$ ]]; then
-            _SSH_ACCESS_MODE="deploy-rs"
-            _DEPLOY_ENABLED=true
-            _DEPLOY_SSH_KEY=""
+            _SSH_ACCESS_MODE="generate-key"
+            _SSH_KEY_FILE=""
             log_msg "Config" "SSH 키: (설치 시 자동 생성 → ~/.ssh/${HOST:-<hostname>}_ed25519)"
         else
             _SSH_ACCESS_MODE="password"
-            _DEPLOY_ENABLED=false
-            _DEPLOY_SSH_KEY=""
+            _SSH_KEY_FILE=""
             log_msg "Config" "SSH 키: 없음 (비밀번호 인증)"
         fi
     fi
@@ -279,8 +278,8 @@ show_summary() {
         printf "  4. %-11s:  %s  (stateVersion: %s)\n" "프리셋" "${_PRESET:-workstation}" "$_sv_display"
         case "${_SSH_ACCESS_MODE:-}" in
             "password")     printf "     %-11s   SSH: 비밀번호 전용\n" "" ;;
-            "existing-key") printf "     %-11s   SSH: 키 — %s\n" "" "${_DEPLOY_SSH_KEY:-(미설정)}" ;;
-            "deploy-rs")    printf "     %-11s   SSH: 키 — %s\n" "" "${_DEPLOY_SSH_KEY:-(자동 생성)}" ;;
+            "existing-key") printf "     %-11s   SSH: 키 — %s\n" "" "${_SSH_KEY_FILE:-(미설정)}" ;;
+            "generate-key") printf "     %-11s   SSH: 키 — (자동 생성)\n" "" ;;
         esac
     else
         printf "  4. %-11s:  %s  (레포에서)\n" "프리셋" "${_HOST_PRESET_FROM_REPO:-?}"
@@ -313,9 +312,8 @@ save_params() {
         printf '_NEW_BOOT_NUM=%s\n'           "$_NEW_BOOT_NUM"
         printf '_NEW_ROOT_NUM=%s\n'           "$_NEW_ROOT_NUM"
         printf '_SSH_ACCESS_MODE=%s\n'             "$_SSH_ACCESS_MODE"
-        printf '_DEPLOY_ENABLED=%s\n'             "$_DEPLOY_ENABLED"
-        printf '_DEPLOY_SSH_KEY=%s\n'             "$_DEPLOY_SSH_KEY"
-        printf '_DEPLOY_KEY_WAS_GENERATED=%s\n'   "$_DEPLOY_KEY_WAS_GENERATED"
+        printf '_SSH_KEY_FILE=%s\n'               "$_SSH_KEY_FILE"
+        printf '_SSH_KEY_GENERATED=%s\n'          "$_SSH_KEY_GENERATED"
     } > "$PARAMS_FILE"
     log_msg "Config" "세션 저장: $PARAMS_FILE"
 }
@@ -342,6 +340,10 @@ load_params() {
     if [ "$REPLY" -eq 0 ]; then
         # shellcheck disable=SC1090
         source "$PARAMS_FILE"
+        # 구버전 세션 호환: deploy-rs 모드/_DEPLOY_* 변수로 저장된 파일 → 현재 이름으로 변환
+        [ "${_SSH_ACCESS_MODE:-}" = "deploy-rs" ] && _SSH_ACCESS_MODE="generate-key"
+        [ -z "${_SSH_KEY_FILE:-}" ] && _SSH_KEY_FILE="${_DEPLOY_SSH_KEY:-}"
+        [ -z "${_SSH_KEY_GENERATED:-}" ] && _SSH_KEY_GENERATED="${_DEPLOY_KEY_WAS_GENERATED:-false}"
         log_msg "Config" "세션 로드됨."
         return 0
     else
@@ -389,18 +391,18 @@ review_loop() {
             1)
                 ask_repo_and_clone
                 select_host
-                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_state_version; ask_deploy_config; fi
+                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_state_version; ask_ssh_access; fi
                 ;;
             2)
                 select_host
-                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_state_version; ask_deploy_config; fi
+                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_state_version; ask_ssh_access; fi
                 ;;
             3) ask_partitions ;;
             4)
                 if [ "$_HOST_IS_NEW" = true ]; then
                     ask_preset
                     ask_state_version
-                    ask_deploy_config
+                    ask_ssh_access
                 else
                     log_msg "Notice" "기존 호스트의 프리셋은 레포에서 고정됩니다."
                 fi

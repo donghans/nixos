@@ -79,8 +79,8 @@ CLI Engine  →  Metadata  →  Logic Core  →  Mods
 - **호스트별 Nix 파일**:
   - `hosts/<hostname>.nix`: 커널 파라미터, 하드웨어 모듈 등 NixOS 시스템 레벨 설정과 Home Manager 설정을 `mkHostConfiguration` 패턴으로 함께 담습니다.
   - `hosts/<hostname>.home.nix`: Home Manager 전용 추가 설정 (디스플레이 배열, 터치패드 동작 등 하드웨어 종속 개인화 로직). 분리가 필요할 때만 사용합니다.
-  - `hosts/deploy/<hostname>.pub`: rnixstrap이 서버에서 추출한 SSH 공개키. deploy-rs의 root 인증에 사용됩니다.
-  - `hosts/deploy/<hostname>.hardware.nix`: rnixstrap 설치 후 서버에서 역복사된 하드웨어 설정.
+  - `hosts/_deploy/<hostname>.pub`: nixstrap/rnixstrap이 등록한 SSH 공개키. 원격 호스트 primary user의 `authorized_keys`로 주입되며, `[deploy]`가 있는 호스트는 root 인증(deploy-rs)에도 사용됩니다.
+  - `hosts/_deploy/<hostname>.hardware.nix`: rnixstrap 설치 후 서버에서 역복사된 하드웨어 설정.
 
 **리졸브 우선순위** — 병합은 2단계로 진행됩니다:
 
@@ -94,7 +94,7 @@ CLI Engine  →  Metadata  →  Logic Core  →  Mods
 | `diskDevice`, `bootDevice` | `<hostname>.toml` → `_base.toml` (레이블·UUID 모두 가능) |
 | `type`, `preset` | `<hostname>.toml` 필수 선언 |
 | `bootLoader` | `<hostname>.toml` 선언 (enum: `systemd-boot` · `grub-bios` · `grub-uefi`, 기본: `systemd-boot`) |
-| `isRemote` | resolver가 `[deploy]` 섹션 유무로 자동 판단 — 직접 선언 불필요 |
+| `isRemote` | `[deploy]` 섹션이 있거나 `type = "server"`이면 자동으로 true — 직접 선언 불필요 (`[deploy]` 유무는 `hasDeployRs`로 구분: 없으면 standalone 서버) |
 | `ramGb` | 자동 감지 (`/proc/meminfo`), `<hostname>.toml` 입력 무시 |
 | `swapGb`, `tmpfsSize`, `zramPercent` | 선택적 오버라이드 (기본값: 자동 계산) |
 | `stateVersion` | `<hostname>.toml` 명시 → preset 선언 → `_base.toml rollingStateVersion` (rolling 폴백) |
