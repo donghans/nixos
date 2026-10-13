@@ -22,14 +22,6 @@ mkHostConfiguration ({
       package = config.boot.kernelPackages.nvidiaPackages.stable;
     };
 
-    # (임시) beelink-ser7-co의 eth0-share(NAT) 경유 설치 중 — 그쪽 물리 인터페이스가
-    # tailscale MTU 정책상 1400으로 낮아져 있어 여기도 맞춰야 대용량 다운로드가 안 멈춤.
-    # 최종 네트워크에 연결되면 이 블록은 제거할 것.
-    systemd.network.links."10-eth-mtu" = {
-      matchConfig.OriginalName = "en*";
-      linkConfig.MTUBytes = "1400";
-    };
-
     # == 무선랜 (USB Realtek 802.11ax RTL8851BU, 0bda:b831 / rtw89_8851bu) ==
     # (목적: 유선 연결이 불가능한 환경 대비. iwd로 연결하고 SSID/PSK는 iwctl로 1회 등록
     #   → /var/lib/iwd에 저장되므로 이사/네트워크 변경 시에도 nix 설정을 건드리지 않음)
