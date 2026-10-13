@@ -30,30 +30,33 @@ mkHostConfiguration ({
       linkConfig.MTUBytes = "1400";
     };
 
-    # == 무선랜 (USB Realtek 802.11ax, 0bda:b831 / rtw89_8852bu) ==
+    # == 무선랜 (USB Realtek 802.11ax RTL8851BU, 0bda:b831 / rtw89_8851bu) ==
     # (목적: 유선 연결이 불가능한 환경 대비. iwd로 연결하고 SSID/PSK는 iwctl로 1회 등록
     #   → /var/lib/iwd에 저장되므로 이사/네트워크 변경 시에도 nix 설정을 건드리지 않음)
-    # (참고: 연결 방법은 `sudo iwctl station wlan0 connect <SSID>`)
+    # (참고: 연결 방법은 `iwctl station list`로 인터페이스 이름 확인 후
+    #   `sudo iwctl station <wlanN> connect <SSID>`)
     networking.wireless.iwd = {
       enable = true;
       # (이유: IP 설정은 systemd-networkd가 담당)
       settings.General.EnableNetworkConfiguration = false;
     };
-    # (이유: 0bda:b831은 mainline rtw89 USB ID 테이블에 없어 자동 로드/바인딩되지 않음.
-    #   8852BU 호환이라는 가정하에 모듈을 올리고 new_id로 수동 바인딩 — 안 되면 칩이 다른 것)
+    # (이유: 0bda:b831은 RTL8851BU지만 커널 6.19부터 rtw89_8851bu ID 테이블에 포함됨.
+    #   이 호스트의 6.18에는 없어 자동 로드/바인딩되지 않으므로 new_id로 수동 바인딩.
+    #   커널을 6.19 이상으로 올리면 이 모듈 로드와 서비스는 불필요 → 제거할 것)
     # (주의: new_id에 "vendor product"만 쓰면 driver_info가 비어 rtw89_usb_probe가 NULL 역참조로
     #   커널 oops를 냄 (2026-10-13 실측, 6.18.35). 반드시 "vendor product intclass refVendor refProduct"
-    #   형식으로 mainline에 등록된 8852BU ID(0bda:b832)의 driver_info를 복사해야 함)
-    boot.kernelModules = ["rtw89_8852bu"];
+    #   형식으로 이미 등록된 8851BU ID(0bda:b851)의 driver_info를 복사해야 함)
+    # (참고: 8852BU(0bda:b832)로 바인딩하면 firmware "no suitable firmware found"로 probe 실패 — 칩이 다름)
+    boot.kernelModules = ["rtw89_8851bu"];
     systemd.services.rtw89-b831-bind = {
-      description = "Bind Realtek 0bda:b831 USB WiFi to rtw89_8852bu";
+      description = "Bind Realtek 0bda:b831 USB WiFi to rtw89_8851bu";
       wantedBy = ["multi-user.target"];
       after = ["systemd-modules-load.service"];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
         # (참고: 이미 등록돼 있으면 write가 실패하므로 무시)
-        ExecStart = "${pkgs.runtimeShell} -c 'echo \"0bda b831 ff 0bda b832\" > /sys/bus/usb/drivers/rtw89_8852bu/new_id || true'";
+        ExecStart = "${pkgs.runtimeShell} -c 'echo \"0bda b831 ff 0bda b851\" > /sys/bus/usb/drivers/rtw89_8851bu/new_id || true'";
       };
     };
     # (목적: 유선(metric 1024)보다 무선을 우선 경로로 사용)
