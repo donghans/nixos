@@ -26,14 +26,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+          cache-dependency-path: _docs/site/package-lock.json
 
       - name: Sync docs into Starlight
         run: |
@@ -46,11 +44,11 @@ jobs:
           done
 
       - name: Install deps
-        run: pnpm install --frozen-lockfile
+        run: npm ci
         working-directory: _docs/site
 
       - name: Build
-        run: pnpm run build
+        run: npm run build
         working-directory: _docs/site
 
       - uses: actions/configure-pages@v5
