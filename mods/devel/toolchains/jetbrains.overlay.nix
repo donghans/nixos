@@ -76,10 +76,6 @@ _final: prev: let
     run = ''
       PRJ_PARENT="$HOME/JetbrainsProjects"
       case "${binName}" in
-        idea)           PRJ_NAME="IdeaProjects" ;;
-        webstorm)       PRJ_NAME="WebstormProjects" ;;
-        datagrip)       PRJ_NAME="DataGripProjects" ;;
-        pycharm)        PRJ_NAME="PyCharmProjects" ;;
         android-studio) PRJ_NAME="AndroidStudioProjects" ;;
         *)              PRJ_NAME="${binName}Projects" ;;
       esac
@@ -117,10 +113,6 @@ _final: prev: let
 in {
   # 래핑된 JetBrains 패키지 세트를 생성하여 노출합니다.
   jetbrains-wrapped = {
-    idea = wrapJetbrainsPackage prev.jetbrains.idea "idea";
-    webstorm = wrapJetbrainsPackage prev.jetbrains.webstorm "webstorm";
-    pycharm = wrapJetbrainsPackage prev.jetbrains.pycharm "pycharm";
-    datagrip = wrapJetbrainsPackage prev.jetbrains.datagrip "datagrip";
     # Android Studio는 jetbrains 네임스페이스가 아닐 수 있으므로 직접 참조
     android-studio = wrapJetbrainsPackage prev.android-studio "android-studio";
   };

@@ -7,10 +7,6 @@ mkModOf "mods.devel" __curPos "JetBrains common configs" ({
   ...
 }: {
   options = {
-    idea.enable = lib.mkEnableOption "IntelliJ IDEA";
-    pycharm.enable = lib.mkEnableOption "PyCharm Professional";
-    webstorm.enable = lib.mkEnableOption "WebStorm";
-    datagrip.enable = lib.mkEnableOption "DataGrip";
     android-studio.enable = lib.mkEnableOption "Android Studio (ADB, UDP 5353)";
   };
   # (목적: ADB udev 규칙, mDNS 포트, adbusers 그룹 — NixOS 전용)
@@ -25,10 +21,6 @@ mkModOf "mods.devel" __curPos "JetBrains common configs" ({
       # (사용자는 lib.mkForce false로 개별 비활성화 가능)
       (lib.mkIf cfg.enable {
         mods.devel.toolchains.jetbrains = {
-          idea.enable = lib.mkDefault true;
-          webstorm.enable = lib.mkDefault true;
-          pycharm.enable = lib.mkDefault true;
-          datagrip.enable = lib.mkDefault true;
           android-studio.enable = lib.mkDefault true;
         };
       })
@@ -37,7 +29,7 @@ mkModOf "mods.devel" __curPos "JetBrains common configs" ({
       lib.mkIf config.mods.devel.toolchains.jetbrains.${name}.enable {
         home.packages = [pkgs.jetbrains-wrapped.${name}];
       })
-    ["idea" "pycharm" "webstorm" "datagrip" "android-studio"]
+    ["android-studio"]
     ++ [
       # (목적: adb, fastboot 등 SDK 커맨드라인 툴)
       (lib.mkIf config.mods.devel.toolchains.jetbrains.android-studio.enable {
