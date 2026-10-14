@@ -77,5 +77,5 @@ Mods 프레임워크는 **파일 스캐닝 → 옵션 자동 생성 → 조건�
 | 파일 | 노출 attrset | 역할 |
 |------|-------------|------|
 | `jetbrains.overlay.nix` | `pkgs.jetbrains-wrapped.android-studio` | UI 스케일 고정(`-Dsun.java2d.uiScale=1.0`), XWayland 커서 크기 고정, 프로젝트 디렉터리 자동 생성 및 `ide.general.xml` 패치 |
-| `node.overlay.nix` | `pkgs.node-wrapped`, `pkgs.pnpm-wrapped`, `pkgs.pnpm-yarn-wrapper` | OpenSSL 라이브러리 주입, Prisma 엔진 자동 탐색(`$PWD` 상위 순회), `yarn` → `pnpm` 호환 래퍼 |
+| `node.overlay.nix` | `pkgs.node-wrapped`, `pkgs.npm-wrapper`, `pkgs.npm-node-dedup` | OpenSSL 라이브러리 주입, Prisma 엔진 자동 탐색(`$PWD` 상위 순회), npm install 시 prefer-dedupe·prune·Btrfs 블록 dedup |
 | `fvm.overlay.nix` | `pkgs.fvm-wrapped` | Flutter 런타임 동적 링킹 라이브러리 전체 주입(GTK3, Mesa, Wayland 등 30여 개) |
