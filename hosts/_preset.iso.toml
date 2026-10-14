@@ -10,6 +10,7 @@ nfd     = false
 trash   = false
 archive = false
 sshpass = false
+steam-run = false
 
 [mods.sys.services]
 bluetooth          = true

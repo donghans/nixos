@@ -13,6 +13,7 @@ nfd     = true
 trash   = true
 archive = false
 sshpass = false
+steam-run = false
 
 [mods.sys.services]
 tailscale      = false
