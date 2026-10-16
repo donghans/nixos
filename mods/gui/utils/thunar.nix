@@ -47,6 +47,13 @@ mkModOf "mods.gui" __curPos "Thunar (기본 파일 관리자)" ({
 
     xdg.mimeApps.defaultApplications."inode/directory" = "thunar.desktop";
 
+    # 기본 창 크기: Thunar 는 마지막 크기를 기억하지 않아(xfconf 에 last-window-width/height 없음) 640x480 으로 뜸 → 너무 작아서
+    # 파일 창(제목이 "<폴더> - Thunar")만 1100x720 + 가운데로. 진행/확인 같은 다른 Thunar 창은 제목이 달라서 영향 없음.
+    # (값을 바꾸려면 아래 size 만 수정. 창을 직접 늘려도 새 창은 이 크기로 다시 뜸)
+    wayland.windowManager.hyprland.extraConfig = ''
+      hl.window_rule({ match = { class = "^(thunar)$", title = "^.* - Thunar$" }, size = "1100 720", center = true })
+    '';
+
     # 런처(wofi)에서 Thunar 의 보조 항목은 숨김 — 같은 이름의 사용자 .desktop 이 우선하므로 NoDisplay 로 덮어씀
     # (설정은 Thunar 안의 Edit > Preferences, 일괄 이름 변경은 Thunar 안의 우클릭 메뉴/Edit 에서 열 수 있음)
     xdg.desktopEntries = {
