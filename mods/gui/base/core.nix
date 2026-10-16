@@ -356,10 +356,6 @@ mkPartOf "mods.gui" ({
           '';
         };
 
-      home.packages = with pkgs; [
-        nemo
-      ];
-
       # == Wayland 환경 변수 ==
       home.sessionVariables = {
         ELECTRON_OZONE_PLATFORM_HINT = "auto";

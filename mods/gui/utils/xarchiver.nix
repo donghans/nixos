@@ -20,7 +20,28 @@
 # (Preferences > Archive > "Prefer unzip for zip files" 체크 해제, 재시작 필요).
 # → 이 덕분에 mods.sys.utils.archive는 zip/unzip 없이 p7zip만 둠.
 {mkModOf, ...}:
-mkModOf "mods.gui" __curPos "Xarchiver (압축파일 기본 연결 프로그램)" ({pkgs, ...}: {
+mkModOf "mods.gui" __curPos "Xarchiver (압축파일 기본 연결 프로그램)" ({pkgs, ...}: let
+  archiveMimeTypes = [
+    "application/zip"
+    "application/x-7z-compressed"
+    "application/vnd.rar"
+    "application/x-rar"
+    "application/x-tar"
+    "application/x-compressed-tar"
+    "application/gzip"
+    "application/x-bzip"
+    "application/x-bzip2"
+    "application/x-bzip-compressed-tar"
+    "application/x-bzip2-compressed-tar"
+    "application/x-xz"
+    "application/x-xz-compressed-tar"
+    "application/x-lzma"
+    "application/x-cpio"
+    "application/x-arj"
+    "application/java-archive"
+    "application/vnd.ms-cab-compressed"
+  ];
+in {
   hm = {
     home.packages = [pkgs.xarchiver];
 
@@ -33,37 +54,25 @@ mkModOf "mods.gui" __curPos "Xarchiver (압축파일 기본 연결 프로그램)
       comment = "Create, extract and modify archives";
       icon = "archive-manager";
       exec = "xarchiver %f";
+      mimeType = archiveMimeTypes; # (Thunar 등이 이 앱을 압축 처리기로 인식하는 데 필요)
       terminal = false;
       categories = ["GTK" "Utility" "Archiving" "Compression"];
     };
 
     # 압축파일 더블클릭 시 기본으로 xarchiver가 열리도록 연결.
-    xdg.mimeApps.defaultApplications = let
-      archiveMimeTypes = [
-        "application/zip"
-        "application/x-7z-compressed"
-        "application/vnd.rar"
-        "application/x-rar"
-        "application/x-tar"
-        "application/x-compressed-tar"
-        "application/gzip"
-        "application/x-bzip"
-        "application/x-bzip2"
-        "application/x-bzip-compressed-tar"
-        "application/x-bzip2-compressed-tar"
-        "application/x-xz"
-        "application/x-xz-compressed-tar"
-        "application/x-lzma"
-        "application/x-cpio"
-        "application/x-arj"
-        "application/java-archive"
-        "application/vnd.ms-cab-compressed"
-      ];
-    in
-      builtins.listToAttrs (map (n: {
-          name = n;
-          value = "xarchiver.desktop";
-        })
-        archiveMimeTypes);
+    xdg.mimeApps.defaultApplications = builtins.listToAttrs (map (n: {
+        name = n;
+        value = "xarchiver.desktop";
+      })
+      archiveMimeTypes);
+
+    # (이유) thunar-archive-plugin 은 g_app_info_get_all_for_type 으로 "해당 형식을 처리한다고 선언한" 앱의
+    #        desktop-id 로 <id>.tap 을 찾음. 위 desktopEntries 가 패키지의 xarchiver.desktop 을 덮어쓰면서
+    #        MimeType= 이 없어지면 "No suitable archive manager found" 가 되므로 형식을 연결로도 선언해 둠.
+    xdg.mimeApps.associations.added = builtins.listToAttrs (map (n: {
+        name = n;
+        value = ["xarchiver.desktop"];
+      })
+      archiveMimeTypes);
   };
 })
