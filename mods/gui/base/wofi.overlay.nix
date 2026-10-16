@@ -1,4 +1,4 @@
-# Wofi Overlay: wofi 1.5.3 패치 6가지
+# Wofi Overlay: wofi 1.5.3 패치 7가지
 # 1) hover select — 마우스를 움직이면 해당 항목을 선택
 #    (이유: 클릭해야만 선택되고 마우스 이동으로는 선택되지 않음. fuzzel 처럼 hover 만으로 선택 강조)
 #    (주의: 클릭이 아닌 '실제 마우스 이동'(motion)에만 반응 — 목록이 갱신되며 커서 아래로 항목이 밀려와도 선택이 튀지 않음)
@@ -15,7 +15,9 @@
 # 5) 검색 일치 글자 강조 — 검색어가 바뀔 때마다 각 항목 라벨에서 일치한 글자를 찾아 Pango 속성(색+굵게)으로 표시
 #    (fuzzy: 연속 부분문자열 우선, 아니면 부분수열 / contains 계열: 부분문자열(multi 는 공백 토큰별). 한글은 UTF-8 바이트 오프셋으로 처리)
 #    (색 WOFI_MATCH_* 는 fuzzel 시절 match 색 #cb4b16)
-# 6) 서피스 크기 보정 — 레이어 서피스/창 크기를 요청할 때 CSS 의 테두리+패딩만큼(WOFI_EXTRA) 더해서 요청
+# 6) 퍼지 점수 길이 한계 상향 — wofi 는 256자를 넘는 텍스트의 퍼지 점수를 최저값으로 취급해, 긴 항목(클립보드 미리보기 등)이
+#    정확히 일치해도 항상 순위가 맨 뒤로 밀림. 한계를 올림 (점수 계산용 스택 배열 크기만 커짐)
+# 7) 서피스 크기 보정 — 레이어 서피스/창 크기를 요청할 때 CSS 의 테두리+패딩만큼(WOFI_EXTRA) 더해서 요청
 #    (이유: wofi 는 width/height 를 그대로 요청하지만 GTK 는 #outer-box 의 테두리+패딩 양쪽 합(wofi.nix 의 extra, 현재 18px) 만큼
 #           더 큰 창을 요구함 → 입력/포커스마다 "요청 크기로 줄었다가 GTK 가 다시 키우는" 1프레임 흔들림 발생)
 #    (주의: WOFI_EXTRA 는 wofi.nix 의 extra = 2*(borderPx+paddingPx) 와 반드시 일치해야 함)
@@ -24,6 +26,10 @@ _final: prev: {
     postPatch =
       (old.postPatch or "")
       + ''
+        substituteInPlace inc/match.h \
+          --replace-fail '#define MATCH_FUZZY_MAX_LEN 256' \
+                         '#define MATCH_FUZZY_MAX_LEN 2048'
+
         substituteInPlace src/wofi.c \
           --replace-fail 'static uint64_t width, height;' \
 '#define WOFI_EXTRA 18
