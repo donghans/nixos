@@ -16,6 +16,11 @@
         up) ${pkgs.wireplumber}/bin/wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+ ;;
         down) ${pkgs.wireplumber}/bin/wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- ;;
         mute) ${pkgs.wireplumber}/bin/wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle ;;
+        mic)
+          ${pkgs.wireplumber}/bin/wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle
+          if ${pkgs.wireplumber}/bin/wpctl get-volume @DEFAULT_AUDIO_SOURCE@ | grep -q "MUTED"; then STATE="Muted"; else STATE="On"; fi
+          ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:microphone -u low "Microphone" "$STATE"
+          exit 0 ;;
       esac
 
       VOL=$(${pkgs.wireplumber}/bin/wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}')
@@ -79,6 +84,7 @@
             ", XF86AudioRaiseVolume, exec, ${volumeControl}/bin/vol-control up"
             ", XF86AudioLowerVolume, exec, ${volumeControl}/bin/vol-control down"
             ", XF86AudioMute, exec, ${volumeControl}/bin/vol-control mute"
+            ", XF86AudioMicMute, exec, ${volumeControl}/bin/vol-control mic"
           ]
           ++ lib.optionals (config.workspace.type == "laptop") [
             ", XF86MonBrightnessUp, exec, ${brightnessControl}/bin/brt-control up"

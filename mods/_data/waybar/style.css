@@ -109,3 +109,17 @@ window#waybar {
 #clock {
   padding: 0 4px;
 }
+
+/* 오디오 (음량/마이크) */
+#pulseaudio {
+  padding: 0 8px;
+  color: #ffffff;
+}
+
+#pulseaudio.muted {
+  color: #bbbbbb;
+}
+
+#pulseaudio.source-muted {
+  color: #ebcb8b;
+}
