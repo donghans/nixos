@@ -4,7 +4,7 @@ mkModOf "mods.gui" __curPos "Incus VM" ({
   pkgs,
   ...
 }: let
-  # GUI VM 목록을 fuzzel로 선택 → 상태에 따라 켜기/끄기/뷰어 열기 액션 선택
+  # GUI VM 목록을 wofi로 선택 → 상태에 따라 켜기/끄기/뷰어 열기 액션 선택
   spiceViewerScript = pkgs.writeShellScriptBin "incus-vm" ''
     # 가상머신(컨테이너 제외)만 조회 - "이름 (상태)" 형식으로 표시
     entries=$(${pkgs.incus}/bin/incus list --format=json 2>/dev/null \
@@ -17,7 +17,7 @@ mkModOf "mods.gui" __curPos "Incus VM" ({
 
     # 1단계: VM 선택
     selected=$(printf '%s\n' "$entries" \
-      | ${pkgs.fuzzel}/bin/fuzzel --dmenu --prompt="VM 선택 > ")
+      | ${pkgs.wofi}/bin/wofi --dmenu --cache-file /dev/null --prompt="VM 선택 > ")
     [ -z "$selected" ] && exit
 
     vm_name=$(echo "$selected" | awk '{print $1}')
@@ -31,7 +31,7 @@ mkModOf "mods.gui" __curPos "Incus VM" ({
     fi
 
     action=$(printf "$actions" \
-      | ${pkgs.fuzzel}/bin/fuzzel --dmenu --prompt="$vm_name > ")
+      | ${pkgs.wofi}/bin/wofi --dmenu --cache-file /dev/null --prompt="$vm_name > ")
     [ -z "$action" ] && exit
 
     case "$action" in

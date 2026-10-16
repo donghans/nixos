@@ -10,8 +10,28 @@ mkPartOf "mods.gui" ({
   slurp = "${pkgs.slurp}/bin/slurp";
   satty = "${pkgs.satty}/bin/satty";
   cliphist = "${pkgs.cliphist}/bin/cliphist";
-  fuzzel = "${pkgs.fuzzel}/bin/fuzzel";
+  wofi = "${pkgs.wofi}/bin/wofi";
   wl-copy = "${pkgs.wl-clipboard}/bin/wl-copy";
+
+  # 앱 런처: wofi drun 선택 결과(.desktop 경로 [액션])를 uwsm scope 로 실행
+  # (이유: 네이티브 앱(Zed, kitty 등)을 Hyprland 와 분리된 app.slice 로 띄워 CPU/IO weight 를 분리 — core.cgroups.nix 참고.
+  #        uwsm app 은 경로가 아닌 Desktop Entry ID(foo.desktop[:action])를 받으므로 파일명으로 변환)
+  appLauncher = pkgs.writeShellScriptBin "hypr-launcher" ''
+    # wofi 는 단일 인스턴스가 아니라 다른 모니터에서 또 실행하면 중복으로 뜸 → 이미 떠 있으면 닫기(토글)
+    # (Nix 래핑으로 프로세스 이름이 .wofi-wrapped 이므로 둘 다 매칭)
+    pkill -x '(.wofi-wrapped|wofi)' && exit 0
+    sel=$(${wofi} --show drun -D print_desktop_file=true) || exit 0
+    [ -z "$sel" ] && exit 0
+    file=''${sel%% *}
+    action=''${sel#"$file"}
+    action=''${action# }
+    id=$(basename "$file")
+    if [ -n "$action" ]; then
+      exec ${pkgs.uwsm}/bin/uwsm app -- "$id:$action"
+    else
+      exec ${pkgs.uwsm}/bin/uwsm app -- "$id"
+    fi
+  '';
 
   # 모니터 스왑 스크립트 정의
   swapMonitors = pkgs.writeShellScriptBin "hypr-swap-monitors" ''
@@ -61,8 +81,9 @@ mkPartOf "mods.gui" ({
     esac
   '';
 
-  # 단축키 목록 보기: description 이 있는 바인딩만 hyprctl 에서 읽어 fuzzel 로 표시
+  # 단축키 목록 보기: description 이 있는 바인딩만 hyprctl 에서 읽어 wofi 로 표시
   keybindsHelp = pkgs.writeShellScriptBin "hypr-keybinds" ''
+    pkill -x '(.wofi-wrapped|wofi)' && exit 0
     hyprctl binds -j | ${pkgs.jq}/bin/jq -r '
       def mods: . as $m
         | [ [64, "SUPER"], [4, "CTRL"], [8, "ALT"], [1, "SHIFT"] ][]
@@ -71,7 +92,7 @@ mkPartOf "mods.gui" ({
       .[] | select(.description != "")
       | ([(.modmask | mods), (.key | keyname)] | join(" + ")) + "\t" + .description
     ' | ${pkgs.util-linux}/bin/column -t -s "$(printf '\t')" -o "   │   " \
-      | ${fuzzel} --dmenu --width 70 --lines 24 --placeholder "단축키 검색 (Esc: 닫기)" > /dev/null
+      | ${wofi} --dmenu --hide-search --cache-file /dev/null --width 900 --lines 24 --prompt "단축키 (Esc: 닫기)" > /dev/null
   '';
 
   # 현재 창 캡쳐 스크립트 정의
@@ -85,7 +106,8 @@ in {
   hm = {
     wayland.windowManager.hyprland.extraConfig = ''
       -- absolute paths from Nix
-      local fuzzel = "${fuzzel}"
+      local wofi = "${wofi}"
+      local launcher = "${appLauncher}/bin/hypr-launcher"
       local cliphist = "${cliphist}"
       local wl_copy = "${wl-copy}"
       local swap_monitors = "${swapMonitors}/bin/hypr-swap-monitors"
@@ -107,8 +129,8 @@ in {
       bindd("SUPER + Q", hl.dsp.window.close(), "창 닫기")
       bindd("SUPER + SHIFT + Q", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'"), "Hyprland 종료")
       bindd("SUPER + F", hl.dsp.window.float({ action = "toggle" }), "플로팅 토글")
-      bindd("SUPER + space", hl.dsp.exec_cmd(fuzzel), "앱 런처 (fuzzel)")
-      bindd("SUPER + V", hl.dsp.exec_cmd(cliphist .. " list | " .. fuzzel .. " --dmenu | " .. cliphist .. " decode | " .. wl_copy), "클립보드 히스토리")
+      bindd("SUPER + space", hl.dsp.exec_cmd(launcher), "앱 런처 (wofi)")
+      bindd("SUPER + V", hl.dsp.exec_cmd("pkill -x '(.wofi-wrapped|wofi)' && exit 0; " .. cliphist .. " list | " .. wofi .. " --dmenu --cache-file /dev/null | " .. cliphist .. " decode | " .. wl_copy), "클립보드 히스토리")
       bindd("SUPER + L", hl.dsp.exec_cmd("hyprlock"), "화면 잠금")
       bindd("SUPER + H", hl.dsp.exec_cmd(keybinds_help), "단축키 목록 보기")
       bindd("SUPER + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"), "fcitx5 재시작")
@@ -139,7 +161,7 @@ in {
       bindd("SHIFT + Print", hl.dsp.exec_cmd(grim .. " - | " .. satty .. " --filename -"), "전체 화면 캡처")
 
       ${lib.optionalString config.services.custom-notify-logger.enable ''
-        bindd("SUPER + N", hl.dsp.exec_cmd("ls -tr ${config.services.custom-notify-logger.logDir}/$USER.log* 2>/dev/null | xargs -r zcat -f | tac | " .. fuzzel .. " --dmenu --width 150 --placeholder \"Search 30-day History...\""), "알림 로그 (30일)")
+        bindd("SUPER + N", hl.dsp.exec_cmd("pkill -x '(.wofi-wrapped|wofi)' && exit 0; ls -tr ${config.services.custom-notify-logger.logDir}/$USER.log* 2>/dev/null | xargs -r zcat -f | tac | " .. wofi .. " --dmenu --cache-file /dev/null --width 1400 --prompt \"Search 30-day History...\""), "알림 로그 (30일)")
       ''}
 
       -- Workspace 1-10
