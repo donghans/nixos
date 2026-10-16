@@ -297,11 +297,25 @@ def lua_rule(name: str, c: dict) -> str:
     )
 
 
-def apply_cfg(cfg: dict) -> list[str]:
-    """규칙 적용. 켜는 것 → 미러 → 끄는 것 순서 (모든 화면이 한꺼번에 꺼지는 순간을 피함). 오류 메시지를 돌려준다."""
+def apply_cfg(cfg: dict, on: set[str] | None = None) -> list[str]:
+    """규칙 적용. 오류 메시지를 돌려준다.
+    적용 순서(on = 지금 켜져 있는 모니터 이름들):
+      1) 끌 모니터 (적어도 하나가 계속 켜져 있을 때만 먼저 끔)
+      2) 이미 켜져 있는 모니터의 재배치/모드 변경
+      3) 꺼져 있다가 켜질 모니터
+      4) 미러
+      5) 끌 모니터 (계속 켜져 있는 모니터가 없을 때: 모든 화면이 꺼지는 순간을 피해 마지막에)
+    (이유: 전환 중간에 두 모니터가 같은 위치에서 겹치는 순간이 있으면 Hyprland 가 "monitor layout is set up
+     incorrectly ... overlaps" 경고 말풍선을 띄움. 끈 모니터는 겹침 검사에 들어가지 않음(최종 상태에서는 경고 없음을 확인))"""
+    stays = bool(on) and any(n in on and not cfg.get(n, {}).get("disabled") for n in cfg)
+
     def rank(item):
-        c = item[1]
-        return 2 if c.get("disabled") else 1 if c.get("mirror") else 0
+        name, c = item
+        if c.get("disabled"):
+            return 0 if stays else 4
+        if c.get("mirror"):
+            return 3
+        return 1 if on is None or name in on else 2
     errs = []
     for name, c in sorted(cfg.items(), key=rank):
         out = eval_lua(lua_rule(name, c))
@@ -391,7 +405,7 @@ class Transaction:
         self.cfg, self.layout = build(mons, st)
         self.new_state = st
         migrate_windows(self.cfg)
-        errs = apply_cfg(self.cfg)
+        errs = apply_cfg(self.cfg, {m.name for m in mons if not m.disabled})
         if not do_verify:
             return errs
         issues = verify(self.cfg)
@@ -410,7 +424,7 @@ class Transaction:
 
     def revert(self) -> list[str]:
         migrate_windows(self.prev_cfg)
-        errs = apply_cfg(self.prev_cfg)
+        errs = apply_cfg(self.prev_cfg, {m.name for m in get_monitors() if not m.disabled})
         save_state(self.prev_state)
         return errs
 
@@ -519,7 +533,7 @@ def restore() -> int:
             return 0
         cfg, _ = build(mons, st)
         migrate_windows(cfg)
-        apply_cfg(cfg)
+        apply_cfg(cfg, {m.name for m in mons if not m.disabled})
         return 0
 
 

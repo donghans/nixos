@@ -72,4 +72,13 @@ check("외장의 창은 건드리지 않음", not any("0xbbb" in e for e in ev))
 open(FS + ".events", "w").close(); run("layout", "extend")
 check("확장으로 돌아갈 때는 창을 옮기지 않음", not any(e.startswith("move") for e in open(FS + ".events").read().splitlines()))
 
+# 적용 순서: 겹침 경고(전환 중 같은 위치에서 겹침)를 피함
+reset(); run("layout", "extend"); open(FS + ".events", "w").close(); run("layout", "external")
+ev = open(FS + ".events").read().splitlines()
+check("확장 → 외부만: 내장을 먼저 끄고 나서 외장을 0,0 으로 옮김", ev.index("disable eDP-1") < ev.index(next(e for e in ev if e.startswith("rule DP-4"))), str(ev))
+open(FS + ".events", "w").close(); run("layout", "extend"); ev = open(FS + ".events").read().splitlines()
+check("외부만 → 확장: 켜져 있던 외장을 먼저 옮기고 나서 내장을 켬", ev.index(next(e for e in ev if e.startswith("rule DP-4"))) < ev.index(next(e for e in ev if e.startswith("rule eDP-1"))), str(ev))
+reset(); run("layout", "internal"); open(FS + ".events", "w").close(); run("layout", "external"); ev = open(FS + ".events").read().splitlines()
+check("노트북만 → 외부만(남는 게 없음): 외장을 먼저 켜고 내장을 마지막에 끔", ev.index(next(e for e in ev if e.startswith("rule DP-4"))) < ev.index("disable eDP-1"), str(ev))
+
 print(f"\n코어 {ok} 통과 / {fail} 실패"); sys.exit(1 if fail else 0)

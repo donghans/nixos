@@ -28,6 +28,9 @@ displayctl reset                      # 저장된 구성을 지우고 설정 파
   꺼졌던 모니터를 켜려면 `disabled = false`, 미러를 풀려면 `mirror = ""` 를 반드시 같이 줘야 한다(없으면 상태가 그대로 남음. 실측).
 - 구성은 `~/.local/state/displayctl/state.json`, 사용자 프리셋은 `~/.config/displayctl/presets.json`.
   Hyprland 는 reload 때 런타임 모니터 설정을 지우므로 시작 / `config.reloaded` / `monitor.added` / `monitor.removed` 에서 `displayctl restore` 로 다시 적용한다.
+- 적용 순서: 끌 모니터(남는 모니터가 있을 때) → 이미 켜진 모니터 재배치 → 꺼졌던 모니터 켜기 → 미러. 전환 중간에 켜진 두 모니터가 같은 위치에서
+  겹치면 Hyprland 가 화면에 "Your monitor layout is set up incorrectly ... overlaps" 말풍선(로그에는 안 남음)을 띄우기 때문이다.
+  끈 모니터는 겹침 검사에 들어가지 않는다(최종 상태에서는 경고 없음).
 - 안전장치: 연결된 모니터로 불가능한 레이아웃(외장이 없는데 "외부만")은 확장으로 바꿔 모든 화면이 꺼지지 않게 한다.
 
 ## 실측 (msi-summit-me, 내장 AU Optronics + 외장 MNT 2728UDP4K)

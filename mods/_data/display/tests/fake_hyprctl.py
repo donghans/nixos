@@ -47,6 +47,7 @@ def main(a):
         m = next((x for x in d if x["name"] == name), None)
         if m is None: print("ok"); return
         if field(code, "disabled") == "true": m["disabled"] = True; log("disable " + name); save(d); print("ok"); return
+        log(f"rule {name} pos={field(code, 'position')} disabled={field(code, 'disabled')}")
         if field(code, "disabled") == "false": m["disabled"] = False
         mir = field(code, "mirror")
         if mir is not None:
