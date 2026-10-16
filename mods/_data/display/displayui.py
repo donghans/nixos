@@ -223,6 +223,10 @@ class DisplayUI(App):
         if st and st.get("before"):
             ol.add_option(Option("  ↩ 이전 구성으로 복귀", id="back"))
         ol.add_option(Option("  ⟲ 기본 구성으로 초기화", id="reset"))
+        # 선택 줄(커서)을 지금 적용된 모드에 둠 — 없으면 Enter 가 아무것도 안 하고 방향키를 한 번 눌러야 했음
+        cur_id = f"preset:{st['preset']}" if st and st.get("preset") else f"layout:{cur}"
+        ids = [ol.get_option_at_index(i).id for i in range(ol.option_count)]
+        ol.highlighted = ids.index(cur_id) if cur_id in ids else 0
 
     def fill_table(self) -> None:
         t = self.query_one("#mons", DataTable)

@@ -42,6 +42,8 @@ async def t_basic():
         await settle(pilot); ids = opt_ids(app)
         check("모드 목록: 레이아웃 4 + 내장 프리셋", "layout:mirror" in ids and "preset:presentation-1080p" in ids and "preset:laptop-1200p" in ids and "reset" in ids)
         check("시작 포커스: 모드 목록", app.focused.id == "modes")
+        ol0 = app.query_one("#modes", OptionList)
+        check("선택 줄(커서)이 지금 모드(확장)에 있음 → 바로 Enter 가능", ol0.highlighted is not None and ol0.get_option_at_index(ol0.highlighted).id == "layout:extend", str(ol0.highlighted))
         check("모니터 표 2개, 외장이 기본 선택", app.query_one("#mons", DataTable).row_count == 2 and app.sel == "DP-4", str(app.sel))
         check("해상도/주사율 값이 현재 모드", app.query_one("#res", Select).value == "3840x2560" and app.query_one("#hz", Select).value == "60")
         check("화면에 표시되는 해상도/주사율 라벨이 '모니터 지원(★)'", "★" in shown(app, "res") and "★" in shown(app, "hz"), f"{shown(app,'res')!r} {shown(app,'hz')!r}")
@@ -65,6 +67,20 @@ async def t_focus():
         await settle(pilot, 10)
         for key, wid in (("r", "hz"), ("s", "res"), ("c", "scale"), ("p", "rel"), ("m", "modes")):
             await pilot.press(key); await settle(pilot, 3); check(f"키 {key} → #{wid}", app.focused.id == wid)
+
+async def t_cursor():
+    # 저장된 구성이 있으면 그 모드에 커서가 있어야 함
+    reset(); dc.go(dc.op_layout("mirror"), quiet=True)
+    app = ui.DisplayUI(focus="mode")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await settle(pilot); ol = app.query_one("#modes", OptionList)
+        check("저장된 구성(미러)이 있으면 미러에 커서", ol.get_option_at_index(ol.highlighted).id == "layout:mirror")
+        await pilot.press("down"); await settle(pilot, 3)
+        check("↓ 한 번으로 다음 항목(노트북만)", ol.get_option_at_index(ol.highlighted).id == "layout:internal")
+    reset(); app = ui.DisplayUI(focus="mode", quick=True)
+    async with app.run_test(size=(140, 42)) as pilot:
+        await settle(pilot); await pilot.press("down", "enter"); await settle(pilot, 25)
+        check("SUPER+P 흐름: ↓ Enter 로 '미러' 적용 후 종료", not app.is_running and mons()["eDP-1"].mirror_of == "DP-4")
 
 async def t_layout_quick():
     reset(); app = ui.DisplayUI(focus="mode")
@@ -133,7 +149,7 @@ async def t_misc():
 
 async def main():
     only = os.environ.get("ONLY")
-    for t in [x for x in (t_basic, t_focus, t_layout_quick, t_apply_confirm, t_misc) if not only or x.__name__ == only]:
+    for t in [x for x in (t_basic, t_focus, t_cursor, t_layout_quick, t_apply_confirm, t_misc) if not only or x.__name__ == only]:
         try: await t()
         except Exception:
             import traceback; traceback.print_exc(); results.append(False); print("FAIL (예외)", t.__name__)

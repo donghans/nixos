@@ -49,7 +49,7 @@ mkPartOf "mods.gui" ({
   # 단축키 목록 보기: description 이 있는 바인딩만 hyprctl 에서 읽어 wofi 로 표시
   keybindsHelp = pkgs.writeShellScriptBin "hypr-keybinds" ''
     pkill -x '(.wofi-wrapped|wofi)' && exit 0
-    hyprctl binds -j | ${pkgs.jq}/bin/jq -r '
+    sel=$(hyprctl binds -j | ${pkgs.jq}/bin/jq -r '
       def mods: . as $m
         | [ [64, "SUPER"], [4, "CTRL"], [8, "ALT"], [1, "SHIFT"] ][]
         | select((($m / .[0] | floor) % 2) == 1) | .[1];
@@ -57,7 +57,20 @@ mkPartOf "mods.gui" ({
       .[] | select(.description != "")
       | ([(.modmask | mods), (.key | keyname)] | join(" + ")) + "\t" + .description
     ' | ${pkgs.util-linux}/bin/column -t -s "$(printf '\t')" -o "   │   " \
-      | ${wofi} --dmenu --cache-file /dev/null --width 900 --height 640 --prompt "단축키 검색" > /dev/null
+      | ${wofi} --dmenu --cache-file /dev/null --width 900 --height 640 --prompt "단축키 검색 (Enter/클릭: 실행)") || exit 0
+    [ -z "$sel" ] && exit 0
+
+    # 선택한 줄의 설명(마지막 열)으로 그 단축키의 동작을 찾아 실행 — 설정 맨 앞에서 hl.bind 를 감싸 설명→동작을 HELP_BINDS 에 기록해 둠
+    desc=$(printf '%s' "$sel" | ${pkgs.gawk}/bin/awk -F'│' '{ d = $NF; sub(/^ +/, "", d); sub(/ +$/, "", d); print d }')
+    [ -z "$desc" ] && exit 0
+    # 마우스 드래그/휠 같은 바인딩은 마우스 상태가 있어야 의미가 있어 실행하지 않음
+    if [ "$(hyprctl binds -j | ${pkgs.jq}/bin/jq -r --arg d "$desc" '[.[] | select(.description == $d)][0].mouse')" = true ]; then
+      ${pkgs.libnotify}/bin/notify-send -u low "단축키" "마우스 동작은 목록에서 실행할 수 없습니다: $desc"
+      exit 0
+    fi
+    ldesc=$(printf '%s' "$desc" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    sleep 0.15 # (목록 창이 닫히고 이전 창으로 포커스가 돌아온 뒤에 실행해야 "창 닫기" 같은 동작이 올바른 창에 적용됨)
+    hyprctl eval "if HELP_BINDS and HELP_BINDS[\"$ldesc\"] then hl.dispatch(HELP_BINDS[\"$ldesc\"]) end" > /dev/null
   '';
 
   # 현재 창 캡쳐 스크립트 정의
@@ -69,7 +82,20 @@ mkPartOf "mods.gui" ({
   '';
 in {
   hm = {
-    wayland.windowManager.hyprland.extraConfig = ''
+    # 모든 hl.bind 보다 먼저 실행돼야 하므로 mkBefore. 설명이 붙은 단축키의 동작을 HELP_BINDS 에 기록
+    # (SUPER+H 단축키 목록에서 항목을 고르면 hypr-keybinds 가 이 표로 그 동작을 hl.dispatch 로 실행)
+    wayland.windowManager.hyprland.extraConfig = lib.mkMerge [
+      (lib.mkBefore ''
+      HELP_BINDS = {}
+      do
+        local orig_bind = hl.bind
+        hl.bind = function(keys, dispatcher, opts)
+          if type(opts) == "table" and opts.description then HELP_BINDS[opts.description] = dispatcher end
+          return orig_bind(keys, dispatcher, opts)
+        end
+      end
+    '')
+      ''
       -- absolute paths from Nix
       local wofi = "${wofi}"
       local launcher = "${appLauncher}/bin/hypr-launcher"
@@ -165,6 +191,7 @@ in {
         direction = "down",
         action = function() hl.exec_cmd(swap_monitors) end
       })
-    '';
+    ''
+    ];
   };
 })

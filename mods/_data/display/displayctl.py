@@ -500,7 +500,14 @@ def op_set(mon: str, res: str | None = None, hz: float | None = None, scale: flo
     cur = st["monitors"].setdefault(mon, {"mode": m.mode, "scale": m.scale})
     pm = parse_mode(cur["mode"]) or (m.width, m.height, m.hz)
     w, h = (int(x) for x in res.split("x")) if res else (pm[0], pm[1])
-    cur["mode"] = fmt_mode(w, h, hz if hz else pm[2])
+    if not hz:
+        hz = pm[2]
+        if res:
+            # 해상도만 바꿀 때의 주사율: 그 해상도를 모니터가 지원하면 그중 가장 가까운 값, 아니면 정수로 반올림
+            # (목록 밖 해상도에 현재 값 60.04 를 그대로 붙이면 "1920x1200@60.04" 가 거부됨 — 실측)
+            native = mode_groups(m).get(f"{w}x{h}")
+            hz = min(native, key=lambda x: abs(x - hz)) if native else float(round(hz))
+    cur["mode"] = fmt_mode(w, h, hz)
     if scale:
         cur["scale"] = float(scale)
     if pos is not None:

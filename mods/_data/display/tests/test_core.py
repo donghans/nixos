@@ -98,4 +98,9 @@ reset(); run("layout", "external"); open(FS + ".events", "w").close(); run("layo
 check("외부만 → 노트북만(맞바꿈): 임시 위치로 먼저 켜고 나서 외장을 끄고 최종 위치로", any(e.startswith("rule eDP-1 pos=2") or e.startswith("rule eDP-1 pos=3") for e in ev) and not any(e.startswith("OVERLAP") for e in ev), str(ev))
 m = mons(); check("  최종 위치: 내장 0,0", (m["eDP-1"].x, m["eDP-1"].y) == (0, 0) and m["DP-4"].disabled)
 
+# 해상도만 바꿀 때 주사율: 목록 밖 해상도에는 정수로 반올림(60.04 → 60), 지원 해상도에는 가장 가까운 지원 값
+reset(); run("set", "eDP-1", "--res", "1920x1200")
+check("--res 만 줘도 주사율이 정수로(1920x1200@60, 60.04 아님)", dc.load_state()["monitors"]["eDP-1"]["mode"] == "1920x1200@60", dc.load_state()["monitors"]["eDP-1"]["mode"])
+reset(); run("set", "DP-4", "--res", "1920x1080"); check("지원 해상도는 가장 가까운 지원 주사율(60)", dc.load_state()["monitors"]["DP-4"]["mode"] == "1920x1080@60", dc.load_state()["monitors"]["DP-4"]["mode"])
+
 print(f"\n코어 {ok} 통과 / {fail} 실패"); sys.exit(1 if fail else 0)
