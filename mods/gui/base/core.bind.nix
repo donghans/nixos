@@ -46,74 +46,6 @@ mkPartOf "mods.gui" ({
     fi
   '';
 
-  # 디스플레이 모드 전환 스크립트 정의 (확장 / 미러 / 노트북만 / 외부만)
-  # 노트북만·외부만: 사용하지 않는 쪽을 disabled 로 끔. 복원은 extend(= hyprctl reload).
-  # 미러: 내부 모니터(eDP-*)가 외부 모니터의 화면/비율을 그대로 따라감 (패널 비율이 다르면 여백 발생)
-  # 확장: hyprctl reload 로 설정 파일의 기본 monitor 규칙 복원
-  displayMode = pkgs.writeShellScriptBin "hypr-display-mode" ''
-    JQ=${pkgs.jq}/bin/jq
-    # 미러된 모니터는 `monitors`에서 빠지므로 all 로 조회
-    MONITORS_JSON=$(hyprctl monitors all -j)
-    EXTERNAL=$(echo "$MONITORS_JSON" | $JQ -r '[.[] | select(.name | startswith("eDP") | not)] | .[0].name // empty')
-    INTERNALS=$(echo "$MONITORS_JSON" | $JQ -r '.[] | select(.name | startswith("eDP")) | .name')
-    MIRRORED=$(echo "$MONITORS_JSON" | $JQ -r '[.[] | select(.name | startswith("eDP")) | select(.mirrorOf != "none")] | length')
-
-    MODE=''${1:-toggle}
-    if [ "$MODE" = toggle ]; then
-      if [ "$MIRRORED" -gt 0 ]; then MODE=extend; else MODE=mirror; fi
-    fi
-
-    case "$MODE" in
-      mirror)
-        [ -z "$EXTERNAL" ] && { echo "외부 모니터 없음" >&2; exit 1; }
-        # (이유: 노트북만/외부만으로 끈 모니터는 disabled 가 남아 미러 규칙만으로는 켜지지 않음 → 먼저 초기화)
-        hyprctl reload
-        for m in $INTERNALS; do
-          hyprctl eval "hl.monitor({ output = \"$m\", mode = \"preferred\", position = \"auto\", scale = 1, mirror = \"$EXTERNAL\" })"
-        done
-        ;;
-      extend)
-        # reload 만으로는 내부 모니터가 외부 옆으로 밀려 배치가 바뀌므로 내부를 원점에 고정 후 외부를 위로 재배치
-        hyprctl reload
-        for m in $INTERNALS; do
-          hyprctl eval "hl.monitor({ output = \"$m\", mode = \"preferred\", position = \"0x0\", scale = 1 })"
-        done
-        [ -n "$EXTERNAL" ] && hyprctl eval "hl.monitor({ output = \"$EXTERNAL\", mode = \"preferred\", position = \"auto-up\", scale = 1 })"
-        ;;
-      internal)
-        # 노트북 화면만: 미러/규칙을 기본으로 되돌린 뒤 외부 모니터를 끔
-        hyprctl reload
-        for m in $INTERNALS; do
-          hyprctl eval "hl.monitor({ output = \"$m\", mode = \"preferred\", position = \"0x0\", scale = 1 })"
-        done
-        [ -n "$EXTERNAL" ] && hyprctl eval "hl.monitor({ output = \"$EXTERNAL\", disabled = true })"
-        ;;
-      external)
-        # 외부 화면만: 외부가 없으면 화면이 모두 꺼지므로 거부
-        [ -z "$EXTERNAL" ] && { echo "외부 모니터 없음" >&2; exit 1; }
-        hyprctl reload
-        hyprctl eval "hl.monitor({ output = \"$EXTERNAL\", mode = \"preferred\", position = \"0x0\", scale = 1 })"
-        for m in $INTERNALS; do
-          hyprctl eval "hl.monitor({ output = \"$m\", disabled = true })"
-        done
-        ;;
-      *) echo "usage: hypr-display-mode [extend|mirror|internal|external|toggle]" >&2; exit 1 ;;
-    esac
-  '';
-
-  # 화면 모드 메뉴: 화면 전환 키(SUPER+P, XF86Display)로 wofi 표시 → hypr-display-mode 실행
-  displayMenu = pkgs.writeShellScriptBin "hypr-display-menu" ''
-    pkill -x '(.wofi-wrapped|wofi)' && exit 0
-    modes="extend	확장 (노트북 + 외부)
-    mirror	미러
-    internal	노트북 화면만
-    external	외부 화면만"
-    sel=$(printf '%s\n' "$modes" | cut -f2 | ${wofi} --dmenu --hide-search --cache-file /dev/null --width 420 --lines 4) || exit 0
-    [ -z "$sel" ] && exit 0
-    mode=$(printf '%s\n' "$modes" | ${pkgs.gawk}/bin/awk -F'\t' -v s="$sel" '$2 == s { print $1 }')
-    [ -n "$mode" ] && exec ${displayMode}/bin/hypr-display-mode "$mode"
-  '';
-
   # 단축키 목록 보기: description 이 있는 바인딩만 hyprctl 에서 읽어 wofi 로 표시
   keybindsHelp = pkgs.writeShellScriptBin "hypr-keybinds" ''
     pkill -x '(.wofi-wrapped|wofi)' && exit 0
@@ -137,15 +69,11 @@ mkPartOf "mods.gui" ({
   '';
 in {
   hm = {
-    # (이유: 장치 메뉴(hypr-device-menu)가 PATH 로 호출함)
-    home.packages = [displayMode];
-
     wayland.windowManager.hyprland.extraConfig = ''
       -- absolute paths from Nix
       local wofi = "${wofi}"
       local launcher = "${appLauncher}/bin/hypr-launcher"
       local swap_monitors = "${swapMonitors}/bin/hypr-swap-monitors"
-      local display_menu = "${displayMenu}/bin/hypr-display-menu"
       local keybinds_help = "${keybindsHelp}/bin/hypr-keybinds"
       local grim = "${grim}"
       local slurp = "${slurp}"
@@ -168,10 +96,8 @@ in {
       bindd("SUPER + H", hl.dsp.exec_cmd(keybinds_help), "단축키 목록 보기")
       bindd("SUPER + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"), "fcitx5 재시작")
 
-      -- 디스플레이 모드 전환 (확장 <-> 미러)
       -- Fn+F11 은 펌웨어가 SUPER+P(Windows 의 Win+P 방식)를 보내므로 SUPER+P 에 할당
-      bindd("SUPER + P", hl.dsp.exec_cmd(display_menu), "화면 모드 메뉴: 확장 / 미러 / 노트북만 / 외부만 (Fn+F11)")
-      hl.bind("XF86Display", hl.dsp.exec_cmd(display_menu))
+      -- 화면 전환 키(SUPER+P, Fn+F11)는 display-manager.nix (displayui)
 
       -- Special workspace
       bindd("SUPER + S", hl.dsp.workspace.toggle_special("magic"), "스페셜 워크스페이스 토글")

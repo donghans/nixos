@@ -107,7 +107,7 @@
     '';
 
     # 입력 장치 메뉴(터치패드/터치스크린): 터치패드 키를 누르면 wofi 로 표시. 항목 추가는 deviceMenuExtraEntries 옵션 사용
-    # (화면 모드 전환은 별도 메뉴 hypr-display-menu — 화면 전환 키 SUPER+P / XF86Display)
+    # (화면 모드 전환은 별도: 화면 전환 키 SUPER+P / XF86Display → displayui, mods/gui/base/display-manager.nix)
     extraEntries = config.wayland.windowManager.hyprland.deviceMenuExtraEntries;
     deviceMenu = pkgs.writeShellScriptBin "hypr-device-menu" ''
       pkill -x '(.wofi-wrapped|wofi)' && exit 0
