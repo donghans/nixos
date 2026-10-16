@@ -33,6 +33,7 @@ notify-logger   = true
 xarchiver       = true
 thunar          = true
 wayvnc          = true
+office          = true
 
 [mods.devel]
 enable = true

@@ -41,6 +41,7 @@ notify-logger   = true
 xarchiver       = false
 thunar          = false
 wayvnc          = false
+office          = false
 
 [mods.devel]
 enable = false
