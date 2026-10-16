@@ -72,7 +72,26 @@ mkHostConfiguration ({
     # == Services & Hardware ==
     # (목적: 부팅 시 I2C 버스 간섭 방지)
     networking.modemmanager.enable = false;
-    services.fprintd.enable = true; # (Goodix 27c6:6094 MOC 지문 센서 — libfprint goodixmoc 드라이버로 동작 확인됨)
+    # (지문 인식은 쓰지 않음: Goodix 27c6:6094 센서는 동작했지만, 지문이 비밀번호보다 먼저 PAM 에서 처리돼
+    #  비밀번호만 쓰려면 지문 실패를 기다려야 했고 keyring 도 못 열었음 → fprintd 를 끄고 얼굴 인식으로 대체)
+
+    # == 얼굴 인식 (Howdy + IR 카메라) ==
+    # 카메라: SunplusIT FHD Camera(5986:213a) — 일반(RGB)과 IR 가 별개 영상 장치. Howdy 는 IR 장치를 써야 함.
+    # IR 에미터는 IR 스트림을 열면 별도 설정 없이 켜지는 것으로 확인됨(linux-enable-ir-emitter 불필요).
+    # 적용 범위: greetd(로그인)와 hyprlock(잠금 화면)만. sudo/su/TTY/polkit 은 비밀번호만(앉아만 있어도 통과하는
+    #   얼굴 인증을 권한 상승에 쓰지 않기 위함). 얼굴 인식은 "sufficient" 라 카메라가 없거나 꺼져 있거나
+    #   얼굴이 안 맞으면 자동으로 비밀번호로 넘어감. 얼굴로 로그인하면 비밀번호를 PAM 이 못 봐서 gnome-keyring 은
+    #   첫 사용 때 비밀번호로 열어야 함.
+    # 얼굴 등록(root 필요): sudo howdy add   /  확인: sudo howdy list   /  삭제: sudo howdy clear
+    services.howdy = {
+      enable = true;
+      control = "sufficient";
+      # (이유: /dev/video2 같은 번호는 부팅마다 바뀔 수 있어 USB 포트·인터페이스(1.2 = IR) 기준의 고정 경로 사용)
+      settings.video.device_path = "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:7:1.2-video-index0";
+    };
+    security.pam.howdy.enable = false; # (이유: 기본값은 모든 PAM 서비스에 적용되므로 끄고 아래 두 곳만 켬)
+    security.pam.services.greetd.howdy.enable = true;
+    security.pam.services.hyprlock.howdy.enable = true; # (hyprlock 은 NixOS 모듈이 아니라 HM 이라 이 PAM 서비스를 여기서 정의)
 
     # (참고: TLP 기본 laptop 프로파일은 mods/sys/base/os/_power.nix에서 적용됨)
     # MSI 전용 TLP quirk 추가 설정
