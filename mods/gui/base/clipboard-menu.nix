@@ -87,9 +87,10 @@ in {
 
     # 앱 런처(SUPER+Space)에서도 검색되도록 freedesktop 등록. clipui-open 이 class=clipui 전용 창으로 연다
     xdg.desktopEntries.clipui = {
-      name = "클립보드 관리";
-      genericName = "Clipboard Manager";
-      comment = "클립보드 이력 검색 · 전문 보기 · 선택 복사 · 일괄 삭제 · DB 최적화";
+      # (런처에 보이는 이름은 다른 앱들처럼 영어로 통일)
+      name = "Clipboard Manager";
+      genericName = "Clipboard history";
+      comment = "Search, preview, copy parts of, bulk-delete and optimize the clipboard history";
       exec = "${clipuiOpen}/bin/clipui-open";
       terminal = false;
       categories = ["Utility"];
@@ -98,7 +99,7 @@ in {
 
     wayland.windowManager.hyprland.extraConfig = ''
       -- 클립보드 관리 TUI 창: 모니터 크기에 비례한 크기로 가운데에 (안의 내용은 창 크기에 맞춰 반응)
-      -- 열기: 앱 런처(SUPER+Space)에서 "클립보드 관리" — 전용 단축키는 두지 않음
+      -- 열기: 앱 런처(SUPER+Space)에서 "Clipboard Manager" — 전용 단축키는 두지 않음
       hl.window_rule({
         match = { class = "^(clipui)$" },
         center = true,
