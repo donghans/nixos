@@ -10,6 +10,8 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
 }: let
   # (목적: Wayland 터미널(kitty, alacritty 등)에서 LLM CLI의 Home/End 키 깨짐 현상 수정)
   #
+  # (claude-code 쪽 패치는 제거함: 4월에 패키지가 네이티브 바이너리 배포로 바뀌면서 패치 대상 cli.js 가 사라져
+  #  "pattern not found, skipping" 으로 아무 효과가 없었고, 현재 버전에서는 Home/End 문제도 재현되지 않음)
   # 원인: gemini-cli, claude-code 모두 시작 시 kitty keyboard protocol 쿼리(\x1b[?u)를 보내고,
   # kitty/alacritty 등 최신 Wayland 터미널이 이를 지원한다고 응답하면 프로토콜을 활성화(\x1b[>1u).
   # 이 모드에서 Home/End 키가 앱 자체의 키 파서가 처리하지 못하는 확장 시퀀스로 전송됨.
@@ -29,9 +31,6 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   #       fi
   #     '';
   # });
-  # claude-code: kitty keyboard protocol enable 시퀀스를 빈 문자열로 교체
-  # ">1u"는 CSI > 1 u (kitty keyboard protocol enable) 페이로드.
-  # 변수명(Xd6, yo6 등)·함수명(cz, NA 등)은 빌드마다 바뀌므로 grep으로 동적 탐색.
   #
   # (목적: claude 래퍼가 노출하는 LD_LIBRARY_PATH 의 alsa-lib 가 다른 프로그램을 깨뜨리는 문제 수정)
   # nixpkgs claude-code 는 /voice(음성 입력) 네이티브 모듈이 libasound 를 dlopen 하도록 래퍼에
@@ -39,19 +38,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # 빌드돼 있어, 이 변수를 물려받는 glibc 2.42 프로그램(ONLYOFFICE 등)이 `GLIBC_2.43 not found` 로 죽음.
   # → alsa-lib 만 stable 것으로 교체. 새 glibc 는 옛 glibc 로 빌드된 라이브러리를 그대로 로드할 수 있어 양쪽 모두 안전함
   #   (claude 바이너리는 libc/libm/libpthread/librt 를 미리 로드하고 stable libasound 의 의존도 같은 목록).
-  claude = (unstable.claude-code.override {alsa-lib = pkgs.alsa-lib;}).overrideAttrs (old: {
-    postInstall =
-      (old.postInstall or "")
-      + ''
-        target="$out/lib/node_modules/@anthropic-ai/claude-code/cli.js"
-        if grep -q '">1u"' "$target" 2>/dev/null; then
-          sed -i 's/\([A-Za-z0-9_$]\{1,8\}\)=\([A-Za-z0-9_$]\{1,8\}\)(">1u")/\1=""/g' "$target"
-          echo "patched: kitty keyboard protocol disabled in claude-code"
-        else
-          echo "WARNING: kitty keyboard protocol pattern not found in claude-code, skipping patch"
-        fi
-      '';
-  });
+  claude = unstable.claude-code.override {alsa-lib = pkgs.alsa-lib;};
 in {
   hm = {
     home.packages = [claude unstable.antigravity-cli];
