@@ -77,6 +77,8 @@ in {
       /* 플레이스홀더(wofi.overlay.nix 의 겹침 라벨): 돋보기 아이콘 오른쪽에 정렬 */
       #placeholder {
         margin-left: 32px;
+        /* 세로 가운데 정렬이 입력 글자보다 3px 아래라 아래 여백으로 3px 올림 (실측) */
+        margin-bottom: 6px;
         color: #7a7a7a;
       }
       #entry {
