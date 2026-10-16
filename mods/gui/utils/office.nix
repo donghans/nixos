@@ -1,5 +1,4 @@
-# MS Office 문서(docx/xlsx/pptx) 열람·편집용 오피스 — ONLYOFFICE 와 LibreOffice 를 같이 두고 비교 중.
-# (어느 쪽이 MS Office 서식을 더 잘 재현하는지 실제 문서로 확인한 뒤 하나로 정리할 것)
+# MS Office 문서(docx/xlsx/pptx) 열람·편집용 오피스 — ONLYOFFICE Desktop Editors (LibreOffice 는 주석 처리해 둠).
 # 폰트: MS 전용 폰트(Calibri/Cambria 등)는 재배포할 수 없어 같은 글자 폭(metric-compatible)의 대체 폰트를 둠.
 #   Calibri → Carlito, Cambria → Caladea, Arial/Times New Roman/Courier New → Liberation.
 #   한글 문서는 맑은 고딕 등을 Noto CJK 로 대체하므로 글자 폭이 달라 줄바꿈 위치가 조금 달라질 수 있음.
@@ -14,11 +13,29 @@
 #   → 정적 TTF(나눔, Liberation)를 ~/.local/share/fonts 에 "실제 파일"로 복사해야 하므로 home-manager 의 링크 방식 대신 활성화 때 복사.
 #   LibreOffice 는 fontconfig 를 직접 써서 이 문제가 없음.
 {mkModOf, ...}:
-mkModOf "mods.gui" __curPos "Office (ONLYOFFICE + LibreOffice + MS 호환 폰트)" ({
+mkModOf "mods.gui" __curPos "Office (ONLYOFFICE + MS 호환 폰트)" ({
   pkgs,
   lib,
   ...
-}: {
+}: let
+  # UI 배율: ONLYOFFICE 는 기본으로 2배(창 2400x1480)로 떠서 너무 큼. 1 / 1.25 / 1.5 / 1.75 / 2 중 선택 (여기서만 바꾸면 됨)
+  # 인자(--force-scale)로만 지정 가능해서, 실행 파일과 .desktop(문서 더블클릭 시 실행) 둘 다 이 값으로 감싼다.
+  uiScale = "1";
+  onlyoffice = pkgs.symlinkJoin {
+    name = "onlyoffice-desktopeditors-scaled";
+    paths = [pkgs.onlyoffice-desktopeditors];
+    nativeBuildInputs = [pkgs.makeWrapper];
+    postBuild = ''
+      rm $out/bin/onlyoffice-desktopeditors
+      makeWrapper ${pkgs.onlyoffice-desktopeditors}/bin/onlyoffice-desktopeditors $out/bin/onlyoffice-desktopeditors \
+        --add-flags "--force-scale=${uiScale}"
+      rm $out/share/applications/onlyoffice-desktopeditors.desktop
+      sed "s|^Exec=[^ ]*|Exec=$out/bin/onlyoffice-desktopeditors|" \
+        ${pkgs.onlyoffice-desktopeditors}/share/applications/onlyoffice-desktopeditors.desktop \
+        > $out/share/applications/onlyoffice-desktopeditors.desktop
+    '';
+  };
+in {
   os.fonts.packages = with pkgs; [
     carlito
     caladea
@@ -28,9 +45,32 @@ mkModOf "mods.gui" __curPos "Office (ONLYOFFICE + LibreOffice + MS 호환 폰트
   ];
   hm = {
     home.packages = [
-      pkgs.onlyoffice-desktopeditors
-      pkgs.libreoffice-fresh
+      onlyoffice
+      # pkgs.libreoffice-fresh # (필요하면 주석 해제: fontconfig 를 그대로 써서 폰트 문제는 없지만 OOXML 재현은 ONLYOFFICE 가 나음)
     ];
+
+    # ONLYOFFICE 설정(~/.config/onlyoffice/DesktopEditors.conf)은 앱이 직접 다시 쓰므로 파일 전체를 선언하지 않고
+    # 필요한 키만 활성화 때 맞춘다.
+    #  - UITheme: theme-dark(UI 만 어둡고 문서 용지는 흰색 유지) / theme-night(문서 배경까지 어둡게) /
+    #             theme-light / theme-classic-light / theme-contrast-dark
+    #  - titlebar: custom(앱이 직접 그린 둥근 창 + 최소화/닫기 버튼) / system(창 틀은 Hyprland 가 그림 → 모서리가
+    #              각지고 다른 앱과 어울림. 대신 창 버튼이 없어 닫기는 단축키로)
+    home.activation.onlyofficeConf = lib.hm.dag.entryAfter ["writeBoundary"] ''
+      conf="$HOME/.config/onlyoffice/DesktopEditors.conf"
+      if [ -z "''${DRY_RUN:-}" ]; then
+        mkdir -p "$(dirname "$conf")"
+        [ -f "$conf" ] || printf '[General]\n' > "$conf"
+        set_key() {
+          if ${pkgs.gnugrep}/bin/grep -q "^$1=" "$conf"; then
+            ${pkgs.gnused}/bin/sed -i "s|^$1=.*|$1=$2|" "$conf"
+          else
+            ${pkgs.gnused}/bin/sed -i "/^\\[General\\]/a $1=$2" "$conf"
+          fi
+        }
+        set_key UITheme theme-dark
+        set_key titlebar system
+      fi
+    '';
 
     home.activation.onlyofficeFonts = lib.hm.dag.entryAfter ["writeBoundary"] ''
       if [ -z "''${DRY_RUN:-}" ]; then
