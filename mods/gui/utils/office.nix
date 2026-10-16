@@ -3,7 +3,11 @@
 # 폰트: MS 전용 폰트(Calibri/Cambria 등)는 재배포할 수 없어 같은 글자 폭(metric-compatible)의 대체 폰트를 둠.
 #   Calibri → Carlito, Cambria → Caladea, Arial/Times New Roman/Courier New → Liberation.
 #   한글 문서는 맑은 고딕 등을 Noto CJK 로 대체하므로 글자 폭이 달라 줄바꿈 위치가 조금 달라질 수 있음.
-#   (실제 MS 폰트가 필요하면 라이선스를 가진 Windows 에서 ~/.local/share/fonts 로 직접 복사)
+# 실제 Windows 폰트(재배포 불가라 레포에는 없음): 이 PC 의 Windows 파티션(nvme0n1p3 NTFS)에서 직접 복사해 둠.
+#   절차: udisksctl mount -b /dev/nvme0n1p3 -o ro (관리자 인증 필요) → <마운트>/Windows/Fonts 에서
+#   arial/times/cour/calibri/cambria/consola/segoeui/malgun/batang/gulim/georgia/verdana/tahoma/trebuc 등
+#   (*.ttf, *.ttc)을 ~/.local/share/fonts 에 "실제 파일"로 복사 → 언마운트. ONLYOFFICE 는 다음 실행 때 자동 재스캔.
+#   (홈을 새로 만들면 위 절차를 다시 해야 함. 없어도 위의 호환 폰트로 대체되어 열리긴 함)
 # ONLYOFFICE 의 한글: 문서 본문은 자체 렌더링 엔진이 그리는데, 이 엔진은 시스템 폰트(fontconfig)가 아니라
 #   자기가 스캔한 폰트만 씀. 스캔 대상은 번들 폰트 + /usr/share/fonts(FHS) + ~/.local/share/fonts 인데,
 #   변수형 .otf.ttc(Noto CJK)와 심볼릭 링크는 건너뛰어서 한글이 □ 로 나왔음(실제 시험으로 확인).
