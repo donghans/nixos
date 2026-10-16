@@ -109,8 +109,8 @@ PATH 에 뷰어/플레이어가 없고(ImageMagick `convert` 뿐), `xdg-mime que
 
 | 용도 | 기본(더블클릭, 런처에서 숨김) | 직접 고르는 것(런처에 보임) |
 |---|---|---|
-| 이미지 | **imv-dir** | **swayimg** (Thunar 우클릭 "swayimg로 열기") |
-| 영상/오디오 | **mpv** (`hwdec=vaapi`) | **VLC** (Thunar 우클릭 "VLC로 열기") |
+| 이미지 | **imv-dir** | **swayimg** (Thunar 우클릭 "Open in swayimg") |
+| 영상/오디오 | **mpv** (`hwdec=vaapi`) | **VLC** (Thunar 우클릭 "Open in VLC") |
 
 실제로 확인한 것과 이유:
 - **imv 는 파일 하나를 주면 그 파일만 연다**(창 제목 `[1/1]`). 폴더의 다음/이전 사진으로 넘기려면 폴더 전체를 여는 `imv-dir` 가 필요하다
@@ -124,11 +124,29 @@ PATH 에 뷰어/플레이어가 없고(ImageMagick `convert` 뿐), `xdg-mime que
   오디오 파일도 `--player-operation-mode=pseudo-gui`(mpv.desktop 의 Exec)라서 창과 컨트롤바가 뜬다.
 - mpv `hwdec=vaapi` 가 실제로 켜진다(`hwdec-current` = vaapi).
 - **loupe 를 인자 없이 열면** "Open Files…" 버튼과 드래그 앤 드롭 안내가 있는 빈 창이 뜬다(파일 선택창 자체는 열어 보지 않음).
-- Thunar 우클릭(`~/.config/Thunar/uca.xml` 을 선언적으로 관리 — 기존 파일은 Thunar 가 만든 "Open Terminal Here" 예제 하나뿐이라 그대로 포함): 폴더에 "swayimg로 열기"/"VLC로 열기"가 보이고,
+- Thunar 우클릭(`~/.config/Thunar/uca.xml` 을 선언적으로 관리 — 기존 파일은 Thunar 가 만든 "Open Terminal Here" 예제 하나뿐이라 그대로 포함): 폴더에 "Open in swayimg"/"Open in VLC"가 보이고,
   swayimg 는 폴더에서 열어 p1→p2→p3 로 넘어가는 것까지 확인했다. 이 파일은 읽기 전용 링크라 Thunar 의 "Edit > Configure custom actions" 로 고치면 저장되지 않는다(`media.nix` 를 수정).
 
+## swayimg vs loupe (다중 파일/폴더/확대·축소) — 2026-10-17 실측
+
+| 항목 | swayimg | loupe |
+|---|---|---|
+| 파일 1개 열기 | 그 파일만(`list.all=yes` 설정 시 폴더 전체) | 같은 폴더의 다음 파일로 넘어감(기본값). 끝에서 순환하지 않음 |
+| 파일 여러 개 | 그 목록 | 그 목록 안에서만 이동(p1,p3 → 둘 사이) |
+| 폴더 인자 | 열림(폴더 안 이미지, `recursive=yes` 면 하위 포함) | **창이 뜨지 않음**(파일+폴더 섞으면 폴더는 무시). 폴더 단위 열기는 `loupe 폴더/*` 처럼 파일로 풀어 줘야 함 |
+| 인자 없이 | 현재 폴더의 이미지(없으면 종료) | "Open Files…" 버튼이 있는 빈 창 |
+| 확대/축소 | `+`/`-`, Ctrl+휠, `z` 맞춤, `w`/`W` 너비/높이, `Shift+z` 채움, `BackSpace` 최적 | `+`/`-`(Ctrl 조합도), `Ctrl+0` Best Fit, `Ctrl+1` 원본 크기 |
+| 이동 | 방향키·휠 | Ctrl+방향키 |
+| 회전/뒤집기 | `[` `]` 회전, `m`/`Shift+m` 뒤집기 | Ctrl+R / Shift+Ctrl+R 회전 |
+| 이전/다음/처음/끝 | PageUp/PageDown·Space, Home/End | ←/→, Home/End |
+| 갤러리/슬라이드쇼 | 있음(Return, `s`) | 단축키 목록에 슬라이드쇼 없음, 썸네일 격자 미확인 |
+| 시작 | 약 0.11초 | 약 1.2초 |
+
+loupe 의 키는 loupe 자신의 단축키 창(F1 → Show Keyboard Shortcuts)을 화면으로 읽어 확인했다. loupe 의 터치패드 핀치/휠 확대, 마우스 드래그는 시험하지 않았다.
+Thunar 의 "Open in swayimg" 는 폴더에 쓸 수 있지만 loupe 는 폴더를 못 받아서 같은 방식의 메뉴를 만들려면 `loupe "$dir"/*` 형태의 래퍼가 필요하다.
+
 미확인:
-- VLC 가 폴더를 열었을 때 재생목록에 폴더 안 파일이 모두 들어가는지(첫 실행 "Privacy and Network Access Policy" 대화상자에 가려 확인하지 못함). VLC 는 XWayland 로 뜬다(`xwayland=true`).
+- (확인됨) VLC 는 폴더를 열면 하위 폴더까지 재귀로 재생목록에 담는다(MPRIS 로 미디어 3개 확인, PNG 제외). 첫 실행 개인정보 대화상자는 사용자가 `qt-privacy-ask=0` 으로 꺼 둠(`~/.config/vlc`, 레포 밖 수동 설정). VLC 는 XWayland 로 뜬다.
 - NoDisplay 인 imv/mpv 가 Thunar "Open With" 하위 메뉴에 보이는지(`gio mime` 목록에는 등록 앱으로 나옴). 화면 시험 중 사용자의 다른 창으로 포커스가 넘어가서 중단함.
 - imv 의 HEIC/AVIF/JXL/SVG 실제 표시, 마우스 휠 확대·드래그 이동(키보드 확대는 설명서로만 확인).
 - 이미지 3종(PNG만 아닌 다른 형식)·영상 기본 연결이 실제 더블클릭으로 열리는지(`xdg-mime query default` 로는 모두 연결 확인).

@@ -3,9 +3,9 @@
 # 역할 분담 (런처 wofi 에는 "직접 골라 쓰는 것"만 보이게 하고, 더블클릭으로 열리는 기본 프로그램은 숨김):
 #   이미지   기본: imv-dir  (런처에서 숨김. imv 는 파일 하나를 주면 그 파일만 열어서, 폴더의 다음/이전 사진으로 넘기려면
 #                            폴더를 통째로 여는 imv-dir 가 필요함 — 실제로 imv=[1/1], imv-dir=[2/3] 으로 확인)
-#            선택: swayimg (런처에 보임, Thunar 우클릭 "swayimg로 열기". 폴더 단위 갤러리가 장점)
+#            선택: swayimg (런처에 보임, Thunar 우클릭 "Open in swayimg". 폴더 단위 갤러리가 장점)
 #   영상/오디오 기본: mpv (런처에서 숨김, VA-API 하드웨어 디코딩)
-#            선택: VLC (런처에 보임, Thunar 우클릭 "VLC로 열기")
+#            선택: VLC (런처에 보임, Thunar 우클릭 "Open in VLC")
 {mkModOf, ...}:
 mkModOf "mods.gui" __curPos "미디어 (imv, swayimg, mpv, vlc)" ({
   pkgs,
@@ -110,8 +110,8 @@ in {
       <?xml version="1.0" encoding="UTF-8"?>
       <actions>
       ${ucaAction "1792143897495107-1" "utilities-terminal" "Open Terminal Here" "exo-open --working-directory %f --launch TerminalEmulator" "<directories/>"}
-      ${ucaAction "1792143897495107-2" "image-x-generic" "swayimg로 열기" "swayimg-open %F" "<directories/>\n\t<image-files/>"}
-      ${ucaAction "1792143897495107-3" "vlc" "VLC로 열기" "vlc %F" "<directories/>\n\t<audio-files/>\n\t<video-files/>"}
+      ${ucaAction "1792143897495107-2" "image-x-generic" "Open in swayimg" "swayimg-open %F" "<directories/>\n\t<image-files/>"}
+      ${ucaAction "1792143897495107-3" "vlc" "Open in VLC" "vlc %F" "<directories/>\n\t<audio-files/>\n\t<video-files/>"}
       </actions>
     '';
   };
