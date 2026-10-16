@@ -9,9 +9,7 @@ mkPartOf "mods.gui" ({
   grim = "${pkgs.grim}/bin/grim";
   slurp = "${pkgs.slurp}/bin/slurp";
   satty = "${pkgs.satty}/bin/satty";
-  cliphist = "${pkgs.cliphist}/bin/cliphist";
   wofi = "${pkgs.wofi}/bin/wofi";
-  wl-copy = "${pkgs.wl-clipboard}/bin/wl-copy";
 
   # 앱 런처: wofi drun 선택 결과(.desktop 경로 [액션])를 uwsm scope 로 실행
   # (이유: 네이티브 앱(Zed, kitty 등)을 Hyprland 와 분리된 app.slice 로 띄워 CPU/IO weight 를 분리 — core.cgroups.nix 참고.
@@ -110,8 +108,6 @@ in {
       -- absolute paths from Nix
       local wofi = "${wofi}"
       local launcher = "${appLauncher}/bin/hypr-launcher"
-      local cliphist = "${cliphist}"
-      local wl_copy = "${wl-copy}"
       local swap_monitors = "${swapMonitors}/bin/hypr-swap-monitors"
       local display_mode = "${displayMode}/bin/hypr-display-mode"
       local keybinds_help = "${keybindsHelp}/bin/hypr-keybinds"
@@ -132,7 +128,6 @@ in {
       bindd("SUPER + SHIFT + Q", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'"), "Hyprland 종료")
       bindd("SUPER + F", hl.dsp.window.float({ action = "toggle" }), "플로팅 토글")
       bindd("SUPER + space", hl.dsp.exec_cmd(launcher), "앱 런처 (wofi)")
-      bindd("SUPER + V", hl.dsp.exec_cmd("pkill -x '(.wofi-wrapped|wofi)' && exit 0; " .. cliphist .. " list | " .. wofi .. " --dmenu --cache-file /dev/null --prompt \"클립보드 검색\" | " .. cliphist .. " decode | " .. wl_copy), "클립보드 히스토리")
       bindd("SUPER + L", hl.dsp.exec_cmd("hyprlock"), "화면 잠금")
       bindd("SUPER + H", hl.dsp.exec_cmd(keybinds_help), "단축키 목록 보기")
       bindd("SUPER + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"), "fcitx5 재시작")
