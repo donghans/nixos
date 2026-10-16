@@ -13,6 +13,7 @@ mkPartOf "mods.gui" ({
   kitty = "${pkgs.kitty}/bin/kitty";
   uwsm = "${pkgs.uwsm}/bin/uwsm";
   gawk = "${pkgs.gawk}/bin/gawk";
+  zenity = "${pkgs.zenity}/bin/zenity";
 
   # 고급 관리 CLI (키워드/크기 기준 일괄 삭제, 통계, DB 최적화) — 본체는 mods/_data/clipboard/clipctl.sh
   clipctl = pkgs.writeShellScriptBin "clipctl" (
@@ -36,24 +37,62 @@ mkPartOf "mods.gui" ({
     MODE=''${1:-paste}
     WOFI="${wofi} --dmenu --cache-file /dev/null --width 1400"
 
-    # 삭제 전 확인: $1 = 제목, $2 = "id<TAB>바이트<TAB>미리보기" 목록. 대상 미리보기를 보여주고 실행/취소를 고름
-    # 실행을 고르면 0 을 반환하고 대상 목록을 $ROWS 에 남긴다
+    # zenity(GTK 대화상자): wofi 는 목록 선택용이라 입력창·진행 표시·항목별 체크를 못 함
+    # (GTK 테마 경고가 stderr 로 나오므로 버림)
+    z() { ${zenity} "$@" 2>/dev/null; }
+
+    # zenity --text 는 마크업이라 &, <, > 를 이스케이프
+    esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+    # 오래 걸리는 명령을 실행하는 동안 진행 표시줄(취소 가능)을 보여준다. 결과(stdout)는 $SPIN_OUT 에 담는다
+    # 반환: 0 = 끝까지 실행, 1 = 사용자가 취소 (취소하면 실행 중인 명령도 중단)
+    # SPIN_NOCANCEL=1 이면 취소 버튼을 없앤다 (DB 최적화처럼 중간에 끊기면 곤란한 작업용)
+    spin() {
+      local text="$1" out pid zpid zopts=()
+      shift
+      [ "''${SPIN_NOCANCEL:-0}" = 1 ] && zopts+=(--no-cancel)
+      out=$(mktemp)
+      "$@" >"$out" 2>/dev/null &
+      pid=$!
+      # 명령이 끝나면 입력이 닫혀 진행 창이 저절로 닫힘
+      ( while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done ) \
+        | z --progress --pulsate --auto-close "''${zopts[@]}" --title "클립보드" --text "$text" --width 400 &
+      zpid=$!
+      while kill -0 "$pid" 2>/dev/null && kill -0 "$zpid" 2>/dev/null; do sleep 0.2; done
+      if kill -0 "$pid" 2>/dev/null; then
+        # 명령이 아직 도는데 진행 창이 먼저 닫힘 = 사용자가 취소
+        kill "$pid" 2>/dev/null
+        wait "$pid" 2>/dev/null
+        rm -f "$out"
+        return 1
+      fi
+      wait "$zpid" 2>/dev/null
+      SPIN_OUT=$(cat "$out")
+      rm -f "$out"
+      return 0
+    }
+
+    # 삭제 확인: $1 = 문구, $2 = "id<TAB>바이트<TAB>미리보기" 목록. 체크박스로 삭제할 항목을 고른다 (기본: 전부 체크)
+    # 선택이 있으면 0 을 반환하고 체크한 항목만 $ROWS 에 남긴다
     # (주의: 파이프 오른쪽에서 호출하면 서브셸이라 $ROWS 가 부모 셸에 전달되지 않으므로 인자로 받는다)
-    confirm_rows() {
-      ROWS="$2"
-      if [ -z "$ROWS" ]; then
+    confirm_checklist() {
+      local rows="$2" n sel
+      if [ -z "$rows" ]; then
         ${notify} -t 2500 "클립보드" "일치하는 항목이 없습니다"
         return 1
       fi
-      local n pick
-      n=$(printf '%s\n' "$ROWS" | wc -l)
-      pick=$({
-        printf '삭제 실행 — %s개\n취소\n' "$n"
-        printf '%s\n' "$ROWS" | while IFS=$'\t' read -r id bytes preview; do
-          printf '    #%s · %s · %s\n' "$id" "$(${numfmt} --to=iec --suffix=B "$bytes")" "$preview"
-        done
-      } | $WOFI --prompt "$1 — 대상 ''${n}개 (아래는 미리보기, Esc: 취소)") || return 1
-      case "$pick" in "삭제 실행"*) return 0 ;; *) return 1 ;; esac
+      n=$(printf '%s\n' "$rows" | wc -l)
+      sel=$(printf '%s\n' "$rows" | while IFS=$'\t' read -r id bytes preview; do
+          printf 'TRUE\n%s\n%s\n%s\n' "$id" "$(${numfmt} --to=iec --suffix=B "$bytes")" "$preview"
+        done | z --list --checklist --title "클립보드 일괄 삭제 — 확인" \
+          --text "$(printf '%s' "$1" | esc) — 총 ''${n}개. 삭제할 항목만 체크하세요 (기본: 전부 체크)" \
+          --column "삭제" --column "ID" --column "크기" --column "미리보기" \
+          --print-column 2 --separator "," \
+          --ok-label "체크한 항목 삭제" --cancel-label "취소" --width 1200 --height 720) || return 1
+      [ -z "$sel" ] && return 1
+      ROWS=$(printf '%s\n' "$rows" | ${gawk} -F'\t' -v ids=",$sel," 'index(ids, "," $1 ",") > 0')
+      [ -z "$ROWS" ] && return 1
+      return 0
     }
 
     delete_rows() {
@@ -119,42 +158,43 @@ mkPartOf "mods.gui" ({
 
     # 일괄 작업 메뉴
     tools_menu() {
-      local choice kw kb pick rows
+      local choice kw kb
       choice=$(printf '%s\n' \
         '키워드로 일괄 삭제' '큰 항목 삭제' '통계 보기' 'DB 최적화 (파일 크기 줄이기)' '전체 삭제' \
         | $WOFI --prompt "일괄 작업") || return 0
 
       case "$choice" in
         "키워드로 일괄 삭제")
-          kw=$(printf "" | $WOFI --prompt "삭제할 키워드 입력 후 Enter (대소문자 무시, 내용 전체에서 검색)") || return 0
+          kw=$(z --entry --title "클립보드 일괄 삭제 — 입력" \
+            --text "삭제할 키워드를 입력하세요 (대소문자 구분 없음, 항목 내용 전체에서 검색)" \
+            --width 520 --ok-label "검색" --cancel-label "취소") || return 0
           [ -z "$kw" ] && return 0
-          ${notify} -t 3000 "클립보드" "내용을 검색하는 중…"
-          rows=$(${ctl} find "$kw" --tsv)
-          if confirm_rows "'$kw' 포함 항목 삭제" "$rows"; then delete_rows; fi
+          spin "'$(printf '%s' "$kw" | esc)' 검색 중…" ${ctl} find "$kw" --tsv || return 0
+          if confirm_checklist "'$kw' 포함 항목" "$SPIN_OUT"; then delete_rows; fi
           ;;
         "큰 항목 삭제")
-          kb=$(printf '%s\n' 10 50 100 500 | $WOFI --prompt "이 크기(KB) 이상 항목 삭제 — 숫자를 직접 입력해도 됨") || return 0
+          kb=$(z --entry --title "클립보드 일괄 삭제 — 입력" --entry-text 10 \
+            --text "이 크기(KB) 이상인 항목을 찾습니다" \
+            --width 420 --ok-label "검색" --cancel-label "취소") || return 0
           case "$kb" in *[!0-9]*|"") ${notify} "클립보드" "숫자(KB)를 입력하세요"; return 0 ;; esac
-          ${notify} -t 3000 "클립보드" "크기를 확인하는 중…"
-          rows=$(${ctl} big "$kb" --tsv)
-          if confirm_rows "''${kb}KB 이상 항목 삭제" "$rows"; then delete_rows; fi
+          spin "''${kb}KB 이상 항목을 찾는 중…" ${ctl} big "$kb" --tsv || return 0
+          if confirm_checklist "''${kb}KB 이상 항목" "$SPIN_OUT"; then delete_rows; fi
           ;;
         "통계 보기")
-          ${ctl} stats | $WOFI --prompt "클립보드 통계 (Esc: 닫기)" >/dev/null
+          spin "통계를 계산하는 중…" ${ctl} stats || return 0
+          printf '%s\n' "$SPIN_OUT" | z --text-info --title "클립보드 통계" --width 700 --height 420 --font "monospace 11"
           ;;
         "DB 최적화 (파일 크기 줄이기)")
-          pick=$(printf '%s\n' '최적화 실행 (수 초 소요, 그동안 새 복사는 기록되지 않음)' '취소' \
-            | $WOFI --prompt "DB 를 새로 구성합니다 (백업 자동 생성, 이력 번호는 새로 매겨짐)") || return 0
-          case "$pick" in
-            "최적화 실행"*)
-              ${notify} -t 3000 "클립보드" "DB 최적화 중…"
-              ${notify} "클립보드 DB 최적화" "$(${ctl} compact 2>&1)"
-              ;;
-          esac
+          z --question --title "DB 최적화" --width 520 --ok-label "최적화 실행" --cancel-label "취소" \
+            --text "클립보드 DB 를 새로 구성합니다. 백업이 자동으로 만들어지고 이력 번호는 새로 매겨집니다. 수 초 걸리며 그동안 새 복사는 기록되지 않습니다." || return 0
+          SPIN_NOCANCEL=1 spin "DB 를 최적화하는 중… (그동안 새 복사는 기록되지 않습니다)" sh -c '${ctl} compact 2>&1' || return 0
+          z --info --title "DB 최적화 결과" --width 620 --text "$(printf '%s' "$SPIN_OUT" | esc)"
           ;;
         "전체 삭제")
-          pick=$(printf '%s\n' "전부 삭제 실행 — 이력 $(${cliphist} list | wc -l)개" '취소' | $WOFI --prompt "전체 삭제 (되돌릴 수 없음)") || return 0
-          case "$pick" in "전부 삭제 실행"*) ${cliphist} wipe; ${notify} -t 2500 "클립보드" "전체 삭제됨" ;; esac
+          z --question --title "전체 삭제" --width 420 --ok-label "전부 삭제" --cancel-label "취소" \
+            --text "이력 $(${cliphist} list | wc -l)개를 전부 삭제합니다. 되돌릴 수 없습니다." || return 0
+          ${cliphist} wipe
+          ${notify} -t 2500 "클립보드" "전체 삭제됨"
           ;;
       esac
     }
@@ -201,6 +241,7 @@ in {
     home.packages = [clipMenu clipctl];
 
     wayland.windowManager.hyprland.extraConfig = ''
+      hl.window_rule({ match = { class = "^(zenity)$" }, center = true })
       hl.bind("SUPER + V", hl.dsp.exec_cmd("${clipMenu}/bin/hypr-cliphist"), { description = "클립보드 히스토리" })
       hl.bind("SUPER + SHIFT + V", hl.dsp.exec_cmd("${clipMenu}/bin/hypr-cliphist manage"), { description = "클립보드 관리 (전문 보기/삭제/일괄 작업)" })
     '';
