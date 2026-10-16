@@ -109,7 +109,7 @@ mkPartOf "mods.sys.base" ({
       nano
       wget
       curl
-      htop
+      btop
     ];
 
     system.stateVersion = config.workspace.stateVersion;
@@ -122,6 +122,60 @@ mkPartOf "mods.sys.base" ({
 
     programs = {
       home-manager.enable = true;
+      # 시스템 모니터: htop 대신 btop (CPU/메모리/디스크/네트워크/프로세스를 한 화면에). 색은 lazygit/clipui/displayui 와 같은 팔레트
+      btop = {
+        enable = true;
+        settings = {
+          color_theme = "lazygit";
+          theme_background = false;
+          truecolor = true;
+          rounded_corners = true;
+          graph_symbol = "braille";
+          update_ms = 2000;
+          shown_boxes = "cpu mem net proc";
+          proc_sorting = "cpu lazy";
+        };
+        themes.lazygit = ''
+          theme[main_fg]="#cfcfcf"
+          theme[title]="#cfcfcf"
+          theme[hi_fg]="#33ccff"
+          theme[selected_bg]="#268bd2"
+          theme[selected_fg]="#ffffff"
+          theme[inactive_fg]="#595959"
+          theme[graph_text]="#9a9a9a"
+          theme[meter_bg]="#262626"
+          theme[proc_misc]="#33ccff"
+          theme[cpu_box]="#595959"
+          theme[mem_box]="#595959"
+          theme[net_box]="#595959"
+          theme[proc_box]="#595959"
+          theme[div_line]="#595959"
+          theme[temp_start]="#268bd2"
+          theme[temp_mid]="#ebcb8b"
+          theme[temp_end]="#e06c75"
+          theme[cpu_start]="#1b4f7a"
+          theme[cpu_mid]="#268bd2"
+          theme[cpu_end]="#33ccff"
+          theme[free_start]="#1b4f7a"
+          theme[free_mid]="#268bd2"
+          theme[free_end]="#33ccff"
+          theme[cached_start]="#1b4f7a"
+          theme[cached_mid]="#268bd2"
+          theme[cached_end]="#33ccff"
+          theme[available_start]="#1b4f7a"
+          theme[available_mid]="#268bd2"
+          theme[available_end]="#33ccff"
+          theme[used_start]="#1b4f7a"
+          theme[used_mid]="#268bd2"
+          theme[used_end]="#33ccff"
+          theme[download_start]="#1b4f7a"
+          theme[download_mid]="#268bd2"
+          theme[download_end]="#33ccff"
+          theme[upload_start]="#6b5a2e"
+          theme[upload_mid]="#b8a46a"
+          theme[upload_end]="#ebcb8b"
+        '';
+      };
       git = {
         enable = true;
         settings = {

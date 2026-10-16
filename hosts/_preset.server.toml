@@ -28,6 +28,7 @@ nix-cache-proxy    = false
 aws-roles-anywhere      = false
 print-co                = false
 tailpass                = false
+netdata                 = false
 
 [mods.gui]
 enable = false

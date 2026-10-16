@@ -5,3 +5,4 @@ cpuCount   = 16
 
 [mods.sys.services]
 tailpass = true
+netdata  = true
