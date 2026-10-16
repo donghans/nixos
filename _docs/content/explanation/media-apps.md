@@ -152,6 +152,17 @@ Thunar 의 "Open in swayimg" 는 폴더에 쓸 수 있지만 loupe 는 폴더를
   loupe 의 "Open Files…" 선택창에서 Ctrl+A 로 폴더 전체를 고르는 방법도 있을 것으로 보나 시험하지 않음.
 - swayimg 는 제거(패키지/설정/런처 항목). 필요하면 git 이력(`0186aa8`)에서 복원.
 
+### loupe "Could not Load Image" — Hyprland 가 물려준 CAP_SYS_NICE (2026-10-17)
+- 증상: Thunar 우클릭/런처에서 연 loupe 만 정상 JPEG(`Downloads/20260905_142232.jpg`, Galaxy S25 사진)를 "Could not Load Image" 로 못 염. **같은 파일이 터미널(내 셸)·`systemd-run --user` 로는 열림.**
+  상세 메시지: `Loader process exited early with status '1'` + bubblewrap(`bwrap --unshare-all …`) 명령.
+- 원인: loupe 의 이미지 로더(glycin)는 bwrap 샌드박스에서 도는데, **bwrap 은 setuid 가 아니면서 capability 를 가진 채로는 "Unexpected capabilities but not setuid" 로 거부하고 종료 코드 1**.
+  NixOS 의 Hyprland 래퍼가 `cap_setpcap,cap_sys_nice=ep` 이고(`getcap /run/wrappers/bin/*`), Hyprland 프로세스와 그 자식들(Thunar 데몬 `.thunar-wrapped`, waybar 등)이
+  `CapAmb: 0000000000800000`(= CAP_SYS_NICE ambient)을 가짐(`/proc/<pid>/status`). 권한이 없는 경로(내 셸 `CapEff: 0`)에서는 정상. 같은 이유로 Hyprland 세션에서 뜬 glycin 기반 앱은 모두 영향을 받을 수 있음.
+- 해결(`mods/gui/utils/media.nix`): PATH 의 `loupe` 를 `setpriv --ambient-caps=-all <loupe>` 래퍼(`lib.hiPrio`)로 가림 → exec 후 권한이 사라짐. `loupe-open` 도 이 래퍼를 씀.
+  검증: Thunar 우클릭 "Open in Loupe" 로 같은 파일이 열리고 그 프로세스의 `CapAmb` 가 0 으로 바뀜(수정 전에는 `800000`, 실패).
+- 참고: loupe 는 단일 인스턴스라 이미 실패 상태로 떠 있는 loupe 가 있으면 새로 열어도 그 프로세스로 전달되어 계속 실패함 → 그 창을 모두 닫아야 함(수정 전 증상 분석 중 이로 인해 혼동).
+- 미확인: 런처(wofi)·"Open With" 경로는 `loupe` 를 PATH 에서 찾으므로 같은 래퍼를 쓸 것으로 보나 직접 시험하지 않음.
+
 ### 메모(주석) — satty
 - loupe 의 편집은 자르기/회전/뒤집기뿐이고 그리기·글자·화살표 같은 메모 도구는 없다(화면으로 확인).
 - satty 는 `--filename <파일>` 로 **기존 이미지 파일도 열 수** 있다(스크린샷 단축키가 쓰는 `--filename -` 는 stdin). 도구: 자르기, 펜, 선, 화살표, 사각형, 원, 글자, 번호, 블러, 형광펜.

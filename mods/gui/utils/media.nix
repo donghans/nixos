@@ -41,6 +41,15 @@ mkModOf "mods.gui" __curPos "미디어 (imv, loupe, mpv, vlc)" ({
     video/x-ogm+ogg video/x-theora video/x-theora+ogg
   ''));
 
+  # loupe 의 이미지 로더(glycin)는 bubblewrap 샌드박스에서 돌아가는데, bwrap 은 setuid 가 아니면서 capability 를 가진 채로는
+  # "Unexpected capabilities but not setuid" 로 거부하고 종료 코드 1 로 끝남 → loupe 가 "Could not Load Image" 를 냄.
+  # NixOS 의 Hyprland 래퍼가 cap_sys_nice=ep 라 Hyprland 가 띄운 모든 프로세스(Thunar 데몬, 런처, waybar…)가 CAP_SYS_NICE 를
+  # ambient 로 물려받음(/proc/<pid>/status 의 CapAmb 로 확인). 터미널 등 권한 없는 경로에서는 열리고 Thunar/런처에서는 안 열렸던 이유.
+  # → loupe 를 실행하기 직전에 ambient capability 를 비움(exec 후 권한이 사라짐). PATH 의 loupe 를 이 래퍼가 가리도록 hiPrio.
+  loupeNoCap = lib.hiPrio (pkgs.writeShellScriptBin "loupe" ''
+    exec ${pkgs.util-linux}/bin/setpriv --ambient-caps=-all ${pkgs.loupe}/bin/loupe "$@"
+  '');
+
   # loupe 는 폴더를 인자로 받으면 창이 뜨지 않음(실측). 폴더는 안의 이미지 파일로 풀어서 넘김(이름순). 인자가 없으면 그대로 빈 창("Open Files…")
   loupeOpen = pkgs.writeShellScriptBin "loupe-open" ''
     args=()
@@ -54,7 +63,7 @@ mkModOf "mods.gui" __curPos "미디어 (imv, loupe, mpv, vlc)" ({
         args+=("$a")
       fi
     done
-    exec ${pkgs.loupe}/bin/loupe "''${args[@]}"
+    exec ${loupeNoCap}/bin/loupe "''${args[@]}"
   '';
 
   ucaAction = id: icon: name: command: types: ''
@@ -73,7 +82,7 @@ mkModOf "mods.gui" __curPos "미디어 (imv, loupe, mpv, vlc)" ({
   '';
 in {
   hm = {
-    home.packages = [pkgs.imv pkgs.loupe loupeOpen pkgs.vlc];
+    home.packages = [pkgs.imv pkgs.loupe loupeNoCap loupeOpen pkgs.vlc];
 
     # 영상: VA-API 하드웨어 디코딩(intel-media-driver 는 hosts/ 의 hardware.graphics.extraPackages). 같은 영상에서 CPU 약 절반
     programs.mpv = {
