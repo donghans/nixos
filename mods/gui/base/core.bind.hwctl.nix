@@ -67,12 +67,59 @@
         ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:touchpad -u low "Touchpad" "Enabled"
       fi
     '';
+
+    # 터치스크린 토글 스크립트 (Laptop 전용). 펜(stylus)은 그대로 둠
+    toggleTouchscreen = pkgs.writeShellScriptBin "hypr-toggle-touchscreen" ''
+      DEVICES=$(hyprctl devices -j | ${pkgs.jq}/bin/jq -r '.touch[]?.name')
+
+      if [ -z "$DEVICES" ]; then
+        ${pkgs.libnotify}/bin/notify-send "Touchscreen" "No touchscreen device found!"
+        exit 1
+      fi
+
+      STATUS_FILE="$HOME/.local/state/hypr/touchscreen_enabled"
+      mkdir -p "$(dirname "$STATUS_FILE")"
+      [ ! -f "$STATUS_FILE" ] && echo "true" > "$STATUS_FILE"
+
+      if [ "$(cat "$STATUS_FILE")" = "true" ]; then NEW=false; LABEL=Disabled; else NEW=true; LABEL=Enabled; fi
+      while read -r dev; do
+        hyprctl eval "hl.device({ name = \"$dev\", enabled = $NEW })"
+      done <<< "$DEVICES"
+      echo "$NEW" > "$STATUS_FILE"
+      ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:touchscreen -u low "Touchscreen" "$LABEL"
+    '';
+
+    # 입력 장치 메뉴(터치패드/터치스크린): 터치패드 키를 누르면 wofi 로 표시. 항목 추가는 deviceMenuExtraEntries 옵션 사용
+    # (화면 모드 전환은 별도 메뉴 hypr-display-menu — 화면 전환 키 SUPER+P / XF86Display)
+    extraEntries = config.wayland.windowManager.hyprland.deviceMenuExtraEntries;
+    deviceMenu = pkgs.writeShellScriptBin "hypr-device-menu" ''
+      pkill -x '(.wofi-wrapped|wofi)' && exit 0
+
+      labels=()
+      cmds=()
+      add() { labels+=("$1"); cmds+=("$2"); }
+      state() { cat "$HOME/.local/state/hypr/$1" 2>/dev/null || echo true; }
+      onoff() { [ "$(state "$1")" = true ] && echo "끄기 (지금 켜짐)" || echo "켜기 (지금 꺼짐)"; }
+
+      add "터치패드 $(onoff touchpad_enabled)" "${toggleTouchpad}/bin/hypr-toggle-touchpad"
+      add "터치스크린 $(onoff touchscreen_enabled)" "${toggleTouchscreen}/bin/hypr-toggle-touchscreen"
+      ${lib.concatMapStrings (e: "add ${lib.escapeShellArg e.label} ${lib.escapeShellArg e.command}\n      ") extraEntries}
+      sel=$(printf '%s\n' "''${labels[@]}" | ${pkgs.wofi}/bin/wofi --dmenu --cache-file /dev/null --width 520 --height 200 --prompt "입력 장치") || exit 0
+      [ -z "$sel" ] && exit 0
+      for i in "''${!labels[@]}"; do
+        if [ "''${labels[$i]}" = "$sel" ]; then
+          exec ${pkgs.runtimeShell} -c "''${cmds[$i]}"
+        fi
+      done
+    '';
   in {
     hm = {
       # 스크립트를 home.packages에 명시적으로 추가해 HM 클로저에 포함시킴
       # (settings.bindl 문자열 내 스토어 경로는 의존성 추적에서 누락될 수 있음)
       home.packages = lib.optionals (config.workspace.type == "laptop") [
         toggleTouchpad
+        toggleTouchscreen
+        deviceMenu
         volumeControl
         brightnessControl
       ];
@@ -93,8 +140,9 @@
 
         # == Laptop Specific Bindings ==
         bindl = lib.mkIf (config.workspace.type == "laptop") [
-          # 터치패드 토글 (설정된 키 사용)
-          "${config.wayland.windowManager.hyprland.touchpadToggleKey}, exec, ${toggleTouchpad}/bin/hypr-toggle-touchpad"
+          # 입력 장치 메뉴 (터치패드 키)
+          # (이전에는 터치패드를 바로 토글했음. 이제는 입력 장치 메뉴를 띄우고, 터치패드 토글은 메뉴 항목으로 이동)
+          "${config.wayland.windowManager.hyprland.touchpadToggleKey}, exec, ${deviceMenu}/bin/hypr-device-menu"
 
           # 덮개 스위치 (로그인 잠금 및 전원 관리)
           ", switch:on:Lid Switch, exec, loginctl lock-session && hyprctl dispatch \"hl.dsp.dpms({ action = 'disable' })\"${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd != "") " && ${config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd}"}"
@@ -112,6 +160,22 @@ in {
       type = lib.types.str;
       default = ", XF86TouchpadToggle";
       description = "Touchpad toggle key binding for Hyprland.";
+    };
+    deviceMenuExtraEntries = lib.mkOption {
+      type = lib.types.listOf (lib.types.submodule {
+        options = {
+          label = lib.mkOption {
+            type = lib.types.str;
+            description = "메뉴에 표시할 이름";
+          };
+          command = lib.mkOption {
+            type = lib.types.str;
+            description = "선택 시 실행할 셸 명령";
+          };
+        };
+      });
+      default = [];
+      description = "입력 장치 메뉴(hypr-device-menu)에 추가할 항목. 호스트 전용 동작(예: 특정 터치패드 드라이버 재시작)용.";
     };
     lidSwitchOnExtraCmd = lib.mkOption {
       type = lib.types.str;

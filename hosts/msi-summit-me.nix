@@ -78,20 +78,41 @@ mkHostConfiguration ({
     # == 얼굴 인식 (Howdy + IR 카메라) ==
     # 카메라: SunplusIT FHD Camera(5986:213a) — 일반(RGB)과 IR 가 별개 영상 장치. Howdy 는 IR 장치를 써야 함.
     # IR 에미터는 IR 스트림을 열면 별도 설정 없이 켜지는 것으로 확인됨(linux-enable-ir-emitter 불필요).
-    # 적용 범위: greetd(로그인)와 hyprlock(잠금 화면)만. sudo/su/TTY/polkit 은 비밀번호만(앉아만 있어도 통과하는
-    #   얼굴 인증을 권한 상승에 쓰지 않기 위함). 얼굴 인식은 "sufficient" 라 카메라가 없거나 꺼져 있거나
-    #   얼굴이 안 맞으면 자동으로 비밀번호로 넘어감. 얼굴로 로그인하면 비밀번호를 PAM 이 못 봐서 gnome-keyring 은
-    #   첫 사용 때 비밀번호로 열어야 함.
-    # 얼굴 등록(root 필요): sudo howdy add   /  확인: sudo howdy list   /  삭제: sudo howdy clear
+    # 적용 범위: hyprlock(잠금 화면)만. greetd(로그인)/sudo/su/TTY/polkit 은 비밀번호만(로그인은 비밀번호로 해야
+    #   gnome-keyring 이 같이 열리고, 앉아만 있어도 통과하는 얼굴 인증을 권한 상승에 쓰지 않기 위함). 얼굴 인식은 "sufficient" 라 카메라가 없거나 꺼져 있거나
+    #   얼굴이 안 맞으면 자동으로 비밀번호로 넘어감.     # 얼굴 등록(root 필요): sudo howdy add   /  확인: sudo howdy list   /  삭제: sudo howdy clear
     services.howdy = {
       enable = true;
       control = "sufficient";
       # (이유: /dev/video2 같은 번호는 부팅마다 바뀔 수 있어 USB 포트·인터페이스(1.2 = IR) 기준의 고정 경로 사용)
       settings.video.device_path = "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:7:1.2-video-index0";
     };
-    security.pam.howdy.enable = false; # (이유: 기본값은 모든 PAM 서비스에 적용되므로 끄고 아래 두 곳만 켬)
-    security.pam.services.greetd.howdy.enable = true;
+    security.pam.howdy.enable = false; # (이유: 기본값은 모든 PAM 서비스에 적용되므로 끄고 아래 한 곳만 켬)
     security.pam.services.hyprlock.howdy.enable = true; # (hyprlock 은 NixOS 모듈이 아니라 HM 이라 이 PAM 서비스를 여기서 정의)
+
+    # == 터치패드 재인식 (장치 메뉴의 "터치패드 재인식" 항목) ==
+    # 터치패드(ELAN0305, I2C HID)가 먹통이 될 때 드라이버를 unbind/bind 해서 다시 인식시킴.
+    # sysfs 쓰기는 root 만 가능하므로 root 서비스로 두고, 로컬 활성 세션 사용자가 비밀번호 없이 이 유닛만 시작하게 허용.
+    systemd.services.touchpad-reset = {
+      description = "Re-probe ELAN0305 touchpad (i2c_hid_acpi unbind/bind)";
+      serviceConfig.Type = "oneshot";
+      script = ''
+        drv=/sys/bus/i2c/drivers/i2c_hid_acpi
+        dev=i2c-ELAN0305:00
+        [ -e "$drv/$dev" ] && echo "$dev" > "$drv/unbind"
+        sleep 1
+        echo "$dev" > "$drv/bind"
+      '';
+    };
+    security.polkit.extraConfig = ''
+      polkit.addRule(function(action, subject) {
+        if (action.id == "org.freedesktop.systemd1.manage-units" &&
+            action.lookup("unit") == "touchpad-reset.service" &&
+            subject.local && subject.active) {
+          return polkit.Result.YES;
+        }
+      });
+    '';
 
     # (참고: TLP 기본 laptop 프로파일은 mods/sys/base/os/_power.nix에서 적용됨)
     # MSI 전용 TLP quirk 추가 설정
@@ -147,6 +168,13 @@ mkHostConfiguration ({
   hm = {
     wayland.windowManager.hyprland = {
       touchpadToggleKey = "SUPER + CTRL, F24";
+      deviceMenuExtraEntries = [
+        {
+          label = "터치패드 재인식 (드라이버 재시작)";
+          # 재시작하면 장치가 기본(켜짐)으로 돌아오므로 메뉴가 보여 주는 상태 기록도 켜짐으로 맞춤
+          command = "systemctl start touchpad-reset.service && mkdir -p ~/.local/state/hypr && echo true > ~/.local/state/hypr/touchpad_enabled";
+        }
+      ];
       lidSwitchOnExtraCmd = "tlp bat";
       lidSwitchOffExtraCmd = "tlp start";
       settings = {
