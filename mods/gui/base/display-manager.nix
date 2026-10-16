@@ -1,6 +1,7 @@
 # 화면 관리: displayctl(CLI) + displayui(TUI, Textual) — 본체는 mods/_data/display/
 #  - 화면 모드(확장/미러/노트북만/외부만), 프리젠테이션 등 프리셋(해상도 고정, 이전 구성 복귀)
 #  - 모니터별 해상도·주사율·배율·상대 위치. 모니터가 알려 주는 모드 외의 값도 시도하고 적용 뒤 실제 값을 검증
+#  - 해상도/주사율 변경은 확인이 없으면 되돌림: TUI 확인 창과 별개로 systemd 사용자 타이머가 예약돼서 TUI/터미널이 죽어도 되돌려짐
 #  - 구성은 상태 파일에 저장하고, 시작/설정 reload/모니터 연결·해제 때 displayctl restore 로 다시 적용
 #    (Hyprland 는 reload 때 런타임 모니터 설정을 지움)
 # 열기: 단축키(SUPER+P, Fn+F11=XF86Display) = 화면 모드에서 시작, 토글, 모드를 고르면 적용하고 닫힘
@@ -21,7 +22,7 @@ mkPartOf "mods.gui" ({
   # displayui.py 가 displayctl.py 를 import 하므로 같은 디렉터리에 둔다
   dir = pkgs.runCommand "display-py" {} ''
     mkdir -p $out
-    cp ${pkgs.writeText "displayctl.py" (builtins.replaceStrings ["@hyprctl@"] [hyprctl] (src "displayctl.py"))} $out/displayctl.py
+    cp ${pkgs.writeText "displayctl.py" (builtins.replaceStrings ["@hyprctl@" "@notify_send@"] [hyprctl "${pkgs.libnotify}/bin/notify-send"] (src "displayctl.py"))} $out/displayctl.py
     cp ${pkgs.writeText "displayui.py" (src "displayui.py")} $out/displayui.py
   '';
   displayctl = pkgs.writeShellScriptBin "displayctl" ''exec ${py}/bin/python3 ${dir}/displayctl.py "$@"'';

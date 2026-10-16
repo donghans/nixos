@@ -3,7 +3,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import displayctl as dc
 
 FS = os.environ["FAKE_STATE"]
+def kill_units():
+    subprocess.run([os.environ["DISPLAYCTL_SYSTEMCTL"], "--user", "stop", f"{dc.TIMER_UNIT}.timer", f"{dc.TIMER_UNIT}.service"], capture_output=True)
 def reset():
+    kill_units()
     for f in (FS, FS + ".events", FS + ".windows"):
         if os.path.exists(f): os.remove(f)
     shutil.rmtree(os.environ["DISPLAYCTL_STATE"], ignore_errors=True); shutil.rmtree(os.environ["DISPLAYCTL_CONF"], ignore_errors=True)
@@ -102,5 +105,54 @@ m = mons(); check("  최종 위치: 내장 0,0", (m["eDP-1"].x, m["eDP-1"].y) ==
 reset(); run("set", "eDP-1", "--res", "1920x1200")
 check("--res 만 줘도 주사율이 정수로(1920x1200@60, 60.04 아님)", dc.load_state()["monitors"]["eDP-1"]["mode"] == "1920x1200@60", dc.load_state()["monitors"]["eDP-1"]["mode"])
 reset(); run("set", "DP-4", "--res", "1920x1080"); check("지원 해상도는 가장 가까운 지원 주사율(60)", dc.load_state()["monitors"]["DP-4"]["mode"] == "1920x1080@60", dc.load_state()["monitors"]["DP-4"]["mode"])
+
+# ───── 되돌리기 타이머(별도 프로세스) ─────
+import time as _t
+def pending(): return os.path.exists(dc.PENDING_FILE)
+DC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "displayctl.py")
+
+reset(); tx = dc.Transaction(); tx.apply(dc.op_set("DP-4", "1280x720", 60, None, None)); tx.arm(1)
+check("arm: 변경이 적용되고 대기 기록이 생김", pending() and mons()["DP-4"].width == 1280)
+_t.sleep(3)
+m = mons(); check("확인 없이 시간이 지나면 별도 프로세스가 원래대로 되돌림", m["DP-4"].width == 3840 and not pending() and dc.load_state() is None, f"{m['DP-4'].width} pending={pending()}")
+
+reset(); tx = dc.Transaction(); tx.apply(dc.op_set("DP-4", "1280x720", 60, None, None)); tx.arm(2); tx.commit(); _t.sleep(3.5)
+check("확인(commit)하면 타이머가 취소되어 유지됨 + 구성 저장", mons()["DP-4"].width == 1280 and not pending() and dc.load_state()["monitors"]["DP-4"]["mode"].startswith("1280x720"))
+
+reset()
+subprocess.run([sys.executable, "-I", "-c", f"""
+import os, sys
+sys.path.insert(0, {os.path.dirname(DC)!r})
+import displayctl as dc
+tx = dc.Transaction(); tx.apply(dc.op_set("DP-4", "1280x720", 60, None, None)); tx.arm(1)
+os.kill(os.getpid(), 9)   # 부모(TUI/터미널)가 갑자기 죽는 상황
+"""])
+check("적용 직후 부모 프로세스가 죽은 상태", pending() and mons()["DP-4"].width == 1280)
+_t.sleep(3)
+check("부모가 죽어도 타이머가 되돌림 (핵심)", mons()["DP-4"].width == 3840 and not pending(), f"{mons()['DP-4'].width}")
+
+reset(); tx = dc.Transaction(); tx.apply(dc.op_set("DP-4", "1280x720", 60, None, None)); tx.arm(60); kill_units()  # 타이머가 사라진 상태(재부팅/재로그인) 흉내
+run("restore")
+check("확인 전 재로그인(restore): 변경을 복원하지 않고 이전 구성으로 되돌림", mons()["DP-4"].width == 3840 and not pending() and dc.load_state() is None)
+
+reset(); run("layout", "mirror"); run("revert-pending")
+check("대기 기록이 없으면 revert-pending 은 아무것도 안 함", mons()["eDP-1"].mirror_of == "DP-4" and dc.load_state()["layout"] == "mirror")
+
+reset(); tx1 = dc.Transaction(); tx1.apply(dc.op_set("DP-4", "1280x720", 60, None, None)); tx1.arm(60)
+tx2 = dc.Transaction(); tx2.apply(dc.op_set("DP-4", "1600x900", 60, None, None)); tx2.arm(1); _t.sleep(3)
+check("확인 전에 또 변경해도 처음(마지막으로 확인된) 구성으로 되돌림", mons()["DP-4"].width == 3840 and not pending(), f"{mons()['DP-4'].width}")
+
+reset(); tx = dc.Transaction(); tx.apply(dc.op_set("DP-4", "1280x720", 60, None, None)); tx.arm(60)
+run("confirm")
+check("다른 프로세스에서 `displayctl confirm`: 유지 + 구성 저장 + 타이머 취소", mons()["DP-4"].width == 1280 and not pending() and dc.load_state()["monitors"]["DP-4"]["mode"].startswith("1280x720"))
+_t.sleep(0.3)
+
+reset(); r = subprocess.run(["sh", "-c", f"echo | {sys.executable} -I {DC} set DP-4 --res 1280x720 --hz 60 --confirm 2"], capture_output=True, text=True)
+check("CLI set --confirm: Enter 를 누르면 유지", mons()["DP-4"].width == 1280 and not pending(), r.stderr[-120:])
+reset(); r = subprocess.run(["sh", "-c", f"{sys.executable} -I {DC} set DP-4 --res 1280x720 --hz 60 --confirm 2 < /dev/null"], capture_output=True, text=True)
+check("CLI set --confirm: 입력 없이 닫힘(EOF)은 확인으로 보지 않고 되돌림", mons()["DP-4"].width == 3840 and not pending(), r.stderr[-120:])
+reset(); r = subprocess.run(["sh", "-c", f"sleep 4 | {sys.executable} -I {DC} set DP-4 --res 1280x720 --hz 60 --confirm 2"], capture_output=True, text=True)
+check("CLI set --confirm: 시간 안에 입력이 없으면 되돌림", mons()["DP-4"].width == 3840 and not pending(), r.stderr[-120:])
+kill_units()
 
 print(f"\n코어 {ok} 통과 / {fail} 실패"); sys.exit(1 if fail else 0)

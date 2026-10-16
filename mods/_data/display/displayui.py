@@ -372,6 +372,10 @@ class DisplayUI(App):
         self.call_from_thread(self.msg, "적용 중…")
         tx = dc.Transaction()
         issues = tx.apply(st)
+        if confirm:
+            # 이 TUI(또는 터미널)가 죽어도 되돌려지도록 별도 프로세스(systemd 타이머)에도 되돌리기를 예약.
+            # 보통은 아래 확인 창의 타이머가 먼저 끝나므로 여유를 둠
+            tx.arm(CONFIRM_SECONDS + 5)
         self.call_from_thread(self.after_apply, tx, issues, confirm)
 
     def after_apply(self, tx: dc.Transaction, issues: list[str], confirm: bool) -> None:

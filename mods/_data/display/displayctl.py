@@ -10,7 +10,11 @@
 - 모니터가 알려 주는 모드(EDID) 외의 해상도/주사율도 시도할 수 있다. 적용 뒤 실제 모드를 읽어 요청과 다르면 알려 준다
   (예: 내장 패널은 48Hz 는 되지만 45/30Hz 는 60Hz 로 돌아감).
 
-(Nix 가 @hyprctl@ 자리표시자를 실제 경로로 치환한다 — mods/gui/base/display-manager.nix)
+되돌리기 타이머: 해상도/주사율처럼 화면이 안 나올 수 있는 변경은 적용 직전에 "이전 구성 + 만료 시각"을 pending.json 에 기록하고
+systemd 사용자 타이머(displayctl-revert)가 시간이 지나면 `displayctl revert-pending` 을 실행해 되돌린다. TUI 나 터미널이 죽어도
+(화면이 안 나와서 확인을 못 해도) 별도 프로세스가 되돌린다. 확인(`displayctl confirm`)하면 기록을 지우고 타이머를 취소한다.
+
+(Nix 가 @hyprctl@, @notify_send@ 자리표시자를 실제 경로로 치환한다 — mods/gui/base/display-manager.nix)
 """
 from __future__ import annotations
 
@@ -35,6 +39,11 @@ CONF_DIR = os.environ.get("DISPLAYCTL_CONF") or os.path.join(
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
 PRESET_FILE = os.path.join(CONF_DIR, "presets.json")
 LOCK_FILE = os.path.join(STATE_DIR, "lock")
+PENDING_FILE = os.path.join(STATE_DIR, "pending.json")  # 확인 대기 중인 변경(이전 구성 + 만료 시각)
+TIMER_UNIT = "displayctl-revert"
+SYSTEMD_RUN = os.environ.get("DISPLAYCTL_SYSTEMD_RUN", "systemd-run")
+SYSTEMCTL = os.environ.get("DISPLAYCTL_SYSTEMCTL", "systemctl")
+NOTIFY = os.environ.get("DISPLAYCTL_NOTIFY", "@notify_send@")  # 비어 있으면 알림 생략
 SETTLE = float(os.environ.get("DISPLAYCTL_SETTLE", "0.8"))  # 적용 뒤 실제 모드를 읽기 시작하기까지 기다리는 시간(초)
 VERIFY_TIMEOUT = float(os.environ.get("DISPLAYCTL_VERIFY_TIMEOUT", "4"))  # 검증이 통과할 때까지 기다리는 최대 시간(초)
 
@@ -152,6 +161,32 @@ def get_monitors() -> list[Mon]:
 
 def eval_lua(code: str) -> str:
     return hyprctl("eval", code).stdout.strip()
+
+
+# ───────────────────────── 잠금 ─────────────────────────
+import contextlib
+
+_lock_depth = 0
+_lock_fd = None
+
+
+@contextlib.contextmanager
+def locked():
+    """상태/대기 기록을 만지는 동안의 배타 잠금. 같은 프로세스에서 중첩 호출해도 안전(같은 파일에 flock 을 두 번 걸면 교착)"""
+    global _lock_depth, _lock_fd
+    if _lock_depth == 0:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        _lock_fd = open(LOCK_FILE, "w")
+        fcntl.flock(_lock_fd, fcntl.LOCK_EX)
+    _lock_depth += 1
+    try:
+        yield
+    finally:
+        _lock_depth -= 1
+        if _lock_depth == 0:
+            fcntl.flock(_lock_fd, fcntl.LOCK_UN)
+            _lock_fd.close()
+            _lock_fd = None
 
 
 # ───────────────────────── 상태 파일 ─────────────────────────
@@ -441,14 +476,76 @@ def migrate_windows(cfg: dict) -> int:
 
 
 # ───────────────────────── 트랜잭션 (되돌리기 지원) ─────────────────────────
+# ───────────────────────── 되돌리기 타이머 ─────────────────────────
+def _pending_load() -> dict | None:
+    try:
+        with open(PENDING_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _pending_clear() -> None:
+    try:
+        os.remove(PENDING_FILE)
+    except OSError:
+        pass
+
+
+def _notify(text: str) -> None:
+    if NOTIFY:
+        try:
+            subprocess.run([NOTIFY, "-u", "normal", "화면 설정", text], capture_output=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
+def cancel_timer() -> None:
+    subprocess.run([SYSTEMCTL, "--user", "stop", f"{TIMER_UNIT}.timer", f"{TIMER_UNIT}.service"], capture_output=True)
+
+
+def schedule_timer(seconds: float) -> None:
+    """seconds 뒤에 revert-pending 을 실행하는 systemd 사용자 타이머. 부모 프로세스와 무관하게 돈다."""
+    cancel_timer()
+    subprocess.run(
+        [SYSTEMD_RUN, "--user", "--quiet", "--collect", f"--unit={TIMER_UNIT}", f"--on-active={max(1, round(seconds))}s",
+         sys.executable, os.path.abspath(__file__), "revert-pending"],
+        capture_output=True,
+    )
+
+
+def revert_pending(from_timer: bool = False, fallback: tuple | None = None) -> bool:
+    """확인되지 않은 변경을 되돌린다. 대기 기록이 없으면 아무것도 안 함(이미 확인했거나 되돌린 경우). 되돌렸으면 True.
+    from_timer: 타이머 서비스가 직접 부른 경우 — 자기 자신(서비스)을 stop 하지 않음"""
+    with locked():
+        p = _pending_load()
+        if p:
+            cfg, state = p["prev_cfg"], p["prev_state"]
+        elif fallback:
+            cfg, state = fallback
+        else:
+            return False
+        migrate_windows(cfg)
+        apply_cfg(cfg)
+        save_state(state)
+        _pending_clear()
+    if not from_timer:
+        cancel_timer()
+    if p:
+        _notify("확인이 없어서 이전 화면 설정으로 되돌렸습니다.")
+    return True
+
+
 class Transaction:
-    """적용 전 실제 구성과 상태 파일을 기억해 두고, 확인 시 저장하거나 되돌린다."""
+    """적용 전 실제 구성과 상태 파일을 기억해 두고, 확인 시 저장하거나 되돌린다.
+    arm() 으로 별도 프로세스(systemd 타이머)에 되돌리기를 예약해 두면 이 프로세스가 죽어도 되돌려진다."""
 
     def __init__(self) -> None:
         self.prev_state = load_state()
         self.prev_cfg = current_cfg(get_monitors())
         self.cfg: dict = {}
         self.layout = "extend"
+        self.new_state: dict | None = None
 
     def apply(self, st: dict, do_verify: bool = True) -> list[str]:
         mons = get_monitors()
@@ -469,14 +566,31 @@ class Transaction:
                     st["monitors"][name]["mode"] = m.mode
         return errs + issues
 
+    def arm(self, seconds: float) -> None:
+        """이미 적용한 변경을 seconds 뒤에 자동으로 되돌리도록 예약. 그 전에 commit() 하면 취소됨.
+        확인 전에 또 변경하면 가장 처음의(마지막으로 확인된) 구성을 기준으로 되돌린다."""
+        with locked():
+            old = _pending_load()
+            rec = {
+                "prev_cfg": old["prev_cfg"] if old else self.prev_cfg,
+                "prev_state": old["prev_state"] if old else self.prev_state,
+                "new_state": self.new_state,  # (다른 프로세스가 `displayctl confirm` 으로 확인할 때 저장할 구성)
+                "deadline": time.time() + seconds,
+            }
+            with open(PENDING_FILE + ".tmp", "w") as f:
+                json.dump(rec, f, ensure_ascii=False)
+            os.replace(PENDING_FILE + ".tmp", PENDING_FILE)
+            schedule_timer(seconds)
+
     def commit(self) -> None:
-        save_state(self.new_state)
+        with locked():
+            save_state(self.new_state)
+            _pending_clear()
+        cancel_timer()
 
     def revert(self) -> list[str]:
-        migrate_windows(self.prev_cfg)
-        errs = apply_cfg(self.prev_cfg)
-        save_state(self.prev_state)
-        return errs
+        revert_pending(fallback=(self.prev_cfg, self.prev_state))
+        return []
 
 
 def mutated_state() -> dict:
@@ -578,10 +692,12 @@ def go(st: dict, quiet: bool = False) -> int:
 
 
 def restore() -> int:
-    """시작·reload·모니터 연결/해제 때 호출: 저장된 구성을 다시 적용 (저장된 게 없으면 아무것도 안 함)"""
-    os.makedirs(STATE_DIR, exist_ok=True)
-    with open(LOCK_FILE, "w") as lk:
-        fcntl.flock(lk, fcntl.LOCK_EX)
+    """시작·reload·모니터 연결/해제 때 호출: 저장된 구성을 다시 적용 (저장된 게 없으면 아무것도 안 함).
+    확인되지 않은 변경(pending)이 남아 있으면(예: 확인 전에 재부팅/재로그인) 그 변경을 적용하지 않고 이전 구성으로 되돌린다."""
+    with locked():
+        if _pending_load():
+            revert_pending()
+            return 0
         st = load_state()
         if not st:
             return 0
@@ -659,18 +775,40 @@ def cmd_set(a) -> int:
     st = op_set(a.monitor, a.res, a.hz, a.scale, parse_pos(a.pos) if a.pos else None)
     tx = Transaction()
     issues = tx.apply(st)
+    if a.confirm:
+        # 확인을 기다리는 동안 이 프로세스가 죽어도 되돌려지도록 별도 타이머를 먼저 예약 (확인 시간 + 여유 3초)
+        tx.arm(a.confirm + 3)
     for i in issues:
         print("⚠ " + i, file=sys.stderr)
     if a.confirm:
         print(f"{a.confirm}초 안에 Enter 를 누르면 유지, 아니면 되돌립니다.", file=sys.stderr)
         import select
         ready, _, _ = select.select([sys.stdin], [], [], a.confirm)
-        if not ready:
+        # 입력이 없거나(시간 초과), 입력 없이 닫힌 경우(EOF)는 확인으로 보지 않음
+        if not ready or sys.stdin.readline() == "":
             tx.revert()
             print("되돌렸습니다.", file=sys.stderr)
             return 2
     tx.commit()
     return 1 if issues else 0
+
+
+def cmd_confirm(a) -> int:
+    with locked():
+        p = _pending_load()
+        if not p:
+            print("확인할 변경이 없습니다.", file=sys.stderr)
+            return 1
+        if p.get("new_state"):
+            save_state(p["new_state"])
+        _pending_clear()
+    cancel_timer()
+    return 0
+
+
+def cmd_revert_pending(a) -> int:
+    revert_pending(from_timer=True)
+    return 0
 
 
 def cmd_layout(a) -> int:
@@ -779,6 +917,10 @@ def main(argv: list[str]) -> int:
     s.set_defaults(fn=cmd_reset)
     s = sub.add_parser("restore", help="저장된 구성을 다시 적용 (시작/reload/모니터 변경 시 자동 호출)")
     s.set_defaults(fn=cmd_restore)
+    s = sub.add_parser("confirm", help="확인 대기 중인 변경을 유지하고 되돌리기 타이머를 취소")
+    s.set_defaults(fn=cmd_confirm)
+    s = sub.add_parser("revert-pending", help="확인되지 않은 변경을 이전 구성으로 되돌림 (되돌리기 타이머가 부름)")
+    s.set_defaults(fn=cmd_revert_pending)
     a = p.parse_args(argv)
     return a.fn(a)
 

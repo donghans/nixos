@@ -150,8 +150,14 @@ mkHostConfiguration ({
       binfmt = true;
     };
 
-    environment.systemPackages = with pkgs; [
+    # 영상 하드웨어 디코딩(VA-API): 드라이버는 /run/opengl-driver/lib/dri 에 있어야 libva 가 찾음.
+    # systemPackages 에 넣으면 /run/current-system/sw/lib/dri 에 놓이는데 libva 는 거기를 찾지 않아서
+    # `vainfo` 가 iHD_drv_video.so 를 못 찾고 실패했음(경로를 직접 지정하면 H264/HEVC 등이 정상으로 나옴)
+    hardware.graphics.extraPackages = with pkgs; [
       intel-media-driver
+    ];
+
+    environment.systemPackages = with pkgs; [
       libva-vdpau-driver
       libvdpau-va-gl
 

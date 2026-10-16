@@ -9,7 +9,11 @@ FS = os.environ["FAKE_STATE"]
 results = []
 def check(name, cond, detail=""):
     results.append(bool(cond)); print(("PASS " if cond else "FAIL ") + name + (f"  [{detail}]" if detail else ""), flush=True)
+def kill_units():
+    import subprocess
+    subprocess.run([os.environ["DISPLAYCTL_SYSTEMCTL"], "--user", "stop", f"{dc.TIMER_UNIT}.timer", f"{dc.TIMER_UNIT}.service"], capture_output=True)
 def reset():
+    kill_units()
     for f in (FS, FS + ".events", FS + ".windows"):
         if os.path.exists(f): os.remove(f)
     shutil.rmtree(os.environ["DISPLAYCTL_STATE"], ignore_errors=True); shutil.rmtree(os.environ["DISPLAYCTL_CONF"], ignore_errors=True)
@@ -102,14 +106,15 @@ async def t_apply_confirm():
         check("해상도 변경 시 주사율 목록 갱신", "60" in [v for _, v in app.query_one("#hz", Select)._options])
         app.query_one("#hz", Select).value = "60"; await pilot.press("a"); await settle(pilot, 10)
         check("적용 직후 외장 1920x1080 + 확인 창", mons()["DP-4"].width == 1920 and app.screen.__class__.__name__ == "Confirm")
+        check("확인 창이 떠 있는 동안 별도 타이머가 예약됨(pending 기록)", os.path.exists(dc.PENDING_FILE))
         await pilot.press("enter"); await settle(pilot, 10)
-        check("유지 → 저장", dc.load_state()["monitors"]["DP-4"]["mode"].startswith("1920x1080"))
+        check("유지 → 저장 + 예약 취소(pending 없음)", dc.load_state()["monitors"]["DP-4"]["mode"].startswith("1920x1080") and not os.path.exists(dc.PENDING_FILE))
         app.query_one("#res", Select).value = "1280x720"; await settle(pilot, 3); await pilot.press("a"); await settle(pilot, 10)
         check("적용(1280x720)", mons()["DP-4"].width == 1280)
         await pilot.press("escape"); await settle(pilot, 10); check("Esc → 이전(1920x1080) 복귀", mons()["DP-4"].width == 1920)
         app.query_one("#res", Select).value = "1600x900"; await settle(pilot, 3); await pilot.press("a"); await settle(pilot, 10)
         check("적용(1600x900)", mons()["DP-4"].width == 1600)
-        await pilot.pause(3.6); await settle(pilot, 20); check("시간 초과 → 자동 되돌림", mons()["DP-4"].width == 1920)
+        await pilot.pause(3.6); await settle(pilot, 20); check("시간 초과 → 자동 되돌림 + pending 정리", mons()["DP-4"].width == 1920 and not os.path.exists(dc.PENDING_FILE))
 
 async def t_misc():
     reset(); app = ui.DisplayUI(focus="refresh")
@@ -153,5 +158,6 @@ async def main():
         try: await t()
         except Exception:
             import traceback; traceback.print_exc(); results.append(False); print("FAIL (예외)", t.__name__)
+    kill_units()
     print(f"\nTUI {sum(results)}/{len(results)} 통과"); return 0 if all(results) else 1
 sys.exit(asyncio.run(main()))
