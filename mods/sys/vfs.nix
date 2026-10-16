@@ -4,7 +4,5 @@ mkMod __curPos "Virtual File Systems (GVFS, Udisks2)" (_: {
     services.gvfs.enable = true;
     services.udisks2.enable = true;
   };
-  hm = {
-    services.udiskie.enable = true; # (목적: USB 자동 마운트 및 트레이 알림)
-  };
+  # (USB 자동 마운트는 mods/gui/utils/thunar.nix 의 thunar-volman 이 담당)
 })
