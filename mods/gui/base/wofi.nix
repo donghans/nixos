@@ -37,6 +37,8 @@ in {
       allow_images = true;
       image_size = 24;
       insensitive = true;
+      # (목적: fuzzel 처럼 퍼지 검색 — wofi 내장 fzy 기반 점수/정렬, 일치 글자 강조는 wofi.overlay.nix 패치)
+      matching = "fuzzy";
       no_actions = true;
     };
 
