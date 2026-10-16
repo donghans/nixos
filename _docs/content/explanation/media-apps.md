@@ -163,6 +163,12 @@ Thunar 의 "Open in swayimg" 는 폴더에 쓸 수 있지만 loupe 는 폴더를
 - 참고: loupe 는 단일 인스턴스라 이미 실패 상태로 떠 있는 loupe 가 있으면 새로 열어도 그 프로세스로 전달되어 계속 실패함 → 그 창을 모두 닫아야 함(수정 전 증상 분석 중 이로 인해 혼동).
 - 미확인: 런처(wofi)·"Open With" 경로는 `loupe` 를 PATH 에서 찾으므로 같은 래퍼를 쓸 것으로 보나 직접 시험하지 않음.
 
+### ONLYOFFICE 도 같은 원인으로 Thunar 에서 안 열림 (2026-10-17)
+- 증상: Thunar 에서 PDF 더블클릭/우클릭 "Open With ONLYOFFICE" 를 해도 아무 창도 안 뜨고 오류도 없음(프로세스·저널 흔적 없음). 터미널이나 `hyprctl dispatch exec` 로 같은 명령을 실행하면 정상.
+- 원인: loupe 와 동일. ONLYOFFICE 는 `buildFHSEnv`(bubblewrap)이라 Thunar 데몬이 물려받은 ambient CAP_SYS_NICE 가 있으면 bwrap 이 거부하고 조용히 종료.
+- 해결(`mods/gui/utils/office.nix`): 실행 래퍼를 `setpriv --ambient-caps=-all <onlyoffice>` 로 바꿈. 검증: Thunar 우클릭 "Open With ONLYOFFICE" 로 PDF 가 열리고 프로세스의 `CapAmb` 가 0.
+- 그 전에 사용자가 쓰던 ONLYOFFICE 인스턴스가 떠 있었던 것은 다른 경로(런처)로 실행됐기 때문으로 보이나, 경로별 권한 차이의 정확한 이유는 확인하지 못함(`hyprctl dispatch exec` 로 띄운 프로세스는 `CapAmb` 0 이었는데 Thunar 데몬 자식은 `800000`).
+
 ### 메모(주석) — satty
 - loupe 의 편집은 자르기/회전/뒤집기뿐이고 그리기·글자·화살표 같은 메모 도구는 없다(화면으로 확인).
 - satty 는 `--filename <파일>` 로 **기존 이미지 파일도 열 수** 있다(스크린샷 단축키가 쓰는 `--filename -` 는 stdin). 도구: 자르기, 펜, 선, 화살표, 사각형, 원, 글자, 번호, 블러, 형광펜.

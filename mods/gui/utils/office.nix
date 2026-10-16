@@ -27,8 +27,11 @@ mkModOf "mods.gui" __curPos "Office (ONLYOFFICE + MS 호환 폰트)" ({
     nativeBuildInputs = [pkgs.makeWrapper];
     postBuild = ''
       rm $out/bin/onlyoffice-desktopeditors
-      makeWrapper ${pkgs.onlyoffice-desktopeditors}/bin/onlyoffice-desktopeditors $out/bin/onlyoffice-desktopeditors \
-        --add-flags "--force-scale=${uiScale}"
+      # ONLYOFFICE 는 bubblewrap 으로 만든 FHS 환경(buildFHSEnv)이라, Hyprland 가 자식에게 물려주는 ambient CAP_SYS_NICE 가 있으면
+      # bwrap 이 "Unexpected capabilities but not setuid" 로 거부하고 조용히 종료함 → Thunar 에서 문서를 더블클릭해도 안 열렸음.
+      # (같은 원인 설명은 mods/gui/utils/media.nix 의 loupeNoCap) 실행 직전에 ambient capability 를 비움.
+      makeWrapper ${pkgs.util-linux}/bin/setpriv $out/bin/onlyoffice-desktopeditors \
+        --add-flags "--ambient-caps=-all ${pkgs.onlyoffice-desktopeditors}/bin/onlyoffice-desktopeditors --force-scale=${uiScale}"
       rm $out/share/applications/onlyoffice-desktopeditors.desktop
       sed "s|^Exec=[^ ]*|Exec=$out/bin/onlyoffice-desktopeditors|" \
         ${pkgs.onlyoffice-desktopeditors}/share/applications/onlyoffice-desktopeditors.desktop \
