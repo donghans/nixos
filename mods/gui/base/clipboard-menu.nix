@@ -11,28 +11,43 @@ mkPartOf "mods.gui" ({
   kitty = "${pkgs.kitty}/bin/kitty";
   uwsm = "${pkgs.uwsm}/bin/uwsm";
 
+  hyprctl = "${pkgs.hyprland}/bin/hyprctl";
+  py = pkgs.python3.withPackages (ps: [ps.textual]);
+  src = name: builtins.readFile (../../_data/clipboard + "/${name}");
+
+  # 부가 정보(시각·출처 앱·복사/사용 횟수) 사이드카 — clipmeta.py (cliphist DB 형식은 그대로 두고 옆에 sqlite 로 기록)
+  # 파이썬 import 가 되도록 세 스크립트(clipmeta/clipstore/clipui)는 같은 디렉터리에 둔다
+  clipmetaDir = pkgs.runCommand "clipboard-py" {} ''
+    mkdir -p $out
+    cp ${pkgs.writeText "clipmeta.py" (builtins.replaceStrings ["@cliphist@" "@hyprctl@"] [cliphist hyprctl] (src "clipmeta.py"))} $out/clipmeta.py
+    cp ${pkgs.writeText "clipstore.py" (src "clipstore.py")} $out/clipstore.py
+  '';
+  clipmeta = pkgs.writeShellScriptBin "clipmeta" ''exec ${py}/bin/python3 ${clipmetaDir}/clipmeta.py "$@"'';
+
+  # wl-paste --watch 가 클립보드가 바뀔 때마다 호출: cliphist 에 저장(기존 동작) + 부가 정보 기록
+  clipstore = pkgs.writeShellScriptBin "clipstore" ''exec ${py}/bin/python3 ${clipmetaDir}/clipstore.py "$@"'';
+
   # 고급 관리 CLI (키워드/크기 기준 삭제, 통계, DB 최적화) — 본체는 mods/_data/clipboard/clipctl.sh
   clipctl = pkgs.writeShellScriptBin "clipctl" (
     builtins.replaceStrings
-    ["@path@" "@cliphist@"]
+    ["@path@" "@cliphist@" "@clipmeta@"]
     [
       (lib.makeBinPath [pkgs.coreutils pkgs.gnugrep pkgs.gawk pkgs.gnused pkgs.findutils pkgs.util-linux])
       cliphist
+      "${clipmeta}/bin/clipmeta"
     ]
-    (builtins.readFile ../../_data/clipboard/clipctl.sh)
+    (src "clipctl.sh")
   );
 
   # 클립보드 관리 TUI (Textual) — 본체는 mods/_data/clipboard/clipui.py
-  # 검색(퍼지 + 내용 전체), 전문 미리보기·부분 복사, 체크 후 일괄 삭제, 통계, DB 최적화. 창 크기에 반응
-  clipuiSource = pkgs.writeText "clipui.py" (
-    builtins.replaceStrings
-    ["@cliphist@" "@clipctl@" "@wlcopy@"]
-    [cliphist "${clipctl}/bin/clipctl" wlCopy]
-    (builtins.readFile ../../_data/clipboard/clipui.py)
-  );
-  clipui = pkgs.writeShellScriptBin "clipui" ''
-    exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${clipuiSource} "$@"
+  # 검색(퍼지 + 내용 전체 + 필터), 전문 미리보기·부분 복사, 체크 후 일괄 삭제, 풍부한 통계, DB 최적화. 창 크기에 반응
+  # clipmeta.py 를 import 하므로 clipmetaDir 와 같은 디렉터리에 복사해 둔다
+  clipuiDir = pkgs.runCommand "clipui-py" {} ''
+    mkdir -p $out
+    cp ${clipmetaDir}/clipmeta.py $out/clipmeta.py
+    cp ${pkgs.writeText "clipui.py" (builtins.replaceStrings ["@clipctl@" "@wlcopy@"] ["${clipctl}/bin/clipctl" wlCopy] (src "clipui.py"))} $out/clipui.py
   '';
+  clipui = pkgs.writeShellScriptBin "clipui" ''exec ${py}/bin/python3 ${clipuiDir}/clipui.py "$@"'';
 
   # 전용 창(class=clipui)으로 열기 — 이미 떠 있으면 새로 띄우지 않고 그 창으로 포커스
   # (창 크기/위치는 아래 window_rule 이 class 로 지정)
@@ -60,11 +75,15 @@ mkPartOf "mods.gui" ({
     [ -z "$N" ] && exit 0
     ID=$(printf '%s\n' "$LIST" | sed -n "$((N + 1))p" | cut -f1)
     [ -z "$ID" ] && exit 0
+    ${clipmeta}/bin/clipmeta use "$ID" 2>/dev/null || true
     ${cliphist} decode "$ID" | ${wlCopy}
   '';
 in {
   hm = {
-    home.packages = [clipMenu clipctl clipui clipuiOpen];
+    home.packages = [clipMenu clipctl clipui clipuiOpen clipmeta clipstore];
+
+    # 수집 서비스: cliphist 에 저장(기존 동작) + 시각·출처 앱·복사 횟수 기록 (wl-clip.nix 의 ExecStart 를 대체)
+    systemd.user.services.cliphist.Service.ExecStart = lib.mkForce "${pkgs.wl-clipboard}/bin/wl-paste --type text/plain --watch ${clipstore}/bin/clipstore";
 
     # 앱 런처(SUPER+Space)에서도 검색되도록 freedesktop 등록. clipui-open 이 class=clipui 전용 창으로 연다
     xdg.desktopEntries.clipui = {
@@ -79,13 +98,13 @@ in {
 
     wayland.windowManager.hyprland.extraConfig = ''
       -- 클립보드 관리 TUI 창: 모니터 크기에 비례한 크기로 가운데에 (안의 내용은 창 크기에 맞춰 반응)
+      -- 열기: 앱 런처(SUPER+Space)에서 "클립보드 관리" — 전용 단축키는 두지 않음
       hl.window_rule({
         match = { class = "^(clipui)$" },
         center = true,
         size = { "monitor_w * 0.7", "monitor_h * 0.75" }
       })
       hl.bind("SUPER + V", hl.dsp.exec_cmd("${clipMenu}/bin/hypr-cliphist"), { description = "클립보드 히스토리 (빠른 붙여넣기)" })
-      hl.bind("SUPER + SHIFT + V", hl.dsp.exec_cmd("${clipuiOpen}/bin/clipui-open"), { description = "클립보드 관리 (검색·전문·삭제·최적화)" })
     '';
   };
 })

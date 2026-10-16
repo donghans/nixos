@@ -5,6 +5,7 @@ set -u
 export PATH="@path@:$PATH"
 
 CLIPHIST="@cliphist@"
+CLIPMETA="${CLIPMETA_CMD:-@clipmeta@}"   # 부가 정보(시각·앱·횟수) 사이드카 도구
 DB="${CLIPHIST_DB:-${XDG_CACHE_HOME:-$HOME/.cache}/cliphist/db}"
 SERVICE="${CLIPCTL_SERVICE:-cliphist.service}"
 PREVIEW=100
@@ -81,6 +82,7 @@ delete_rows() {  # $1 = 파일(id<TAB>크기<TAB>일치<TAB>미리보기)
   n=$(wc -l <"$1")
   [ "$n" -gt 0 ] || { echo "대상이 없습니다."; return 0; }
   awk -F'\t' '{print $1 "\t" $4}' "$1" | CH delete || die "삭제 실패"
+  "$CLIPMETA" prune >/dev/null 2>&1 || true
   echo "${n}개 삭제했습니다."
 }
 
@@ -196,7 +198,12 @@ cmd_compact() {
     return 1
   fi
 
+  # 이력 순서를 그대로 옮겼으므로 같은 위치끼리 대응 (최신순): 옛 번호 → 새 번호
+  pairs=$(paste <(CH list | cut -f1) <("$CLIPHIST" -db-path "$new" list | cut -f1))
   mv "$new" "$DB" || die "교체 실패 (백업: $bak)"
+  if ! printf '%s\n' "$pairs" | "$CLIPMETA" remap >/dev/null 2>&1; then
+    echo "경고: 부가 정보(시각·앱·횟수) 번호 이동에 실패했습니다" >&2
+  fi
   after=$(stat -c %s "$DB")
   # 오래된 백업은 최근 2개만 유지
   ls -1t "$DB".bak-* 2>/dev/null | tail -n +3 | xargs -r rm -f
