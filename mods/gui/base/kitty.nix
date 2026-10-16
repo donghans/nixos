@@ -3,6 +3,13 @@ mkPartOf "mods.gui" (_: {
   hm = {
     programs.kitty.enable = true;
 
+    # (목적: Terminal=true 앱(htop 등)을 uwsm 이 kitty 로 실행하도록 터미널을 명시 — xdg-terminal-exec 표준 목록)
+    # (이유: 명시하지 않으면 uwsm 이 TerminalEmulator 카테고리의 첫 항목을 골라 알파벳 순으로 먼저 오는
+    #        kitty-open.desktop(`kitty +open %U`, URL 열기 도우미)이 선택돼 `kitty +open %U -e htop` 이 실행됨)
+    xdg.configFile."xdg-terminals.list".text = ''
+      kitty.desktop
+    '';
+
     # 폰트 설정 (pkgs에서 폰트 패키지를 가져오는 것이 좋습니다)
     programs.kitty = {
       font = {
