@@ -3,6 +3,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import displayctl as dc
 import displayui as ui
 from textual.widgets import DataTable, OptionList, Select
+from textual.worker import WorkerCancelled
 
 FS = os.environ["FAKE_STATE"]
 results = []
@@ -14,7 +15,20 @@ def reset():
     shutil.rmtree(os.environ["DISPLAYCTL_STATE"], ignore_errors=True); shutil.rmtree(os.environ["DISPLAYCTL_CONF"], ignore_errors=True)
 def mons(): return {m.name: m for m in dc.get_monitors()}
 async def settle(pilot, n=30):
+    # (고정 대기만으로는 시스템이 바쁠 때 적용 스레드가 끝나기 전에 검사하게 되므로, 워커가 끝나기를 먼저 기다림.
+    #  --quick 처럼 앱이 스스로 종료된 뒤에는 기다릴 것이 없으므로 건너뜀)
+    async def idle():
+        if pilot.app.is_running:
+            try:
+                await pilot.app.workers.wait_for_complete()
+            except WorkerCancelled:  # --quick 은 적용 직후 앱이 종료하며 워커가 취소됨
+                pass
+    for _ in range(3):
+        await idle()
+        await pilot.pause(0.05)
     for _ in range(n): await pilot.pause(0.05)
+    await idle()
+    await pilot.pause(0.1)
 def opt_ids(app):
     ol = app.query_one("#modes", OptionList); return [ol.get_option_at_index(i).id for i in range(ol.option_count)]
 def pick(app, oid):
@@ -79,7 +93,7 @@ async def t_apply_confirm():
         await pilot.press("escape"); await settle(pilot, 10); check("Esc → 이전(1920x1080) 복귀", mons()["DP-4"].width == 1920)
         app.query_one("#res", Select).value = "1600x900"; await settle(pilot, 3); await pilot.press("a"); await settle(pilot, 10)
         check("적용(1600x900)", mons()["DP-4"].width == 1600)
-        await pilot.pause(3.6); await settle(pilot, 10); check("시간 초과 → 자동 되돌림", mons()["DP-4"].width == 1920)
+        await pilot.pause(3.6); await settle(pilot, 20); check("시간 초과 → 자동 되돌림", mons()["DP-4"].width == 1920)
 
 async def t_misc():
     reset(); app = ui.DisplayUI(focus="refresh")
@@ -118,7 +132,8 @@ async def t_misc():
             await settle(pilot, 10); check(f"폭 {w}: narrow={narrow}", app.has_class("narrow") == narrow)
 
 async def main():
-    for t in (t_basic, t_focus, t_layout_quick, t_apply_confirm, t_misc):
+    only = os.environ.get("ONLY")
+    for t in [x for x in (t_basic, t_focus, t_layout_quick, t_apply_confirm, t_misc) if not only or x.__name__ == only]:
         try: await t()
         except Exception:
             import traceback; traceback.print_exc(); results.append(False); print("FAIL (예외)", t.__name__)

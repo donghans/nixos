@@ -166,6 +166,13 @@ mkHostConfiguration ({
   };
 
   hm = {
+    # 런처에서 Howdy 설정 GUI(howdy-gtk)는 숨김 — 얼굴 등록/삭제는 CLI(sudo howdy add / clear)로 함
+    xdg.desktopEntries.howdy = {
+      name = "Howdy";
+      exec = "howdy-gtk";
+      noDisplay = true;
+    };
+
     wayland.windowManager.hyprland = {
       touchpadToggleKey = "SUPER + CTRL, F24";
 

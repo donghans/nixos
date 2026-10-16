@@ -1,4 +1,4 @@
-# Wofi Overlay: wofi 1.5.3 패치 7가지
+# Wofi Overlay: wofi 1.5.3 패치 8가지
 # 1) hover select — 마우스를 움직이면 해당 항목을 선택
 #    (이유: 클릭해야만 선택되고 마우스 이동으로는 선택되지 않음. fuzzel 처럼 hover 만으로 선택 강조)
 #    (주의: 클릭이 아닌 '실제 마우스 이동'(motion)에만 반응 — 목록이 갱신되며 커서 아래로 항목이 밀려와도 선택이 튀지 않음)
@@ -21,6 +21,10 @@
 #    (이유: wofi 는 width/height 를 그대로 요청하지만 GTK 는 #outer-box 의 테두리+패딩 양쪽 합(wofi.nix 의 extra, 현재 18px) 만큼
 #           더 큰 창을 요구함 → 입력/포커스마다 "요청 크기로 줄었다가 GTK 가 다시 키우는" 1프레임 흔들림 발생)
 #    (주의: WOFI_EXTRA 는 wofi.nix 의 extra = 2*(borderPx+paddingPx) 와 반드시 일치해야 함)
+# 8) drun 검색 대상 축소 — wofi 는 이름 + .desktop 파일 경로 + 실행 명령 + 설명 + 카테고리 + 키워드 + 일반 이름을 전부 이어 붙인
+#    문자열에 퍼지 매칭을 해서, 글자가 흩어져 있기만 해도 무관한 앱이 걸리고(예: "pulse" → kitty, Clipboard Manager),
+#    파일명/실행 명령에 검색어가 들어 있는 항목(thunar-bulk-rename.desktop)이 이름이 정확히 일치하는 항목보다 위로 올라옴.
+#    → 이름 + 키워드 + 일반 이름만 사용 (키워드 사이에 공백도 넣음: 원래는 붙여 써서 단어가 합쳐졌음)
 _final: prev: {
   wofi = prev.wofi.overrideAttrs (old: {
     postPatch =
@@ -29,6 +33,13 @@ _final: prev: {
         substituteInPlace inc/match.h \
           --replace-fail '#define MATCH_FUZZY_MAX_LEN 256' \
                          '#define MATCH_FUZZY_MAX_LEN 2048'
+
+        # 8) drun 검색 대상 축소 (위 설명 참고)
+        substituteInPlace modes/drun.c \
+          --replace-fail 'utils_concat(2, keywords_str, keywords[count])' \
+                         'utils_concat(3, keywords_str, " ", keywords[count])'
+        sed -i '/ret = utils_concat(7, name, file,/,/generic_name == NULL ? "" : generic_name);/c\ret = utils_concat(5, name, " ", keywords_str, " ", generic_name == NULL ? "" : generic_name);' modes/drun.c
+        grep -q 'utils_concat(5, name, " ", keywords_str' modes/drun.c
 
         substituteInPlace src/wofi.c \
           --replace-fail 'static uint64_t width, height;' \

@@ -81,4 +81,21 @@ check("외부만 → 확장: 켜져 있던 외장을 먼저 옮기고 나서 내
 reset(); run("layout", "internal"); open(FS + ".events", "w").close(); run("layout", "external"); ev = open(FS + ".events").read().splitlines()
 check("노트북만 → 외부만(남는 게 없음): 외장을 먼저 켜고 내장을 마지막에 끔", ev.index(next(e for e in ev if e.startswith("rule DP-4"))) < ev.index("disable eDP-1"), str(ev))
 
+# 모든 레이아웃 전환 조합에서 켜진 모니터끼리 겹치는 순간이 없어야 함 (겹치면 화면에 경고 말풍선이 뜸)
+LAYS = ["extend", "mirror", "internal", "external"]
+bad = []
+for a in LAYS:
+    for b in LAYS:
+        if a == b: continue
+        reset(); run("layout", a); open(FS + ".events", "w").close(); run("layout", b)
+        ev = open(FS + ".events").read().splitlines()
+        if any(e.startswith("OVERLAP") for e in ev): bad.append(f"{a}→{b}")
+        m = mons()
+        want_on = {"extend": 2, "mirror": 2, "internal": 1, "external": 1}[b]
+        if sum(1 for x in m.values() if not x.disabled) != want_on: bad.append(f"{a}→{b}(최종 상태)")
+check(f"모든 레이아웃 전환 {len(LAYS)*(len(LAYS)-1)}가지에서 겹침 없음 + 최종 상태 정상", not bad, str(bad))
+reset(); run("layout", "external"); open(FS + ".events", "w").close(); run("layout", "internal"); ev = open(FS + ".events").read().splitlines()
+check("외부만 → 노트북만(맞바꿈): 임시 위치로 먼저 켜고 나서 외장을 끄고 최종 위치로", any(e.startswith("rule eDP-1 pos=2") or e.startswith("rule eDP-1 pos=3") for e in ev) and not any(e.startswith("OVERLAP") for e in ev), str(ev))
+m = mons(); check("  최종 위치: 내장 0,0", (m["eDP-1"].x, m["eDP-1"].y) == (0, 0) and m["DP-4"].disabled)
+
 print(f"\n코어 {ok} 통과 / {fail} 실패"); sys.exit(1 if fail else 0)

@@ -24,6 +24,15 @@ def log(x): open(LOG, "a").write(x + "\n")
 def windows():
     try: return json.load(open(WIN))
     except Exception: return []
+def check_overlap(d):
+    """켜져 있고 미러가 아닌 모니터끼리 겹치면 기록 (실제 Hyprland 는 이때 화면에 경고 말풍선을 띄움)"""
+    live = [m for m in d if not m["disabled"] and m["mirrorOf"] == "none"]
+    for i, a in enumerate(live):
+        for b in live[i + 1:]:
+            ra = (a["x"], a["y"], round(a["width"] / a["scale"]), round(a["height"] / a["scale"]))
+            rb = (b["x"], b["y"], round(b["width"] / b["scale"]), round(b["height"] / b["scale"]))
+            if ra[0] < rb[0] + rb[2] and rb[0] < ra[0] + ra[2] and ra[1] < rb[1] + rb[3] and rb[1] < ra[1] + ra[3]:
+                log(f"OVERLAP {a['name']} {b['name']}")
 def field(code, k):
     m = re.search(r'\b%s\s*=\s*("([^"]*)"|[A-Za-z0-9_.\-]+)' % k, code)
     if not m: return None
@@ -46,7 +55,7 @@ def main(a):
         code = a[1]; name = field(code, "output")
         m = next((x for x in d if x["name"] == name), None)
         if m is None: print("ok"); return
-        if field(code, "disabled") == "true": m["disabled"] = True; log("disable " + name); save(d); print("ok"); return
+        if field(code, "disabled") == "true": m["disabled"] = True; log("disable " + name); check_overlap(d); save(d); print("ok"); return
         log(f"rule {name} pos={field(code, 'position')} disabled={field(code, 'disabled')}")
         if field(code, "disabled") == "false": m["disabled"] = False
         mir = field(code, "mirror")
@@ -64,6 +73,6 @@ def main(a):
         if pos and pos != "auto": px, py = pos.split("x"); m["x"], m["y"] = int(px), int(py)
         sc = field(code, "scale")
         if sc: m["scale"] = float(sc)
-        save(d); print("ok"); return
+        check_overlap(d); save(d); print("ok"); return
     print("ok")
 main(sys.argv[1:])

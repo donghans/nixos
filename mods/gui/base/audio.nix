@@ -15,6 +15,14 @@ mkPartOf "mods.gui" ({
       pkgs.pavucontrol
     ];
 
+    # 런처에는 "Volume Control"(pavucontrol)만 보이게 함. pasystray 는 로그인 때 저절로 뜨는 트레이 앱이라
+    # 런처에서 또 실행하면 트레이 아이콘만 하나 더 생김
+    xdg.desktopEntries.pasystray = {
+      name = "PulseAudio System Tray";
+      exec = "pasystray";
+      noDisplay = true;
+    };
+
     # (pasystray 는 패키지가 XDG 자동 시작(app-pasystray@autostart.service)을 제공해서 로그인 때 저절로 뜸.
     #  exec-once 로 한 번 더 띄우면 트레이 아이콘이 둘이 되므로 별도로 시작하지 않음)
   };

@@ -297,30 +297,80 @@ def lua_rule(name: str, c: dict) -> str:
     )
 
 
-def apply_cfg(cfg: dict, on: set[str] | None = None) -> list[str]:
-    """규칙 적용. 오류 메시지를 돌려준다.
-    적용 순서(on = 지금 켜져 있는 모니터 이름들):
-      1) 끌 모니터 (적어도 하나가 계속 켜져 있을 때만 먼저 끔)
-      2) 이미 켜져 있는 모니터의 재배치/모드 변경
-      3) 꺼져 있다가 켜질 모니터
-      4) 미러
-      5) 끌 모니터 (계속 켜져 있는 모니터가 없을 때: 모든 화면이 꺼지는 순간을 피해 마지막에)
-    (이유: 전환 중간에 두 모니터가 같은 위치에서 겹치는 순간이 있으면 Hyprland 가 "monitor layout is set up
-     incorrectly ... overlaps" 경고 말풍선을 띄움. 끈 모니터는 겹침 검사에 들어가지 않음(최종 상태에서는 경고 없음을 확인))"""
-    stays = bool(on) and any(n in on and not cfg.get(n, {}).get("disabled") for n in cfg)
+def _overlap(a: tuple, b: tuple) -> bool:
+    return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
 
-    def rank(item):
-        name, c = item
-        if c.get("disabled"):
-            return 0 if stays else 4
-        if c.get("mirror"):
-            return 3
-        return 1 if on is None or name in on else 2
-    errs = []
-    for name, c in sorted(cfg.items(), key=rank):
+
+def apply_cfg(cfg: dict, mons: list[Mon] | None = None) -> list[str]:
+    """규칙 적용. 오류 메시지를 돌려준다.
+    전환 중간에 켜진 두 모니터가 같은 위치에서 겹치면 Hyprland 가 화면에 "monitor layout is set up incorrectly ...
+    overlaps" 말풍선(로그에는 안 남음)을 띄우므로, 어느 순간에도 켜진 모니터끼리 겹치지 않게 순서를 짠다.
+    (끈 모니터와 미러는 겹침 검사에 들어가지 않음 — 실측)
+      1) 끌 모니터 (적어도 하나가 계속 켜져 있을 때만 먼저 끔)
+      2) 소스가 이미 켜져 있는 미러 (미러가 되면 겹침 검사에서 빠짐)
+      3) 이미 켜져 있던 모니터의 재배치/모드 변경
+      4) 꺼져 있다가(또는 미러였다가) 켜질 모니터. 지금 켜져 있는 모니터와 겹치면 먼저 오른쪽 끝의 임시 위치에 켬
+      5) 나머지 미러
+      6) 끌 모니터 (계속 켜져 있는 게 없을 때는 모든 화면이 꺼지는 순간을 피해 마지막에)
+      7) 임시 위치에 켠 모니터를 최종 위치로"""
+    cur = {m.name: m for m in (mons if mons is not None else get_monitors())}
+    lit = {n for n, m in cur.items() if not m.disabled}                       # 화면이 켜진 모니터(미러 포함)
+    on = {n for n in lit if not cur[n].mirror_of}                              # 그중 따로 영상을 내는 모니터 (겹침 검사 대상)
+    dis = [n for n, c in cfg.items() if c.get("disabled")]
+    mir = [n for n, c in cfg.items() if c.get("mirror")]
+    plain = [n for n, c in cfg.items() if not c.get("disabled") and not c.get("mirror")]
+    stays = any(n in lit for n in plain + mir)
+    late = [n for n in dis if n in lit] if not stays else []
+    # 미러의 소스가 이미 켜져 있으면 먼저 미러로 바꿔 겹침 검사에서 뺌
+    early_mir = [n for n in mir if cfg[n]["mirror"] in on and cfg[n]["mirror"] in plain]
+    late_mir = [n for n in mir if n not in early_mir]
+    errs: list[str] = []
+
+    def run(name: str, c: dict) -> None:
         out = eval_lua(lua_rule(name, c))
         if out and out != "ok":
             errs.append(f"{name}: {out}")
+
+    def final_rect(n: str) -> tuple:
+        c = cfg[n]
+        w, h = cur[n].logical(c["mode"], c["scale"])
+        return (c["x"], c["y"], w, h)
+
+    def cur_rect(n: str) -> tuple:
+        m = cur[n]
+        return (m.x, m.y, *m.logical())
+
+    for n in dis:
+        if n not in late:
+            run(n, cfg[n])
+    for n in early_mir:
+        run(n, cfg[n])
+    present: list[tuple] = []
+    for n in plain:
+        if n in on:
+            run(n, cfg[n])
+            present.append(final_rect(n))
+    # 아직 바뀌지 않은 채 남아 있는 모니터(나중에 미러가 되거나 꺼질 것들)는 지금 위치 그대로 존재
+    present += [cur_rect(n) for n in on if n in late_mir or n in late]
+    temp = []
+    for n in plain:
+        if n in on:
+            continue
+        fr = final_rect(n)
+        if any(_overlap(fr, r) for r in present):
+            right = max(r[0] + r[2] for r in present)
+            run(n, dict(cfg[n], x=right, y=0))
+            temp.append(n)
+            present.append((right, 0, fr[2], fr[3]))
+        else:
+            run(n, cfg[n])
+            present.append(fr)
+    for n in late_mir:
+        run(n, cfg[n])
+    for n in late:
+        run(n, cfg[n])
+    for n in temp:
+        run(n, cfg[n])
     return errs
 
 
@@ -405,7 +455,7 @@ class Transaction:
         self.cfg, self.layout = build(mons, st)
         self.new_state = st
         migrate_windows(self.cfg)
-        errs = apply_cfg(self.cfg, {m.name for m in mons if not m.disabled})
+        errs = apply_cfg(self.cfg, mons)
         if not do_verify:
             return errs
         issues = verify(self.cfg)
@@ -424,7 +474,7 @@ class Transaction:
 
     def revert(self) -> list[str]:
         migrate_windows(self.prev_cfg)
-        errs = apply_cfg(self.prev_cfg, {m.name for m in get_monitors() if not m.disabled})
+        errs = apply_cfg(self.prev_cfg)
         save_state(self.prev_state)
         return errs
 
@@ -533,7 +583,7 @@ def restore() -> int:
             return 0
         cfg, _ = build(mons, st)
         migrate_windows(cfg)
-        apply_cfg(cfg, {m.name for m in mons if not m.disabled})
+        apply_cfg(cfg, mons)
         return 0
 
 

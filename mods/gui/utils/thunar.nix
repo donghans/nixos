@@ -47,6 +47,26 @@ mkModOf "mods.gui" __curPos "Thunar (기본 파일 관리자)" ({
 
     xdg.mimeApps.defaultApplications."inode/directory" = "thunar.desktop";
 
+    # 런처(wofi)에서 Thunar 의 보조 항목은 숨김 — 같은 이름의 사용자 .desktop 이 우선하므로 NoDisplay 로 덮어씀
+    # (설정은 Thunar 안의 Edit > Preferences, 일괄 이름 변경은 Thunar 안의 우클릭 메뉴/Edit 에서 열 수 있음)
+    xdg.desktopEntries = {
+      thunar-bulk-rename = {
+        name = "Bulk Rename";
+        exec = "thunar --bulk-rename %F";
+        noDisplay = true;
+      };
+      thunar-settings = {
+        name = "Thunar Preferences";
+        exec = "thunar-settings";
+        noDisplay = true;
+      };
+      thunar-volman-settings = {
+        name = "Removable Drives and Media";
+        exec = "thunar-volman-settings";
+        noDisplay = true;
+      };
+    };
+
     # Thunar 의 "여기서 터미널 열기" 는 exo 의 선호 터미널을 씀 (기본은 xterm 계열)
     xdg.configFile."xfce4/helpers.rc".text = ''
       TerminalEmulator=kitty
