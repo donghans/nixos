@@ -38,10 +38,12 @@ displayctl reset                      # 저장된 구성을 지우고 설정 파
 
 ## 알려진 문제 / 미확인
 
-- **kitty 크래시**: `displayctl layout external` 로 노트북 화면을 끄는 순간, 그 화면에 있던 kitty(0.47.0)가 `libwayland-client` 에서
+- **kitty 크래시(대응 확인됨)**: `displayctl layout external` 로 노트북 화면을 끄는 순간, 그 화면에 있던 kitty(0.47.0)가 `libwayland-client` 에서
   SIGSEGV 로 죽었다(코어 덤프 `coredumpctl`, 2026-10-16 22:02). 대응으로 모니터를 끄거나 미러로 만들기 전에 그 화면의 창을
-  남는 화면으로 먼저 옮기게 했지만, **이게 크래시를 실제로 막는지는 아직 확인하지 못했다.**
-  시험하려면 kitty 를 외장 쪽 워크스페이스에 둔 상태에서 `external` → `extend` 를 해 볼 것.
+  남는 화면으로 먼저 옮긴다. **시험(2026-10-16)**: 노트북 화면에 시험용 kitty 를 두고 `external` → `extend` 를 하자 창이 외장으로
+  옮겨진 뒤 화면이 꺼졌고 크래시가 없었으며, 복귀 뒤 `wl_output` 에 두 모니터가 모두 있고 `grim`/waybar 도 정상이었다.
+  다만 **창 이동 없이 끄면 실제로 크래시가 재현되는지(대조 실험)는 하지 않았다** — 재현되면 노트북 화면의 `wl_output` 이 사라져
+  재로그인이 필요할 수 있어서.
 - **노트북 화면이 `wl_output` 에서 사라지는 현상**: 위 상황 뒤 `hyprctl`/`wlr-randr` 는 노트북 화면(eDP-1)을 켜짐으로 보이는데
   `wayland-info` 에는 외장(DP-4) 하나뿐이고 `grim` 이 노트북 화면 영역을 못 찾았다. 화면 자체는 정상으로 보였다.
   waybar 에 문제가 있었음. **로그아웃 후 다시 로그인하면 정상으로 돌아왔다**(wl_output 에 두 모니터 모두 나타나고 waybar 도 양쪽에 뜸).
