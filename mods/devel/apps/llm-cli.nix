@@ -3,7 +3,11 @@
   unstable,
   ...
 }:
-mkModOf "mods.devel" __curPos "LLM CLI tools" ({unstable, ...}: let
+mkModOf "mods.devel" __curPos "LLM CLI tools" ({
+  pkgs,
+  unstable,
+  ...
+}: let
   # (목적: Wayland 터미널(kitty, alacritty 등)에서 LLM CLI의 Home/End 키 깨짐 현상 수정)
   #
   # 원인: gemini-cli, claude-code 모두 시작 시 kitty keyboard protocol 쿼리(\x1b[?u)를 보내고,
@@ -28,7 +32,14 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({unstable, ...}: let
   # claude-code: kitty keyboard protocol enable 시퀀스를 빈 문자열로 교체
   # ">1u"는 CSI > 1 u (kitty keyboard protocol enable) 페이로드.
   # 변수명(Xd6, yo6 등)·함수명(cz, NA 등)은 빌드마다 바뀌므로 grep으로 동적 탐색.
-  claude = unstable.claude-code.overrideAttrs (old: {
+  #
+  # (목적: claude 래퍼가 노출하는 LD_LIBRARY_PATH 의 alsa-lib 가 다른 프로그램을 깨뜨리는 문제 수정)
+  # nixpkgs claude-code 는 /voice(음성 입력) 네이티브 모듈이 libasound 를 dlopen 하도록 래퍼에
+  # `--prefix LD_LIBRARY_PATH : alsa-lib` 를 붙임(nixpkgs PR #518983). unstable 의 alsa-lib 는 더 새 glibc(2.44)로
+  # 빌드돼 있어, 이 변수를 물려받는 glibc 2.42 프로그램(ONLYOFFICE 등)이 `GLIBC_2.43 not found` 로 죽음.
+  # → alsa-lib 만 stable 것으로 교체. 새 glibc 는 옛 glibc 로 빌드된 라이브러리를 그대로 로드할 수 있어 양쪽 모두 안전함
+  #   (claude 바이너리는 libc/libm/libpthread/librt 를 미리 로드하고 stable libasound 의 의존도 같은 목록).
+  claude = (unstable.claude-code.override {alsa-lib = pkgs.alsa-lib;}).overrideAttrs (old: {
     postInstall =
       (old.postInstall or "")
       + ''
