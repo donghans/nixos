@@ -309,6 +309,10 @@ class DisplayUI(App):
     def on_select_changed(self, ev: Select.Changed) -> None:
         if self._updating or ev.select.id != "res":
             return
+        # (값을 채우는 동안 발생한 이벤트가 뒤늦게 도착하면 오래된 값 기준으로 주사율 목록을 다시 만들어 버리므로,
+        #  현재 값과 다른 이벤트는 무시)
+        if ev.value != ev.select.value:
+            return
         m = self.mon()
         if m is None:
             return

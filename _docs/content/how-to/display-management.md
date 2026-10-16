@@ -44,6 +44,9 @@ displayctl reset                      # 저장된 구성을 지우고 설정 파
   시험하려면 kitty 를 외장 쪽 워크스페이스에 둔 상태에서 `external` → `extend` 를 해 볼 것.
 - **노트북 화면이 `wl_output` 에서 사라지는 현상**: 위 상황 뒤 `hyprctl`/`wlr-randr` 는 노트북 화면(eDP-1)을 켜짐으로 보이는데
   `wayland-info` 에는 외장(DP-4) 하나뿐이고 `grim` 이 노트북 화면 영역을 못 찾았다. 화면 자체는 정상으로 보였다.
-  waybar 에 문제가 있었음. 로그아웃/로그인으로 복구되는지 확인 필요(추정).
+  waybar 에 문제가 있었음. **로그아웃 후 다시 로그인하면 정상으로 돌아왔다**(wl_output 에 두 모니터 모두 나타나고 waybar 도 양쪽에 뜸).
+  원인(껐다 켠 노트북 화면의 wl_output 이 다시 만들어지지 않음)은 모른다.
 - 터치스크린/펜 매핑(`hosts/msi-summit-me.nix` 의 `hl.device`)은 모니터가 꺼졌다 켜질 때 유지되는지 확인하지 못했다.
-- 시험 환경: 실제 Hyprland 를 건드리지 않도록 가짜 `hyprctl` 로 코어(37개)와 TUI Pilot(45개)을 시험했다.
+- 시험: 실제 Hyprland 를 건드리지 않도록 가짜 `hyprctl` 로 코어와 TUI(Textual Pilot)를 시험한다. 실제 환경의 관찰된 동작(미러/disabled 지속,
+  내장 패널의 48Hz 미만 거부)을 흉내 내고, 창 이동과 모니터 끄기의 순서도 검증한다.
+  `PYTHON=<textual 이 있는 python> mods/_data/display/tests/run.sh`
