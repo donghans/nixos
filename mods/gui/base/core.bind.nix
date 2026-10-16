@@ -16,11 +16,13 @@ mkPartOf "mods.gui" ({
   # 앱 런처: wofi drun 선택 결과(.desktop 경로 [액션])를 uwsm scope 로 실행
   # (이유: 네이티브 앱(Zed, kitty 등)을 Hyprland 와 분리된 app.slice 로 띄워 CPU/IO weight 를 분리 — core.cgroups.nix 참고.
   #        uwsm app 은 경로가 아닌 Desktop Entry ID(foo.desktop[:action])를 받으므로 파일명으로 변환)
+  # (주의: wofi 의 모드별 옵션은 `-D <모드>-<옵션>` 형식(drun-print_desktop_file). 접두사를 빼면 조용히 무시되어
+  #        wofi 가 앱을 직접 실행하고 uwsm 래퍼를 건너뜀)
   appLauncher = pkgs.writeShellScriptBin "hypr-launcher" ''
     # wofi 는 단일 인스턴스가 아니라 다른 모니터에서 또 실행하면 중복으로 뜸 → 이미 떠 있으면 닫기(토글)
     # (Nix 래핑으로 프로세스 이름이 .wofi-wrapped 이므로 둘 다 매칭)
     pkill -x '(.wofi-wrapped|wofi)' && exit 0
-    sel=$(${wofi} --show drun --prompt "앱 검색" -D print_desktop_file=true) || exit 0
+    sel=$(${wofi} --show drun --prompt "앱 검색" -D drun-print_desktop_file=true) || exit 0
     [ -z "$sel" ] && exit 0
     file=''${sel%% *}
     action=''${sel#"$file"}
