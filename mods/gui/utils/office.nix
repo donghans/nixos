@@ -52,10 +52,18 @@ in {
       # pkgs.libreoffice-fresh # (필요하면 주석 해제: fontconfig 를 그대로 써서 폰트 문제는 없지만 OOXML 재현은 ONLYOFFICE 가 나음)
     ];
 
+    # ONLYOFFICE 의 보조 창(닫을 때 "변경 사항을 저장하시겠습니까?" 확인창, 파일 열기/저장 창 등)은 본 창(class ONLYOFFICE)과
+    # 다른 class `DesktopEditors` 의 XWayland 창이고 제목이 없음. 전역 규칙(core.ux.nix)이 모든 창을 플로팅으로 만드는데
+    # 위치 지정이 없어 화면 왼쪽 위 (0,0) 에 붙었음(hyprctl clients 로 확인: at=[0,0] size=[391,112]) → 가운데로.
+    wayland.windowManager.hyprland.extraConfig = ''
+      hl.window_rule({ match = { class = "^(DesktopEditors)$" }, center = true })
+    '';
+
     # ONLYOFFICE 설정(~/.config/onlyoffice/DesktopEditors.conf)은 앱이 직접 다시 쓰므로 파일 전체를 선언하지 않고
     # 필요한 키만 활성화 때 맞춘다.
     #  - UITheme: theme-dark(UI 만 어둡고 문서 용지는 흰색 유지) / theme-night(문서 배경까지 어둡게) /
     #             theme-light / theme-classic-light / theme-contrast-dark
+    #  - locale: 인터페이스 언어(ko/en 등). 앱의 Settings > Interface language 와 같은 값 (`locale=ko` 로 한국어가 되는 것을 실제로 확인)
     #  - titlebar: custom(앱이 직접 그린 둥근 창 + 최소화/닫기 버튼) / system(창 틀은 Hyprland 가 그림 → 모서리가
     #              각지고 다른 앱과 어울림. 대신 창 버튼이 없어 닫기는 단축키로)
     home.activation.onlyofficeConf = lib.hm.dag.entryAfter ["writeBoundary"] ''
@@ -72,6 +80,7 @@ in {
         }
         set_key UITheme theme-dark
         set_key titlebar system
+        set_key locale ko
       fi
     '';
 

@@ -163,6 +163,18 @@ Thunar 의 "Open in swayimg" 는 폴더에 쓸 수 있지만 loupe 는 폴더를
 - 참고: loupe 는 단일 인스턴스라 이미 실패 상태로 떠 있는 loupe 가 있으면 새로 열어도 그 프로세스로 전달되어 계속 실패함 → 그 창을 모두 닫아야 함(수정 전 증상 분석 중 이로 인해 혼동).
 - 미확인: 런처(wofi)·"Open With" 경로는 `loupe` 를 PATH 에서 찾으므로 같은 래퍼를 쓸 것으로 보나 직접 시험하지 않음.
 
+### ONLYOFFICE 글꼴 뻣뻣함 · 언어 · 확인창 위치 (2026-10-17)
+- **글꼴이 뻣뻣한 원인**: 시스템 fontconfig/FreeType 이 아니라 ONLYOFFICE 자체 엔진(FreeType 이 `fonts.wasm` 에 내장, 시스템 것을 안 씀)의 힌팅.
+  시스템 설정은 NixOS 기본(`hintstyle slight`, 회색조, 서브픽셀 없음)인데 ONLYOFFICE 는 pango 의 medium/full 힌팅과 비슷한 수치(회색 22%/진한 검정 64% vs 20%/68%; slight 는 36%/33%)였음.
+  세 개 중 선택지: `as Windows`(기본) / `as OS X` / `Native`. **`as OS X` 로 바꾸니 획이 부드러워지고 간격이 자연스러워짐**(사용자도 확인). `Native` 는 시험하지 않음.
+- **설정 위치**: 문서를 연 뒤 `File` → 왼쪽 패널 **맨 아래** `Advanced Settings` → `Font hinting` → 선택 후 **`Apply`**. 이 값은 앱 내부 저장소에 들어가고 설정 파일(`DesktopEditors.conf`)에는 없어서 **선언적으로 관리하지 못함**(새 홈에서는 다시 설정해야 함).
+  (자동 조작 시 주의: 드롭다운 항목은 커서를 순간이동만 시키면 호버가 없어 안 눌리므로 실제 이동 이벤트를 준 뒤 클릭해야 함.)
+- **인터페이스 언어**: `DesktopEditors.conf` 의 `locale=ko` 로 한국어가 됨(실제 확인: 메뉴·설정·저장 확인창 모두 한국어). `office.nix` 의 활성화 스크립트가 이 키를 맞춤.
+  처음에 "설정 파일로는 안 된다"고 한 것은 확인 없이 한 말이라 틀렸음. Region/Formula language 는 Advanced Settings 쪽이라 별개(현재 English).
+- **저장 확인창이 왼쪽 위에 뜨던 문제**: 확인창은 본 창(class `ONLYOFFICE`)과 다른 class `DesktopEditors` 의 제목 없는 XWayland 창이고, 전역 규칙(`core.ux.nix`, 모든 창 플로팅)에는 위치 지정이 없어 `(0,0)` 에 붙음.
+  `hl.window_rule({ match = { class = "^(DesktopEditors)$" }, center = true })` 를 `office.nix` 에 추가. 검증: 확인창이 `(1085,756)` 에 뜸(2560x1600 모니터의 중앙은 `(1085,744)`).
+  같은 class 의 다른 보조 창(파일 열기/저장 등)에도 적용되나 직접 확인하지는 않음.
+
 ### ONLYOFFICE 도 같은 원인으로 Thunar 에서 안 열림 (2026-10-17)
 - 증상: Thunar 에서 PDF 더블클릭/우클릭 "Open With ONLYOFFICE" 를 해도 아무 창도 안 뜨고 오류도 없음(프로세스·저널 흔적 없음). 터미널이나 `hyprctl dispatch exec` 로 같은 명령을 실행하면 정상.
 - 원인: loupe 와 동일. ONLYOFFICE 는 `buildFHSEnv`(bubblewrap)이라 Thunar 데몬이 물려받은 ambient CAP_SYS_NICE 가 있으면 bwrap 이 거부하고 조용히 종료.
