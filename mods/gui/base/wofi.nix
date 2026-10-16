@@ -91,6 +91,11 @@ in {
         margin: 0px 8px;
         color: #ffffff;
       }
+      #entry, #entry:focus, #entry:hover {
+        border: none;
+        outline: none;
+        box-shadow: none;
+      }
       #entry:selected {
         background-color: #268bd2;
       }

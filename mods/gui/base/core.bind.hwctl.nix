@@ -77,9 +77,10 @@
         exit 1
       fi
 
+      # (기록이 없으면 꺼짐이 기본: 터치스크린은 평소 쓰지 않음)
       STATUS_FILE="$HOME/.local/state/hypr/touchscreen_enabled"
       mkdir -p "$(dirname "$STATUS_FILE")"
-      [ ! -f "$STATUS_FILE" ] && echo "true" > "$STATUS_FILE"
+      [ ! -f "$STATUS_FILE" ] && echo "false" > "$STATUS_FILE"
 
       if [ "$(cat "$STATUS_FILE")" = "true" ]; then NEW=false; LABEL=Disabled; else NEW=true; LABEL=Enabled; fi
       while read -r dev; do
@@ -89,18 +90,20 @@
       ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:touchscreen -u low "Touchscreen" "$LABEL"
     '';
 
-    # 터치패드/터치스크린을 끈 상태를 Hyprland 설정 reload 뒤에도 유지
+    # 터치패드/터치스크린의 켜짐/꺼짐을 로그인과 Hyprland 설정 reload 뒤에도 유지(터치스크린은 기록이 없으면 꺼짐)
     # (이유: 장치 켜기/끄기(hl.device enabled)는 런타임 설정이라 hyprctl reload 때 초기화되는데 상태 기록 파일은
     #  남아서, 메뉴 표시와 실제 상태가 어긋나고 토글이 반대로 동작했음)
     restoreInput = pkgs.writeShellScriptBin "hypr-restore-input" ''
+      # apply <기록 파일> <기록이 없을 때 기본값> <대상 장치 jq 식>
       apply() {
-        [ "$(cat "$HOME/.local/state/hypr/$1" 2>/dev/null || echo true)" = false ] || return 0
-        hyprctl devices -j | ${pkgs.jq}/bin/jq -r "$2" | while read -r dev; do
-          hyprctl eval "hl.device({ name = \"$dev\", enabled = false })"
+        [ "$(cat "$HOME/.local/state/hypr/$1" 2>/dev/null || echo "$2")" = false ] || return 0
+        hyprctl devices -j | ${pkgs.jq}/bin/jq -r "$3" | while read -r dev; do
+          hyprctl eval "hl.device({ name = \"$dev\", enabled = false })" > /dev/null
         done
       }
-      apply touchpad_enabled '.mice[] | select(.name | contains("touchpad")) | .name'
-      apply touchscreen_enabled '.touch[]?.name'
+      apply touchpad_enabled true '.mice[] | select(.name | contains("touchpad")) | .name'
+      apply touchscreen_enabled false '.touch[]?.name'
+      ${pkgs.util-linux}/bin/logger -t hypr-restore-input "input device state restored"
     '';
 
     # 입력 장치 메뉴(터치패드/터치스크린): 터치패드 키를 누르면 wofi 로 표시. 항목 추가는 deviceMenuExtraEntries 옵션 사용
@@ -112,12 +115,12 @@
       labels=()
       cmds=()
       add() { labels+=("$1"); cmds+=("$2"); }
-      state() { cat "$HOME/.local/state/hypr/$1" 2>/dev/null || echo true; }
-      onoff() { [ "$(state "$1")" = true ] && echo "끄기 (지금 켜짐)" || echo "켜기 (지금 꺼짐)"; }
+      # onoff <기록 파일> <기록이 없을 때 기본값>
+      onoff() { [ "$(cat "$HOME/.local/state/hypr/$1" 2>/dev/null || echo "$2")" = true ] && echo "끄기 (지금 켜짐)" || echo "켜기 (지금 꺼짐)"; }
 
-      add "터치패드 $(onoff touchpad_enabled)" "${toggleTouchpad}/bin/hypr-toggle-touchpad"
-      add "터치스크린 $(onoff touchscreen_enabled)" "${toggleTouchscreen}/bin/hypr-toggle-touchscreen"
-      ${lib.concatMapStrings (e: "add ${lib.escapeShellArg e.label} ${lib.escapeShellArg e.command}\n      ") extraEntries}
+      add "터치패드 $(onoff touchpad_enabled true)" "${toggleTouchpad}/bin/hypr-toggle-touchpad"
+      ${lib.concatMapStrings (e: "add ${lib.escapeShellArg e.label} ${lib.escapeShellArg e.command}\n      ") extraEntries}add "터치스크린 $(onoff touchscreen_enabled false)" "${toggleTouchscreen}/bin/hypr-toggle-touchscreen"
+      
       sel=$(printf '%s\n' "''${labels[@]}" | ${pkgs.wofi}/bin/wofi --dmenu --hide-search --cache-file /dev/null --width 520 --lines ${toString (2 + builtins.length extraEntries)}) || exit 0
       [ -z "$sel" ] && exit 0
       for i in "''${!labels[@]}"; do
@@ -139,10 +142,11 @@
         brightnessControl
       ];
 
-      # 로그인 때는 Hyprland 가 장치를 모두 켠 상태로 시작하므로 기록도 초기화, 설정 reload 때는 끈 상태를 복원
+      # 로그인(hyprland.start)과 설정 reload(config.reloaded) 때 마지막 켜짐/꺼짐 상태를 복원
+      # (이유: Hyprland 는 시작/reload 때 장치를 모두 켠 상태로 되돌림)
       wayland.windowManager.hyprland.extraConfig = lib.mkIf (config.workspace.type == "laptop") ''
         hl.on("hyprland.start", function()
-          hl.exec_cmd("rm -f $HOME/.local/state/hypr/touchpad_enabled $HOME/.local/state/hypr/touchscreen_enabled")
+          hl.exec_cmd("sleep 1; ${restoreInput}/bin/hypr-restore-input")
         end)
         hl.on("config.reloaded", function()
           hl.exec_cmd("${restoreInput}/bin/hypr-restore-input")
