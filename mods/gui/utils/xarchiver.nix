@@ -7,7 +7,7 @@
 # (src/extract_dialog.c의 xa_set_extract_dialog_options: 이 값이 비어 있으면 단일 압축 해제
 # 다이얼로그는 아카이브 파일이 있는 디렉터리로 자동 폴백함. 화면에서 직접 확인함).
 # 다중 선택 압축해제 다이얼로그(xa_multi_extract_dialog)는 비어 있으면 /tmp 가 코드에
-# 하드코딩되어 있어 xarchiver 자체 한계(패치 없이는 못 고침).
+# 하드코딩되어 있어 설정으로는 못 고침 → 아래 home.packages 의 소스 패치로 첫 아카이브 폴더를 기본값으로 함.
 #
 # 참고 2: zip 파일 비-ASCII 파일명 깨짐/"압축은 됐는데 에러 창" 문제
 # (unzip 6.0의 local/central 헤더 필드 불일치 검증 버그, natspec 패치와도
@@ -49,7 +49,22 @@ mkModOf "mods.gui" __curPos "Xarchiver (압축파일 기본 연결 프로그램)
   ];
 in {
   hm = {
-    home.packages = [pkgs.xarchiver];
+    # 다중 선택 압축 해제(Multi-Extract) 다이얼로그의 대상 경로가 /tmp 로 고정되던 것을 패치:
+    # 첫 번째로 추가한 아카이브가 있는 폴더를 기본 대상으로 쓰고, 다이얼로그를 닫으면 비움
+    # (원본은 설정이 비어 있으면 /tmp 로 하드코딩 — 설정 파일로는 못 바꿈)
+    home.packages = [
+      (pkgs.xarchiver.overrideAttrs (old: {
+        postPatch =
+          (old.postPatch or "")
+          + ''
+            substituteInPlace src/extract_dialog.c \
+              --replace-fail $'\tmulti_extract->nr_total++;\n\tg_free(file_utf8);' \
+              $'\tmulti_extract->nr_total++;\n\tif (multi_extract->nr_total == 1 && !*gtk_entry_get_text(GTK_ENTRY(multi_extract->destination_path_entry)))\n\t\tgtk_entry_set_text(GTK_ENTRY(multi_extract->destination_path_entry), path_utf8);\n\tg_free(file_utf8);' \
+              --replace-fail $'\tgtk_list_store_clear(multi_extract->liststore);\n' \
+              $'\tgtk_list_store_clear(multi_extract->liststore);\n\tgtk_entry_set_text(GTK_ENTRY(multi_extract->destination_path_entry), "");\n'
+          '';
+      }))
+    ];
 
     # xarchiver 패키지의 .desktop(Icon=xarchiver)을 덮어써서 창/작업표시줄
     # 아이콘 교체. ~/.local/share/applications가 우선순위상 앞서서 이걸로 대체됨.
