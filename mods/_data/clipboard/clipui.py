@@ -328,6 +328,10 @@ class ClipUI(App):
     #stats-scroll { height: 1fr; }
     #dialog-title { text-style: bold; padding-bottom: 1; }
     #dialog-hint { color: #7a7a7a; padding-top: 1; }
+    Footer { background: #000000; color: #9a9a9a; }
+    Footer FooterKey { background: #000000; }
+    Footer .footer-key--key { background: #000000; color: #33ccff; text-style: none; }
+    Footer .footer-key--description { background: #000000; color: #9a9a9a; }
     """
 
     BINDINGS = [
@@ -380,6 +384,9 @@ class ClipUI(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        # displayui / lazygit 처럼 제목을 테두리 안에 둠
+        self.query_one(ClipList).border_title = "클립보드"
+        self.query_one(Preview).border_title = "미리보기"
         self.query_one("#search", Input).focus()
         self.apply_layout(self.size.width, self.size.height)
         self.reload()

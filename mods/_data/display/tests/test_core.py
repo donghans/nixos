@@ -22,7 +22,7 @@ reset(); m = mons()
 check("모니터 2개, 내장/외장 구분", m["eDP-1"].internal and not m["DP-4"].internal)
 check("지원 모드 파싱", (2560, 1600, 165.04) in m["eDP-1"].modes and len(m["DP-4"].modes) == 10)
 reset(); run("layout", "extend"); m = mons()
-check("확장: 내장 0,0 / 외장 0,-2560(내장 위)", (m["eDP-1"].x, m["eDP-1"].y, m["DP-4"].x, m["DP-4"].y) == (0, 0, 0, -2560))
+check("확장: 내장 0,0 / 외장 -640,-2560(내장 위, 가운데 정렬: (2560-3840)/2)", (m["eDP-1"].x, m["eDP-1"].y, m["DP-4"].x, m["DP-4"].y) == (0, 0, -640, -2560))
 run("layout", "mirror"); check("미러", mons()["eDP-1"].mirror_of == "DP-4")
 run("layout", "extend"); m = mons(); check("미러 해제 후 확장", m["eDP-1"].mirror_of is None and not m["eDP-1"].disabled)
 run("layout", "internal"); m = mons(); check("노트북만", m["DP-4"].disabled and not m["eDP-1"].disabled)
@@ -105,6 +105,21 @@ m = mons(); check("  최종 위치: 내장 0,0", (m["eDP-1"].x, m["eDP-1"].y) ==
 reset(); run("set", "eDP-1", "--res", "1920x1200")
 check("--res 만 줘도 주사율이 정수로(1920x1200@60, 60.04 아님)", dc.load_state()["monitors"]["eDP-1"]["mode"] == "1920x1200@60", dc.load_state()["monitors"]["eDP-1"]["mode"])
 reset(); run("set", "DP-4", "--res", "1920x1080"); check("지원 해상도는 가장 가까운 지원 주사율(60)", dc.load_state()["monitors"]["DP-4"]["mode"] == "1920x1080@60", dc.load_state()["monitors"]["DP-4"]["mode"])
+
+# ───── 기본 가운데 정렬 / 확장 배치(--arrange) ─────
+reset(); run("layout", "extend"); m = mons()
+ext, lap = m["DP-4"], m["eDP-1"]
+ew, eh = ext.logical(ext.mode, ext.scale); lw, lh = lap.logical(lap.mode, lap.scale)
+check("기본 확장: 외부가 노트북 위에서 가운데 정렬", ext.y == -eh and ext.x - lap.x == (lw - ew) // 2, f"ext=({ext.x},{ext.y}) lap=({lap.x},{lap.y}) ew={ew} eh={eh} lw={lw}")
+reset(); run("layout", "extend", "--arrange", "left"); m = mons(); ext, lap = m["DP-4"], m["eDP-1"]
+ew, eh = ext.logical(ext.mode, ext.scale); lw, lh = lap.logical(lap.mode, lap.scale)
+check("좌우(외부 왼쪽): 외부 오른쪽 끝이 노트북 왼쪽 끝이고 세로 가운데", ext.x + ew == lap.x and (ext.y + eh // 2) - (lap.y + lh // 2) in (0, -1, 1), f"ext=({ext.x},{ext.y}) lap=({lap.x},{lap.y})")
+reset(); run("layout", "extend", "--arrange", "right"); m = mons(); ext, lap = m["DP-4"], m["eDP-1"]
+ew, eh = ext.logical(ext.mode, ext.scale); lw, lh = lap.logical(lap.mode, lap.scale)
+check("좌우(외부 오른쪽): 노트북 오른쪽 끝이 외부 왼쪽 끝이고 세로 가운데", lap.x + lw == ext.x and (ext.y + eh // 2) - (lap.y + lh // 2) in (0, -1, 1), f"ext=({ext.x},{ext.y}) lap=({lap.x},{lap.y})")
+check("배치가 저장되고 current_arrange 가 알아봄", dc.current_arrange(dc.load_state(), dc.get_monitors()) == "right")
+run("layout", "extend", "--arrange", "stack"); check("위아래로 되돌리면 위치 지정이 사라짐", not dc.load_state()["pos"] and dc.current_arrange(dc.load_state(), dc.get_monitors()) == "stack")
+run("set", "DP-4", "--pos", "left:eDP-1:start"); check("직접 지정한 위치는 사용자 지정으로 인식", dc.current_arrange(dc.load_state(), dc.get_monitors()) == "custom")
 
 # ───── 되돌리기 타이머(별도 프로세스) ─────
 import time as _t

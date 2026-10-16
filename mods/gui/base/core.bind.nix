@@ -53,7 +53,7 @@ mkPartOf "mods.gui" ({
       def mods: . as $m
         | [ [64, "SUPER"], [4, "CTRL"], [8, "ALT"], [1, "SHIFT"] ][]
         | select((($m / .[0] | floor) % 2) == 1) | .[1];
-      def keyname: {"mouse:272": "Mouse Left", "mouse:273": "Mouse Right", "mouse:274": "Mouse Middle", "mouse:275": "Mouse Back", "mouse:276": "Mouse Forward", "mouse_up": "Mouse Wheel Up", "mouse_down": "Mouse Wheel Down"}[.] // .;
+      def keyname: {"mouse:272": "Mouse Left", "mouse:273": "Mouse Right", "mouse:274": "Mouse Middle", "mouse:275": "Mouse Back", "mouse:276": "Mouse Forward", "mouse_up": "Mouse Wheel Up", "mouse_down": "Mouse Wheel Down", "left": "←", "right": "→", "up": "↑", "down": "↓"}[.] // .;
       .[] | select(.description != "")
       | ([(.modmask | mods), (.key | keyname)] | join(" + ")) + "\t" + .description
     ' | ${pkgs.util-linux}/bin/column -t -s "$(printf '\t')" -o "   │   " \
@@ -164,11 +164,12 @@ in {
         up = "u",
         down = "d"
       }
+      local arrows = { left = "←", right = "→", up = "↑", down = "↓" } -- (SUPER+H 목록 표시용)
       for key, dir in pairs(directions) do
         bindd("SUPER + " .. key, function()
           hl.dispatch(hl.dsp.focus({ direction = dir }))
           hl.dispatch(hl.dsp.window.alter_zorder({ mode = "top" }))
-        end, "포커스 이동 (" .. key .. ")")
+        end, "포커스 이동 (" .. arrows[key] .. ")")
       end
 
       -- Mouse drag (bindm)

@@ -46,9 +46,11 @@ class Confirm(ModalScreen[bool]):
     ]
     DEFAULT_CSS = """
     Confirm { align: center middle; }
-    Confirm > Vertical { width: 64; height: auto; border: round #33ccff; background: $surface; padding: 1 2; }
-    Confirm Horizontal { height: 3; margin-top: 1; align-horizontal: center; }
-    Confirm Button { margin: 0 2; }
+    Confirm > Vertical { width: 64; height: auto; border: round #33ccff; background: #101010; padding: 1 2; }
+    Confirm Horizontal { height: 1; margin-top: 1; align-horizontal: center; }
+    Confirm Button { margin: 0 2; border: none; height: 1; min-width: 0; padding: 0 2; background: #141414; color: #cfcfcf; text-style: none; }
+    Confirm Button:hover, Confirm Button:focus { background: #268bd2; color: #ffffff; text-style: none; }
+    Confirm #ccount { color: #7a7a7a; padding-top: 1; }
     """
 
     def __init__(self, message: str, seconds: int) -> None:
@@ -61,8 +63,8 @@ class Confirm(ModalScreen[bool]):
             yield Static(self.message, id="cmsg")
             yield Static("", id="ccount")
             with Horizontal():
-                yield Button("유지 (Enter)", id="keep", variant="success")
-                yield Button("되돌리기 (Esc)", id="undo", variant="error")
+                yield Button("유지 (Enter)", id="keep", variant="primary")
+                yield Button("되돌리기 (Esc)", id="undo")
 
     def on_mount(self) -> None:
         self._tick()
@@ -88,7 +90,9 @@ class NameInput(ModalScreen[str]):
     BINDINGS = [Binding("escape", "cancel", "취소")]
     DEFAULT_CSS = """
     NameInput { align: center middle; }
-    NameInput > Vertical { width: 56; height: auto; border: round #33ccff; background: $surface; padding: 1 2; }
+    NameInput > Vertical { width: 56; height: auto; border: round #33ccff; background: #101010; padding: 1 2; }
+    NameInput Input { border: none; height: 1; background: #141414; padding: 0 1; margin-top: 1; }
+    NameInput Input:focus { border: none; background: #1b2a38; }
     """
 
     def compose(self) -> ComposeResult:
@@ -105,19 +109,39 @@ class NameInput(ModalScreen[str]):
 
 class DisplayUI(App):
     TITLE = "화면 관리"
+    ENABLE_COMMAND_PALETTE = False  # 푸터의 ^p palette 안내 숨김 (clipui 와 같음, 쓰지 않음)
+    # 색은 lazygit(mods/sys/utils/lazygit.nix) / clipui 와 같음: 비활성 테두리 #595959, 포커스 #33ccff, 선택 줄 #268bd2, 배경 검정.
     CSS = """
+    Screen { background: #000000; }
     #body { height: 1fr; }
-    #left { width: 38; border: round #33ccff; }
-    #right { width: 1fr; }
-    #modes { height: 1fr; background: transparent; }
-    #mons { height: 6; border: round #33ccff; }
-    #form { border: round #33ccff; padding: 0 1; height: auto; }
-    .row { height: 3; }
-    .row Label { width: 12; padding-top: 1; }
-    .row Select { width: 1fr; }
-    #buttons { height: 3; margin-top: 1; }
-    #buttons Button { margin-right: 2; }
-    #msg { height: auto; min-height: 1; padding: 0 1; color: #ebcb8b; }
+    #left, #mons, #form { background: #000000; border: round #595959; border-title-color: #9a9a9a; border-subtitle-color: #7a7a7a; }
+    #left:focus-within, #mons:focus-within, #form:focus-within { border: round #33ccff; border-title-color: #33ccff; border-title-style: bold; }
+    #left { width: 38; }
+    #right { width: 1fr; background: #000000; }
+    #modes { height: 1fr; background: #000000; border: none; padding: 0 1; }
+    #modes > .option-list--option-highlighted, #modes:focus > .option-list--option-highlighted { background: #268bd2; color: #ffffff; text-style: none; }
+    #modes > .option-list--option-disabled { color: #7a7a7a; }
+    #mons { height: 6; padding: 0 1; }
+    #mons > .datatable--header { background: #000000; color: #9a9a9a; text-style: none; }
+    #mons > .datatable--cursor, #mons:focus > .datatable--cursor { background: #268bd2; color: #ffffff; text-style: none; }
+    #form { height: auto; padding: 0 1; }
+    .row { height: 1; margin-bottom: 1; }
+    .row Label { width: 12; color: #9a9a9a; }
+    .row Select { width: 1fr; height: 1; }
+    Select > SelectCurrent { border: none; height: 1; padding: 0 1; background: #141414; }
+    Select:focus > SelectCurrent { border: none; background: #1b2a38; }
+    SelectOverlay { border: round #33ccff; background: #000000; }
+    SelectOverlay > .option-list--option-highlighted { background: #268bd2; color: #ffffff; text-style: none; }
+    #buttons { height: 1; margin-top: 1; }
+    Button { border: none; height: 1; min-width: 0; padding: 0 2; margin-right: 2; background: #141414; color: #cfcfcf; text-style: none; }
+    Button:hover, Button:focus { background: #268bd2; color: #ffffff; text-style: none; }
+    Button.-primary { background: #1b4f7a; color: #ffffff; }
+    Button.-primary:hover, Button.-primary:focus { background: #268bd2; }
+    #msg { height: auto; min-height: 1; padding: 0 1; color: #b8a46a; }
+    Footer { background: #000000; color: #9a9a9a; }
+    Footer FooterKey { background: #000000; }
+    Footer .footer-key--key { background: #000000; color: #33ccff; text-style: none; }
+    Footer .footer-key--description { background: #000000; color: #9a9a9a; }
     .narrow #body { layout: vertical; }
     .narrow #left { width: 1fr; height: 10; }
     """
@@ -144,15 +168,12 @@ class DisplayUI(App):
 
     # ───── 화면 구성 ─────
     def compose(self) -> ComposeResult:
-        yield Header()
         with Horizontal(id="body"):
             with Vertical(id="left"):
-                yield Label(" 화면 모드 / 프리셋  (Enter: 적용)")
                 yield OptionList(id="modes")
             with VerticalScroll(id="right"):
                 yield DataTable(id="mons", cursor_type="row")
                 with Vertical(id="form"):
-                    yield Label("선택한 모니터 설정")
                     with Horizontal(classes="row"):
                         yield Label("해상도 (s)")
                         yield Select([("-", "-")], id="res", allow_blank=False)
@@ -178,6 +199,11 @@ class DisplayUI(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        # lazygit 처럼 제목을 테두리 안에 둠 ("[키]-이름")
+        for wid, title, sub in (("#left", "\\[m] 화면 모드 / 프리셋", "Enter 적용"), ("#mons", "모니터", ""), ("#form", "선택한 모니터 설정", "")):
+            box = self.query_one(wid)
+            box.border_title = title
+            box.border_subtitle = sub
         t = self.query_one("#mons", DataTable)
         t.add_columns("모니터", "설명", "모드", "배율", "위치", "상태")
         self.reload_all()
@@ -211,8 +237,16 @@ class DisplayUI(App):
         ol.clear_options()
         st = dc.load_state()
         cur = st["layout"] if st else "extend"
+        arr = dc.current_arrange(st, self.mons)
         for k, label in dc.LAYOUTS.items():
             ol.add_option(Option(("● " if k == cur and not (st and st.get("preset")) else "  ") + label, id=f"layout:{k}"))
+        # 확장 배치(위아래/좌우, 모두 가운데 정렬). 위쪽 4줄의 순서는 그대로 둬서 ↓ Enter 같은 기존 동작이 바뀌지 않게 별도 구역으로 둠
+        ol.add_option(Option("── 확장 배치 ──", disabled=True))
+        in_extend = cur == "extend" and not (st and st.get("preset"))
+        for ak, alabel in dc.ARRANGES.items():
+            ol.add_option(Option(("● " if in_extend and arr == ak else "  ") + alabel, id=f"arrange:{ak}"))
+        if in_extend and arr == "custom":
+            ol.add_option(Option("● 사용자 지정 배치 (아래 위치 설정)", disabled=True))
         ol.add_option(Option("── 프리셋 ──", disabled=True))
         for k, v in dc.BUILTIN_PRESETS.items():
             ol.add_option(Option(("● " if st and st.get("preset") == k else "  ") + v["label"], id=f"preset:{k}"))
@@ -295,7 +329,7 @@ class DisplayUI(App):
             self.query_one("#of", Select).set_options([(n, n) for n in others] or [("-", "-")])
             self.query_one("#of", Select).value = spec["of"] if spec and spec.get("of") in others else (others[0] if others else "-")
             self.query_one("#align", Select).set_options([(v, k) for k, v in dc.ALIGNS.items()])
-            self.query_one("#align", Select).value = (spec or {}).get("align", "start")
+            self.query_one("#align", Select).value = (spec or {}).get("align", "center")
         finally:
             self._updating = False
         self.msg(f"{m.name} 선택됨 — 값을 고르고 a 로 적용 (10초 안에 확인하지 않으면 되돌립니다)")
@@ -335,6 +369,8 @@ class DisplayUI(App):
         oid = ev.option.id or ""
         if oid.startswith("layout:"):
             self.run_layout(dc.op_layout(oid[7:]), confirm=False)
+        elif oid.startswith("arrange:"):
+            self.run_layout(dc.op_layout("extend", oid[8:]), confirm=False)
         elif oid.startswith("preset:"):
             st = dc.resolve_preset(oid[7:], dc.get_monitors())
             if st is not None:

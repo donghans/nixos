@@ -60,6 +60,24 @@ async def t_basic():
         async with app.run_test(size=(140, 42)) as pilot:
             await settle(pilot); check(f"focus={focus} 에서도 화면 라벨이 ★", "★" in shown(app, "res") and "★" in shown(app, "hz"), f"{shown(app,'hz')!r}")
 
+async def t_arrange():
+    reset(); app = ui.DisplayUI(focus="mode")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await settle(pilot); ids = opt_ids(app)
+        check("모드 목록에 확장 배치 3개(위아래/좌우/좌우 반대)", all(f"arrange:{k}" in ids for k in ("stack", "left", "right")))
+        check("확장 배치는 기존 4줄 아래에 있어 ↓ Enter 동작이 그대로", ids.index("layout:extend") + 1 == ids.index("layout:mirror") and ids.index("layout:external") < ids.index("arrange:stack"), str(ids[:9]))
+        ol = app.query_one("#modes", OptionList)
+        label = lambda oid: str(ol.get_option_at_index(ids.index(oid)).prompt)
+        check("처음에는 위아래 배치에 ● 표시", label("arrange:stack").startswith("●"), label("arrange:stack"))
+        pick(app, "arrange:left"); await settle(pilot)
+        m = {x.name: x for x in dc.get_monitors()}
+        ext, lap = m["DP-4"], m["eDP-1"]
+        ew, eh = ext.logical(ext.mode, ext.scale); lw, lh = lap.logical(lap.mode, lap.scale)
+        check("좌우(외부 왼쪽) 적용: 외부 오른쪽 끝 = 노트북 왼쪽 끝, 세로 가운데", ext.x + ew == lap.x and abs((ext.y + eh // 2) - (lap.y + lh // 2)) <= 1, f"ext=({ext.x},{ext.y}) lap=({lap.x},{lap.y})")
+        ids = opt_ids(app); ol = app.query_one("#modes", OptionList)
+        check("적용 뒤 ● 가 좌우 배치로 이동", str(ol.get_option_at_index(ids.index("arrange:left")).prompt).startswith("●") and not str(ol.get_option_at_index(ids.index("arrange:stack")).prompt).startswith("●"))
+    kill_units()
+
 async def t_focus():
     reset()
     for focus, wid in (("refresh", "hz"), ("resolution", "res"), ("position", "rel"), ("scale", "scale"), ("monitors", "mons")):
@@ -154,7 +172,7 @@ async def t_misc():
 
 async def main():
     only = os.environ.get("ONLY")
-    for t in [x for x in (t_basic, t_focus, t_cursor, t_layout_quick, t_apply_confirm, t_misc) if not only or x.__name__ == only]:
+    for t in [x for x in (t_basic, t_arrange, t_focus, t_cursor, t_layout_quick, t_apply_confirm, t_misc) if not only or x.__name__ == only]:
         try: await t()
         except Exception:
             import traceback; traceback.print_exc(); results.append(False); print("FAIL (예외)", t.__name__)

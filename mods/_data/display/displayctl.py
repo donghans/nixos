@@ -57,6 +57,13 @@ SCALES = [1, 1.25, 1.5, 1.6, 1.75, 2, 2.5, 3]
 RELS = {"above": "위", "below": "아래", "left": "왼쪽", "right": "오른쪽"}
 ALIGNS = {"start": "시작(위/왼쪽) 맞춤", "center": "가운데 맞춤", "end": "끝(아래/오른쪽) 맞춤"}
 
+# 확장 배치(외부 모니터를 노트북 기준 어디에 둘지). 모두 가운데 정렬. stack = 기본(외부 위, 노트북 아래)
+ARRANGES = {
+    "stack": "위아래: 외부 위 / 노트북 아래",
+    "left": "좌우: 외부 왼쪽 / 노트북 오른쪽",
+    "right": "좌우: 외부 오른쪽 / 노트북 왼쪽",
+}
+
 LAYOUTS = {
     "extend": "확장 (노트북 + 외부)",
     "mirror": "미러",
@@ -272,8 +279,8 @@ def build(mons: list[Mon], st: dict) -> tuple[dict, str]:
         if i == 0:
             return None
         if layout == "extend" and m.name == (externals[0].name if externals else "") and internals:
-            return {"rel": "above", "of": internals[0].name, "align": "start"}
-        return {"rel": "right", "of": order[i - 1], "align": "start"}
+            return {"rel": "above", "of": internals[0].name, "align": "center"}
+        return {"rel": "right", "of": order[i - 1], "align": "center"}
 
     def resolve(name: str, stack: tuple = ()) -> tuple[int, int]:
         if name in placed:
@@ -600,9 +607,36 @@ def mutated_state() -> dict:
 
 
 # ───────────────────────── 동작 ─────────────────────────
-def op_layout(layout: str) -> dict:
+def current_arrange(st: dict | None, mons: list["Mon"]) -> str:
+    """저장된 위치 설정에서 지금 확장 배치가 stack/left/right 중 무엇인지 (사용자 지정이면 'custom')"""
+    ext = next((m for m in mons if not m.internal), None)
+    internal = next((m for m in mons if m.internal), None)
+    if ext is None or internal is None:
+        return "stack"
+    pos = (st or {}).get("pos") or {}
+    spec = pos.get(ext.name)
+    other = {k: v for k, v in pos.items() if k != ext.name}
+    if other:
+        return "custom"
+    if not spec:
+        return "stack"
+    if spec.get("of") != internal.name or spec.get("align", "center") != "center":
+        return "custom"
+    return {"above": "stack", "left": "left", "right": "right"}.get(spec.get("rel"), "custom")
+
+
+def op_layout(layout: str, arrange: str | None = None) -> dict:
     st = mutated_state()
     st["layout"] = layout
+    if arrange:
+        mons = get_monitors()
+        ext = next((m for m in mons if not m.internal), None)
+        internal = next((m for m in mons if m.internal), None)
+        if ext is not None and internal is not None:
+            st["pos"].pop(ext.name, None)
+            st["pos"].pop(internal.name, None)
+            if arrange in ("left", "right"):
+                st["pos"][ext.name] = {"rel": arrange, "of": internal.name, "align": "center"}
     return st
 
 
@@ -767,8 +801,8 @@ def cmd_modes(a) -> int:
 def parse_pos(s: str) -> dict:
     p = s.split(":")
     if p[0] not in RELS or len(p) < 2:
-        raise SystemExit("위치 형식: <above|below|left|right>:<기준 모니터>[:start|center|end]")
-    return {"rel": p[0], "of": p[1], "align": p[2] if len(p) > 2 else "start"}
+        raise SystemExit("위치 형식: <above|below|left|right>:<기준 모니터>[:start|center|end] (정렬 기본 center)")
+    return {"rel": p[0], "of": p[1], "align": p[2] if len(p) > 2 else "center"}
 
 
 def cmd_set(a) -> int:
@@ -812,7 +846,7 @@ def cmd_revert_pending(a) -> int:
 
 
 def cmd_layout(a) -> int:
-    return go(op_layout(a.name))
+    return go(op_layout(a.name, a.arrange))
 
 
 def cmd_present(a) -> int:
@@ -893,6 +927,7 @@ def main(argv: list[str]) -> int:
     s.set_defaults(fn=cmd_modes)
     s = sub.add_parser("layout", help="확장/미러/노트북만/외부만")
     s.add_argument("name", choices=list(LAYOUTS))
+    s.add_argument("--arrange", choices=list(ARRANGES), help="확장 배치(가운데 정렬): stack=외부 위/노트북 아래, left=외부 왼쪽, right=외부 오른쪽")
     s.set_defaults(fn=cmd_layout)
     s = sub.add_parser("set", help="해상도/주사율/배율/위치 변경")
     s.add_argument("monitor")
