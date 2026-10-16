@@ -7,7 +7,7 @@
 #    (방향키 이동은 "검색창 포커스면 select_idx(1)" 로 이미 짜여 있어 영향 없음)
 # 3) 방향키 이동을 "선택만 변경 + 포커스는 검색창 유지" 방식으로 변경 — 기본은 GTK 포커스를 목록 항목으로 옮겨
 #    text-input(IME)이 꺼지므로, 방향키로 이동한 뒤 입력하면 첫 글자가 다시 영어로 입력됨
-#    (단일 열 + 세로 방향일 때만 적용, 그 외는 기존 동작. 스크롤은 adjustment 로 직접 보정해 포커스 이동 불필요)
+#    (단일 열 + 세로 방향일 때만 적용(Tab/Shift+Tab 은 끝에서 순환), 그 외는 기존 동작. 스크롤은 adjustment 로 직접 보정해 포커스 이동 불필요)
 #    + Enter 가 항상 0번째 항목만 실행하던 것을 선택된 항목 실행으로 변경 (검색창 포커스 유지 시 hover/방향키 선택이 무시되므로)
 # 4) 서피스 크기 보정 — 레이어 서피스/창 크기를 요청할 때 CSS 의 테두리+패딩만큼(WOFI_EXTRA) 더해서 요청
 #    (이유: wofi 는 width/height 를 그대로 요청하지만 GTK 는 #outer-box 의 테두리+패딩 양쪽 합(wofi.nix 의 extra, 현재 22px) 만큼
@@ -53,7 +53,7 @@ static uint64_t width, height;' \
 	}
 }
 
-static void move_selection(gint delta) {
+static void move_selection(gint delta, gboolean wrap) {
 	GList* selected = gtk_flow_box_get_selected_children(GTK_FLOW_BOX(inner_box));
 	gint idx = selected != NULL ? gtk_flow_box_child_get_index(selected->data) : -1;
 	g_list_free(selected);
@@ -69,6 +69,21 @@ static void move_selection(gint delta) {
 			break;
 		}
 	}
+	if(target == NULL && wrap) {
+		/* Tab 처럼 끝에서 반대쪽 끝으로 순환: 보이는 항목 중 처음(delta>0) 또는 마지막(delta<0) */
+		for(gint next = 0;; ++next) {
+			GtkFlowBoxChild* candidate = gtk_flow_box_get_child_at_index(GTK_FLOW_BOX(inner_box), next);
+			if(candidate == NULL) {
+				break;
+			}
+			if(gtk_widget_get_visible(GTK_WIDGET(candidate))) {
+				target = candidate;
+				if(delta > 0) {
+					break;
+				}
+			}
+		}
+	}
 	if(target != NULL) {
 		gtk_flow_box_select_child(GTK_FLOW_BOX(inner_box), target);
 		scroll_to_child(GTK_WIDGET(target));
@@ -78,7 +93,7 @@ static void move_selection(gint delta) {
 static void move_up(void) {
 	user_moved = true;
 	if(columns == 1 && outer_orientation == GTK_ORIENTATION_VERTICAL) {
-		move_selection(-1);
+		move_selection(-1, FALSE);
 		return;
 	}' \
           --replace-fail 'static void move_down(void) {
@@ -86,7 +101,7 @@ static void move_up(void) {
 'static void move_down(void) {
 	user_moved = true;
 	if(columns == 1 && outer_orientation == GTK_ORIENTATION_VERTICAL) {
-		move_selection(1);
+		move_selection(1, FALSE);
 		return;
 	}' \
           --replace-fail '	GtkFlowBoxChild* child = gtk_flow_box_get_child_at_index(GTK_FLOW_BOX(inner_box), 0);
@@ -102,6 +117,22 @@ static void move_up(void) {
 		child = gtk_flow_box_get_child_at_index(GTK_FLOW_BOX(inner_box), 0);
 	}
 	gboolean is_visible = gtk_widget_get_visible(GTK_WIDGET(child));' \
+          --replace-fail 'static void move_forward(void) {
+	user_moved = true;' \
+'static void move_forward(void) {
+	user_moved = true;
+	if(columns == 1 && outer_orientation == GTK_ORIENTATION_VERTICAL) {
+		move_selection(1, TRUE);
+		return;
+	}' \
+          --replace-fail 'static void move_backward(void) {
+	user_moved = true;' \
+'static void move_backward(void) {
+	user_moved = true;
+	if(columns == 1 && outer_orientation == GTK_ORIENTATION_VERTICAL) {
+		move_selection(-1, TRUE);
+		return;
+	}' \
           --replace-fail 'static gboolean _insert_widget(gpointer data) {' \
 'static gboolean hover_select(GtkWidget* widget, GdkEventMotion* event, gpointer data) {
 	(void) event;
