@@ -152,6 +152,13 @@ Thunar 의 "Open in swayimg" 는 폴더에 쓸 수 있지만 loupe 는 폴더를
   loupe 의 "Open Files…" 선택창에서 Ctrl+A 로 폴더 전체를 고르는 방법도 있을 것으로 보나 시험하지 않음.
 - swayimg 는 제거(패키지/설정/런처 항목). 필요하면 git 이력(`0186aa8`)에서 복원.
 
+### 메모(주석) — satty
+- loupe 의 편집은 자르기/회전/뒤집기뿐이고 그리기·글자·화살표 같은 메모 도구는 없다(화면으로 확인).
+- satty 는 `--filename <파일>` 로 **기존 이미지 파일도 열 수** 있다(스크린샷 단축키가 쓰는 `--filename -` 는 stdin). 도구: 자르기, 펜, 선, 화살표, 사각형, 원, 글자, 번호, 블러, 형광펜.
+  satty 자체 `.desktop` 은 `NoDisplay=true`, MimeType 은 PNG/JPEG 뿐이라 런처에는 안 나옴. 다른 형식(WebP 등)과 저장 동작은 시험하지 않음.
+- Thunar 이미지 우클릭 "Annotate with Satty" (`satty --filename %f`, 공백 있는 경로도 열림 확인). 저장은 `mods/gui/base/satty.nix` 의 `output-filename`
+  (`~/Pictures/Screenshots/satty-날짜시각.png`)이라 **원본은 그대로 두고 새 파일로 저장**된다.
+
 ### mpv 이전/다음
 - 기본은 파일 하나를 열면 재생목록도 하나라 `<`/`>` 가 안 먹는다. 여러 파일을 선택해 열면 그 목록이 재생목록(한 창에서 순서대로).
 - `autocreate-playlist=same` 을 켜서 해결: `b.flac` 을 열면 `[a.mp3, b.flac, c.mp3]`(오디오끼리), `d.mp4` 는 영상끼리(해당 폴더에 영상이 하나면 그것뿐). `filter` 는 PNG 까지 섞여서 `same` 선택.

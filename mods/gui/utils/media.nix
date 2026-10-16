@@ -110,6 +110,7 @@ in {
       <actions>
       ${ucaAction "1792143897495107-1" "utilities-terminal" "Open Terminal Here" "exo-open --working-directory %f --launch TerminalEmulator" "<directories/>"}
       ${ucaAction "1792143897495107-2" "image-x-generic" "Open in Loupe" "loupe-open %F" "<directories/>\n\t<image-files/>"}
+      ${ucaAction "1792143897495107-4" "applications-graphics" "Annotate with Satty" "${pkgs.satty}/bin/satty --filename %f" "<image-files/>"}
       ${ucaAction "1792143897495107-3" "vlc" "Open in VLC" "vlc %F" "<directories/>\n\t<audio-files/>\n\t<video-files/>"}
       </actions>
     '';
