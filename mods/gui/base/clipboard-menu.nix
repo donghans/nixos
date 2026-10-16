@@ -48,12 +48,12 @@ mkPartOf "mods.gui" ({
       local n pick
       n=$(printf '%s\n' "$ROWS" | wc -l)
       pick=$({
-        printf '▶ %s개 삭제 실행\n✖ 취소\n' "$n"
+        printf '삭제 실행 — %s개\n취소\n' "$n"
         printf '%s\n' "$ROWS" | while IFS=$'\t' read -r id bytes preview; do
           printf '    #%s · %s · %s\n' "$id" "$(${numfmt} --to=iec --suffix=B "$bytes")" "$preview"
         done
       } | $WOFI --prompt "$1 — 대상 ''${n}개 (아래는 미리보기, Esc: 취소)") || return 1
-      case "$pick" in "▶ "*) return 0 ;; *) return 1 ;; esac
+      case "$pick" in "삭제 실행"*) return 0 ;; *) return 1 ;; esac
     }
 
     delete_rows() {
@@ -77,9 +77,9 @@ mkPartOf "mods.gui" ({
 
       while true; do
         pick=$({
-          printf '▶ 전체 복사\n'
-          printf '🗑 이 항목 삭제\n'
-          printf '↗ 별도 창(pager)에서 전문 열기\n'
+          printf '전체 복사\n'
+          printf '이 항목 삭제\n'
+          printf '별도 창(pager)에서 전문 열기\n'
           printf '── 전문 · %s줄 · %s — 줄을 고르면 그 줄만 복사 ──\n' "$total" "$HUMAN"
           ${gawk} -v max="$MAX_LINES" -v w="$MAX_WIDTH" '
             NR > max { exit }
@@ -143,18 +143,18 @@ mkPartOf "mods.gui" ({
           ${ctl} stats | $WOFI --prompt "클립보드 통계 (Esc: 닫기)" >/dev/null
           ;;
         "DB 최적화 (파일 크기 줄이기)")
-          pick=$(printf '%s\n' '▶ 최적화 실행 (수 초 소요, 그동안 새 복사는 기록되지 않음)' '✖ 취소' \
+          pick=$(printf '%s\n' '최적화 실행 (수 초 소요, 그동안 새 복사는 기록되지 않음)' '취소' \
             | $WOFI --prompt "DB 를 새로 구성합니다 (백업 자동 생성, 이력 번호는 새로 매겨짐)") || return 0
           case "$pick" in
-            "▶ "*)
+            "최적화 실행"*)
               ${notify} -t 3000 "클립보드" "DB 최적화 중…"
               ${notify} "클립보드 DB 최적화" "$(${ctl} compact 2>&1)"
               ;;
           esac
           ;;
         "전체 삭제")
-          pick=$(printf '%s\n' "▶ 이력 $(${cliphist} list | wc -l)개를 전부 삭제" '✖ 취소' | $WOFI --prompt "전체 삭제 (되돌릴 수 없음)") || return 0
-          case "$pick" in "▶ "*) ${cliphist} wipe; ${notify} -t 2500 "클립보드" "전체 삭제됨" ;; esac
+          pick=$(printf '%s\n' "전부 삭제 실행 — 이력 $(${cliphist} list | wc -l)개" '취소' | $WOFI --prompt "전체 삭제 (되돌릴 수 없음)") || return 0
+          case "$pick" in "전부 삭제 실행"*) ${cliphist} wipe; ${notify} -t 2500 "클립보드" "전체 삭제됨" ;; esac
           ;;
       esac
     }
@@ -169,7 +169,7 @@ mkPartOf "mods.gui" ({
       if [ "$MODE" = manage ]; then
         # 맨 위 행(0번)은 일괄 작업, 이후 행(k번)은 이력의 k번째 줄
         N=$({
-          printf '⚙  일괄 작업 (키워드로 삭제 · 큰 항목 정리 · 통계 · DB 최적화)…\n'
+          printf '일괄 작업 (키워드로 삭제 · 큰 항목 정리 · 통계 · DB 최적화)…\n'
           printf '%s\n' "$LIST" | cut -f2-
         } | $WOFI --prompt "클립보드 관리 — 항목을 고르면 복사 / 전문 보기 / 삭제" -D dmenu-print_line_num=true) || exit 0
         [ -z "$N" ] && exit 0
