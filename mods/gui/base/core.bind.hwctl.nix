@@ -89,6 +89,20 @@
       ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:touchscreen -u low "Touchscreen" "$LABEL"
     '';
 
+    # 터치패드/터치스크린을 끈 상태를 Hyprland 설정 reload 뒤에도 유지
+    # (이유: 장치 켜기/끄기(hl.device enabled)는 런타임 설정이라 hyprctl reload 때 초기화되는데 상태 기록 파일은
+    #  남아서, 메뉴 표시와 실제 상태가 어긋나고 토글이 반대로 동작했음)
+    restoreInput = pkgs.writeShellScriptBin "hypr-restore-input" ''
+      apply() {
+        [ "$(cat "$HOME/.local/state/hypr/$1" 2>/dev/null || echo true)" = false ] || return 0
+        hyprctl devices -j | ${pkgs.jq}/bin/jq -r "$2" | while read -r dev; do
+          hyprctl eval "hl.device({ name = \"$dev\", enabled = false })"
+        done
+      }
+      apply touchpad_enabled '.mice[] | select(.name | contains("touchpad")) | .name'
+      apply touchscreen_enabled '.touch[]?.name'
+    '';
+
     # 입력 장치 메뉴(터치패드/터치스크린): 터치패드 키를 누르면 wofi 로 표시. 항목 추가는 deviceMenuExtraEntries 옵션 사용
     # (화면 모드 전환은 별도 메뉴 hypr-display-menu — 화면 전환 키 SUPER+P / XF86Display)
     extraEntries = config.wayland.windowManager.hyprland.deviceMenuExtraEntries;
@@ -104,7 +118,7 @@
       add "터치패드 $(onoff touchpad_enabled)" "${toggleTouchpad}/bin/hypr-toggle-touchpad"
       add "터치스크린 $(onoff touchscreen_enabled)" "${toggleTouchscreen}/bin/hypr-toggle-touchscreen"
       ${lib.concatMapStrings (e: "add ${lib.escapeShellArg e.label} ${lib.escapeShellArg e.command}\n      ") extraEntries}
-      sel=$(printf '%s\n' "''${labels[@]}" | ${pkgs.wofi}/bin/wofi --dmenu --cache-file /dev/null --width 520 --height 200 --prompt "입력 장치") || exit 0
+      sel=$(printf '%s\n' "''${labels[@]}" | ${pkgs.wofi}/bin/wofi --dmenu --hide-search --cache-file /dev/null --width 520 --lines ${toString (2 + builtins.length extraEntries)}) || exit 0
       [ -z "$sel" ] && exit 0
       for i in "''${!labels[@]}"; do
         if [ "''${labels[$i]}" = "$sel" ]; then
@@ -119,10 +133,21 @@
       home.packages = lib.optionals (config.workspace.type == "laptop") [
         toggleTouchpad
         toggleTouchscreen
+        restoreInput
         deviceMenu
         volumeControl
         brightnessControl
       ];
+
+      # 로그인 때는 Hyprland 가 장치를 모두 켠 상태로 시작하므로 기록도 초기화, 설정 reload 때는 끈 상태를 복원
+      wayland.windowManager.hyprland.extraConfig = lib.mkIf (config.workspace.type == "laptop") ''
+        hl.on("hyprland.start", function()
+          hl.exec_cmd("rm -f $HOME/.local/state/hypr/touchpad_enabled $HOME/.local/state/hypr/touchscreen_enabled")
+        end)
+        hl.on("config.reloaded", function()
+          hl.exec_cmd("${restoreInput}/bin/hypr-restore-input")
+        end)
+      '';
 
       wayland.windowManager.hyprland.settings = {
         # == Generic Media Bindings ==

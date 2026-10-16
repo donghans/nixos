@@ -108,7 +108,7 @@ mkPartOf "mods.gui" ({
     mirror	미러
     internal	노트북 화면만
     external	외부 화면만"
-    sel=$(printf '%s\n' "$modes" | cut -f2 | ${wofi} --dmenu --cache-file /dev/null --width 420 --height 240 --prompt "화면 모드") || exit 0
+    sel=$(printf '%s\n' "$modes" | cut -f2 | ${wofi} --dmenu --hide-search --cache-file /dev/null --width 420 --lines 4) || exit 0
     [ -z "$sel" ] && exit 0
     mode=$(printf '%s\n' "$modes" | ${pkgs.gawk}/bin/awk -F'\t' -v s="$sel" '$2 == s { print $1 }')
     [ -n "$mode" ] && exec ${displayMode}/bin/hypr-display-mode "$mode"

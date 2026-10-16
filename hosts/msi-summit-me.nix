@@ -168,6 +168,15 @@ mkHostConfiguration ({
   hm = {
     wayland.windowManager.hyprland = {
       touchpadToggleKey = "SUPER + CTRL, F24";
+
+      # 터치스크린/펜은 노트북 패널 전용 입력 장치. 지정하지 않으면 좌표가 모든 모니터를 합친 영역에 매핑돼
+      # 외부 모니터와 확장하면 외부 모니터 기준으로 인식됨(터치가 엉뚱한 위치로 들어감).
+      # (주의: 전역 input:touchdevice:output 만으로는 부족했고 장치별 지정으로 해결됨 — 실제 터치로 확인)
+      # (주의: hyprctl reload 는 런타임 설정을 지우므로 화면 모드 메뉴 등이 reload 해도 유지되게 설정 파일에 둠)
+      extraConfig = ''
+        hl.device({ name = "elan-touchscreen", output = "eDP-1" })
+        hl.device({ name = "elan-touchscreen-stylus", output = "eDP-1" })
+      '';
       deviceMenuExtraEntries = [
         {
           label = "터치패드 재인식 (드라이버 재시작)";
