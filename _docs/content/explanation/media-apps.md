@@ -163,6 +163,18 @@ Thunar 의 "Open in swayimg" 는 폴더에 쓸 수 있지만 loupe 는 폴더를
 - 참고: loupe 는 단일 인스턴스라 이미 실패 상태로 떠 있는 loupe 가 있으면 새로 열어도 그 프로세스로 전달되어 계속 실패함 → 그 창을 모두 닫아야 함(수정 전 증상 분석 중 이로 인해 혼동).
 - 미확인: 런처(wofi)·"Open With" 경로는 `loupe` 를 PATH 에서 찾으므로 같은 래퍼를 쓸 것으로 보나 직접 시험하지 않음.
 
+### ONLYOFFICE 대체 글꼴 (2026-10-17)
+- 문서가 지정한 글꼴이 설치돼 있지 않으면 ONLYOFFICE 가 **스캔한 글꼴(`~/.local/share/fonts` 등) 중에서 자체 알고리즘으로** 대체 글꼴을 고른다(fontconfig 와 무관, 대체 규칙을 지정하는 설정은 못 찾음).
+  실제 pptx(`Ⅴ. 프로젝트 관리_v0.93 (1).pptx`)에서 눈으로 대조한 결과 `에스코어 드림 6 Bold`(고딕) 제목은 **바탕체 계열**로, `KoPub돋움체` 본문은 가는 굴림/돋움 계열로 그려졌음(확정은 아님).
+  이 문서가 쓰는데 없는 글꼴: KoPub돋움체/바탕체, 에스코어 드림 5·6·7, 산돌고딕B. nixpkgs 에도 없음.
+- **해결**: 없는 이름과 같은 이름의 글꼴을 Pretendard(`pkgs.pretendard`, 굵기별 정적 OTF)에서 만들어 둠. 이름표(name 테이블)만 바꾼 복사본이고 글리프는 Pretendard 그대로.
+  `mods/_data/office-fonts/alias.py` + `office.nix` 의 `fontAliasMap`(이름 → Pretendard 굵기). 활성화 때 `~/.local/share/fonts/zz-alias-*.otf` 로 실제 파일 복사(ONLYOFFICE 가 심볼릭 링크를 건너뜀).
+  검증: 별칭을 넣고 ONLYOFFICE 를 **완전히 재시작**하자 `fonts.log` 가 재스캔되고, 제목이 바탕체에서 굵은 고딕(Pretendard Bold)으로, 본문이 Pretendard 로 바뀜.
+- 주의: (1) ONLYOFFICE 는 프로필 경로와 무관하게 **프로세스가 하나뿐**이고 글꼴 목록은 시작할 때 한 번만 읽으므로 새 글꼴은 완전 종료 후 다시 켜야 보임(독립 인스턴스로 시험 불가).
+  (2) 모양은 Pretendard 이지 원래 KoPub/에스코어 드림이 아님 → 글자 폭이 달라 줄바꿈 위치가 조금 다를 수 있음. (3) `KoPub바탕체`(명조)는 별칭을 만들지 않아 지금도 ONLYOFFICE 기본 대체(바탕 계열).
+  (4) 다른 문서에서 대체되는 이름이 생기면 `fontAliasMap` 에 한 줄 추가. (5) 이름표를 바꾼 복사본이므로 개인용으로만 둘 것.
+- fontTools 로 Mac 이름표(`platformID 1`)에 한글을 넣으면 Mac Roman 인코딩 오류로 저장이 실패함 → Windows 이름표만 사용.
+
 ### ONLYOFFICE 글꼴 뻣뻣함 · 언어 · 확인창 위치 (2026-10-17)
 - **글꼴이 뻣뻣한 원인**: 시스템 fontconfig/FreeType 이 아니라 ONLYOFFICE 자체 엔진(FreeType 이 `fonts.wasm` 에 내장, 시스템 것을 안 씀)의 힌팅.
   시스템 설정은 NixOS 기본(`hintstyle slight`, 회색조, 서브픽셀 없음)인데 ONLYOFFICE 는 pango 의 medium/full 힌팅과 비슷한 수치(회색 22%/진한 검정 64% vs 20%/68%; slight 는 36%/33%)였음.

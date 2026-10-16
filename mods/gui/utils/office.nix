@@ -21,6 +21,30 @@ mkModOf "mods.gui" __curPos "Office (ONLYOFFICE + MS 호환 폰트)" ({
   # UI 배율: ONLYOFFICE 는 기본으로 2배(창 2400x1480)로 떠서 너무 큼. 1 / 1.25 / 1.5 / 1.75 / 2 중 선택 (여기서만 바꾸면 됨)
   # 인자(--force-scale)로만 지정 가능해서, 실행 파일과 .desktop(문서 더블클릭 시 실행) 둘 다 이 값으로 감싼다.
   uiScale = "1";
+  # 문서가 지정했는데 이 PC 에 없는 글꼴 → Pretendard 의 같은 굵기로 연결(이름표만 바꾼 복사본). 이유와 방법은 _data/office-fonts/alias.py 참고.
+  # 목록은 실제로 열어 본 문서(pptx)에서 나온 이름이고, 다른 문서에서 대체 글꼴로 보이는 이름이 생기면 여기에 추가.
+  pretendardDir = "${pkgs.pretendard}/share/fonts/opentype";
+  fontAliasMap = {
+    "KoPub돋움체 Light" = "Light";
+    "KoPub돋움체 Medium" = "Medium";
+    "KoPub돋움체 Bold" = "Bold";
+    "에스코어 드림 1 Thin" = "Thin";
+    "에스코어 드림 2 ExtraLight" = "ExtraLight";
+    "에스코어 드림 3 Light" = "Light";
+    "에스코어 드림 4 Regular" = "Regular";
+    "에스코어 드림 5 Medium" = "Medium";
+    "에스코어 드림 6 Bold" = "Bold";
+    "에스코어 드림 7 ExtraBold" = "ExtraBold";
+    "에스코어 드림 8 Heavy" = "Black";
+    "에스코어 드림 9 Black" = "Black";
+    "산돌고딕B" = "Bold";
+  };
+  fontAliases = pkgs.runCommand "office-font-aliases" {
+    nativeBuildInputs = [(pkgs.python3.withPackages (p: [p.fonttools]))];
+  } ''
+    python3 -I ${../../_data/office-fonts/alias.py} $out \
+      ${lib.concatStringsSep " \\\n      " (lib.mapAttrsToList (n: w: lib.escapeShellArg "${n}=${pretendardDir}/Pretendard-${w}.otf") fontAliasMap)}
+  '';
   onlyoffice = pkgs.symlinkJoin {
     name = "onlyoffice-desktopeditors-scaled";
     paths = [pkgs.onlyoffice-desktopeditors];
@@ -89,6 +113,18 @@ in {
     home.activation.onlyofficeFonts = lib.hm.dag.entryAfter ["writeBoundary"] ''
       if [ -z "''${DRY_RUN:-}" ]; then
         mkdir -p "$HOME/.local/share/fonts"
+        # 별칭 글꼴(zz-alias-*): 목록이 바뀌면 오래된 것이 남지 않게 먼저 비우고 다시 복사(변경이 없으면 내용이 같아 ONLYOFFICE 재스캔도 안 일어남)
+        for old in "$HOME"/.local/share/fonts/zz-alias-*.otf; do
+          [ -e "$old" ] || continue
+          [ -e "${fontAliases}/$(basename "$old")" ] || rm -f "$old"
+        done
+        for src in ${fontAliases}/*.otf; do
+          dst="$HOME/.local/share/fonts/$(basename "$src")"
+          if [ -L "$dst" ] || ! ${pkgs.diffutils}/bin/cmp -s "$src" "$dst"; then
+            rm -f "$dst"
+            install -m 644 "$src" "$dst"
+          fi
+        done
         # 한글(고딕/명조) + Arial/Times New Roman/Courier New 대체(Liberation). 이름이 겹치지 않게 그대로 복사
         for src in \
           ${pkgs.nanum}/share/fonts/{NanumGothic,NanumGothicBold,NanumMyeongjo,NanumMyeongjoBold}.ttf \
