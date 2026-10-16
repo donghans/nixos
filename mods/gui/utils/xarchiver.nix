@@ -50,7 +50,7 @@ mkModOf "mods.gui" __curPos "Xarchiver (압축파일 기본 연결 프로그램)
 in {
   hm = {
     # 다중 선택 압축 해제(Multi-Extract) 다이얼로그의 대상 경로가 /tmp 로 고정되던 것을 패치:
-    # 첫 번째로 추가한 아카이브가 있는 폴더를 기본 대상으로 쓰고, 다이얼로그를 닫으면 비움
+    # 첫 번째로 추가한 아카이브가 있는 폴더를 기본 대상으로 쓰고(열 때 미리 채워진 /tmp 도 덮어씀), 다이얼로그를 닫으면 비움
     # (원본은 설정이 비어 있으면 /tmp 로 하드코딩 — 설정 파일로는 못 바꿈)
     home.packages = [
       (pkgs.xarchiver.overrideAttrs (old: {
@@ -59,7 +59,7 @@ in {
           + ''
             substituteInPlace src/extract_dialog.c \
               --replace-fail $'\tmulti_extract->nr_total++;\n\tg_free(file_utf8);' \
-              $'\tmulti_extract->nr_total++;\n\tif (multi_extract->nr_total == 1 && !*gtk_entry_get_text(GTK_ENTRY(multi_extract->destination_path_entry)))\n\t\tgtk_entry_set_text(GTK_ENTRY(multi_extract->destination_path_entry), path_utf8);\n\tg_free(file_utf8);' \
+              $'\tmulti_extract->nr_total++;\n\tif (multi_extract->nr_total == 1)\n\t\tgtk_entry_set_text(GTK_ENTRY(multi_extract->destination_path_entry), path_utf8);\n\tg_free(file_utf8);' \
               --replace-fail $'\tgtk_list_store_clear(multi_extract->liststore);\n' \
               $'\tgtk_list_store_clear(multi_extract->liststore);\n\tgtk_entry_set_text(GTK_ENTRY(multi_extract->destination_path_entry), "");\n'
           '';
