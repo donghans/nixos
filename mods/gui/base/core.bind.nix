@@ -88,7 +88,7 @@ mkPartOf "mods.gui" ({
       def mods: . as $m
         | [ [64, "SUPER"], [4, "CTRL"], [8, "ALT"], [1, "SHIFT"] ][]
         | select((($m / .[0] | floor) % 2) == 1) | .[1];
-      def keyname: {"mouse:272": "Mouse Left-drag", "mouse:273": "Mouse Right-drag", "mouse:274": "Mouse Wheel-click"}[.] // .;
+      def keyname: {"mouse:272": "Mouse Left", "mouse:273": "Mouse Right", "mouse:274": "Mouse Middle", "mouse:275": "Mouse Back", "mouse:276": "Mouse Forward", "mouse_up": "Mouse Wheel Up", "mouse_down": "Mouse Wheel Down"}[.] // .;
       .[] | select(.description != "")
       | ([(.modmask | mods), (.key | keyname)] | join(" + ")) + "\t" + .description
     ' | ${pkgs.util-linux}/bin/column -t -s "$(printf '\t')" -o "   │   " \
