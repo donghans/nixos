@@ -63,6 +63,7 @@ in {
     # 필요한 키만 활성화 때 맞춘다.
     #  - UITheme: theme-dark(UI 만 어둡고 문서 용지는 흰색 유지) / theme-night(문서 배경까지 어둡게) /
     #             theme-light / theme-classic-light / theme-contrast-dark
+    #  - editorWindowMode: true 면 문서를 열 때마다 새 창(앱 Settings 의 "Open file: In its own window"). false 면 한 창의 탭. true 로 두 문서가 각자 창으로 열리는 것을 확인
     #  - locale: 인터페이스 언어(ko/en 등). 앱의 Settings > Interface language 와 같은 값 (`locale=ko` 로 한국어가 되는 것을 실제로 확인)
     #  - titlebar: custom(앱이 직접 그린 둥근 창 + 최소화/닫기 버튼) / system(창 틀은 Hyprland 가 그림 → 모서리가
     #              각지고 다른 앱과 어울림. 대신 창 버튼이 없어 닫기는 단축키로)
@@ -81,6 +82,7 @@ in {
         set_key UITheme theme-dark
         set_key titlebar system
         set_key locale ko
+        set_key editorWindowMode true
       fi
     '';
 
