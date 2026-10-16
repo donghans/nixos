@@ -109,7 +109,7 @@ PATH 에 뷰어/플레이어가 없고(ImageMagick `convert` 뿐), `xdg-mime que
 
 | 용도 | 기본(더블클릭, 런처에서 숨김) | 직접 고르는 것(런처에 보임) |
 |---|---|---|
-| 이미지 | **imv-dir** | **swayimg** (Thunar 우클릭 "Open in swayimg") |
+| 이미지 | **imv-dir** | **loupe** (Thunar 우클릭 "Open in Loupe") — 2026-10-17 swayimg 에서 교체 |
 | 영상/오디오 | **mpv** (`hwdec=vaapi`) | **VLC** (Thunar 우클릭 "Open in VLC") |
 
 실제로 확인한 것과 이유:
@@ -144,6 +144,18 @@ PATH 에 뷰어/플레이어가 없고(ImageMagick `convert` 뿐), `xdg-mime que
 
 loupe 의 키는 loupe 자신의 단축키 창(F1 → Show Keyboard Shortcuts)을 화면으로 읽어 확인했다. loupe 의 터치패드 핀치/휠 확대, 마우스 드래그는 시험하지 않았다.
 Thunar 의 "Open in swayimg" 는 폴더에 쓸 수 있지만 loupe 는 폴더를 못 받아서 같은 방식의 메뉴를 만들려면 `loupe "$dir"/*` 형태의 래퍼가 필요하다.
+
+### swayimg → loupe 교체 (2026-10-17)
+- 이유: loupe 에는 **편집**이 있다(헤더의 자르기 버튼 → 비율 Free/Original/Square/5:4/4:3/3:2/16:9, 회전, 좌우·상하 뒤집기, Save 드롭다운). swayimg/imv 에는 자르기·저장이 없다(swayimg 는 `exec` 바인딩으로 외부 명령 연결만, 키 목록 확인). 슬라이드쇼는 필요 없다고 판단.
+- 아쉬운 점 해결: loupe 는 폴더를 인자로 받으면 창이 안 뜬다 → `loupe-open` 래퍼(`media.nix`)가 폴더를 안의 이미지 파일 목록(이름순, 하위 폴더 제외)으로 풀어서 넘김.
+  Thunar 폴더 우클릭 "Open in Loupe" 로 `p1→p2→p3` 넘기기 확인. 이미지가 없는 폴더는 빈 창이 뜸. loupe 명령줄 옵션은 사실상 없음(`--help` 에 GApplication 옵션뿐).
+  loupe 의 "Open Files…" 선택창에서 Ctrl+A 로 폴더 전체를 고르는 방법도 있을 것으로 보나 시험하지 않음.
+- swayimg 는 제거(패키지/설정/런처 항목). 필요하면 git 이력(`0186aa8`)에서 복원.
+
+### mpv 이전/다음
+- 기본은 파일 하나를 열면 재생목록도 하나라 `<`/`>` 가 안 먹는다. 여러 파일을 선택해 열면 그 목록이 재생목록(한 창에서 순서대로).
+- `autocreate-playlist=same` 을 켜서 해결: `b.flac` 을 열면 `[a.mp3, b.flac, c.mp3]`(오디오끼리), `d.mp4` 는 영상끼리(해당 폴더에 영상이 하나면 그것뿐). `filter` 는 PNG 까지 섞여서 `same` 선택.
+- 따라서 imv 를 "한 개만 열기"로 맞출 이유가 없어 **imv-dir(폴더 순환) 유지**. (한 개만 열기를 원하면 기본 연결을 `imv.desktop` 으로 바꾸면 됨: 파일 하나=그 파일만, 여러 개 선택=그 목록)
 
 미확인:
 - (확인됨) VLC 는 폴더를 열면 하위 폴더까지 재귀로 재생목록에 담는다(MPRIS 로 미디어 3개 확인, PNG 제외). 첫 실행 개인정보 대화상자는 사용자가 `qt-privacy-ask=0` 으로 꺼 둠(`~/.config/vlc`, 레포 밖 수동 설정). VLC 는 XWayland 로 뜬다.

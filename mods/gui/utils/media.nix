@@ -3,11 +3,12 @@
 # 역할 분담 (런처 wofi 에는 "직접 골라 쓰는 것"만 보이게 하고, 더블클릭으로 열리는 기본 프로그램은 숨김):
 #   이미지   기본: imv-dir  (런처에서 숨김. imv 는 파일 하나를 주면 그 파일만 열어서, 폴더의 다음/이전 사진으로 넘기려면
 #                            폴더를 통째로 여는 imv-dir 가 필요함 — 실제로 imv=[1/1], imv-dir=[2/3] 으로 확인)
-#            선택: swayimg (런처에 보임, Thunar 우클릭 "Open in swayimg". 폴더 단위 갤러리가 장점)
+#            선택: loupe (런처에 보임, 자르기/회전/뒤집기 편집 가능. 폴더를 인자로 못 받아서 Thunar 우클릭 "Open in Loupe" 는
+#                         loupe-open 래퍼가 폴더를 이미지 파일 목록으로 풀어서 넘김. swayimg 와 비교는 문서 참고)
 #   영상/오디오 기본: mpv (런처에서 숨김, VA-API 하드웨어 디코딩)
 #            선택: VLC (런처에 보임, Thunar 우클릭 "Open in VLC")
 {mkModOf, ...}:
-mkModOf "mods.gui" __curPos "미디어 (imv, swayimg, mpv, vlc)" ({
+mkModOf "mods.gui" __curPos "미디어 (imv, loupe, mpv, vlc)" ({
   pkgs,
   lib,
   ...
@@ -40,11 +41,20 @@ mkModOf "mods.gui" __curPos "미디어 (imv, swayimg, mpv, vlc)" ({
     video/x-ogm+ogg video/x-theora video/x-theora+ogg
   ''));
 
-  # 파일 없이 켜면(런처) 사진 폴더(하위 폴더 포함)를 보여줌. swayimg 는 인자가 없으면 현재 폴더(= 홈)에서 이미지를 찾는데
-  # 없으면 바로 종료하기 때문. (Pictures 에는 이미지가 Screenshots/ 같은 하위 폴더에 있어서 하위 폴더도 읽음)
-  swayimgOpen = pkgs.writeShellScriptBin "swayimg-open" ''
-    [ $# -gt 0 ] || set -- -c list.recursive=yes "$HOME/Pictures"
-    exec ${pkgs.swayimg}/bin/swayimg "$@"
+  # loupe 는 폴더를 인자로 받으면 창이 뜨지 않음(실측). 폴더는 안의 이미지 파일로 풀어서 넘김(이름순). 인자가 없으면 그대로 빈 창("Open Files…")
+  loupeOpen = pkgs.writeShellScriptBin "loupe-open" ''
+    args=()
+    for a in "$@"; do
+      if [ -d "$a" ]; then
+        while IFS= read -r -d $'\0' f; do args+=("$f"); done < <(
+          ${pkgs.findutils}/bin/find "$a" -maxdepth 1 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' \
+            -o -iname '*.webp' -o -iname '*.bmp' -o -iname '*.tif' -o -iname '*.tiff' -o -iname '*.svg' -o -iname '*.avif' \
+            -o -iname '*.heic' -o -iname '*.heif' -o -iname '*.jxl' -o -iname '*.ico' -o -iname '*.qoi' \) -print0 | sort -zV)
+      else
+        args+=("$a")
+      fi
+    done
+    exec ${pkgs.loupe}/bin/loupe "''${args[@]}"
   '';
 
   ucaAction = id: icon: name: command: types: ''
@@ -63,19 +73,18 @@ mkModOf "mods.gui" __curPos "미디어 (imv, swayimg, mpv, vlc)" ({
   '';
 in {
   hm = {
-    home.packages = [pkgs.imv pkgs.swayimg swayimgOpen pkgs.vlc];
+    home.packages = [pkgs.imv pkgs.loupe loupeOpen pkgs.vlc];
 
     # 영상: VA-API 하드웨어 디코딩(intel-media-driver 는 hosts/ 의 hardware.graphics.extraPackages). 같은 영상에서 CPU 약 절반
     programs.mpv = {
       enable = true;
-      config.hwdec = "vaapi";
+      config = {
+        hwdec = "vaapi";
+        # 파일 하나를 열어도 같은 폴더의 같은 종류(오디오는 오디오끼리) 파일이 재생목록이 되어 이전/다음(< >)이 됨.
+        # 기본(no)은 파일 하나면 재생목록도 하나뿐. 실측: b.flac 을 열면 [a.mp3, b.flac, c.mp3] (filter 는 png 까지 섞임)
+        autocreate-playlist = "same";
+      };
     };
-
-    # swayimg: 파일 하나를 열어도 같은 폴더 전체를 넘겨볼 수 있게 (기본은 그 파일만 염. 실제로 확인)
-    xdg.configFile."swayimg/config".text = ''
-      [list]
-      all = yes
-    '';
 
     xdg.mimeApps.defaultApplications =
       lib.genAttrs imageMimeTypes (_: "imv-dir.desktop")
@@ -93,24 +102,14 @@ in {
         noDisplay = true;
         categories = ["AudioVideo" "Audio" "Video" "Player"];
       };
-      # swayimg 는 패키지에서 NoDisplay 라 런처에 보이게 다시 정의
-      swayimg = {
-        name = "Swayimg";
-        genericName = "Image viewer";
-        icon = "swayimg";
-        exec = "swayimg-open %F";
-        mimeType = imageMimeTypes;
-        terminal = false;
-        categories = ["Graphics" "Viewer"];
-      };
     };
 
-    # Thunar 우클릭(사용자 지정 동작). 폴더를 우클릭해 갤러리/재생목록으로 여는 용도
+    # Thunar 우클릭(사용자 지정 동작). 폴더를 우클릭해 이미지/재생목록으로 여는 용도
     xdg.configFile."Thunar/uca.xml".text = ''
       <?xml version="1.0" encoding="UTF-8"?>
       <actions>
       ${ucaAction "1792143897495107-1" "utilities-terminal" "Open Terminal Here" "exo-open --working-directory %f --launch TerminalEmulator" "<directories/>"}
-      ${ucaAction "1792143897495107-2" "image-x-generic" "Open in swayimg" "swayimg-open %F" "<directories/>\n\t<image-files/>"}
+      ${ucaAction "1792143897495107-2" "image-x-generic" "Open in Loupe" "loupe-open %F" "<directories/>\n\t<image-files/>"}
       ${ucaAction "1792143897495107-3" "vlc" "Open in VLC" "vlc %F" "<directories/>\n\t<audio-files/>\n\t<video-files/>"}
       </actions>
     '';
