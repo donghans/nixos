@@ -12,6 +12,7 @@ mkPartOf "mods.gui" ({
   less = "${pkgs.less}/bin/less";
   kitty = "${pkgs.kitty}/bin/kitty";
   uwsm = "${pkgs.uwsm}/bin/uwsm";
+  gawk = "${pkgs.gawk}/bin/gawk";
 
   # 고급 관리 CLI (키워드/크기 기준 일괄 삭제, 통계, DB 최적화) — 본체는 mods/_data/clipboard/clipctl.sh
   clipctl = pkgs.writeShellScriptBin "clipctl" (
@@ -58,6 +59,62 @@ mkPartOf "mods.gui" ({
     delete_rows() {
       printf '%s\n' "$ROWS" | cut -f1,3 | ${cliphist} delete
       ${notify} -t 2500 "클립보드" "$(printf '%s\n' "$ROWS" | wc -l)개 삭제됨"
+    }
+
+    # 항목 상세: 동작(전체 복사/삭제/pager)과 전문을 줄 단위 항목으로 함께 보여준다.
+    # 줄을 고르면 그 줄만 복사하고, Esc 는 목록으로 돌아간다.
+    # 반환: 0 = 복사해서 끝냄, 1 = 목록으로 돌아감
+    # (표시 제한: 많은 줄/긴 줄은 wofi 가 무거워지므로 잘라서 보여주고 전체는 pager 로)
+    MAX_LINES=300
+    MAX_WIDTH=1500
+    detail_menu() {
+      local tmp total shown pick k status
+      tmp=$(mktemp)
+      ${cliphist} decode "$ID" > "$tmp"
+      total=$(${gawk} 'END { print NR }' "$tmp")
+      shown=$total
+      [ "$shown" -gt "$MAX_LINES" ] && shown=$MAX_LINES
+
+      while true; do
+        pick=$({
+          printf '▶ 전체 복사\n'
+          printf '🗑 이 항목 삭제\n'
+          printf '↗ 별도 창(pager)에서 전문 열기\n'
+          printf '── 전문 · %s줄 · %s — 줄을 고르면 그 줄만 복사 ──\n' "$total" "$HUMAN"
+          ${gawk} -v max="$MAX_LINES" -v w="$MAX_WIDTH" '
+            NR > max { exit }
+            { l = $0
+              if (l == "") l = " "
+              else if (length(l) > w) l = substr(l, 1, w) " … (이하 생략)"
+              print l }' "$tmp"
+          if [ "$total" -gt "$MAX_LINES" ]; then
+            printf '… 외 %s줄 생략 — 전체는 위의 pager 로 여세요\n' "$((total - MAX_LINES))"
+          fi
+        } | $WOFI -D line_wrap=word --prompt "#$ID 전문 — 동작을 고르세요 (Esc: 목록으로)" -D dmenu-print_line_num=true)
+        status=$?
+        if [ "$status" -ne 0 ] || [ -z "$pick" ]; then rm -f "$tmp"; return 1; fi
+
+        case "$pick" in
+          0) ${wlCopy} < "$tmp"; rm -f "$tmp"; return 0 ;;
+          1)
+            printf '%s\n' "$LINE" | ${cliphist} delete
+            ${notify} -t 1500 "클립보드" "#$ID ($HUMAN) 삭제됨"
+            rm -f "$tmp"; return 1 ;;
+          2)
+            # pager 가 닫힐 때까지 기다렸다가 이 화면으로 돌아옴
+            ${uwsm} app -- ${kitty} --title "클립보드 #$ID ($HUMAN)" \
+              sh -c '${cliphist} decode "$1" | ${less}' _ "$ID"
+            ;;
+          3) ;;
+          *)
+            k=$((pick - 3))
+            if [ "$k" -ge 1 ] && [ "$k" -le "$shown" ]; then
+              printf '%s' "$(${gawk} -v n="$k" 'NR == n { print; exit }' "$tmp")" | ${wlCopy}
+              rm -f "$tmp"; return 0
+            fi
+            ;;
+        esac
+      done
     }
 
     # 일괄 작업 메뉴
@@ -136,24 +193,7 @@ mkPartOf "mods.gui" ({
 
       SIZE=$(${cliphist} decode "$ID" | wc -c)
       HUMAN=$(${numfmt} --to=iec --suffix=B "$SIZE")
-      ACTION=$(printf '복사\n전문 보기\n삭제\n' | $WOFI --prompt "#$ID · $HUMAN — 동작 선택") || continue
-
-      case "$ACTION" in
-        "복사")
-          ${cliphist} decode "$ID" | ${wlCopy}
-          exit 0
-          ;;
-        "전문 보기")
-          # 큰 내용도 다룰 수 있게 pager 로 연다 (q 로 닫기)
-          ${uwsm} app -- ${kitty} --title "클립보드 #$ID ($HUMAN)" \
-            sh -c '${cliphist} decode "$1" | ${less}' _ "$ID"
-          exit 0
-          ;;
-        "삭제")
-          printf '%s\n' "$LINE" | ${cliphist} delete
-          ${notify} -t 1500 "클립보드" "#$ID ($HUMAN) 삭제됨"
-          ;;
-      esac
+      detail_menu && exit 0
     done
   '';
 in {
