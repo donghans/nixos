@@ -34,6 +34,7 @@ xarchiver       = true
 thunar          = true
 wayvnc          = true
 office          = true
+media           = true
 
 [mods.devel]
 enable = true

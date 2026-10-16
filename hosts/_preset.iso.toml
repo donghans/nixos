@@ -42,6 +42,7 @@ xarchiver       = false
 thunar          = false
 wayvnc          = false
 office          = false
+media           = false
 
 [mods.devel]
 enable = false

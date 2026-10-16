@@ -1,7 +1,7 @@
 # 이미지·영상·오디오 프로그램 비교 (msi-summit-me)
 
 이 노트북(Hyprland)에서 이미지/영상/오디오를 열 프로그램을 고르려고 시작 시간을 실측하고 특징을 정리한 기록.
-**상태: 비교만 했고 아직 아무것도 설치/연결하지 않았다.** (2026-10-17)
+**상태: 적용 완료** — 구성은 `mods/gui/utils/media.nix` (2026-10-17). 아래 "적용한 구성" 참고.
 
 ## 현재 상태 (조사 시점)
 
@@ -105,9 +105,30 @@ PATH 에 뷰어/플레이어가 없고(ImageMagick `convert` 뿐), `xdg-mime que
 - 이미지 형식 지원(svg, avif, heic, tiff, jxl)과 사용성은 시험하지 않았다. "일반" 표시 항목은 일반적으로 알려진 내용이다.
 - 시험 파일은 합성한 것이라 실제 사진/영화의 디코딩 부하와 다를 수 있다.
 
-## 결정할 것 (미정)
+## 적용한 구성 (`mods/gui/utils/media.nix`)
 
-- 이미지: swayimg(갤러리, 가장 빠름) / imv(최소, CPU 최소) / loupe(느리지만 형식 지원 기대)
-- 영상: mpv(+ `hwdec=vaapi`) / vlc(Windows 와 비슷한 GUI)
-- 오디오: mpv / vlc / amberol
-- 정한 뒤에는 `xdg.mimeApps.defaultApplications` 로 형식별 기본 프로그램을 연결하고, mpv 를 쓴다면 `hwdec` 를 설정에 넣는다.
+| 용도 | 기본(더블클릭, 런처에서 숨김) | 직접 고르는 것(런처에 보임) |
+|---|---|---|
+| 이미지 | **imv-dir** | **swayimg** (Thunar 우클릭 "swayimg로 열기") |
+| 영상/오디오 | **mpv** (`hwdec=vaapi`) | **VLC** (Thunar 우클릭 "VLC로 열기") |
+
+실제로 확인한 것과 이유:
+- **imv 는 파일 하나를 주면 그 파일만 연다**(창 제목 `[1/1]`). 폴더의 다음/이전 사진으로 넘기려면 폴더 전체를 여는 `imv-dir` 가 필요하다
+  (`[2/3]` 에서 시작해 Right 로 3/3 → 1/3 순환, Left 로 되돌아옴). 그래서 기본 연결은 `imv-dir.desktop`. imv/imv-dir 는 패키지 자체가 `NoDisplay=true`.
+- **swayimg 도 기본은 파일 하나만 연다**(`list.all = no`). `~/.config/swayimg/config` 에 `[list] all = yes` 를 넣으면 같은 폴더 전체를 넘긴다(옵션 없이 space 로 p2→p3 확인).
+  키: Space/PageDown 다음, PageUp 이전, Ctrl+휠 확대(휠은 이동), `[`/`]` 회전, f 전체화면, Return 갤러리, s 슬라이드쇼.
+  **파일 없이 켜면** 현재 폴더의 이미지를 불러오고, 이미지가 없으면 "Image list is empty" 를 남기고 바로 종료한다. 런처는 홈에서 실행되어 이미지가 없으므로
+  `swayimg-open` 래퍼가 인자가 없을 때 `~/Pictures`(하위 폴더 포함, 스크린샷이 `Screenshots/` 에 있음)를 연다. swayimg 패키지의 `.desktop` 은 `NoDisplay=true` 라 같은 이름으로 다시 정의했다.
+- **mpv 기본 조작**(mpv 가 알려주는 바인딩 목록으로 확인): Space/p 재생·일시정지, ←/→ 5초, ↑/↓ 60초 이동, `[`/`]` 속도, `{`/`}` 절반/두 배 속도, `9`/`0` 또는 휠 볼륨, `m` 음소거,
+  `<`/`>` 이전/다음 곡, `l` A-B 반복, `L` 한 곡 반복, `f`/더블클릭 전체화면, `q` 종료. **별도의 "정지" 키는 없고 종료(q)가 정지**다(`Q` 는 위치를 저장하고 종료).
+  오디오 파일도 `--player-operation-mode=pseudo-gui`(mpv.desktop 의 Exec)라서 창과 컨트롤바가 뜬다.
+- mpv `hwdec=vaapi` 가 실제로 켜진다(`hwdec-current` = vaapi).
+- **loupe 를 인자 없이 열면** "Open Files…" 버튼과 드래그 앤 드롭 안내가 있는 빈 창이 뜬다(파일 선택창 자체는 열어 보지 않음).
+- Thunar 우클릭(`~/.config/Thunar/uca.xml` 을 선언적으로 관리 — 기존 파일은 Thunar 가 만든 "Open Terminal Here" 예제 하나뿐이라 그대로 포함): 폴더에 "swayimg로 열기"/"VLC로 열기"가 보이고,
+  swayimg 는 폴더에서 열어 p1→p2→p3 로 넘어가는 것까지 확인했다. 이 파일은 읽기 전용 링크라 Thunar 의 "Edit > Configure custom actions" 로 고치면 저장되지 않는다(`media.nix` 를 수정).
+
+미확인:
+- VLC 가 폴더를 열었을 때 재생목록에 폴더 안 파일이 모두 들어가는지(첫 실행 "Privacy and Network Access Policy" 대화상자에 가려 확인하지 못함). VLC 는 XWayland 로 뜬다(`xwayland=true`).
+- NoDisplay 인 imv/mpv 가 Thunar "Open With" 하위 메뉴에 보이는지(`gio mime` 목록에는 등록 앱으로 나옴). 화면 시험 중 사용자의 다른 창으로 포커스가 넘어가서 중단함.
+- imv 의 HEIC/AVIF/JXL/SVG 실제 표시, 마우스 휠 확대·드래그 이동(키보드 확대는 설명서로만 확인).
+- 이미지 3종(PNG만 아닌 다른 형식)·영상 기본 연결이 실제 더블클릭으로 열리는지(`xdg-mime query default` 로는 모두 연결 확인).
