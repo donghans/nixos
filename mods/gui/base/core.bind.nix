@@ -20,7 +20,7 @@ mkPartOf "mods.gui" ({
     # wofi 는 단일 인스턴스가 아니라 다른 모니터에서 또 실행하면 중복으로 뜸 → 이미 떠 있으면 닫기(토글)
     # (Nix 래핑으로 프로세스 이름이 .wofi-wrapped 이므로 둘 다 매칭)
     pkill -x '(.wofi-wrapped|wofi)' && exit 0
-    sel=$(${wofi} --show drun -D print_desktop_file=true) || exit 0
+    sel=$(${wofi} --show drun --prompt "앱 검색" -D print_desktop_file=true) || exit 0
     [ -z "$sel" ] && exit 0
     file=''${sel%% *}
     action=''${sel#"$file"}
@@ -92,7 +92,7 @@ mkPartOf "mods.gui" ({
       .[] | select(.description != "")
       | ([(.modmask | mods), (.key | keyname)] | join(" + ")) + "\t" + .description
     ' | ${pkgs.util-linux}/bin/column -t -s "$(printf '\t')" -o "   │   " \
-      | ${wofi} --dmenu --hide-search --cache-file /dev/null --width 900 --lines 24 --prompt "단축키 (Esc: 닫기)" > /dev/null
+      | ${wofi} --dmenu --cache-file /dev/null --width 900 --height 640 --prompt "단축키 검색" > /dev/null
   '';
 
   # 현재 창 캡쳐 스크립트 정의
@@ -130,7 +130,7 @@ in {
       bindd("SUPER + SHIFT + Q", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'"), "Hyprland 종료")
       bindd("SUPER + F", hl.dsp.window.float({ action = "toggle" }), "플로팅 토글")
       bindd("SUPER + space", hl.dsp.exec_cmd(launcher), "앱 런처 (wofi)")
-      bindd("SUPER + V", hl.dsp.exec_cmd("pkill -x '(.wofi-wrapped|wofi)' && exit 0; " .. cliphist .. " list | " .. wofi .. " --dmenu --cache-file /dev/null | " .. cliphist .. " decode | " .. wl_copy), "클립보드 히스토리")
+      bindd("SUPER + V", hl.dsp.exec_cmd("pkill -x '(.wofi-wrapped|wofi)' && exit 0; " .. cliphist .. " list | " .. wofi .. " --dmenu --cache-file /dev/null --prompt \"클립보드 검색\" | " .. cliphist .. " decode | " .. wl_copy), "클립보드 히스토리")
       bindd("SUPER + L", hl.dsp.exec_cmd("hyprlock"), "화면 잠금")
       bindd("SUPER + H", hl.dsp.exec_cmd(keybinds_help), "단축키 목록 보기")
       bindd("SUPER + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"), "fcitx5 재시작")
@@ -161,7 +161,7 @@ in {
       bindd("SHIFT + Print", hl.dsp.exec_cmd(grim .. " - | " .. satty .. " --filename -"), "전체 화면 캡처")
 
       ${lib.optionalString config.services.custom-notify-logger.enable ''
-        bindd("SUPER + N", hl.dsp.exec_cmd("pkill -x '(.wofi-wrapped|wofi)' && exit 0; ls -tr ${config.services.custom-notify-logger.logDir}/$USER.log* 2>/dev/null | xargs -r zcat -f | tac | " .. wofi .. " --dmenu --cache-file /dev/null --width 1400 --prompt \"Search 30-day History...\""), "알림 로그 (30일)")
+        bindd("SUPER + N", hl.dsp.exec_cmd("pkill -x '(.wofi-wrapped|wofi)' && exit 0; ls -tr ${config.services.custom-notify-logger.logDir}/$USER.log* 2>/dev/null | xargs -r zcat -f | tac | " .. wofi .. " --dmenu --cache-file /dev/null --width 1400 --prompt \"알림 검색 (최근 30일)\""), "알림 로그 (30일)")
       ''}
 
       -- Workspace 1-10

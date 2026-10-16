@@ -17,7 +17,7 @@ mkModOf "mods.gui" __curPos "Incus VM" ({
 
     # 1단계: VM 선택
     selected=$(printf '%s\n' "$entries" \
-      | ${pkgs.wofi}/bin/wofi --dmenu --cache-file /dev/null --prompt="VM 선택 > ")
+      | ${pkgs.wofi}/bin/wofi --dmenu --cache-file /dev/null --prompt="VM 검색")
     [ -z "$selected" ] && exit
 
     vm_name=$(echo "$selected" | awk '{print $1}')
@@ -31,7 +31,7 @@ mkModOf "mods.gui" __curPos "Incus VM" ({
     fi
 
     action=$(printf "$actions" \
-      | ${pkgs.wofi}/bin/wofi --dmenu --cache-file /dev/null --prompt="$vm_name > ")
+      | ${pkgs.wofi}/bin/wofi --dmenu --cache-file /dev/null --prompt="$vm_name 동작 검색")
     [ -z "$action" ] && exit
 
     case "$action" in

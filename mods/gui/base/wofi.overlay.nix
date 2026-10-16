@@ -1,4 +1,4 @@
-# Wofi Overlay: wofi 1.5.3 패치 4가지
+# Wofi Overlay: wofi 1.5.3 패치 5가지
 # 1) hover select — 마우스를 움직이면 해당 항목을 선택
 #    (이유: 클릭해야만 선택되고 마우스 이동으로는 선택되지 않음. fuzzel 처럼 hover 만으로 선택 강조)
 #    (주의: 클릭이 아닌 '실제 마우스 이동'(motion)에만 반응 — 목록이 갱신되며 커서 아래로 항목이 밀려와도 선택이 튀지 않음)
@@ -9,7 +9,10 @@
 #    text-input(IME)이 꺼지므로, 방향키로 이동한 뒤 입력하면 첫 글자가 다시 영어로 입력됨
 #    (단일 열 + 세로 방향일 때만 적용(Tab/Shift+Tab 은 끝에서 순환), 그 외는 기존 동작. 스크롤은 adjustment 로 직접 보정해 포커스 이동 불필요)
 #    + Enter 가 항상 0번째 항목만 실행하던 것을 선택된 항목 실행으로 변경 (검색창 포커스 유지 시 hover/방향키 선택이 무시되므로)
-# 4) 서피스 크기 보정 — 레이어 서피스/창 크기를 요청할 때 CSS 의 테두리+패딩만큼(WOFI_EXTRA) 더해서 요청
+# 4) 플레이스홀더 — GTK3 입력창은 포커스가 있으면 플레이스홀더를 숨기는데, 시작 시 검색창에 포커스를 두므로
+#    입력창 위에 라벨을 겹쳐 "텍스트가 비어 있고 IME 조합(preedit) 중이 아닐 때" 항상 표시
+#    (라벨은 CSS #placeholder 로 스타일링, 입력은 통과)
+# 5) 서피스 크기 보정 — 레이어 서피스/창 크기를 요청할 때 CSS 의 테두리+패딩만큼(WOFI_EXTRA) 더해서 요청
 #    (이유: wofi 는 width/height 를 그대로 요청하지만 GTK 는 #outer-box 의 테두리+패딩 양쪽 합(wofi.nix 의 extra, 현재 18px) 만큼
 #           더 큰 창을 요구함 → 입력/포커스마다 "요청 크기로 줄었다가 GTK 가 다시 키우는" 1프레임 흔들림 발생)
 #    (주의: WOFI_EXTRA 는 wofi.nix 의 extra = 2*(borderPx+paddingPx) 와 반드시 일치해야 함)
@@ -133,8 +136,47 @@ static void move_up(void) {
 		move_selection(-1, TRUE);
 		return;
 	}' \
+          --replace-fail '	gtk_entry_set_placeholder_text(GTK_ENTRY(entry), prompt);
+	gtk_container_add(GTK_CONTAINER(outer_box), entry);' \
+'	GtkWidget* entry_overlay = gtk_overlay_new();
+	gtk_container_add(GTK_CONTAINER(entry_overlay), entry);
+	placeholder_label = gtk_label_new(prompt);
+	gtk_widget_set_name(placeholder_label, "placeholder");
+	gtk_widget_set_halign(placeholder_label, GTK_ALIGN_START);
+	gtk_widget_set_valign(placeholder_label, GTK_ALIGN_CENTER);
+	gtk_widget_set_no_show_all(placeholder_label, TRUE);
+	gtk_overlay_add_overlay(GTK_OVERLAY(entry_overlay), placeholder_label);
+	gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(entry_overlay), placeholder_label, TRUE);
+	gtk_container_add(GTK_CONTAINER(outer_box), entry_overlay);
+	g_signal_connect(entry, "changed", G_CALLBACK(entry_text_changed), NULL);
+	g_signal_connect(entry, "preedit-changed", G_CALLBACK(entry_preedit_changed), NULL);
+	update_placeholder();' \
           --replace-fail 'static gboolean _insert_widget(gpointer data) {' \
-'static gboolean hover_select(GtkWidget* widget, GdkEventMotion* event, gpointer data) {
+'static GtkWidget* placeholder_label = NULL;
+static gboolean entry_preedit_active = FALSE;
+
+static void update_placeholder(void) {
+	if(placeholder_label == NULL) {
+		return;
+	}
+	const gchar* text = gtk_entry_get_text(GTK_ENTRY(entry));
+	gtk_widget_set_visible(placeholder_label, (text == NULL || text[0] == 0) && !entry_preedit_active && !hide_search);
+}
+
+static void entry_text_changed(GtkEditable* editable, gpointer data) {
+	(void) editable;
+	(void) data;
+	update_placeholder();
+}
+
+static void entry_preedit_changed(GtkEntry* editable, gchar* preedit, gpointer data) {
+	(void) editable;
+	(void) data;
+	entry_preedit_active = preedit != NULL && preedit[0] != 0;
+	update_placeholder();
+}
+
+static gboolean hover_select(GtkWidget* widget, GdkEventMotion* event, gpointer data) {
 	(void) event;
 	(void) data;
 	/* 항목(GtkFlowBoxChild)은 자체 GdkWindow 가 없어 motion 이벤트가 오지 않으므로

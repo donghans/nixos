@@ -74,6 +74,11 @@ in {
         border: none;
         background-color: #000000;
       }
+      /* 플레이스홀더(wofi.overlay.nix 의 겹침 라벨): 돋보기 아이콘 오른쪽에 정렬 */
+      #placeholder {
+        margin-left: 32px;
+        color: #7a7a7a;
+      }
       #entry {
         margin: 0px;
         padding: 2px 10px;
