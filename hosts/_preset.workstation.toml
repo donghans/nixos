@@ -10,6 +10,7 @@ trash   = true
 archive = true
 sshpass = true
 steam-run = true
+lazygit = true
 
 [mods.sys.services]
 bluetooth      = true

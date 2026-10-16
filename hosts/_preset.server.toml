@@ -14,6 +14,7 @@ trash   = true
 archive = false
 sshpass = false
 steam-run = false
+lazygit = true
 
 [mods.sys.services]
 tailscale      = false

@@ -11,6 +11,7 @@ trash   = false
 archive = false
 sshpass = false
 steam-run = false
+lazygit = false
 
 [mods.sys.services]
 bluetooth          = true
