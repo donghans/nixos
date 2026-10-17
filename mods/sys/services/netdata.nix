@@ -1,5 +1,6 @@
 # Netdata — 시스템 지표(CPU/메모리/디스크/네트워크/프로세스…)를 기록해서 "그때 어땠는지"를 나중에 볼 수 있게 한다.
-#  - 웹 화면: http://localhost:19999 (로컬에서만 열림). 같은 주소의 REST API(/api/v1/data 등)로 Claude 도 구간 조회를 할 수 있음.
+#  - 로컬에서만 열림(127.0.0.1:19999). nixpkgs 빌드에는 웹 대시보드 화면이 없어(withCloudUi=false, `/` 는 404) REST API(/api/v1/data 등)만 쓸 수 있음.
+#    그래서 `power-report` 명령(전력/배터리/CPU 그래프 PNG + 요약)을 같이 설치하고, Claude 도 같은 API 로 구간 조회를 할 수 있음.
 #  - 전원 정책(노트북): AC 연결 시 1초 간격, 배터리일 땐 10초 간격으로 수집(완전히 끄지 않는 이유: 배터리에서 TLP 상한으로
 #    느려진 때의 기록이 오히려 쓸모 있음). 수집 주기는 서비스 시작 때 정해지므로 전원 상태가 바뀌면 udev 가 서비스를 재시작함(몇 초 공백).
 #  - 익명 통계 전송은 모듈 기본값으로 꺼져 있고(DO_NOT_TRACK, .opt-out-from-anonymous-statistics), 클라우드 연결(claim)은 안 함.
@@ -28,7 +29,13 @@ mkMod __curPos "Netdata (시스템 지표 기록: AC 1초 / 배터리 10초)" ({
     if [ "$ac" = 1 ]; then every=${toString acEvery}; else every=${toString batteryEvery}; fi
     ${pkgs.gnused}/bin/sed "s/@EVERY@/$every/" /etc/netdata/netdata.conf > "''${OUT:-/run/netdata/netdata.conf}"
   '';
+  # Netdata API 로 배터리 잔량/전력(RAPL, 전압×전류)/CPU 를 같은 시간축 그래프와 요약으로 보여주는 도구 (스크립트: _data/netdata/power_report.py)
+  powerReport = pkgs.writeShellScriptBin "power-report" ''
+    exec ${pkgs.python3.withPackages (p: [p.matplotlib])}/bin/python3 ${../../_data/netdata/power_report.py} "$@"
+  '';
 in {
+  hm.home.packages = [powerReport];
+
   os = {
     services.netdata = {
       enable = true;

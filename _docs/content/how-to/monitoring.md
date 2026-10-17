@@ -24,6 +24,31 @@
   - 더 줄이려면: 배터리 주기를 30초로 늘리거나 배터리에서 `apps.plugin`(프로세스별 통계)을 끄는 방법이 있음(시험 안 함).
 - 미확인(남은 것): 어댑터를 다시 꽂을 때(AC 로 돌아가 1초 간격이 되는 쪽)의 동작, 로컬 웹 화면이 nixpkgs 빌드에서 어떻게 나오는지.
 
+### 전력 / 배터리 / CPU 를 그래프로 — `power-report`
+`mods/sys/services/netdata.nix` 가 설치하는 명령(스크립트 `mods/_data/netdata/power_report.py`, matplotlib). Netdata API 의 기록을 읽어 **같은 시간축** 그래프(PNG)와 요약 표를 만든다.
+```
+power-report                    # 최근 6시간, ~/Pictures/power-report/<시각>.png 로 저장
+power-report --hours 1
+power-report --from "2026-10-17 10:00" --to "2026-10-17 10:40" -o /tmp/x.png
+power-report --no-plot          # 요약만
+```
+그래프(위→아래): 배터리 잔량(%) / 전력(W: 배터리 전력, RAPL 패키지, RAPL psys) / CPU 사용률+평균 주파수 / 패키지 온도. 노란 배경=방전, 초록 배경=충전(**잔량 변화로 추정**).
+방전 중이면 최근 평균 전력과 잔량으로 **남은 시간**을 추정해서 출력(전체 용량 = `charge_full × 평균 전압`).
+- Netdata 가 이미 수집하는 것(차트 이름): `powersupply_capacity.BAT1`(잔량), `sensors.voltage_BAT1-acpi-0_in0_input`/`sensors.curr_BAT1-acpi-0_curr1_input`(배터리 전압/전류 → 전력 = 곱),
+  `cpu.powercap_intel_rapl_zone_package-0`/`..._zone_psys`(RAPL), `cpu.cpufreq`, `system.cpu`, `sensors.temperature_*`, 팬 4개, `cpu.core_throttling`.
+- 배터리 전류에는 충전/방전 부호가 없다(크기). 그래서 충전 중인지는 잔량 변화로 추정. 전압/전류/온도는 `sensors` 수집기라 선이 드문드문 끊길 수 있음(RAPL, 잔량은 연속).
+- **실측으로 본 것(2026-10-17)**: 배터리 방전 구간(10:07~10:33)에서 **배터리 전력(전압×전류)과 RAPL psys 가 거의 겹침(14~17 W)**. psys 는 AC 에서도 읽히므로 배터리 계측이 안 되는 AC 상태의 전력 비교에 쓸 수 있음.
+  AC 에서는 같은 유휴 상태에서 psys 가 약 17 W, 배터리에서는 약 14.5~15 W 였다(TLP 설정 차이 등으로 보이나 원인은 확인하지 않음).
+
+### RAPL 은 왜 일반 사용자가 못 읽나
+`/sys/class/powercap/intel-rapl:0/energy_uj` 가 `-r-------- root root` 라서 일반 사용자는 `Permission denied` (하드웨어가 없는 게 아님 — `sudo` 로는 값이 읽힘).
+리눅스 5.10 부터 RAPL 에너지 카운터를 root 전용으로 바꿨다(PLATYPUS 라는 전력 측정 기반 부채널 공격 CVE-2020-8694 완화). Netdata 는 `debugfs.plugin` 에 `CAP_DAC_READ_SEARCH`(파일 읽기 권한 우회)를 줘서
+(NixOS 가 `/run/wrappers/bin/debugfs.plugin` 으로 처리, 프로세스 `CapEff` 에서 확인) 읽는다. 그래서 Netdata 에서는 값이 나오고 내 셸에서는 안 됨.
+
+### 웹 대시보드는 이 빌드에 없음
+`http://127.0.0.1:19999/` 는 404. nixpkgs netdata 는 `withCloudUi = false` 가 기본이고 대시보드 화면 파일이 이 옵션일 때만 들어간다(`ENABLE_DASHBOARD = withCloudUi`, Netdata 가 따로 배포하는 UI 를 받아옴 — 라이선스는 확인하지 않음).
+API 는 대시보드와 무관하게 동작해서 `power-report` 와 Claude 의 조회에는 문제가 없음. 화면을 꼭 쓰고 싶으면 `services.netdata.package = pkgs.netdata.override { withCloudUi = true; }` 를 시험할 수 있음(라이선스 확인 필요).
+
 ### API 로 조회 (Claude 가 과거를 확인할 때)
 ```
 curl -s 'localhost:19999/api/v1/info'                                    # 버전/상태
