@@ -24,21 +24,18 @@
     postureCli = pkgs.writeShellScriptBin "posture" ''
       exec ${pkgs.python3}/bin/python3 -I ${../../_data/posture/posture} "$@"
     '';
-    # 가상 키보드(wvkbd): 설정(~/.config/vkb/config.json: 높이, 레이어)을 읽어 숨긴 채로 시작. 보이기/숨기기/크기는 `vkb` 명령이 시그널·재시작으로 제어.
-    # (wvkbd 는 높이를 시작할 때만 받고 숨기기 전용 키가 없어서 이 구조를 씀 — mods/_data/vkb/vkb.py 머리말 참고)
-    # 패치: 하단 줄에 접기(▼) 키와 한/영(KEY_HANGEUL, fcitx5 전환키에 Hangul 등록됨) 키 추가 — mods/_data/wvkbd/hide-hangul-keys.patch
-    wvkbd = pkgs.wvkbd.overrideAttrs (old: { patches = (old.patches or [ ]) ++ [ ../../_data/wvkbd/hide-hangul-keys.patch ]; });
-    wvkbdStart = pkgs.writeShellScript "wvkbd-start" ''
-      conf="$HOME/.config/vkb/config.json"
-      h=$(${pkgs.jq}/bin/jq -r '.height // 360' "$conf" 2>/dev/null || echo 360)
-      layers=$(${pkgs.jq}/bin/jq -r '.layers // ""' "$conf" 2>/dev/null || echo "")
-      args=(-H "$h" -L "$h" --fn "NanumGothic 18" --hidden)
-      [ -n "$layers" ] && args+=(-l "$layers" --landscape-layers "$layers")
-      exec ${wvkbd}/bin/wvkbd-mobintl "''${args[@]}"
-    '';
+    # 가상 키보드(wvkbd): 시작 인자(높이/폭/글자 크기/모드/레이어)는 `vkb args` 가 화면 물리 크기(mm→px)로 계산해 숨긴 채로 시작.
+    # 보이기/숨기기/크기/모드는 `vkb` 명령이 시그널·재시작으로 제어. (wvkbd 는 높이를 시작할 때만 받음 — mods/_data/vkb/vkb.py 머리말 참고)
+    # 패치(mods/_data/wvkbd/float-hangul-numrow.patch): 플로팅 모드와 ⧉ 키, 한/영 키(KEY_HANGEUL; fcitx5 전환키에 Hangul 등록됨), 가로 배열 숫자 줄, 모드 변경 훅
+    wvkbd = pkgs.wvkbd.overrideAttrs (old: { patches = (old.patches or [ ]) ++ [ ../../_data/wvkbd/float-hangul-numrow.patch ]; });
     vkbCli = pkgs.writeShellScriptBin "vkb" ''
       export VKB_POSTURE=${postureCli}/bin/posture
       exec ${pkgs.python3}/bin/python3 -I ${../../_data/vkb/vkb.py} "$@"
+    '';
+    wvkbdStart = pkgs.writeShellScript "wvkbd-start" ''
+      mapfile -t args < <(${vkbCli}/bin/vkb args) || true
+      [ "''${#args[@]}" -gt 0 ] || args=(-H 450 -L 380 --hidden)
+      exec ${wvkbd}/bin/wvkbd-mobintl "''${args[@]}" --on-mode "${vkbCli}/bin/vkb mode-changed"
     '';
 
     # 소비자들을 차례로 실행. 하나가 실패해도 나머지는 실행하고 기록만 남김(소비자끼리 서로 영향 없음)

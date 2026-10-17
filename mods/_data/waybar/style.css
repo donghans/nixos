@@ -110,25 +110,27 @@ window#waybar {
   padding: 0 4px;
 }
 
-/* 터치로 누르는 버튼(가상 키보드 접기/펴기, 크기, 한/영): 손가락으로 누르기 쉽게 여백을 넓힘 */
+/* 터치로 누르는 버튼(가상 키보드 접기/펴기, 크기, 고정/플로팅): 손가락으로 누르기 쉽게 여백을 넓힘 */
 #custom-vkb,
 #custom-vkbsize,
-#custom-ime {
+#custom-vkbmode {
   padding: 0 16px;
   min-width: 24px;
   color: #ffffff;
   background: transparent;
 }
-#custom-vkb.on {
+#custom-vkb.on,
+#custom-vkbmode.on {
   color: #33ccff;
   box-shadow: inset 0 -3px 0 #33ccff;
 }
-#custom-vkb.off {
+#custom-vkb.off,
+#custom-vkbmode.off {
   color: #9a9a9a;
 }
 #custom-vkb:hover,
 #custom-vkbsize:hover,
-#custom-ime:hover {
+#custom-vkbmode:hover {
   background-color: rgba(51, 204, 255, 1);
   color: #000000;
 }

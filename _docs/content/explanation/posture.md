@@ -72,20 +72,25 @@ Hyprland 0.55 가 노출하는 프로토콜(`wayland-info`로 확인): `zwp_virt
 
 ### 구현: `vkb` (접기/펴기, 크기, 창 가림 방지, 터치 버튼, 자세 연동)
 `mods/_data/vkb/vkb.py`(명령 `vkb`), 서비스/연결은 `mods/gui/base/core.posture.nix`, 버튼은 `mods/gui/base/waybar.nix` + `mods/_data/waybar/style.css`.
-- **wvkbd 의 한계(소스 확인)**: 위치는 하단 전체 폭 고정, 높이는 시작할 때만 지정(`-H`/`-L`), 숨기기 전용 키 없음(`⌨` 키는 **레이어 전환**), 위치/폭 옵션 없음.
-  그래서 접고 펴기는 시그널, 크기는 재시작으로 처리하고 그 위에 제어층(`vkb`)을 얹음.
-- `wvkbd.service`(사용자 서비스): `--hidden` 으로 상시 대기(메모리만 차지). 높이/레이어는 `~/.config/vkb/config.json` 에서 읽음.
-- 명령: `vkb show|hide|toggle`, `vkb size small(240)|medium(360)|large(480)|120~900|up|down|cycle`, `vkb layers full,special,…`, `vkb auto on|off`, `vkb status [--json]`, `vkb waybar [size]`.
+- **wvkbd 의 한계(소스 확인)**: 위치는 하단 전체 폭 고정, 높이는 시작할 때만 지정(`-H`/`-L`), 숨기기 전용 키 없음(`⌨` 키는 **레이어 전환**), 플로팅/폭 옵션 없음. 그래서 아래 패치로 플로팅을 추가하고, 접고 펴기는 시그널, 크기는 재시작으로 처리하며 그 위에 제어층(`vkb`)을 얹음.
+  접기/펴기 전용 키는 두지 않음(waybar 버튼으로 충분). 대신 키보드 안에 도킹↔플로팅 전환 키(`⧉`)를 둠.
+- `wvkbd.service`(사용자 서비스): `--hidden` 으로 상시 대기(메모리만 차지). 시작 인자는 `vkb args` 가 `~/.config/vkb/config.json`(크기/모드/레이어)과 화면 물리 크기로 계산.
+- 명령: `vkb show|hide|toggle`, `vkb size small(8mm)|medium(10mm)|large(12.5mm)|4~30|up|down|cycle`, `vkb mode dock|float|toggle`, `vkb layers full,special,…`, `vkb auto on|off`, `vkb status [--json]`, `vkb waybar [size|mode]`, `vkb args`.
+- **크기는 mm 기준(화면 dpi 반영)**: `hyprctl monitors` 의 `physicalWidth`(이 기기 340mm → 2560px, 7.53px/mm)로 계산. 키 한 줄 높이 medium 10mm(손가락 터치 최소 권장 9~10mm 근처) → 가로 배열 5줄 376px, 세로 배열 6줄 452px(화면 높이의 45% 상한). 플로팅 폭은 13키 × 14.5mm = 1419px(화면의 55%), 글자 크기는 줄 높이에 비례(18pt). 회전한 화면은 가로세로와 물리 크기를 바꿔서 계산(회전 자체는 미구현).
 - **창 가림 방지**: wvkbd 는 기본으로 하단 배타 영역을 요청해서 **타일 창은 자동으로 줄어듦**. 떠 있는(floating) 창은 영역과 무관해 가려지므로 `vkb` 가 보일 때 **키보드 윗면 아래로 내려온 창만** 높이를 줄이고(260px 미만이 되면 위로 이동), 원본 지오메트리를 `~/.local/state/vkb/fit.json` 에 기록.
   숨길 때 **그 창이 맞춘 상태 그대로일 때만** 복원(그 사이 사용자가 옮기거나 크기를 바꿨으면 건드리지 않음, 닫힌 창은 무시).
-- **터치 버튼(waybar, 모두 단일 탭)**: `⌨` 접기/펴기(펴지면 하늘색 강조), 크기 버튼(`S`/`M`/`L`, 키보드가 보일 때만 나타남, 탭하면 다음 크기), `한`/`A` 한/영 전환(`fcitx5-remote -t`; wvkbd 에는 한/영 키가 없음).
-  상태가 바뀔 때만 waybar 에 `RTMIN+8` 신호를 보내 다시 그려서 폴링이 없음(한/영 표시만 2초 간격).
+- **터치 버튼(waybar, 모두 단일 탭)**: `⌨` 접기/펴기(펴지면 하늘색), `⧉` 하단 고정↔플로팅(플로팅이면 하늘색), 크기 `S`/`M`/`L`(탭하면 다음 크기). 세 버튼 모두 **노트북 모드에서는 키보드가 떠 있을 때만** 보이고 텐트/태블릿에서는 항상 보임(`⧉`/크기는 키보드가 보일 때만). `vkb waybar` 가 빈 출력을 내면 모듈이 사라지는 waybar 동작을 이용. 한/영 버튼은 시스템 트레이의 fcitx5 아이콘과 중복이라 없앰(키보드 안에 `한/영` 키가 있음).
+  상태가 바뀌거나 자세가 바뀔 때(`apply-posture`)만 waybar 에 `RTMIN+8` 신호를 보내 다시 그려서 폴링이 없음.
 - **자세 연동**: `posture.consumers` 에 `vkb apply-posture` 등록. 자동(기본 켜짐)이면 tent/tablet → 보임, laptop → 숨김. 멱등(이미 그 상태면 아무것도 안 함). `vkb auto off` 로 끔.
 - 실제 화면 검증(2026-10-17): 보이기 → 타일 창(Zed/kitty)이 1570→1210 으로 자동으로 줄고 떠 있는 Thunar 는 693→417 로 맞춰짐, 숨기기 → 모두 원복(기록 비움).
-  크기 large(480)/small(240) 로 바꾸면 창이 다시 맞춰짐. waybar 버튼을 포인터로 눌러 `⌨`(펴기/접기), 크기 순환(M→L→S), 한/영(한↔A)이 동작하는 것을 확인.
-- **wvkbd 패치**(`mods/_data/wvkbd/hide-hangul-keys.patch`, `core.posture.nix` 의 `overrideAttrs`): 하단 줄에 `▼`(접기, 새 키 종류 `Hide` 가 자기 자신에게 SIGUSR1 을 보냄)와 `한/영`(`KEY_HANGEUL`; fcitx5 전환키에 `Hangul` 이 이미 등록돼 있어 설정 변경 없음)을 추가. 세로/가로(`Full`/`Landscape`) 배열에 적용, 스페이스 폭만 줄임.
-  실제 화면에서 `한/영` 탭으로 hangul↔keyboard-us 전환, `▼` 탭으로 키보드가 접히고 프로세스는 유지됨을 확인(포인터 클릭). 다른 레이어(`special` 등)와 `Full wide` 배열 등은 확인하지 않음. wvkbd 버전이 바뀌면 패치가 안 맞을 수 있음(빌드가 실패하므로 알 수 있음).
-- 시험: `python3 -I mods/_data/vkb/tests/test_vkb.py`(19, 맞춤/복원/크기 계획), `test_vkb_cli.py`(29, 가짜 hyprctl/systemctl 로 전체 흐름).
+  (2026-10-17 재확인) 도킹: 타일 창 1570→1194, 떠 있는 Thunar 693→401. 플로팅(`vkb mode float`): 창이 모두 원래 크기로 돌아오고 키보드(571,1212, 1419×376)가 위에 겹침. 도킹으로 복귀하면 다시 맞춰지고, 숨기면 원복. waybar 에서 `⧉` 를 포인터로 눌러 전환됨을 확인.
+- **wvkbd 패치**(`mods/_data/wvkbd/float-hangul-numrow.patch`, `core.posture.nix` 의 `overrideAttrs`):
+  ① 플로팅 모드: `--float`, `--float-width`, `--float-margin`, 시그널 `RTMIN+1`(토글)/`+2`(도킹)/`+3`(플로팅). 플로팅이면 하단 가운데 고정 폭, 배타 영역 없음(창이 안 줄어듦). 새 키 종류 `Float`(`⧉`)가 자기 자신에게 `RTMIN+1` 을 보냄.
+  ② 모드가 바뀐 뒤 `--on-mode <명령>` 을 실행(환경변수 `WVKBD_MODE`) → `vkb mode-changed` 가 설정 저장과 창 맞춤/복원을 처리(키 입력으로 바뀌어도 `vkb` 와 상태가 어긋나지 않게).
+  ③ `한/영` 키(`KEY_HANGEUL`; fcitx5 전환키에 `Hangul` 이 이미 등록돼 있어 설정 변경 없음). ④ 가로 배열(`Landscape`)에 숫자 줄 추가(Esc/숫자/Del, Tab 은 q 줄 맨 앞으로).
+  함정: wvkbd 의 `die()` 매크로는 중괄호 없는 두 문장이라 `if (...) die(...)` 로 쓰면 조건과 무관하게 종료한다(처음 패치에서 겪음; 중괄호로 감쌈).
+  실제 화면에서 `한/영` 탭으로 hangul↔keyboard-us 전환, `⧉` 탭으로 도킹↔플로팅 전환을 확인(포인터 클릭). 다른 레이어(`special` 등)의 숫자 줄과 세로 배열은 확인하지 않음. wvkbd 버전이 바뀌면 패치가 안 맞을 수 있음(빌드가 실패하므로 알 수 있음).
+- 시험: `python3 -I mods/_data/vkb/tests/test_vkb.py`(25, 맞춤/복원/크기 계획/mm→px 계산), `test_vkb_cli.py`(45, 가짜 hyprctl/systemctl 로 전체 흐름).
 - **미확인**: 손가락 터치로 waybar 버튼이 눌리는지(포인터 클릭만 확인, GTK 가 터치를 클릭으로 바꾸는 것으로 알려져 있으나 직접 확인 못 함), waybar 높이 24px 의 터치 적합성, 자세 연동의 실제 힌지 시험, 가상 키보드가 보이는 동안 잠금 화면/Hyprland reload 와의 상호작용.
 
 ### 알려진 한계: 터치스크린으로는 창 이동/크기 조절이 안 됨

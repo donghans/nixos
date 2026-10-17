@@ -1,0 +1,264 @@
+diff -ru a/keyboard.c b/keyboard.c
+--- a/keyboard.c	1970-01-01 09:00:01.000000000 +0900
++++ b/keyboard.c	2026-10-17 12:25:38.543007636 +0900
+@@ -1,5 +1,6 @@
+ #include "proto/virtual-keyboard-unstable-v1-client-protocol.h"
+ #include <linux/input-event-codes.h>
++#include <signal.h>
+ #include <stddef.h>
+ #include <stdio.h>
+ #include <sys/mman.h>
+@@ -507,6 +508,10 @@
+             kbd_draw_key(kb, k, Unpress);
+         }
+         break;
++    case Float:
++        // handled by main's signalfd loop (SIGRTMIN+1 = toggle dock/float)
++        raise(SIGRTMIN + 1);
++        break;
+     case NextLayer: //(also handles previous layer when shift modifier is on, or
+                     //"first layer" with other modifiers)
+         kbd_next_layer(kb, k, false);
+diff -ru a/keyboard.h b/keyboard.h
+--- a/keyboard.h	1970-01-01 09:00:01.000000000 +0900
++++ b/keyboard.h	2026-10-17 12:25:38.542851092 +0900
+@@ -24,6 +24,7 @@
+ 	NextLayer, // Layout switch to the next layout in the layers sequence
+ 	Compose,   // Compose modifier key, switches to a specific associated layout
+ 	           // upon next keypress
++	Float,     // Toggle between docked (full width) and floating (narrow, centered)
+ 	EndRow,    // Incidates the end of a key row
+ 	Last,      // Indicated the end of a layout
+ };
+diff -ru a/layout.mobintl.h b/layout.mobintl.h
+--- a/layout.mobintl.h	1970-01-01 09:00:01.000000000 +0900
++++ b/layout.mobintl.h	2026-10-17 12:25:38.544550418 +0900
+@@ -233,10 +233,12 @@
+   {"⌫", "⌫", 1.5, Code, KEY_BACKSPACE, .scheme = 1},
+   {"", "", 0.0, EndRow},
+ 
+-  {"⌨͕", "⌨͔", 1.5, NextLayer, .scheme = 1},
++  {"⧉", "⧉", 1.0, Float, .scheme = 1},
++  {"⌨͕", "⌨͔", 1.0, NextLayer, .scheme = 1},
++  {"한/영", "한/영", 1.0, Code, KEY_HANGEUL, .scheme = 1},
+   {"Cmp", "Cmp", 1.0, Compose, .scheme = 1},
+   {",", "'", 1.0, Code, KEY_COMMA, &layouts[ComposeMath]},
+-  {"", "Tab", 4.0, Code, KEY_SPACE},
++  {"", "Tab", 3.0, Code, KEY_SPACE},
+   {".", "?", 1.0, Code, KEY_DOT, &layouts[ComposePunctuation]},
+   {"Enter", "Enter", 1.5, Code, KEY_ENTER, .scheme = 1},
+ 
+@@ -307,10 +309,12 @@
+   {"⌫", "⌫", 1.5, Code, KEY_BACKSPACE, .scheme = 1},
+   {"", "", 0.0, EndRow},
+ 
+-  {"⌨͕", "⌨͔", 1.5, NextLayer, .scheme = 1},
++  {"⧉", "⧉", 1.0, Float, .scheme = 1},
++  {"⌨͕", "⌨͔", 1.0, NextLayer, .scheme = 1},
++  {"한/영", "한/영", 1.0, Code, KEY_HANGEUL, .scheme = 1},
+   {"Cmp", "Cmp", 1.0, Compose, .scheme = 1},
+   {",", "'", 1.0, Code, KEY_COMMA, &layouts[ComposeMath]},
+-  {"", "Tab", 4.0, Code, KEY_SPACE},
++  {"", "Tab", 3.0, Code, KEY_SPACE},
+   {".", "?", 1.0, Code, KEY_DOT, &layouts[ComposePunctuation]},
+   {"Enter", "Enter", 1.5, Code, KEY_ENTER, .scheme = 1},
+ 
+@@ -1104,6 +1108,22 @@
+ static struct key keys_landscape[] = {
+   {"Esc", "Esc", 1.0, Code, KEY_ESC, .scheme = 1},
+   {"", "", 0.5, Pad, .scheme = 1},
++  {"1", "!", 1.0, Code, KEY_1},
++  {"2", "@", 1.0, Code, KEY_2},
++  {"3", "#", 1.0, Code, KEY_3},
++  {"4", "$", 1.0, Code, KEY_4},
++  {"5", "%", 1.0, Code, KEY_5},
++  {"6", "^", 1.0, Code, KEY_6},
++  {"7", "&", 1.0, Code, KEY_7},
++  {"8", "*", 1.0, Code, KEY_8},
++  {"9", "(", 1.0, Code, KEY_9, &layouts[ComposeBracket]},
++  {"0", ")", 1.0, Code, KEY_0, &layouts[ComposeBracket]},
++  {"", "", 0.5, Pad, .scheme = 1},
++  {"Del", "Del", 1.0, Code, KEY_DELETE, .scheme = 1},
++  {"", "", 0.0, EndRow},
++
++  {"Tab", "Tab", 1.0, Code, KEY_TAB, .scheme = 1},
++  {"", "", 0.5, Pad, .scheme = 1},
+   {"q", "Q", 1.0, Code, KEY_Q, &layouts[Emoji]},
+   {"w", "W", 1.0, Code, KEY_W, &layouts[ComposeW]},
+   {"e", "E", 1.0, Code, KEY_E, &layouts[ComposeE]},
+@@ -1115,7 +1135,7 @@
+   {"o", "O", 1.0, Code, KEY_O, &layouts[ComposeO]},
+   {"p", "P", 1.0, Code, KEY_P, &layouts[ComposeP]},
+   {"", "", 0.5, Pad, .scheme = 1},
+-  {"Tab", "Tab", 1.0, Code, KEY_TAB, .scheme = 1},
++  {"", "", 1.0, Pad, .scheme = 1},
+   {"", "", 0.0, EndRow},
+ 
+   {"↑", "↑", 0.75, Code, KEY_UP, .scheme = 1},
+@@ -1149,11 +1169,13 @@
+   {"⌫", "⌫", 1.5, Code, KEY_BACKSPACE, .scheme = 1},
+   {"", "", 0.0, EndRow},
+ 
++  {"⧉", "⧉", 1.0, Float, .scheme = 1},
+   {"⌨͕", "⌨͔", 1.0, NextLayer, .scheme = 1},
++  {"한/영", "한/영", 1.0, Code, KEY_HANGEUL, .scheme = 1},
+   {"Cmp", "Cmp", 1.0, Compose, .scheme = 1},
+   {"Ctr", "Ctr", 1.0, Mod, Ctrl, .scheme = 1},
+   {",", "'", 1.0, Code, KEY_COMMA, &layouts[ComposeMath]},
+-  {"", "Tab", 5.0, Code, KEY_SPACE},
++  {"", "Tab", 4.0, Code, KEY_SPACE},
+   {".", "?", 1.0, Code, KEY_DOT, &layouts[ComposePunctuation]},
+   {"Enter", "Enter", 2.0, Code, KEY_ENTER, .scheme = 1},
+ 
+diff -ru a/main.c b/main.c
+--- a/main.c	1970-01-01 09:00:01.000000000 +0900
++++ b/main.c	2026-10-17 12:25:38.543431342 +0900
+@@ -4,6 +4,7 @@
+ #include "proto/fractional-scale-v1-client-protocol.h"
+ #include "proto/viewporter-client-protocol.h"
+ #include <errno.h>
++#include <signal.h>
+ #include <linux/input-event-codes.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -70,6 +71,10 @@
+ static struct kbd keyboard;
+ static uint32_t height, normal_height, landscape_height;
+ static int rounding = DEFAULT_ROUNDING;
++/* floating mode: narrow, bottom-centered, no exclusive zone */
++static bool floating = false;
++static uint32_t float_width = 0, float_margin = 0;
++static char *mode_hook = NULL;
+ static bool hidden = false;
+ 
+ /* event handler prototypes */
+@@ -122,6 +127,7 @@
+ static void redimension_keyboard();
+ static void show();
+ static void hide();
++static void set_floating(bool f, bool run_hook);
+ 
+ /* event handlers */
+ static const struct wl_pointer_listener pointer_listener = {
+@@ -502,7 +508,8 @@
+         height = normal_height;
+     }
+ 
+-    keyboard.w = available_width;
++    keyboard.w = (floating && float_width && float_width < available_width)
++                     ? float_width : available_width;
+     keyboard.h = height;
+     keyboard.layout = &keyboard.layouts[layer];
+     keyboard.layer_index = 0;
+@@ -624,6 +631,10 @@
+             "  -l                     - Comma separated list of layers\n");
+     fprintf(stderr, "  --landscape-layers     - Comma separated list of "
+                     "landscape layers\n");
++    fprintf(stderr, "  --float                - Start in floating mode (narrow, bottom-centered)\n");
++    fprintf(stderr, "  --float-width [int]    - Floating width in pixels\n");
++    fprintf(stderr, "  --float-margin [int]   - Floating bottom margin in pixels\n");
++    fprintf(stderr, "  --on-mode [cmd]        - Shell command run after dock/float changes (env WVKBD_MODE)\n");
+     fprintf(stderr, "  --non-exclusive        - Allow the keyboard to overlap"
+                     " windows. Do not request an exclusive zone from the"
+                     "compositor\n");
+@@ -711,9 +722,13 @@
+     layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+         layer_shell, draw_surf.surf, current_output_data, layer, namespace);
+ 
+-    zwlr_layer_surface_v1_set_size(layer_surface, 0, height);
+-    zwlr_layer_surface_v1_set_anchor(layer_surface, anchor);
+-    if (keyboard.exclusive) {
++    bool fl = floating && float_width && float_width < available_width;
++    zwlr_layer_surface_v1_set_size(layer_surface, fl ? float_width : 0, height);
++    zwlr_layer_surface_v1_set_anchor(
++        layer_surface, fl ? ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM : anchor);
++    if (fl) {
++        zwlr_layer_surface_v1_set_margin(layer_surface, 0, 0, float_margin, 0);
++    } else if (keyboard.exclusive) {
+         zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, height);
+     }
+     zwlr_layer_surface_v1_set_keyboard_interactivity(layer_surface, false);
+@@ -722,6 +737,36 @@
+     wl_surface_commit(draw_surf.surf);
+ }
+ 
++static void
++run_mode_hook()
++{
++    if (!mode_hook)
++        return;
++    pid_t pid = fork();
++    if (pid == 0) {
++        sigset_t none;
++        sigemptyset(&none);
++        sigprocmask(SIG_SETMASK, &none, NULL);
++        setenv("WVKBD_MODE", floating ? "float" : "dock", 1);
++        execl("/bin/sh", "sh", "-c", mode_hook, (char *)NULL);
++        _exit(127);
++    }
++}
++
++static void
++set_floating(bool f, bool run_hook)
++{
++    if (floating == f)
++        return;
++    floating = f;
++    if (!hidden && layer_surface) {
++        hide();
++        show();
++    }
++    if (run_hook)
++        run_mode_hook();
++}
++
+ void
+ toggle_visibility()
+ {
+@@ -939,6 +984,23 @@
+                    (!strcmp(argv[i], "--list-layers"))) {
+             list_layers();
+             exit(0);
++        } else if (!strcmp(argv[i], "--float")) {
++            floating = true;
++        } else if (!strcmp(argv[i], "--float-width")) {
++            if (i >= argc - 1) {
++                die("--float-width requires an argument\n");
++            }
++            float_width = atoi(argv[++i]);
++        } else if (!strcmp(argv[i], "--float-margin")) {
++            if (i >= argc - 1) {
++                die("--float-margin requires an argument\n");
++            }
++            float_margin = atoi(argv[++i]);
++        } else if (!strcmp(argv[i], "--on-mode")) {
++            if (i >= argc - 1) {
++                die("--on-mode requires an argument\n");
++            }
++            mode_hook = estrdup(argv[++i]);
+         } else if ((!strcmp(argv[i], "-non-exclusive")) || (!strcmp(argv[i], "--non-exclusive"))) {
+             keyboard.exclusive = false;
+         } else {
+@@ -1045,6 +1107,9 @@
+     sigaddset(&signal_mask, SIGUSR1);
+     sigaddset(&signal_mask, SIGUSR2);
+     sigaddset(&signal_mask, SIGRTMIN);
++    sigaddset(&signal_mask, SIGRTMIN + 1); /* toggle dock/float */
++    sigaddset(&signal_mask, SIGRTMIN + 2); /* dock */
++    sigaddset(&signal_mask, SIGRTMIN + 3); /* float */
+     sigaddset(&signal_mask, SIGPIPE);
+     if (sigprocmask(SIG_BLOCK, &signal_mask, NULL) == -1) {
+         die("Failed to disable handled signals: %d\n", errno);
+@@ -1079,6 +1144,12 @@
+                 show();
+             else if (si.ssi_signo == SIGRTMIN)
+                 toggle_visibility();
++            else if (si.ssi_signo == SIGRTMIN + 1)
++                set_floating(!floating, true);
++            else if (si.ssi_signo == SIGRTMIN + 2)
++                set_floating(false, true);
++            else if (si.ssi_signo == SIGRTMIN + 3)
++                set_floating(true, true);
+             else if (si.ssi_signo == SIGPIPE)
+                 pipewarn();
+         }
