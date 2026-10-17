@@ -192,6 +192,14 @@ setpos("tablet", 90); run("rotate", "auto"); run("layout", "external"); rc = run
 check("꺼진 내장 화면은 회전하지 않음(오류 없이)", rc == 0 and mons()["eDP-1"].disabled)
 reset(); run("layout", "mirror"); setpos("tablet", 90); rc = run("rotate", "auto")
 check("미러인 내장 화면은 회전하지 않음", rc == 0 and mons()["eDP-1"].transform == 0)
+def devlog(): return [l for l in open(FS + ".events").read().splitlines() if l.startswith("device ")] if os.path.exists(FS + ".events") else []
+reset(); run("layout", "extend"); run("rotate", "1"); dl = devlog()
+check("회전하면 터치스크린과 스타일러스 transform 도 같은 값(1)으로(터치가 화면을 따라 돎)", "device elan-touchscreen transform=1" in dl and "device elan-touchscreen-stylus transform=1" in dl, str(dl))
+check("터치패드(mice)는 건드리지 않음", not any("touchpad" in l for l in dl), str(dl))
+run("rotate", "0"); check("0 으로 돌리면 터치도 0", "device elan-touchscreen transform=0" in devlog()[-2:] or "device elan-touchscreen transform=0" in devlog(), str(devlog()))
+run("rotate", "3"); run("restore"); check("restore(reload 뒤)에도 터치 transform 을 다시 맞춤", devlog()[-2:] == ["device elan-touchscreen transform=3", "device elan-touchscreen-stylus transform=3"], str(devlog()[-3:]))
+reset(); run("layout", "internal"); run("rotate", "2"); run("layout", "external"); run("restore")
+check("내장 화면이 꺼지면 터치 transform 은 0", devlog()[-1] == "device elan-touchscreen-stylus transform=0", str(devlog()[-2:]))
 check("target_transform 순수 함수: laptop 은 항상 0", dc.target_transform(90, "laptop") == 0 and dc.target_transform(270, "tent") == 3 and dc.target_transform(45, "tablet") == 0)
 
 print(f"\n코어 {ok} 통과 / {fail} 실패"); sys.exit(1 if fail else 0)

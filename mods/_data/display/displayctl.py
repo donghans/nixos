@@ -658,6 +658,23 @@ def op_rotate(mon: str, transform: int) -> dict:
     return st
 
 
+def sync_touch(mons: list[Mon] | None = None) -> list[str]:
+    """내장 화면의 회전을 터치스크린/스타일러스에 같이 적용한다. Hyprland 는 터치 좌표를 `모니터 위치 + 정규화 좌표 × 모니터 크기` 로만 계산해서
+    모니터가 회전해도 터치는 따라 돌지 않으므로(소스 확인: Touch.cpp), 장치별 transform(libinput 보정 행렬)을 모니터 transform 과 같은 값으로 맞춘다.
+    hl.device 설정은 reload 때 초기화되므로 restore 때도 다시 호출한다. 꺼진/미러인 내장 화면이면 0. 적용한 장치 이름 목록을 돌려준다."""
+    mons = mons if mons is not None else get_monitors()
+    internal = next((m for m in mons if m.internal), None)
+    tr = internal.transform if internal and not internal.disabled and not internal.mirror_of else 0
+    try:
+        d = json.loads(hyprctl("devices", "-j").stdout or "{}")
+    except ValueError:
+        return []
+    names = [x["name"] for k in ("touch", "tablets") for x in d.get(k, []) if x.get("name")]
+    for n in names:
+        eval_lua(f'hl.device({{ name = "{n}", transform = {tr} }})')
+    return names
+
+
 def target_transform(rotation: int, posture_mode: str) -> int:
     """자세/기기 회전 → 내장 화면 transform. laptop 모드에서는 항상 0(세로로 들어도 돌리지 않음)"""
     return 0 if posture_mode == "laptop" else ROTATION_TO_TRANSFORM.get(int(rotation) % 360, 0)
@@ -764,6 +781,7 @@ def restore() -> int:
         cfg, _ = build(mons, st)
         migrate_windows(cfg)
         apply_cfg(cfg, mons)
+        sync_touch()
         return 0
 
 
@@ -893,9 +911,11 @@ def cmd_rotate(a) -> int:
     if target.disabled or target.mirror_of:
         return 0                                  # 꺼졌거나 미러인 화면은 돌리지 않음
     if target.transform == want:
-        return 0                                  # 이미 그 방향이면 아무것도 안 함(깜빡임/불필요한 재적용 방지)
+        return 0                                  # 이미 그 방향이면 아무것도 안 함(깜빡임/불필요한 재적용 방지). 터치는 restore 가 맞춤
     with locked():
-        return go(op_rotate(target.name, want), quiet=True)
+        rc = go(op_rotate(target.name, want), quiet=True)
+        sync_touch()
+        return rc
 
 
 def cmd_layout(a) -> int:

@@ -53,9 +53,13 @@ def main(a):
         print("ok"); return
     if a[:2] == ["monitors", "all"] or a[:1] == ["monitors"]:
         print(json.dumps(d if a[:2] == ["monitors", "all"] else [m for m in d if not m["disabled"]])); return
+    if a[:2] == ["devices", "-j"]: print(json.dumps({"touch": [{"name": "elan-touchscreen"}], "tablets": [{"name": "elan-touchscreen-stylus"}], "mice": [{"name": "touchpad"}]})); return
     if a[0] == "reload": save(baseline()); print("ok"); return
     if a[0] == "eval":
-        code = a[1]; name = field(code, "output")
+        code = a[1]
+        if code.startswith("hl.device"):
+            log(f"device {field(code, 'name')} transform={field(code, 'transform')}"); print("ok"); return
+        name = field(code, "output")
         m = next((x for x in d if x["name"] == name), None)
         if m is None: print("ok"); return
         if field(code, "disabled") == "true": m["disabled"] = True; log("disable " + name); check_overlap(d); save(d); print("ok"); return
