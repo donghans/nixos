@@ -1,6 +1,6 @@
 diff -ru a/keyboard.c b/keyboard.c
---- a/keyboard.c	1970-01-01 09:00:01.000000000 +0900
-+++ b/keyboard.c	2026-10-17 12:39:08.463089573 +0900
+--- a/keyboard.c	2026-10-17 15:14:18.361800146 +0900
++++ b/keyboard.c	2026-10-17 15:14:18.387365531 +0900
 @@ -1,5 +1,6 @@
  #include "proto/virtual-keyboard-unstable-v1-client-protocol.h"
  #include <linux/input-event-codes.h>
@@ -20,8 +20,8 @@ diff -ru a/keyboard.c b/keyboard.c
                      //"first layer" with other modifiers)
          kbd_next_layer(kb, k, false);
 diff -ru a/keyboard.h b/keyboard.h
---- a/keyboard.h	1970-01-01 09:00:01.000000000 +0900
-+++ b/keyboard.h	2026-10-17 12:39:08.462773756 +0900
+--- a/keyboard.h	2026-10-17 15:14:18.362222321 +0900
++++ b/keyboard.h	2026-10-17 15:14:18.387689839 +0900
 @@ -24,6 +24,7 @@
  	NextLayer, // Layout switch to the next layout in the layers sequence
  	Compose,   // Compose modifier key, switches to a specific associated layout
@@ -31,8 +31,8 @@ diff -ru a/keyboard.h b/keyboard.h
  	Last,      // Indicated the end of a layout
  };
 diff -ru a/layout.mobintl.h b/layout.mobintl.h
---- a/layout.mobintl.h	1970-01-01 09:00:01.000000000 +0900
-+++ b/layout.mobintl.h	2026-10-17 12:39:08.466172541 +0900
+--- a/layout.mobintl.h	2026-10-17 15:14:18.364800220 +0900
++++ b/layout.mobintl.h	2026-10-17 15:14:18.411385742 +0900
 @@ -233,10 +233,12 @@
    {"⌫", "⌫", 1.5, Code, KEY_BACKSPACE, .scheme = 1},
    {"", "", 0.0, EndRow},
@@ -125,7 +125,7 @@ diff -ru a/layout.mobintl.h b/layout.mobintl.h
    {"z", "Z", 1.0, Code, KEY_Z, &layouts[ComposeZ]},
    {"x", "X", 1.0, Code, KEY_X, &layouts[ComposeX]},
    {"c", "C", 1.0, Code, KEY_C, &layouts[ComposeC]},
-@@ -1144,18 +1161,23 @@
+@@ -1144,18 +1161,24 @@
    {"b", "B", 1.0, Code, KEY_B, &layouts[ComposeB]},
    {"n", "N", 1.0, Code, KEY_N, &layouts[ComposeN]},
    {"m", "M", 1.0, Code, KEY_M, &layouts[ComposeM]},
@@ -138,19 +138,19 @@ diff -ru a/layout.mobintl.h b/layout.mobintl.h
 +  {"⇧", "⇫", 2.75, Mod, Shift, .scheme = 1},
    {"", "", 0.0, EndRow},
  
--  {"⌨͕", "⌨͔", 1.0, NextLayer, .scheme = 1},
++  {"Ctr", "Ctr", 1.25, Mod, Ctrl, .scheme = 1},
++  {"Sup", "Sup", 1.0, Mod, Super, .scheme = 1},
++  {"⧉", "⧉", 1.0, Float, .scheme = 1},
+   {"⌨͕", "⌨͔", 1.0, NextLayer, .scheme = 1},
 -  {"Cmp", "Cmp", 1.0, Compose, .scheme = 1},
 -  {"Ctr", "Ctr", 1.0, Mod, Ctrl, .scheme = 1},
 -  {",", "'", 1.0, Code, KEY_COMMA, &layouts[ComposeMath]},
 -  {"", "Tab", 5.0, Code, KEY_SPACE},
 -  {".", "?", 1.0, Code, KEY_DOT, &layouts[ComposePunctuation]},
 -  {"Enter", "Enter", 2.0, Code, KEY_ENTER, .scheme = 1},
-+  {"Ctr", "Ctr", 1.25, Mod, Ctrl, .scheme = 1},
-+  {"⧉", "⧉", 1.0, Float, .scheme = 1},
-+  {"⌨͕", "⌨͔", 1.0, NextLayer, .scheme = 1},
 +  {"한/영", "한/영", 1.25, Code, KEY_HANGEUL, .scheme = 1},
 +  {"Alt", "Alt", 1.25, Mod, Alt, .scheme = 1},
-+  {"", "Tab", 4.25, Code, KEY_SPACE},
++  {"", "Tab", 3.25, Code, KEY_SPACE},
 +  {"Esc", "Esc", 1.0, Code, KEY_ESC, .scheme = 1},
 +  {"←", "←", 1.0, Code, KEY_LEFT, .scheme = 1},
 +  {"↓", "↓", 1.0, Code, KEY_DOWN, .scheme = 1},
@@ -160,8 +160,8 @@ diff -ru a/layout.mobintl.h b/layout.mobintl.h
    /* end of layout */
    {"", "", 0.0, Last},
 diff -ru a/main.c b/main.c
---- a/main.c	1970-01-01 09:00:01.000000000 +0900
-+++ b/main.c	2026-10-17 12:39:08.463755164 +0900
+--- a/main.c	2026-10-17 15:14:18.365697295 +0900
++++ b/main.c	2026-10-17 15:14:18.388416330 +0900
 @@ -4,6 +4,7 @@
  #include "proto/fractional-scale-v1-client-protocol.h"
  #include "proto/viewporter-client-protocol.h"
