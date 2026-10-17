@@ -32,13 +32,36 @@ power-report --hours 1
 power-report --from "2026-10-17 10:00" --to "2026-10-17 10:40" -o /tmp/x.png
 power-report --no-plot          # 요약만
 ```
-그래프(위→아래): 배터리 잔량(%) / 전력(W: 배터리 전력, RAPL 패키지, RAPL psys) / CPU 사용률+평균 주파수 / 패키지 온도. 노란 배경=방전, 초록 배경=충전(**잔량 변화로 추정**).
+그래프(위→아래): 배터리 잔량(%) / 전력(W: 배터리 전력, RAPL 패키지, RAPL psys) / CPU 사용률+평균 주파수 / 패키지 온도 / 전원 상태(AC 연결, TLP 모드). 노란 배경=방전, 초록=충전, 파랑=만충.
+충전/방전은 아래 기록기 값이 있는 구간은 **실제 값**, 없는 이전 구간은 잔량 변화로 추정(제목에 "기록 N/M점" 표시). 요약에는 상태별(방전/충전/만충)·TLP 모드별 평균 psys/패키지/CPU 도 나옴.
 방전 중이면 최근 평균 전력과 잔량으로 **남은 시간**을 추정해서 출력(전체 용량 = `charge_full × 평균 전압`).
 - Netdata 가 이미 수집하는 것(차트 이름): `powersupply_capacity.BAT1`(잔량), `sensors.voltage_BAT1-acpi-0_in0_input`/`sensors.curr_BAT1-acpi-0_curr1_input`(배터리 전압/전류 → 전력 = 곱),
   `cpu.powercap_intel_rapl_zone_package-0`/`..._zone_psys`(RAPL), `cpu.cpufreq`, `system.cpu`, `sensors.temperature_*`, 팬 4개, `cpu.core_throttling`.
-- 배터리 전류에는 충전/방전 부호가 없다(크기). 그래서 충전 중인지는 잔량 변화로 추정. 전압/전류/온도는 `sensors` 수집기라 선이 드문드문 끊길 수 있음(RAPL, 잔량은 연속).
+- 배터리 전류에는 충전/방전 부호가 없다(크기). 충전 중인지는 아래 기록기가 남긴 값을 쓴다. 전압/전류/온도는 `sensors` 수집기라 선이 드문드문 끊길 수 있음(RAPL, 잔량은 연속).
 - **실측으로 본 것(2026-10-17)**: 배터리 방전 구간(10:07~10:33)에서 **배터리 전력(전압×전류)과 RAPL psys 가 거의 겹침(14~17 W)**. psys 는 AC 에서도 읽히므로 배터리 계측이 안 되는 AC 상태의 전력 비교에 쓸 수 있음.
   AC 에서는 같은 유휴 상태에서 psys 가 약 17 W, 배터리에서는 약 14.5~15 W 였다(TLP 설정 차이 등으로 보이나 원인은 확인하지 않음).
+
+### 전원 상태 기록기 (`netdata-power-state`)
+Netdata 는 기본으로 충전/방전, AC 연결, TLP 모드를 기록하지 않아서 작은 systemd 서비스가 **10초마다** sysfs 를 읽어 Netdata 의 statsd(`127.0.0.1:8125`)로 게이지를 보낸다(`mods/sys/services/netdata.nix`).
+- `power.ac_online` (0/1, Mains `online`), `power.battery_state` (0 방전, 1 충전, 2 완충, 3 충전 안 함, -1 알 수 없음, `BAT1/status`), `power.tlp_profile` (`/run/tlp/last_pwr` 첫 값: TLP 가 마지막으로 적용한 모드, 0=AC 1=배터리).
+- Netdata 차트 이름: `statsd_power.ac_online_gauge`, `statsd_power.battery_state_gauge`, `statsd_power.tlp_profile_gauge`.
+- 계속 보내므로 어댑터를 꽂고 뽑을 때 Netdata 가 재시작돼도 몇 초 안에 복구됨. **기록은 이 서비스를 켠 시점부터**(이전 구간은 없음).
+- 검증: sysfs 값(AC=1, Charging, TLP '0 0')과 일치. `tlp bat` 으로 AC 에서 배터리 설정을 강제한 구간에는 `power.tlp_profile = 1` 로 기록됨(그래프에서 확인). 수동 전환도 `last_pwr` 에 반영된다(`1 0`).
+
+### 전력 실측 (AC 에서, RAPL 직접 읽음, 60초 구간 3쌍 교대)
+- **TLP 배터리 설정을 AC 에서 강제(`tlp bat`) vs 자동(AC 설정, `tlp start`)** — 전원은 AC 그대로 두고 TLP 모드만 바꿈:
+  psys **16.01 W**(배터리 설정) vs **18.08 W**(AC 설정) → **AC 설정이 +2.07 W**. 패키지(CPU) 4.43 W vs 5.52 W → +1.09 W. 첫 쌍은 전환 직후의 과도 상태로 높게 나와(19.11 W) 그것을 빼면 +1.57 W / +0.93 W.
+  CPU 사용률은 반대로 배터리 설정에서 **더 높음**(16.2% vs 8.8%): 최대 성능 50% 제한 + EPP `power` 로 같은 일을 더 오래 처리하기 때문.
+  → "AC 에서 더 먹는 건 TLP 제한이 없어서"라는 추측이 **맞음**. AC 와 배터리의 약 2 W 차이를 TLP 설정 하나로 거의 설명(AC 약 17.5 W vs 배터리 약 15~15.5 W).
+  다만 psys 차이(약 1.6~2.1 W) 중 CPU 패키지가 차지하는 것은 약 0.9~1.1 W 라서 **나머지 약 0.7~1 W 는 CPU 밖**(TLP 의 SATA 링크 전력, 러닝타임 PM 등 다른 항목으로 보이나 어느 항목인지는 확인하지 않음).
+- **Netdata (AC, 1초 간격) 켬 vs 끔**: psys 17.45 W vs 17.06 W → **+0.39 W(+2.3%)**, 쌍별 +0.42/+0.42/+0.32 로 일관됨. 패키지 +0.18 W, CPU 사용률 +0.58%p. Netdata 자체는 코어 1개의 약 9%.
+  (배터리 10초 간격은 앞서 +0.15 W(±0.1))
+- 측정 중 배터리는 계속 충전 중(Charging)이었음. psys 가 충전 전력을 포함하는지는 확인하지 못했지만 켬/끔 비교에서는 상쇄됨.
+
+### 참고: 눈여겨볼 항목 — `pcie_aspm=off`
+`mods/sys/base/core.optimize.nix` 가 커널 옵션으로 PCIe ASPM(링크 절전)을 끈다(주석: "인터럽트 지연 및 충돌 방지"). 유휴 전력에 영향을 줄 수 있는 설정이고 AC/배터리 구분 없이 항상 적용됨.
+런타임에 바꿀 수 없어(옵션으로 꺼져 있으면 sysfs 정책도 못 바꿈) 재부팅이 필요하고 끈 이유(안정성)는 확인하지 않아서 **바꾸지 않았음**. 측정하려면 재부팅 후 같은 방식으로 비교해야 함.
+참고로 현재 TLP 설정은 배터리 `CPU_MAX_PERF_ON_BAT = 50`(설정 파일 기준)이다.
 
 ### RAPL 은 왜 일반 사용자가 못 읽나
 `/sys/class/powercap/intel-rapl:0/energy_uj` 가 `-r-------- root root` 라서 일반 사용자는 `Permission denied` (하드웨어가 없는 게 아님 — `sudo` 로는 값이 읽힘).

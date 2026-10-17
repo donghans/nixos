@@ -29,6 +29,30 @@ mkMod __curPos "Netdata (시스템 지표 기록: AC 1초 / 배터리 10초)" ({
     if [ "$ac" = 1 ]; then every=${toString acEvery}; else every=${toString batteryEvery}; fi
     ${pkgs.gnused}/bin/sed "s/@EVERY@/$every/" /etc/netdata/netdata.conf > "''${OUT:-/run/netdata/netdata.conf}"
   '';
+  # 전원 상태를 Netdata(statsd, 127.0.0.1:8125)에 게이지로 기록: Netdata 가 기본으로는 충전/방전·AC 연결·TLP 모드를 남기지 않아서.
+  #   power.ac_online (0/1), power.battery_state (0 방전, 1 충전, 2 완충, 3 충전 안 함, -1 알 수 없음),
+  #   power.tlp_profile (/run/tlp/last_pwr 의 첫 값: TLP 가 마지막으로 적용한 전원 모드. 0 = AC, 1 = 배터리)
+  # 값이 바뀔 때만이 아니라 주기적으로 다시 보내서, Netdata 가 재시작(전원 변경 시 udev 가 재시작함)돼도 몇 초 안에 복구됨.
+  powerState = pkgs.writeShellScript "netdata-power-state" ''
+    bat=""
+    for d in /sys/class/power_supply/*; do
+      [ "$(cat "$d/type" 2>/dev/null)" = Battery ] && { bat=$d; break; }
+    done
+    while :; do
+      ac=0
+      for d in /sys/class/power_supply/*; do
+        [ "$(cat "$d/type" 2>/dev/null)" = Mains ] && [ "$(cat "$d/online" 2>/dev/null)" = 1 ] && ac=1
+      done
+      case "$(cat "$bat/status" 2>/dev/null)" in
+        Discharging) b=0 ;; Charging) b=1 ;; Full) b=2 ;; "Not charging") b=3 ;; *) b=-1 ;;
+      esac
+      tlp=-1
+      read -r tlp _ < /run/tlp/last_pwr 2>/dev/null || tlp=-1
+      printf 'power.ac_online:%s|g\npower.battery_state:%s|g\npower.tlp_profile:%s|g\n' "$ac" "$b" "$tlp" > /dev/udp/127.0.0.1/8125 2>/dev/null
+      sleep 10
+    done
+  '';
+
   # Netdata API 로 배터리 잔량/전력(RAPL, 전압×전류)/CPU 를 같은 시간축 그래프와 요약으로 보여주는 도구 (스크립트: _data/netdata/power_report.py)
   powerReport = pkgs.writeShellScriptBin "power-report" ''
     exec ${pkgs.python3.withPackages (p: [p.matplotlib])}/bin/python3 ${../../_data/netdata/power_report.py} "$@"
@@ -57,6 +81,22 @@ in {
     systemd.services.netdata.serviceConfig = {
       ExecStartPre = "${genConf}";
       ExecStart = lib.mkForce "${nd.package}/bin/netdata -P /run/netdata/netdata.pid -D -c /run/netdata/netdata.conf";
+    };
+
+    systemd.services.netdata-power-state = {
+      description = "전원 상태(AC/충전/TLP 모드)를 Netdata 에 기록";
+      after = ["netdata.service"];
+      wantedBy = ["multi-user.target"];
+      serviceConfig = {
+        ExecStart = "${powerState}";
+        DynamicUser = true;
+        Restart = "on-failure";
+        # 읽기만 하는 아주 작은 루프라서 권한 최소화
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+      };
     };
 
     # 전원 어댑터를 꽂거나 뽑으면 수집 주기를 다시 정하도록 재시작 (실행 중일 때만)

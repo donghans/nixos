@@ -8,8 +8,10 @@
   2. 전력(W): 배터리 전력(전압×전류, 방향 구분 없는 크기), RAPL 패키지, RAPL psys(플랫폼 전체)
   3. CPU 사용률(%)과 평균 주파수(GHz)
   4. 패키지 온도(°C)
+  5. AC 연결 여부와 TLP 적용 모드(전원 상태 기록기 netdata-power-state 가 남긴 값)
+충전/방전 구분은 기록(`power.battery_state`)이 있는 구간은 실제 값, 기록이 없는 이전 구간은 잔량 변화로 추정(그래프 제목에 표시).
 요약: 구간 평균/최대 전력, 방전 구간의 추정 남은 시간.
-주의: 배터리 전류는 충전/방전 부호가 없는 크기라서 충전 중인지는 잔량 변화로 추정한다. 데이터는 Netdata 가 켜져 있던 시간에만 있다.
+주의: 배터리 전류는 충전/방전 부호가 없는 크기다. 데이터는 Netdata 가 켜져 있던 시간에만 있다.
 """
 import argparse, json, math, os, sys, time, urllib.parse, urllib.request
 from datetime import datetime
@@ -25,6 +27,10 @@ CHARTS = {
     "cpu": "system.cpu",
     "freq": "cpu.cpufreq",
     "temp": "sensors.temperature_coretemp-isa-0000_temp1_Package_id_0_input",
+    # 전원 상태 기록기(mods/sys/services/netdata.nix 의 netdata-power-state)가 statsd 로 보낸 게이지
+    "acon": "statsd_power.ac_online_gauge",
+    "bstate": "statsd_power.battery_state_gauge",
+    "tlp": "statsd_power.tlp_profile_gauge",
 }
 
 
@@ -97,13 +103,19 @@ def main():
     cpu, freq, temp, cap = aligned("cpu"), aligned("freq"), aligned("temp"), aligned("cap")
     freq_ghz = [None if f is None else f / 1000 for f in freq]
 
-    # 충전/방전 추정: 구간 안에서 잔량이 오르는 중이면 충전, 내리는 중이면 방전 (10분 이동 창)
+    acon, bstate, tlp = aligned("acon"), aligned("bstate"), aligned("tlp")
+    # 충전/방전: 기록(power.battery_state)이 있으면 그 값, 없으면 구간 안 잔량 변화로 추정(10분 이동 창)
     win = max(1, int(600 / max(1, (ts[-1] - ts[0]) / max(1, len(ts) - 1))))
-    state = []
+    CODE = {0: "방전", 1: "충전", 2: "만충", 3: "만충"}
+    state, recorded = [], 0
     for i in range(len(ts)):
+        if bstate[i] is not None and round(bstate[i]) in CODE:
+            state.append(CODE[round(bstate[i])]); recorded += 1
+            continue
         j = max(0, i - win)
         d = (cap[i] - cap[j]) if cap[i] is not None and cap[j] is not None else 0
         state.append("충전" if d > 0.5 else "방전" if d < -0.5 else "-")
+    rec_note = "기록" if recorded == len(ts) else f"기록 {recorded}/{len(ts)}점, 나머지는 잔량 변화로 추정" if recorded else "잔량 변화로 추정(기록 없음)"
 
     # 요약
     fmt = lambda x: "-" if x is None or (isinstance(x, float) and math.isnan(x)) else f"{x:.1f}"
@@ -120,9 +132,18 @@ def main():
         w_recent = mean(dis[-max(3, win):])
         print(f"  방전 중: 최근 평균 {w_recent:.1f} W, 잔량 {last_cap:.0f}% → 이 속도라면 약 {last_cap/100*e_full/w_recent:.1f}시간 남음 (전체 약 {e_full:.0f} Wh 기준, 추정)")
     elif state and state[-1] != "방전":
-        print(f"  지금은 {'충전 중(추정)' if state[-1] == '충전' else '충전/방전 변화 없음(AC 연결·만충 등)'} — 남은 시간 계산 생략")
+        print(f"  지금은 {state[-1] if state[-1] != '-' else '충전/방전 변화 없음'} 상태 — 남은 시간 계산 생략")
     if dis:
         print(f"  방전 구간 평균 {mean(dis):.1f} W (샘플 {len(dis)}개)")
+    # 상태별 평균 전력 (psys, 패키지) — AC/배터리·TLP 모드 비교용
+    for name in ("방전", "충전", "만충"):
+        idx = [i for i, st in enumerate(state) if st == name]
+        if idx:
+            print(f"  [{name}] {len(idx)}점: psys {fmt(mean([psys[i] for i in idx]))} W, 패키지 {fmt(mean([pkg[i] for i in idx]))} W, CPU {fmt(mean([cpu[i] for i in idx]))}%, 주파수 {fmt(mean([freq_ghz[i] for i in idx]))} GHz")
+    for tv, tn in ((0, "TLP=AC 모드"), (1, "TLP=배터리 모드")):
+        idx = [i for i, v in enumerate(tlp) if v is not None and round(v) == tv]
+        if idx:
+            print(f"  [{tn}] {len(idx)}점: psys {fmt(mean([psys[i] for i in idx]))} W, 패키지 {fmt(mean([pkg[i] for i in idx]))} W, CPU {fmt(mean([cpu[i] for i in idx]))}%")
     if a.no_plot:
         return 0
 
@@ -137,7 +158,7 @@ def main():
     have = {f.name for f in fm.fontManager.ttflist}
     ko = [n for n in ("NanumGothic", "NanumBarunGothic", "Malgun Gothic", "Pretendard") if n in have]
     plt.rcParams.update({"font.family": ko + ["DejaVu Sans"], "axes.unicode_minus": False})
-    fig, ax = plt.subplots(4, 1, figsize=(13, 9.2), sharex=True, gridspec_kw={"height_ratios": [1.1, 1.6, 1.2, 0.8], "hspace": 0.12})
+    fig, ax = plt.subplots(5, 1, figsize=(13, 10.2), sharex=True, gridspec_kw={"height_ratios": [1.1, 1.6, 1.2, 0.8, 0.55], "hspace": 0.12})
     fig.patch.set_facecolor(BG)
     for x in ax:
         x.set_facecolor(BG)
@@ -155,6 +176,9 @@ def main():
         if state[i] in ("충전", "방전"):
             for x in ax:
                 x.axvspan(X[i], X[j + 1], color=(GR if state[i] == "충전" else AM), alpha=0.10, lw=0)
+        elif state[i] == "만충":
+            for x in ax:
+                x.axvspan(X[i], X[j + 1], color=BL, alpha=0.08, lw=0)
         i = j + 1
     ax[0].plot(X, nn(cap), color=CY, lw=1.8); ax[0].set_ylabel("배터리 잔량 (%)", color=FG); ax[0].set_ylim(0, 105)
     ax[1].plot(X, nn(psys), color=AM, lw=1.2, label="RAPL psys (플랫폼 전체)")
@@ -167,10 +191,19 @@ def main():
     for s in f2.spines.values():
         s.set_color("#595959")
     ax[3].plot(X, nn(temp), color=RD, lw=1.2); ax[3].set_ylabel("패키지 온도 (°C)", color=FG)
-    ax[3].xaxis.set_major_formatter(mdates.DateFormatter("%H:%M")); ax[3].xaxis.set_major_locator(mdates.AutoDateLocator(minticks=5, maxticks=12))
+    # 전원 상태 기록: AC 연결(1/0)과 TLP 적용 모드(0=AC, 1=배터리)를 단계선으로
+    if any(v is not None for v in acon + tlp):
+        ax[4].step(X, nn([None if v is None else round(v) for v in acon]), where="post", color=CY, lw=1.4, label="AC 연결 (1=연결)")
+        ax[4].step(X, nn([None if v is None else round(v) + 0.0 for v in tlp]), where="post", color=AM, lw=1.2, ls="--", label="TLP 모드 (0=AC, 1=배터리)")
+        ax[4].set_yticks([0, 1]); ax[4].set_ylim(-0.3, 1.3)
+        ax[4].legend(loc="center left", fontsize=8, facecolor=BG, edgecolor="#595959", labelcolor=FG, ncol=2)
+    else:
+        ax[4].text(0.5, 0.5, "전원 상태 기록 없음 (netdata-power-state 가 켜진 뒤부터 기록됨)", transform=ax[4].transAxes, ha="center", va="center", color=MUTED, fontsize=9)
+    ax[4].set_ylabel("전원 상태", color=FG)
+    ax[4].xaxis.set_major_formatter(mdates.DateFormatter("%H:%M")); ax[3].xaxis.set_major_locator(mdates.AutoDateLocator(minticks=5, maxticks=12))
     for x in ax:
         x.set_xlim(X[0], X[-1])
-    fig.suptitle(f"전력 / 배터리 / CPU   {X[0]:%m-%d %H:%M} ~ {X[-1]:%m-%d %H:%M}   (노란 배경=방전, 초록 배경=충전: 잔량 변화로 추정)", color=FG, fontsize=11, y=0.94)
+    fig.suptitle(f"전력 / 배터리 / CPU   {X[0]:%m-%d %H:%M} ~ {X[-1]:%m-%d %H:%M}   (노란 배경=방전, 초록=충전, 파랑=만충 · 상태: {rec_note})", color=FG, fontsize=11, y=0.94)
     out = a.out or os.path.expanduser(f"~/Pictures/power-report/{datetime.now():%Y%m%d-%H%M%S}.png")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     fig.savefig(out, dpi=110, facecolor=BG, bbox_inches="tight")
