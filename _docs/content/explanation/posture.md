@@ -46,4 +46,29 @@ MSI Summit E16 Flip(360도 힌지)에서 **힌지 각도 → 사용 모드(lapto
 
 ## 다음 단계 (미구현)
 - 화면 자동 회전: 상태 스키마의 `orientation` 자리는 비워 둠. 가속도로 방향을 판정하려면 센서 부호 교정이 필요하고, `displayctl` 이 모니터 규칙에 `transform` 을 넣지 않아 회전 후 `displayctl restore` 가 회전을 풀어버리므로 `displayctl` 에 회전 상태를 먼저 추가해야 함.
-- 가상 키보드(조사 결과는 별도).
+- 가상 키보드: 아래 조사 결과. 아직 설치/연결은 안 했음(결정 대기).
+
+## 가상 키보드 조사 (2026-10-17)
+기준: 텐트/태블릿에서는 내장 키보드가 꺼지므로 화면에서 입력할 수단이 필요. **한글 입력(fcitx5-hangul)과 충돌하지 않아야** 함.
+Hyprland 0.55 가 노출하는 프로토콜(`wayland-info`로 확인): `zwp_virtual_keyboard_manager_v1`, `zwp_input_method_manager_v2`, `zwp_text_input_manager_v3`(+v1), `zwlr_virtual_pointer_manager_v1`.
+
+| 후보 | 방식 | 한글 입력기와 | 비고 |
+|---|---|---|---|
+| **wvkbd 0.19.4** | 가상 키보드 프로토콜로 키 이벤트를 주입 | **충돌 없음(실측)**: 키를 보내면 fcitx5 가 일반 키보드처럼 받아 조합 | 아래 실측. nixpkgs 에 있음 |
+| squeekboard 1.43.1 | input-method-v2 (입력기 자리 차지) | 충돌 가능성이 큼(추정): fcitx5 도 같은 프로토콜로 입력기 자리를 쓰는데 시트당 하나만 가능 | 시험하지 않음. 한글 배열이 있는지 확인하지 못함 |
+| maliit-keyboard 2.3.1-unstable | Qt 입력기 | squeekboard 와 비슷한 이유로 충돌 가능(추정) | 시험하지 않음 |
+| onboard 1.4.1 | GTK, X11 기반 | Wayland 네이티브 창에 입력되는지 불확실(추정) | 시험하지 않음 |
+| fcitx5 내장 | `libvirtualkeyboard.so` 는 **D-Bus 백엔드뿐**(화면 UI 프로그램 없음) | - | nixpkgs 에 이 백엔드용 UI 패키지를 찾지 못함 → 단독 사용 불가 |
+(표의 "추정"은 프로토콜 구조에서 짐작한 것이고 직접 시험하지 않은 항목.)
+
+### wvkbd 실측
+- 화면 하단 전체 폭(2560x360 으로 띄움)에 QWERTY 한 장: Esc, Tab, 방향키, Shift, Cmp(compose), Ctr, 쉼표/마침표/Enter, 백스페이스. 레이어에 숫자/특수/이모지/내비 등(`--list-layers`: full, fullwide, special, specialpad, simple, dialer, cyrillic … emoji, nav, landscape).
+- **영문 입력 확인**: 포인터로 키를 눌러 테스트 창에 `a` 가 찍힘. 키보드 창을 눌러도 입력 창의 **포커스가 유지**됨.
+- **한글 입력 확인**: fcitx5 를 한글로 두고 `g`, `k`, `s` 를 누르자 `한` 이 조합돼 찍힘(2벌식 배열 그대로).
+- **한/영 전환 확인**: `Ctr` 다음 스페이스(= Ctrl+Space)로 fcitx5 가 `hangul` → `keyboard-us` 로 바뀜(fcitx5 전환키 `Control+space`). 한/영 전용 키는 없음.
+- **보이기/숨기기 시그널 확인**: `--hidden` 으로 숨긴 채 시작 가능. `SIGUSR2` = 표시, `SIGUSR1` = 숨김, `SIGRTMIN` = 토글(레이어 서피스가 생기고 사라지는 것을 `hyprctl layers` 로 확인).
+- 옵션: `-H`/`-L` 세로/가로 높이, `--fn` 글꼴, `--non-exclusive`(창과 겹침 허용, 아니면 작업 영역을 줄임), 색상 지정.
+- 한계: 한/영 전환이 `Ctr`+스페이스 두 번 누름(전용 키 없음), 화면 폭 전체를 차지해서 크기/위치 조정 필요, 터치(손가락) 입력은 직접 시험하지 못함(포인터 클릭으로만 확인).
+
+### 자세 허브와 연결하는 방법(구상, 미구현)
+`wvkbd-mobintl --hidden` 을 사용자 서비스로 상시 띄워 두고(메모리만 차지), `posture.consumers` 에 "tent/tablet 이면 SIGUSR2, laptop 이면 SIGUSR1" 소비자를 추가. 멱등이라 reload/로그인에도 안전.
