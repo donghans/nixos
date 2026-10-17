@@ -95,10 +95,16 @@ vkb("size", "cycle"); check("size cycle: large → small", conf()["size"] == "sm
 vkb("size", "medium")
 check("크기를 바꾸면 waybar 에 갱신 신호(RTMIN+8)", any("-RTMIN+8" in l for l in log("pkill")) if os.path.exists(f"{T}/pkill.log") else False)
 
+# 키 폭 설정
+reset_logs(); check("keywidth 20: 저장 + 재시작", vkb("keywidth", "20").returncode == 0 and conf()["key_mm"] == 20.0 and log("restarts") == ["restart"], str(log("restarts")))
+check("keywidth 20 이면 폭 2259", vkb("args").stdout.split("\n")[vkb("args").stdout.split("\n").index("--width") + 1] == "2259")
+check("keywidth 범위 밖은 거부", vkb("keywidth", "3").returncode == 2 and vkb("keywidth", "x").returncode == 2)
+vkb("keywidth", "16")
+
 # wvkbd 시작 인자: 화면 물리 크기로 계산
 args = vkb("args").stdout.split("\n")
 check("args: 가로 5줄 376 / 세로 6줄 452 / 글자 18 / 숨김 시작", args[:6] == ["-H", "452", "-L", "376", "--fn", "NanumGothic 18"] and "--hidden" in args, str(args))
-check("args: 플로팅 폭 1419, 여백 12, 도킹이면 --float 없음", args[args.index("--float-width") + 1] == "1419" and args[args.index("--float-margin") + 1] == "12" and "--float" not in args, str(args))
+check("args: 폭 1807(도킹도 좁게), 여백 12, 도킹이면 --float 없음", args[args.index("--width") + 1] == "1807" and args[args.index("--float-margin") + 1] == "12" and "--float" not in args, str(args))
 vkb("layers", "full"); check("args: 레이어 지정", "-l" in vkb("args").stdout.split("\n")); vkb("layers", "")
 
 # 노트북 모드: 키보드가 숨겨져 있으면 버튼이 안 보임, 떠 있으면 보임. 텐트/태블릿은 항상 보임

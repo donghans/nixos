@@ -14,6 +14,9 @@ mkPartOf "mods.gui" ({
   ...
 }: let
   isLaptop = config.workspace.type == "laptop";
+  # 비활성: 켜서 적용하자 실행 중이던 Hyprland 0.55.2 가 SEGV 로 종료되고, 로그인할 때마다 같은 설정이 다시 로드돼 반복 크래시했다(2026-10-17).
+  # 원인(플러그인 자체 버그인지 로드 시점/설정 문제인지)은 확인하지 못함. 다시 켜기 전에 격리된 환경(중첩 Hyprland 등)에서 먼저 시험할 것.
+  enableHyprgrass = false;
   wf-touch = pkgs.wf-touch.overrideAttrs (old: {
     mesonFlags = (old.mesonFlags or []) ++ ["-Dtests=disabled"];
   });
@@ -32,7 +35,7 @@ mkPartOf "mods.gui" ({
     old.buildInputs;
   });
 in {
-  hm = lib.mkIf isLaptop {
+  hm = lib.mkIf (isLaptop && enableHyprgrass) {
     wayland.windowManager.hyprland.extraConfig = ''
       -- 터치 제스처(hyprgrass). 플러그인 로드가 실패해도 나머지 설정은 그대로 진행
       do

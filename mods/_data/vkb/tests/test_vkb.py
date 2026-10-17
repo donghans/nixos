@@ -54,10 +54,10 @@ check("mm 변환: 이름/숫자/범위 밖", vkb.row_mm_of("small") == 8.0 and v
 G = {"w": 2560, "h": 1600, "mm_w": 340.0, "mm_h": 220.0}
 L = vkb.compute_layout(10.0, 14.5, G)
 check("medium: 가로 5줄 ≈ 376px, 세로 6줄 ≈ 452px", L["land"] == 376 and L["port"] == 452, str(L))
-check("플로팅 폭: 13키 × 14.5mm ≈ 1419px, 글자 18pt", L["float_width"] == 1419 and L["font_pt"] == 18, str(L))
+check("키보드 폭: 15키 × 16mm ≈ 1807px, 글자 18pt", vkb.compute_layout(10.0, 16.0, G)["width"] == 1807 and L["font_pt"] == 18, str(L))
 H2 = vkb.compute_layout(10.0, 14.5, dict(G, mm_w=170.0, mm_h=110.0))
 check("너무 커지면 화면 높이의 45% 로 제한", H2["land"] <= 1600 * 0.45 and H2["port"] <= 1600 * 0.45, str(H2))
-check("폭은 화면 폭을 넘지 않음", vkb.compute_layout(30.0, 99.0, G)["float_width"] == 2560)
+check("폭은 화면 폭을 넘지 않음", vkb.compute_layout(30.0, 99.0, G)["width"] == 2560)
 check("글자 크기 범위 12~32", vkb.compute_layout(4.0, 14.5, G)["font_pt"] >= 12 and vkb.compute_layout(30.0, 14.5, G)["font_pt"] <= 32)
 
 # 자세 연동

@@ -5,7 +5,8 @@
   vkb size <small|medium|large|MM>   키 한 줄 높이 프리셋(8/10/12.5mm) 또는 mm(4~30). 화면 dpi 로 픽셀을 계산. 설정 저장 후 다시 띄움(wvkbd 는 높이를 시작할 때만 받음)
   vkb size up | down                 프리셋을 한 단계 크게/작게
   vkb size cycle                     small → medium → large → small (터치 버튼용: 한 번 탭하면 다음 크기)
-  vkb mode <dock|float|toggle>       하단 고정(전체 폭) / 플로팅(가운데 좁은 폭, 창을 줄이지 않고 위에 겹침). 키보드 안의 ⧉ 키도 같은 동작
+  vkb mode <dock|float|toggle>       하단 고정(창이 줄어듦) / 플로팅(화면 아래에서 띄워 창 위에 겹침). 둘 다 같은 폭(가운데). 키보드 안의 ⧉ 키도 같은 동작
+  vkb keywidth <mm>                  키 한 개 폭(8~30mm). 키보드 폭 = 15키 × 이 값
   vkb waybar [toggle|size|mode]      waybar 사용자 지정 모듈용 JSON. 노트북 모드에서는 키보드가 떠 있을 때만 보임(텐트/태블릿에서 항상 보임)
   vkb args                           wvkbd 실행 인자(한 줄에 하나): 화면 물리 크기로 계산한 높이/폭/글자 크기, 모드, 레이어
   vkb status                         상태 요약 (JSON 이면 --json)
@@ -18,7 +19,7 @@ wvkbd 는 패치(mods/_data/wvkbd/float-hangul-numrow.patch)를 적용해 쓴다
 접고 펴기는 시그널(SIGUSR1 숨김 / SIGUSR2 표시 / SIGRTMIN 토글)로 한다.
 
 크기: 키 한 줄 높이를 mm 로 정하고 화면 물리 크기(hyprctl monitors 의 physicalWidth)로 픽셀을 계산한다(가로 배열 5줄, 세로 배열 6줄).
-플로팅 폭은 13키 × 키 폭(기본 14.5mm), 글자 크기는 줄 높이에 비례.
+키보드 폭은 도킹/플로팅 모두 15키 × 키 폭(기본 16mm)으로 가운데에 두고(화면 전체 폭으로 늘리지 않음), 글자 크기는 줄 높이에 비례.
 
 창 가림 방지(하단 고정일 때만): wvkbd 는 기본으로 하단 배타 영역(exclusive zone)을 요청해서 타일/최대화 창은 자동으로 줄어든다. 떠 있는(floating) 창은
 영역과 상관없이 그대로라 가려질 수 있으므로, 보일 때 키보드 윗면보다 아래로 내려온 창만 키보드 위로 맞추고(높이를 줄이고 부족하면 위로 이동),
@@ -35,8 +36,8 @@ import time
 
 PRESETS = {"small": 8.0, "medium": 10.0, "large": 12.5}      # 키 한 줄 높이(mm)
 ORDER = ["small", "medium", "large"]
-KEY_MM = 14.5               # 플로팅일 때 키 한 개 폭(mm)
-LAND_ROWS, PORT_ROWS, LAND_UNITS = 5, 6, 13
+KEY_MM = 16.0               # 키 한 개 폭(mm). 키보드 폭 = 15키 × 이 값(도킹/플로팅 공통, 화면 전체 폭으로 늘리지 않음)
+LAND_ROWS, PORT_ROWS, LAND_UNITS = 5, 6, 15
 FLOAT_MARGIN = 12           # 플로팅 키보드와 화면 아래 사이(px)
 DEFAULT_GEOM = {"w": 2560, "h": 1600, "mm_w": 340.0, "mm_h": 220.0}
 MIN_WINDOW_H = 260          # 맞춘 뒤 창 높이가 이보다 작아지면 줄이지 않고 위로 옮김
@@ -133,7 +134,7 @@ def compute_layout(row_mm: float, key_mm: float, geom: dict) -> dict:
     land = int(min(round(row * LAND_ROWS), cap))
     port = int(min(round(row * PORT_ROWS), cap))
     row_px = land / LAND_ROWS
-    return {"land": land, "port": port, "float_width": int(min(round(LAND_UNITS * key_mm * ppm), geom["w"])),
+    return {"land": land, "port": port, "width": int(min(round(LAND_UNITS * key_mm * ppm), geom["w"])),
             "font_pt": int(max(12, min(32, round(row_px * 0.24)))), "ppm": round(ppm, 3)}
 
 
@@ -190,7 +191,7 @@ def geom() -> dict:
 def wvkbd_args(c: dict, g: dict) -> list[str]:
     L = compute_layout(row_mm_of(c["size"]), float(c["key_mm"]), g)
     a = ["-H", str(L["port"]), "-L", str(L["land"]), "--fn", f"NanumGothic {L['font_pt']}", "--hidden"]
-    a += ["--float-width", str(L["float_width"]), "--float-margin", str(FLOAT_MARGIN)]
+    a += ["--width", str(L["width"]), "--float-margin", str(FLOAT_MARGIN)]
     if c["mode"] == "float":
         a.append("--float")
     if c["layers"]:
@@ -337,6 +338,24 @@ def main(argv: list[str]) -> int:
         save_conf(c)
         restart(vis)
         refresh_bar()
+        return 0
+    if cmd == "keywidth":
+        try:
+            mm = float(arg)
+        except ValueError:
+            mm = 0
+        if not 8 <= mm <= 30:
+            print("사용: vkb keywidth <8~30(mm)>", file=sys.stderr)
+            return 2
+        c = load_conf()
+        if mm == float(c["key_mm"]):
+            return 0
+        vis = bool(kb_layer())
+        if vis:
+            fit_windows(False)
+        c["key_mm"] = mm
+        save_conf(c)
+        restart(vis)
         return 0
     if cmd == "mode":
         c = load_conf()

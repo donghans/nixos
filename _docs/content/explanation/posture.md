@@ -96,3 +96,11 @@ Hyprland 0.55 가 노출하는 프로토콜(`wayland-info`로 확인): `zwp_virt
 ### 알려진 한계: 터치스크린으로는 창 이동/크기 조절이 안 됨
 Hyprland 의 제스처 클래스는 전부 터치패드용(`TrackpadGesture`)이고 터치스크린용은 워크스페이스 스와이프(`gestures:workspace_swipe_touch`)뿐이다. `Super`+드래그는 마우스 버튼 바인딩(`bindm`)이라 터치에는 적용되지 않고,
 터치는 클라이언트에 터치 이벤트로 그대로 전달된다(그래서 클릭/우클릭이 섞여 들어가는 것처럼 보일 수 있음). 설정으로 고칠 수 없는 컴포지터의 한계라서, 태블릿 모드에서는 창을 옮길 일이 없게 만드는 쪽(창 최대화 등)이 대안.
+
+### 터치 제스처 플러그인(hyprgrass): 시도했으나 Hyprland 가 크래시해서 꺼 둠 (2026-10-17)
+- 목적: 터치로 창 이동(3손가락 길게 눌러 끌기)/크기 조절/워크스페이스 스와이프. `mods/gui/base/core.touch.nix` 에 구성이 남아 있고 `enableHyprgrass = false` 로 비활성.
+- nixpkgs 의 hyprgrass(2025-10)는 Hyprland 0.55 와 컴파일이 안 돼서, 업스트림 `hyprpm.toml` 이 "Hyprland v0.55.2(39d7e209) ↔ hyprgrass 3236fbb1" 로 고정한 커밋을 직접 빌드(wf-touch 는 테스트용 doctest 링크 때문에 `-Dtests=disabled`). 빌드와 생성된 Lua 문법은 통과.
+- **결과**: 적용하자 실행 중이던 Hyprland 가 `SEGV`. 크래시 리포트 3건 모두 스택이 `libhyprgrass.so(pluginInit+0x61e)` ← `CPluginSystem::loadPlugin`(로드할 때마다 같은 위치, 재현됨). 설정에 로드가 남아 있어서 로그인(tuigreet)할 때마다 반복 크래시했다.
+  `pcall` 로 감싸도 소용없다(Lua 오류가 아니라 네이티브 크래시).
+- 원인은 모름(버전 고정 커밋을 쓰고 헤더도 같은 nixpkgs hyprland 0.55.2 인데 pluginInit 안에서 죽음). 다시 시도하려면 실제 세션이 아니라 격리된 환경(중첩 Hyprland)에서 먼저 로드해 볼 것.
+- 교훈: 플러그인 로드는 **실행 중인 세션에서 시험하면 안 된다**. 이번엔 "적용 전 확인받기"로 해 둔 구성을 이미 커밋해 둔 상태에서 다른 변경(`nixup home`)을 적용하다가 같이 들어가 버렸다(적용 안 할 것은 커밋하지 않거나 처음부터 꺼 둘 것).
