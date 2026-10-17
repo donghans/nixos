@@ -39,6 +39,25 @@
       ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:brightness -h int:value:"$BRT" -u low "Brightness" "$BRT%"
     '';
 
+    # 덮개를 닫으면 화면을 끄고(백라이트 0), 열면 원래 밝기로 복원. dpms(화면 출력 끄기/켜기)는 쓰지 않는다:
+    # 이 기기(i915 + Hyprland 0.55)에서 `dpms enable` 뒤에 화면이 다시 켜지지 않고 까맣게 남아(커널은 On, 백라이트 정상) hyprlock 이 떠 있어도 안 보였고
+    # tty 를 옮겼다 와야 복구됐다(2026-10-17 잠금 없이도 재현). 백라이트만 쓰면 모드 재설정이 없다.
+    # 밝기는 닫을 때 한 번만 저장(이미 0 이면 덮어쓰지 않음 → 닫힘이 두 번 와도 원래 밝기를 잃지 않음).
+    lidScreen = pkgs.writeShellScriptBin "lid-screen" ''
+      f="''${XDG_RUNTIME_DIR:-/tmp}/lid_brightness"
+      b=${pkgs.brightnessctl}/bin/brightnessctl
+      case $1 in
+        off)
+          cur=$($b get)
+          if [ "$cur" -gt 0 ] 2>/dev/null; then echo "$cur" > "$f"; fi
+          $b -q set 0
+          ;;
+        on)
+          if [ -s "$f" ]; then $b -q set "$(cat "$f")" && rm -f "$f"; fi
+          ;;
+      esac
+    '';
+
     # 터치패드 토글 스크립트 (Laptop 전용)
     toggleTouchpad = pkgs.writeShellScriptBin "hypr-toggle-touchpad" ''
       if [ "$(${config.posture.cli}/bin/posture get mode)" != laptop ]; then
@@ -198,6 +217,7 @@
         deviceMenu
         volumeControl
         brightnessControl
+        lidScreen
       ];
 
       posture.consumers = lib.optionals (config.workspace.type == "laptop") ["${inputPolicy}/bin/hypr-input-policy"];
@@ -226,8 +246,8 @@
           "${config.wayland.windowManager.hyprland.touchpadToggleKey}, exec, ${deviceMenu}/bin/hypr-device-menu"
 
           # 덮개 스위치 (로그인 잠금 및 전원 관리)
-          ", switch:on:Lid Switch, exec, loginctl lock-session && hyprctl dispatch \"hl.dsp.dpms({ action = 'disable' })\"${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd != "") " && ${config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd}"}"
-          ", switch:off:Lid Switch, exec, hyprctl dispatch \"hl.dsp.dpms({ action = 'enable' })\"${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd != "") " && ${config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd}"}"
+          ", switch:on:Lid Switch, exec, loginctl lock-session; ${lidScreen}/bin/lid-screen off${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd != "") "; ${config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd}"}"
+          ", switch:off:Lid Switch, exec, ${lidScreen}/bin/lid-screen on${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd != "") "; ${config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd}"}"
         ];
       };
     };

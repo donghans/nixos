@@ -119,3 +119,13 @@ tent/tablet 에서 기기를 돌리면 내장 화면과 터치가 같이 돈다.
   `pcall` 로 감싸도 소용없다(Lua 오류가 아니라 네이티브 크래시).
 - 원인은 모름(버전 고정 커밋을 쓰고 헤더도 같은 nixpkgs hyprland 0.55.2 인데 pluginInit 안에서 죽음). 다시 시도하려면 실제 세션이 아니라 격리된 환경(중첩 Hyprland)에서 먼저 로드해 볼 것.
 - 교훈: 플러그인 로드는 **실행 중인 세션에서 시험하면 안 된다**. 이번엔 "적용 전 확인받기"로 해 둔 구성을 이미 커밋해 둔 상태에서 다른 변경(`nixup home`)을 적용하다가 같이 들어가 버렸다(적용 안 할 것은 커밋하지 않거나 처음부터 꺼 둘 것).
+
+### 덮개를 열면 화면이 까만 채로 남던 문제 (2026-10-17)
+- 증상: 덮개를 닫았다 열면 hyprlock 은 떠 있고(IR 카메라 불, 키보드 입력도 들어감) 화면에는 아무것도 안 보이고, tty 를 옮겼다 돌아오면 복구.
+- 원인(재현·확인): 덮개 바인딩이 `hyprctl dispatch dpms disable/enable` 을 썼는데 **`dpms enable` 뒤에 화면이 다시 켜지지 않음**. 잠금 없이 `dpms disable` → `enable` 만 해도 재현됨.
+  그때 커널 `/sys/class/drm/card1-eDP-1/dpms` 는 `On`, Hyprland `dpmsStatus=true`, 백라이트 96000 으로 모두 정상으로 보이는데 화면만 까맣다(tty 전환의 전체 모드 재설정이 복구).
+  덤으로 화면이 꺼진 동안 hyprlock 이 해제를 마무리하지 못하고 화면이 켜지는 순간에야 끝났다(`authenticated` 와 `Unlocking session` 이 5초 차이).
+  닫을 때 hyprlock 이 배경용 화면 캡처를 기다리다 `Gathering resources timed out after 2000 milliseconds` 로 2초 지연되는 것도 같은 원인(꺼진 화면은 캡처가 안 됨). dpms 없이 잠그면 17ms.
+- 왜 dpms 가 안 켜지는지는 모름(i915 + `i915.enable_psr=1` + Hyprland 0.55.2. PSR 의심은 하지만 확인 안 함. 화면이 까만 동안 `grim` 으로 컴포지터가 그리는지 보는 시험은 하지 않았다).
+- 조치: dpms 를 쓰지 않고 **백라이트만** 끄고 켬(`lid-screen off|on`, `brightnessctl` 사용, 닫을 때 밝기를 한 번만 저장해 닫힘이 두 번 와도 원래 밝기를 잃지 않음). 모드 재설정이 없어 이 경로의 문제가 생기지 않는다.
+- 확인(사용자): 백라이트 시험 후 화면 정상, 실제 덮개를 닫았다 열어도 정상. 오래 닫아 둔 뒤 열기는 확인 중.
