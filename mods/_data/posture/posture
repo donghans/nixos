@@ -3,11 +3,11 @@
 
   posture                 사람이 읽는 요약
   posture json            원본 상태(JSON) — 안전한 기본값 처리가 된 것
-  posture get <키>        mode | angle | screen | keyboard | orientation   (값만 출력)
+  posture get <키>        mode | angle | screen | keyboard | orientation | rotation | flat   (값만 출력. rotation: 기기를 시계방향으로 돌린 각도 0/90/180/270)
   posture watch           바뀔 때마다 한 줄씩 출력 (Ctrl+C 로 종료)
 
 안전한 기본값을 **여기서 한 곳에** 처리한다: 서비스가 실행 중이 아니거나, 상태 파일이 없거나 깨졌거나, 스키마가 다르거나,
-너무 오래됐으면 mode=laptop, orientation=null 로 본다 → 센서/서비스 문제로 키보드가 꺼진 채 남지 않는다.
+너무 오래됐으면 mode=laptop, rotation=0 으로 본다 → 센서/서비스 문제로 키보드가 꺼진 채 남지 않는다.
 시험용 환경변수: POSTURE_STATE_DIR, POSTURE_NO_SYSTEMCTL=1(서비스 실행 여부 확인 생략), POSTURE_SYSTEMCTL(systemctl 대신 쓸 명령)
 """
 import json
@@ -19,7 +19,7 @@ import time
 STATE = os.path.join(os.environ.get("POSTURE_STATE_DIR", "/run/posture"), "state.json")
 SCHEMA = 1
 SAFE = {"schema": SCHEMA, "ts": 0, "mode": "laptop", "hinge": {"angle": None, "screen": None, "keyboard": None},
-        "orientation": None, "sensors": {"hinge": "unavailable"}, "source": "default"}
+        "orientation": {"rotation": 0, "flat": False}, "sensors": {"hinge": "unavailable"}, "source": "default"}
 
 
 def active() -> bool:
@@ -44,6 +44,10 @@ def load() -> dict:
 def field(d: dict, key: str):
     if key in ("angle", "screen", "keyboard"):
         return d["hinge"].get(key)
+    if key in ("rotation", "flat"):
+        o = d.get("orientation")
+        o = o if isinstance(o, dict) else {}
+        return o.get(key, 0 if key == "rotation" else False)
     return d.get(key)
 
 
@@ -53,7 +57,7 @@ def main(argv: list[str]) -> int:
         print(json.dumps(load(), ensure_ascii=False))
     elif cmd == "get":
         if len(argv) < 2:
-            print("사용: posture get <mode|angle|screen|keyboard|orientation>", file=sys.stderr)
+            print("사용: posture get <mode|angle|screen|keyboard|orientation|rotation|flat>", file=sys.stderr)
             return 2
         v = field(load(), argv[1])
         print("" if v is None else v)

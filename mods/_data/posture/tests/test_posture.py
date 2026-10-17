@@ -26,6 +26,18 @@ v = pd.decode(bytes.fromhex("8900800080005f015f01574f"), lay)     # 실측 12바
 check("실측 레코드 해석: 힌지 137, 화면 128, 키보드 351", (v["in_angl0"], v["in_angl1"], v["in_angl2"]) == (137, 128, 351), str(v))
 check("부호 있는 16비트", pd.decode(struct.pack("<III", (1 << 16) | 0xFFFF, 0, 0), lay)["in_angl0"] == -1)
 
+# 화면 방향(실측 5자세: 태블릿 상태로 들고 잰 값, 비스듬한 상태 포함)
+POSES = {1: (-0.10, -8.40, -5.24, 0), 2: (8.84, -0.70, -4.08, 90), 3: (0.17, 8.95, -3.84, 180), 4: (-8.77, -0.24, -4.01, 270)}
+for n, (x, y, z, want) in POSES.items():
+    check(f"실측 자세 {n}: 회전 {want}° (처음부터 판정)", pd.orient_classify(0, False, x, y) == (want, False) or want != 0 and pd.orient_classify(0, False, x, y)[0] == want, str(pd.orient_classify(0, False, x, y)))
+check("실측 자세 5(평평): 눕힘, 직전 방향 유지", pd.orient_classify(90, False, 0.07, 0.30) == (90, True))
+check("눕혀 있는 동안 노이즈로 방향이 바뀌지 않음", pd.orient_classify(180, True, 2.0, 2.0) == (180, True))
+check("눕힘에서 나오려면 더 기울어야 함(히스테리시스 2.5→3.5)", pd.orient_classify(0, True, 0.0, -3.0)[1] is True and pd.orient_classify(0, True, 0.0, -3.6) == (0, False))
+check("방향 경계 히스테리시스: 0°에서 50° 기울어도 유지", pd.orient_classify(0, False, 7.0, -5.8)[0] == 0)
+check("60° 넘게 벗어나야 바뀜(0→90)", pd.orient_classify(0, False, 9.0, -3.0)[0] == 90)
+check("반대쪽으로 한 번에 돌려도 가까운 방향(0→180)", pd.orient_classify(0, False, 0.0, 9.0)[0] == 180)
+check("정확히 270 → 0 으로의 이동(0 과 360 경계)", pd.orient_classify(270, False, -0.5, -9.0)[0] == 0)
+
 # ───── 데몬 통합: 가짜 sysfs + FIFO ─────
 T = tempfile.mkdtemp()
 IIO, DEV, ST = f"{T}/iio", f"{T}/dev", f"{T}/run"
@@ -35,9 +47,16 @@ open(f"{d}/name", "w").write("hinge\n"); open(f"{d}/buffer/enable", "w").write("
 for i in range(3):
     open(f"{d}/scan_elements/in_angl{i}_en", "w").write("0\n"); open(f"{d}/scan_elements/in_angl{i}_index", "w").write(f"{i}\n")
     open(f"{d}/scan_elements/in_angl{i}_type", "w").write("le:s16/32>>0\n")
+a = f"{IIO}/iio:device1"
+os.makedirs(a)
+open(f"{a}/name", "w").write("accel_3d\n"); open(f"{a}/in_accel_scale", "w").write("0.000009806\n")
+def set_accel(x, y, z):
+    for n, v in zip("xyz", (x, y, z)): open(f"{a}/in_accel_{n}_raw", "w").write(f"{round(v / 0.000009806)}\n")
+set_accel(-0.10, -8.40, -5.24)        # 정방향 가로
+open(f"{d}/in_angl_hysteresis", "w").write("1.000000\n")
 os.mkfifo(f"{DEV}/iio:device7")
 wfd = os.open(f"{DEV}/iio:device7", os.O_RDWR)       # 쓰는 쪽을 먼저 열어 둬야 데몬의 open 이 막히지 않음
-env = dict(os.environ, POSTURE_IIO=IIO, POSTURE_DEV=DEV, POSTURE_STATE_DIR=ST, POSTURE_DEBOUNCE="0.4", PYTHONDONTWRITEBYTECODE="1")
+env = dict(os.environ, POSTURE_IIO=IIO, POSTURE_DEV=DEV, POSTURE_STATE_DIR=ST, POSTURE_DEBOUNCE="0.4", POSTURE_ACCEL_PERIOD="0.1", POSTURE_ORIENT_DEBOUNCE="0.3", PYTHONDONTWRITEBYTECODE="1")
 proc = subprocess.Popen([sys.executable, "-I", f"{ROOT}/posture_daemon.py"], env=env)
 def rec(angle, screen=0, kb=0): return struct.pack("<III", angle, screen, kb)
 def state():
@@ -52,6 +71,7 @@ def wait(pred, t=3.0):
     return state()
 
 time.sleep(0.5)
+check("시작하면 hysteresis 를 썼다가 원래 값으로 되돌림(가만히 있는 센서가 첫 샘플을 내보내게)", open(f"{d}/in_angl_hysteresis").read().strip() == "1.000000")
 check("시작하면 센서가 켜짐(buffer/enable=1, 각도 채널 3개 활성)", open(f"{d}/buffer/enable").read().strip() == "1" and all(open(f"{d}/scan_elements/in_angl{i}_en").read().strip() == "1" for i in range(3)))
 os.write(wfd, rec(138, 129, 351))
 s = wait(lambda s: s["hinge"]["angle"] == 138)
@@ -68,12 +88,24 @@ s = wait(lambda s: s["mode"] == "tent")
 check("268° 가 유지되면 tent", s["mode"] == "tent" and s["hinge"]["angle"] in (138, 268), str(s))
 os.write(wfd, rec(359, 179, 178)); s = wait(lambda s: s["mode"] == "tablet")
 check("359° → tablet", s["mode"] == "tablet", str(s))
+set_accel(8.84, -0.70, -4.08); time.sleep(0.8)
+s = state()
+check("tablet 에서 기기를 시계방향 90° 돌리면 rotation 90", s["orientation"]["rotation"] == 90 and s["orientation"]["flat"] is False and s["sensors"]["accel"] == "ok", str(s))
+set_accel(0.17, 8.95, -3.84); time.sleep(0.2); set_accel(8.84, -0.70, -4.08); time.sleep(0.8)
+check("순간적으로 다른 방향을 거쳐도 확정되지 않음(디바운스) — 다시 90", state()["orientation"]["rotation"] == 90, str(state()))
+set_accel(0.07, 0.30, -9.74); time.sleep(0.8)
+check("책상에 눕히면 flat=true, 방향은 90 그대로(회전 고정)", state()["orientation"] == {"rotation": 90, "flat": True}, str(state()))
+set_accel(-8.77, -0.24, -4.01); s = wait(lambda s: s["orientation"]["rotation"] == 270)
+check("다시 세우면(반시계 90°) rotation 270, flat=false", s["orientation"] == {"rotation": 270, "flat": False}, str(s))
 os.write(wfd, rec(320)); time.sleep(0.8)
 check("320° 는 tablet 유지(히스테리시스)", state()["mode"] == "tablet" and state()["hinge"]["angle"] == 320, str(state()))
 os.write(wfd, rec(200)); time.sleep(0.1); os.write(wfd, rec(340)); time.sleep(0.8)
 check("순간적인 튐(200° 다음 바로 340°)은 모드를 바꾸지 않음", state()["mode"] == "tablet", str(state()))
 os.write(wfd, rec(96)); s = wait(lambda s: s["mode"] == "laptop")
 check("96° → laptop (한 번에 두 단계)", s["mode"] == "laptop", str(s))
+check("laptop 으로 돌아오면 방향은 0 으로 초기화", s["orientation"] == {"rotation": 0, "flat": False}, str(s))
+set_accel(8.84, -0.70, -4.08); time.sleep(0.8)
+check("laptop 에서는 센서가 돌아가 있어도 방향을 읽지 않음(0 유지)", state()["orientation"]["rotation"] == 0, str(state()))
 os.write(wfd, rec(268) + rec(110)); time.sleep(1.0)
 check("한 번에 여러 레코드가 와도 마지막 값으로 정리됨", state()["mode"] == "laptop" and state()["hinge"]["angle"] == 110, str(state()))
 os.write(wfd, rec(359)); wait(lambda s: s["mode"] == "tablet")
@@ -94,7 +126,7 @@ check("깨진 파일 → 안전한 기본값 laptop", cli("get", "mode") == "lap
 json.dump({"schema": 99, "mode": "tablet"}, open(f"{ST}/state.json", "w"))
 check("스키마가 다르면 안전한 기본값", cli("get", "mode") == "laptop")
 os.remove(f"{ST}/state.json")
-check("파일이 없으면 안전한 기본값", cli("get", "mode") == "laptop" and cli("get", "orientation") == "")
+check("파일이 없으면 안전한 기본값(laptop, 회전 0)", cli("get", "mode") == "laptop" and cli("get", "rotation").strip() == "0" and cli("get", "flat").strip() == "False")
 json.dump({"schema": 1, "ts": 1, "mode": "tablet", "hinge": {}, "sensors": {}}, open(f"{ST}/state.json", "w"))
 # 서비스 상태 확인은 가짜 systemctl 로(실제 시스템의 서비스 상태에 시험이 영향을 받지 않게): 종료 코드 1 = 실행 중 아님, 0 = 실행 중
 for code, want in ((1, "laptop"), (0, "tablet")):
@@ -102,5 +134,9 @@ for code, want in ((1, "laptop"), (0, "tablet")):
     open(fake, "w").write(f"#!/bin/sh\nexit {code}\n"); os.chmod(fake, 0o755)
     got = subprocess.run([sys.executable, "-I", f"{ROOT}/posture", "get", "mode"], capture_output=True, text=True, env=dict(os.environ, POSTURE_STATE_DIR=ST, POSTURE_SYSTEMCTL=fake)).stdout.strip()
     check(f"서비스 {'실행 중 아님' if code else '실행 중'}이면 파일이 tablet 일 때 {want}", got == want, got)
+json.dump({"schema": 1, "ts": int(time.time()), "mode": "tablet", "hinge": {"angle": 359, "screen": 1, "keyboard": 2}, "orientation": {"rotation": 270, "flat": True}, "sensors": {}}, open(f"{ST}/state.json", "w"))
+check("CLI get rotation / flat", cli("get", "rotation").strip() == "270" and cli("get", "flat").strip() == "True", cli("get", "rotation"))
+json.dump({"schema": 1, "ts": int(time.time()), "mode": "tablet", "hinge": {"angle": 359, "screen": 1, "keyboard": 2}, "orientation": "엉뚱한 값", "sensors": {}}, open(f"{ST}/state.json", "w"))
+check("orientation 형식이 이상하면 rotation 0 (오류 없이)", cli("get", "rotation").strip() == "0")
 print(f"\nposture {ok} 통과 / {bad} 실패")
 sys.exit(1 if bad else 0)

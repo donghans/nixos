@@ -170,4 +170,28 @@ reset(); r = subprocess.run(["sh", "-c", f"sleep 4 | {sys.executable} -I {DC} se
 check("CLI set --confirm: 시간 안에 입력이 없으면 되돌림", mons()["DP-4"].width == 3840 and not pending(), r.stderr[-120:])
 kill_units()
 
+# ───── 화면 회전 ─────
+def setpos(mode, rot):
+    json.dump({"mode": mode, "rotation": rot}, open(os.environ["TESTS_TMP"] + "/posture.json", "w"))
+def overlaps(): return [l for l in open(FS + ".events").read().splitlines() if "OVERLAP" in l] if os.path.exists(FS + ".events") else []
+reset(); run("layout", "extend"); rc = run("rotate", "1"); m = mons()
+check("rotate 1: 내장 화면 transform=1, 상태에 기록", rc == 0 and m["eDP-1"].transform == 1 and dc.load_state()["monitors"]["eDP-1"]["transform"] == 1)
+check("회전하면 확장 배치가 회전된 논리 크기(1600x2560)로 다시 계산돼 외장이 가운데 위에(x=(1600-3840)/2)", (m["DP-4"].x, m["DP-4"].y) == (-1120, -2560), str((m["DP-4"].x, m["DP-4"].y)))
+check("회전해도 모니터끼리 겹치지 않음", not overlaps(), str(overlaps()))
+run("layout", "internal"); check("레이아웃을 바꿔도 회전이 유지됨", mons()["eDP-1"].transform == 1)
+run("layout", "extend"); run("restore"); check("restore 해도 회전이 유지됨(되돌리지 않음)", mons()["eDP-1"].transform == 1)
+reset(); run("layout", "extend"); run("rotate", "3"); calls_before = len(open(FS + ".events").read().splitlines()) if os.path.exists(FS + ".events") else 0
+run("rotate", "3"); calls_after = len(open(FS + ".events").read().splitlines()) if os.path.exists(FS + ".events") else 0
+check("이미 그 방향이면 아무것도 적용하지 않음(깜빡임 방지)", calls_before == calls_after, f"{calls_before} {calls_after}")
+check("rotate 잘못된 값은 거부(2)", run("rotate", "7") == 2 and run("rotate", "x") == 2)
+reset(); run("layout", "extend"); setpos("tablet", 90); run("rotate", "auto"); check("rotate auto: tablet 에서 기기 시계 90° → transform 1", mons()["eDP-1"].transform == 1)
+setpos("tablet", 270); run("rotate", "auto"); check("rotate auto: 270° → transform 3", mons()["eDP-1"].transform == 3)
+setpos("tablet", 180); run("rotate", "auto"); check("rotate auto: 180° → transform 2", mons()["eDP-1"].transform == 2)
+setpos("laptop", 90); run("rotate", "auto"); check("rotate auto: laptop 이면 회전값과 무관하게 0 으로 복귀", mons()["eDP-1"].transform == 0)
+setpos("tablet", 90); run("rotate", "auto"); run("layout", "external"); rc = run("rotate", "auto")
+check("꺼진 내장 화면은 회전하지 않음(오류 없이)", rc == 0 and mons()["eDP-1"].disabled)
+reset(); run("layout", "mirror"); setpos("tablet", 90); rc = run("rotate", "auto")
+check("미러인 내장 화면은 회전하지 않음", rc == 0 and mons()["eDP-1"].transform == 0)
+check("target_transform 순수 함수: laptop 은 항상 0", dc.target_transform(90, "laptop") == 0 and dc.target_transform(270, "tent") == 3 and dc.target_transform(45, "tablet") == 0)
+
 print(f"\n코어 {ok} 통과 / {fail} 실패"); sys.exit(1 if fail else 0)

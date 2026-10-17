@@ -43,6 +43,7 @@ PENDING_FILE = os.path.join(STATE_DIR, "pending.json")  # 확인 대기 중인 �
 TIMER_UNIT = "displayctl-revert"
 SYSTEMD_RUN = os.environ.get("DISPLAYCTL_SYSTEMD_RUN", "systemd-run")
 SYSTEMCTL = os.environ.get("DISPLAYCTL_SYSTEMCTL", "systemctl")
+POSTURE = os.environ.get("DISPLAYCTL_POSTURE", "posture")
 NOTIFY = os.environ.get("DISPLAYCTL_NOTIFY", "@notify_send@")  # 비어 있으면 알림 생략
 SETTLE = float(os.environ.get("DISPLAYCTL_SETTLE", "0.8"))  # 적용 뒤 실제 모드를 읽기 시작하기까지 기다리는 시간(초)
 VERIFY_TIMEOUT = float(os.environ.get("DISPLAYCTL_VERIFY_TIMEOUT", "4"))  # 검증이 통과할 때까지 기다리는 최대 시간(초)
@@ -128,8 +129,8 @@ class Mon:
     def mode(self) -> str:
         return fmt_mode(self.width, self.height, self.hz)
 
-    def logical(self, mode: str | None = None, scale: float | None = None) -> tuple[int, int]:
-        """배치에 쓰는 논리 크기 (해상도 / 배율, 회전 90/270 이면 가로세로 교환)"""
+    def logical(self, mode: str | None = None, scale: float | None = None, transform: int | None = None) -> tuple[int, int]:
+        """배치에 쓰는 논리 크기 (해상도 / 배율, 회전 90/270 이면 가로세로 교환). transform 을 주면 현재 값 대신 그것으로 계산"""
         w, h = self.width, self.height
         if mode and mode != "preferred":
             pm = parse_mode(mode)
@@ -137,7 +138,8 @@ class Mon:
                 w, h = pm[0], pm[1]
         sc = scale if scale else self.scale
         lw, lh = round(w / sc), round(h / sc)
-        return (lh, lw) if self.transform % 2 == 1 else (lw, lh)
+        tr = self.transform if transform is None else transform
+        return (lh, lw) if tr % 2 == 1 else (lw, lh)
 
 
 def parse_mode(s: str):
@@ -254,9 +256,9 @@ def build(mons: list[Mon], st: dict) -> tuple[dict, str]:
     enabled = {"extend": internals + externals, "mirror": internals + externals, "internal": internals, "external": externals}[layout]
     en = {m.name for m in enabled}
 
-    def intent(m: Mon) -> tuple[str, float]:
+    def intent(m: Mon) -> tuple[str, float, int]:
         s = st["monitors"].get(m.name, {})
-        return s.get("mode") or m.mode, float(s.get("scale") or m.scale)
+        return s.get("mode") or m.mode, float(s.get("scale") or m.scale), int(s.get("transform") or 0) % 4
 
     cfg: dict[str, dict] = {}
     for m in mons:
@@ -267,9 +269,9 @@ def build(mons: list[Mon], st: dict) -> tuple[dict, str]:
     placed: dict[str, tuple[int, int]] = {}
     sizes: dict[str, tuple[int, int]] = {}
     for m in enabled:
-        mode, scale = intent(m)
-        sizes[m.name] = m.logical(mode, scale)
-        cfg[m.name] = {"mode": mode, "scale": scale}
+        mode, scale, tr = intent(m)
+        sizes[m.name] = m.logical(mode, scale, tr)
+        cfg[m.name] = {"mode": mode, "scale": scale, "transform": tr}
 
     layout_mons = [m for m in enabled if not (layout == "mirror" and m.internal)]
     order = [m.name for m in layout_mons]
@@ -322,7 +324,7 @@ def current_cfg(mons: list[Mon]) -> dict:
         if m.disabled:
             cfg[m.name] = {"disabled": True}
         else:
-            c = {"mode": m.mode, "scale": m.scale, "x": m.x, "y": m.y}
+            c = {"mode": m.mode, "scale": m.scale, "x": m.x, "y": m.y, "transform": m.transform}
             if m.mirror_of:
                 c["mirror"] = m.mirror_of
             cfg[m.name] = c
@@ -335,7 +337,7 @@ def lua_rule(name: str, c: dict) -> str:
     pos = "auto" if "x" not in c or c.get("mirror") else f'{c["x"]}x{c["y"]}'
     return (
         f'hl.monitor({{ output = "{name}", mode = "{c["mode"]}", position = "{pos}", scale = {c["scale"]}, '
-        f'disabled = false, mirror = "{c.get("mirror", "")}" }})'
+        f'transform = {int(c.get("transform") or 0)}, disabled = false, mirror = "{c.get("mirror", "")}" }})'
     )
 
 
@@ -375,7 +377,7 @@ def apply_cfg(cfg: dict, mons: list[Mon] | None = None) -> list[str]:
 
     def final_rect(n: str) -> tuple:
         c = cfg[n]
-        w, h = cur[n].logical(c["mode"], c["scale"])
+        w, h = cur[n].logical(c["mode"], c["scale"], c.get("transform"))
         return (c["x"], c["y"], w, h)
 
     def cur_rect(n: str) -> tuple:
@@ -441,6 +443,8 @@ def _check(cfg: dict) -> list[str]:
             issues.append(f"{name}: 주사율 {want[2]:g}Hz 요청 → 실제 {m.hz:.2f}Hz (이 모니터가 받아들이지 않음)")
         if "x" in c and (m.x, m.y) != (c["x"], c["y"]):
             issues.append(f"{name}: 위치 {c['x']},{c['y']} 요청 → 실제 {m.x},{m.y}")
+        if "transform" in c and m.transform != int(c["transform"] or 0):
+            issues.append(f"{name}: 회전 {c['transform']} 요청 → 실제 {m.transform}")
     return issues
 
 
@@ -638,6 +642,25 @@ def op_layout(layout: str, arrange: str | None = None) -> dict:
             if arrange in ("left", "right"):
                 st["pos"][ext.name] = {"rel": arrange, "of": internal.name, "align": "center"}
     return st
+
+
+# 자세 허브의 rotation(기기를 시계방향으로 돌린 각도) → Hyprland monitor transform. 화면 내용은 기기와 반대로 돌려야 똑바로 보이므로
+# 시계방향으로 90° 돌렸으면 내용을 반시계 90° 돌린다 = wl_output "90"(= transform 1). **실제 화면에서 확인 필요**(문서 참고).
+ROTATION_TO_TRANSFORM = {0: 0, 90: 1, 180: 2, 270: 3}
+
+
+def op_rotate(mon: str, transform: int) -> dict:
+    """모니터의 회전(Hyprland transform 0~3)을 상태에 기록. 다른 값은 그대로(restore/레이아웃 변경에도 유지됨)"""
+    st = mutated_state()
+    m = next((x for x in get_monitors() if x.name == mon), None)
+    ent = st["monitors"].setdefault(mon, {"mode": m.mode if m else "preferred", "scale": m.scale if m else 1.0})
+    ent["transform"] = int(transform) % 4
+    return st
+
+
+def target_transform(rotation: int, posture_mode: str) -> int:
+    """자세/기기 회전 → 내장 화면 transform. laptop 모드에서는 항상 0(세로로 들어도 돌리지 않음)"""
+    return 0 if posture_mode == "laptop" else ROTATION_TO_TRANSFORM.get(int(rotation) % 360, 0)
 
 
 def op_set(mon: str, res: str | None = None, hz: float | None = None, scale: float | None = None, pos: dict | None = None) -> dict:
@@ -845,6 +868,36 @@ def cmd_revert_pending(a) -> int:
     return 0
 
 
+def cmd_rotate(a) -> int:
+    """displayctl rotate <0|1|2|3|auto> [monitor]. auto: 자세 허브(posture)의 방향을 내장 화면에 반영(laptop 이면 0)"""
+    mons = get_monitors()
+    internal = next((m for m in mons if m.internal), None)
+    target = next((m for m in mons if m.name == a.monitor), None) if a.monitor else internal
+    if target is None:
+        print("회전할 모니터가 없습니다", file=sys.stderr)
+        return 1
+    if a.value == "auto":
+        def pget(k: str) -> str:
+            try:
+                return subprocess.run([POSTURE, "get", k], capture_output=True, text=True, timeout=5).stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                return ""
+        mode = pget("mode") or "laptop"
+        rot = pget("rotation")
+        want = target_transform(int(rot) if rot.isdigit() else 0, mode)
+    elif a.value in ("0", "1", "2", "3"):
+        want = int(a.value)
+    else:
+        print("사용: displayctl rotate <0|1|2|3|auto> [monitor]  (Hyprland transform: 1=90° 2=180° 3=270°)", file=sys.stderr)
+        return 2
+    if target.disabled or target.mirror_of:
+        return 0                                  # 꺼졌거나 미러인 화면은 돌리지 않음
+    if target.transform == want:
+        return 0                                  # 이미 그 방향이면 아무것도 안 함(깜빡임/불필요한 재적용 방지)
+    with locked():
+        return go(op_rotate(target.name, want), quiet=True)
+
+
 def cmd_layout(a) -> int:
     return go(op_layout(a.name, a.arrange))
 
@@ -925,6 +978,10 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("modes", help="모니터가 지원하는 해상도/주사율")
     s.add_argument("monitor")
     s.set_defaults(fn=cmd_modes)
+    s = sub.add_parser("rotate", help="화면 회전: 0~3(Hyprland transform) 또는 auto(자세 허브의 방향을 내장 화면에 반영)")
+    s.add_argument("value")
+    s.add_argument("monitor", nargs="?", help="기본은 내장 화면")
+    s.set_defaults(fn=cmd_rotate)
     s = sub.add_parser("layout", help="확장/미러/노트북만/외부만")
     s.add_argument("name", choices=list(LAYOUTS))
     s.add_argument("--arrange", choices=list(ARRANGES), help="확장 배치(가운데 정렬): stack=외부 위/노트북 아래, left=외부 왼쪽, right=외부 오른쪽")

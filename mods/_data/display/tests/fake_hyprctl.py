@@ -29,8 +29,11 @@ def check_overlap(d):
     live = [m for m in d if not m["disabled"] and m["mirrorOf"] == "none"]
     for i, a in enumerate(live):
         for b in live[i + 1:]:
-            ra = (a["x"], a["y"], round(a["width"] / a["scale"]), round(a["height"] / a["scale"]))
-            rb = (b["x"], b["y"], round(b["width"] / b["scale"]), round(b["height"] / b["scale"]))
+            def lg(m):  # 회전 90/270 이면 논리 가로세로가 바뀜(실제 Hyprland 와 같음)
+                w, h = round(m["width"] / m["scale"]), round(m["height"] / m["scale"])
+                return (h, w) if m.get("transform", 0) % 2 == 1 else (w, h)
+            ra = (a["x"], a["y"], *lg(a))
+            rb = (b["x"], b["y"], *lg(b))
             if ra[0] < rb[0] + rb[2] and rb[0] < ra[0] + ra[2] and ra[1] < rb[1] + rb[3] and rb[1] < ra[1] + ra[3]:
                 log(f"OVERLAP {a['name']} {b['name']}")
 def field(code, k):
@@ -73,6 +76,8 @@ def main(a):
         if pos and pos != "auto": px, py = pos.split("x"); m["x"], m["y"] = int(px), int(py)
         sc = field(code, "scale")
         if sc: m["scale"] = float(sc)
+        tr = field(code, "transform")
+        if tr is not None: m["transform"] = int(tr)
         check_overlap(d); save(d); print("ok"); return
     print("ok")
 main(sys.argv[1:])
