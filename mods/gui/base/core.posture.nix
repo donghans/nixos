@@ -26,13 +26,15 @@
     '';
     # 가상 키보드(wvkbd): 설정(~/.config/vkb/config.json: 높이, 레이어)을 읽어 숨긴 채로 시작. 보이기/숨기기/크기는 `vkb` 명령이 시그널·재시작으로 제어.
     # (wvkbd 는 높이를 시작할 때만 받고 숨기기 전용 키가 없어서 이 구조를 씀 — mods/_data/vkb/vkb.py 머리말 참고)
+    # 패치: 하단 줄에 접기(▼) 키와 한/영(KEY_HANGEUL, fcitx5 전환키에 Hangul 등록됨) 키 추가 — mods/_data/wvkbd/hide-hangul-keys.patch
+    wvkbd = pkgs.wvkbd.overrideAttrs (old: { patches = (old.patches or [ ]) ++ [ ../../_data/wvkbd/hide-hangul-keys.patch ]; });
     wvkbdStart = pkgs.writeShellScript "wvkbd-start" ''
       conf="$HOME/.config/vkb/config.json"
       h=$(${pkgs.jq}/bin/jq -r '.height // 360' "$conf" 2>/dev/null || echo 360)
       layers=$(${pkgs.jq}/bin/jq -r '.layers // ""' "$conf" 2>/dev/null || echo "")
       args=(-H "$h" -L "$h" --fn "NanumGothic 18" --hidden)
       [ -n "$layers" ] && args+=(-l "$layers" --landscape-layers "$layers")
-      exec ${pkgs.wvkbd}/bin/wvkbd-mobintl "''${args[@]}"
+      exec ${wvkbd}/bin/wvkbd-mobintl "''${args[@]}"
     '';
     vkbCli = pkgs.writeShellScriptBin "vkb" ''
       export VKB_POSTURE=${postureCli}/bin/posture

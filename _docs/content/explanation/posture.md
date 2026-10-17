@@ -83,6 +83,8 @@ Hyprland 0.55 가 노출하는 프로토콜(`wayland-info`로 확인): `zwp_virt
 - **자세 연동**: `posture.consumers` 에 `vkb apply-posture` 등록. 자동(기본 켜짐)이면 tent/tablet → 보임, laptop → 숨김. 멱등(이미 그 상태면 아무것도 안 함). `vkb auto off` 로 끔.
 - 실제 화면 검증(2026-10-17): 보이기 → 타일 창(Zed/kitty)이 1570→1210 으로 자동으로 줄고 떠 있는 Thunar 는 693→417 로 맞춰짐, 숨기기 → 모두 원복(기록 비움).
   크기 large(480)/small(240) 로 바꾸면 창이 다시 맞춰짐. waybar 버튼을 포인터로 눌러 `⌨`(펴기/접기), 크기 순환(M→L→S), 한/영(한↔A)이 동작하는 것을 확인.
+- **wvkbd 패치**(`mods/_data/wvkbd/hide-hangul-keys.patch`, `core.posture.nix` 의 `overrideAttrs`): 하단 줄에 `▼`(접기, 새 키 종류 `Hide` 가 자기 자신에게 SIGUSR1 을 보냄)와 `한/영`(`KEY_HANGEUL`; fcitx5 전환키에 `Hangul` 이 이미 등록돼 있어 설정 변경 없음)을 추가. 세로/가로(`Full`/`Landscape`) 배열에 적용, 스페이스 폭만 줄임.
+  실제 화면에서 `한/영` 탭으로 hangul↔keyboard-us 전환, `▼` 탭으로 키보드가 접히고 프로세스는 유지됨을 확인(포인터 클릭). 다른 레이어(`special` 등)와 `Full wide` 배열 등은 확인하지 않음. wvkbd 버전이 바뀌면 패치가 안 맞을 수 있음(빌드가 실패하므로 알 수 있음).
 - 시험: `python3 -I mods/_data/vkb/tests/test_vkb.py`(19, 맞춤/복원/크기 계획), `test_vkb_cli.py`(29, 가짜 hyprctl/systemctl 로 전체 흐름).
 - **미확인**: 손가락 터치로 waybar 버튼이 눌리는지(포인터 클릭만 확인, GTK 가 터치를 클릭으로 바꾸는 것으로 알려져 있으나 직접 확인 못 함), waybar 높이 24px 의 터치 적합성, 자세 연동의 실제 힌지 시험, 가상 키보드가 보이는 동안 잠금 화면/Hyprland reload 와의 상호작용.
 
