@@ -24,6 +24,21 @@
     postureCli = pkgs.writeShellScriptBin "posture" ''
       exec ${pkgs.python3}/bin/python3 -I ${../../_data/posture/posture} "$@"
     '';
+    # 가상 키보드(wvkbd): 설정(~/.config/vkb/config.json: 높이, 레이어)을 읽어 숨긴 채로 시작. 보이기/숨기기/크기는 `vkb` 명령이 시그널·재시작으로 제어.
+    # (wvkbd 는 높이를 시작할 때만 받고 숨기기 전용 키가 없어서 이 구조를 씀 — mods/_data/vkb/vkb.py 머리말 참고)
+    wvkbdStart = pkgs.writeShellScript "wvkbd-start" ''
+      conf="$HOME/.config/vkb/config.json"
+      h=$(${pkgs.jq}/bin/jq -r '.height // 360' "$conf" 2>/dev/null || echo 360)
+      layers=$(${pkgs.jq}/bin/jq -r '.layers // ""' "$conf" 2>/dev/null || echo "")
+      args=(-H "$h" -L "$h" --fn "NanumGothic 18" --hidden)
+      [ -n "$layers" ] && args+=(-l "$layers" --landscape-layers "$layers")
+      exec ${pkgs.wvkbd}/bin/wvkbd-mobintl "''${args[@]}"
+    '';
+    vkbCli = pkgs.writeShellScriptBin "vkb" ''
+      export VKB_POSTURE=${postureCli}/bin/posture
+      exec ${pkgs.python3}/bin/python3 -I ${../../_data/vkb/vkb.py} "$@"
+    '';
+
     # 소비자들을 차례로 실행. 하나가 실패해도 나머지는 실행하고 기록만 남김(소비자끼리 서로 영향 없음)
     cfg = config.posture;
     applyAll = pkgs.writeShellScriptBin "posture-apply" ''
@@ -53,8 +68,23 @@
     };
 
     hm = lib.mkIf isLaptop {
-      home.packages = [postureCli applyAll];
+      home.packages = [postureCli applyAll vkbCli];
       posture.cli = postureCli;
+      posture.consumers = ["${vkbCli}/bin/vkb apply-posture"];
+
+      # 가상 키보드 서비스(숨긴 채 상시 대기: 메모리만 차지, 시그널로 즉시 표시)
+      systemd.user.services.wvkbd = {
+        Unit = {
+          Description = "가상 키보드 wvkbd (숨김 상태로 대기, vkb 명령으로 제어)";
+          After = ["graphical-session.target"];
+          PartOf = ["graphical-session.target"];
+        };
+        Service = {
+          ExecStart = "${wvkbdStart}";
+          Restart = "on-failure";
+        };
+        Install.WantedBy = ["graphical-session.target"];
+      };
 
       # 상태 파일이 바뀌면 소비자를 한 번 실행. 서비스가 정지할 때도 안전한 값(laptop)이 발행되므로 같은 경로로 복원됨
       systemd.user.paths.posture-apply = {

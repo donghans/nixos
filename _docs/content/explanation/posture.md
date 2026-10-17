@@ -46,7 +46,7 @@ MSI Summit E16 Flip(360도 힌지)에서 **힌지 각도 → 사용 모드(lapto
 
 ## 다음 단계 (미구현)
 - 화면 자동 회전: 상태 스키마의 `orientation` 자리는 비워 둠. 가속도로 방향을 판정하려면 센서 부호 교정이 필요하고, `displayctl` 이 모니터 규칙에 `transform` 을 넣지 않아 회전 후 `displayctl restore` 가 회전을 풀어버리므로 `displayctl` 에 회전 상태를 먼저 추가해야 함.
-- 가상 키보드: 아래 조사 결과. 아직 설치/연결은 안 했음(결정 대기).
+- 화면 자동 회전: 위 설명 참고(미구현).
 
 ## 가상 키보드 조사 (2026-10-17)
 기준: 텐트/태블릿에서는 내장 키보드가 꺼지므로 화면에서 입력할 수단이 필요. **한글 입력(fcitx5-hangul)과 충돌하지 않아야** 함.
@@ -70,5 +70,22 @@ Hyprland 0.55 가 노출하는 프로토콜(`wayland-info`로 확인): `zwp_virt
 - 옵션: `-H`/`-L` 세로/가로 높이, `--fn` 글꼴, `--non-exclusive`(창과 겹침 허용, 아니면 작업 영역을 줄임), 색상 지정.
 - 한계: 한/영 전환이 `Ctr`+스페이스 두 번 누름(전용 키 없음), 화면 폭 전체를 차지해서 크기/위치 조정 필요, 터치(손가락) 입력은 직접 시험하지 못함(포인터 클릭으로만 확인).
 
-### 자세 허브와 연결하는 방법(구상, 미구현)
-`wvkbd-mobintl --hidden` 을 사용자 서비스로 상시 띄워 두고(메모리만 차지), `posture.consumers` 에 "tent/tablet 이면 SIGUSR2, laptop 이면 SIGUSR1" 소비자를 추가. 멱등이라 reload/로그인에도 안전.
+### 구현: `vkb` (접기/펴기, 크기, 창 가림 방지, 터치 버튼, 자세 연동)
+`mods/_data/vkb/vkb.py`(명령 `vkb`), 서비스/연결은 `mods/gui/base/core.posture.nix`, 버튼은 `mods/gui/base/waybar.nix` + `mods/_data/waybar/style.css`.
+- **wvkbd 의 한계(소스 확인)**: 위치는 하단 전체 폭 고정, 높이는 시작할 때만 지정(`-H`/`-L`), 숨기기 전용 키 없음(`⌨` 키는 **레이어 전환**), 위치/폭 옵션 없음.
+  그래서 접고 펴기는 시그널, 크기는 재시작으로 처리하고 그 위에 제어층(`vkb`)을 얹음.
+- `wvkbd.service`(사용자 서비스): `--hidden` 으로 상시 대기(메모리만 차지). 높이/레이어는 `~/.config/vkb/config.json` 에서 읽음.
+- 명령: `vkb show|hide|toggle`, `vkb size small(240)|medium(360)|large(480)|120~900|up|down|cycle`, `vkb layers full,special,…`, `vkb auto on|off`, `vkb status [--json]`, `vkb waybar [size]`.
+- **창 가림 방지**: wvkbd 는 기본으로 하단 배타 영역을 요청해서 **타일 창은 자동으로 줄어듦**. 떠 있는(floating) 창은 영역과 무관해 가려지므로 `vkb` 가 보일 때 **키보드 윗면 아래로 내려온 창만** 높이를 줄이고(260px 미만이 되면 위로 이동), 원본 지오메트리를 `~/.local/state/vkb/fit.json` 에 기록.
+  숨길 때 **그 창이 맞춘 상태 그대로일 때만** 복원(그 사이 사용자가 옮기거나 크기를 바꿨으면 건드리지 않음, 닫힌 창은 무시).
+- **터치 버튼(waybar, 모두 단일 탭)**: `⌨` 접기/펴기(펴지면 하늘색 강조), 크기 버튼(`S`/`M`/`L`, 키보드가 보일 때만 나타남, 탭하면 다음 크기), `한`/`A` 한/영 전환(`fcitx5-remote -t`; wvkbd 에는 한/영 키가 없음).
+  상태가 바뀔 때만 waybar 에 `RTMIN+8` 신호를 보내 다시 그려서 폴링이 없음(한/영 표시만 2초 간격).
+- **자세 연동**: `posture.consumers` 에 `vkb apply-posture` 등록. 자동(기본 켜짐)이면 tent/tablet → 보임, laptop → 숨김. 멱등(이미 그 상태면 아무것도 안 함). `vkb auto off` 로 끔.
+- 실제 화면 검증(2026-10-17): 보이기 → 타일 창(Zed/kitty)이 1570→1210 으로 자동으로 줄고 떠 있는 Thunar 는 693→417 로 맞춰짐, 숨기기 → 모두 원복(기록 비움).
+  크기 large(480)/small(240) 로 바꾸면 창이 다시 맞춰짐. waybar 버튼을 포인터로 눌러 `⌨`(펴기/접기), 크기 순환(M→L→S), 한/영(한↔A)이 동작하는 것을 확인.
+- 시험: `python3 -I mods/_data/vkb/tests/test_vkb.py`(19, 맞춤/복원/크기 계획), `test_vkb_cli.py`(29, 가짜 hyprctl/systemctl 로 전체 흐름).
+- **미확인**: 손가락 터치로 waybar 버튼이 눌리는지(포인터 클릭만 확인, GTK 가 터치를 클릭으로 바꾸는 것으로 알려져 있으나 직접 확인 못 함), waybar 높이 24px 의 터치 적합성, 자세 연동의 실제 힌지 시험, 가상 키보드가 보이는 동안 잠금 화면/Hyprland reload 와의 상호작용.
+
+### 알려진 한계: 터치스크린으로는 창 이동/크기 조절이 안 됨
+Hyprland 의 제스처 클래스는 전부 터치패드용(`TrackpadGesture`)이고 터치스크린용은 워크스페이스 스와이프(`gestures:workspace_swipe_touch`)뿐이다. `Super`+드래그는 마우스 버튼 바인딩(`bindm`)이라 터치에는 적용되지 않고,
+터치는 클라이언트에 터치 이벤트로 그대로 전달된다(그래서 클릭/우클릭이 섞여 들어가는 것처럼 보일 수 있음). 설정으로 고칠 수 없는 컴포지터의 한계라서, 태블릿 모드에서는 창을 옮길 일이 없게 만드는 쪽(창 최대화 등)이 대안.
