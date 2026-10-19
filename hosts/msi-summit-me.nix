@@ -62,6 +62,21 @@ mkHostConfiguration ({
 
     services.libinput.enable = true;
 
+    # 시험용 임시 부팅 항목(2026-10-20): 기본 항목은 그대로 두고, 부팅 메뉴(또는 `bootctl set-oneshot`)로 **한 번만** 고를 수 있다.
+    # 공통/호스트 설정이 넣은 `pcie_aspm=off`, `acpi_osi=Linux`(일반 노트북용 기본값으로 들어간 것, 이 기종에서 검증 안 됨)와 `irqpoll`(터치패드 IRQ 공유 대응으로 넣은 것)을 모두 뺀다.
+    # 용도: (1) 내장 키보드의 Backspace/→ 키가 신호를 아예 안 보내는 문제(커널 이벤트 0건)가 이 인자들과 관련 있는지, (2) 쉬는 전력이 달라지는지.
+    # 시험이 끝나면 이 블록을 지우면 된다. 목록을 통째로 지정하므로 위 인자가 바뀌면 여기도 맞춰야 한다(확인: `tr ' ' '\n' < /proc/cmdline`).
+
+    specialisation.no-quirks.configuration = {
+      boot.kernelParams = lib.mkForce [
+        "nowatchdog"
+        "loglevel=3"
+        "i915.enable_psr=1"
+        "module_blacklist=idma64"
+        "lsm=landlock,yama,bpf"
+      ];
+    };
+
     # (이유: TLP RUNTIME_PM_DENYLIST는 TLP 서비스 시작 후 적용되어 부팅 초기 probe 시점엔 늦음.
     #  kernel 6.18+ 에서 i2c_designware 모듈이 없어 disable_ps 파라미터도 무효가 됨.
     #  I2C 컨트롤러(0x51e8)가 runtime suspend 상태로 터치패드 probe 실패 방지를 위해
@@ -174,8 +189,12 @@ mkHostConfiguration ({
       IdleAction = "ignore";
     };
 
-    # (목적: Wi-Fi 네트워크 절전 방지)
-    networking.networkmanager.wifi.powersave = false;
+    # Wi-Fi 절전은 **배터리에서만** 켠다(2026-10-20; 예전 목적은 "절전 방지"=연결 끊김 방지였다). 공통 노트북 설정(core.power.nix)은 AC/배터리 모두 끄고
+    # NetworkManager 도 `wifi.powersave=false` 로 강제하는데, 덮개를 닫은 쉬는 상태에서 켜면 배터리 약 −0.6 W(+패키지가 pc10 까지 진입)였다(ABAB 시험, posture.md).
+    # NM 이 TLP 값을 덮어쓰지 못하도록 NM 쪽 강제를 풀고(null) TLP 가 AC=off, 배터리=on 으로 정한다. 대가: 지연이 늘 수 있음(핫스팟에서 가장 조심).
+    # 되돌리려면 이 블록을 `networking.networkmanager.wifi.powersave = false;` 한 줄로 바꾸면 된다(TLP 배터리 값은 공통 설정의 off 로 돌아감).
+    services.tlp.settings.WIFI_PWR_ON_BAT = lib.mkForce "on";
+    networking.networkmanager.wifi.powersave = lib.mkForce null;
 
     programs.appimage = {
       enable = true;

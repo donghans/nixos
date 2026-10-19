@@ -414,3 +414,25 @@ lsmod | grep idma64                          # 비어 있어야 함
 - 시험 중 알게 된 것: `hypridle.conf` 는 `general { lock_cmd }` 뿐이라 유휴 타이머가 없다. `iw` 는 시스템에 없어서 일회성(`nix shell nixpkgs#iw`)으로 받아 `IDLE_AB_EXTRA_PATH` 로 넘겼다. 이 시험들의 틀은 `mods/_data/power-ab/idle_ab.py`(`bisect`, `ab2` 모드, 환경변수 `IDLE_AB_CANDS`/`IDLE_AB_SETTLE`).
 - 아직 못 한 것: Wi-Fi 절전을 켠 채 실제 사용(지연/끊김) 확인, Netdata 수집기별 기여, 부팅 인자(`acpi_osi=Linux`, `pcie_aspm=off`, `irqpoll`) 제거 시험(재부팅 필요).
 
+### 후속 조사 (2026-10-20 새벽): 안정화 가설 철회, Wi-Fi 절전 적용, 키보드 문제, 아침 자동 측정
+**1. "부팅 후 40분이 지나야 안정화된다"는 틀렸다** — 재부팅 직후(4분)부터 1시간(`boot_settle.py`, 30초 간격, 프로세스별 CPU/깨어남과 RAPL) 기록: 쉬는 전력(덮개 닫힘, 방전)이 **10분 만에 약 6.7 W 로 안정되고 이후 60분간 변하지 않았다**(배터리 6.66~6.86 W, psys 6.73~6.78 W, 패키지 약 2.9 W). 줄지 않는 상시 소비자: `electron`(Bitwarden 데스크톱) CPU 9~10%·깨어남 약 257/s, `netdata` 깨어남 약 341/s. 부팅 직후 이 Claude 세션 자체가 60% CPU 까지 쓰지만(긴 세션 재개 + 명령 실행) 가만히 두면 2~4%.
+- **Electron 을 SIGSTOP 으로 얼려 ABAB**: 배터리 −0.20 W, psys −0.25 W, 깨어남 −20/s — 깨어남 257/s 가 실제 전력으로는 크게 이어지지 않는다.
+**2. 어제 저녁의 약 4.3 W 상태는 이 조작들의 지속 효과가 아니다**: (a) 조작을 **하나씩 적용했다 되돌린 뒤** 구간을 잰 `cycles` 시험(posture-daemon/tailscaled 재시작, 컨테이너 pause→unpause, Netdata 재시작, Wi-Fi 절전 켰다 끔, EDAC/proc_thermal/Thunderbolt 재바인드, LPSS/ISH auto→원래)에서 어느 단계도 전력이 내려가지 않았다(6.80~6.93 W). (b) 어제의 **누적(bisect) 시험을 그대로 재현**해도 되돌린 기준(s9 6.87 W)이 처음 기준(s0 6.89 W)과 같았다. 재현에서의 단계별 효과는 번갈아 재기 결과와 일치(Wi-Fi 절전 약 −0.5 W, Netdata 약 −0.6 W, LPSS/ISH·EDAC·열관리 등은 효과 없음).
+- 사용자 가설 "Wayland 를 끄고 Claude 만 남아서"는 기록으로 반증됐다: 지난 부팅(22:42)의 로그인 기록에 Hyprland 세션(3번)이 만들어진 뒤 23:50 종료(재부팅)까지 로그아웃이 없다(Wayland 가 계속 떠 있었음).
+- **남은 가설: 독(어댑터) 연결/분리 이력.** 장치 감시 알림 기록: 22:40:57 AC 연결(부팅 22:41 에 독이 붙어 있었음), 22:43:22 분리, 22:46:31 연결, 22:55:20 분리 — 그 뒤 약 4.3 W 상태가 나타났다. 오늘 부팅(독 없이 시작)은 6.8 W. 독의 붙고 떨어짐이 Thunderbolt/USB4·PCIe 컨트롤러의 절전 상태를 바꿀 수 있다는 가설이고 **아직 검증 전**. `pm_snapshot.py`(PCI/USB 런타임 절전 상태 저장/비교; 독 연결 전 저장본 `/tmp/pm-before-dock.json`, 활성 장치 15개)와 아침 자동 측정(아래)이 이를 확인한다.
+**3. Wi-Fi 절전 — 적용(배터리 전용)과 지연 시험**: `hosts/msi-summit-me.nix` 에서 `services.tlp.settings.WIFI_PWR_ON_BAT = mkForce "on"`, `networking.networkmanager.wifi.powersave = mkForce null`(예전: false). TLP 는 AC=off, 배터리=on 이고 NM 이 덮어쓰지 않는다. `tlp-stat -c` 로 확인(`WIFI_PWR_ON_AC="off"`, `WIFI_PWR_ON_BAT="on"`), NM 설정에서 powersave 줄 제거 확인. 이 설정이 배터리 전환 때 실제로 `iw ... power_save on` 으로 적용되는지는 **아침 측정이 로그로 확인**한다.
+- 지연/손실(`wifi_latency.py`, AC 연결 상태, 5GHz 신호 −34 dBm 160MHz HE, 절전 끔-켬-끔-켬 각 45초 핑, 손실 0%):
+| 절전 | 게이트웨이 중앙 / 평균 / 95% | 1.1.1.1 중앙 / 평균 / 95% |
+|---|---|---|
+| 끔 | 1.1 / 1.2 / 1.7 ms (3구간: 평균 6.5, 95% 42.8, 최대 111 — 우연한 튐) | 3.3 / 3.3 / 4.1 ms |
+| 켬 | 2.5 / 2.2 / 3.5 ms | 4.6 / 4.4 / 5.8 ms |
+  절전을 켜면 **중앙값 약 +1.3 ms**, 손실 없음. Claude 원격 세션은 시험 내내 유지됐다(연결이 끊기는 것이 아니라 지연이 늘 뿐, 신호가 강하고 공유기가 절전을 잘 지원하는 환경). **핫스팟은 시험하지 못했다**(휴대폰 핫스팟이 절전 단말의 버퍼링을 잘못 처리하면 멈칫/끊김이 있을 수 있음 — 핫스팟에서 문제가 생기면 위 두 줄을 지우면 된다).
+**4. 내장 키보드: Backspace 와 →(Right)가 신호를 안 보낸다** (사용자: 이 작업보다 훨씬 전부터 안 됐다고 함)
+- `key_probe.py`(지정한 키의 눌림 횟수와 전체 키 이벤트 개수만 셈, 내용 비기록): 요청한 횟수만큼 눌렀을 때 **Backspace 0건, →  0건**, ←/↑/↓ 는 정상 건수(재연결 후), 글자 키 등 다른 이벤트는 정상. 커널 로그에는 부팅 약 100분 시점에 `atkbd serio0: Unknown key pressed (translated set 2, code 0xf0 ...)` 한 쌍만 있고 Backspace/→ 를 누를 때마다 새 오류가 쌓이지는 않았다 → 키보드 컨트롤러가 이 두 키의 신호를 **아예 안 올리는** 것(소프트웨어(입력기/터미널/Hyprland 설정)가 아님; 설정에 Backspace 리맵도 없음).
+- `echo -n reconnect > /sys/bus/serio/devices/serio0/drvctl` 로 키보드를 재초기화해도 Backspace/→ 는 그대로(0건).
+- 사용자 가설 "hyprlock/덮개 관련": hyprlock 은 커널 입력 이벤트보다 위 단계라서 커널 카운터 0 을 설명하지 못한다. 다만 **덮개 닫고 열기(EC 이벤트) 뒤에 키가 죽는 것**일 수는 있다 — 아침에 `key_probe` 를 켜 둔 채 덮개를 한 번 닫았다 열어 건수가 바뀌는지 보면 된다.
+- 임시 우회: `hyprctl eval 'hl.config({ input = { kb_options = "korean:ralt_hangul,korean:rctrl_hanja,caps:backspace" } })'`(Caps Lock = Backspace, 런타임이라 설정을 다시 읽으면 원래대로). →는 Ctrl+F 등으로.
+- 다음 시험(권장 순서): ① **EC 초기화**: 완전 종료 → 어댑터 분리 → 전원 버튼 30~40초 → 부팅 ② 그래도 안 되면 **`no-quirks` 임시 부팅 항목**(아래)으로 한 번 부팅해 `pcie_aspm=off`/`acpi_osi=Linux`/`irqpoll` 없이 키가 돌아오는지 ③ 그래도 안 되면 키보드 하드웨어 점검.
+**5. 임시 부팅 항목 `no-quirks`**(세대 454): 기본 항목은 그대로 두고 `pcie_aspm=off`, `acpi_osi=Linux`, `irqpoll` 을 뺀 항목(`nowatchdog i915.enable_psr=1 module_blacklist=idma64 lsm=landlock,yama,bpf`)이 추가됐다. 선택: 부팅 메뉴에서 `…specialisation-no-quirks`, 또는 `sudo bootctl set-oneshot nixos-generation-454-specialisation-no-quirks.conf` 후 재부팅(**한 번만** 쓰고 다음 부팅은 자동으로 기본으로 돌아옴). 시험이 끝나면 `hosts/msi-summit-me.nix` 의 `specialisation.no-quirks` 블록을 지운다.
+**6. 아침 자동 측정(예약됨)**: `idle-morning` 서비스(root, `idle_ab.py morning`)가 **어댑터(독)를 뽑고 덮개를 닫을 때까지 최대 12시간 기다렸다가** (150초 안정화 뒤) ① 장치 절전 스냅샷(`/tmp/pm-after-dock.json`; 비교: `pm_snapshot.py diff /tmp/pm-before-dock.json /tmp/pm-after-dock.json`) + Wi-Fi 절전을 끈 채 구간 2개(독을 뺀 뒤 전력이 낮아지는지: 기준 6.8 W 와 비교), ② Wi-Fi 절전 끔/켬 ABAB 4구간으로 실제 효율을 잰다. 결과 `/tmp/idle-ab-morning.json`, 로그 `/tmp/idle-ab-morning.log`. **재부팅하면 이 예약과 `/tmp` 의 저장본이 사라진다**(EC 초기화를 하려면 이 측정을 먼저 끝낼 것).
+

@@ -8,6 +8,10 @@
                패키지가 C2 에서 못 내려가는 원인을 찾는다. 끝에 모두 되돌리고 기준 구간을 한 번 더 재 흔들림을 본다. 터치패드/힌지가 잠깐 안 될 수 있음(LPSS/ISH 단계, 맨 마지막)
   모드 ab2     : bisect 의 후속. 시간이 지나며 쉬는 전력이 저절로 줄어드는 영향(부팅 직후 백그라운드 작업이 잦아듦)을 빼려고 후보마다 **기준-변경-기준-변경(ABAB)** 으로 번갈아 잰다(Wi-Fi 절전, Netdata, LPSS/ISH).
                덮개 닫힘+방전 조건이 되면 2분 더 기다린 뒤 시작. 끝에 모두 원래대로.
+  모드 cycles  : 어제 누적 시험 뒤 전력이 **되돌린 뒤에도 계속 낮았던** 이유를 찾는다: 각 조작을 "적용했다 되돌린" 뒤에 구간을 재서 어느 조작이 이후 전력을 지속적으로 낮추는지 본다
+               (posture-daemon 재시작, tailscaled 재시작, 컨테이너 pause/unpause, Netdata 재시작, Wi-Fi 절전 켰다 끔, EDAC/proc_thermal/Thunderbolt 드라이버 재바인드, LPSS/ISH 런타임 PM auto→on).
+  모드 morning : 어댑터(독)를 **뽑고 덮개를 닫을 때까지 기다렸다가**(최대 12시간) ① 장치 절전 상태 스냅샷(독 연결 전 저장본과 비교용) + Wi-Fi 절전 끈 채 구간 2개(독을 뺀 뒤 전력이 낮아지는지)
+               ② Wi-Fi 절전 켬/끔 번갈아 4구간(ABAB)을 연달아 잰다. 끝나면 Wi-Fi 절전은 TLP 가 정한 값으로 둔다. 환경변수 PM_SNAPSHOT=<저장 경로>(pm_snapshot.py 가 있는 디렉터리는 PM_TOOL).
   모드 session : **tty2(kmscon)의 Claude 처럼 그래픽 세션에 안 묶인 세션에서만.** 그래픽 세션 켜짐 2구간 → Hyprland 세션 종료(`wayland-wm@hyprland\\x2duwsm.desktop.service` 정지) → 꺼짐 2구간 → Netdata 정지 2구간.
                한 방향(그래픽 세션은 복구하지 않음: 사용자가 다시 로그인/재부팅). Netdata 는 끝에 다시 켠다
 
@@ -345,6 +349,32 @@ def run_ab2():
             except OSError as e:
                 log(f"  {d} 실패: {e}")
 
+    frozen = []
+
+    def electron_pids():
+        out = []
+        for pid in os.listdir("/proc"):
+            if pid.isdigit():
+                try:
+                    if b"/libexec/electron/electron" in open(f"/proc/{pid}/cmdline", "rb").read():
+                        out.append(int(pid))
+                except OSError:
+                    pass
+        return out
+
+    def electron_set(on):
+        """Electron(Bitwarden 등)을 SIGSTOP 으로 얼리거나(on) SIGCONT 로 푼다. 상태는 그대로 보존됨."""
+        import signal as _sg
+        if on:
+            frozen[:] = electron_pids()
+        for pid in frozen:
+            try:
+                os.kill(pid, _sg.SIGSTOP if on else _sg.SIGCONT)
+            except OSError:
+                pass
+        if on:
+            log(f"  electron {len(frozen)}개 프로세스 정지")
+
     def win(label, cand, state):
         if rd(f"{BAT}/status") != "Discharging" or "closed" not in rd("/proc/acpi/button/lid/LID0/state"):
             raise RuntimeError("조건이 바뀜(충전/덮개 열림)")
@@ -355,7 +385,7 @@ def run_ab2():
 
     try:
         only = [c for c in os.environ.get("IDLE_AB_CANDS", "").split(",") if c]   # 일부 후보만(예: netdata-off)
-        for cand, setter in (("wifi-ps", wifi_set), ("netdata-off", nd_set), ("lpss-ish-auto", ish_set)):
+        for cand, setter in (("wifi-ps", wifi_set), ("netdata-off", nd_set), ("lpss-ish-auto", ish_set), ("electron-freeze", electron_set)):
             if only and cand not in only:
                 continue
             log(f"후보 {cand}: A(기준) B(변경) A B")
@@ -366,7 +396,7 @@ def run_ab2():
     except Exception as e:
         log(f"중단: {e}")
     finally:
-        wifi_set(False); nd_set(False); ish_set(False)
+        wifi_set(False); nd_set(False); ish_set(False); electron_set(False)
         sh("systemctl", "restart", "posture-daemon.service")
         log("모두 원래대로, posture-daemon 재시작")
         if os.path.exists(OUT):
@@ -374,7 +404,138 @@ def run_ab2():
         log("완료")
 
 
+def run_cycles():
+    log("cycles 모드 시작: 덮개 닫힘 + 방전 대기")
+    deadline = time.time() + 3600
+    while time.time() < deadline:
+        if "closed" in rd("/proc/acpi/button/lid/LID0/state") and rd(f"{BAT}/status") == "Discharging":
+            break
+        time.sleep(5)
+    else:
+        log("조건이 1시간 안에 안 맞아 중단")
+        return
+    time.sleep(30)
+    iface = wifi_iface()
+    wifi_orig = (re.search(r"Power save:\s*(\w+)", sh("iw", "dev", iface, "get", "power_save").stdout or "") or [None, "off"])[1] if iface else None
+    containers = [c for c in as_user("docker", "ps", "-q").stdout.split() if c]
+    log(f"시작 wifi={iface}({wifi_orig}) 컨테이너 {len(containers)}개")
+    results = []
+
+    def rebind(drv, addr):
+        def f():
+            if pci_unbind(drv, addr):
+                time.sleep(5)
+                pci_bind(drv, addr)
+        return f
+
+    def ish():
+        old = {d: rd(f"/sys/bus/pci/devices/{d}/power/control") for d in ("0000:00:15.0", "0000:00:12.0")}
+        for d in old:
+            try:
+                open(f"/sys/bus/pci/devices/{d}/power/control", "w").write("auto")
+            except OSError:
+                pass
+        time.sleep(8)
+        for d, v in old.items():
+            try:
+                open(f"/sys/bus/pci/devices/{d}/power/control", "w").write(v or "on")
+            except OSError:
+                pass
+
+    def wifi():
+        if iface:
+            sh("iw", "dev", iface, "set", "power_save", "on")
+            time.sleep(8)
+            sh("iw", "dev", iface, "set", "power_save", wifi_orig or "off")
+
+    def docker_cycle():
+        if containers:
+            as_user("docker", "pause", *containers)
+            time.sleep(5)
+            as_user("docker", "unpause", *containers)
+
+    def restart(unit):
+        return lambda: sh("systemctl", "restart", unit)
+
+    steps = [("c0-base", "기준(아무것도 안 함)", lambda: None),
+             ("c1-posture", "posture-daemon 재시작", restart("posture-daemon.service")),
+             ("c2-tailscaled", "tailscaled 재시작", restart("tailscaled")),
+             ("c3-docker", "컨테이너 pause→unpause", docker_cycle),
+             ("c4-netdata", "Netdata 재시작", restart("netdata")),
+             ("c5-wifi", "Wi-Fi 절전 켰다 끔", wifi),
+             ("c6-edac", "igen6_edac 재바인드", rebind("igen6_edac", "0000:00:00.0")),
+             ("c7-thermal", "proc_thermal_pci 재바인드", rebind("proc_thermal_pci", "0000:00:04.0")),
+             ("c8-thunderbolt", "Thunderbolt NHI 재바인드", rebind("thunderbolt", "0000:00:0d.2")),
+             ("c9-lpss-ish", "LPSS/ISH 런타임 PM auto→원래", ish)]
+    try:
+        for label, desc, act in steps:
+            if rd(f"{BAT}/status") != "Discharging" or "closed" not in rd("/proc/acpi/button/lid/LID0/state"):
+                raise RuntimeError("조건이 바뀜(충전/덮개 열림)")
+            log(f"단계 {label}: {desc}")
+            act()
+            res = dict(window(label, seconds=45, settle=12), step=label, desc=desc)
+            results.append(res)
+            log(f"  batt={res.get('battery_w') and round(res['battery_w'], 2)} psys={res.get('psys_w') and round(res['psys_w'], 2)} pkg={res.get('pkg_w') and round(res['pkg_w'], 2)} 깨어남={res.get('wakeups')} pc8={res.get('pc8')} pc10={res.get('pc10')}")
+            json.dump(results, open(OUT, "w"), ensure_ascii=False, indent=1)
+    except Exception as e:
+        log(f"중단: {e}")
+    finally:
+        if os.path.exists(OUT):
+            os.chmod(OUT, 0o644)
+        log("완료(되돌릴 것 없음: 모든 단계가 이미 원래대로 되돌린 뒤 측정)")
+
+
+def run_morning():
+    log("morning 모드 시작: 어댑터 분리 + 덮개 닫힘 대기(최대 12시간)")
+    deadline = time.time() + 12 * 3600
+    while time.time() < deadline:
+        if "closed" in rd("/proc/acpi/button/lid/LID0/state") and rd(f"{BAT}/status") == "Discharging":
+            break
+        time.sleep(10)
+    else:
+        log("12시간 안에 조건이 안 맞아 중단")
+        return
+    log("조건 충족: 안정화 대기 150초(독 분리 직후의 정리 작업이 끝나도록)")
+    time.sleep(150)
+    iface = wifi_iface()
+    tool = os.environ.get("PM_TOOL", "")
+    if tool and os.path.exists(os.path.join(tool, "pm_snapshot.py")):
+        sh(sys.executable, os.path.join(tool, "pm_snapshot.py"), "save", "/tmp/pm-after-dock.json")
+        log("장치 절전 스냅샷 저장: /tmp/pm-after-dock.json (비교: pm_snapshot.py diff /tmp/pm-before-dock.json /tmp/pm-after-dock.json)")
+    ps_now = (re.search(r"Power save:\s*(\w+)", sh("iw", "dev", iface, "get", "power_save").stdout or "") or [None, "?"])[1] if iface else "?"
+    log(f"독 분리 뒤 Wi-Fi 절전 현재값(TLP 배터리 설정이 적용됐는지): {ps_now}")
+    results = []
+
+    def win(label, state, wifi_ps):
+        if rd(f"{BAT}/status") != "Discharging" or "closed" not in rd("/proc/acpi/button/lid/LID0/state"):
+            raise RuntimeError("조건이 바뀜(충전/덮개 열림)")
+        if iface:
+            sh("iw", "dev", iface, "set", "power_save", wifi_ps)
+        res = dict(window(label, seconds=45, settle=15), step=label, state=state, wifi_ps=wifi_ps)
+        results.append(res)
+        log(f"  {label}: wifi_ps={wifi_ps} batt={res.get('battery_w') and round(res['battery_w'], 2)} psys={res.get('psys_w') and round(res['psys_w'], 2)} pkg={res.get('pkg_w') and round(res['pkg_w'], 2)} pc8={res.get('pc8')} pc10={res.get('pc10')}")
+        json.dump(results, open(OUT, "w"), ensure_ascii=False, indent=1)
+
+    try:
+        win("d1-wifi-off", "dock-effect", "off")
+        win("d2-wifi-off", "dock-effect", "off")
+        for i, ps in enumerate(("off", "on", "off", "on")):
+            win(f"w{i + 1}-wifi-{ps}", "wifi-abab", ps)
+    except Exception as e:
+        log(f"중단: {e}")
+    finally:
+        if iface:
+            sh("iw", "dev", iface, "set", "power_save", ps_now if ps_now in ("on", "off") else "off")
+        if os.path.exists(OUT):
+            os.chmod(OUT, 0o644)
+        log("완료")
+
+
 def main():
+    if MODE == "morning":
+        return run_morning()
+    if MODE == "cycles":
+        return run_cycles()
     if MODE == "ab2":
         return run_ab2()
     if MODE == "bisect":
