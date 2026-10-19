@@ -32,6 +32,22 @@ mkHostConfiguration (_: {
     #   상대 PC가 "Getting IP configuration"에서 무한 대기하는 문제 방지.
     #   incusbr0/tailscale0와 동일하게 직결 신뢰 인터페이스로 등록)
     networking.firewall.trustedInterfaces = ["eth0"];
+    # (목적: eth0 공유 PC의 HTTPS 등 대용량 응답이 PMTU 블랙홀로 멈추는 문제 방지)
+    # wlan0/eth0 MTU가 1400(tailscale 정책)인데 NM shared dnsmasq는 클라이언트에 MTU를 알리지 않아
+    # 상대 PC가 MSS=1460을 협상함. 서버(예: SECUI 장비)가 ICMP "need to frag"를 무시하면
+    # 1460바이트 세그먼트가 재전송만 반복되어 TLS 핸드셰이크가 멈춤(TCP 연결은 되나 페이지가 안 열림).
+    # SYN의 MSS를 rt mtu 기준으로 클램프하여 해결.
+    networking.nftables.enable = true;
+    networking.nftables.tables.eth0-share-mss = {
+      family = "ip";
+      content = ''
+        chain forward {
+          type filter hook forward priority mangle;
+          iifname "eth0" tcp flags syn tcp option maxseg size set rt mtu
+          oifname "eth0" tcp flags syn tcp option maxseg size set rt mtu
+        }
+      '';
+    };
 
     # AppImage 실행 지원 (FUSE 마운트 + binfmt 자동 실행)
     # binfmt = true: AppImage를 직접 실행 가능하게 함 (./foo.AppImage)
