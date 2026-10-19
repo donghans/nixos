@@ -135,6 +135,9 @@ tent/tablet 에서 기기를 돌리면 내장 화면과 터치가 같이 돈다.
   | unstable 0.56.2 + nixpkgs 패키지(d094a3e6) | 실패 | - | `TouchVisualizer.cpp`: PI 미선언, `scheduleFrameForMonitor` 없음(API 변경). nixpkgs 는 broken 표시 안 함 |
   | unstable 0.56.2 + 8e605468(0.56.2 고정 커밋, 8/11) | 실패 | - | `PinchAction::exceeds_tolerance marked override` — wf-touch 인터페이스 불일치 |
   | unstable 0.56.2 + 6adcebc2(최신, 10/18) | 실패 | - | `ShimTrackpadGestures.cpp:228: 'LOG' was not declared` |
+- **unstable(0.56.2)에서 빌드되는 fallback 찾기(2026-10-19)**: 실패 원인 하나는 nixpkgs 의 `wf-touch` 가 업스트림이 쓰는 것과 달라서였다. 업스트림이 자기 `nix/wf-touch.nix`(WayfireWM/wf-touch `8974eb0f` + 패치)를 쓰므로 그 커밋 자신의 `nix/wf-touch.nix` 를 `callPackage` 해서 `buildInputs` 의 wf-touch 를 바꾸면 된다.
+  그렇게 해도 최신(`6adcebc2`, `LOG` 매크로 미선언)과 9/4 이후는 실패하고, **이분 탐색 결과 0.56.2 헤더로 빌드되는 가장 새 커밋은 `56473e9e`(2026-08-13)**, 처음 깨지는 커밋은 `a5e206bb`(8/19, "hacky hyprland 0.53 compat" — 업스트림이 Hyprland 개발판 리팩터링을 따라가기 시작).
+  중첩 Hyprland 0.56.2 에서 `56473e9e` 는 크래시 없이 로드되고 Lua 설정(hl.config, hyprgrass.bind/gesture)이 오류 없이 받아들여졌다(`configerrors` 비어 있음). 실제 터치는 미확인. 26.11 로 올릴 때 Hyprland 가 0.56.x 이면 이 조합이 출발점이다(상위 버전이면 업스트림 `hyprpm.toml` 의 고정표를 다시 확인).
 - 결론: **stable 유지 + hyprgrass d094a3e6**. unstable 로 올려도 어떤 변종도 그대로는 안 빌드돼서 소스를 따로 고쳐야 하고(wf-touch 버전, LOG 매크로), 컴포지터 업그레이드 위험까지 지게 된다. `core.touch.nix` 가 이 조합으로 준비돼 있고 `enableHyprgrass = false` 로 꺼져 있다. 켜기 전에 열린 작업을 저장할 것.
 - 만약 unstable Hyprland 를 쓰게 되면: `nixup fix hyprland` 가 `.env` 의 `NIX_UNSTABLE_FALLBACK_REV/SHA` 에 "직전 커밋"을 기록하고 모듈에서 `unstable-fallback.hyprland` 로 쓰는 기존 고정 장치(core/lib/host.nix)를 그대로 쓸 수 있다.
 - **격리 시험 방법(유효함)**: 현재 세션 안에서 `Hyprland -c <최소 설정>` 을 `systemd-run --user --unit=...` 로 중첩 실행하면 플러그인 로드 크래시를 실제 세션과 분리해 재현할 수 있다(`env -u LD_LIBRARY_PATH -u HYPRLAND_INSTANCE_SIGNATURE`, `WAYLAND_DISPLAY` 전달). 정리는 반드시 유닛/PID 로(이름으로 pkill 하면 실제 세션도 죽음 — 2026-10-19 실수).
@@ -160,8 +163,7 @@ tent/tablet 에서 기기를 돌리면 내장 화면과 터치가 같이 돈다.
 - 한 가지 일은 한 곳에서: 장치 켜기/끄기와 수동 상태 파일의 기본값은 `hypr-input-policy` 에만 있고, 터치패드/터치스크린 토글은 상태 파일만 뒤집고 정책을 부른다(예전에는 토글 두 개와 정책이 각자 같은 장치 선택/적용 코드를 가졌음). 메뉴 라벨도 정책의 `--print` 값을 쓴다.
 - 두 곳에 같은 숫자가 있으면 시험이 지키게 한다: 가로 배열의 줄 수/폭 단위(5줄, 15)는 `pc-layout.patch` 와 `vkb.py`(`LAND_ROWS`/`LAND_UNITS`) 에 따로 있어서, `test_vkb.py` 가 원본 wvkbd 에 두 패치를 실제로 적용해 읽고 비교한다(패치가 안 맞아도 여기서 실패).
 - 내장 키보드 이름은 공용 모듈이 아니라 호스트가 `wayland.windowManager.hyprland.internalKeyboardName` 로 지정한다(비어 있으면 정책이 키보드를 건드리지 않음).
-- 아직 남은 것(위험 낮음, 필요할 때): `posture` CLI 를 소비자가 값마다 한 번씩 부름(파이썬 시작 + systemctl 확인이 매번);
-  `_data/*/tests/` 마다 가짜 hyprctl/systemctl 을 따로 만들어 쓰는 중복; `displayctl.py` 가 1000줄이 넘는 단일 파일.
+- 아직 남은 것(위험 낮음, 필요할 때): `displayui` 의 시험(`test_ui.py`)은 자체 `check()` 형식(`PASS/FAIL` 한 줄씩)이라 공용 하네스로 옮기지 않음, `posture` CLI 는 호출마다 파이썬 시작(~50ms)이 들어서 소비자가 값을 한 번에 읽도록 `get <키> <키>` 를 추가했지만 시작 비용 자체는 그대로.
 
 ### 알려진 함정과 점검 방법 (2026-10-19)
 - **깨어남 유실(고침)**: 경로 유닛(`posture-apply.path`)은 이미 실행 중인 `posture-apply.service` 를 다시 시작하지 못해(start 요청이 무시됨) 실행 도중에 온 상태 변경을 놓친다.
@@ -187,3 +189,15 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 4. **실기 확인**: `displayctl status`/`displayctl rotate 1` 후 `rotate 0`, `vkb show`/`vkb mode toggle`/`vkb hide`, 덮개 닫기/열기, 터치패드 토글, waybar 버튼.
 5. **함께 움직이는 것들**: `wvkbd` 패치(`mods/_data/wvkbd/README.md` 의 재생성 방법 + `test_vkb.py` 가 적용 여부를 검사), hyprlock/hypridle 설정 옵션(0.9.5 에서 `grace` 등이 사라져 오류가 났던 전례), xdg-desktop-portal-hyprland.
 6. 올리기 전 `nixup` 의 `unstable-fallback` 고정 장치(`nixup fix <패키지>`)로 되돌릴 수 있는 커밋을 확보해 둔다(`core/lib/host.nix`).
+
+### 점검 도구와 시험 구성 (2026-10-19)
+- **`posture-doctor`**(`mods/_data/posture/doctor.py`, 사용자 PATH 에 설치): 서비스 환경의 `WAYLAND_DISPLAY`/`HYPRLAND_INSTANCE_SIGNATURE` 가 살아 있는 인스턴스를 가리키는지, 허브 데몬/센서/`posture-apply.path`, 마지막 소비자 실행의 실패, 허브의 덮개와 ACPI 의 불일치, 덮개가 열렸는데 백라이트가 0인 화면을 점검해 OK/WARN/FAIL 과 해결 힌트를 낸다(문제가 있으면 종료 코드 1, `--json` 지원).
+  이날 실제로 겪은 통합 단계 고장(환경 오염, 깨어남 유실로 꺼진 화면, 소비자 실패)을 잡으려는 것이라 시험(가짜 도구)이 못 잡는 영역을 맡는다. 문제가 의심되면 먼저 `posture-doctor`.
+- **공용 시험 도구 상자 `mods/_data/_testkit/`**: `harness.py`(`checker()`: 시험마다 따로 있던 `check()`/카운터/종료 처리, `script()`), `fake_cmd.py` + `fakes.py`(`Sandbox`: 데이터 기반 가짜 `hyprctl`/`systemctl`/`pkill`/`posture`/`journalctl` — 응답과 상태를 `FAKE_DIR` 아래 파일로 정함, 동작 정의는 `fake_cmd.py` 머리말).
+  vkb CLI 시험, posture 시험, doctor 시험이 이것을 쓴다(예전에는 도구마다 가짜 `hyprctl`/`systemctl` 을 따로 만들어 Hyprland 명령 형식이 바뀌면 여러 곳을 고쳐야 했음). displayctl 시험의 `fake_hyprctl.py` 는 모니터 배치를 시뮬레이션하는 도메인 전용이라 그대로 두고 `checker()` 만 공유한다.
+- **전체 시험**: `mods/_data/run-tests.sh` (vkb 29 + vkb CLI 48 + posture 77 + doctor 11 + displayctl 코어 79 + TUI 53).
+- **중첩 Hyprland 시험 도구 `mods/_data/hyprland-nested/hypr-nested`**: `hypr-nested <시험할 Hyprland store 경로> <시험 설정.lua> [--wait|초]`. 유닛 이름으로만 정리하고, 시작 전 서비스 환경을 기록했다가 끝나면 복구·확인한다(위의 "환경 오염" 함정을 막음). `--wait` 는 Enter 까지 유지해서 중첩 창을 손가락/마우스로 직접 시험할 때 쓴다.
+- **displayctl 구조**: 1044줄 단일 파일을 패키지 `mods/_data/display/dispctl/`(`config`/`hypr`/`state`/`layout`/`apply`/`transaction`/`ops`/`cli`, 위에서 아래로만 import)로 나누고 `displayctl.py` 는 얇은 진입점으로 남겼다(`import displayctl as dc` 와 서브프로세스 호출이 그대로 동작).
+  나누면서 시험이 실제 버그를 잡았다: 되돌리기 타이머가 `__file__` 로 진입 스크립트를 찾는데 분리 후 `dispctl/transaction.py` 를 가리켜 `revert-pending` 이 아무 일도 안 했다 → `ENTRY`(패키지 한 단계 위의 `displayctl.py`)로 고침. Nix 자리표시자는 `dispctl/config.py` 한 곳.
+- **덮개 TLP 프로필**: `tlp bat`(배터리 프로필 + 수동 모드: 전원이 바뀌어도 다음 부팅/`tlp start` 까지 무시)/`tlp start`(실제 전원에 맞는 프로필 + 수동 모드 해제)는 root 가 필요해서 `hosts/msi-summit-me.nix` 에 root 유닛 `tlp-lid-closed`/`tlp-lid-open` + polkit 규칙(로컬 활성 사용자만, 해당 두 유닛만)을 두고 `lid-policy` 의 추가 명령이 `systemctl start --no-block` 으로 시작한다. 확인: 사용자 권한으로 시작해 `balanced/BAT (manual)` ↔ `performance/AC (auto)` 전환.
+  **주의: 시험하다 `tlp ac`/`tlp bat` 를 직접 실행하면 수동 모드가 남아 전원이 바뀌어도 무시된다** — 2026-10-19 에 이 실수로 TLP 가 2시간 반 동안 `performance/AC (manual)` 에 머물렀다(`tlp start` 로 해제). 시험 뒤에는 `sudo tlp-stat -s` 로 `(manual)` 이 없는지 확인할 것.

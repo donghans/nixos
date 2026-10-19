@@ -1,0 +1,49 @@
+#!/bin/sh
+# hypr-nested — 현재 Hyprland 세션 안에서 **중첩 Hyprland** 를 안전하게 띄워 시험한다(플러그인 로드, 설정 검증 등). 실제 세션은 건드리지 않는다.
+#
+# 사용: hypr-nested <Hyprland 설치 경로(bin/Hyprland 가 있는 곳)> <시험용 설정 lua> [--wait|초(기본 20)]
+#   --wait : Enter 를 누를 때까지 유지(중첩 창을 손가락/마우스로 직접 시험할 때)
+#
+# 이 스크립트가 지켜 주는 것(2026-10-19 에 실제로 겪은 문제들):
+#  1) 정리는 **유닛 이름으로만** 한다(이름으로 pkill 하면 실제 세션의 Hyprland 도 같이 죽는다).
+#  2) 중첩 Hyprland 는 사용자 서비스 환경(WAYLAND_DISPLAY → 죽은 소켓, HYPRLAND_INSTANCE_SIGNATURE/HYPRLAND_CMD/DISPLAY 삭제)을 오염시켜
+#     서비스의 hyprctl 이 전부 실패하게 만든다 → 끝나면 시작 전 값으로 복구하고 확인한다.
+#  3) 종료 신호에 느리게 반응해 최대 20초 뒤 강제 종료한다.
+set -u
+HLP=${1:?사용: hypr-nested <Hyprland 설치 경로> <설정 lua> [--wait|초]}; CFG=${2:?설정 lua 가 필요합니다}; HOLD=${3:-20}
+[ -x "$HLP/bin/Hyprland" ] || { echo "$HLP/bin/Hyprland 가 없습니다" >&2; exit 2; }
+HCTL=$HLP/bin/hyprctl; [ -x "$HCTL" ] || HCTL=hyprctl      # (NixOS 래퍼 경로(/run/wrappers)를 주면 hyprctl 이 없어서 PATH 의 것을 씀. 시험할 버전의 store 경로를 주는 게 정확함)
+[ -n "${WAYLAND_DISPLAY:-}" ] && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || { echo "실제 Hyprland 세션 안에서 실행하세요(WAYLAND_DISPLAY/HYPRLAND_INSTANCE_SIGNATURE 없음)" >&2; exit 2; }
+UNIT=hl-nested-$$; OUT=${TMPDIR:-/tmp}/$UNIT
+# 시작 전 값 기록(복구용): 지금 이 셸이 실제 세션의 값을 가지고 있다
+W=$WAYLAND_DISPLAY; S=$HYPRLAND_INSTANCE_SIGNATURE; C=${HYPRLAND_CMD:-}; D=${DISPLAY:-}
+crashes() { ls "$HOME/.cache/hyprland"/hyprlandCrashReport*.txt 2>/dev/null | wc -l; }
+N0=$(crashes)
+restore() {
+  systemctl --user set-environment WAYLAND_DISPLAY="$W" HYPRLAND_INSTANCE_SIGNATURE="$S" ${C:+HYPRLAND_CMD="$C"} ${D:+DISPLAY="$D"}
+  dbus-update-activation-environment --systemd WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE HYPRLAND_CMD DISPLAY 2>/dev/null
+}
+cleanup() {
+  timeout 20 systemctl --user stop "$UNIT" 2>/dev/null || systemctl --user kill -s KILL "$UNIT" 2>/dev/null
+  systemctl --user reset-failed "$UNIT" 2>/dev/null
+  restore
+  now=$(systemctl --user show-environment | sed -n 's/^HYPRLAND_INSTANCE_SIGNATURE=//p')
+  [ "$now" = "$S" ] && echo "서비스 환경 복구 확인됨" || echo "경고: 서비스 환경이 복구되지 않음(HYPRLAND_INSTANCE_SIGNATURE='$now')"
+  echo "크래시 리포트: $N0 → $(crashes)"
+}
+trap 'cleanup; exit 130' INT TERM
+env -u LD_LIBRARY_PATH -u HYPRLAND_INSTANCE_SIGNATURE systemd-run --user --collect -q --unit="$UNIT" \
+  -p StandardOutput=file:"$OUT.out" -p StandardError=file:"$OUT.err" -E WAYLAND_DISPLAY="$W" -E XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" \
+  "$HLP/bin/Hyprland" -c "$CFG" || { echo "시작 실패" >&2; restore; exit 1; }
+sleep 8
+P=$(systemctl --user show -p MainPID --value "$UNIT")
+echo "유닛 $UNIT 상태: $(systemctl --user is-active "$UNIT")  (stdout/stderr: $OUT.out / $OUT.err)"
+for d in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"/hypr/*/; do
+  [ "$(head -1 "$d/hyprland.lock" 2>/dev/null)" = "$P" ] || continue
+  sig=$(basename "$d"); echo "중첩 인스턴스: $sig"
+  env -u HYPRLAND_INSTANCE_SIGNATURE "$HCTL" -i "$sig" version | head -1
+  env -u HYPRLAND_INSTANCE_SIGNATURE "$HCTL" -i "$sig" plugin list
+  echo "configerrors: [$(env -u HYPRLAND_INSTANCE_SIGNATURE "$HCTL" -i "$sig" configerrors | head -5)]"
+done
+if [ "$HOLD" = "--wait" ]; then echo "중첩 창을 시험하세요. 끝나면 Enter."; read -r _; else sleep "$HOLD"; fi
+cleanup
