@@ -348,3 +348,24 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 - 해결 후보(아직 구현 안 함): (a) 부팅 후 한 번 `intel-lpss` 를 다시 올리는 oneshot 서비스(위에서 검증한 절차 그대로, 터치패드가 몇 초 안 잡힘), (b) `intel_lpss_pci` 를 initrd 에서 빼서 루트 udev 가 규칙을 가진 상태에서 올라오게 함(재부팅 시험 필요, 터치패드 초기화 순서가 바뀜). 그다음에야 `irqpoll` 제거 시험이 의미가 있고, 폭주가 2~3주에 한 번이라 효과 확인에는 몇 주가 걸린다.
 - 지금(2026-10-19 20:08 이후)의 실행 중 상태는 이미 "단독(PIO)"이다 — 앞으로 폭주가 생기는지는 `ls /var/log/touchpad-watchdog/` 와 `journalctl -k | grep "controller timed out"` 로 볼 수 있다.
 
+
+#### 재부팅 직후 확인 체크리스트와 tty2 시험 계획 (2026-10-19 작성, 다음 세션용)
+**상황**: `hosts/msi-summit-me.nix` 에 `boot.blacklistedKernelModules` 로 `idma64` 를 추가해 적용했다(`nixup os` 완료, 효과는 다음 부팅부터). 사용자는 재부팅 → Hyprland 로그인 → tty2 로 옮겨 Claude 를 새로 켠다(그래픽 세션에 안 묶인 세션; tty2 에는 fcitx5 가 없어 영어로 입력할 수 있음).
+
+**1) 재부팅 직후 확인할 것(idma64 차단 성공 여부)**
+```
+ls /sys/bus/platform/drivers/idma64/        # idma64.0 이 없어야 함(드라이버 자체가 없을 수 있음)
+awk '$1=="27:"' /proc/interrupts             # 끝이 i2c_designware.0 단독이어야 함
+journalctl -b -t idma64-unbind               # 비어 있어야 정상(idma64 가 안 붙으니 bind 이벤트가 없음; 비어 있으면 "initrd 에서 이미 바인딩" 추정과도 일치)
+grep -c 'ELAN0305' /proc/bus/input/devices   # 터치패드 입력장치가 있어야 함(여러 개)
+sudo dmesg | grep -iE "idma64|i2c_designware|controller timed out"   # 오류 없어야 함
+lsmod | grep idma64                          # 비어 있어야 함
+```
+성공이면: `hosts/msi-summit-me.nix` 의 idma64 udev unbind 규칙(진단 로그 포함)을 지워도 된다. 실패(터치패드가 안 잡히거나 IRQ 27 이 여전히 공유)면 되돌리고(블랙리스트 항목 삭제) 후보 (a)(부팅 후 `intel-lpss` 재바인드 oneshot 서비스)로 간다. 이 결과는 **며칠 쓴 뒤 폭주(`ls /var/log/touchpad-watchdog/`)가 없는지**로 장기 확인하고, 그 다음에야 `irqpoll` 제거를 시험한다(재부팅 두 번째; 한 번에 같이 바꾸지 않는다).
+
+**2) tty2 에서 할 쉬는 전력 시험(그래픽 세션을 끈 상태)** — 어댑터 분리 + 방전 중, 덮개는 닫아도/열어도 되지만 조건을 기록한다. 열린 작업은 사라지니 사용자가 저장한 뒤 시작.
+- 목적: 패키지가 C2 에서 못 내려가는 원인이 그래픽 세션(컴포지터/waybar/kitty/Netdata 등)인지 가른다. 지금까지: 코어는 깊게 자는데 패키지는 pc2 뿐(덮개를 닫아 화면이 꺼져도 동일), 시스템 깨어남 약 450~740/s, EC GPE 초당 25~43회(EC 레지스터 읽기 초당 약 10번: `systemd-logind` 44/6s, waybar 15/6s, Netdata 계열 약 30/6s).
+- 방법: `sudo -v` 를 사용자가 한 번 입력(이 시스템의 sudo 는 비밀번호 필요, 캐시 5분) → root 서비스로 한 번에 실행(`sudo systemd-run --unit=... --collect <python3> mods/_data/power-ab/idle_ab.py <powertop 경로> <모드>`; powertop 은 `nix shell nixpkgs#powertop` 로 받은 경로). 구간별(90초×2바퀴 번갈아) 배터리 전력/RAPL/powertop(pc 상태·깨어남)/GPE 비율을 기록하는 틀은 `idle_ab.py` 에 있고, 모드는 `netdata`, `usb-ts` 가 있으니 필요한 모드(예: 그래픽 세션 정지/시작, waybar 정지/시작)를 추가해 쓴다.
+- 순서 제안: (i) 그래픽 세션이 떠 있는 기준 구간(아직 Hyprland 가 살아 있는 tty1) (ii) Hyprland 세션 종료(`loginctl terminate-session`) 후 구간 (iii) 가능하면 Netdata 도 정지한 구간. 각 구간에서 pc2/pc3+/깨어남/GPE/배터리 W 를 비교.
+- **EC GPE 0x6E(`/sys/firmware/acpi/interrupts/gpe6E`)를 끄는 시험은 하지 않는다**(덮개/어댑터/배터리/단축키 이벤트의 통로; 하려면 자동 복구 타이머 필수). 폴러(waybar/logind/Netdata)를 멈춰 GPE 비율이 어떻게 바뀌는지만 본다.
+- 끝나면 반드시 원복: Netdata `systemctl start netdata`, 사용자가 다시 Hyprland 로그인. 터치스크린 USB `power/control` 은 정책(`hypr-input-policy`)이 관리한다.
