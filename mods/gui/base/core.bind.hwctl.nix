@@ -58,64 +58,43 @@
       esac
     '';
 
-    # 터치패드 토글 스크립트 (Laptop 전용)
-    toggleTouchpad = pkgs.writeShellScriptBin "hypr-toggle-touchpad" ''
-      if [ "$(${config.posture.cli}/bin/posture get mode)" != laptop ]; then
-        ${pkgs.libnotify}/bin/notify-send -u low "터치패드" "텐트/태블릿 모드에서는 꺼짐으로 고정돼 있습니다 (힌지를 열면 직접 조절 가능)"
-        exit 0
-      fi
-      DEVICES=$(hyprctl devices -j | ${pkgs.jq}/bin/jq -r '.mice[] | select(.name | contains("touchpad")) | .name')
-
-      if [ -z "$DEVICES" ]; then
-        ${pkgs.libnotify}/bin/notify-send "Touchpad" "No touchpad device found!"
-        exit 1
-      fi
-
-      STATUS_FILE="$HOME/.local/state/hypr/touchpad_enabled"
-      mkdir -p "$(dirname "$STATUS_FILE")"
-      [ ! -f "$STATUS_FILE" ] && echo "true" > "$STATUS_FILE"
-      CURRENT_STATUS=$(cat "$STATUS_FILE")
-
-      if [ "$CURRENT_STATUS" = "true" ]; then
-        while read -r dev; do
-          hyprctl eval "hl.device({ name = \"$dev\", enabled = false })"
-        done <<< "$DEVICES"
-        echo "false" > "$STATUS_FILE"
-        ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:touchpad -u low "Touchpad" "Disabled"
-      else
-        while read -r dev; do
-          hyprctl eval "hl.device({ name = \"$dev\", enabled = true })"
-        done <<< "$DEVICES"
-        echo "true" > "$STATUS_FILE"
-        ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:touchpad -u low "Touchpad" "Enabled"
-      fi
-    '';
-
-    # 터치스크린 토글 스크립트 (Laptop 전용). 펜(stylus)은 그대로 둠
-    toggleTouchscreen = pkgs.writeShellScriptBin "hypr-toggle-touchscreen" ''
-      if [ "$(${config.posture.cli}/bin/posture get mode)" != laptop ]; then
-        ${pkgs.libnotify}/bin/notify-send -u low "터치스크린" "텐트/태블릿 모드에서는 켜짐으로 고정돼 있습니다 (힌지를 열면 직접 조절 가능)"
-        exit 0
-      fi
-      DEVICES=$(hyprctl devices -j | ${pkgs.jq}/bin/jq -r '.touch[]?.name')
-
-      if [ -z "$DEVICES" ]; then
-        ${pkgs.libnotify}/bin/notify-send "Touchscreen" "No touchscreen device found!"
-        exit 1
-      fi
-
-      # (기록이 없으면 꺼짐이 기본: 터치스크린은 평소 쓰지 않음)
-      STATUS_FILE="$HOME/.local/state/hypr/touchscreen_enabled"
-      mkdir -p "$(dirname "$STATUS_FILE")"
-      [ ! -f "$STATUS_FILE" ] && echo "false" > "$STATUS_FILE"
-
-      if [ "$(cat "$STATUS_FILE")" = "true" ]; then NEW=false; LABEL=Disabled; else NEW=true; LABEL=Enabled; fi
-      while read -r dev; do
-        hyprctl eval "hl.device({ name = \"$dev\", enabled = $NEW })"
-      done <<< "$DEVICES"
-      echo "$NEW" > "$STATUS_FILE"
-      ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:touchscreen -u low "Touchscreen" "$LABEL"
-    '';
+    # 터치패드/터치스크린 토글 (Laptop 전용). 장치를 직접 만지지 않는다: **수동 상태 파일만 뒤집고** 적용은 정책(hypr-input-policy)에 맡긴다.
+    # (장치 선택·적용·상태 파일 기본값이 정책 한 곳에만 있도록: 예전에는 토글 두 개와 정책이 각자 같은 일을 했음)
+    # mkToggle 인자: bin=스크립트 이름, label=알림 제목, file=수동 상태 파일 이름, field=`hypr-input-policy --print` 출력에서 현재 값의 필드 번호(터치패드 4 / 터치스크린 5), lockedMsg=텐트/태블릿에서 눌렀을 때 안내
+    mkToggle = {
+      bin,
+      label,
+      file,
+      field,
+      lockedMsg,
+    }:
+      pkgs.writeShellScriptBin bin ''
+        if [ "$(${config.posture.cli}/bin/posture get mode)" != laptop ]; then
+          ${pkgs.libnotify}/bin/notify-send -u low "${label}" "${lockedMsg}"
+          exit 0
+        fi
+        cur=$(${inputPolicy}/bin/hypr-input-policy --print | cut -d' ' -f${toString field})
+        if [ "$cur" = true ]; then new=false; shown=Disabled; else new=true; shown=Enabled; fi
+        mkdir -p "$HOME/.local/state/hypr"
+        echo "$new" > "$HOME/.local/state/hypr/${file}"
+        ${inputPolicy}/bin/hypr-input-policy
+        ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:${bin} -u low "${label}" "$shown"
+      '';
+    toggleTouchpad = mkToggle {
+      bin = "hypr-toggle-touchpad";
+      label = "Touchpad";
+      file = "touchpad_enabled";
+      field = 4;
+      lockedMsg = "텐트/태블릿 모드에서는 꺼짐으로 고정돼 있습니다 (힌지를 열면 직접 조절 가능)";
+    };
+    # (펜(stylus)은 그대로 둠)
+    toggleTouchscreen = mkToggle {
+      bin = "hypr-toggle-touchscreen";
+      label = "Touchscreen";
+      file = "touchscreen_enabled";
+      field = 5;
+      lockedMsg = "텐트/태블릿 모드에서는 켜짐으로 고정돼 있습니다 (힌지를 열면 직접 조절 가능)";
+    };
 
     # 입력 장치(내장 키보드/터치패드/터치스크린)의 켜짐/꺼짐 정책. 자세(힌지 모드)는 `posture get mode`(core.posture.nix) 로 읽는다.
     #   laptop        : **마지막 수동 상태를 따름**(메뉴에서 정한 touchpad_enabled/touchscreen_enabled 파일, 없으면 터치패드 켬/터치스크린 끔), 키보드 켬
@@ -181,8 +160,8 @@
       labels=()
       cmds=()
       add() { labels+=("$1"); cmds+=("$2"); }
-      # onoff <기록 파일> <기록이 없을 때 기본값>
-      onoff() { [ "$(cat "$HOME/.local/state/hypr/$1" 2>/dev/null || echo "$2")" = true ] && echo "끄기 (지금 켜짐)" || echo "켜기 (지금 꺼짐)"; }
+      # onoff <true|false>: 현재 상태(정책이 출력한 값)에 따른 라벨
+      onoff() { [ "$1" = true ] && echo "끄기 (지금 켜짐)" || echo "켜기 (지금 꺼짐)"; }
 
       # 자세에 따라: 노트북 모드는 직접 조절, 텐트/태블릿 모드는 고정(선택해도 바뀌지 않고 안내만)
       read -r mode angle kb tp ts < <(${inputPolicy}/bin/hypr-input-policy --print)
@@ -190,8 +169,8 @@
       yn() { [ "$1" = true ] && echo 켜짐 || echo 꺼짐; }
 
       if [ "$mode" = laptop ]; then
-        add "터치패드 $(onoff touchpad_enabled true)" "${toggleTouchpad}/bin/hypr-toggle-touchpad"
-        ${lib.concatMapStrings (e: "add ${lib.escapeShellArg e.label} ${lib.escapeShellArg e.command}\n        ") extraEntries}add "터치스크린 $(onoff touchscreen_enabled false)" "${toggleTouchscreen}/bin/hypr-toggle-touchscreen"
+        add "터치패드 $(onoff "$tp")" "${toggleTouchpad}/bin/hypr-toggle-touchpad"
+        ${lib.concatMapStrings (e: "add ${lib.escapeShellArg e.label} ${lib.escapeShellArg e.command}\n        ") extraEntries}add "터치스크린 $(onoff "$ts")" "${toggleTouchscreen}/bin/hypr-toggle-touchscreen"
       else
         add "터치패드: $(yn "$tp") — $mname 모드(힌지 $angle°)에서 고정" "${toggleTouchpad}/bin/hypr-toggle-touchpad"
         ${lib.concatMapStrings (e: "add ${lib.escapeShellArg e.label} ${lib.escapeShellArg e.command}\n        ") extraEntries}add "터치스크린: $(yn "$ts") — $mname 모드(힌지 $angle°)에서 고정" "${toggleTouchscreen}/bin/hypr-toggle-touchscreen"
