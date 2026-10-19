@@ -1,54 +1,22 @@
 #!/usr/bin/env python3
-"""vkb CLI 통합 시험: 가짜 hyprctl/systemctl/posture 로 show/hide/size/auto/apply-posture 흐름을 확인."""
-import json, os, stat, subprocess, sys, tempfile
+"""vkb CLI 통합 시험: 가짜 hyprctl/systemctl/posture 로 show/hide/size/auto/apply-posture 흐름을 확인. (가짜 도구는 mods/_data/_testkit 공용)"""
+import json, os, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-T = tempfile.mkdtemp()
-ok = bad = 0
-def check(name, cond, extra=""):
-    global ok, bad
-    if cond: ok += 1
-    else: bad += 1; print("  FAIL", name, extra)
-def script(name, body):
-    p = f"{T}/{name}"; open(p, "w").write("#!/usr/bin/env python3\n" + body); os.chmod(p, 0o755); return p
+sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "_testkit"))
+from harness import checker
+from fakes import Sandbox
+check, finish = checker()
+sb = Sandbox(); T = sb.dir
 
-# 가짜 hyprctl: clients/monitors/layers 는 파일에서, dispatch 는 호출 기록
-open(f"{T}/clients.json", "w").write(json.dumps([
+# 가짜 hyprctl 이 돌려줄 창/모니터. layers 는 FAKE_DIR/visible 이 있을 때만 wvkbd 가 있는 것으로, dispatch 는 calls.log 에 기록
+sb.write_json("clients.json", [
     {"address": "0xb", "at": [100, 700], "size": [800, 700], "floating": True, "hidden": False, "fullscreen": 0, "monitor": 0},
-    {"address": "0xa", "at": [100, 100], "size": [800, 400], "floating": True, "hidden": False, "fullscreen": 0, "monitor": 0}]))
-open(f"{T}/monitors.json", "w").write(json.dumps([{"id": 0, "name": "eDP-1", "x": 0, "y": 0, "focused": True, "width": 2560, "height": 1600, "scale": 1.0, "transform": 0, "physicalWidth": 340, "physicalHeight": 220}]))
-hypr = script("hyprctl", f'''
-import sys, json, os
-T = "{T}"; a = sys.argv[1:]
-if a[0] == "dispatch": open(T + "/calls.log", "a").write(a[1] + "\\n"); sys.exit(0)
-if a[0] == "layers": print(json.dumps({{"eDP-1": {{"levels": {{"3": ([{{"namespace": "wvkbd", "x": 0, "y": 1240, "w": 2560, "h": 360}}] if os.path.exists(T + "/visible") else [])}}}}}})); sys.exit(0)
-print(open(T + "/" + a[0] + ".json").read())
-''')
-# 가짜 systemctl: 시그널로 가시성 플래그를 바꿈, restart 는 기록
-sysctl = script("systemctl", f'''
-import sys, os
-T = "{T}"; a = sys.argv[1:]
-if "show" in a: print("4242"); sys.exit(0)
-if "is-active" in a: sys.exit(0)
-if "restart" in a: open(T + "/restarts.log", "a").write("restart\\n"); os.path.exists(T + "/visible") and os.remove(T + "/visible"); sys.exit(0)
-if "kill" in a:
-    sig = [x for x in a if x.startswith("--signal=")][0].split("=")[1]
-    open(T + "/signals.log", "a").write(sig + "\\n")
-    if sig == "SIGUSR2": open(T + "/visible", "w").close()
-    elif sig == "SIGUSR1" and os.path.exists(T + "/visible"): os.remove(T + "/visible")
-    sys.exit(0)
-''')
-pkill = script("pkill", f'''
-import sys
-open("{T}/pkill.log", "a").write(" ".join(sys.argv[1:]) + "\\n")
-''')
-posture = script("posture", 'import os,sys; print(open(os.environ["FAKE_MODE_FILE"]).read().strip())')
-env = dict(os.environ, PATH=T + os.pathsep + os.environ["PATH"], VKB_HYPRCTL=hypr, VKB_SYSTEMCTL=sysctl, VKB_POSTURE=posture, VKB_CONFIG_DIR=f"{T}/conf", VKB_STATE_DIR=f"{T}/state", FAKE_MODE_FILE=f"{T}/mode", PYTHONDONTWRITEBYTECODE="1")
+    {"address": "0xa", "at": [100, 100], "size": [800, 400], "floating": True, "hidden": False, "fullscreen": 0, "monitor": 0}])
+sb.write_json("monitors.json", [{"id": 0, "name": "eDP-1", "x": 0, "y": 0, "focused": True, "width": 2560, "height": 1600, "scale": 1.0, "transform": 0, "physicalWidth": 340, "physicalHeight": 220}])
+env = sb.env(VKB_HYPRCTL=sb.path("hyprctl"), VKB_SYSTEMCTL=sb.path("systemctl"), VKB_POSTURE=sb.path("posture"), VKB_CONFIG_DIR=f"{T}/conf", VKB_STATE_DIR=f"{T}/state")
 def vkb(*a): return subprocess.run([sys.executable, "-I", f"{ROOT}/vkb.py", *a], capture_output=True, text=True, env=env)
-def log(n): return open(f"{T}/{n}.log").read().splitlines() if os.path.exists(f"{T}/{n}.log") else []
-def reset_logs():
-    for n in ("calls", "signals", "restarts", "pkill"):
-        try: os.remove(f"{T}/{n}.log")
-        except OSError: pass
+def log(n): return sb.log(n)
+def reset_logs(): sb.reset_logs()
 
 # 보이기: SIGUSR2 + 가려지는 창(0xb)만 맞춤
 r = vkb("show")
@@ -108,14 +76,14 @@ check("args: 폭 1807(도킹도 좁게), 여백 12, 도킹이면 --float 없음"
 vkb("layers", "full"); check("args: 레이어 지정", "-l" in vkb("args").stdout.split("\n")); vkb("layers", "")
 
 # 노트북 모드: 키보드가 숨겨져 있으면 버튼이 안 보임, 떠 있으면 보임. 텐트/태블릿은 항상 보임
-open(f"{T}/mode", "w").write("laptop\n")
+sb.write("mode", "laptop\n")
 check("waybar(laptop+숨김): 빈 출력", vkb("waybar").stdout.strip() == "" and vkb("waybar", "mode").stdout.strip() == "")
 open(f"{T}/visible", "w").close()
 w = json.loads(vkb("waybar").stdout); check("waybar(laptop+보임): 클래스 on", w["class"] == "on" and w["text"] == "⌨", str(w))
 w = json.loads(vkb("waybar", "size").stdout); check("waybar size(보임): M 표시", w["text"] == "M", str(w))
 w = json.loads(vkb("waybar", "mode").stdout); check("waybar mode(도킹): off", w["class"] == "off" and w["text"] == "⧉", str(w))
 os.remove(f"{T}/visible")
-open(f"{T}/mode", "w").write("tablet\n")
+sb.write("mode", "tablet\n")
 w = json.loads(vkb("waybar").stdout); check("waybar(tablet+숨김): 클래스 off 로 보임", w["class"] == "off", str(w))
 check("waybar size/mode(숨김): 빈 출력(모듈이 사라짐)", vkb("waybar", "size").stdout.strip() == "" and vkb("waybar", "mode").stdout.strip() == "")
 
@@ -142,15 +110,15 @@ os.path.exists(f"{T}/visible") and os.remove(f"{T}/visible")
 
 # 사용 모드 연동
 os.remove(f"{T}/visible") if os.path.exists(f"{T}/visible") else None
-open(f"{T}/mode", "w").write("tablet\n"); reset_logs(); vkb("apply-posture")
+sb.write("mode", "tablet\n"); reset_logs(); vkb("apply-posture")
 check("tablet 이면 자동으로 보임", log("signals") == ["SIGUSR2"], str(log("signals")))
 reset_logs(); vkb("apply-posture")
 check("이미 보이면 아무것도 안 함(멱등)", log("signals") == [], str(log("signals")))
-open(f"{T}/mode", "w").write("laptop\n"); reset_logs(); vkb("apply-posture")
+sb.write("mode", "laptop\n"); reset_logs(); vkb("apply-posture")
 check("laptop 이면 자동으로 숨김", log("signals") == ["SIGUSR1"], str(log("signals")))
-vkb("auto", "off"); open(f"{T}/mode", "w").write("tablet\n"); reset_logs(); vkb("apply-posture")
+vkb("auto", "off"); sb.write("mode", "tablet\n"); reset_logs(); vkb("apply-posture")
 check("auto off 면 사용 모드가 바뀌어도 건드리지 않음", log("signals") == [], str(log("signals")))
-r = subprocess.run([sys.executable, "-I", f"{ROOT}/vkb.py", "show"], capture_output=True, text=True, env=dict(env, VKB_SYSTEMCTL=script("systemctl2", "import sys; sys.exit(3 if 'is-active' in sys.argv else 0)")))
+dead = Sandbox(); dead.write_json("rc.json", {"is-active": 3})          # 서비스가 실행 중이 아닌 시스템
+r = subprocess.run([sys.executable, "-I", f"{ROOT}/vkb.py", "show"], capture_output=True, text=True, env=dict(env, VKB_SYSTEMCTL=dead.path("systemctl"), FAKE_DIR=dead.dir))
 check("서비스가 없으면 오류 메시지와 종료 코드 1", r.returncode == 1 and "실행 중이 아닙니다" in r.stderr, r.stderr)
-print(f"\nvkb CLI {ok} 통과 / {bad} 실패")
-sys.exit(1 if bad else 0)
+finish("vkb CLI")

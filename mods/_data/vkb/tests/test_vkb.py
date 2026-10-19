@@ -4,11 +4,9 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import vkb
 
-ok = bad = 0
-def check(name, cond, extra=""):
-    global ok, bad
-    if cond: ok += 1
-    else: bad += 1; print("  FAIL", name, extra)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "_testkit"))
+from harness import checker
+check, finish = checker()
 
 def win(addr, x, y, w, h, floating=True, hidden=False, fullscreen=0):
     return {"address": addr, "at": [x, y], "size": [w, h], "floating": floating, "hidden": hidden, "fullscreen": fullscreen}
@@ -97,5 +95,4 @@ else:
     check("가로 배열의 모든 줄 폭 합 == vkb.LAND_UNITS (키보드 폭 = 단위 × 키 폭 계산의 전제)", all(abs(r - vkb.LAND_UNITS) < 1e-6 for r in rows), str(rows))
     shutil.rmtree(tmp, ignore_errors=True)
 
-print(f"\nvkb {ok} 통과 / {bad} 실패")
-sys.exit(1 if bad else 0)
+finish("vkb")

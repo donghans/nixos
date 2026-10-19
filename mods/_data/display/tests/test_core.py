@@ -12,11 +12,9 @@ def reset():
     shutil.rmtree(os.environ["DISPLAYCTL_STATE"], ignore_errors=True); shutil.rmtree(os.environ["DISPLAYCTL_CONF"], ignore_errors=True)
 def mons(): return {m.name: m for m in dc.get_monitors()}
 def run(*a): return dc.main(list(a))
-ok = fail = 0
-def check(name, cond, extra=""):
-    global ok, fail
-    if cond: ok += 1; print("  ok  ", name)
-    else: fail += 1; print("  FAIL", name, extra)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "_testkit"))
+from harness import checker
+check, finish = checker(verbose=True)
 
 reset(); m = mons()
 check("모니터 2개, 내장/외장 구분", m["eDP-1"].internal and not m["DP-4"].internal)
@@ -205,4 +203,4 @@ check("target_transform 순수 함수: laptop 은 항상 0", dc.target_transform
 r = subprocess.run([sys.executable, "-I", DC, "rotate", "auto"], capture_output=True, text=True, env=dict(os.environ, DISPLAYCTL_HYPRCTL=os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_hyprctl_down.sh")))
 check("컴포지터가 없어 hyprctl 이 JSON 이 아닌 문장을 내도 rotate auto 는 오류 없이 종료(0)", r.returncode == 0 and "Traceback" not in r.stderr, r.stderr[-120:])
 
-print(f"\n코어 {ok} 통과 / {fail} 실패"); sys.exit(1 if fail else 0)
+finish("코어")
