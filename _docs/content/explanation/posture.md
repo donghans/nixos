@@ -392,3 +392,8 @@ lsmod | grep idma64                          # 비어 있어야 함
 
 **잘못된 의심의 정정**: 재부팅 뒤 `always` 컨테이너 5개가 "Up Less than a second" 로 계속 보여 재시작 반복을 의심했으나 **재시작 횟수는 0** 이었다. 부팅 직후 약 30초 동안 시스템 시계가 9시간 앞서(RTC 문제) 컨테이너의 `StartedAt` 이 미래(20:26 UTC)로 기록돼 도커가 지금(약 12:12 UTC)과 비교해 "1초 미만" 으로 표시한 것이다. 부팅 때 `always` 컨테이너 5개(LibreChat, rag_api, vectordb, chat-mongodb, chat-meilisearch)만 되살아났고 CPU 는 각각 1% 미만이다(80% 를 쓰던 `genple` 은 `unless-stopped` 라 멈춘 채 유지됨). 따라서 오늘 밤 측정에는 그 큰 컨테이너 부하가 섞이지 않았다.
 
+#### 두 번째 재부팅 결과: `module_blacklist=idma64` 성공 (2026-10-19 22:42 부팅)
+- 부팅 명령줄에 `module_blacklist=idma64 irqpoll`. 커널 로그에 `Module idma64 is blacklisted`(2.05, 2.11, 5.17초 — initrd 단계 포함)가 찍혔고 **`lsmod` 에 idma64 없음**, `/sys/bus/platform/drivers/idma64/` 없음, `idma64.0` 장치는 있으나 드라이버 없음, **IRQ 27 은 `i2c_designware.0` 단독**, 터치패드 입력장치 6개(ELAN0305)로 정상, `controller timed out` 오류 없음. `posture-doctor` 7개 OK, 실패한 유닛 없음, 알림 센터/장치 감시/Netdata 정상. 터치스크린 USB 는 `auto`/`suspended`(노트북 모드, 터치 꺼짐).
+- 이로써 첫 번째 재부팅의 "modprobe blacklist 는 initrd 의 softdep 앞에서 무효" 가설이 확인됐다(커널 인자 방식은 initrd 포함 모든 로드를 막음). **필요 없어진 `idma64` udev unbind 규칙(과 진단 로그)은 제거했다.**
+- **남은 일(장기 확인)**: 이 상태(IRQ 27 단독, PIO)에서 폭주(`controller timed out`)가 사라졌는지는 몇 주 지켜봐야 한다(예전엔 2~3주에 한 번, `ls /var/log/touchpad-watchdog/` 에 쌓임). 폭주가 없다는 확신이 선 뒤에 **`irqpoll` 제거 시험**(재부팅 한 번, 따로)을 한다. `irqpoll` 이 없으면 과거엔 "발열/배터리 문제"(IRQ 폭주)가 있었다고 기록돼 있으므로, 제거 후 발열/`irq/…` CPU 사용·`/proc/irq/*/spurious` 를 같이 본다.
+
