@@ -149,7 +149,7 @@ tent/tablet 에서 기기를 돌리면 내장 화면과 터치가 같이 돈다.
   그때 커널 `/sys/class/drm/card1-eDP-1/dpms` 는 `On`, Hyprland `dpmsStatus=true`, 백라이트 96000 으로 모두 정상으로 보이는데 화면만 까맣다(tty 전환의 전체 모드 재설정이 복구).
   덤으로 화면이 꺼진 동안 hyprlock 이 해제를 마무리하지 못하고 화면이 켜지는 순간에야 끝났다(`authenticated` 와 `Unlocking session` 이 5초 차이).
   닫을 때 hyprlock 이 배경용 화면 캡처를 기다리다 `Gathering resources timed out after 2000 milliseconds` 로 2초 지연되는 것도 같은 원인(꺼진 화면은 캡처가 안 됨). dpms 없이 잠그면 17ms.
-- 왜 dpms 가 안 켜지는지는 모름(i915 + `i915.enable_psr=1` + Hyprland 0.55.2. PSR 의심은 하지만 확인 안 함. 화면이 까만 동안 `grim` 으로 컴포지터가 그리는지 보는 시험은 하지 않았다).
+- 왜 dpms 가 안 켜지는지는 모름(i915 + `i915.enable_psr=1` + Hyprland 0.55.2. PSR 의심은 했으나 아래 "PSR 조사"에서 PSR 은 애초에 꺼져 있었음을 확인. 화면이 까만 동안 `grim` 으로 컴포지터가 그리는지 보는 시험은 하지 않았다).
 - 조치: dpms 를 쓰지 않고 **백라이트만** 끄고 켬(`lid-screen off|on`, `brightnessctl` 사용, 닫을 때 밝기를 한 번만 저장해 닫힘이 두 번 와도 원래 밝기를 잃지 않음). 모드 재설정이 없어 이 경로의 문제가 생기지 않는다.
 - 확인(사용자): 백라이트 시험 후 화면 정상, 실제 덮개를 닫았다 열어도 정상. 오래 닫아 둔 뒤 열기는 확인 중.
 
@@ -244,3 +244,11 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 | "뭔가 이상한데 어디서부터 볼지 모르겠다" | 위 항목을 한 번에 훑어 어느 단계에서 끊겼는지 + 힌트를 알려줌 |
 
 **Claude 로 레포를 고칠 때 권장 순서**: (1) `mods/_data/run-tests.sh` (2) `nixup check` (3) `nixup home`/`os` 적용 (4) `posture-doctor`. 문제가 나오면 출력의 힌트대로 고치고, 시험으로 못 잡는 종류(환경 오염, 서비스 비활성화)는 이 도구에 점검 항목으로 추가한다(`mods/_data/posture/doctor.py`, 시험 `tests/test_doctor.py`). 로그인 때 자동 실행/알림은 일부러 넣지 않았다: 문제는 대부분 우리가 손댄 직후에 생기고, 그때는 직접 실행하는 편이 확실하다.
+
+### PSR(패널 자체 갱신) 조사 (2026-10-19)
+**결론: `i915.enable_psr=1` 은 6.18 에서 PSR 을 켜 주지 않고, 켜도 이 패널은 실제로 자체 갱신에 들어가지 않는다. 전력 이득을 기대할 수 없어 그대로 둔다.**
+- 증상: 패널은 PSR 을 지원하는데(`Sink support: PSR = yes`) `i915_edp_psr_status` 가 `PSR mode: disabled`.
+- 원인(커널 6.18.35 `intel_psr.c` 소스로 확인): `psr_global_enabled()` 가 eDP 에서는 **펌웨어 VBT 의 PSR 허용 비트**(`connector->panel.vbt.psr.enable`)만 본다. 예전 커널에서는 `enable_psr=1` 이 이를 덮어썼지만 지금은 `enable_psr` 이 PSR2 사용 여부(`==1` 이면 PSR2 금지)만 정한다. 이 노트북의 VBT 는 PSR 을 허용하지 않아 컴퓨트 단계에서 `PSR disabled by flag`(`drm.debug=0x4` 로 확인) 로 거부된다. `enable_psr=1` 은 부팅 때 "dangerous option - tainting kernel" 만 남긴다.
+- 사용자 지정 48Hz 모드나 화면 주사율 문제가 아니다: 60Hz/165Hz 표준 모드에서도 같다.
+- 강제 시험: `echo 2 | sudo tee /sys/kernel/debug/dri/1/i915_edp_psr_debug`(ENABLE, VBT 무시) 후 모드 변경 → `PSR1 enabled`. 하지만 정지 화면 12초 동안 소스 상태는 `IDLE`, 싱크는 `inactive` 로 **자체 갱신에 한 번도 들어가지 않았다**(Busy frontbuffer 0). 즉 강제해도 얻는 게 없다(VBT 가 끄는 데는 이유가 있을 수 있음). 시험 후 `0` 으로 되돌렸고 debugfs 값은 재부팅하면 초기화된다.
+- 후속 선택지: `hosts/msi-summit-me.nix` 의 `"i915.enable_psr=1"` 은 효과 없이 커널 taint 만 만드니 지워도 된다(다음 `nixup os` + 재부팅 때). 지우기 전까지 해는 없음.
