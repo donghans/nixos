@@ -292,9 +292,11 @@ def record(log_dir: str = LOG_DIR, user: str = USER) -> int:
 
 # ───────────────────────── 명령줄 ─────────────────────────
 def copy_text(text: str) -> bool:
+    """wl-copy 는 클립보드 내용을 계속 제공하려고 백그라운드로 남는다. 그 프로세스가 우리 터미널(pty)을 붙잡고 있으면
+    복사하고 종료해도 kitty 창이 빈 화면으로 남으므로, 출력은 /dev/null 로 돌려 터미널과 분리한다."""
     if not shutil.which("wl-copy"):
         return False
-    return subprocess.run(["wl-copy"], input=text, text=True).returncode == 0
+    return subprocess.run(["wl-copy"], input=text, text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
 
 def entry_text(e: dict, body_only: bool = False) -> str:

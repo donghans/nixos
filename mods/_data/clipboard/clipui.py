@@ -193,7 +193,8 @@ def parse_query(raw: str) -> tuple[list[tuple], str]:
 
 
 def copy_bytes(data: bytes) -> None:
-    subprocess.run(shlex.split(COPY_CMD), input=data, check=False)
+    # wl-copy 는 클립보드 내용을 계속 제공하려고 백그라운드로 남는다. 출력을 터미널에 물려 두면 복사하고 종료해도 kitty 창이 빈 화면으로 남는다
+    subprocess.run(shlex.split(COPY_CMD), input=data, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 class ConfirmScreen(ModalScreen[bool]):

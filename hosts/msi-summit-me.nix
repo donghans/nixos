@@ -198,6 +198,19 @@ mkHostConfiguration ({
   };
 
   hm = {
+    # HDMI/DisplayPort 오디오 출력(HDMI1~3)을 숨김 — 사용자가 모니터 오디오를 쓰지 않음(2026-10-19).
+    # 이 노트북의 오디오 칩에는 모니터 연결과 상관없이 HDMI/DP 출력 3개가 항상 있고, pasystray 가 다시 시작될 때마다
+    # 이 출력들을 "새 장치"로 반복해서 알려서 알림 기록(notif)이 쌓였음. 노드 이름 예: alsa_output.pci-…skl_hda_dsp_generic.HiFi__HDMI1__sink
+    # 적용은 `systemctl --user restart wireplumber` (음이 잠깐 끊김). 되돌리려면 이 블록을 지우고 같은 명령.
+    xdg.configFile."wireplumber/wireplumber.conf.d/51-no-hdmi-audio.conf".text = ''
+      monitor.alsa.rules = [
+        {
+          matches = [ { node.name = "~alsa_output\\..*HiFi__HDMI[0-9]+__sink" } ]
+          actions = { update-props = { node.disabled = true } }
+        }
+      ]
+    '';
+
     # 런처에서 Howdy 설정 GUI(howdy-gtk)는 숨김 — 얼굴 등록/삭제는 CLI(sudo howdy add / clear)로 함
     xdg.desktopEntries.howdy = {
       name = "Howdy";

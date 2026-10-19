@@ -6,6 +6,7 @@ sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(ROOT),
 import notif
 from harness import checker, tmpdir
 check, finish = checker()
+real_copy_text = notif.copy_text
 copied = []
 notif.copy_text = lambda t: copied.append(t) or True
 
@@ -103,6 +104,16 @@ check("copy --body: 본문만", rc2 == 0 and copied[-1] == "줄1\n줄2")
 with contextlib.redirect_stderr(io.StringIO()):
     rc3 = notif.main(["copy", "9"])
 check("범위를 벗어난 번호는 실패", rc3 == 1)
+
+# wl-copy 가 터미널을 붙잡지 않게 출력을 분리(복사 후 종료해도 kitty 창이 빈 화면으로 남던 문제의 회귀 시험)
+import subprocess as _sp, shutil as _sh
+seen = {}
+_orig_run, _orig_which = notif.subprocess.run, notif.shutil.which
+notif.shutil.which = lambda n: "/x/wl-copy"
+notif.subprocess.run = lambda cmd, **kw: (seen.update(kw), type("R", (), {"returncode": 0})())[1]
+ok = real_copy_text("x")
+notif.subprocess.run, notif.shutil.which = _orig_run, _orig_which
+check("copy_text: wl-copy 의 stdout/stderr 를 /dev/null 로 돌려 터미널과 분리", ok and seen.get("stdout") == _sp.DEVNULL and seen.get("stderr") == _sp.DEVNULL, str(seen))
 
 # 화면(textual 이 있을 때만) — 왼쪽 그룹 패널(전체/시스템 문제/앱별)을 고르면 오른쪽 목록이 바뀌는 구조, 검색 필터, Enter 복사 후 종료
 try:

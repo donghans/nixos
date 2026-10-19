@@ -49,3 +49,6 @@
 - 알림 데몬은 mako 이고 `notif` 는 mako 의 기록(`makoctl history`)이 아니라 위의 자체 기록을 쓴다 — mako 의 기록은 재시작하면 사라지고 건수 제한이 있다.
 - 시스템 유닛의 실패 원인 로그는 사용자 권한으로 못 읽을 수 있다(그러면 알림 본문이 "(로그를 읽지 못했습니다)").
 - 시험: `mods/_data/run-tests.sh` (notif 35개 + 화면 23개; 화면은 textual 이 있는 python 필요). 실제 확인: 실패하는 임시 유닛(`systemd-run --user --unit=x false`)을 만들어 알림·waybar 표시·해소를 확인했다 — 확인 후 `systemctl --user reset-failed x`.
+- **복사하고 종료했는데 창이 빈 화면으로 남던 문제 (2026-10-19, notif 와 clipui 둘 다)**: Enter 로 복사하면 `wl-copy` 가 클립보드 내용을 계속 제공하려고 백그라운드로 남는데, 그 프로세스의 stderr 가 kitty 의 터미널(pty)에 물려 있어서 kitty 창이 닫히지 않았다(`wl-copy` 의 fd 2 가 `/dev/pts/0`). 프로세스(`notif ui`)는 정상 종료(status 0)하고 있었다. 복사할 때 stdout/stderr 를 `/dev/null` 로 돌리자 창이 닫혔다. `hyprctl dispatch 'hl.dsp.send_shortcut({ mods = "", key = "Return", window = "class:^notif$" })'` 로 대상 창에만 Enter 를 보내 실제 창에서 고침 전/후를 확인했다(시험은 `copy_text` 가 출력을 분리하는지를 검사).
+- **pasystray 의 "New sink" 알림 반복**: 모니터 연결과 무관하게 이 노트북 오디오 칩(sof-hda-dsp)에는 HDMI/DP 출력 3개가 항상 있고, pasystray 가 (다시 시작될 때마다) 이 출력들과 마이크·스피커·헤드폰을 "새 장치"로 한꺼번에 알렸다. 터진 시각이 `nixup home` 을 돌린 시각과 겹쳤다(오늘 14:08~16:10). 모니터 오디오를 쓰지 않으므로 `hosts/msi-summit-me.nix` 에서 WirePlumber 규칙(`~/.config/wireplumber/wireplumber.conf.d/51-no-hdmi-audio.conf`, `node.disabled = true`)으로 HDMI 출력 노드를 숨겼다 — `wpctl status` 의 HDMI 출력 3개가 0개로 줄고 스피커/독 오디오는 그대로. 스피커·헤드폰·마이크 알림은 pasystray 재시작 때 여전히 나올 수 있다(끄려면 `pasystray --notify=none`).
+
