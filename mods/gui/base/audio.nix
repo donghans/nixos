@@ -5,10 +5,7 @@
 # - pavucontrol: 상세 설정(장치/포트/앱별 음량). pasystray 메뉴의 "Volume Control…" 로 열림
 # - 단축키(볼륨/음소거/마이크 음소거)는 core.bind.hwctl.nix 의 vol-control
 {mkPartOf, ...}:
-mkPartOf "mods.gui" ({
-  pkgs,
-  ...
-}: {
+mkPartOf "mods.gui" ({pkgs, ...}: {
   hm = {
     home.packages = [
       pkgs.pasystray

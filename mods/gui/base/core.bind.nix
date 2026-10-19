@@ -86,113 +86,113 @@ in {
     # (SUPER+H 단축키 목록에서 항목을 고르면 hypr-keybinds 가 이 표로 그 동작을 hl.dispatch 로 실행)
     wayland.windowManager.hyprland.extraConfig = lib.mkMerge [
       (lib.mkBefore ''
-      HELP_BINDS = {}
-      do
-        local orig_bind = hl.bind
-        hl.bind = function(keys, dispatcher, opts)
-          if type(opts) == "table" and opts.description then HELP_BINDS[opts.description] = dispatcher end
-          return orig_bind(keys, dispatcher, opts)
+        HELP_BINDS = {}
+        do
+          local orig_bind = hl.bind
+          hl.bind = function(keys, dispatcher, opts)
+            if type(opts) == "table" and opts.description then HELP_BINDS[opts.description] = dispatcher end
+            return orig_bind(keys, dispatcher, opts)
+          end
         end
-      end
-    '')
+      '')
       ''
-      -- absolute paths from Nix
-      local wofi = "${wofi}"
-      local launcher = "${appLauncher}/bin/hypr-launcher"
-      local swap_monitors = "${swapMonitors}/bin/hypr-swap-monitors"
-      local keybinds_help = "${keybindsHelp}/bin/hypr-keybinds"
-      local grim = "${grim}"
-      local slurp = "${slurp}"
-      local satty = "${satty}"
-      local capture_active_window = "${captureActiveWindow}/bin/hypr-capture-active"
+        -- absolute paths from Nix
+        local wofi = "${wofi}"
+        local launcher = "${appLauncher}/bin/hypr-launcher"
+        local swap_monitors = "${swapMonitors}/bin/hypr-swap-monitors"
+        local keybinds_help = "${keybindsHelp}/bin/hypr-keybinds"
+        local grim = "${grim}"
+        local slurp = "${slurp}"
+        local satty = "${satty}"
+        local capture_active_window = "${captureActiveWindow}/bin/hypr-capture-active"
 
-      -- 설명(description)이 붙은 바인딩 헬퍼: SUPER+H 단축키 목록(hypr-keybinds)에 표시됨
-      local function bindd(keys, dispatcher, desc, flags)
-        flags = flags or {}
-        flags.description = desc
-        hl.bind(keys, dispatcher, flags)
-      end
+        -- 설명(description)이 붙은 바인딩 헬퍼: SUPER+H 단축키 목록(hypr-keybinds)에 표시됨
+        local function bindd(keys, dispatcher, desc, flags)
+          flags = flags or {}
+          flags.description = desc
+          hl.bind(keys, dispatcher, flags)
+        end
 
-      -- 기본 키바인딩
-      bindd("SUPER + Q", hl.dsp.window.close(), "창 닫기")
-      bindd("SUPER + SHIFT + Q", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'"), "Hyprland 종료")
-      bindd("SUPER + F", hl.dsp.window.float({ action = "toggle" }), "플로팅 토글")
-      bindd("SUPER + space", hl.dsp.exec_cmd(launcher), "앱 런처 (wofi)")
-      bindd("SUPER + L", hl.dsp.exec_cmd("hyprlock"), "화면 잠금")
-      bindd("SUPER + H", hl.dsp.exec_cmd(keybinds_help), "단축키 목록 보기")
-      bindd("SUPER + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"), "fcitx5 재시작")
+        -- 기본 키바인딩
+        bindd("SUPER + Q", hl.dsp.window.close(), "창 닫기")
+        bindd("SUPER + SHIFT + Q", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'"), "Hyprland 종료")
+        bindd("SUPER + F", hl.dsp.window.float({ action = "toggle" }), "플로팅 토글")
+        bindd("SUPER + space", hl.dsp.exec_cmd(launcher), "앱 런처 (wofi)")
+        bindd("SUPER + L", hl.dsp.exec_cmd("hyprlock"), "화면 잠금")
+        bindd("SUPER + H", hl.dsp.exec_cmd(keybinds_help), "단축키 목록 보기")
+        bindd("SUPER + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"), "fcitx5 재시작")
 
-      -- Fn+F11 은 펌웨어가 SUPER+P(Windows 의 Win+P 방식)를 보내므로 SUPER+P 에 할당
-      -- 화면 전환 키(SUPER+P, Fn+F11)는 display-manager.nix (displayui)
+        -- Fn+F11 은 펌웨어가 SUPER+P(Windows 의 Win+P 방식)를 보내므로 SUPER+P 에 할당
+        -- 화면 전환 키(SUPER+P, Fn+F11)는 display-manager.nix (displayui)
 
-      -- Special workspace
-      bindd("SUPER + S", hl.dsp.workspace.toggle_special("magic"), "스페셜 워크스페이스 토글")
-      bindd("SUPER + SHIFT + S", hl.dsp.window.move({ workspace = "special:magic" }), "창을 스페셜 워크스페이스로 보내기")
+        -- Special workspace
+        bindd("SUPER + S", hl.dsp.workspace.toggle_special("magic"), "스페셜 워크스페이스 토글")
+        bindd("SUPER + SHIFT + S", hl.dsp.window.move({ workspace = "special:magic" }), "창을 스페셜 워크스페이스로 보내기")
 
-      -- Scroll through existing workspaces
-      bindd("SUPER + mouse_down", hl.dsp.focus({ workspace = "r-1" }), "이전 워크스페이스 (휠)")
-      bindd("SUPER + mouse_up", hl.dsp.focus({ workspace = "r+1" }), "다음 워크스페이스 (휠)")
-      bindd("SUPER + SHIFT + mouse_down", hl.dsp.window.move({ workspace = "r-1" }), "창을 이전 워크스페이스로 (휠)")
-      bindd("SUPER + SHIFT + mouse_up", hl.dsp.window.move({ workspace = "r+1" }), "창을 다음 워크스페이스로 (휠)")
-      bindd("SUPER + SHIFT + CTRL + mouse_down", hl.dsp.window.move({ workspace = "r-1", follow = false }), "창을 이전 워크스페이스로, 따라가지 않음 (휠)")
-      bindd("SUPER + SHIFT + CTRL + mouse_up", hl.dsp.window.move({ workspace = "r+1", follow = false }), "창을 다음 워크스페이스로, 따라가지 않음 (휠)")
+        -- Scroll through existing workspaces
+        bindd("SUPER + mouse_down", hl.dsp.focus({ workspace = "r-1" }), "이전 워크스페이스 (휠)")
+        bindd("SUPER + mouse_up", hl.dsp.focus({ workspace = "r+1" }), "다음 워크스페이스 (휠)")
+        bindd("SUPER + SHIFT + mouse_down", hl.dsp.window.move({ workspace = "r-1" }), "창을 이전 워크스페이스로 (휠)")
+        bindd("SUPER + SHIFT + mouse_up", hl.dsp.window.move({ workspace = "r+1" }), "창을 다음 워크스페이스로 (휠)")
+        bindd("SUPER + SHIFT + CTRL + mouse_down", hl.dsp.window.move({ workspace = "r-1", follow = false }), "창을 이전 워크스페이스로, 따라가지 않음 (휠)")
+        bindd("SUPER + SHIFT + CTRL + mouse_up", hl.dsp.window.move({ workspace = "r+1", follow = false }), "창을 다음 워크스페이스로, 따라가지 않음 (휠)")
 
-      -- Swap workspaces
-      bindd("SUPER + SHIFT + mouse:274", hl.dsp.exec_cmd(swap_monitors), "모니터 간 워크스페이스 스왑")
+        -- Swap workspaces
+        bindd("SUPER + SHIFT + mouse:274", hl.dsp.exec_cmd(swap_monitors), "모니터 간 워크스페이스 스왑")
 
-      -- Misc
-      bindd("Print", hl.dsp.exec_cmd(grim .. " -g \"$(" .. slurp .. ")\" - | " .. satty .. " --filename -"), "영역 캡처")
-      bindd("CTRL + Print", hl.dsp.exec_cmd(capture_active_window), "현재 창 캡처")
-      bindd("SHIFT + Print", hl.dsp.exec_cmd(grim .. " - | " .. satty .. " --filename -"), "전체 화면 캡처")
+        -- Misc
+        bindd("Print", hl.dsp.exec_cmd(grim .. " -g \"$(" .. slurp .. ")\" - | " .. satty .. " --filename -"), "영역 캡처")
+        bindd("CTRL + Print", hl.dsp.exec_cmd(capture_active_window), "현재 창 캡처")
+        bindd("SHIFT + Print", hl.dsp.exec_cmd(grim .. " - | " .. satty .. " --filename -"), "전체 화면 캡처")
 
-      ${lib.optionalString config.services.custom-notify-logger.enable ''
-        bindd("SUPER + N", hl.dsp.exec_cmd("pkill -x '(.wofi-wrapped|wofi)' && exit 0; ls -tr ${config.services.custom-notify-logger.logDir}/$USER.log* 2>/dev/null | xargs -r zcat -f | tac | " .. wofi .. " --dmenu --cache-file /dev/null --width 1400 --prompt \"알림 검색 (최근 30일)\""), "알림 로그 (30일)")
-      ''}
+        ${lib.optionalString config.services.custom-notify-logger.enable ''
+          bindd("SUPER + N", hl.dsp.exec_cmd("pkill -x '(.wofi-wrapped|wofi)' && exit 0; ls -tr ${config.services.custom-notify-logger.logDir}/$USER.log* 2>/dev/null | xargs -r zcat -f | tac | " .. wofi .. " --dmenu --cache-file /dev/null --width 1400 --prompt \"알림 검색 (최근 30일)\""), "알림 로그 (30일)")
+        ''}
 
-      -- Workspace 1-10
-      for i = 1, 9 do
-        bindd("SUPER + " .. tostring(i), hl.dsp.focus({ workspace = tostring(i) }), "워크스페이스 " .. i .. " 로 이동")
-        bindd("SUPER + SHIFT + " .. tostring(i), hl.dsp.window.move({ workspace = tostring(i) }), "창을 워크스페이스 " .. i .. " 로 보내기")
-      end
-      bindd("SUPER + 0", hl.dsp.focus({ workspace = "10" }), "워크스페이스 10 로 이동")
-      bindd("SUPER + SHIFT + 0", hl.dsp.window.move({ workspace = "10" }), "창을 워크스페이스 10 로 보내기")
+        -- Workspace 1-10
+        for i = 1, 9 do
+          bindd("SUPER + " .. tostring(i), hl.dsp.focus({ workspace = tostring(i) }), "워크스페이스 " .. i .. " 로 이동")
+          bindd("SUPER + SHIFT + " .. tostring(i), hl.dsp.window.move({ workspace = tostring(i) }), "창을 워크스페이스 " .. i .. " 로 보내기")
+        end
+        bindd("SUPER + 0", hl.dsp.focus({ workspace = "10" }), "워크스페이스 10 로 이동")
+        bindd("SUPER + SHIFT + 0", hl.dsp.window.move({ workspace = "10" }), "창을 워크스페이스 10 로 보내기")
 
-      -- Focus arrows
-      local directions = {
-        left = "l",
-        right = "r",
-        up = "u",
-        down = "d"
-      }
-      local arrows = { left = "←", right = "→", up = "↑", down = "↓" } -- (SUPER+H 목록 표시용)
-      for key, dir in pairs(directions) do
-        bindd("SUPER + " .. key, function()
-          hl.dispatch(hl.dsp.focus({ direction = dir }))
-          hl.dispatch(hl.dsp.window.alter_zorder({ mode = "top" }))
-        end, "포커스 이동 (" .. arrows[key] .. ")")
-      end
+        -- Focus arrows
+        local directions = {
+          left = "l",
+          right = "r",
+          up = "u",
+          down = "d"
+        }
+        local arrows = { left = "←", right = "→", up = "↑", down = "↓" } -- (SUPER+H 목록 표시용)
+        for key, dir in pairs(directions) do
+          bindd("SUPER + " .. key, function()
+            hl.dispatch(hl.dsp.focus({ direction = dir }))
+            hl.dispatch(hl.dsp.window.alter_zorder({ mode = "top" }))
+          end, "포커스 이동 (" .. arrows[key] .. ")")
+        end
 
-      -- Mouse drag (bindm)
-      bindd("SUPER + mouse:272", hl.dsp.window.drag(), "창 이동", { mouse = true })
-      bindd("SUPER + mouse:273", hl.dsp.window.resize(), "창 크기 조절", { mouse = true })
+        -- Mouse drag (bindm)
+        bindd("SUPER + mouse:272", hl.dsp.window.drag(), "창 이동", { mouse = true })
+        bindd("SUPER + mouse:273", hl.dsp.window.resize(), "창 크기 조절", { mouse = true })
 
-      -- Release bindings (bindr)
-      bindd("SUPER + SHIFT + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"), "fcitx5 재시작 (키를 뗄 때)", { release = true })
+        -- Release bindings (bindr)
+        bindd("SUPER + SHIFT + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"), "fcitx5 재시작 (키를 뗄 때)", { release = true })
 
-      -- Gestures
-      hl.gesture({
-        fingers = 3,
-        direction = "horizontal",
-        action = "workspace"
-      })
+        -- Gestures
+        hl.gesture({
+          fingers = 3,
+          direction = "horizontal",
+          action = "workspace"
+        })
 
-      -- 3손가락 아래 스와이프: 모니터 간 워크스페이스 스왑
-      hl.gesture({
-        fingers = 3,
-        direction = "down",
-        action = function() hl.exec_cmd(swap_monitors) end
-      })
-    ''
+        -- 3손가락 아래 스와이프: 모니터 간 워크스페이스 스왑
+        hl.gesture({
+          fingers = 3,
+          direction = "down",
+          action = function() hl.exec_cmd(swap_monitors) end
+        })
+      ''
     ];
   };
 })

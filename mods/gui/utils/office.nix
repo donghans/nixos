@@ -39,12 +39,13 @@ mkModOf "mods.gui" __curPos "Office (ONLYOFFICE + MS 호환 폰트)" ({
     "에스코어 드림 9 Black" = "Black";
     "산돌고딕B" = "Bold";
   };
-  fontAliases = pkgs.runCommand "office-font-aliases" {
-    nativeBuildInputs = [(pkgs.python3.withPackages (p: [p.fonttools]))];
-  } ''
-    python3 -I ${../../_data/office-fonts/alias.py} $out \
-      ${lib.concatStringsSep " \\\n      " (lib.mapAttrsToList (n: w: lib.escapeShellArg "${n}=${pretendardDir}/Pretendard-${w}.otf") fontAliasMap)}
-  '';
+  fontAliases =
+    pkgs.runCommand "office-font-aliases" {
+      nativeBuildInputs = [(pkgs.python3.withPackages (p: [p.fonttools]))];
+    } ''
+      python3 -I ${../../_data/office-fonts/alias.py} $out \
+        ${lib.concatStringsSep " \\\n      " (lib.mapAttrsToList (n: w: lib.escapeShellArg "${n}=${pretendardDir}/Pretendard-${w}.otf") fontAliasMap)}
+    '';
   onlyoffice = pkgs.symlinkJoin {
     name = "onlyoffice-desktopeditors-scaled";
     paths = [pkgs.onlyoffice-desktopeditors];

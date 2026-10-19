@@ -152,7 +152,7 @@ mkHostConfiguration ({config, ...}: {
     security.acme.acceptTerms = true;
     security.acme.defaults.email = "772610158.xyz@gmail.com";
     security.acme.certs = let
-      mkDmsCert = {}: {
+      mkDmsCert = _: {
         dnsProvider = "cloudflare";
         environmentFile = "/var/lib/nix-secrets/cloudflare/token";
         group = "caddy";

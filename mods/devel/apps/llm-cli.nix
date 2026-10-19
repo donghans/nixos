@@ -38,7 +38,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # 빌드돼 있어, 이 변수를 물려받는 glibc 2.42 프로그램(ONLYOFFICE 등)이 `GLIBC_2.43 not found` 로 죽음.
   # → alsa-lib 만 stable 것으로 교체. 새 glibc 는 옛 glibc 로 빌드된 라이브러리를 그대로 로드할 수 있어 양쪽 모두 안전함
   #   (claude 바이너리는 libc/libm/libpthread/librt 를 미리 로드하고 stable libasound 의 의존도 같은 목록).
-  claude = unstable.claude-code.override {alsa-lib = pkgs.alsa-lib;};
+  claude = unstable.claude-code.override {inherit (pkgs) alsa-lib;};
 in {
   hm = {
     home.packages = [claude unstable.antigravity-cli];
