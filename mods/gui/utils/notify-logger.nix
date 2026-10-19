@@ -18,10 +18,11 @@
       mkdir -p $out
       cp ${../../_data/notif/notif.py} $out/notif.py
       cp ${../../_data/notif/notif_ui.py} $out/notif_ui.py
+      cp ${../../_data/notif/devwatch.py} $out/devwatch.py
     '';
     # busctl/systemctl/journalctl(systemd), pkill(procps), wl-copy, notify-send 를 PATH 에 넣어 서비스 환경에서도 동작하게 함
     notif = pkgs.writeShellScriptBin "notif" ''
-      export PATH=${lib.makeBinPath [pkgs.systemd pkgs.procps pkgs.wl-clipboard pkgs.libnotify]}:$PATH
+      export PATH=${lib.makeBinPath [pkgs.systemd pkgs.procps pkgs.wl-clipboard pkgs.libnotify pkgs.pipewire]}:$PATH
       export NOTIF_LOG_DIR=${svcCfg.logDir}
       exec ${py}/bin/python3 ${notifDir}/notif.py "$@"
     '';
@@ -95,6 +96,30 @@
           };
           Install.WantedBy = ["timers.target"];
         };
+
+        # 장치 감시: 외부 오디오(USB/블루투스)·헤드폰 연결/해제, USB, 마운트/언마운트, 전원 어댑터 전환을 알림(앱 이름 devices)으로.
+        # pasystray 의 자체 알림은 끈다(아래 autostart) — 설정을 다시 읽을 때마다 내장 카드를 "새 장치"로 반복해서 알렸음
+        systemd.user.services.notif-devices = {
+          Unit = {
+            Description = "Device event notifications (notif devices)";
+            After = ["graphical-session-pre.target"];
+            PartOf = ["graphical-session.target"];
+          };
+          Install.WantedBy = ["graphical-session.target"];
+          Service = {
+            ExecStart = "${notif}/bin/notif devices";
+            Restart = "always";
+            RestartSec = 3;
+          };
+        };
+        # 패키지가 제공하는 XDG 자동 시작 항목을 같은 이름으로 덮어써서 알림만 끔(트레이 아이콘/음량 조작은 그대로)
+        xdg.configFile."autostart/pasystray.desktop".text = ''
+          [Desktop Entry]
+          Type=Application
+          Name=PulseAudio System Tray
+          Exec=pasystray --notify=none
+          NoDisplay=true
+        '';
 
         # 앱 런처(SUPER+Space)에서 "Notification Center" 로 연다 — 전용 단축키는 두지 않음
         xdg.desktopEntries.notif = {

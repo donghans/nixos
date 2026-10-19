@@ -8,6 +8,7 @@
   notif copy N [--body] [list 와 같은 조건]   list 의 N번 알림을 클립보드로(기본: 제목+본문, --body: 본문만)
   notif record                       (서비스용) 알림을 받아 기록한다
   notif health                       실패한 서비스를 확인해 새 실패를 알리고 waybar 를 갱신한다
+  notif devices                      (서비스용) 장치 연결/해제·마운트·전원 어댑터 변화를 알림으로 알린다(devwatch.py)
   notif waybar                       waybar 모듈용 JSON(문제가 없으면 빈 출력 = 모듈이 사라짐)
   notif ui [all|apps|problems|stats] 대화형 화면(Notification Center)
 
@@ -335,7 +336,7 @@ def main(argv: list) -> int:
     p.add_argument("n", type=int)
     p.add_argument("--body", action="store_true")
     filters(p)
-    for name in ("record", "health", "waybar"):
+    for name in ("record", "health", "waybar", "devices"):
         sub.add_parser(name)
     sub.add_parser("ui").add_argument("tab", nargs="?", default="all", choices=["all", "apps", "problems", "stats"])
     a = ap.parse_args(argv)
@@ -343,6 +344,10 @@ def main(argv: list) -> int:
 
     if a.cmd == "record":
         return record()
+    if a.cmd == "devices":
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import devwatch
+        return devwatch.run()
     if a.cmd == "health":
         r = health()
         print(f"실패한 서비스 {len(r['failed'])}개, 새로 알린 것 {len(r['new'])}개")
