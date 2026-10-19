@@ -104,13 +104,14 @@ with contextlib.redirect_stderr(io.StringIO()):
     rc3 = notif.main(["copy", "9"])
 check("범위를 벗어난 번호는 실패", rc3 == 1)
 
-# 화면(textual 이 있을 때만) — clipui 와 같은 조작: 검색창 필터, F키, Enter 복사 후 종료, Esc 단계적 해제
+# 화면(textual 이 있을 때만) — 왼쪽 그룹 패널(전체/시스템 문제/앱별)을 고르면 오른쪽 목록이 바뀌는 구조, 검색 필터, Enter 복사 후 종료
 try:
     import textual, asyncio, notif_ui
 except ImportError:
     print("  (textual 없음: 화면 시험은 건너뜀 — PYTHON=<textual 이 있는 python> 으로 실행)")
 else:
     from textual.widgets import Input
+    from textual.screen import ModalScreen
     fresh = [dict(e, ts=datetime.datetime.now() - datetime.timedelta(minutes=10 * (len(ents) - i))) for i, e in enumerate(ents)]
     notif.read_entries = lambda: fresh
     notif.failed_units = lambda: []
@@ -120,30 +121,34 @@ else:
         app = notif_ui.NotifUI()
         async with app.run_test(size=(120, 30)) as pilot:
             await pilot.pause()
-            check("화면: 전체 보기에 알림이 나오고 가장 나중에 기록된 것이 맨 위", len(app.shown) == 4 and app.shown[0]["summary"] == "서비스 실패: x")
+            check("화면: 그룹 패널 = 전체·시스템 문제·앱별(건수 많은 순)", app.group_keys == ["all", "problems", "app:Slack", "app:kitty", "app:system-health"], str(app.group_keys))
+            check("화면: 처음엔 전체 그룹, 가장 나중에 기록된 알림이 맨 위", app.group == "all" and len(app.shown) == 4 and app.shown[0]["summary"] == "서비스 실패: x")
             check("화면: 검색창에 포커스(바로 입력 가능)", app.focused is app.query_one("#search", Input))
-            await pilot.press(*"app:slack"); await pilot.pause()
-            check("화면: app: 필터", len(app.shown) == 2 and all(e["app"] == "Slack" for e in app.shown))
+            await pilot.press("tab"); await pilot.pause()
+            check("화면: Tab 으로 그룹 패널로 이동", app.focused is app.query_one(notif_ui.GroupList))
+            await pilot.press("down", "down"); await pilot.pause()
+            check("화면: 그룹 패널에서 ↓ 로 Slack 을 고르면 오른쪽 목록이 그 앱의 알림 2건으로", app.group == "app:Slack" and len(app.shown) == 2 and all(e["app"] == "Slack" for e in app.shown), app.group)
+            check("화면: 목록 제목에 그룹 이름", "Slack" in app.query_one(notif_ui.NotifList).border_title)
+            await pilot.press("enter"); await pilot.pause()
+            check("화면: 그룹에서 Enter 는 종료하지 않고 목록으로 이동", app.is_running and app.focused is app.query_one(notif_ui.NotifList))
+            await pilot.press("left"); await pilot.pause()
+            check("화면: 목록에서 ← 로 그룹 패널로", app.focused is app.query_one(notif_ui.GroupList))
+            await pilot.press("up"); await pilot.pause()
+            check("화면: 시스템 문제 그룹은 문제 알림만", app.group == "problems" and [e["app"] for e in app.shown] == ["system-health"])
             await pilot.press("escape"); await pilot.pause()
-            check("화면: Esc 는 먼저 검색어만 지움(종료 안 함)", app.query_one("#search", Input).value == "" and len(app.shown) == 4 and app.is_running)
+            check("화면: Esc 는 그룹을 '전체'로 되돌림(종료 안 함)", app.group == "all" and len(app.shown) == 4 and app.is_running)
+            await pilot.press("/"); await pilot.pause()
+            await pilot.press(*"app:slack"); await pilot.pause()
+            check("화면: app: 필터로 목록과 그룹 건수가 함께 바뀜", len(app.shown) == 2 and app.group_keys == ["all", "problems", "app:Slack"], str(app.group_keys))
+            await pilot.press("escape"); await pilot.pause()
+            check("화면: Esc 는 먼저 검색어만 지움", app.query_one("#search", Input).value == "" and len(app.shown) == 4)
             await pilot.press(*"is:problem"); await pilot.pause()
             check("화면: is:problem 필터", [e["app"] for e in app.shown] == ["system-health"])
             await pilot.press("escape"); await pilot.pause()
-            await pilot.press("down", "down"); await pilot.pause()
-            check("화면: 검색창에 있어도 ↓ 로 목록 이동", app.query_one(notif_ui.NotifList).highlighted == 2)
             await pilot.press("f6"); await pilot.pause()
-            check("화면: F6 앱별 보기는 앱 묶음 3개(건수 많은 Slack 이 맨 위)", app.view == "앱별" and len(app.shown) == 3 and app.shown[0][0] == "Slack", str(app.shown))
-            await pilot.press("enter"); await pilot.pause()
-            check("화면: 앱별에서 Enter 하면 그 앱 안으로(종료하지 않음)", app.app_filter == "Slack" and app.view == "전체" and len(app.shown) == 2 and app.is_running)
-            await pilot.press("escape"); await pilot.pause()
-            check("화면: Esc 로 앱 필터 해제", app.app_filter is None and len(app.shown) == 4)
-            await pilot.press("f8"); await pilot.pause()
-            check("화면: F8 같은 앱만(맨 위 항목의 앱)", app.app_filter == "system-health" and len(app.shown) == 1)
-            await pilot.press("f8"); await pilot.pause()
-            await pilot.press("f6", "f6"); await pilot.pause()
-            check("화면: F6 두 번이면 문제 보기", app.view == "문제" and [e["app"] for e in app.shown] == ["system-health"])
+            check("화면: F6 그룹 패널 숨김", app.query_one("#main").has_class("hide-groups"))
+            await pilot.press("f6"); await pilot.pause()
             await pilot.press("f10"); await pilot.pause()
-            from textual.screen import ModalScreen
             check("화면: F10 서비스 점검은 대화상자로 목록을 보여줌", isinstance(app.screen, ModalScreen) and app.failed == [("user", "x.service")])
             await pilot.press("escape"); await pilot.pause()
             check("화면: Esc 로 대화상자 닫기", not isinstance(app.screen, ModalScreen))
@@ -154,21 +159,22 @@ else:
             check("화면: F7 미리보기 숨김", app.query_one("#main").has_class("hide-preview"))
             await pilot.press("f7"); await pilot.pause()
 
-        # 체크 후 Enter: 체크한 것을 모두 복사하고 종료
-        app = notif_ui.NotifUI()
-        async with app.run_test(size=(120, 30)) as pilot:
-            await pilot.pause()
-            await pilot.press("f6", "f6", "f6"); await pilot.pause()      # 전체로 한 바퀴
-            await pilot.press("f2", "f2"); await pilot.pause()
-            check("화면: F2 로 체크(표시와 상태줄)", len(app.marked) == 2 and "체크 2개" in str(app.query_one("#status").render()))
-            await pilot.press("enter"); await pilot.pause()
-        check("화면: Enter 는 체크한 알림을 모두 복사하고 종료", not app.is_running and copied[-1].count("\n\n") == 1 and "서비스 실패: x" in copied[-1], copied[-1])
         app = notif_ui.NotifUI()
         async with app.run_test(size=(120, 30)) as pilot:
             await pilot.pause()
             await pilot.press("enter"); await pilot.pause()
-        check("화면: 체크가 없으면 Enter 는 현재 항목(제목+본문)을 복사하고 종료", not app.is_running and copied[-1] == "서비스 실패: x\n줄1\n줄2", copied[-1])
-        for size, cls in (((80, 30), "narrow"), ((120, 10), "short")):
+        check("화면: Enter 는 현재 알림(제목+본문)을 복사하고 종료", not app.is_running and copied[-1] == "서비스 실패: x\n줄1\n줄2", copied[-1])
+        app = notif_ui.NotifUI()
+        async with app.run_test(size=(120, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("tab", "tab"); await pilot.pause()      # 검색창 → 그룹 → 목록
+            await pilot.press("c"); await pilot.pause()
+            check("화면: 목록에서 c 는 본문만 복사하고 종료하지 않음", app.is_running and copied[-1] == "줄1\n줄2", copied[-1])
+        app = notif_ui.NotifUI(notif_ui.PROBLEMS)
+        async with app.run_test(size=(120, 30)) as pilot:
+            await pilot.pause()
+            check("화면: notif ui problems 는 시스템 문제 그룹으로 시작", app.group == "problems" and len(app.shown) == 1)
+        for size, cls in (((60, 30), "narrow"), ((120, 10), "short")):
             app = notif_ui.NotifUI()
             async with app.run_test(size=size) as pilot:
                 await pilot.pause()
