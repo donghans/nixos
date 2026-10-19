@@ -12,75 +12,25 @@
   }: let
     svcCfg = config.services.custom-notify-logger;
 
-    logger-script = pkgs.writers.writePython3 "custom-notify-logger-script" {} ''
-      import datetime
-      import os
-      import re
-      import subprocess
-
-      log_dir = os.environ["LOG_DIR"]
-      user = os.environ.get("USER", "unknown")
-      log_path = os.path.join(log_dir, f"{user}.log")
-
-
-      def parse_string_value(line):
-          m = re.match(r'\s+string "(.*)"$', line)
-          return m.group(1) if m else None
-
-
-      # stdbuf -oL: 라인 버퍼링 강제 (실시간 기록 핵심)
-      # fmt: off
-      _stdbuf = "${pkgs.coreutils}/bin/stdbuf"  # noqa: E501
-      _dbus_mon = "${pkgs.dbus}/bin/dbus-monitor"  # noqa: E501
-      # fmt: on
-      _dbus_filter = (
-          "interface='org.freedesktop.Notifications',"
-          "member='Notify',type='method_call'"
-      )
-      proc = subprocess.Popen(
-          [_stdbuf, "-oL", _dbus_mon, _dbus_filter],
-          stdout=subprocess.PIPE,
-          text=True,
-          bufsize=1,
-      )
-
-      strings_in_block = []
-      in_notify_block = False
-
-      for raw_line in proc.stdout:
-          line = raw_line.rstrip("\n")
-
-          if "member=Notify" in line:
-              strings_in_block = []
-              in_notify_block = True
-              continue
-
-          if not in_notify_block:
-              continue
-
-          # 들여쓰기 없는 라인 = 새 메시지 헤더 → 블록 종료
-          if line and not line[0].isspace():
-              in_notify_block = False
-              strings_in_block = []
-              continue
-
-          val = parse_string_value(line)
-          if val is not None:
-              strings_in_block.append(val)
-
-              # dbus Notify 시그니처:
-              # s(0:app_name) s(1:app_icon) u(skip) s(2:summary) s(3:body) ...
-              # uint32/array/dict 라인은 parse_string_value가 None 반환 → 자동 무시
-              if len(strings_in_block) == 4:
-                  app_name = strings_in_block[0]
-                  summary = strings_in_block[2]
-                  body = strings_in_block[3]
-                  if summary:
-                      ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                      with open(log_path, "a", encoding="utf-8") as f:
-                          f.write(f"[{ts}] [{app_name}] [{summary}] {body}\n")
-                  in_notify_block = False
-                  strings_in_block = []
+    # 기록·조회·통계·장애 감시 본체는 mods/_data/notif/notif.py (시험: mods/_data/notif/tests). 화면(notif ui)은 Textual 이 필요
+    py = pkgs.python3.withPackages (ps: [ps.textual]);
+    notifDir = pkgs.runCommand "notif-py" {} ''
+      mkdir -p $out
+      cp ${../../_data/notif/notif.py} $out/notif.py
+      cp ${../../_data/notif/notif_ui.py} $out/notif_ui.py
+    '';
+    # busctl/systemctl/journalctl(systemd), pkill(procps), wl-copy, notify-send 를 PATH 에 넣어 서비스 환경에서도 동작하게 함
+    notif = pkgs.writeShellScriptBin "notif" ''
+      export PATH=${lib.makeBinPath [pkgs.systemd pkgs.procps pkgs.wl-clipboard pkgs.libnotify]}:$PATH
+      export NOTIF_LOG_DIR=${svcCfg.logDir}
+      exec ${py}/bin/python3 ${notifDir}/notif.py "$@"
+    '';
+    # 전용 창(class=notif)으로 열기 — 이미 떠 있으면 그 창으로 포커스. 인자: all|apps|problems|stats
+    notifOpen = pkgs.writeShellScriptBin "notif-open" ''
+      if hyprctl clients -j | ${pkgs.jq}/bin/jq -e '.[] | select(.class == "notif")' >/dev/null 2>&1; then
+        exec hyprctl dispatch 'hl.dsp.focus({ window = "class:^notif$" })'
+      fi
+      exec ${pkgs.uwsm}/bin/uwsm app -- ${pkgs.kitty}/bin/kitty --class notif --title "알림 센터" ${notif}/bin/notif ui "''${1:-all}"
     '';
   in {
     os = lib.mkMerge [
@@ -112,7 +62,7 @@
           after = ["graphical-session-pre.target"];
           partOf = ["graphical-session.target"];
           serviceConfig = {
-            ExecStart = "${logger-script}";
+            ExecStart = "${notif}/bin/notif record";
             Restart = "always";
             RestartSec = 3;
             Environment = ["LOG_DIR=${svcCfg.logDir}"];
@@ -126,6 +76,44 @@
 
       (lib.mkIf svcCfg.enable {
         # == Home Manager: 사용자 서비스 등록 (섹션별 중첩 키 구조) ==
+        home.packages = [notif notifOpen];
+
+        # 실패한 서비스(시스템+사용자)를 1분마다 확인해 새 실패만 알림(앱 이름 system-health, 긴급)으로 알리고 waybar 의 경고 표시를 갱신
+        systemd.user.services.notif-health = {
+          Unit.Description = "Failed service watcher (notif health)";
+          Service = {
+            Type = "oneshot";
+            ExecStart = "${notif}/bin/notif health";
+          };
+        };
+        systemd.user.timers.notif-health = {
+          Unit.Description = "Failed service watcher timer";
+          Timer = {
+            OnBootSec = "45s";
+            OnUnitActiveSec = "60s";
+            AccuracySec = "5s";
+          };
+          Install.WantedBy = ["timers.target"];
+        };
+
+        # 앱 런처(SUPER+Space)에서 "Notification Center" 로 연다 — 전용 단축키는 두지 않음
+        xdg.desktopEntries.notif = {
+          name = "Notification Center";
+          genericName = "Notification history";
+          comment = "Search, group, count and copy past notifications; see system problems";
+          exec = "${notifOpen}/bin/notif-open";
+          terminal = false;
+          categories = ["Utility"];
+          icon = "preferences-system-notifications";
+        };
+        wayland.windowManager.hyprland.extraConfig = ''
+          hl.window_rule({
+            match = { class = "^(notif)$" },
+            center = true,
+            size = { "monitor_w * 0.7", "monitor_h * 0.75" }
+          })
+        '';
+
         systemd.user.services.custom-notify-logger = {
           Unit = {
             Description = "Notification Logger Service";
@@ -136,7 +124,7 @@
             WantedBy = ["graphical-session.target"];
           };
           Service = {
-            ExecStart = "${logger-script}";
+            ExecStart = "${notif}/bin/notif record";
             Restart = "always";
             RestartSec = 3;
             Environment = ["LOG_DIR=${svcCfg.logDir}"];

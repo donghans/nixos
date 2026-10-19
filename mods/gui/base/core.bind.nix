@@ -145,10 +145,6 @@ in {
         bindd("CTRL + Print", hl.dsp.exec_cmd(capture_active_window), "현재 창 캡처")
         bindd("SHIFT + Print", hl.dsp.exec_cmd(grim .. " - | " .. satty .. " --filename -"), "전체 화면 캡처")
 
-        ${lib.optionalString config.services.custom-notify-logger.enable ''
-          bindd("SUPER + N", hl.dsp.exec_cmd("pkill -x '(.wofi-wrapped|wofi)' && exit 0; ls -tr ${config.services.custom-notify-logger.logDir}/$USER.log* 2>/dev/null | xargs -r zcat -f | tac | " .. wofi .. " --dmenu --cache-file /dev/null --width 1400 --prompt \"알림 검색 (최근 30일)\""), "알림 로그 (30일)")
-        ''}
-
         -- Workspace 1-10
         for i = 1, 9 do
           bindd("SUPER + " .. tostring(i), hl.dsp.focus({ workspace = tostring(i) }), "워크스페이스 " .. i .. " 로 이동")

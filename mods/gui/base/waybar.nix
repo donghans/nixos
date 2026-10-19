@@ -29,6 +29,8 @@ mkPartOf "mods.gui" ({
       modules-center = ["hyprland/window"];
       modules-right =
         ["tray"]
+        # 실패한 서비스가 있을 때만 나타나는 경고(notif health 가 1분마다 확인, 클릭하면 알림 센터의 문제 화면)
+        ++ lib.optionals config.services.custom-notify-logger.enable ["custom/health"]
         ++ (
           # 가상 키보드 버튼은 2-in-1 호스트만, 배터리는 모든 노트북
           lib.optionals config.workspace.convertible ["custom/vkbsize" "custom/vkbmode" "custom/vkb"]
@@ -40,6 +42,14 @@ mkPartOf "mods.gui" ({
       #  ⌨: 가상 키보드 접기/펴기 / ⧉: 하단 고정↔플로팅 / 크기(S·M·L): 탭하면 다음 크기. 크기·⧉ 는 키보드가 보일 때만 나타남
       #  세 버튼 모두 노트북 모드에서는 키보드가 떠 있을 때만 보이고 텐트/태블릿에서는 항상 보임(vkb waybar 가 빈 출력을 내면 모듈이 사라짐)
       # (vkb 가 상태를 바꾸거나 사용 모드가 바뀔 때만 waybar 에 신호(RTMIN+8)를 보내 다시 그리므로 폴링이 없음. 한/영 전환은 시스템 트레이의 fcitx5 아이콘과 키보드 안의 한/영 키)
+      "custom/health" = {
+        exec = "notif waybar";
+        return-type = "json";
+        interval = "once";
+        signal = 9;
+        on-click = "notif-open problems";
+        tooltip = true;
+      };
       "custom/vkb" = {
         exec = "vkb waybar";
         return-type = "json";

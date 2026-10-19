@@ -134,3 +134,9 @@ window#waybar {
   background-color: rgba(51, 204, 255, 1);
   color: #000000;
 }
+
+/* 실패한 서비스 경고 (notif health): 문제가 있을 때만 나타남 */
+#custom-health {
+  padding: 0 8px;
+  color: #ff5555;
+}
