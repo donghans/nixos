@@ -8,7 +8,7 @@
 - 재는 동안 CPU 가 바쁘면(평균 사용률 10% 초과) 결과에 표시한다 — 그 값은 화면 설정 차이가 아니라 작업 때문일 수 있다.
 - `--mouse`: 재는 동안 포인터를 화면 가운데 원 둘레로 부드럽게(60회/초) 움직여 화면이 계속 바뀌는 상태로 잰다(정지 화면과 비교용). 끝나면 포인터를 원래 자리로 돌린다. 클릭/키 입력은 하지 않는다.
 - 끝나면(중간에 Ctrl+C 해도) `displayctl restore` 로 저장된 화면 설정으로 되돌린다. 밝기는 건드리지 않는다.
-- 시나리오: `165`/`60` 은 표준 모드로 전환, `48` 은 저장된 구성(`displayctl restore`, 지금은 사용자 지정 48Hz).
+- 시나리오: 주사율(Hz) 숫자. `165`/`60` 은 표준 모드, 그 외(`48` 등)는 같은 해상도의 사용자 지정 주사율. 전환은 런타임만(저장 안 함)이고 끝나면 저장된 구성으로 복원한다.
 """
 import argparse
 import json
@@ -146,11 +146,10 @@ def cursor_pos():
 
 
 def apply(name: str) -> bool:
-    if name in ("165", "60"):
-        mode = "2560x1600@165" if name == "165" else "2560x1600@60"
-        r = subprocess.run(["hyprctl", "eval", f'hl.monitor({{ output = "eDP-1", mode = "{mode}", position = "0x0", scale = 1 }})'], capture_output=True, text=True)
-    else:
-        r = subprocess.run(["displayctl", "restore"], capture_output=True, text=True)
+    """시나리오 이름 = 주사율(Hz). 표준 모드(165/60)는 그대로, 그 외(예: 48)는 같은 해상도의 사용자 지정 주사율. 런타임만 바꾸고 저장하지 않는다(끝나면 displayctl restore)."""
+    if not name.isdigit():
+        return False
+    r = subprocess.run(["hyprctl", "eval", f'hl.monitor({{ output = "eDP-1", mode = "2560x1600@{name}", position = "0x0", scale = 1 }})'], capture_output=True, text=True)
     return r.returncode == 0
 
 
