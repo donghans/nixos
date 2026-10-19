@@ -121,7 +121,9 @@ nixup os
 nixup update nixpkgs-unstable
 ```
 
-`.env`에서 `NIX_UNSTABLE_FALLBACK_REV`와 `NIX_UNSTABLE_FALLBACK_SHA` 줄을 삭제합니다. Mod 파일의 `unstable-fallback` 참조를 `unstable`로 되돌립니다.
+`.env`의 `NIX_UNSTABLE_FALLBACK_REV=`와 `NIX_UNSTABLE_FALLBACK_SHA=` 값을 **비웁니다**(줄은 자리표시자로 남겨 둬도 됩니다. 값이 비어 있으면 `unstable-fallback`은 `unstable`과 같은 것을 가리키므로, 참조가 남아 있어도 최신 버전으로 빌드됩니다). Mod 파일의 `unstable-fallback` 참조를 `unstable`로 되돌립니다.
+
+`.env`는 git에 올라가지 않는 호스트 로컬 파일이라, 다른 호스트에서는 `nixup fix`를 다시 실행해야 고정됩니다.
 
 ---
 
