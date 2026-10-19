@@ -60,7 +60,7 @@ mkMod __curPos "Netdata (시스템 지표 기록: AC 1초 / 배터리 10초)" ({
   # 어댑터를 뽑은 상태에서 화면 주사율별 소비 전력을 번갈아 재서 비교(스크립트: _data/power-ab/power_ab.py)
   powerAb = pkgs.writeShellScriptBin "power-ab" ''
     # displayctl 은 사용자 프로필(~/.nix-profile/bin)에 있어서 PATH 를 덧붙임
-    export PATH=${lib.makeBinPath [pkgs.hyprland]}:$HOME/.nix-profile/bin:$PATH
+    export PATH=${lib.makeBinPath [pkgs.hyprland]}:$HOME/.nix-profile/bin:/run/current-system/sw/bin:/run/wrappers/bin:$PATH   # docker(--containers), sudo(RAPL 읽기)
     exec ${pkgs.python3}/bin/python3 ${../../_data/power-ab/power_ab.py} "$@"
   '';
 in {
