@@ -120,7 +120,17 @@ tent/tablet 에서 기기를 돌리면 내장 화면과 터치가 같이 돈다.
 - **원인 확정(2026-10-19, 중첩 Hyprland 로 재현)**: 이 고정 커밋은 Hyprlang 시절 코드다. `getConfigValue(PHANDLE, "plugin:touch_gestures:...")` 를 15곳 넘게 쓰는데 Lua 설정(0.55)에서는 이 값들이 등록되지 않아 nullptr 이고, 그 결과를 바로 역참조한다.
   디버그 빌드(`mesonBuildType=debug`, `dontStrip`) + `addr2line` 으로 줄을 확인: `main.cpp:380`(`getConfigValue(...)->getDataStaticPtr()`) → 그 줄을 널 검사로 막으면 `GestureManager.cpp:83`(생성자)에서 같은 유형으로 죽음. 한 줄 패치로는 해결 안 됨.
   `hyprpm.toml` 의 "Hyprland 커밋 ↔ hyprgrass 커밋" 고정은 컴파일 호환만 뜻하고 Lua 런타임 호환은 아니다.
-- 업스트림 최신판(2026-10-18)은 Hyprlang 호환층을 지운 Lua 네이티브(`hl.plugin.hyprgrass.bind/gesture`)이고 Hyprland 0.56.x 용이다. 0.55.2 헤더로 최신판을 빌드해 보는 것은 시도하지 않음(API 가 자주 바뀌어 위험). 쓰려면 Hyprland 를 0.56.x 로 올릴 것.
+- **버전별 비교(2026-10-19, 모두 중첩 Hyprland 로 시험)** — 핵심: 고정 커밋 3236fbb1(6/9)은 Hyprlang 시절, **바로 다음 날 d094a3e6(6/10)부터 Lua 방식**(getConfigValue 0곳). 업스트림 hyprpm 은 d094a3e6 을 Hyprland 0.55.1/0.55.4 에 고정해 둠.
+
+  | 조합 | 빌드 | 로드 | 비고 |
+  |---|---|---|---|
+  | stable 0.55.2 + 3236fbb1 (Hyprlang 시절, 예전 시도) | 됨 | **SEGV** | getConfigValue null 역참조(main.cpp:380, GestureManager.cpp:83) |
+  | **stable 0.55.2 + d094a3e6 (Lua)** | **됨** | **됨**, Lua 설정(hl.config, hyprgrass.bind/gesture)이 오류 없이 받아들여짐 | Hyprland 를 올릴 필요 없음. 실제 터치는 중첩 환경에서 못 시험 |
+  | unstable 0.56.2 + nixpkgs 패키지(d094a3e6) | 실패 | - | `TouchVisualizer.cpp`: PI 미선언, `scheduleFrameForMonitor` 없음(API 변경). nixpkgs 는 broken 표시 안 함 |
+  | unstable 0.56.2 + 8e605468(0.56.2 고정 커밋, 8/11) | 실패 | - | `PinchAction::exceeds_tolerance marked override` — wf-touch 인터페이스 불일치 |
+  | unstable 0.56.2 + 6adcebc2(최신, 10/18) | 실패 | - | `ShimTrackpadGestures.cpp:228: 'LOG' was not declared` |
+- 결론: **stable 유지 + hyprgrass d094a3e6**. unstable 로 올려도 어떤 변종도 그대로는 안 빌드돼서 소스를 따로 고쳐야 하고(wf-touch 버전, LOG 매크로), 컴포지터 업그레이드 위험까지 지게 된다. `core.touch.nix` 가 이 조합으로 준비돼 있고 `enableHyprgrass = false` 로 꺼져 있다. 켜기 전에 열린 작업을 저장할 것.
+- 만약 unstable Hyprland 를 쓰게 되면: `nixup fix hyprland` 가 `.env` 의 `NIX_UNSTABLE_FALLBACK_REV/SHA` 에 "직전 커밋"을 기록하고 모듈에서 `unstable-fallback.hyprland` 로 쓰는 기존 고정 장치(core/lib/host.nix)를 그대로 쓸 수 있다.
 - **격리 시험 방법(유효함)**: 현재 세션 안에서 `Hyprland -c <최소 설정>` 을 `systemd-run --user --unit=...` 로 중첩 실행하면 플러그인 로드 크래시를 실제 세션과 분리해 재현할 수 있다(`env -u LD_LIBRARY_PATH -u HYPRLAND_INSTANCE_SIGNATURE`, `WAYLAND_DISPLAY` 전달). 정리는 반드시 유닛/PID 로(이름으로 pkill 하면 실제 세션도 죽음 — 2026-10-19 실수).
 - 교훈: 플러그인 로드는 **실행 중인 세션에서 시험하면 안 된다**. 이번엔 "적용 전 확인받기"로 해 둔 구성을 이미 커밋해 둔 상태에서 다른 변경(`nixup home`)을 적용하다가 같이 들어가 버렸다(적용 안 할 것은 커밋하지 않거나 처음부터 꺼 둘 것).
 

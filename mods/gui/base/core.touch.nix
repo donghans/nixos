@@ -1,11 +1,13 @@
 # 터치스크린 제스처(hyprgrass 플러그인) — Hyprland 자체의 터치 제스처는 워크스페이스 스와이프 하나뿐이고 `Super`+드래그(bindm)는 터치에 적용되지 않아서,
 # 터치로 창을 옮기고 크기를 조절하고 워크스페이스를 넘기려면 플러그인이 필요하다. (조사/시험 기록: _docs/content/explanation/posture.md)
 #
-# 버전 주의: Hyprland 플러그인은 헤더 버전이 맞아야 한다. nixpkgs 의 hyprgrass(2025-10)는 Hyprland 0.55 와 컴파일이 안 되고,
-# 업스트림 hyprpm.toml 이 "Hyprland v0.55.2(39d7e209) ↔ hyprgrass 3236fbb1" 로 고정해 둔 커밋을 쓴다. Hyprland 를 올리면 이 rev 도 같이 올려야 한다.
+# 버전 선택(2026-10-19, 중첩 Hyprland 로 시험): Hyprland 는 stable(0.55.2)을 유지하고 hyprgrass 는 **Lua 지원 커밋 d094a3e6**(업스트림 hyprpm 이 0.55.1/0.55.4 에 고정)을 쓴다.
+#  - 0.55.2 에 고정된 3236fbb1 은 Hyprlang 시절 코드(getConfigValue 16곳)라 Lua 설정에서 SEGV → 쓰면 안 됨(바로 다음 날 커밋 d094a3e6 부터 Lua 방식).
+#  - d094a3e6 은 0.55.2 헤더로 빌드되고, 중첩 Hyprland(0.55.2)에서 로드/Lua 설정(hl.config, hyprgrass.bind/gesture)이 오류 없이 받아들여졌다. **실제 터치 동작은 중첩 환경에서 못 시험함**.
+#  - unstable(Hyprland 0.56.2)은 세 변종 모두 그대로는 빌드가 안 된다: nixpkgs 패키지(d094a3e6)는 API 변경으로, 0.56.2 고정 커밋(8e605468)은 wf-touch 불일치로, 최신(6adcebc2)은 LOG 매크로 미선언으로 실패.
 # wf-touch 는 nixpkgs 에서 테스트(doctest) 링크 때문에 빌드가 실패해서 테스트를 끈다.
 #
-# 플러그인이 없거나 로드에 실패해도 Hyprland 설정 전체가 깨지지 않도록 pcall 로 감싼다(제스처만 안 됨). 단, 플러그인 자체가 비정상 종료하면 Hyprland 도 같이 종료된다.
+# 켜기 전에: 열린 작업을 저장할 것(플러그인이 비정상 종료하면 Hyprland 도 같이 종료됨). 플러그인 로드 실패는 pcall 로 막아 두었다(설정 전체는 안 깨짐).
 {mkPartOf, ...}:
 mkPartOf "mods.gui" ({
   pkgs,
@@ -14,21 +16,18 @@ mkPartOf "mods.gui" ({
   ...
 }: let
   isLaptop = config.workspace.type == "laptop";
-  # 비활성(2026-10-19 원인 확정): 이 고정 커밋(3236fbb1)은 Hyprlang 시절 코드라 getConfigValue("plugin:touch_gestures:*")를 15곳 넘게 쓰는데,
-  # Lua 설정(Hyprland 0.55)에서는 그 값들이 등록되지 않아 nullptr 을 바로 역참조한다 → pluginInit(main.cpp:380)과 GestureManager 생성자(GestureManager.cpp:83)에서 SEGV.
-  # 중첩 Hyprland 로 두 번 재현했고, 첫 줄만 널 검사로 막아도 다음 지점에서 죽는다(패치로 해결 불가). 업스트림 최신판(2026-10-18)은 Hyprlang 호환층을 지운 Lua 네이티브라서
-  # Hyprland 0.56.x 용이다 → 쓰려면 Hyprland 를 올려야 함. 조사 기록: _docs/content/explanation/posture.md. 켜기 전에 반드시 중첩 Hyprland 로 먼저 로드해 볼 것.
+  # 비활성: 켜기 전에 사용자가 열린 작업을 저장하고 실제 터치로 확인하기로 함(중첩 환경에서는 로드까지만 확인). 켜면 로그인/reload 때 플러그인이 로드된다.
   enableHyprgrass = false;
   wf-touch = pkgs.wf-touch.overrideAttrs (old: {
     mesonFlags = (old.mesonFlags or []) ++ ["-Dtests=disabled"];
   });
   hyprgrass = pkgs.hyprlandPlugins.hyprgrass.overrideAttrs (old: {
-    version = "0.8.2-hl0.55.2";
+    version = "0.8.2-d094a3e-lua";
     src = pkgs.fetchFromGitHub {
       owner = "horriblename";
       repo = "hyprgrass";
-      rev = "3236fbb1a2f9c3a91ac1a4f390ed6d510c2aaf19";
-      hash = "sha256-4mXQwdPuWNDAwVJF+SbifB33K1eDpQYpXKT06hNmnVU=";
+      rev = "d094a3e62f6ecaeb41515982d3e13edefaf8a4e7";
+      hash = "sha256-tCt7FNc1RBHou/ym7B0XzoOqqNq8Df+dizEDkAgJ4U0=";
     };
     buildInputs = map (x:
       if (x.pname or "") == "wf-touch"
