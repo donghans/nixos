@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""posture — 자세(힌지 모드 등) 조회 CLI. 소비자 스크립트는 상태 파일을 직접 읽지 말고 이걸 쓴다.
+"""posture — 사용 모드(laptop/tent/tablet 등) 조회 CLI. 소비자 스크립트는 상태 파일을 직접 읽지 말고 이걸 쓴다.
 
   posture                 사람이 읽는 요약
   posture json            원본 상태(JSON) — 안전한 기본값 처리가 된 것

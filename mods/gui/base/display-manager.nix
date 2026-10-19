@@ -50,7 +50,7 @@ in {
   hm = {
     home.packages = [displayctl displayui displayuiOpen];
 
-    # 자세 허브 소비자: 세워서 쓰는 중(tent/tablet)에 기기를 돌리면 내장 화면을 같이 돌림. laptop 으로 돌아오면 0. (멱등: 이미 그 방향이면 아무것도 안 함)
+    # 사용 모드 허브 소비자: 세워서 쓰는 중(tent/tablet)에 기기를 돌리면 내장 화면을 같이 돌림. laptop 으로 돌아오면 0. (멱등: 이미 그 방향이면 아무것도 안 함)
     # 회전은 상태 파일에 기록돼 restore/레이아웃 변경 때도 유지됨. 방향 판정은 posture-daemon(가속도 센서). 이 기기 외 노트북은 센서가 없으면 항상 0.
     posture.consumers = lib.optionals (config.workspace.type == "laptop") ["${displayctl}/bin/displayctl rotate auto"];
 

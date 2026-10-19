@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vkb 순수 로직 시험: 창 맞춤 계획, 복원 계획, 크기 단계, 자세 연동 판정."""
+"""vkb 순수 로직 시험: 창 맞춤 계획, 복원 계획, 크기 단계, 사용 모드 연동 판정."""
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import vkb
@@ -60,7 +60,7 @@ check("너무 커지면 화면 높이의 45% 로 제한", H2["land"] <= 1600 * 0
 check("폭은 화면 폭을 넘지 않음", vkb.compute_layout(30.0, 99.0, G)["width"] == 2560)
 check("글자 크기 범위 12~32", vkb.compute_layout(4.0, 14.5, G)["font_pt"] >= 12 and vkb.compute_layout(30.0, 14.5, G)["font_pt"] <= 32)
 
-# 자세 연동
+# 사용 모드 연동
 check("laptop 이면 숨김", vkb.desired_visibility("laptop") is False)
 check("tent/tablet 이면 보임", vkb.desired_visibility("tent") and vkb.desired_visibility("tablet"))
 # ───── 배열 패치와 vkb.py 상수의 일치(두 곳에 따로 적힌 같은 지식이 어긋나면 키 폭/높이 계산이 틀어짐) ─────

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""posture-daemon — 360도 힌지 노트북의 "자세"(힌지 각도 → 사용 모드)를 센서에서 읽어 한 곳에 발행한다. (root 로 실행)
+"""posture-daemon — 360도 힌지 노트북의 "사용 모드"(힌지 각도 → laptop/tent/tablet)를 센서에서 읽어 한 곳에 발행한다. (root 로 실행)
 
 발행: /run/posture/state.json  (원자적 교체. 스키마 버전 `schema`)
   {"schema": 1, "ts": <epoch 초>, "mode": "laptop|tent|tablet",

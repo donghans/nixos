@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vkb — 가상 키보드(wvkbd) 제어: 접기/펴기, 크기 조절, 창 가림 방지, 자세 연동.
+"""vkb — 가상 키보드(wvkbd) 제어: 접기/펴기, 크기 조절, 창 가림 방지, 사용 모드 연동.
 
   vkb show | hide | toggle          키보드 보이기/숨기기 (wvkbd 에 시그널; 보일 때 가려지는 창은 키보드 위로 맞춤, 숨기면 원래대로)
   vkb size <small|medium|large|MM>   키 한 줄 높이 프리셋(8/10/12.5mm) 또는 mm(4~30). 화면 dpi 로 픽셀을 계산. 설정 저장 후 다시 띄움(wvkbd 는 높이를 시작할 때만 받음)
@@ -10,8 +10,8 @@
   vkb waybar [toggle|size|mode]      waybar 사용자 지정 모듈용 JSON. 노트북 모드에서는 키보드가 떠 있을 때만 보임(텐트/태블릿에서 항상 보임)
   vkb args                           wvkbd 실행 인자(한 줄에 하나): 화면 물리 크기로 계산한 높이/폭/글자 크기, 모드, 레이어
   vkb status                         상태 요약 (JSON 이면 --json)
-  vkb auto on | off                  자세 연동: 텐트/태블릿이면 자동으로 보이고 노트북 모드면 숨김 (기본 켜짐)
-  vkb apply-posture                  자세 허브 소비자(멱등): auto 가 켜져 있으면 현재 자세에 맞춤
+  vkb auto on | off                  사용 모드 연동: 텐트/태블릿이면 자동으로 보이고 노트북 모드면 숨김 (기본 켜짐)
+  vkb apply-posture                  사용 모드 허브 소비자(멱등): auto 가 켜져 있으면 현재 사용 모드에 맞춤
   vkb layers <full,special,...>      쓸 레이어(wvkbd -l). 비우면 기본값(full,...). 한 번에 하나만 쓰려면 예: full
 
 wvkbd 는 패치(mods/_data/wvkbd/float-mode.patch, pc-layout.patch; README 참고)를 적용해 쓴다: 플로팅 모드(--float, 시그널 RTMIN+1 토글/+2 도킹/+3 플로팅), ⧉ 키, 한/영 키,
@@ -412,7 +412,7 @@ def main(argv: list[str]) -> int:
             mode = run(POSTURE, "get", "mode").stdout.strip() or "laptop"
             if desired_visibility(mode) != bool(kb_layer()):
                 return set_visible(desired_visibility(mode))   # 안에서 waybar 도 갱신
-        refresh_bar()                          # 자세가 바뀌면 waybar 버튼이 나타나거나 사라져야 함
+        refresh_bar()                          # 사용 모드가 바뀌면 waybar 버튼이 나타나거나 사라져야 함
         return 0
     if cmd == "waybar":
         # waybar custom 모듈 JSON. 빈 출력이면 모듈이 사라짐. 노트북 모드에서는 키보드가 떠 있을 때만 보임(텐트/태블릿에서는 항상)
@@ -435,7 +435,7 @@ def main(argv: list[str]) -> int:
             return 0
         text = "⌨"
         cls = "on" if st["visible"] else "off"
-        tip = ("가상 키보드 보임 — 눌러서 접기" if st["visible"] else "가상 키보드 숨김 — 눌러서 펴기") + f" (자세 연동 {'켜짐' if st['auto'] else '꺼짐'})"
+        tip = ("가상 키보드 보임 — 눌러서 접기" if st["visible"] else "가상 키보드 숨김 — 눌러서 펴기") + f" (사용 모드 연동 {'켜짐' if st['auto'] else '꺼짐'})"
         if not st["running"]:
             cls, tip = "off", "가상 키보드 서비스가 실행 중이 아닙니다"
         print(json.dumps({"text": text, "tooltip": tip, "class": cls}, ensure_ascii=False))
@@ -445,7 +445,7 @@ def main(argv: list[str]) -> int:
         if "--json" in argv:
             print(json.dumps(s, ensure_ascii=False))
         else:
-            print(f"실행 {'예' if s['running'] else '아니오'} · 보임 {'예' if s['visible'] else '아니오'} · 크기 {s['size']}({s['row_mm']:g}mm) · 모드 {'플로팅' if s['mode'] == 'float' else '하단 고정'} · 자세 연동 {'켜짐' if s['auto'] else '꺼짐'} · 레이어 {s['layers'] or '기본'}")
+            print(f"실행 {'예' if s['running'] else '아니오'} · 보임 {'예' if s['visible'] else '아니오'} · 크기 {s['size']}({s['row_mm']:g}mm) · 모드 {'플로팅' if s['mode'] == 'float' else '하단 고정'} · 사용 모드 연동 {'켜짐' if s['auto'] else '꺼짐'} · 레이어 {s['layers'] or '기본'}")
         return 0
     print(__doc__, file=sys.stderr)
     return 2

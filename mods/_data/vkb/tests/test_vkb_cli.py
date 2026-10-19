@@ -140,7 +140,7 @@ check("훅(dock): 키보드가 보이면 다시 창을 맞춤(0xb)", conf()["mod
 check("훅: 알 수 없는 모드는 거부", subprocess.run([sys.executable, "-I", f"{ROOT}/vkb.py", "mode-changed"], capture_output=True, text=True, env=dict(env, WVKBD_MODE="zzz")).returncode == 2)
 os.path.exists(f"{T}/visible") and os.remove(f"{T}/visible")
 
-# 자세 연동
+# 사용 모드 연동
 os.remove(f"{T}/visible") if os.path.exists(f"{T}/visible") else None
 open(f"{T}/mode", "w").write("tablet\n"); reset_logs(); vkb("apply-posture")
 check("tablet 이면 자동으로 보임", log("signals") == ["SIGUSR2"], str(log("signals")))
@@ -149,7 +149,7 @@ check("이미 보이면 아무것도 안 함(멱등)", log("signals") == [], str
 open(f"{T}/mode", "w").write("laptop\n"); reset_logs(); vkb("apply-posture")
 check("laptop 이면 자동으로 숨김", log("signals") == ["SIGUSR1"], str(log("signals")))
 vkb("auto", "off"); open(f"{T}/mode", "w").write("tablet\n"); reset_logs(); vkb("apply-posture")
-check("auto off 면 자세가 바뀌어도 건드리지 않음", log("signals") == [], str(log("signals")))
+check("auto off 면 사용 모드가 바뀌어도 건드리지 않음", log("signals") == [], str(log("signals")))
 r = subprocess.run([sys.executable, "-I", f"{ROOT}/vkb.py", "show"], capture_output=True, text=True, env=dict(env, VKB_SYSTEMCTL=script("systemctl2", "import sys; sys.exit(3 if 'is-active' in sys.argv else 0)")))
 check("서비스가 없으면 오류 메시지와 종료 코드 1", r.returncode == 1 and "실행 중이 아닙니다" in r.stderr, r.stderr)
 print(f"\nvkb CLI {ok} 통과 / {bad} 실패")

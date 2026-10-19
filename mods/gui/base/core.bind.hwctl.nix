@@ -99,11 +99,11 @@
     # 내장 키보드 이름(호스트가 지정). 비어 있으면 정책이 키보드를 건드리지 않는다(알려지지 않은 기기에서 키보드를 잘못 끄지 않도록).
     kbName = config.wayland.windowManager.hyprland.internalKeyboardName;
 
-    # 입력 장치(내장 키보드/터치패드/터치스크린)의 켜짐/꺼짐 정책. 자세(힌지 모드)는 `posture get mode`(core.posture.nix) 로 읽는다.
+    # 입력 장치(내장 키보드/터치패드/터치스크린)의 켜짐/꺼짐 정책. 사용 모드(힌지 각도)는 `posture get mode`(core.posture.nix) 로 읽는다.
     #   laptop        : **마지막 수동 상태를 따름**(메뉴에서 정한 touchpad_enabled/touchscreen_enabled 파일, 없으면 터치패드 켬/터치스크린 끔), 키보드 켬
     #   tent, tablet  : **강제** 키보드 끔 / 터치패드 끔 / 터치스크린 켬 (접힌 채 등 쪽 키·패드가 눌리는 것 방지). 수동 상태 파일은 건드리지 않아서
     #                   노트북 모드로 돌아오면 원래 상태로 복원됨.
-    #   안전장치: 자세 서비스가 멈췄거나 파일이 없으면 posture CLI 가 laptop 을 돌려줌 → 키보드가 꺼진 채 남지 않음. 복구는 힌지를 190° 미만으로 여는 것.
+    #   안전장치: 사용 모드 서비스가 멈췄거나 파일이 없으면 posture CLI 가 laptop 을 돌려줌 → 키보드가 꺼진 채 남지 않음. 복구는 힌지를 190° 미만으로 여는 것.
     #   `--print` 는 판정만 출력("모드 각도 키보드 터치패드 터치스크린"), 장치는 건드리지 않음.
     # (장치 켜기/끄기(hl.device enabled)는 런타임 설정이라 hyprctl reload 때 초기화되므로 로그인/reload 때도 다시 적용 — posture-apply)
     inputPolicy = pkgs.writeShellScriptBin "hypr-input-policy" ''
@@ -142,7 +142,7 @@
             tent) msg="텐트 모드 (힌지 $angle°): 키보드·터치패드 끔, 터치스크린 켬" ;;
             *) msg="노트북 모드 (힌지 $angle°): 키보드 켬, 터치패드·터치스크린은 마지막 설정으로 복원" ;;
           esac
-          ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:hinge -u low "자세" "$msg"
+          ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:hinge -u low "사용 모드" "$msg"
         fi
       fi
       ${pkgs.util-linux}/bin/logger -t hypr-input-policy "mode=$mode angle=$angle keyboard=$kb touchpad=$tp touchscreen=$ts"
@@ -166,7 +166,7 @@
       # onoff <true|false>: 현재 상태(정책이 출력한 값)에 따른 라벨
       onoff() { [ "$1" = true ] && echo "끄기 (지금 켜짐)" || echo "켜기 (지금 꺼짐)"; }
 
-      # 자세에 따라: 노트북 모드는 직접 조절, 텐트/태블릿 모드는 고정(선택해도 바뀌지 않고 안내만)
+      # 사용 모드에 따라: 노트북 모드는 직접 조절, 텐트/태블릿 모드는 고정(선택해도 바뀌지 않고 안내만)
       read -r mode angle kb tp ts < <(${inputPolicy}/bin/hypr-input-policy --print)
       case "$mode" in tablet) mname=태블릿 ;; tent) mname=텐트 ;; *) mname=노트북 ;; esac
       yn() { [ "$1" = true ] && echo 켜짐 || echo 꺼짐; }
@@ -204,7 +204,7 @@
 
       posture.consumers = lib.optionals (config.workspace.type == "laptop") ["${inputPolicy}/bin/hypr-input-policy"];
 
-      # 입력 장치 정책을 자세 허브의 소비자로 등록. 로그인(hyprland.start)/reload(config.reloaded) 때 실행하는 것도 허브가 함
+      # 입력 장치 정책을 사용 모드 허브의 소비자로 등록. 로그인(hyprland.start)/reload(config.reloaded) 때 실행하는 것도 허브가 함
       # (이유: Hyprland 는 시작/reload 때 장치를 모두 켠 상태로 되돌림)
 
       wayland.windowManager.hyprland.settings = {

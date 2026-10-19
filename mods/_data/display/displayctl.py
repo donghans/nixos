@@ -644,7 +644,7 @@ def op_layout(layout: str, arrange: str | None = None) -> dict:
     return st
 
 
-# 자세 허브의 rotation(기기를 시계방향으로 돌린 각도) → Hyprland monitor transform. 화면 내용은 기기와 반대로 돌려야 똑바로 보이므로
+# 사용 모드 허브의 rotation(기기를 시계방향으로 돌린 각도) → Hyprland monitor transform. 화면 내용은 기기와 반대로 돌려야 똑바로 보이므로
 # 시계방향으로 90° 돌렸으면 내용을 반시계 90° 돌린다 = wl_output "90"(= transform 1). **실제 화면에서 확인 필요**(문서 참고).
 ROTATION_TO_TRANSFORM = {0: 0, 90: 1, 180: 2, 270: 3}
 
@@ -676,7 +676,7 @@ def sync_touch(mons: list[Mon] | None = None) -> list[str]:
 
 
 def target_transform(rotation: int, posture_mode: str) -> int:
-    """자세/기기 회전 → 내장 화면 transform. laptop 모드에서는 항상 0(세로로 들어도 돌리지 않음)"""
+    """사용 모드/기기 회전 → 내장 화면 transform. laptop 모드에서는 항상 0(세로로 들어도 돌리지 않음)"""
     return 0 if posture_mode == "laptop" else ROTATION_TO_TRANSFORM.get(int(rotation) % 360, 0)
 
 
@@ -887,11 +887,11 @@ def cmd_revert_pending(a) -> int:
 
 
 def cmd_rotate(a) -> int:
-    """displayctl rotate <0|1|2|3|auto> [monitor]. auto: 자세 허브(posture)의 방향을 내장 화면에 반영(laptop 이면 0)"""
+    """displayctl rotate <0|1|2|3|auto> [monitor]. auto: 사용 모드 허브(posture)의 방향을 내장 화면에 반영(laptop 이면 0)"""
     try:
         mons = get_monitors()
     except ValueError:
-        return 0        # 컴포지터가 아직 없음(로그인 직전 자세 허브 소비자가 먼저 도는 경우): hyprctl 이 JSON 이 아닌 오류 문장을 냄. 할 일이 없다
+        return 0        # 컴포지터가 아직 없음(로그인 직전 사용 모드 허브 소비자가 먼저 도는 경우): hyprctl 이 JSON 이 아닌 오류 문장을 냄. 할 일이 없다
     internal = next((m for m in mons if m.internal), None)
     target = next((m for m in mons if m.name == a.monitor), None) if a.monitor else internal
     if target is None:
@@ -1001,7 +1001,7 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("modes", help="모니터가 지원하는 해상도/주사율")
     s.add_argument("monitor")
     s.set_defaults(fn=cmd_modes)
-    s = sub.add_parser("rotate", help="화면 회전: 0~3(Hyprland transform) 또는 auto(자세 허브의 방향을 내장 화면에 반영)")
+    s = sub.add_parser("rotate", help="화면 회전: 0~3(Hyprland transform) 또는 auto(사용 모드 허브의 방향을 내장 화면에 반영)")
     s.add_argument("value")
     s.add_argument("monitor", nargs="?", help="기본은 내장 화면")
     s.set_defaults(fn=cmd_rotate)
