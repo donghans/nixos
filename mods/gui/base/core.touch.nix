@@ -7,7 +7,7 @@
 #  - unstable(Hyprland 0.56.2)은 세 변종 모두 그대로는 빌드가 안 된다: nixpkgs 패키지(d094a3e6)는 API 변경으로, 0.56.2 고정 커밋(8e605468)은 wf-touch 불일치로, 최신(6adcebc2)은 LOG 매크로 미선언으로 실패.
 # wf-touch 는 nixpkgs 에서 테스트(doctest) 링크 때문에 빌드가 실패해서 테스트를 끈다.
 #
-# 켜기 전에: 열린 작업을 저장할 것(플러그인이 비정상 종료하면 Hyprland 도 같이 종료됨). 플러그인 로드 실패는 pcall 로 막아 두었다(설정 전체는 안 깨짐).
+# 플러그인이 비정상 종료하면 Hyprland 도 같이 종료된다(pcall 은 Lua 오류만 막음). 플러그인 로드 실패(Lua 오류)는 pcall 로 막아 설정 전체는 안 깨진다.
 {mkPartOf, ...}:
 mkPartOf "mods.gui" ({
   pkgs,
@@ -16,8 +16,12 @@ mkPartOf "mods.gui" ({
   ...
 }: let
   convertible = config.workspace.convertible; # 2-in-1 호스트만(host.toml `convertible = true`)
-  # 비활성: 켜기 전에 사용자가 열린 작업을 저장하고 실제 터치로 확인하기로 함(중첩 환경에서는 로드까지만 확인). 켜면 로그인/reload 때 플러그인이 로드된다.
-  enableHyprgrass = false;
+  # 켬(2026-10-19, 사용자 승인): 빌드/로드/Lua 설정 수락은 중첩 Hyprland 로 확인했지만 **실제 터치 이벤트 처리는 이 세션에서 처음 시험**한다
+  # (중첩 Hyprland 는 바깥 창의 터치를 받지 못해 터치 시험이 불가능: aquamarine 의 Wayland 백엔드는 키보드/포인터만 구현).
+  # 터치스크린이 꺼져 있으면(노트북 모드의 마지막 수동 상태) 제스처도 안 들어온다 — 텐트/태블릿에서는 강제로 켜지고, 노트북 모드에서는 입력 장치 메뉴로 켠다.
+  # **로그인 때마다 Hyprland 가 죽으면**(이 플러그인이 원인일 때) tty 에서 이 줄을 false 로 되돌리고 `nixup home`:
+  #   cd ~/nixos && sed -i 's/enableHyprgrass = true;/enableHyprgrass = false;/' mods/gui/base/core.touch.nix && nixup home
+  enableHyprgrass = true;
   wf-touch = pkgs.wf-touch.overrideAttrs (old: {
     mesonFlags = (old.mesonFlags or []) ++ ["-Dtests=disabled"];
   });
