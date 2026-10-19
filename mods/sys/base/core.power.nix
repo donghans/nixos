@@ -14,7 +14,9 @@ mkPartOf "mods.sys.base" ({
 
   laptopSettings = {
     # AC: 응답성과 효율의 균형 / BAT: 최대 절전
-    CPU_SCALING_GOVERNOR_ON_AC = "balanced";
+    # (intel_pstate 는 거버너가 performance/powersave 뿐이라 "balanced" 는 유효하지 않았다: TLP 가 매 이벤트마다 `governor not available` 오류를 냄(2026-10-19 확인).
+    #  균형은 거버너가 아니라 EPP(아래 balance_performance)가 정한다. 실제 거버너는 이미 powersave 였으므로 동작은 같고 오류만 사라짐)
+    CPU_SCALING_GOVERNOR_ON_AC = "powersave";
     CPU_ENERGY_PERF_POLICY_ON_AC = "balance_performance";
     CPU_MAX_PERF_ON_AC = 100; # AC에서는 성능 제한 없음
 

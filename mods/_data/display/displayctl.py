@@ -888,7 +888,10 @@ def cmd_revert_pending(a) -> int:
 
 def cmd_rotate(a) -> int:
     """displayctl rotate <0|1|2|3|auto> [monitor]. auto: 자세 허브(posture)의 방향을 내장 화면에 반영(laptop 이면 0)"""
-    mons = get_monitors()
+    try:
+        mons = get_monitors()
+    except ValueError:
+        return 0        # 컴포지터가 아직 없음(로그인 직전 자세 허브 소비자가 먼저 도는 경우): hyprctl 이 JSON 이 아닌 오류 문장을 냄. 할 일이 없다
     internal = next((m for m in mons if m.internal), None)
     target = next((m for m in mons if m.name == a.monitor), None) if a.monitor else internal
     if target is None:

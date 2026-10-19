@@ -4,10 +4,9 @@ mkPartOf "mods.gui" (_: {
     programs.hyprlock.enable = true;
 
     programs.hyprlock.settings = {
+      # (hyprlock 0.9.5 에서 grace/disable_loading/no_fade_in 옵션이 없어졌다: 잠글 때마다 "config option does not exist" 오류가 나서 지움.
+      #  값은 모두 지금 기본 동작과 같음 — 유예 시간 없음, 페이드인 켜짐)
       general = {
-        no_fade_in = false;
-        grace = 0;
-        disable_loading = true;
         hide_cursor = true;
       };
 

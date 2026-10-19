@@ -9,7 +9,8 @@
   # (참고: qos의 rpct/rlat/wpct/wlat은 커널 문서 예시값 그대로 — NVMe에는 널널한(=보수적인) 값이라
   #        과도한 스로틀링 위험이 낮음. 필요시 실측 후 좁혀도 됨)
   systemd.services.iocost-nvme0n1 = {
-    description = "NVMe(nvme0n1) io.cost qos/model 캘리브레이션 적용";
+    # (부팅 콘솔은 한글이 네모로 보이므로 영어: io.cost qos/model 캘리브레이션 적용)
+    description = "Apply io.cost qos/model calibration for NVMe (nvme0n1)";
     after = ["dev-nvme0n1.device"];
     requires = ["dev-nvme0n1.device"];
     wantedBy = ["multi-user.target"];

@@ -84,7 +84,8 @@ in {
     };
 
     systemd.services.netdata-power-state = {
-      description = "전원 상태(AC/충전/TLP 모드)를 Netdata 에 기록";
+      # (부팅 콘솔(가상 콘솔)은 한글 글리프가 없어 네모로 보이므로 시스템 유닛 Description 은 영어로: 전원 상태(AC/충전/TLP 모드)를 Netdata 에 기록)
+      description = "Record power state (AC/charging/TLP mode) for Netdata";
       after = ["netdata.service"];
       wantedBy = ["multi-user.target"];
       serviceConfig = {

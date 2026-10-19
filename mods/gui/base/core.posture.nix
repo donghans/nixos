@@ -50,7 +50,8 @@
   in {
     os = lib.mkIf isLaptop {
       systemd.services.posture-daemon = {
-        description = "자세(힌지 각도 → laptop/tent/tablet) 판정과 발행";
+        # (부팅 콘솔은 한글이 네모로 보이므로 영어: 자세(힌지 각도 → laptop/tent/tablet) 판정과 발행)
+        description = "Posture hub: hinge angle to laptop/tent/tablet";
         wantedBy = ["multi-user.target"];
         serviceConfig = {
           ExecStart = "${pkgs.python3}/bin/python3 -I ${../../_data/posture/posture_daemon.py}";

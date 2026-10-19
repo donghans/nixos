@@ -202,4 +202,7 @@ reset(); run("layout", "internal"); run("rotate", "2"); run("layout", "external"
 check("내장 화면이 꺼지면 터치 transform 은 0", devlog()[-1] == "device elan-touchscreen-stylus transform=0", str(devlog()[-2:]))
 check("target_transform 순수 함수: laptop 은 항상 0", dc.target_transform(90, "laptop") == 0 and dc.target_transform(270, "tent") == 3 and dc.target_transform(45, "tablet") == 0)
 
+r = subprocess.run([sys.executable, "-I", DC, "rotate", "auto"], capture_output=True, text=True, env=dict(os.environ, DISPLAYCTL_HYPRCTL=os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_hyprctl_down.sh")))
+check("컴포지터가 없어 hyprctl 이 JSON 이 아닌 문장을 내도 rotate auto 는 오류 없이 종료(0)", r.returncode == 0 and "Traceback" not in r.stderr, r.stderr[-120:])
+
 print(f"\n코어 {ok} 통과 / {fail} 실패"); sys.exit(1 if fail else 0)

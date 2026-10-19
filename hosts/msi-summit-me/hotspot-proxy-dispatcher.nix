@@ -58,7 +58,8 @@ in {
   '';
 
   systemd.services.redsocks-hotspot = {
-    description = "휴대폰 핫스팟 SOCKS5 프록시용 redsocks 로컬 TCP/UDP 투명 프록시";
+    # (부팅 콘솔은 한글이 네모로 보이므로 영어: 휴대폰 핫스팟 SOCKS5 프록시용 redsocks 로컬 TCP/UDP 투명 프록시)
+    description = "redsocks local TCP/UDP transparent proxy for the phone hotspot SOCKS5 proxy";
     serviceConfig = {
       Type = "simple";
       ExecStart = "${pkgs.redsocks}/bin/redsocks -c ${redsocksConf}";
