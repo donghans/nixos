@@ -14,8 +14,10 @@ mkPartOf "mods.gui" ({
   ...
 }: let
   isLaptop = config.workspace.type == "laptop";
-  # 비활성: 켜서 적용하자 실행 중이던 Hyprland 0.55.2 가 SEGV 로 종료되고, 로그인할 때마다 같은 설정이 다시 로드돼 반복 크래시했다(2026-10-17).
-  # 원인(플러그인 자체 버그인지 로드 시점/설정 문제인지)은 확인하지 못함. 다시 켜기 전에 격리된 환경(중첩 Hyprland 등)에서 먼저 시험할 것.
+  # 비활성(2026-10-19 원인 확정): 이 고정 커밋(3236fbb1)은 Hyprlang 시절 코드라 getConfigValue("plugin:touch_gestures:*")를 15곳 넘게 쓰는데,
+  # Lua 설정(Hyprland 0.55)에서는 그 값들이 등록되지 않아 nullptr 을 바로 역참조한다 → pluginInit(main.cpp:380)과 GestureManager 생성자(GestureManager.cpp:83)에서 SEGV.
+  # 중첩 Hyprland 로 두 번 재현했고, 첫 줄만 널 검사로 막아도 다음 지점에서 죽는다(패치로 해결 불가). 업스트림 최신판(2026-10-18)은 Hyprlang 호환층을 지운 Lua 네이티브라서
+  # Hyprland 0.56.x 용이다 → 쓰려면 Hyprland 를 올려야 함. 조사 기록: _docs/content/explanation/posture.md. 켜기 전에 반드시 중첩 Hyprland 로 먼저 로드해 볼 것.
   enableHyprgrass = false;
   wf-touch = pkgs.wf-touch.overrideAttrs (old: {
     mesonFlags = (old.mesonFlags or []) ++ ["-Dtests=disabled"];

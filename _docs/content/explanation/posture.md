@@ -71,7 +71,7 @@ Hyprland 0.55 가 노출하는 프로토콜(`wayland-info`로 확인): `zwp_virt
 - 한계: 한/영 전환이 `Ctr`+스페이스 두 번 누름(전용 키 없음), 화면 폭 전체를 차지해서 크기/위치 조정 필요, 터치(손가락) 입력은 직접 시험하지 못함(포인터 클릭으로만 확인).
 
 ### 구현: `vkb` (접기/펴기, 크기, 창 가림 방지, 터치 버튼, 자세 연동)
-`mods/_data/vkb/vkb.py`(명령 `vkb`), 서비스/연결은 `mods/gui/base/core.posture.nix`, 버튼은 `mods/gui/base/waybar.nix` + `mods/_data/waybar/style.css`.
+`mods/_data/vkb/vkb.py`(명령 `vkb`), 서비스/연결은 `mods/gui/base/vkb.nix`, 버튼은 `mods/gui/base/waybar.nix` + `mods/_data/waybar/style.css`.
 - **wvkbd 의 한계(소스 확인)**: 위치는 하단 전체 폭 고정, 높이는 시작할 때만 지정(`-H`/`-L`), 숨기기 전용 키 없음(`⌨` 키는 **레이어 전환**), 플로팅/폭 옵션 없음. 그래서 아래 패치로 플로팅을 추가하고, 접고 펴기는 시그널, 크기는 재시작으로 처리하며 그 위에 제어층(`vkb`)을 얹음.
   접기/펴기 전용 키는 두지 않음(waybar 버튼으로 충분). 대신 키보드 안에 도킹↔플로팅 전환 키(`⧉`)를 둠.
 - `wvkbd.service`(사용자 서비스): `--hidden` 으로 상시 대기(메모리만 차지). 시작 인자는 `vkb args` 가 `~/.config/vkb/config.json`(크기/모드/레이어)과 화면 물리 크기로 계산.
@@ -84,7 +84,7 @@ Hyprland 0.55 가 노출하는 프로토콜(`wayland-info`로 확인): `zwp_virt
 - **자세 연동**: `posture.consumers` 에 `vkb apply-posture` 등록. 자동(기본 켜짐)이면 tent/tablet → 보임, laptop → 숨김. 멱등(이미 그 상태면 아무것도 안 함). `vkb auto off` 로 끔.
 - 실제 화면 검증(2026-10-17): 보이기 → 타일 창(Zed/kitty)이 1570→1210 으로 자동으로 줄고 떠 있는 Thunar 는 693→417 로 맞춰짐, 숨기기 → 모두 원복(기록 비움).
   (2026-10-17 재확인) 도킹: 타일 창 1570→1194, 떠 있는 Thunar 693→401. 플로팅(`vkb mode float`): 창이 모두 원래 크기로 돌아오고 키보드(571,1212, 1419×376)가 위에 겹침. 도킹으로 복귀하면 다시 맞춰지고, 숨기면 원복. waybar 에서 `⧉` 를 포인터로 눌러 전환됨을 확인.
-- **wvkbd 패치**(`mods/_data/wvkbd/float-hangul-numrow.patch`, `core.posture.nix` 의 `overrideAttrs`):
+- **wvkbd 패치**(`mods/_data/wvkbd/float-mode.patch`(기능) + `pc-layout.patch`(배열), `vkb.nix` 의 `overrideAttrs`; 다시 만드는 법은 `mods/_data/wvkbd/README.md`):
   ① 플로팅 모드: `--float`, `--float-width`, `--float-margin`, 시그널 `RTMIN+1`(토글)/`+2`(도킹)/`+3`(플로팅). 플로팅이면 하단 가운데 고정 폭, 배타 영역 없음(창이 안 줄어듦). 새 키 종류 `Float`(`⧉`)가 자기 자신에게 `RTMIN+1` 을 보냄.
   ② 모드가 바뀐 뒤 `--on-mode <명령>` 을 실행(환경변수 `WVKBD_MODE`) → `vkb mode-changed` 가 설정 저장과 창 맞춤/복원을 처리(키 입력으로 바뀌어도 `vkb` 와 상태가 어긋나지 않게).
   ③ `한/영` 키(`KEY_HANGEUL`; fcitx5 전환키에 `Hangul` 이 이미 등록돼 있어 설정 변경 없음). ④ 가로 배열(`Landscape`)을 PC 표준 5줄(숫자 줄, Tab/CpL/Shift 줄, 아래줄 `Ctr Sup ⧉ ⌨ 한/영 Alt 스페이스 Esc ←↓↑→`)로 교체(합 15키 폭). `Sup`(Super)는 처음에 레이어를 전환해야만 있어서 메인 배열 아래줄로 옮김(Hyprland 단축키가 전부 Super 기반).
@@ -117,7 +117,11 @@ tent/tablet 에서 기기를 돌리면 내장 화면과 터치가 같이 돈다.
 - nixpkgs 의 hyprgrass(2025-10)는 Hyprland 0.55 와 컴파일이 안 돼서, 업스트림 `hyprpm.toml` 이 "Hyprland v0.55.2(39d7e209) ↔ hyprgrass 3236fbb1" 로 고정한 커밋을 직접 빌드(wf-touch 는 테스트용 doctest 링크 때문에 `-Dtests=disabled`). 빌드와 생성된 Lua 문법은 통과.
 - **결과**: 적용하자 실행 중이던 Hyprland 가 `SEGV`. 크래시 리포트 3건 모두 스택이 `libhyprgrass.so(pluginInit+0x61e)` ← `CPluginSystem::loadPlugin`(로드할 때마다 같은 위치, 재현됨). 설정에 로드가 남아 있어서 로그인(tuigreet)할 때마다 반복 크래시했다.
   `pcall` 로 감싸도 소용없다(Lua 오류가 아니라 네이티브 크래시).
-- 원인은 모름(버전 고정 커밋을 쓰고 헤더도 같은 nixpkgs hyprland 0.55.2 인데 pluginInit 안에서 죽음). 다시 시도하려면 실제 세션이 아니라 격리된 환경(중첩 Hyprland)에서 먼저 로드해 볼 것.
+- **원인 확정(2026-10-19, 중첩 Hyprland 로 재현)**: 이 고정 커밋은 Hyprlang 시절 코드다. `getConfigValue(PHANDLE, "plugin:touch_gestures:...")` 를 15곳 넘게 쓰는데 Lua 설정(0.55)에서는 이 값들이 등록되지 않아 nullptr 이고, 그 결과를 바로 역참조한다.
+  디버그 빌드(`mesonBuildType=debug`, `dontStrip`) + `addr2line` 으로 줄을 확인: `main.cpp:380`(`getConfigValue(...)->getDataStaticPtr()`) → 그 줄을 널 검사로 막으면 `GestureManager.cpp:83`(생성자)에서 같은 유형으로 죽음. 한 줄 패치로는 해결 안 됨.
+  `hyprpm.toml` 의 "Hyprland 커밋 ↔ hyprgrass 커밋" 고정은 컴파일 호환만 뜻하고 Lua 런타임 호환은 아니다.
+- 업스트림 최신판(2026-10-18)은 Hyprlang 호환층을 지운 Lua 네이티브(`hl.plugin.hyprgrass.bind/gesture`)이고 Hyprland 0.56.x 용이다. 0.55.2 헤더로 최신판을 빌드해 보는 것은 시도하지 않음(API 가 자주 바뀌어 위험). 쓰려면 Hyprland 를 0.56.x 로 올릴 것.
+- **격리 시험 방법(유효함)**: 현재 세션 안에서 `Hyprland -c <최소 설정>` 을 `systemd-run --user --unit=...` 로 중첩 실행하면 플러그인 로드 크래시를 실제 세션과 분리해 재현할 수 있다(`env -u LD_LIBRARY_PATH -u HYPRLAND_INSTANCE_SIGNATURE`, `WAYLAND_DISPLAY` 전달). 정리는 반드시 유닛/PID 로(이름으로 pkill 하면 실제 세션도 죽음 — 2026-10-19 실수).
 - 교훈: 플러그인 로드는 **실행 중인 세션에서 시험하면 안 된다**. 이번엔 "적용 전 확인받기"로 해 둔 구성을 이미 커밋해 둔 상태에서 다른 변경(`nixup home`)을 적용하다가 같이 들어가 버렸다(적용 안 할 것은 커밋하지 않거나 처음부터 꺼 둘 것).
 
 ### 덮개를 열면 화면이 까만 채로 남던 문제 (2026-10-17)
@@ -129,3 +133,15 @@ tent/tablet 에서 기기를 돌리면 내장 화면과 터치가 같이 돈다.
 - 왜 dpms 가 안 켜지는지는 모름(i915 + `i915.enable_psr=1` + Hyprland 0.55.2. PSR 의심은 하지만 확인 안 함. 화면이 까만 동안 `grim` 으로 컴포지터가 그리는지 보는 시험은 하지 않았다).
 - 조치: dpms 를 쓰지 않고 **백라이트만** 끄고 켬(`lid-screen off|on`, `brightnessctl` 사용, 닫을 때 밝기를 한 번만 저장해 닫힘이 두 번 와도 원래 밝기를 잃지 않음). 모드 재설정이 없어 이 경로의 문제가 생기지 않는다.
 - 확인(사용자): 백라이트 시험 후 화면 정상, 실제 덮개를 닫았다 열어도 정상. 오래 닫아 둔 뒤 열기는 확인 중.
+
+### 모듈 구성과 유지보수 규칙 (2026-10-19 점검)
+| 모듈/파일 | 책임 | 소비자 등록 |
+|---|---|---|
+| `mods/gui/base/core.posture.nix` + `mods/_data/posture/` | 허브: 센서(힌지/가속도) → 상태 파일 → 소비자 호출. 소비자의 내용은 모름 | `posture.consumers` 옵션 |
+| `mods/gui/base/core.bind.hwctl.nix` | 입력 장치 정책(`hypr-input-policy`)과 토글/메뉴, 덮개 동작(`lid-screen`) | 정책을 소비자로 등록 |
+| `mods/gui/base/vkb.nix` + `mods/_data/vkb/` + `mods/_data/wvkbd/` | 가상 키보드 서비스와 제어 CLI, wvkbd 패치 | `vkb apply-posture` |
+| `mods/gui/base/display-manager.nix` + `mods/_data/display/` | 화면 구성/회전(`displayctl rotate auto`), 터치 좌표 동기화 | `displayctl rotate auto` |
+- 한 가지 일은 한 곳에서: 장치 켜기/끄기와 수동 상태 파일의 기본값은 `hypr-input-policy` 에만 있고, 터치패드/터치스크린 토글은 상태 파일만 뒤집고 정책을 부른다(예전에는 토글 두 개와 정책이 각자 같은 장치 선택/적용 코드를 가졌음). 메뉴 라벨도 정책의 `--print` 값을 쓴다.
+- 두 곳에 같은 숫자가 있으면 시험이 지키게 한다: 가로 배열의 줄 수/폭 단위(5줄, 15)는 `pc-layout.patch` 와 `vkb.py`(`LAND_ROWS`/`LAND_UNITS`) 에 따로 있어서, `test_vkb.py` 가 원본 wvkbd 에 두 패치를 실제로 적용해 읽고 비교한다(패치가 안 맞아도 여기서 실패).
+- 아직 남은 것(위험 낮음, 필요할 때): 호스트 전용 키보드 이름(`at-translated-set-2-keyboard`)이 공용 모듈 `core.bind.hwctl.nix` 에 박혀 있음(옵션으로 빼는 게 맞음); `posture` CLI 를 소비자가 값마다 한 번씩 부름(파이썬 시작 + systemctl 확인이 매번);
+  `_data/*/tests/` 마다 가짜 hyprctl/systemctl 을 따로 만들어 쓰는 중복; `displayctl.py` 가 1000줄이 넘는 단일 파일.
