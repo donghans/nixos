@@ -55,13 +55,22 @@ def set_accel(x, y, z):
 set_accel(-0.10, -8.40, -5.24)        # 정방향 가로
 open(f"{d}/in_angl_hysteresis", "w").write("1.000000\n")
 os.mkfifo(f"{DEV}/iio:device7")
+os.makedirs(f"{DEV}/input"); os.mkfifo(f"{DEV}/input/lid")
+lid_w = os.open(f"{DEV}/input/lid", os.O_RDWR)
+open(f"{T}/lidstate", "w").write("state:      open\n")
+def lid_event(closed): os.write(lid_w, struct.pack("llHHi", 0, 0, 5, 0, 1 if closed else 0) + struct.pack("llHHi", 0, 0, 0, 0, 0))   # SW_LID + SYN_REPORT
 wfd = os.open(f"{DEV}/iio:device7", os.O_RDWR)       # 쓰는 쪽을 먼저 열어 둬야 데몬의 open 이 막히지 않음
-env = dict(os.environ, POSTURE_IIO=IIO, POSTURE_DEV=DEV, POSTURE_STATE_DIR=ST, POSTURE_DEBOUNCE="0.4", POSTURE_ACCEL_PERIOD="0.1", POSTURE_ORIENT_DEBOUNCE="0.3", PYTHONDONTWRITEBYTECODE="1")
+env = dict(os.environ, POSTURE_IIO=IIO, POSTURE_DEV=DEV, POSTURE_STATE_DIR=ST, POSTURE_DEBOUNCE="0.4", POSTURE_ACCEL_PERIOD="0.1", POSTURE_ORIENT_DEBOUNCE="0.3", POSTURE_LID_DEV=f"{DEV}/input/lid", POSTURE_LID_STATE=f"{T}/lidstate", PYTHONDONTWRITEBYTECODE="1")
 proc = subprocess.Popen([sys.executable, "-I", f"{ROOT}/posture_daemon.py"], env=env)
+import atexit
+atexit.register(lambda: proc.poll() is None and proc.kill())      # 시험이 중간에 예외로 끝나도 데몬이 남아 출력 파이프를 붙잡지 않게
 def rec(angle, screen=0, kb=0): return struct.pack("<III", angle, screen, kb)
 def state():
-    try: return json.load(open(f"{ST}/state.json"))
+    try: d = json.load(open(f"{ST}/state.json"))
     except Exception: return None
+    try: d["hinge"] = json.load(open(f"{ST}/telemetry.json"))["hinge"]      # 각도는 telemetry.json (CLI 가 합쳐 보여 주는 것과 같음)
+    except Exception: d["hinge"] = {"angle": None, "screen": None, "keyboard": None}
+    return d
 def wait(pred, t=3.0):
     end = time.time() + t
     while time.time() < end:
@@ -80,8 +89,17 @@ check("원자적 교체: 임시 파일이 남지 않음", not os.path.exists(f"{
 m0 = os.path.getmtime(f"{ST}/state.json"); time.sleep(0.05)
 os.write(wfd, rec(140, 130, 351)); os.write(wfd, rec(137, 128, 351)); time.sleep(0.4)
 check("작은 떨림(±2°)은 다시 발행하지 않음(소비자 호출 최소화)", os.path.getmtime(f"{ST}/state.json") == m0 and state()["hinge"]["angle"] == 138, str(state()))
+m1 = os.path.getmtime(f"{ST}/state.json")
 os.write(wfd, rec(145, 135, 351)); s = wait(lambda s: s["hinge"]["angle"] == 145)
-check("5° 이상 달라지면 같은 모드여도 각도를 갱신", s and s["hinge"]["angle"] == 145 and s["mode"] == "laptop", str(s))
+check("5° 이상 달라지면 같은 모드여도 각도(telemetry)를 갱신", s and s["hinge"]["angle"] == 145 and s["mode"] == "laptop", str(s))
+check("각도만 바뀌면 state.json 은 건드리지 않음(경로 유닛이 소비자를 깨우지 않음)", os.path.getmtime(f"{ST}/state.json") == m1 and "hinge" not in json.load(open(f"{ST}/state.json")))
+check("시작할 때의 덮개 상태는 ACPI 파일에서(open), 센서 상태에 lid ok", state()["lid"] == "open" and state()["sensors"]["lid"] == "ok", str(state()))
+m2 = os.path.getmtime(f"{ST}/state.json"); lid_event(True); s = wait(lambda s: s["lid"] == "closed")
+check("덮개를 닫으면 state.json 에 lid=closed (모드/방향은 그대로)", s["lid"] == "closed" and s["mode"] == "laptop" and os.path.getmtime(f"{ST}/state.json") > m2, str(s))
+lid_event(True); time.sleep(0.2); m3 = os.path.getmtime(f"{ST}/state.json"); lid_event(True); time.sleep(0.3)
+check("같은 덮개 상태가 또 와도 다시 발행하지 않음(소비자를 깨우지 않음)", os.path.getmtime(f"{ST}/state.json") == m3)
+lid_event(False); s = wait(lambda s: s["lid"] == "open")
+check("덮개를 열면 lid=open", s["lid"] == "open", str(s))
 os.write(wfd, rec(268, 58, 150)); time.sleep(0.1)
 check("디바운스: 확정 전에는 아직 laptop", state()["mode"] == "laptop", str(state()))
 s = wait(lambda s: s["mode"] == "tent")
@@ -118,16 +136,23 @@ check("종료하면 센서 설정 원복(buffer/enable=0, 채널 비활성)", op
 def cli(*a, **e):
     return subprocess.run([sys.executable, "-I", f"{ROOT}/posture", *a], capture_output=True, text=True, env=dict(os.environ, POSTURE_STATE_DIR=ST, POSTURE_NO_SYSTEMCTL="1", **e)).stdout.strip()
 os.makedirs(ST, exist_ok=True)
-json.dump({"schema": 1, "ts": 1, "mode": "tablet", "hinge": {"angle": 359, "screen": 179, "keyboard": 178}, "orientation": "left-up", "sensors": {}}, open(f"{ST}/state.json", "w"))
-check("get mode", cli("get", "mode") == "tablet"); check("get angle", cli("get", "angle") == "359"); check("get orientation", cli("get", "orientation") == "left-up")
+json.dump({"schema": 1, "ts": 1, "mode": "tablet", "orientation": "left-up", "lid": "closed", "sensors": {}}, open(f"{ST}/state.json", "w"))
+json.dump({"ts": 1, "hinge": {"angle": 359, "screen": 179, "keyboard": 178}}, open(f"{ST}/telemetry.json", "w"))
+check("get mode", cli("get", "mode") == "tablet"); check("get angle(telemetry.json 에서 합쳐 보여 줌)", cli("get", "angle") == "359"); check("get orientation", cli("get", "orientation") == "left-up")
+check("get lid", cli("get", "lid") == "closed")
+os.remove(f"{ST}/telemetry.json")
+check("telemetry.json 이 없으면 각도는 비어 있음(오류 없이)", cli("get", "angle") == "" and cli("get", "mode") == "tablet")
+json.dump({"schema": 1, "ts": 1, "mode": "tablet", "lid": None, "sensors": {}}, open(f"{ST}/state.json", "w"))
+check("덮개를 알 수 없으면 open 으로(화면을 끄지 않는 쪽이 안전)", cli("get", "lid") == "open")
+json.dump({"schema": 1, "ts": 1, "mode": "tablet", "orientation": "left-up", "lid": "closed", "sensors": {}}, open(f"{ST}/state.json", "w"))
 check("json 은 출처 표시", json.loads(cli("json"))["source"] == "daemon")
 open(f"{ST}/state.json", "w").write("{깨진")
 check("깨진 파일 → 안전한 기본값 laptop", cli("get", "mode") == "laptop" and json.loads(cli("json"))["source"] == "default")
 json.dump({"schema": 99, "mode": "tablet"}, open(f"{ST}/state.json", "w"))
 check("스키마가 다르면 안전한 기본값", cli("get", "mode") == "laptop")
 os.remove(f"{ST}/state.json")
-check("파일이 없으면 안전한 기본값(laptop, 회전 0)", cli("get", "mode") == "laptop" and cli("get", "rotation").strip() == "0" and cli("get", "flat").strip() == "False")
-json.dump({"schema": 1, "ts": 1, "mode": "tablet", "hinge": {}, "sensors": {}}, open(f"{ST}/state.json", "w"))
+check("파일이 없으면 안전한 기본값(laptop, 회전 0, 덮개 열림)", cli("get", "mode") == "laptop" and cli("get", "rotation").strip() == "0" and cli("get", "flat").strip() == "False" and cli("get", "lid") == "open")
+json.dump({"schema": 1, "ts": 1, "mode": "tablet", "sensors": {}}, open(f"{ST}/state.json", "w"))
 # 서비스 상태 확인은 가짜 systemctl 로(실제 시스템의 서비스 상태에 시험이 영향을 받지 않게): 종료 코드 1 = 실행 중 아님, 0 = 실행 중
 for code, want in ((1, "laptop"), (0, "tablet")):
     fake = f"{T}/fake-systemctl-{code}"
@@ -138,5 +163,26 @@ json.dump({"schema": 1, "ts": int(time.time()), "mode": "tablet", "hinge": {"ang
 check("CLI get rotation / flat", cli("get", "rotation").strip() == "270" and cli("get", "flat").strip() == "True", cli("get", "rotation"))
 json.dump({"schema": 1, "ts": int(time.time()), "mode": "tablet", "hinge": {"angle": 359, "screen": 1, "keyboard": 2}, "orientation": "엉뚱한 값", "sensors": {}}, open(f"{ST}/state.json", "w"))
 check("orientation 형식이 이상하면 rotation 0 (오류 없이)", cli("get", "rotation").strip() == "0")
+# ───── 힌지 센서가 없는 일반 노트북: 덮개만으로 동작 ─────
+T2 = tempfile.mkdtemp(); ST2 = f"{T2}/run"; os.makedirs(f"{T2}/iio"); os.makedirs(f"{T2}/dev")
+os.mkfifo(f"{T2}/dev/lid"); lw2 = os.open(f"{T2}/dev/lid", os.O_RDWR)
+open(f"{T2}/lidstate", "w").write("state:      closed\n")
+env2 = dict(os.environ, POSTURE_IIO=f"{T2}/iio", POSTURE_DEV=f"{T2}/dev", POSTURE_STATE_DIR=ST2, POSTURE_LID_DEV=f"{T2}/dev/lid", POSTURE_LID_STATE=f"{T2}/lidstate", PYTHONDONTWRITEBYTECODE="1")
+proc2 = subprocess.Popen([sys.executable, "-I", f"{ROOT}/posture_daemon.py"], env=env2)
+atexit.register(lambda: proc2.poll() is None and proc2.kill())
+def state2():
+    try: return json.load(open(f"{ST2}/state.json"))
+    except Exception: return None
+end = time.time() + 3
+while time.time() < end and not state2(): time.sleep(0.05)
+s2 = state2()
+check("힌지가 없어도 시작하자마자 상태를 발행(모드 laptop, 덮개는 시작 상태 파일에서 closed)", s2 and s2["mode"] == "laptop" and s2["lid"] == "closed" and s2["sensors"]["hinge"] == "none", str(s2))
+os.write(lw2, struct.pack("llHHi", 0, 0, 5, 0, 0)); end = time.time() + 3
+while time.time() < end and state2()["lid"] != "open": time.sleep(0.05)
+check("힌지가 없어도 덮개 이벤트가 상태에 반영됨", state2()["lid"] == "open", str(state2()))
+proc2.send_signal(signal.SIGTERM); proc2.wait(timeout=5)
+p3 = subprocess.run([sys.executable, "-I", f"{ROOT}/posture_daemon.py"], env=dict(env2, POSTURE_LID_DEV="none"), capture_output=True, text=True, timeout=10)
+check("힌지도 덮개도 없으면 바로 종료(0)", p3.returncode == 0 and "종료" in p3.stderr, p3.stderr[-100:])
+
 print(f"\nposture {ok} 통과 / {bad} 실패")
 sys.exit(1 if bad else 0)

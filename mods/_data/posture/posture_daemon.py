@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """posture-daemon — 360도 힌지 노트북의 "사용 모드"(힌지 각도 → laptop/tent/tablet)를 센서에서 읽어 한 곳에 발행한다. (root 로 실행)
 
-발행: /run/posture/state.json  (원자적 교체. 스키마 버전 `schema`)
-  {"schema": 1, "ts": <epoch 초>, "mode": "laptop|tent|tablet",
-   "hinge": {"angle": 138, "screen": 129, "keyboard": 351},
-   "orientation": {"rotation": 0, "flat": false}, "sensors": {"hinge": "ok", "accel": "ok"}}
+발행(둘 다 원자적 교체):
+  /run/posture/state.json      소비자를 깨우는 값. **변할 때만** 갱신 — systemd 경로 유닛이 이 파일만 본다.
+    {"schema": 1, "ts": <epoch 초>, "mode": "laptop|tent|tablet",
+     "orientation": {"rotation": 0, "flat": false}, "lid": "open|closed|null",
+     "sensors": {"hinge": "ok", "accel": "ok", "lid": "ok"}}
+  /run/posture/telemetry.json  자주 바뀌지만 소비자를 깨울 필요 없는 값(힌지 각도). 감시하지 않음.
+    {"ts": ..., "hinge": {"angle": 138, "screen": 129, "keyboard": 351}}
+  (각도를 상태 파일에 두면 덮개를 여는 몇 초 동안 5° 마다 모든 소비자가 다시 실행됐다 — 실측으로 확인해서 분리함)
 orientation.rotation: 기기를 시계방향으로 돌린 각도(0/90/180/270). 정방향 가로=0, 윗변이 오른쪽=90, 거꾸로=180, 윗변이 왼쪽=270.
   laptop 모드에서는 항상 0(센서도 읽지 않음). flat=true 이면 책상에 눕혀 놓은 상태라 방향을 정할 수 없어 직전 값을 유지 중.
-가져가기는 `posture get mode` / `posture json`, 알림은 이 파일 변경을 보는 systemd 경로 유닛(core.posture.nix)이 한다.
+lid: 덮개 스위치(evdev `Lid Switch`, SW_LID)로 읽은 덮개 상태. 시작할 때는 /proc/acpi/button/lid/*/state. 스위치가 없으면 null(소비자는 열림으로 취급).
+힌지 센서가 없는 일반 노트북에서도 덮개 때문에 계속 돈다(둘 다 없으면 바로 종료).
+가져가기는 `posture get mode|lid|rotation|angle` / `posture json`(두 파일을 합쳐서 보여 줌), 알림은 state.json 변경을 보는 systemd 경로 유닛(core.posture.nix)이 한다.
 화면 방향은 화면(뚜껑)에 달린 가속도 센서(IIO `accel_3d`)로 판정한다. 중력 방향만 보면 되므로 센서 축 방향만 알면 된다(실측: 이 기기는 +x=화면 왼쪽, +y=화면 아래, -z=화면 앞쪽).
 세워서 쓰는 중에만(tent/tablet) 약 3Hz 로 sysfs 를 읽고, laptop 이면 읽지 않는다. 경계 흔들림은 히스테리시스(15°)와 디바운스로 막는다.
 이 프로세스는 값을 **계산해서 발행만** 하고, 어떤 소비자(입력 장치, 화면 회전 …)가 있는지 모른다.
@@ -21,19 +27,21 @@ read() 에서 막혀 기다리면 되고 폴링이 없다(전력 부담이 작�
   tent   → tablet : 힌지 ≥ 335°        tablet → tent  : 힌지 < 315°
 모드가 바뀌어도 DEBOUNCE 초 동안 유지돼야 확정(순간적인 튐 방지). 멈추면(SIGTERM) 안전한 값(laptop)을 발행하고 켠 센서 설정을 모두 원복한다.
 
-시험용 환경변수: POSTURE_IIO(IIO sysfs 루트), POSTURE_DEV(장치 노드 디렉터리), POSTURE_STATE_DIR, POSTURE_DEBOUNCE(초)
+시험용 환경변수: POSTURE_IIO(IIO sysfs 루트), POSTURE_DEV(장치 노드 디렉터리), POSTURE_STATE_DIR, POSTURE_DEBOUNCE(초), POSTURE_LID_DEV(덮개 evdev 노드/FIFO), POSTURE_LID_STATE(시작 덮개 상태 파일)
 """
 import json
 import os
 import select
 import signal
+import struct
 import sys
 import time
 
 IIO = os.environ.get("POSTURE_IIO", "/sys/bus/iio/devices")
 DEV = os.environ.get("POSTURE_DEV", "/dev")
 STATE_DIR = os.environ.get("POSTURE_STATE_DIR", "/run/posture")
-STATE = os.path.join(STATE_DIR, "state.json")
+STATE = os.path.join(STATE_DIR, "state.json")           # 소비자를 깨우는 상태(모드/방향/덮개). 경로 유닛이 감시
+TELE = os.path.join(STATE_DIR, "telemetry.json")        # 자주 바뀌는 값(힌지 각도). 감시하지 않음
 DEBOUNCE = float(os.environ.get("POSTURE_DEBOUNCE", "1.0"))
 ANGLE_STEP = 5   # 같은 모드에서 각도가 이만큼 이상 달라질 때만 다시 발행(소비자를 깨우는 횟수를 줄임. 소비자에게 의미 있는 건 모드 변화)
 SCHEMA = 1
@@ -147,33 +155,98 @@ def write(path: str, text: str) -> None:
 
 
 # ───────────────────────── 발행 ─────────────────────────
-def publish(mode: str, hinge: dict | None, sensors: dict, orient: dict | None = None) -> None:
+def write_atomic(path: str, doc: dict) -> None:
     """원자적 교체: 같은 디렉터리에 임시 파일을 쓰고 rename (읽는 쪽이 반쯤 쓰인 파일을 볼 수 없음)."""
     os.makedirs(STATE_DIR, exist_ok=True)
-    doc = {"schema": SCHEMA, "ts": int(time.time()), "mode": mode,
-           "hinge": hinge or {"angle": None, "screen": None, "keyboard": None},
-           "orientation": orient or {"rotation": 0, "flat": False}, "sensors": sensors}
-    tmp = STATE + ".tmp"
+    tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(doc, f)
     os.chmod(tmp, 0o644)
-    os.replace(tmp, STATE)
+    os.replace(tmp, path)
+
+
+def publish_state(mode: str, orient: dict | None, lid: str | None, sensors: dict) -> None:
+    """소비자가 알아야 하는 값만(모드/방향/덮개). **변할 때만** 부른다 — 경로 유닛이 이 파일을 보고 소비자를 깨운다."""
+    write_atomic(STATE, {"schema": SCHEMA, "ts": int(time.time()), "mode": mode,
+                         "orientation": orient or {"rotation": 0, "flat": False}, "lid": lid, "sensors": sensors})
+
+
+def publish_telemetry(hinge: dict | None) -> None:
+    """힌지 각도처럼 자주 바뀌지만 소비자를 깨울 필요는 없는 값. 경로 유닛이 보지 않는다(`posture get angle` 이 읽음)."""
+    write_atomic(TELE, {"ts": int(time.time()), "hinge": hinge or {"angle": None, "screen": None, "keyboard": None}})
+
+
+# ───────────────────────── 덮개 스위치 ─────────────────────────
+EV_SW, SW_LID = 5, 0
+EV_FMT = "llHHi"                      # struct input_event: timeval(sec, usec), type, code, value
+EV_SIZE = struct.calcsize(EV_FMT)
+
+
+def find_lid_node() -> str | None:
+    """덮개 스위치의 evdev 노드. 시험에서는 POSTURE_LID_DEV 로 FIFO 를 줄 수 있음."""
+    forced = os.environ.get("POSTURE_LID_DEV")
+    if forced == "none":                  # 시험용: 덮개 장치가 없는 기기를 흉내(이 기기의 실제 덮개 스위치를 읽지 않게)
+        return None
+    if forced:
+        return forced
+    base = "/sys/class/input"
+    try:
+        for d in sorted(os.listdir(base)):
+            try:
+                if open(f"{base}/{d}/name").read().strip() == "Lid Switch":
+                    for e in os.listdir(f"{base}/{d}"):
+                        if e.startswith("event"):
+                            return os.path.join(DEV, "input", e)
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return None
+
+
+def read_lid_file() -> str | None:
+    """시작할 때의 덮개 상태(ACPI 버튼 파일: `state:      open`). 시험에서는 POSTURE_LID_STATE."""
+    path = os.environ.get("POSTURE_LID_STATE")
+    paths = [path] if path else sorted(__import__("glob").glob("/proc/acpi/button/lid/*/state"))
+    for p in paths:
+        try:
+            v = open(p).read().split(":")[-1].strip()
+            if v in ("open", "closed"):
+                return v
+        except OSError:
+            continue
+    return None
+
+
+def decode_lid(data: bytes) -> str | None:
+    """evdev 레코드들에서 마지막 덮개 이벤트(SW_LID: 1=닫힘) → "closed"/"open". 없으면 None."""
+    lid = None
+    for i in range(0, len(data) - EV_SIZE + 1, EV_SIZE):
+        _s, _u, typ, code, val = struct.unpack(EV_FMT, data[i:i + EV_SIZE])
+        if typ == EV_SW and code == SW_LID:
+            lid = "closed" if val else "open"
+    return lid
 
 
 def main() -> int:
     dev = find("hinge")
-    if dev is None:
-        print("힌지 센서(IIO `hinge`)가 없어서 종료합니다.", file=sys.stderr)
+    lid_node = find_lid_node()
+    if dev is None and lid_node is None:
+        print("힌지 센서(IIO `hinge`)도 덮개 스위치도 없어서 종료합니다.", file=sys.stderr)
         return 0
-    node = os.path.join(DEV, os.path.basename(dev))
-    chans = [f[:-3] for f in os.listdir(f"{dev}/scan_elements") if f.startswith("in_angl") and f.endswith("_en")]
-    write(f"{dev}/buffer/enable", "0")
-    for n in chans:                           # 각도 3개만 켬(타임스탬프는 쓰지 않음)
-        write(f"{dev}/scan_elements/{n}_en", "1")
-    lay, size = layout(dev)
-    write(f"{dev}/buffer/enable", "1")
-    sensors = {"hinge": "ok", "accel": "none"}
-    accel = find("accel_3d")
+    sensors = {"hinge": "none", "accel": "none", "lid": "none"}
+    chans: list[str] = []
+    lay, size, node = None, 0, None
+    if dev is not None:
+        node = os.path.join(DEV, os.path.basename(dev))
+        chans = [f[:-3] for f in os.listdir(f"{dev}/scan_elements") if f.startswith("in_angl") and f.endswith("_en")]
+        write(f"{dev}/buffer/enable", "0")
+        for n in chans:                           # 각도 3개만 켬(타임스탬프는 쓰지 않음)
+            write(f"{dev}/scan_elements/{n}_en", "1")
+        lay, size = layout(dev)
+        write(f"{dev}/buffer/enable", "1")
+        sensors["hinge"] = "ok"
+    accel = find("accel_3d") if dev is not None else None
     accel_scale = 1.0
     if accel:
         try:
@@ -183,36 +256,55 @@ def main() -> int:
         except (OSError, ValueError):
             accel, sensors["accel"] = None, "error"
 
+    lid = read_lid_file() if lid_node else None
+    lid_fd = None
+    if lid_node:
+        try:
+            lid_fd = os.open(lid_node, os.O_RDONLY | os.O_NONBLOCK)
+            sensors["lid"] = "ok"
+        except OSError:
+            sensors["lid"] = "error"
+
     def cleanup(*_):
         try:                                   # 켠 것을 모두 원복
-            write(f"{dev}/buffer/enable", "0")
-            for n in chans:
-                write(f"{dev}/scan_elements/{n}_en", "0")
+            if dev is not None:
+                write(f"{dev}/buffer/enable", "0")
+                for n in chans:
+                    write(f"{dev}/scan_elements/{n}_en", "0")
         except OSError:
             pass
-        publish("laptop", None, {"hinge": "stopped"})   # 멈추면 안전한 값(키보드/터치패드 켜짐)
+        publish_state("laptop", None, None, {"hinge": "stopped"})   # 멈추면 안전한 값(키보드/터치패드 켜짐, 덮개 열림)
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, cleanup)
     signal.signal(signal.SIGINT, cleanup)
 
-    fd = os.open(node, os.O_RDONLY)
-    # 센서는 값이 바뀔 때만 샘플을 준다. 힌지가 가만히 있는 채로 데몬이 시작/재시작되면(예: 접은 채 부팅) 첫 샘플이 영영 안 와서
-    # 현재 모드를 모르게 된다(실측: 재시작 뒤 접힌 채 가만히 두면 'stopped/laptop' 으로 남고, hysteresis 를 0 으로 바꿨다 0.2초 이상 뒤 되돌리면 샘플이 나옴).
-    # hysteresis 를 0 으로 썼다가 원래 값으로 돌려서 현재 값을 한 번 내보내게 한다. (장치 노드를 연 **뒤에** 해야 그 샘플을 받을 수 있음)
-    try:
-        hyst = open(f"{dev}/in_angl_hysteresis").read().strip()
-        write(f"{dev}/in_angl_hysteresis", "0")
-        time.sleep(0.3)               # 바로 되돌리면 샘플이 안 나온다(실측: 0.2~0.5초 쉬었다 되돌리면 나옴)
-        write(f"{dev}/in_angl_hysteresis", hyst)
-    except OSError:
-        pass
-    mode, hinge, pending, since, first, last_angle = "laptop", None, None, 0.0, True, None
+    fd = os.open(node, os.O_RDONLY) if node else None
+    if dev is not None:
+        # 센서는 값이 바뀔 때만 샘플을 준다. 힌지가 가만히 있는 채로 데몬이 시작/재시작되면(예: 접은 채 부팅) 첫 샘플이 영영 안 와서
+        # 현재 모드를 모르게 된다(실측: 재시작 뒤 접힌 채 가만히 두면 'stopped/laptop' 으로 남고, hysteresis 를 0 으로 바꿨다 0.2초 이상 뒤 되돌리면 샘플이 나옴).
+        # hysteresis 를 0 으로 썼다가 원래 값으로 돌려서 현재 값을 한 번 내보내게 한다. (장치 노드를 연 **뒤에** 해야 그 샘플을 받을 수 있음)
+        try:
+            hyst = open(f"{dev}/in_angl_hysteresis").read().strip()
+            write(f"{dev}/in_angl_hysteresis", "0")
+            time.sleep(0.3)               # 바로 되돌리면 샘플이 안 나온다(실측: 0.2~0.5초 쉬었다 되돌리면 나옴)
+            write(f"{dev}/in_angl_hysteresis", hyst)
+        except OSError:
+            pass
+    mode, hinge, pending, since, first, last_angle = "laptop", None, None, 0.0, dev is not None, None
     rot, flat, o_pend, o_since, next_poll = 0, False, None, 0.0, 0.0   # 화면 방향 상태(회전각, 눕힘, 대기 중인 새 방향, 다음 읽기 시각)
+    ready = dev is None                 # 힌지 센서가 있으면 첫 샘플로 모드를 알기 전에는 상태를 발행하지 않음(접힌 채 시작할 때 laptop 이 잠깐 새 나가지 않게)
 
     def pub():
-        publish(mode, hinge, sensors, {"rotation": rot, "flat": flat})
+        if ready:
+            publish_state(mode, {"rotation": rot, "flat": flat}, lid, sensors)
 
+    def tele():
+        publish_telemetry(hinge)
+
+    if ready:
+        pub()                           # 힌지가 없으면(일반 노트북) 시작하자마자 덮개 상태를 발행
+    fds = [x for x in (fd, lid_fd) if x is not None]
     try:
         while True:
             now = time.monotonic()
@@ -224,24 +316,34 @@ def main() -> int:
             if accel and mode != "laptop":
                 waits.append(next_poll - now)
             timeout = max(0.0, min(waits)) if waits else None
-            r, _, _ = select.select([fd], [], [], timeout)
+            r, _, _ = select.select(fds, [], [], timeout)
             if r:
-                data = os.read(fd, size * 16)
-                for i in range(0, len(data) - size + 1, size):    # 한 번에 여러 레코드가 올 수 있음
-                    v = decode(data[i:i + size], lay)
-                    hinge = {"angle": v["in_angl0"], "screen": v["in_angl1"], "keyboard": v["in_angl2"]}
-                    cand = classify(mode, hinge["angle"])
-                    if first:                 # 시작 직후 첫 값은 바로 확정
-                        mode, pending, first = cand, None, False
+                if lid_fd is not None and lid_fd in r:
+                    try:
+                        new_lid = decode_lid(os.read(lid_fd, EV_SIZE * 32))
+                    except BlockingIOError:
+                        new_lid = None
+                    if new_lid and new_lid != lid:
+                        lid = new_lid
                         pub()
-                        last_angle = hinge["angle"]
-                    elif cand == mode:
-                        pending = None
-                        if last_angle is None or abs(hinge["angle"] - last_angle) >= ANGLE_STEP:
-                            pub()   # 각도만 갱신(작은 떨림은 발행하지 않음)
+                if fd is not None and fd in r:
+                    data = os.read(fd, size * 16)
+                    for i in range(0, len(data) - size + 1, size):    # 한 번에 여러 레코드가 올 수 있음
+                        v = decode(data[i:i + size], lay)
+                        hinge = {"angle": v["in_angl0"], "screen": v["in_angl1"], "keyboard": v["in_angl2"]}
+                        cand = classify(mode, hinge["angle"])
+                        if first:                 # 시작 직후 첫 값은 바로 확정
+                            mode, pending, first, ready = cand, None, False, True
+                            pub()
+                            tele()
                             last_angle = hinge["angle"]
-                    elif pending != cand:
-                        pending, since = cand, time.monotonic()
+                        elif cand == mode:
+                            pending = None
+                            if last_angle is None or abs(hinge["angle"] - last_angle) >= ANGLE_STEP:
+                                tele()   # 각도만 갱신: 소비자는 깨우지 않음(상태 파일은 그대로)
+                                last_angle = hinge["angle"]
+                        elif pending != cand:
+                            pending, since = cand, time.monotonic()
             else:
                 if pending is not None and time.monotonic() >= since + DEBOUNCE:
                     mode, pending = pending, None
@@ -250,6 +352,7 @@ def main() -> int:
                     else:
                         next_poll = 0.0                  # 센서를 바로 읽어서 현재 방향을 반영
                     pub()
+                    tele()
                     last_angle = hinge["angle"]
                 if accel and mode != "laptop" and time.monotonic() >= next_poll:
                     next_poll = time.monotonic() + ACCEL_PERIOD

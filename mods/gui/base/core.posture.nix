@@ -1,15 +1,18 @@
-# 사용 모드(posture) 허브 — 360도 힌지 노트북의 힌지 각도(→ laptop/tent/tablet)를 한 곳에서 읽고 발행한다.
+# 사용 모드(posture) 허브 — 노트북의 사용 상태(힌지 각도 → laptop/tent/tablet, 화면 방향, 덮개 열림/닫힘)를 한 곳에서 읽고 발행한다.
+# 모든 노트북(type = "laptop")에 적용된다: 덮개는 모든 노트북이 갖고, 힌지/가속도 센서는 있을 때만 쓴다(2-in-1 전용 기능은 host.toml `convertible = true` 호스트에만: vkb.nix, display-manager.nix 의 회전, core.touch.nix).
 #
 #   [센서] → posture-daemon(root, 이 파일의 system 서비스) → /run/posture/state.json → 경로 유닛 → 소비자들(posture-apply)
+#                                                          └ /run/posture/telemetry.json (힌지 각도: 자주 바뀌지만 소비자를 깨우지 않음)
 #
 # 설계 원칙(유지보수/버그 최소화):
 #  - 센서는 한 프로세스만 읽고 값을 한 번만 해석한다(경계값/디바운스는 mods/_data/posture/posture_daemon.py 한 곳).
-#  - 상태는 하나의 스냅샷(JSON, 원자적 교체). 가져가기는 `posture get mode`, 알림은 이 파일 변경을 보는 경로 유닛.
+#  - 상태는 하나의 스냅샷(JSON, 원자적 교체)이고 **변할 때만** 갱신한다. 가져가기는 `posture get mode|lid|rotation|angle`, 알림은 state.json 변경을 보는 경로 유닛.
 #  - 소비자는 "수준 기반 + 멱등" 조정기: 이벤트를 놓쳐도 아무 때나 실행하면 현재 상태에 맞춰짐(로그인/reload 때도 같은 코드).
-#  - 안전한 기본값(서비스 정지/파일 없음/낡음 → laptop)은 `posture` CLI 한 곳에서 처리 → 키보드가 꺼진 채 남지 않음.
-#  - 소비자는 `posture.consumers` 옵션에 명령을 한 줄 추가하면 연결된다(입력 정책: core.bind.hwctl.nix, 가상 키보드: vkb.nix, 화면 회전: display-manager.nix).
+#  - 안전한 기본값(서비스 정지/파일 없음 → laptop, 덮개 열림)은 `posture` CLI 한 곳에서 처리 → 키보드가 꺼지거나 화면이 꺼진 채 남지 않음.
+#  - 소비자는 `posture.consumers` 옵션에 명령을 한 줄 추가하면 연결된다(덮개/입력 정책: core.bind.hwctl.nix, 가상 키보드: vkb.nix, 화면 회전: display-manager.nix).
 #    이 파일은 허브(센서 → 상태 → 소비자 호출)만 담당하고 소비자의 내용은 모른다.
-# 힌지 센서가 없는 기기에서는 posture-daemon 이 "센서 없음"으로 바로 종료하고 CLI 는 laptop 을 돌려준다.
+#  - 안전과 직결된 동작(덮개를 닫으면 잠금)은 허브를 거치지 않고 Hyprland 바인딩에 둔다: 허브가 죽어도 잠겨야 한다.
+# 힌지 센서도 덮개 스위치도 없는 기기에서는 posture-daemon 이 바로 종료하고 CLI 는 안전한 기본값을 돌려준다.
 {
   mkPartOf,
   lib,

@@ -3,7 +3,7 @@
 
   posture                 사람이 읽는 요약
   posture json            원본 상태(JSON) — 안전한 기본값 처리가 된 것
-  posture get <키>        mode | angle | screen | keyboard | orientation | rotation | flat   (값만 출력. rotation: 기기를 시계방향으로 돌린 각도 0/90/180/270)
+  posture get <키>        mode | lid | angle | screen | keyboard | orientation | rotation | flat   (값만 출력. rotation: 기기를 시계방향으로 돌린 각도 0/90/180/270)
   posture watch           바뀔 때마다 한 줄씩 출력 (Ctrl+C 로 종료)
 
 안전한 기본값을 **여기서 한 곳에** 처리한다: 서비스가 실행 중이 아니거나, 상태 파일이 없거나 깨졌거나, 스키마가 다르거나,
@@ -16,10 +16,12 @@ import subprocess
 import sys
 import time
 
-STATE = os.path.join(os.environ.get("POSTURE_STATE_DIR", "/run/posture"), "state.json")
+STATE_DIR = os.environ.get("POSTURE_STATE_DIR", "/run/posture")
+STATE = os.path.join(STATE_DIR, "state.json")
+TELE = os.path.join(STATE_DIR, "telemetry.json")
 SCHEMA = 1
 SAFE = {"schema": SCHEMA, "ts": 0, "mode": "laptop", "hinge": {"angle": None, "screen": None, "keyboard": None},
-        "orientation": {"rotation": 0, "flat": False}, "sensors": {"hinge": "unavailable"}, "source": "default"}
+        "orientation": {"rotation": 0, "flat": False}, "lid": "open", "sensors": {"hinge": "unavailable"}, "source": "default"}
 
 
 def active() -> bool:
@@ -36,6 +38,12 @@ def load() -> dict:
         if d.get("schema") != SCHEMA or d.get("mode") not in ("laptop", "tent", "tablet"):
             return dict(SAFE)
         d["source"] = "daemon"
+        if d.get("lid") not in ("open", "closed"):
+            d["lid"] = "open"                 # 알 수 없으면 열림(화면을 끄지 않는 쪽이 안전)
+        try:                                  # 각도는 따로 발행되는 파일에서 합쳐 보여 줌(소비자는 파일 구성을 몰라도 됨)
+            d["hinge"] = json.load(open(TELE)).get("hinge") or {"angle": None, "screen": None, "keyboard": None}
+        except (OSError, ValueError):
+            d["hinge"] = {"angle": None, "screen": None, "keyboard": None}
         return d
     except (OSError, ValueError):
         return dict(SAFE)
@@ -43,7 +51,7 @@ def load() -> dict:
 
 def field(d: dict, key: str):
     if key in ("angle", "screen", "keyboard"):
-        return d["hinge"].get(key)
+        return (d.get("hinge") or {}).get(key)
     if key in ("rotation", "flat"):
         o = d.get("orientation")
         o = o if isinstance(o, dict) else {}
@@ -57,7 +65,7 @@ def main(argv: list[str]) -> int:
         print(json.dumps(load(), ensure_ascii=False))
     elif cmd == "get":
         if len(argv) < 2:
-            print("사용: posture get <mode|angle|screen|keyboard|orientation|rotation|flat>", file=sys.stderr)
+            print("사용: posture get <mode|lid|angle|screen|keyboard|orientation|rotation|flat>", file=sys.stderr)
             return 2
         v = field(load(), argv[1])
         print("" if v is None else v)
@@ -65,7 +73,7 @@ def main(argv: list[str]) -> int:
         last = None
         while True:
             d = load()
-            line = f"mode={d['mode']} angle={d['hinge'].get('angle')} orientation={d.get('orientation')}"
+            line = f"mode={d['mode']} lid={d['lid']} angle={d['hinge'].get('angle')} orientation={d.get('orientation')}"
             if line != last:
                 print(line, flush=True)
                 last = line
@@ -73,7 +81,7 @@ def main(argv: list[str]) -> int:
     elif cmd == "summary":
         d = load()
         h = d["hinge"]
-        print(f"모드: {d['mode']}   힌지 {h.get('angle')}° (화면 {h.get('screen')}° / 키보드 {h.get('keyboard')}°)   방향: {d.get('orientation')}   출처: {d['source']}")
+        print(f"모드: {d['mode']}   힌지 {h.get('angle')}° (화면 {h.get('screen')}° / 키보드 {h.get('keyboard')}°)   방향: {d.get('orientation')}   덮개: {d['lid']}   출처: {d['source']}")
     else:
         print(__doc__, file=sys.stderr)
         return 2
