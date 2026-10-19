@@ -5,7 +5,7 @@
 | 파일 | 내용 | 건드리는 곳 |
 |---|---|---|
 | `float-mode.patch` | 도킹/플로팅 모드(`--width`, `--float`, `--float-margin`, 시그널 `RTMIN+1/+2/+3`), 모드가 바뀐 뒤 훅(`--on-mode`), 새 키 종류 `Float` | `main.c`, `keyboard.c`, `keyboard.h` |
-| `pc-layout.patch` | 가로 배열을 PC 표준 5줄로 교체(`Sup`·`한/영`·`⧉` 포함), 세로 배열 아래줄에 `⧉`/`한/영` 추가 | `layout.mobintl.h` |
+| `pc-layout.patch` | 가로 배열을 PC 표준 5줄로 교체(`Sup`·`한/영`·`⧉`·`Prt`(화면 캡처, Print 키) 포함), 세로 배열 아래줄에 `⧉`/`한/영` 추가 | `layout.mobintl.h` |
 
 `pc-layout.patch` 는 `float-mode.patch` 가 만든 `Float` 키 종류를 쓰므로 **이 순서대로** 적용해야 한다.
 

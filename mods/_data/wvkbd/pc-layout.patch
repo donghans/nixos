@@ -93,7 +93,7 @@ diff -ru a/layout.mobintl.h b/layout.mobintl.h
    {"z", "Z", 1.0, Code, KEY_Z, &layouts[ComposeZ]},
    {"x", "X", 1.0, Code, KEY_X, &layouts[ComposeX]},
    {"c", "C", 1.0, Code, KEY_C, &layouts[ComposeC]},
-@@ -1144,18 +1161,24 @@
+@@ -1144,18 +1161,25 @@
    {"b", "B", 1.0, Code, KEY_B, &layouts[ComposeB]},
    {"n", "N", 1.0, Code, KEY_N, &layouts[ComposeN]},
    {"m", "M", 1.0, Code, KEY_M, &layouts[ComposeM]},
@@ -118,7 +118,8 @@ diff -ru a/layout.mobintl.h b/layout.mobintl.h
 -  {"Enter", "Enter", 2.0, Code, KEY_ENTER, .scheme = 1},
 +  {"한/영", "한/영", 1.25, Code, KEY_HANGEUL, .scheme = 1},
 +  {"Alt", "Alt", 1.25, Mod, Alt, .scheme = 1},
-+  {"", "Tab", 3.25, Code, KEY_SPACE},
++  {"", "Tab", 2.25, Code, KEY_SPACE},
++  {"Prt", "Prt", 1.0, Code, KEY_SYSRQ, .scheme = 1},
 +  {"Esc", "Esc", 1.0, Code, KEY_ESC, .scheme = 1},
 +  {"←", "←", 1.0, Code, KEY_LEFT, .scheme = 1},
 +  {"↓", "↓", 1.0, Code, KEY_DOWN, .scheme = 1},
