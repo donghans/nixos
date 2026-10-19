@@ -143,5 +143,6 @@ tent/tablet 에서 기기를 돌리면 내장 화면과 터치가 같이 돈다.
 | `mods/gui/base/display-manager.nix` + `mods/_data/display/` | 화면 구성/회전(`displayctl rotate auto`), 터치 좌표 동기화 | `displayctl rotate auto` |
 - 한 가지 일은 한 곳에서: 장치 켜기/끄기와 수동 상태 파일의 기본값은 `hypr-input-policy` 에만 있고, 터치패드/터치스크린 토글은 상태 파일만 뒤집고 정책을 부른다(예전에는 토글 두 개와 정책이 각자 같은 장치 선택/적용 코드를 가졌음). 메뉴 라벨도 정책의 `--print` 값을 쓴다.
 - 두 곳에 같은 숫자가 있으면 시험이 지키게 한다: 가로 배열의 줄 수/폭 단위(5줄, 15)는 `pc-layout.patch` 와 `vkb.py`(`LAND_ROWS`/`LAND_UNITS`) 에 따로 있어서, `test_vkb.py` 가 원본 wvkbd 에 두 패치를 실제로 적용해 읽고 비교한다(패치가 안 맞아도 여기서 실패).
-- 아직 남은 것(위험 낮음, 필요할 때): 호스트 전용 키보드 이름(`at-translated-set-2-keyboard`)이 공용 모듈 `core.bind.hwctl.nix` 에 박혀 있음(옵션으로 빼는 게 맞음); `posture` CLI 를 소비자가 값마다 한 번씩 부름(파이썬 시작 + systemctl 확인이 매번);
+- 내장 키보드 이름은 공용 모듈이 아니라 호스트가 `wayland.windowManager.hyprland.internalKeyboardName` 로 지정한다(비어 있으면 정책이 키보드를 건드리지 않음).
+- 아직 남은 것(위험 낮음, 필요할 때): `posture` CLI 를 소비자가 값마다 한 번씩 부름(파이썬 시작 + systemctl 확인이 매번);
   `_data/*/tests/` 마다 가짜 hyprctl/systemctl 을 따로 만들어 쓰는 중복; `displayctl.py` 가 1000줄이 넘는 단일 파일.

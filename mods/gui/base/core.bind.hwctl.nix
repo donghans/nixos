@@ -96,6 +96,9 @@
       lockedMsg = "텐트/태블릿 모드에서는 켜짐으로 고정돼 있습니다 (힌지를 열면 직접 조절 가능)";
     };
 
+    # 내장 키보드 이름(호스트가 지정). 비어 있으면 정책이 키보드를 건드리지 않는다(알려지지 않은 기기에서 키보드를 잘못 끄지 않도록).
+    kbName = config.wayland.windowManager.hyprland.internalKeyboardName;
+
     # 입력 장치(내장 키보드/터치패드/터치스크린)의 켜짐/꺼짐 정책. 자세(힌지 모드)는 `posture get mode`(core.posture.nix) 로 읽는다.
     #   laptop        : **마지막 수동 상태를 따름**(메뉴에서 정한 touchpad_enabled/touchscreen_enabled 파일, 없으면 터치패드 켬/터치스크린 끔), 키보드 켬
     #   tent, tablet  : **강제** 키보드 끔 / 터치패드 끔 / 터치스크린 켬 (접힌 채 등 쪽 키·패드가 눌리는 것 방지). 수동 상태 파일은 건드리지 않아서
@@ -125,7 +128,7 @@
           [ -n "$dev" ] && hyprctl eval "hl.device({ name = \"$dev\", enabled = $2 })" > /dev/null
         done
       }
-      set_enabled '.keyboards[] | select(.name == "at-translated-set-2-keyboard") | .name' "$kb"
+      ${lib.optionalString (kbName != null) ''set_enabled '.keyboards[] | select(.name == "${kbName}") | .name' "$kb"''}
       set_enabled '.mice[] | select(.name | contains("touchpad")) | .name' "$tp"
       set_enabled '.touch[]?.name' "$ts"
 
@@ -236,6 +239,12 @@ in {
 
   # (주의: options는 mkIf로 감쌀 수 없으므로 항상 선언)
   options.wayland.windowManager.hyprland = {
+    internalKeyboardName = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "at-translated-set-2-keyboard";
+      description = "내장 키보드의 Hyprland 장치 이름(`hyprctl devices` 의 keyboards). 텐트/태블릿 모드에서 정책이 이 키보드를 끈다. null 이면 키보드는 건드리지 않음.";
+    };
     touchpadToggleKey = lib.mkOption {
       type = lib.types.str;
       default = ", XF86TouchpadToggle";
