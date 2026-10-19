@@ -220,3 +220,15 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 - **`gesture`(손가락을 따라 화면이 연속으로 움직이는 방식)는 이 패널에서 안 되고 `bind`(스와이프가 끝나면 한 번 실행)는 된다**: 가장자리 스와이프를 `gesture`+`workspace` 로 했을 때는 10cm 넘게 해도 반응이 없었고(`edge_margin` 을 10→40→160px 로 넓혀도), 같은 동작을 `bind`+`hl.dsp.focus({workspace="r+1"})` 로 바꾸자 짧은 거리로 바로 됐다. 연속 추적형은 긴 이동과 안정적인 접촉 추적이 필요한 것으로 보인다(왜 실패했는지 로그가 없어 확정은 못 함).
 - 중첩 시험으로는 터치 시험이 불가능(aquamarine 의 Wayland 백엔드는 키보드/포인터만 구현). 터치가 꺼져 있으면(노트북 모드의 마지막 수동 상태) 제스처도 안 들어오므로 시험 때 `hypr-toggle-touchscreen` 으로 켰다 — 텐트/태블릿에서는 강제로 켜진다.
 - 설정을 다시 읽어도(`hyprctl reload`) `hl.plugin.load` 는 이미 로드된 플러그인에서 오류 없이 지나가고 등록도 유지됨을 확인.
+
+### 윈도우 시각 문제: 하드웨어 시계(RTC)를 UTC 로 통일하기 (할 일, 윈도우를 새로 설치할 때)
+- **증상**: 부팅 후 약 30초(NTP 가 처음 맞추기 전)와 네트워크 없이 부팅한 동안 시스템 시각이 **9시간 앞선다**(로그 시각이 뒤섞이고 `journalctl --since` 에 옛 기록이 "미래 시각"으로 섞임). `timedatectl` 은 시간대를 `Asia/Seoul (Asia, +0000)` 로 잘못 표시하고 `RTC in local TZ: yes`.
+- **원인**: 듀얼부팅 때문에 `hosts/msi-summit-me.nix` 에 `time.hardwareClockInLocalTime = true`(RTC 에 로컬 시각 기록)가 있는데, 커널이 부팅할 때 RTC 를 UTC 로 읽어 시스템 시각을 먼저 맞추므로(`rtc_cmos: setting system clock to 2026-10-19T10:34:04 UTC`) 9시간 앞서고, `timesyncd` 가 처음 동기화할 때 바로잡힌다. systemd 가 "RTC configured in localtime, applying delta of 540 minutes" 라고 로그를 남기는데도 실제로 보정되지 않는 이유는 모른다.
+- **해결(윈도우를 지우고 새로 설치할 때 같이)**: 외장 USB 로 부팅해도 같은 하드웨어 시계를 쓰므로 **새 윈도우에도 필요**하다. 순서가 중요하다:
+  1. 새 윈도우를 설치한 직후 관리자 명령 프롬프트에서  
+     `reg add "HKLM\SYSTEM\CurrentControlSet\Control\TimeZoneInformation" /v RealTimeIsUniversal /t REG_DWORD /d 1 /f`  
+     그리고 윈도우 시간 동기화(설정 → 시간 및 언어 → 지금 동기화).
+  2. NixOS: `hosts/msi-summit-me.nix` 에서 `time.hardwareClockInLocalTime = true;` 줄(과 그 주석)을 지우고 `nixup` 으로 적용(기본값 false = RTC 는 UTC).
+  3. 적용 직후 한 번: `sudo hwclock --systohc` (NTP 로 맞은 시스템 시각을 UTC 로 RTC 에 기록).
+  4. 확인: 재부팅 후 `journalctl -b -o short-iso | head -3` 의 시각이 실제 시각과 같고 `timedatectl` 에서 `RTC in local TZ: no`.
+- 윈도우를 먼저 바꾸지 않고 Linux 만 바꾸면 윈도우에서 시각이 9시간 어긋난다(윈도우가 NTP 로 다시 맞추면 Linux 쪽이 어긋난다). 윈도우를 지울 예정이 없어지면 현재 설정(로컬 RTC)을 유지해도 되고, 대가는 위의 "부팅 직후 30초".
