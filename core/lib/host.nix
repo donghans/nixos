@@ -99,6 +99,7 @@
     metaConfig = {
       inherit (workspaceMeta) gitName gitEmail nixosRepo;
       inherit hostname type;
+      convertible = hostInfo.convertible or false;
       username = homeUser;
       ramGb = hostInfo.ramGb       or null;
       swapGb = hostInfo.swapGb      or null;

@@ -1,4 +1,5 @@
 type       = "laptop"
+convertible = true   # 360도 힌지 2-in-1: 가상 키보드/화면 회전/터치 제스처 등을 켬
 preset     = "workstation"
 bootDevice = "/dev/disk/by-label/ESP"
 cpuCount   = 16

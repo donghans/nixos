@@ -134,6 +134,7 @@
       workspaceMeta
       // {
         inherit (resolved) hostname type username;
+        convertible = resolved.convertible or false;
         inherit (resolved) stateVersion pkgsVersion;
         ramGb = resolved.ramGb       or null;
         swapGb = resolved.swapGb      or null;

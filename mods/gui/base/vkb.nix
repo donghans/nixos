@@ -11,7 +11,7 @@ mkPartOf "mods.gui" ({
   config,
   ...
 }: let
-  isLaptop = config.workspace.type == "laptop";
+  convertible = config.workspace.convertible; # 2-in-1 호스트만(host.toml `convertible = true`)
   wvkbd = pkgs.wvkbd.overrideAttrs (old: {
     # 적용 순서 중요: pc-layout 은 float-mode 가 만든 Float 키 종류를 쓴다
     patches = (old.patches or []) ++ [../../_data/wvkbd/float-mode.patch ../../_data/wvkbd/pc-layout.patch];
@@ -26,7 +26,7 @@ mkPartOf "mods.gui" ({
     exec ${wvkbd}/bin/wvkbd-mobintl "''${args[@]}" --on-mode "${vkbCli}/bin/vkb mode-changed"
   '';
 in {
-  hm = lib.mkIf isLaptop {
+  hm = lib.mkIf convertible {
     home.packages = [vkbCli];
     posture.consumers = ["${vkbCli}/bin/vkb apply-posture"];
 

@@ -94,6 +94,7 @@ CLI Engine  →  Metadata  →  Logic Core  →  Mods
 | `diskDevice`, `bootDevice` | `<hostname>.toml` → `_base.toml` (레이블·UUID 모두 가능) |
 | `type`, `preset` | `<hostname>.toml` 필수 선언 |
 | `bootLoader` | `<hostname>.toml` 선언 (enum: `systemd-boot` · `grub-bios` · `grub-uefi`, 기본: `systemd-boot`) |
+| `convertible` | `type = "laptop"` 에서만 `true` 가능(그 외 type 에서 쓰면 오류). 360도 힌지 2-in-1 이면 가상 키보드·화면 자동 회전·터치 제스처 모듈이 켜짐. 기본 `false` |
 | `isRemote` | `[deploy]` 섹션이 있거나 `type = "server"`이면 자동으로 true — 직접 선언 불필요 (`[deploy]` 유무는 `hasDeployRs`로 구분: 없으면 standalone 서버) |
 | `ramGb` | 자동 감지 (`/proc/meminfo`), `<hostname>.toml` 입력 무시 |
 | `swapGb`, `tmpfsSize`, `zramPercent` | 선택적 오버라이드 (기본값: 자동 계산) |

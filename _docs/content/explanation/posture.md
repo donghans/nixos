@@ -12,15 +12,21 @@ MSI Summit E16 Flip(360도 힌지)에서 **힌지 각도 → 사용 모드(lapto
 
 ## 구조
 ```
-[IIO 센서] → posture-daemon (root, system 서비스) → /run/posture/state.json → 경로 유닛 → posture-apply → 소비자들
-                                                         ↑ `posture get mode` / `posture json` (가져가기)
+[IIO 힌지/가속도 센서] ┐
+[덮개 스위치(evdev)]   ┴→ posture-daemon (root, system 서비스) → /run/posture/state.json     → 경로 유닛 → posture-apply → 소비자들
+                                                           └→ /run/posture/telemetry.json (힌지 각도; 감시 안 함)
+                          `posture get mode|lid|rotation|angle` / `posture json` (가져가기: 두 파일을 합쳐 보여 줌)
 ```
-- `mods/_data/posture/posture_daemon.py`: 센서를 한 프로세스만 읽고 값을 한 번만 해석(경계값/디바운스). 발행만 하고 소비자를 모름.
-- `mods/_data/posture/posture`: 조회 CLI. **안전한 기본값 처리가 여기 한 곳**: 서비스 정지, 파일 없음/깨짐, 스키마 불일치 → `mode=laptop`.
+- `mods/_data/posture/posture_daemon.py`: 센서와 덮개 스위치를 한 프로세스만 읽고 값을 한 번만 해석(경계값/디바운스). 발행만 하고 소비자를 모름. 힌지 센서가 없는 일반 노트북에서도 덮개 때문에 돈다(둘 다 없으면 종료).
+- `mods/_data/posture/posture`: 조회 CLI. **안전한 기본값 처리가 여기 한 곳**: 서비스 정지, 파일 없음/깨짐, 스키마 불일치 → `mode=laptop`, 덮개는 `open`(화면이 꺼진 채 남지 않는 쪽).
 - `mods/gui/base/core.posture.nix`: 서비스, 사용자 경로 유닛(`/run/posture/state.json` 변경 감시 → `posture-apply.service`), Nix 옵션 `posture.consumers`(소비자 명령 목록).
 - 소비자는 "수준 기반 + 멱등": 이벤트를 놓쳐도 아무 때나 실행하면 현재 상태에 맞춰짐. 로그인(`hyprland.start`)/reload(`config.reloaded`)에도 같은 소비자를 실행(Hyprland 가 시작/reload 때 장치 상태를 초기화하므로).
-- 현재 소비자: `hypr-input-policy`(입력 장치 정책, `mods/gui/base/core.bind.hwctl.nix`). 추가하려면 `posture.consumers` 에 명령 한 줄.
-- 상태 스키마(`schema: 1`): `{"mode", "hinge": {"angle","screen","keyboard"}, "orientation": null, "sensors": {...}, "ts"}`. 같은 모드에서는 각도가 **5° 이상** 달라질 때만 다시 발행(소비자를 깨우는 횟수를 줄임).
+- 현재 소비자(실행 순서): `lid-policy`(덮개 닫힘/열림 → 백라이트 끄기/켜기 + 호스트 추가 명령, `core.bind.hwctl.nix`), `vkb apply-posture`(`vkb.nix`), `displayctl rotate auto`(`display-manager.nix`), `hypr-input-policy`(입력 장치 정책, `core.bind.hwctl.nix`). 추가하려면 `posture.consumers` 에 명령 한 줄.
+- 적용 범위: 허브/덮개/입력 정책은 모든 노트북(`type = "laptop"`), 가상 키보드·화면 자동 회전·터치 제스처·waybar 키보드 버튼은 **2-in-1 호스트만**(`hosts/<호스트>.toml` 의 `convertible = true`).
+- `state.json`(`schema: 1`): `{"mode", "orientation": {"rotation","flat"}, "lid": "open|closed|null", "sensors": {...}, "ts"}` — **소비자가 알아야 하는 값이 변할 때만** 갱신하고 경로 유닛은 이 파일만 본다.
+  `telemetry.json`: `{"hinge": {"angle","screen","keyboard"}, "ts"}` — 각도는 **5° 이상** 달라질 때 갱신하지만 감시하지 않아 소비자를 깨우지 않는다. (분리 이유: 각도를 상태 파일에 두었을 때 덮개를 여는 몇 초 동안 5° 마다 모든 소비자가 5번 넘게 다시 실행됐다. 2026-10-17 저널로 확인)
+- **덮개**: 허브가 `Lid Switch`(evdev SW_LID)를 읽어 `lid` 를 발행하고(시작 값은 `/proc/acpi/button/lid/*/state`), `lid-policy` 가 바뀔 때만 백라이트와 추가 명령(이 기기는 `tlp bat`/`tlp start`)을 처리한다.
+  **잠금은 허브를 거치지 않고 Hyprland 덮개 바인딩(`loginctl lock-session`)에 둔다** — 허브 데몬이 죽어 있어도 덮개를 닫으면 잠겨야 하기 때문. 허브가 안 돌면 `lid` 는 open 이라 화면은 켜진 쪽으로 복구된다.
 
 ## 모드 경계 (히스테리시스 + 디바운스)
 `laptop → tent` 205° / `tent → laptop` 190° / `tent → tablet` 335° / `tablet → tent` 315°. 모드 변화는 1초 유지돼야 확정. 열린 채 시작해 이미 360도면 한 번에 tablet. 서비스가 멈추면(SIGTERM) 안전한 값 `laptop` 을 발행하고 켠 센서 설정을 모두 원복.
@@ -32,21 +38,21 @@ MSI Summit E16 Flip(360도 힌지)에서 **힌지 각도 → 사용 모드(lapto
 | tent / tablet | **끔(강제)** | **끔(강제)** | **켬(강제)** |
 - 수동 상태 파일(`~/.local/state/hypr/touchpad_enabled`, `touchscreen_enabled`)은 텐트/태블릿에서 **건드리지 않아서** 노트북 모드로 돌아오면 원래 상태로 복원됨.
 - 입력 장치 메뉴(wofi): 노트북 모드는 직접 토글, 텐트/태블릿은 "고정" 표시(선택해도 안내만). 토글 스크립트도 접힌 모드에서는 거부.
-- 대상 키보드는 `at-translated-set-2-keyboard` 만(핫키 `msi-wmi-hotkeys` 등은 그대로). 펜(stylus)은 항상 켜짐.
+- 대상 키보드는 호스트가 `wayland.windowManager.hyprland.internalKeyboardName` 로 지정한 것만(이 기기는 `at-translated-set-2-keyboard`; 핫키 `msi-wmi-hotkeys` 등은 그대로, 지정하지 않으면 키보드는 건드리지 않음). 펜(stylus)은 항상 켜짐.
 - **복구**: 키보드가 꺼진 상태에서는 힌지를 190° 미만으로 열면 복원됨. 서비스가 멈추거나 센서가 없으면 CLI 가 laptop 을 돌려줘서 자동 복원. 최후의 수단은 외부 키보드 또는 `sudo systemctl stop posture-daemon`.
 - 접힌 채 잠금 화면(hyprlock)이 뜨면 내장 키보드로 비밀번호를 칠 수 없음(얼굴 인식은 별개).
 
 ## 검증
-- 자동 시험 `mods/_data/posture/tests/test_posture.py`(40개): 판정 경계/히스테리시스, 레코드 해석, 가짜 sysfs + FIFO 로 **데몬 프로세스 전체**(디바운스, 튐 무시, 다중 레코드, 종료 시 원복), CLI 안전한 기본값(깨진 파일/스키마/파일 없음/서비스 정지).
+- 자동 시험 `mods/_data/posture/tests/test_posture.py`(71개): 판정 경계/히스테리시스, 방향 판정, 레코드 해석, 가짜 sysfs + FIFO 로 **데몬 프로세스 전체**(디바운스, 튐 무시, 다중 레코드, 각도/상태 파일 분리, 덮개 이벤트와 중복 무시, 종료 시 원복), 힌지 없는 노트북(덮개만)과 아무 센서도 없을 때 종료, CLI 안전한 기본값(깨진 파일/스키마/파일 없음/서비스 정지/덮개 모름).
   `python3 -I mods/_data/posture/tests/test_posture.py`
 - **실제 힌지로 종단 시험(사용자가 직접 접고 엶)**: 접는 도중 `laptop(190°) → tent(325°) → tablet(353°→358°)` 로 전환되며 `keyboard=false touchpad=false touchscreen=true` 가 적용됨(저널 `hypr-input-policy`).
   사용자가 키보드를 눌러 **입력이 실제로 막힌 것**과 **터치스크린이 켜진 것**을 확인. 열면(11:52:04) `mode=laptop keyboard=true touchpad=true touchscreen=false` 로 복원됨.
 - 부하: posture-daemon CPU 0.0%(30초 평균), 메모리 약 13 MiB. 사용 모드가 안 바뀌면 소비자는 깨어나지 않음.
 - 미확인: 터치패드가 접힌 모드에서 실제로 막힌 것(키보드/터치스크린만 사용자가 직접 확인), 배터리 사용 시간에 미치는 영향(상시 스트리밍의 전력은 측정하지 않음).
 
-## 다음 단계 (미구현)
-- 화면 자동 회전: 상태 스키마의 `orientation` 자리는 비워 둠. 가속도로 방향을 판정하려면 센서 부호 교정이 필요하고, `displayctl` 이 모니터 규칙에 `transform` 을 넣지 않아 회전 후 `displayctl restore` 가 회전을 풀어버리므로 `displayctl` 에 회전 상태를 먼저 추가해야 함.
-- 화면 자동 회전: 위 설명 참고(미구현).
+## 다음 단계
+- 화면 자동 회전은 구현됨(아래 "화면 자동 회전" 절).
+- lid-policy 의 실제 덮개 시험(닫아서 백라이트가 꺼지고 열어서 복구되는지, 오래 닫아 둔 뒤)은 사용자 확인 대기.
 
 ## 가상 키보드 조사 (2026-10-17)
 기준: 텐트/태블릿에서는 내장 키보드가 꺼지므로 화면에서 입력할 수단이 필요. **한글 입력(fcitx5-hangul)과 충돌하지 않아야** 함.

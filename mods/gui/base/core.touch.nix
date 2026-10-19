@@ -15,7 +15,7 @@ mkPartOf "mods.gui" ({
   config,
   ...
 }: let
-  isLaptop = config.workspace.type == "laptop";
+  convertible = config.workspace.convertible; # 2-in-1 호스트만(host.toml `convertible = true`)
   # 비활성: 켜기 전에 사용자가 열린 작업을 저장하고 실제 터치로 확인하기로 함(중첩 환경에서는 로드까지만 확인). 켜면 로그인/reload 때 플러그인이 로드된다.
   enableHyprgrass = false;
   wf-touch = pkgs.wf-touch.overrideAttrs (old: {
@@ -36,7 +36,7 @@ mkPartOf "mods.gui" ({
     old.buildInputs;
   });
 in {
-  hm = lib.mkIf (isLaptop && enableHyprgrass) {
+  hm = lib.mkIf (convertible && enableHyprgrass) {
     wayland.windowManager.hyprland.extraConfig = ''
       -- 터치 제스처(hyprgrass). 플러그인 로드가 실패해도 나머지 설정은 그대로 진행
       do

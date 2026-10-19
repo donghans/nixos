@@ -101,6 +101,11 @@ with lib; {
         default = false;
         description = "True if this host is managed remotely: it has a [deploy] section (deploy-rs target) or type = \"server\" (standalone, nixup runs on the host itself). Auto-injected from resolved.json.";
       };
+      convertible = mkOption {
+        type = types.bool;
+        default = false;
+        description = "True for a 2-in-1 laptop (hinge folds 360 degrees; host.toml `convertible = true`, type = laptop only). Enables the on-screen keyboard, screen auto-rotation and touch gestures.";
+      };
       hasDeployRs = mkOption {
         type = types.bool;
         default = false;

@@ -52,7 +52,7 @@ in {
 
     # 사용 모드 허브 소비자: 세워서 쓰는 중(tent/tablet)에 기기를 돌리면 내장 화면을 같이 돌림. laptop 으로 돌아오면 0. (멱등: 이미 그 방향이면 아무것도 안 함)
     # 회전은 상태 파일에 기록돼 restore/레이아웃 변경 때도 유지됨. 방향 판정은 posture-daemon(가속도 센서). 이 기기 외 노트북은 센서가 없으면 항상 0.
-    posture.consumers = lib.optionals (config.workspace.type == "laptop") ["${displayctl}/bin/displayctl rotate auto"];
+    posture.consumers = lib.optionals config.workspace.convertible ["${displayctl}/bin/displayctl rotate auto"];
 
     # 앱 런처(SUPER+Space)에서 "Display Settings" 로 검색됨. 주사율/해상도 설정에 포커스를 두고 열림
     xdg.desktopEntries.displayui = {

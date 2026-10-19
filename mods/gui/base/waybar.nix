@@ -30,9 +30,9 @@ mkPartOf "mods.gui" ({
       modules-right =
         ["tray"]
         ++ (
-          if config.workspace.type == "laptop"
-          then ["custom/vkbsize" "custom/vkbmode" "custom/vkb" "battery"]
-          else []
+          # 가상 키보드 버튼은 2-in-1 호스트만, 배터리는 모든 노트북
+          lib.optionals config.workspace.convertible ["custom/vkbsize" "custom/vkbmode" "custom/vkb"]
+          ++ lib.optionals (config.workspace.type == "laptop") ["battery"]
         )
         ++ ["clock"];
 

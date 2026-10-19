@@ -115,6 +115,9 @@ for entry in sorted(os.listdir(hosts_dir)):
         print(f"Error: '{host_toml_path}' 에 'preset' 필드가 없습니다.", file=sys.stderr)
         print(f"       사용 가능한 프리셋: {', '.join(sorted(all_presets.keys()))}", file=sys.stderr)
         sys.exit(1)
+    if host.get("convertible", False) and host["type"] != "laptop":
+        print(f"Error: '{host_toml_path}' 의 convertible=true 는 type = \"laptop\" 에서만 쓸 수 있습니다.", file=sys.stderr)
+        sys.exit(1)
     preset_name = host["preset"]
     if preset_name not in all_presets:
         print(f"Error: '{host_toml_path}' 의 preset='{preset_name}' 이 존재하지 않습니다.", file=sys.stderr)
@@ -162,6 +165,7 @@ for entry in sorted(os.listdir(hosts_dir)):
         "hostname": hostname,
         "system": host.get("system", base["system"]),
         "type": host["type"],
+        "convertible": bool(host.get("convertible", False)),   # 2-in-1(힌지가 360도 돌아가는 노트북): 가상 키보드/화면 회전/터치 제스처 등을 켬
         "ramGb": ram_gb,
         "swapGb": host.get("swapGb"),       # None → Nix 기본값 적용 (ceil(ramGb*0.75))
         "tmpfsSize": host.get("tmpfsSize"),  # None → Nix 기본값 적용 ("100%")
