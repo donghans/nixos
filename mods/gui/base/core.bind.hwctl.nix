@@ -58,6 +58,26 @@
       esac
     '';
 
+    # 덮개 정책(사용 모드 허브의 소비자): 허브가 발행한 `posture get lid` 가 바뀌면 화면(백라이트)을 끄고 켜고, 호스트의 추가 명령(전원 프로필 등)을 실행한다.
+    # 덮개 상태의 출처가 허브 한 곳이라 로그인/reload 후에도, 힌지 이벤트와 겹쳐도 같은 코드로 맞춰진다(마지막으로 적용한 값은 $XDG_RUNTIME_DIR/lid_applied 에 기록해 바뀔 때만 실행).
+    # **잠금은 여기가 아니라 Hyprland 의 덮개 바인딩(아래 bindl)에 남겨 둔다**: 허브 데몬이 죽어 있어도 덮개를 닫으면 잠겨야 하므로 센서 파이프라인에 의존시키지 않는다.
+    # 허브가 안 돌면 `posture get lid` 는 open 이라 화면은 켜진 쪽으로 복구된다.
+    lidPolicy = pkgs.writeShellScriptBin "lid-policy" ''
+      f="''${XDG_RUNTIME_DIR:-/tmp}/lid_applied"
+      lid=$(${config.posture.cli}/bin/posture get lid)
+      last=$(cat "$f" 2>/dev/null || echo open)
+      [ "$lid" = "$last" ] && exit 0
+      if [ "$lid" = closed ]; then
+        ${lidScreen}/bin/lid-screen off
+        ${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd != "") "${config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd} || ${pkgs.util-linux}/bin/logger -t lid-policy \"추가 명령 실패(닫힘)\""}
+      else
+        ${lidScreen}/bin/lid-screen on
+        ${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd != "") "${config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd} || ${pkgs.util-linux}/bin/logger -t lid-policy \"추가 명령 실패(열림)\""}
+      fi
+      echo "$lid" > "$f"
+      ${pkgs.util-linux}/bin/logger -t lid-policy "lid=$lid"
+    '';
+
     # 터치패드/터치스크린 토글 (Laptop 전용). 장치를 직접 만지지 않는다: **수동 상태 파일만 뒤집고** 적용은 정책(hypr-input-policy)에 맡긴다.
     # (장치 선택·적용·상태 파일 기본값이 정책 한 곳에만 있도록: 예전에는 토글 두 개와 정책이 각자 같은 일을 했음)
     # mkToggle 인자: bin=스크립트 이름, label=알림 제목, file=수동 상태 파일 이름, field=`hypr-input-policy --print` 출력에서 현재 값의 필드 번호(터치패드 4 / 터치스크린 5), lockedMsg=텐트/태블릿에서 눌렀을 때 안내
@@ -200,9 +220,14 @@
         volumeControl
         brightnessControl
         lidScreen
+        lidPolicy
       ];
 
-      posture.consumers = lib.optionals (config.workspace.type == "laptop") ["${inputPolicy}/bin/hypr-input-policy"];
+      # 덮개 정책을 가장 먼저(화면 끄기가 느린 소비자 뒤로 밀리지 않게), 그다음 입력 정책
+      posture.consumers = lib.mkIf (config.workspace.type == "laptop") (lib.mkMerge [
+        (lib.mkBefore ["${lidPolicy}/bin/lid-policy"])
+        ["${inputPolicy}/bin/hypr-input-policy"]
+      ]);
 
       # 입력 장치 정책을 사용 모드 허브의 소비자로 등록. 로그인(hyprland.start)/reload(config.reloaded) 때 실행하는 것도 허브가 함
       # (이유: Hyprland 는 시작/reload 때 장치를 모두 켠 상태로 되돌림)
@@ -228,8 +253,8 @@
           "${config.wayland.windowManager.hyprland.touchpadToggleKey}, exec, ${deviceMenu}/bin/hypr-device-menu"
 
           # 덮개 스위치 (로그인 잠금 및 전원 관리)
-          ", switch:on:Lid Switch, exec, loginctl lock-session; ${lidScreen}/bin/lid-screen off${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd != "") "; ${config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd}"}"
-          ", switch:off:Lid Switch, exec, ${lidScreen}/bin/lid-screen on${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd != "") "; ${config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd}"}"
+          # 덮개를 닫으면 바로 잠금(허브/센서에 의존하지 않음). 화면 끄기/켜기와 전원 프로필은 허브의 소비자 lid-policy 가 맡는다
+          ", switch:on:Lid Switch, exec, loginctl lock-session"
         ];
       };
     };
