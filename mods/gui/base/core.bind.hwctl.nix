@@ -118,6 +118,7 @@
 
     # 내장 키보드 이름(호스트가 지정). 비어 있으면 정책이 키보드를 건드리지 않는다(알려지지 않은 기기에서 키보드를 잘못 끄지 않도록).
     kbName = config.wayland.windowManager.hyprland.internalKeyboardName;
+    tsUsb = config.wayland.windowManager.hyprland.touchscreenUsbId;
 
     # 입력 장치(내장 키보드/터치패드/터치스크린)의 켜짐/꺼짐 정책. 사용 모드(힌지 각도)는 `posture get mode`(core.posture.nix) 로 읽는다.
     #   laptop        : **마지막 수동 상태를 따름**(메뉴에서 정한 touchpad_enabled/touchscreen_enabled 파일, 없으면 터치패드 켬/터치스크린 끔), 키보드 켬
@@ -129,7 +130,7 @@
     inputPolicy = pkgs.writeShellScriptBin "hypr-input-policy" ''
       STATE_DIR="$HOME/.local/state/hypr"
       mkdir -p "$STATE_DIR"
-      read -r mode angle < <(${config.posture.cli}/bin/posture get mode angle)   # (한 번에 읽음: 호출당 파이썬 시작 ~50ms)
+      read -r mode angle lid < <(${config.posture.cli}/bin/posture get mode angle lid)   # (한 번에 읽음: 호출당 파이썬 시작 ~50ms)
       [ -n "$angle" ] || angle=-1
       case "$mode" in
         tent|tablet) kb=false; tp=false; ts=true ;;
@@ -147,9 +148,24 @@
           [ -n "$dev" ] && hyprctl eval "hl.device({ name = \"$dev\", enabled = $2 })" > /dev/null
         done
       }
+      # 터치스크린 USB 런타임 절전: 켜기 전에 깨우고(on), 끈 뒤에 재운다(auto). 끈 동안에는 터치로 깨울 일이 없어서 안전하다
+      # (켜진 채 재우면 터치가 안 먹을 수 있어 그렇게는 하지 않음). **덮개를 닫았을 때도 재운다**: 닫으면 힌지가 359° 로 읽혀 tablet(터치 강제 켜짐)으로
+      # 분류되지만 화면이 꺼져 터치할 수 없다. 덮개 스위치는 360° 로 접어도 open 그대로라 닫힘(closed)이면 실제로 닫은 것이다(posture.md).
+      # 쓸 수 없으면(권한/장치 없음) 조용히 넘어간다.
+      usb_touch_power() {
+        ${lib.optionalString (tsUsb != null) ''
+        for d in /sys/bus/usb/devices/*; do
+          [ "$(cat "$d/idVendor" 2>/dev/null):$(cat "$d/idProduct" 2>/dev/null)" = "${tsUsb}" ] && echo "$1" > "$d/power/control" 2>/dev/null
+        done
+      ''}
+        return 0
+      }
       ${lib.optionalString (kbName != null) ''set_enabled '.keyboards[] | select(.name == "${kbName}") | .name' "$kb"''}
       set_enabled '.mice[] | select(.name | contains("touchpad")) | .name' "$tp"
+      touch_awake=false; { [ "$ts" = true ] && [ "$lid" != closed ]; } && touch_awake=true
+      [ "$touch_awake" = true ] && usb_touch_power on
       set_enabled '.touch[]?.name' "$ts"
+      [ "$touch_awake" = true ] || usb_touch_power auto
 
       # 모드가 바뀐 때만 알림(처음 실행은 조용히)
       last=$(cat "$STATE_DIR/hinge_last_mode" 2>/dev/null)
@@ -164,7 +180,7 @@
           ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:hinge -u low "사용 모드" "$msg"
         fi
       fi
-      ${pkgs.util-linux}/bin/logger -t hypr-input-policy "mode=$mode angle=$angle keyboard=$kb touchpad=$tp touchscreen=$ts"
+      ${pkgs.util-linux}/bin/logger -t hypr-input-policy "mode=$mode angle=$angle lid=$lid keyboard=$kb touchpad=$tp touchscreen=$ts"
     '';
 
     # 로그인과 설정 reload 뒤에도 같은 정책을 다시 적용
@@ -268,6 +284,12 @@ in {
       default = null;
       example = "at-translated-set-2-keyboard";
       description = "내장 키보드의 Hyprland 장치 이름(`hyprctl devices` 의 keyboards). 텐트/태블릿 모드에서 정책이 이 키보드를 끈다. null 이면 키보드는 건드리지 않음.";
+    };
+    touchscreenUsbId = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "04f3:2ffa";
+      description = "터치스크린의 USB 장치 ID(`lsusb`, 벤더:제품). 지정하면 정책이 **터치스크린을 끈 동안에만** 그 USB 장치의 런타임 절전을 켜고(`power/control=auto`: 장치와 xHCI 가 잠들어 전력을 아낌), 켤 때는 먼저 깨운다(`on`). 덮개를 닫은 쉬는 상태 실측에서 약 0.5 W 차이. power/control 파일을 이 사용자가 쓸 수 있어야 한다(호스트의 udev 규칙). null 이면 건드리지 않음.";
     };
     touchpadToggleKey = lib.mkOption {
       type = lib.types.str;

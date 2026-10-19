@@ -66,7 +66,11 @@ mkHostConfiguration ({
     #  IRQ 27 단독 소유 → 두 문제 동시 해결 기대.)
     services.udev.extraRules = ''
       ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x8086", ATTR{device}=="0x51e8", ATTR{power/control}="on"
-      ACTION=="bind", SUBSYSTEM=="platform", KERNEL=="idma64.0", RUN+="${pkgs.bash}/bin/sh -c 'echo idma64.0 > /sys/bus/platform/drivers/idma64/unbind'"
+      # (진단, 2026-10-19: 이 규칙이 시뮬레이션(udevadm test)에서는 매칭되는데 실제로는 idma64.0 이 부팅 내내 붙어 있음 → 규칙이 돌았는지/성공했는지 저널에 남긴다.
+      #  다음 부팅 뒤 `journalctl -b -t idma64-unbind` 로 확인: rule-ran 이 없으면 bind 이벤트가 안 걸린 것, unbind-failed 면 쓰기가 막힌 것)
+      ACTION=="bind", SUBSYSTEM=="platform", KERNEL=="idma64.0", RUN+="${pkgs.bash}/bin/sh -c '${pkgs.systemd}/bin/systemd-cat -t idma64-unbind echo rule-ran; if echo idma64.0 > /sys/bus/platform/drivers/idma64/unbind; then ${pkgs.systemd}/bin/systemd-cat -t idma64-unbind echo unbind-ok; else ${pkgs.systemd}/bin/systemd-cat -t idma64-unbind echo unbind-failed; fi'"
+      # 터치스크린 USB 절전(hypr-input-policy)이 root 없이 power/control 에 쓸 수 있게: users 그룹 쓰기 허용(해당 장치만)
+      ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="04f3", ATTR{idProduct}=="2ffa", RUN+="${pkgs.coreutils}/bin/chgrp users /sys%p/power/control", RUN+="${pkgs.coreutils}/bin/chmod g+w /sys%p/power/control"
     '';
 
     # == Services & Hardware ==
@@ -221,6 +225,7 @@ mkHostConfiguration ({
     wayland.windowManager.hyprland = {
       touchpadToggleKey = "SUPER + CTRL, F24";
       internalKeyboardName = "at-translated-set-2-keyboard"; # (텐트/태블릿에서 정책이 끄는 내장 키보드)
+      touchscreenUsbId = "04f3:2ffa"; # (ELAN 터치스크린: 터치를 꺼 둔 동안만 USB 절전 — 덮개 닫은 쉬는 상태 실측 약 −0.5 W)
 
       # 터치스크린/펜은 노트북 패널 전용 입력 장치. 지정하지 않으면 좌표가 모든 모니터를 합친 영역에 매핑돼
       # 외부 모니터와 확장하면 외부 모니터 기준으로 인식됨(터치가 엉뚱한 위치로 들어감).
