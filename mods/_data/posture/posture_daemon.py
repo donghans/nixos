@@ -137,8 +137,9 @@ def decode(buf: bytes, lay) -> dict:
     return vals
 
 
-def read_accel(dev: str, scale: float) -> tuple[float, float, float]:
-    return tuple(int(open(f"{dev}/in_accel_{a}_raw").read()) * scale for a in "xyz")
+def read_accel(dev: str, scale: float) -> tuple[float, float]:
+    """화면 평면의 중력 성분(x, y)만 읽는다. 방향 판정에 z 는 쓰지 않고, 센서 허브에 질의하는 읽기 하나가 ~10ms 걸려서(실측: 3개 30ms/CPU 1.4ms) 안 읽는 쪽이 싸다."""
+    return tuple(int(open(f"{dev}/in_accel_{a}_raw").read()) * scale for a in "xy")
 
 
 def write(path: str, text: str) -> None:
@@ -253,7 +254,7 @@ def main() -> int:
                 if accel and mode != "laptop" and time.monotonic() >= next_poll:
                     next_poll = time.monotonic() + ACCEL_PERIOD
                     try:
-                        x, y, _z = read_accel(accel, accel_scale)
+                        x, y = read_accel(accel, accel_scale)
                     except (OSError, ValueError):
                         sensors["accel"] = "error"
                         accel = None

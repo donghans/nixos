@@ -14,7 +14,7 @@
   vkb apply-posture                  자세 허브 소비자(멱등): auto 가 켜져 있으면 현재 자세에 맞춤
   vkb layers <full,special,...>      쓸 레이어(wvkbd -l). 비우면 기본값(full,...). 한 번에 하나만 쓰려면 예: full
 
-wvkbd 는 패치(mods/_data/wvkbd/float-hangul-numrow.patch)를 적용해 쓴다: 플로팅 모드(--float, 시그널 RTMIN+1 토글/+2 도킹/+3 플로팅), ⧉ 키, 한/영 키,
+wvkbd 는 패치(mods/_data/wvkbd/float-mode.patch, pc-layout.patch; README 참고)를 적용해 쓴다: 플로팅 모드(--float, 시그널 RTMIN+1 토글/+2 도킹/+3 플로팅), ⧉ 키, 한/영 키,
 가로 배열의 숫자 줄, 모드가 바뀐 뒤 호출하는 훅(--on-mode → `vkb mode-changed`). 높이는 여전히 시작할 때만 받으므로 크기는 재시작으로 처리하고,
 접고 펴기는 시그널(SIGUSR1 숨김 / SIGUSR2 표시 / SIGRTMIN 토글)로 한다.
 

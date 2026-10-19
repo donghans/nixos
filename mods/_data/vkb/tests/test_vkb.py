@@ -63,5 +63,39 @@ check("글자 크기 범위 12~32", vkb.compute_layout(4.0, 14.5, G)["font_pt"] 
 # 자세 연동
 check("laptop 이면 숨김", vkb.desired_visibility("laptop") is False)
 check("tent/tablet 이면 보임", vkb.desired_visibility("tent") and vkb.desired_visibility("tablet"))
+# ───── 배열 패치와 vkb.py 상수의 일치(두 곳에 따로 적힌 같은 지식이 어긋나면 키 폭/높이 계산이 틀어짐) ─────
+# 패치는 바뀐 곳만 담고 있어서 원본 wvkbd 소스에 두 패치를 실제로 적용한 결과를 읽는다(원본: 환경변수 WVKBD_SRC, 없으면 `nix build nixpkgs#wvkbd.src`).
+import re, shutil, subprocess, tempfile
+WV = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "wvkbd")
+src = os.environ.get("WVKBD_SRC")
+if not src:
+    r = subprocess.run(["nix", "build", "--no-link", "--print-out-paths", "nixpkgs#wvkbd.src"], capture_output=True, text=True)
+    src = r.stdout.strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else None
+if not src or not os.path.isdir(src):
+    print("  SKIP 배열 패치 검사: wvkbd 원본 소스를 구하지 못함(WVKBD_SRC 로 지정 가능)")
+else:
+    tmp = tempfile.mkdtemp()
+    shutil.copytree(src, tmp + "/b"); subprocess.run(["chmod", "-R", "u+w", tmp + "/b"])
+    for name in ("float-mode.patch", "pc-layout.patch"):
+        r = subprocess.run(["patch", "-p1", "-d", tmp + "/b", "-i", os.path.join(WV, name)], capture_output=True, text=True)
+        check(f"{name} 이 원본 wvkbd 에 깔끔히 적용됨", r.returncode == 0 and "FAILED" not in r.stdout, r.stdout[-200:])
+    text = open(tmp + "/b/layout.mobintl.h").read()
+    body = text[text.index("static struct key keys_landscape[] = {"):]
+    rows, cur = [], 0.0
+    for l in body.splitlines()[1:]:
+        m = re.match(r'\s*\{"(?:[^"\\]|\\.)*", "(?:[^"\\]|\\.)*", ([0-9.]+), (\w+)', l)
+        if not m:
+            continue
+        if m[2] == "Last":
+            break
+        if m[2] == "EndRow":
+            rows.append(cur); cur = 0.0
+        else:
+            cur += float(m[1])
+    rows.append(cur)                                # 마지막 줄(Last 앞에 EndRow 가 없음)
+    check("가로 배열 줄 수 == vkb.LAND_ROWS", len(rows) == vkb.LAND_ROWS, f"{len(rows)} != {vkb.LAND_ROWS}")
+    check("가로 배열의 모든 줄 폭 합 == vkb.LAND_UNITS (키보드 폭 = 단위 × 키 폭 계산의 전제)", all(abs(r - vkb.LAND_UNITS) < 1e-6 for r in rows), str(rows))
+    shutil.rmtree(tmp, ignore_errors=True)
+
 print(f"\nvkb {ok} 통과 / {bad} 실패")
 sys.exit(1 if bad else 0)

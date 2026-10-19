@@ -7,7 +7,8 @@
 #  - 상태는 하나의 스냅샷(JSON, 원자적 교체). 가져가기는 `posture get mode`, 알림은 이 파일 변경을 보는 경로 유닛.
 #  - 소비자는 "수준 기반 + 멱등" 조정기: 이벤트를 놓쳐도 아무 때나 실행하면 현재 상태에 맞춰짐(로그인/reload 때도 같은 코드).
 #  - 안전한 기본값(서비스 정지/파일 없음/낡음 → laptop)은 `posture` CLI 한 곳에서 처리 → 키보드가 꺼진 채 남지 않음.
-#  - 소비자는 `posture.consumers` 옵션에 명령을 한 줄 추가하면 연결된다(입력 정책: core.bind.hwctl.nix).
+#  - 소비자는 `posture.consumers` 옵션에 명령을 한 줄 추가하면 연결된다(입력 정책: core.bind.hwctl.nix, 가상 키보드: vkb.nix, 화면 회전: display-manager.nix).
+#    이 파일은 허브(센서 → 상태 → 소비자 호출)만 담당하고 소비자의 내용은 모른다.
 # 힌지 센서가 없는 기기에서는 posture-daemon 이 "센서 없음"으로 바로 종료하고 CLI 는 laptop 을 돌려준다.
 {
   mkPartOf,
@@ -24,20 +25,6 @@
     postureCli = pkgs.writeShellScriptBin "posture" ''
       exec ${pkgs.python3}/bin/python3 -I ${../../_data/posture/posture} "$@"
     '';
-    # 가상 키보드(wvkbd): 시작 인자(높이/폭/글자 크기/모드/레이어)는 `vkb args` 가 화면 물리 크기(mm→px)로 계산해 숨긴 채로 시작.
-    # 보이기/숨기기/크기/모드는 `vkb` 명령이 시그널·재시작으로 제어. (wvkbd 는 높이를 시작할 때만 받음 — mods/_data/vkb/vkb.py 머리말 참고)
-    # 패치(mods/_data/wvkbd/float-hangul-numrow.patch): 플로팅 모드와 ⧉ 키, 한/영 키(KEY_HANGEUL; fcitx5 전환키에 Hangul 등록됨), 가로 배열 숫자 줄, 모드 변경 훅
-    wvkbd = pkgs.wvkbd.overrideAttrs (old: {patches = (old.patches or []) ++ [../../_data/wvkbd/float-hangul-numrow.patch];});
-    vkbCli = pkgs.writeShellScriptBin "vkb" ''
-      export VKB_POSTURE=${postureCli}/bin/posture
-      exec ${pkgs.python3}/bin/python3 -I ${../../_data/vkb/vkb.py} "$@"
-    '';
-    wvkbdStart = pkgs.writeShellScript "wvkbd-start" ''
-      mapfile -t args < <(${vkbCli}/bin/vkb args) || true
-      [ "''${#args[@]}" -gt 0 ] || args=(-H 450 -L 380 --hidden)
-      exec ${wvkbd}/bin/wvkbd-mobintl "''${args[@]}" --on-mode "${vkbCli}/bin/vkb mode-changed"
-    '';
-
     # 소비자들을 차례로 실행. 하나가 실패해도 나머지는 실행하고 기록만 남김(소비자끼리 서로 영향 없음)
     cfg = config.posture;
     applyAll = pkgs.writeShellScriptBin "posture-apply" ''
@@ -68,23 +55,8 @@
     };
 
     hm = lib.mkIf isLaptop {
-      home.packages = [postureCli applyAll vkbCli];
+      home.packages = [postureCli applyAll];
       posture.cli = postureCli;
-      posture.consumers = ["${vkbCli}/bin/vkb apply-posture"];
-
-      # 가상 키보드 서비스(숨긴 채 상시 대기: 메모리만 차지, 시그널로 즉시 표시)
-      systemd.user.services.wvkbd = {
-        Unit = {
-          Description = "가상 키보드 wvkbd (숨김 상태로 대기, vkb 명령으로 제어)";
-          After = ["graphical-session.target"];
-          PartOf = ["graphical-session.target"];
-        };
-        Service = {
-          ExecStart = "${wvkbdStart}";
-          Restart = "on-failure";
-        };
-        Install.WantedBy = ["graphical-session.target"];
-      };
 
       # 상태 파일이 바뀌면 소비자를 한 번 실행. 서비스가 정지할 때도 안전한 값(laptop)이 발행되므로 같은 경로로 복원됨
       systemd.user.paths.posture-apply = {
