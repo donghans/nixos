@@ -16,7 +16,7 @@ mkPartOf "mods.gui" ({
   ...
 }: let
   convertible = config.workspace.convertible; # 2-in-1 호스트만(host.toml `convertible = true`)
-  # 켬(2026-10-19, 사용자 승인): 빌드/로드/Lua 설정 수락은 중첩 Hyprland 로 확인했지만 **실제 터치 이벤트 처리는 이 세션에서 처음 시험**한다
+  # 켬(2026-10-19, 사용자 승인, 실제 터치로 확인됨: 결과는 _docs/content/explanation/posture.md 의 "터치 제스처 실기 시험 결과")
   # (중첩 Hyprland 는 바깥 창의 터치를 받지 못해 터치 시험이 불가능: aquamarine 의 Wayland 백엔드는 키보드/포인터만 구현).
   # 터치스크린이 꺼져 있으면(노트북 모드의 마지막 수동 상태) 제스처도 안 들어온다 — 텐트/태블릿에서는 강제로 켜지고, 노트북 모드에서는 입력 장치 메뉴로 켠다.
   # **로그인 때마다 Hyprland 가 죽으면**(이 플러그인이 원인일 때) tty 에서 이 줄을 false 로 되돌리고 `nixup home`:
@@ -53,21 +53,27 @@ in {
                   sensitivity = 4.0,            -- 태블릿 화면에서는 기본값(1.0)이 둔함(권장값)
                   long_press_delay = 400,       -- ms
                   resize_on_border_long_press = true,   -- 창 테두리/틈새를 길게 누른 채 끌면 크기 조절
-                  edge_margin = 10,
+                  edge_margin = 160,            -- 가장자리로 치는 폭(px, 약 2cm). 실측: 이 패널은 맨 끝에서 시작한 접촉을 ~0.1초 뒤에 놓쳐서(최대 41px 이동) 끝에서 시작하는 스와이프가 안 됨 → 1~2cm 안쪽에서 시작해도 가장자리로 인식
                 },
               },
             })
-            -- 손가락 3개: 길게 누른 뒤 끌면 창 이동(Super+드래그의 터치 버전)
-            hl.plugin.hyprgrass.bind({
-              pattern = { kind = "longpress", fingers = 3 },
-              action = hl.dsp.window.drag(),
-              mouse = true,
-            })
-            -- 손가락 3개 좌우 스와이프: 워크스페이스 전환
-            hl.plugin.hyprgrass.gesture({
-              pattern = { kind = "swipe", fingers = 3, direction = "horizontal" },
-              action = "workspace",
-            })
+            -- 실측(2026-10-19, libinput debug-events): 이 패널은 손가락 3개를 대고 끌면 접촉이 자주 끊겼다 다시 잡힌다(3손가락 묶음 15개 중 14개에서, 간격 중앙값 0.04초).
+            -- 손가락 하나만 끊겨도 플러그인은 손가락 수가 바뀐 것으로 보고 제스처를 끝내서 끌다가 인식이 풀렸고, 3손가락 스와이프는 세 손가락이 함께 움직이지 않아 인식되지 않았다.
+            -- 그래서 손가락 수에 덜 민감한 제스처를 함께 둔다(3손가락 제스처는 그대로 둠: 되는 날은 됨).
+            -- 창 이동: 손가락 2개 또는 3개로 길게 누른 뒤 끌기(Super+드래그의 터치 버전). 길게 누르기 전에 움직이면 앱이 그대로 받으므로 2손가락 스크롤/핀치는 영향 없음
+            for _, n in ipairs({ 2, 3 }) do
+              hl.plugin.hyprgrass.bind({
+                pattern = { kind = "longpress", fingers = n },
+                action = hl.dsp.window.drag(),
+                mouse = true,
+              })
+            end
+            -- 워크스페이스 전환: 스와이프가 **끝나면 한 번 실행하는 bind** 방식(연속으로 따라가는 gesture 방식은 긴 이동과 안정적인 추적이 필요해서 이 패널에서 10cm 넘게 해도 안 됐다).
+            -- 가장자리(왼쪽/오른쪽 끝에서 약 2cm 안쪽까지)에서 시작해 안쪽으로 쓸기: 오른쪽 끝에서 왼쪽으로 = 다음, 왼쪽 끝에서 오른쪽으로 = 이전. 손가락 3개 좌우 스와이프도 같은 동작.
+            hl.plugin.hyprgrass.bind({ pattern = { kind = "edge", origin = "right", direction = "left" }, action = hl.dsp.focus({ workspace = "r+1" }) })
+            hl.plugin.hyprgrass.bind({ pattern = { kind = "edge", origin = "left", direction = "right" }, action = hl.dsp.focus({ workspace = "r-1" }) })
+            hl.plugin.hyprgrass.bind({ pattern = { kind = "swipe", fingers = 3, direction = "left" }, action = hl.dsp.focus({ workspace = "r+1" }) })
+            hl.plugin.hyprgrass.bind({ pattern = { kind = "swipe", fingers = 3, direction = "right" }, action = hl.dsp.focus({ workspace = "r-1" }) })
           end)
         else
           hl.exec_cmd("notify-send -u low 'hyprgrass' '터치 제스처 플러그인을 불러오지 못했습니다'")

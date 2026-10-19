@@ -201,3 +201,22 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
   나누면서 시험이 실제 버그를 잡았다: 되돌리기 타이머가 `__file__` 로 진입 스크립트를 찾는데 분리 후 `dispctl/transaction.py` 를 가리켜 `revert-pending` 이 아무 일도 안 했다 → `ENTRY`(패키지 한 단계 위의 `displayctl.py`)로 고침. Nix 자리표시자는 `dispctl/config.py` 한 곳.
 - **덮개 TLP 프로필**: `tlp bat`(배터리 프로필 + 수동 모드: 전원이 바뀌어도 다음 부팅/`tlp start` 까지 무시)/`tlp start`(실제 전원에 맞는 프로필 + 수동 모드 해제)는 root 가 필요해서 `hosts/msi-summit-me.nix` 에 root 유닛 `tlp-lid-closed`/`tlp-lid-open` + polkit 규칙(로컬 활성 사용자만, 해당 두 유닛만)을 두고 `lid-policy` 의 추가 명령이 `systemctl start --no-block` 으로 시작한다. 확인: 사용자 권한으로 시작해 `balanced/BAT (manual)` ↔ `performance/AC (auto)` 전환.
   **주의: 시험하다 `tlp ac`/`tlp bat` 를 직접 실행하면 수동 모드가 남아 전원이 바뀌어도 무시된다** — 2026-10-19 에 이 실수로 TLP 가 2시간 반 동안 `performance/AC (manual)` 에 머물렀다(`tlp start` 로 해제). 시험 뒤에는 `sudo tlp-stat -s` 로 `(manual)` 이 없는지 확인할 것.
+
+### 터치 제스처 실기 시험 결과 (2026-10-19, hyprgrass d094a3e6 + Hyprland 0.55.2)
+켜서 실제 터치로 시험했다(중첩 Hyprland 는 터치를 받지 못해 불가능). 최종 구성(`core.touch.nix`)과 결과:
+
+| 제스처 | 방식 | 결과 |
+|---|---|---|
+| 2손가락 길게 누르고 끌기 → 창 이동 | `bind` longpress 2, `mouse = true` | **됨** (3손가락과 비슷) |
+| 3손가락 길게 누르고 끌기 → 창 이동 | `bind` longpress 3 | 되지만 끌다가 인식이 풀림 |
+| 창 테두리/틈새 길게 눌러 끌기 → 크기 조절 | `resize_on_border_long_press` | **됨** |
+| 가장자리(끝에서 ~2cm 안쪽)에서 안쪽으로 쓸기 → 이전/다음 워크스페이스 | `bind` edge | **됨**(짧은 거리, 완료형) |
+| 3손가락 좌우 스와이프 → 이전/다음 워크스페이스 | `bind` swipe 3 | 손가락이 안정적으로 잡힐 때만 |
+
+원인을 원시 입력으로 찾았다(`mods/_data/touch-trace/touch_trace.py`, libinput debug-events 기록 분석; Hyprland 의 DEBUG 로그는 `debug:disable_logs=false` 로도 파일/저널에 안 남아 로그 진단은 불가):
+- **3손가락을 대고 끌면 접촉이 자주 끊겼다 다시 잡혔다**: 3손가락 묶음 15개 중 14개에서 재접촉, 간격 중앙값 0.04초(최대 0.39초). 손가락 하나만 끊겨도 플러그인은 손가락 수가 바뀐 것으로 보고 제스처를 끝낸다. 손의 습기/힘 때문인지 패널이 가까운 손가락(12~20mm)을 못 따라가는지는 데이터만으로 구분 못 함. 이 패널은 동시 10점까지 지원.
+- **3손가락 스와이프는 세 손가락이 함께 움직이지 않았다**: 크게 움직인 건 한 손가락이고 나머지는 이동 0이거나 아예 닿지 않은 경우가 많았다.
+- **맨 가장자리에서 시작한 접촉은 ~0.1초 뒤 끝났다**(최대 41px 이동): 패널은 끝(0~2.7%, 98.7~99.97%)까지 닿지만 안쪽으로 미는 손가락을 계속 따라가지 못한다.
+- **`gesture`(손가락을 따라 화면이 연속으로 움직이는 방식)는 이 패널에서 안 되고 `bind`(스와이프가 끝나면 한 번 실행)는 된다**: 가장자리 스와이프를 `gesture`+`workspace` 로 했을 때는 10cm 넘게 해도 반응이 없었고(`edge_margin` 을 10→40→160px 로 넓혀도), 같은 동작을 `bind`+`hl.dsp.focus({workspace="r+1"})` 로 바꾸자 짧은 거리로 바로 됐다. 연속 추적형은 긴 이동과 안정적인 접촉 추적이 필요한 것으로 보인다(왜 실패했는지 로그가 없어 확정은 못 함).
+- 중첩 시험으로는 터치 시험이 불가능(aquamarine 의 Wayland 백엔드는 키보드/포인터만 구현). 터치가 꺼져 있으면(노트북 모드의 마지막 수동 상태) 제스처도 안 들어오므로 시험 때 `hypr-toggle-touchscreen` 으로 켰다 — 텐트/태블릿에서는 강제로 켜진다.
+- 설정을 다시 읽어도(`hyprctl reload`) `hl.plugin.load` 는 이미 로드된 플러그인에서 오류 없이 지나가고 등록도 유지됨을 확인.
