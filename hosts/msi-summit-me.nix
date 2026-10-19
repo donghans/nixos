@@ -112,8 +112,34 @@ mkHostConfiguration ({
           return polkit.Result.YES;
         }
       });
+      // 덮개 닫힘/열림에 TLP 프로필을 바꾸는 root 유닛(아래)도 같은 방식으로 허용
+      polkit.addRule(function(action, subject) {
+        if (action.id == "org.freedesktop.systemd1.manage-units" &&
+            ["tlp-lid-closed.service", "tlp-lid-open.service"].indexOf(action.lookup("unit")) >= 0 &&
+            subject.local && subject.active) {
+          return polkit.Result.YES;
+        }
+      });
     '';
 
+    # == 덮개를 닫으면 TLP 배터리 프로필, 열면 자동 모드 ==
+    # `tlp bat` 은 전원과 무관하게 배터리 프로필을 적용하고 수동 모드로 들어가며(전원이 바뀌어도 무시), `tlp start` 는 실제 전원에 맞는 프로필을 적용하고 수동 모드에서 나온다(TLP 1.9.1 매뉴얼).
+    # tlp 는 root 가 필요해서 사용자 서비스(lid-policy)가 직접 부르면 "Error: missing root privilege." 로 실패했다(2026-10-19 로그). 위 touchpad-reset 과 같은 방식으로
+    # root 유닛을 두고 polkit 으로(위 touchpad-reset 규칙 옆에 추가) 로컬 활성 세션 사용자가 이 두 유닛만 시작하게 한다. lid-policy 가 아래 lidSwitch*ExtraCmd 로 시작한다.
+    systemd.services.tlp-lid-closed = {
+      description = "TLP battery profile while the lid is closed";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${pkgs.tlp}/bin/tlp bat";
+      };
+    };
+    systemd.services.tlp-lid-open = {
+      description = "Resume TLP automatic mode when the lid is opened";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${pkgs.tlp}/bin/tlp start";
+      };
+    };
     # (참고: TLP 기본 laptop 프로파일은 mods/sys/base/os/_power.nix에서 적용됨)
     # MSI 전용 TLP quirk 추가 설정
     services.tlp.settings = {
@@ -198,8 +224,8 @@ mkHostConfiguration ({
           command = "systemctl start touchpad-reset.service && mkdir -p ~/.local/state/hypr && echo true > ~/.local/state/hypr/touchpad_enabled";
         }
       ];
-      lidSwitchOnExtraCmd = "tlp bat";
-      lidSwitchOffExtraCmd = "tlp start";
+      lidSwitchOnExtraCmd = "systemctl start --no-block tlp-lid-closed.service"; # (root 필요: 위 유닛 + polkit)
+      lidSwitchOffExtraCmd = "systemctl start --no-block tlp-lid-open.service";
       settings = {
         monitor = lib.mkForce [
           "eDP-1,2560x1600@60,auto,1"
