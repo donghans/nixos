@@ -12,6 +12,7 @@
                (posture-daemon 재시작, tailscaled 재시작, 컨테이너 pause/unpause, Netdata 재시작, Wi-Fi 절전 켰다 끔, EDAC/proc_thermal/Thunderbolt 드라이버 재바인드, LPSS/ISH 런타임 PM auto→on).
   모드 morning : 어댑터(독)를 **뽑고 덮개를 닫을 때까지 기다렸다가**(최대 12시간) ① 장치 절전 상태 스냅샷(독 연결 전 저장본과 비교용) + Wi-Fi 절전 끈 채 구간 2개(독을 뺀 뒤 전력이 낮아지는지)
                ② Wi-Fi 절전 켬/끔 번갈아 4구간(ABAB)을 연달아 잰다. 끝나면 Wi-Fi 절전은 TLP 가 정한 값으로 둔다. 환경변수 PM_SNAPSHOT=<저장 경로>(pm_snapshot.py 가 있는 디렉터리는 PM_TOOL).
+  모드 vt      : **어느 VT 가 화면을 쓰는지**에 따른 차이. 지금 활성 VT(예: kmscon 의 tty2)와 다른 VT(Hyprland 의 tty1)로 `chvt` 해 가며 ABAB(RAPL, powertop). 끝나면 원래 VT 로 돌린다. AC 연결 상태에서도 가능(배터리 전력은 안 잼).
   모드 session : **tty2(kmscon)의 Claude 처럼 그래픽 세션에 안 묶인 세션에서만.** 그래픽 세션 켜짐 2구간 → Hyprland 세션 종료(`wayland-wm@hyprland\\x2duwsm.desktop.service` 정지) → 꺼짐 2구간 → Netdata 정지 2구간.
                한 방향(그래픽 세션은 복구하지 않음: 사용자가 다시 로그인/재부팅). Netdata 는 끝에 다시 켠다
 
@@ -531,7 +532,34 @@ def run_morning():
         log("완료")
 
 
+def run_vt():
+    orig = rd("/sys/class/tty/tty0/active")                       # 예: tty2
+    orig_n = int(re.sub(r"\D", "", orig) or 2)
+    other_n = 1 if orig_n != 1 else 2
+    log(f"vt 모드 시작: 원래 활성 VT={orig} 비교 VT=tty{other_n} (덮개 {rd('/proc/acpi/button/lid/LID0/state')}, AC {rd('/sys/class/power_supply/ADP1/online')})")
+    results = []
+    try:
+        for i, n in enumerate((orig_n, other_n, orig_n, other_n)):
+            sh("chvt", str(n))
+            time.sleep(1)
+            label = f"v{i + 1}-tty{n}"
+            res = dict(window(label, seconds=45, settle=20), step=label, vt=n, active=rd("/sys/class/tty/tty0/active"))
+            results.append(res)
+            log(f"  {label}(활성 {res['active']}): psys={res.get('psys_w') and round(res['psys_w'], 2)} pkg={res.get('pkg_w') and round(res['pkg_w'], 2)} 깨어남={res.get('wakeups')} pc2={res.get('pc2')} pc8={res.get('pc8')} pc10={res.get('pc10')}")
+            json.dump(results, open(OUT, "w"), ensure_ascii=False, indent=1)
+    except Exception as e:
+        log(f"중단: {e}")
+    finally:
+        sh("chvt", str(orig_n))
+        log(f"원래 VT(tty{orig_n})로 복구")
+        if os.path.exists(OUT):
+            os.chmod(OUT, 0o644)
+        log("완료")
+
+
 def main():
+    if MODE == "vt":
+        return run_vt()
     if MODE == "morning":
         return run_morning()
     if MODE == "cycles":
