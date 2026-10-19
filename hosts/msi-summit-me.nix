@@ -88,7 +88,7 @@ mkHostConfiguration ({
       settings.video.device_path = "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:7:1.2-video-index0";
     };
     security.pam.howdy.enable = false; # (이유: 기본값은 모든 PAM 서비스에 적용되므로 끄고 아래 한 곳만 켬)
-    security.pam.services.hyprlock.howdy.enable = true; # (hyprlock 은 NixOS 모듈이 아니라 HM 이라 이 PAM 서비스를 여기서 정의)
+    security.pam.services.hyprlock.howdy.enable = false; # (2026-10-17 끔: 잠금 중 pam_howdy 가 ~37분 멈춰 비밀번호 입력창이 안 떴음. pam_howdy 는 비밀번호 프롬프트 전에 동기 실행돼 timeout=4 가 안 먹으면 잠금 해제 불가. 재현은 안 됨(pamtester 로 5초 만에 정상))
 
     # == 터치패드 재인식 (장치 메뉴의 "터치패드 재인식" 항목) ==
     # 터치패드(ELAN0305, I2C HID)가 먹통이 될 때 드라이버를 unbind/bind 해서 다시 인식시킴.
