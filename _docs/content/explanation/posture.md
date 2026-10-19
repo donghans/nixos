@@ -339,3 +339,12 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 - `/etc/udev/rules.d/99-local.rules` 에 규칙이 들어 있고 `udevadm test --action=bind /sys/bus/platform/devices/idma64.0` 시뮬레이션에서는 `RUN+=… echo idma64.0 > …/unbind` 가 실행되도록 **매칭된다**. 그런데 실제로는 `idma64.0` 의 드라이버 링크 시각이 부팅 시각과 같고(한 번도 unbind 되지 않음), `/proc/interrupts` 의 IRQ 27 은 `idma64.0, i2c_designware.0` 둘이 공유한다. 커널/저널에는 idma64 관련 기록이 없어서 **규칙이 안 돌았는지, 돌았는데 쓰기가 막혔는지 구분하지 못했다.**
 - 런타임에 직접 `udevadm trigger --action=bind` 로 실행해 보면 안 되는 이유: 이미 DMA 모드로 쓰고 있는 I2C 컨트롤러 밑의 DMA 컨트롤러를 떼면 터치패드가 죽을 수 있다(원래 설계는 `i2c_designware` 가 probe 되기 **전** 에 떼는 것).
 - 그래서 **진단 로그를 규칙에 추가**했다(`systemd-cat -t idma64-unbind`: `rule-ran` → `unbind-ok`/`unbind-failed`). **다음 부팅 뒤 `journalctl -b -t idma64-unbind`** 로 확인: `rule-ran` 이 없으면 bind 이벤트가 규칙에 안 걸린 것(이벤트가 안 오거나 다른 장치 이름), `unbind-failed` 면 쓰기가 막힌 것, `unbind-ok` 인데도 IRQ 27 이 공유 중이면 unbind 후 다시 붙은 것(예: `touchpad-reset`). 이 결과를 보기 전에는 `irqpoll` 제거 시험을 하지 말 것.
+
+#### idma64 규칙이 부팅 때만 안 도는 이유: 실험으로 확인 (2026-10-19 20:08, 덮개 닫힘/원격 중이라 터치패드가 죽어도 되는 상태)
+- 터치패드 폭주 감시 서비스(`touchpad-watchdog`)의 복구 절차와 같은 방식으로 **`intel-lpss` 드라이버를 내렸다 올려**(`echo 0000:00:15.0 > /sys/bus/pci/drivers/intel-lpss/{unbind,bind}`) `idma64.0`/`i2c_designware.0` 을 새로 만들어 보았다.
+- 결과: **규칙이 돈다** — 저널에 `idma64-unbind: rule-ran` → `unbind-ok`(20:08:56). 이후 `idma64` 바인딩 0개, **IRQ 27 은 `i2c_designware.0` 단독**(PIO 모드), 터치패드(`ELAN0305:00 04F3:31FD Touchpad`)는 정상으로 다시 잡혔고 커널 로그에 오류 없음. 즉 규칙의 방식(bind 이벤트 때 idma64.0 unbind) 자체는 동작한다.
+- **부팅 때만 안 되는 이유(추정)**: 호스트 설정이 `initrd.availableKernelModules` 에 `intel_lpss_pci` 를 넣어(부팅 초기에 LPSS 가 올라옴) `idma64.0` 이 **initrd 단계에서 이미 바인딩**된다. 그 단계의 udev 에는 `/etc/udev/rules.d/99-local.rules` 가 없고, 루트로 전환한 뒤의 udev coldplug 는 `add` 만 다시 보내고 `bind` 는 다시 보내지 않아서 규칙이 한 번도 걸리지 않는다. 런타임에 드라이버를 다시 올리는(= 감시 서비스가 복구할 때) 경우에만 규칙이 걸린다. 이 추정은 **다음 부팅 때 `journalctl -b -t idma64-unbind` 가 비어 있는지**로 확인할 수 있다(비어 있으면 맞음).
+- 따라서 부팅 직후 상태는 "IRQ 27 공유(DMA 모드)"이고, 폭주(`controller timed out`)가 나서 감시 서비스가 복구하면 그때 비로소 "단독(PIO 모드)"이 된다. **감시 서비스가 지금까지 복구한 6번(2026-07-01, 07-03, 07-08, 08-21, 09-10, 09-22; 약 2~3주에 한 번)은 모두 `irqpoll` 이 켜진 상태에서 일어났다** — `irqpoll` 이 있어도 폭주가 막히지는 않았다.
+- 해결 후보(아직 구현 안 함): (a) 부팅 후 한 번 `intel-lpss` 를 다시 올리는 oneshot 서비스(위에서 검증한 절차 그대로, 터치패드가 몇 초 안 잡힘), (b) `intel_lpss_pci` 를 initrd 에서 빼서 루트 udev 가 규칙을 가진 상태에서 올라오게 함(재부팅 시험 필요, 터치패드 초기화 순서가 바뀜). 그다음에야 `irqpoll` 제거 시험이 의미가 있고, 폭주가 2~3주에 한 번이라 효과 확인에는 몇 주가 걸린다.
+- 지금(2026-10-19 20:08 이후)의 실행 중 상태는 이미 "단독(PIO)"이다 — 앞으로 폭주가 생기는지는 `ls /var/log/touchpad-watchdog/` 와 `journalctl -k | grep "controller timed out"` 로 볼 수 있다.
+
