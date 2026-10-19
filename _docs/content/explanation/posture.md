@@ -350,7 +350,7 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 
 
 #### 재부팅 직후 확인 체크리스트와 tty2 시험 계획 (2026-10-19 작성, 다음 세션용)
-**상황**: `hosts/msi-summit-me.nix` 에 `boot.blacklistedKernelModules` 로 `idma64` 를 추가해 적용했다(`nixup os` 완료, 효과는 다음 부팅부터). 사용자는 재부팅 → Hyprland 로그인 → tty2 로 옮겨 Claude 를 새로 켠다(그래픽 세션에 안 묶인 세션; tty2 에는 fcitx5 가 없어 영어로 입력할 수 있음).
+**상황(수정됨)**: 처음에는 `boot.blacklistedKernelModules` 로 `idma64` 를 막았으나 **첫 재부팅에서 효과가 없었다**(아래 결과). 그래서 `boot.kernelParams` 의 `module_blacklist=idma64` 로 바꿨다(세대 449, `nixup os` 완료, 효과는 **다음** 재부팅부터). 사용자는 재부팅 → Hyprland 로그인 → tty2 로 옮겨 Claude 를 새로 켠다(그래픽 세션에 안 묶인 세션; tty2 에는 fcitx5 가 없어 영어로 입력할 수 있음).
 
 **1) 재부팅 직후 확인할 것(idma64 차단 성공 여부)**
 ```
@@ -369,3 +369,10 @@ lsmod | grep idma64                          # 비어 있어야 함
 - 순서 제안: (i) 그래픽 세션이 떠 있는 기준 구간(아직 Hyprland 가 살아 있는 tty1) (ii) Hyprland 세션 종료(`loginctl terminate-session`) 후 구간 (iii) 가능하면 Netdata 도 정지한 구간. 각 구간에서 pc2/pc3+/깨어남/GPE/배터리 W 를 비교.
 - **EC GPE 0x6E(`/sys/firmware/acpi/interrupts/gpe6E`)를 끄는 시험은 하지 않는다**(덮개/어댑터/배터리/단축키 이벤트의 통로; 하려면 자동 복구 타이머 필수). 폴러(waybar/logind/Netdata)를 멈춰 GPE 비율이 어떻게 바뀌는지만 본다.
 - 끝나면 반드시 원복: Netdata `systemctl start netdata`, 사용자가 다시 Hyprland 로그인. 터치스크린 USB `power/control` 은 정책(`hypr-input-policy`)이 관리한다.
+
+#### 첫 재부팅 결과: modprobe blacklist 는 효과가 없었다 (2026-10-19 20:27 부팅)
+- 재부팅 직후: `lsmod` 에 **`idma64` 가 로드됨**, `idma64.0` 이 드라이버에 바인딩, **IRQ 27 은 `idma64.0, i2c_designware.0` 공유**, `journalctl -b -t idma64-unbind` 는 비어 있음(= udev 규칙은 부팅 때 안 걸림, "initrd 에서 이미 바인딩" 추정과 일치). 터치패드는 정상, 오류 로그 없음.
+- 원인: 부팅 initrd(`/run/booted-system/initrd`)에 `idma64.ko.xz` 가 **들어 있고**(`intel_lpss` 의 `softdep pre: platform:idma64` 때문에 모듈 closure 에 포함), initrd 의 `etc/modprobe.d/nixos.conf` 에 `blacklist idma64` 가 **있는데도** 커널 로그상 부팅 2.0초(initrd 단계)에 `idma64 idma64.0: Found Intel integrated DMA 64-bit` 가 찍혔다. softdep 이 모듈 이름을 별칭(`platform:idma64`)으로 해석하는 경로라 modprobe 의 `blacklist` 가 걸러주지 못한 것으로 보인다(정확한 kmod 내부 동작은 확인하지 못함).
+- 대책: **`boot.kernelParams = ["module_blacklist=idma64"]`** — 커널이 직접 그 이름의 모듈 로드를 거부(누가 요청하든, initrd 의 modprobe 포함). 부팅 항목(세대 449)의 `options` 에 들어간 것을 확인했고, `modprobe blacklist` 항목은 효과가 없어 제거했다. **다음 재부팅에서** 위 체크리스트(`lsmod | grep idma64` 가 비어야 함, IRQ 27 이 `i2c_designware.0` 단독)로 확인한다. 이번에도 안 되면 후보 (a)(부팅 후 `intel-lpss` 재바인드 oneshot).
+- 부수 확인: 이 initrd 는 microcode cpio 뒤에 zstd 로 압축된 cpio 가 이어지는 구조(`zstd` 매직 오프셋부터 잘라 `zstd -dc | cpio -t` 로 목록을 볼 수 있다).
+

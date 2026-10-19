@@ -29,6 +29,13 @@ mkHostConfiguration ({
       kernelModules = ["ec_sys"];
       kernelParams = [
         "i915.enable_psr=1"
+        # (이유, 2026-10-19: idma64(DMA 컨트롤러)가 i2c_designware 와 IRQ 27 을 공유해 DMA 모드에서 spurious interrupt 가 생기면
+        #  irqpoll 이 필요하거나 "controller timed out" 폭주(2~3주에 한 번, 터치패드 먹통)가 났다. udev unbind 규칙은 부팅 때 안 걸리고
+        #  (initrd 에서 이미 바인딩), `boot.blacklistedKernelModules`(= modprobe blacklist)도 **효과가 없었다**: intel_lpss 가 `softdep pre: platform:idma64` 를 가져서
+        #  initrd 안에서(부팅 2초) 블랙리스트가 있는데도 로드됨(실제로 확인). 그래서 커널이 직접 로드를 거부하는 module_blacklist 를 쓴다(누가 요청하든, initrd 포함).
+        #  기대 상태(런타임 실험으로 확인): idma64.0 장치만 있고 드라이버 없음 → i2c_designware 가 IRQ 27 단독(PIO), 터치패드 정상.
+        #  재부팅 뒤 `lsmod | grep idma64` 가 비고 IRQ 27 이 i2c_designware.0 단독이면 성공 → 위 udev unbind 규칙은 지워도 됨. posture.md 참고.)
+        "module_blacklist=idma64"
         # pci=nocrs 제거 (2026-06-30): 의도였던 firmware-bug/리소스충돌 완화 효과가 전무했고
         #   (실재 firmware bug는 CPU토폴로지·WMI 뿐, PCI 충돌 0건), ACPI _CRS 무시 → E820 사용이
         #   오히려 LPSS I2C(00:15.0) 컨트롤러 hang(controller timed out)의 유력 원인으로 판단됨.
@@ -45,12 +52,6 @@ mkHostConfiguration ({
         "nvidia_drm"
         "nvidia_modeset"
         "psmouse" # (이유: 최신 I2C 터치패드와 충돌하는 구형 드라이버 차단)
-        # (이유, 2026-10-19: idma64(DMA 컨트롤러)가 i2c_designware 와 IRQ 27 을 공유해 DMA 모드에서 spurious interrupt 가 생기면
-        #  irqpoll 이 필요하거나 "controller timed out" 폭주(2~3주에 한 번, 터치패드 먹통)가 났다. 아래 udev unbind 규칙은 initrd 에서 이미 바인딩돼
-        #  부팅 때는 안 걸리므로(런타임 재바인드 때만 걸림, posture.md "idma64 규칙이 부팅 때만 안 도는 이유") 모듈 자체를 막는다.
-        #  실험으로 확인한 상태: idma64 드라이버 없음 → i2c_designware 가 IRQ 27 단독(PIO), 터치패드 정상. idma64 는 intel_lpss/i2c_designware 의 의존 모듈이 아님.
-        #  재부팅 뒤 `ls /sys/bus/platform/drivers/idma64/` 에 idma64.0 이 없고 IRQ 27 이 i2c_designware.0 단독이면 성공 → 그때 위 udev 규칙을 지워도 됨.)
-        "idma64"
       ];
       extraModprobeConfig = ''
         blacklist nouveau
