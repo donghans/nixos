@@ -37,6 +37,7 @@ bitwarden     = false
 speedcrunch   = true
 gimp          = false
 obs-studio    = false
+drawing       = false
 incus-vm      = false
 
 [mods.gui.utils]
