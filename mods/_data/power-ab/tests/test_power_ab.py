@@ -33,4 +33,8 @@ import io, contextlib
 err = io.StringIO()
 with contextlib.redirect_stderr(err): rc = p.main([])
 check("어댑터가 연결돼(방전이 아니면) 거부하고 안내", rc == 2 and "뽑" in err.getvalue(), err.getvalue())
+pts = [p.circle_point(100, 100, 50, 4.0, t) for t in (0, 1, 2, 3)]
+check("원 둘레 점: 한 바퀴 4초, 1초마다 90도(오른쪽→아래→왼쪽→위)", pts == [(150, 100), (100, 150), (50, 100), (100, 50)], str(pts))
+check("원 둘레 점: 한 바퀴 뒤에는 제자리", p.circle_point(100, 100, 50, 4.0, 4.0) == p.circle_point(100, 100, 50, 4.0, 0.0))
+check("Hyprland 커서 이동 명령 형식(Lua)", p.cursor_cmd(12, 34) == "dispatch hl.dsp.cursor.move({ x = 12, y = 34 })")
 finish("power-ab")
