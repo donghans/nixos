@@ -148,10 +148,10 @@ def stop_graphical():
 
 
 def run_session():
-    log("session 모드 시작: 방전 대기(덮개 상태는 기록만)")
+    log("session 모드 시작: 방전 대기(덮개 상태는 기록만; IDLE_AB_NO_WAIT=1 이면 AC 상태로 바로 시작, 배터리 W 는 null)")
     deadline = time.time() + 3600
     while time.time() < deadline:
-        if rd(f"{BAT}/status") == "Discharging":
+        if rd(f"{BAT}/status") == "Discharging" or os.environ.get("IDLE_AB_NO_WAIT"):
             break
         time.sleep(5)
     else:
@@ -163,7 +163,7 @@ def run_session():
     results = []
 
     def run_window(label, phase):
-        if rd(f"{BAT}/status") != "Discharging":
+        if rd(f"{BAT}/status") != "Discharging" and not os.environ.get("IDLE_AB_NO_WAIT"):
             raise RuntimeError("충전 상태가 됨")
         res = dict(window(label), phase=phase, hyprland=sh("pgrep", "-c", "Hyprland").stdout.strip() or "0")
         results.append(res)

@@ -454,3 +454,25 @@ lsmod | grep idma64                          # 비어 있어야 함
 - 한계: 덮개를 닫아 패널이 꺼진 상태(백라이트 0)라서 "패널을 실제로 켠 채 어느 쪽이 그리느냐"는 못 쟀다. 어제 낮은 상태가 패널이 켜진 상태였는지는 기록이 없다(당시도 덮개 닫힘 시험이었음).
 - 이 시험 후 활성 VT 는 tty2 로 복구됨.
 
+### 용어 정리와 이전 서술 정정 (2026-10-20, 프로세스 트리로 확인)
+이 문서와 대화에서 `tty2`, `kmscon`, `pts/N`, "콘솔", "Wayland 세션"을 섞어 썼다. 실제 구조:
+```
+tty1 (VT1) ── greetd ── 로그인 화면(greeter, logind 세션 6) / 로그인 뒤 Hyprland 세션(logind 세션 3→8, Type=wayland)
+tty2 (VT2) ── kmsconvt@tty2.service ── kmscon ── login ── zsh ── claude   (logind 세션 5, Type=tty)
+                 └ kmscon 이 만든 pty 의 slave = /dev/pts/N
+```
+| 이름 | 정체 | 비고 |
+|---|---|---|
+| `tty1`, `tty2` (VT) | 커널 가상 터미널 번호 = 화면 "채널". **한 번에 하나만 활성**이고 그 채널의 프로그램이 화면(DRM master)을 쓴다 | `cat /sys/class/tty/tty0/active` |
+| `kmscon` | VT2 위에서 도는 **사용자 공간 터미널 에뮬레이터**(DRM/KMS 로 직접 그림) | `kmsconvt@tty2.service` |
+| `pts/N` | kmscon 이 만든 **pty slave**(프로세스와 통신하는 통로, 화면 아님). 번호는 로그인마다 달라짐(예전 pts/0, 지금 pts/3) | |
+| "Wayland 세션" | tty1 의 greetd 가 띄운 Hyprland. VT1 이 비활성이어도 **백그라운드에서 계속 실행**됨 | 활성 VT 가 tty2 여도 떠 있음 |
+| greeter | 로그인 화면. **Hyprland 세션이 끝나면 greetd 가 tty1 에 띄우고 활성 VT 도 tty1 로 옮김** | 별도 Wayland 프로그램 |
+→ "tty2 = kmscon = pts/0"은 같은 것이 아니다. 화면에 보이는 것은 VT2 의 kmscon 이고 pts 는 그 안의 입출력 통로다.
+
+**정정 1 — 이 Claude 의 위치**: 명령을 실행하는 셸은 kmscon 의 `pts/N` 아래가 아니라 **백그라운드 데몬**(`claude bg-pty-host`, 자체 pts, `user@1000` 소속) 아래다. kmscon 쪽 `claude` 는 화면 클라이언트다. 그래서 "이 Claude 는 `login ← kmscon`(session-5.scope) 아래에서 돈다"는 서술(tty2 시험 절)은 틀렸다. 어느 쪽이든 Hyprland 세션을 종료해도 살아남는다는 결론은 같다.
+**정정 2 — "그래픽 끔" 시험들의 의미**: `idle_ab.py session` 의 "그래픽 세션 정지"는 Hyprland 를 끄지만, 그러면 **greeter(Wayland 프로그램)가 tty1 에서 시작되고 활성 VT 가 tty1 로 바뀐다**(시험 직후 `VT tty1`, logind 에 greeter 세션 6·7 확인). 즉 "그래픽 끔"은 "그래픽 없음"이 아니라 **"greeter 가 화면을 쥔 상태"**였다. 2026-10-20 08:14~08:26 의 결과(켬 3.76~3.94 W ↔ 끔 5.9~6.1 W, 끔+Netdata 끔 5.5 W)는 이렇게 다시 읽어야 한다:
+- "켬" 구간 = 활성 VT **tty2(kmscon)**, Hyprland 는 뒤에서 대기. "끔" 구간 = 활성 VT **tty1(greeter)**.
+- 따라서 3.8 W ↔ 6.0 W 의 차이는 "Wayland 켬/끔"이 아니라 **"kmscon 이 화면을 쥔 상태 ↔ greeter 가 화면을 쥔 상태"**일 가능성이 크다(**미증명**). 10-19 20:41 의 같은 시험(켬 6.79 ↔ 끔 6.77 W)과 07:55 의 VT 비교(tty2 ↔ tty1 이 psys 0.2 W 차)는 이 가설로도 모순이 남아, 낮은 상태가 **시간/상태에 따라 켜지고 꺼지는 별도 요인**과 얽혀 있다. 번갈아 재지 않은 순서(켬, 켬, 끔, 끔…)도 한계다.
+**앞으로의 시험 원칙**: (1) 시험마다 **활성 VT 와 화면을 쥔 프로세스**(`/sys/class/tty/tty0/active`, DRM master)를 같이 기록한다. (2) "Wayland 를 끈다" 대신 **VT 만 번갈아**(tty1 Hyprland ↔ tty2 kmscon) 바꾸고, 세션을 끄는 시험은 greeter 를 변수로 인정한다. (3) 번갈아(ABAB) 잰다. (4) 세션을 끄는 시험은 끝에서 반드시 복구(재로그인 필요 여부를 사용자에게 먼저 알림).
+
