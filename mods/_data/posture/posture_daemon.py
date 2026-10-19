@@ -45,7 +45,7 @@ TELE = os.path.join(STATE_DIR, "telemetry.json")        # 자주 바뀌는 값(�
 DEBOUNCE = float(os.environ.get("POSTURE_DEBOUNCE", "1.0"))
 ANGLE_STEP = 5   # 같은 모드에서 각도가 이만큼 이상 달라질 때만 다시 발행(소비자를 깨우는 횟수를 줄임. 소비자에게 의미 있는 건 모드 변화)
 SCHEMA = 1
-ACCEL_PERIOD = float(os.environ.get("POSTURE_ACCEL_PERIOD", "0.33"))   # 가속도 읽는 간격(초). tent/tablet 에서만
+ACCEL_PERIOD = float(os.environ.get("POSTURE_ACCEL_PERIOD", "0.33"))   # 가속도 읽는 간격(초). tent/tablet 에서만(덮개를 닫으면 읽지 않음: 닫으면 힌지가 359° 로 읽혀 tablet 이라 계속 읽던 것을 고침, 쉬는 상태에서 ISH 깨움 감소 목적)
 ORIENT_DEBOUNCE = float(os.environ.get("POSTURE_ORIENT_DEBOUNCE", "0.8"))  # 새 방향이 이만큼 유지돼야 확정(손으로 들고 움직이는 동안 깜빡임 방지)
 ORIENT_HYST = 15.0          # 현재 방향의 중심에서 45+15=60° 넘게 벗어나야 다른 방향으로 바뀜
 FLAT_ENTER, FLAT_EXIT = 2.5, 3.5   # 화면 평면 방향 중력 성분(m/s²)이 이보다 작으면 "눕혀 놓음"(약 15° 이내). 들어갈 땐 낮게, 나올 땐 높게
@@ -313,7 +313,7 @@ def main() -> int:
                 waits.append(since + DEBOUNCE - now)
             if o_pend is not None:
                 waits.append(o_since + ORIENT_DEBOUNCE - now)
-            if accel and mode != "laptop":
+            if accel and mode != "laptop" and lid != "closed":      # 덮개를 닫으면(화면 꺼짐) 방향이 필요 없어서 읽지 않는다
                 waits.append(next_poll - now)
             timeout = max(0.0, min(waits)) if waits else None
             r, _, _ = select.select(fds, [], [], timeout)
@@ -325,6 +325,8 @@ def main() -> int:
                         new_lid = None
                     if new_lid and new_lid != lid:
                         lid = new_lid
+                        if lid != "closed":
+                            next_poll = 0.0                  # 다시 열렸으니 현재 방향을 바로 읽음
                         pub()
                 if fd is not None and fd in r:
                     data = os.read(fd, size * 16)
@@ -354,7 +356,7 @@ def main() -> int:
                     pub()
                     tele()
                     last_angle = hinge["angle"]
-                if accel and mode != "laptop" and time.monotonic() >= next_poll:
+                if accel and mode != "laptop" and lid != "closed" and time.monotonic() >= next_poll:
                     next_poll = time.monotonic() + ACCEL_PERIOD
                     try:
                         x, y = read_accel(accel, accel_scale)

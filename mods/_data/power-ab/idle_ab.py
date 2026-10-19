@@ -4,12 +4,15 @@
   sudo systemd-run --unit=idle-ab-test --collect <python3> idle_ab.py <powertop 경로> <모드>
   모드 netdata : Netdata 를 켠/끈 구간 비교(끝나면 원래 상태로)
   모드 usb-ts  : ELAN 터치스크린 USB 절전을 on/auto 로 번갈아(끝나면 on). 덮개가 닫혀 터치가 필요 없을 때만 의미가 있음
+  모드 session : **tty2(kmscon)의 Claude 처럼 그래픽 세션에 안 묶인 세션에서만.** 그래픽 세션 켜짐 2구간 → Hyprland 세션 종료(`wayland-wm@hyprland\\x2duwsm.desktop.service` 정지) → 꺼짐 2구간 → Netdata 정지 2구간.
+               한 방향(그래픽 세션은 복구하지 않음: 사용자가 다시 로그인/재부팅). Netdata 는 끝에 다시 켠다
 
 덮개가 닫히고 방전 중일 때만 시작한다(최대 1시간 대기). 일회성 실험용 스크립트라 시험은 없다(결과는 posture.md).
 구간마다: 배터리 전력(전압×전류), RAPL(패키지/psys) 평균, powertop 의 패키지 C-state 비율과 초당 깨어남, EC GPE 비율을 기록한다.
 끝나거나 죽을 때 Netdata 는 반드시 다시 켠다."""
 import atexit, json, os, re, signal, statistics, subprocess, sys, time
 
+os.environ["PATH"] = "/run/current-system/sw/bin:/run/wrappers/bin:" + os.environ.get("PATH", "")   # systemd-run 서비스의 PATH 는 거의 비어 있음(pgrep/runuser 등이 필요)
 PT = sys.argv[1]
 MODE = sys.argv[2] if len(sys.argv) > 2 else "netdata"
 LOG, OUT = f"/tmp/idle-ab-{MODE}.log", f"/tmp/idle-ab-{MODE}.json"
@@ -121,7 +124,58 @@ def window(label):
     return res
 
 
+def stop_graphical():
+    """Hyprland(uwsm) 세션을 정상 종료한다. root 에서 사용자 systemd 를 호출."""
+    uid = sh("id", "-u", "donghans").stdout.strip() or "1000"
+    r = sh("runuser", "-u", "donghans", "--", "env", f"XDG_RUNTIME_DIR=/run/user/{uid}", f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
+           "systemctl", "--user", "stop", "wayland-wm@hyprland\\x2duwsm.desktop.service")
+    log(f"그래픽 세션 정지 rc={r.returncode} {r.stderr.strip()[:120]}")
+    for _ in range(30):
+        if sh("pgrep", "Hyprland").returncode != 0:         # (프로세스 이름이 .Hyprland-wrapped 라 -x 로는 안 잡힘)
+            break
+        time.sleep(1)
+    log(f"Hyprland 프로세스: {sh('pgrep', '-c', 'Hyprland').stdout.strip() or 0}")
+
+
+def run_session():
+    log("session 모드 시작: 방전 대기(덮개 상태는 기록만)")
+    deadline = time.time() + 3600
+    while time.time() < deadline:
+        if rd(f"{BAT}/status") == "Discharging":
+            break
+        time.sleep(5)
+    else:
+        log("1시간 안에 방전 상태가 안 돼 중단")
+        return
+    time.sleep(10)
+    state["netdata_was_active"] = sh("systemctl", "is-active", "netdata").stdout.strip() == "active"
+    log(f"측정 시작 덮개={rd('/proc/acpi/button/lid/LID0/state')} netdata={'실행' if state['netdata_was_active'] else '정지'}")
+    results = []
+
+    def run_window(label, phase):
+        if rd(f"{BAT}/status") != "Discharging":
+            raise RuntimeError("충전 상태가 됨")
+        res = dict(window(label), phase=phase, hyprland=sh("pgrep", "-c", "Hyprland").stdout.strip() or "0")
+        results.append(res)
+        json.dump(results, open(OUT, "w"), ensure_ascii=False, indent=1)
+
+    try:
+        run_window("gfx-on-1", "gfx-on"); run_window("gfx-on-2", "gfx-on")
+        stop_graphical()
+        run_window("gfx-off-1", "gfx-off"); run_window("gfx-off-2", "gfx-off")
+        sh("systemctl", "stop", "netdata"); log("netdata 정지")
+        run_window("gfx-off-nd-off-1", "gfx-off+netdata-off"); run_window("gfx-off-nd-off-2", "gfx-off+netdata-off")
+    except Exception as e:                      # 충전 상태 변화 등
+        log(f"중단: {e}")
+    finally:
+        restore()
+        os.chmod(OUT, 0o644) if os.path.exists(OUT) else None
+        log("완료")
+
+
 def main():
+    if MODE == "session":
+        return run_session()
     log("시작: 덮개 닫힘 + 방전 대기")
     deadline = time.time() + 3600
     while time.time() < deadline:

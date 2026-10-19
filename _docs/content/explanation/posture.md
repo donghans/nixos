@@ -329,7 +329,7 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 | 터치스크린 USB 절전 꺼짐(`on`) | 7.39 W | 7.71 W | 3.55 W | 685~716 | 40 | 58~61% |
 | 터치스크린 USB 절전 켬(`auto`; 터치스크린·xHCI `suspended`) | 6.86 W (**−0.53 W, −7%**) | 7.11 W | 3.17 W | 700~710 | 33~37 | 54~65% |
 - 터치스크린 USB 절전의 효과는 두 바퀴 모두 같은 방향이었지만(−0.35, −0.71 W) 바퀴 간 흔들림(최대 0.32 W)이 있어 정확한 값은 대략 −0.4~−0.7 W 로 본다. **패키지는 여전히 pc2 에만 머물렀다**(xHCI 를 재워도 C3 이상 진입 없음 → xHCI 가 유일한 방해자는 아님).
-- **터치스크린이 `auto` 에서 터치로 깨어나는지는 확인하지 못했다**(덮개가 닫혀 터치할 수 없었음). 그래서 **터치를 쓰지 않는 동안에만 재우도록 구현했다**(2026-10-19): `hypr-input-policy`(`core.bind.hwctl.nix`)가 호스트 옵션 `wayland.windowManager.hyprland.touchscreenUsbId`(msi-summit-me: `04f3:2ffa`)의 USB 장치에 대해 **터치스크린을 켜기 전에 `power/control=on`(깨움), 끈 뒤에 `auto`(절전)** 로 쓴다. **덮개를 닫았을 때도 `auto`**: 덮개를 닫으면 힌지가 359° 로 읽혀 `tablet`(터치 강제 켜짐)으로 분류되지만 화면이 꺼져 터치할 수 없다. 덮개 스위치는 360° 로 접어도 `open` 이라(위 첫 항목) 닫힘이면 실제로 닫은 것이다. 켜진 채로는 절대 재우지 않는다(`TLP USB_DENYLIST` 는 그대로).
+- **터치스크린이 `auto` 에서 터치로 깨어나는지는 확인하지 못했다**(덮개가 닫혀 터치할 수 없었음). 그래서 **터치를 쓰지 않는 동안에만 재우도록 구현했다**(2026-10-19): `hypr-input-policy`(`core.bind.hwctl.nix`)가 호스트 옵션 `wayland.windowManager.hyprland.touchscreenUsbId`(msi-summit-me: `04f3:2ffa`)의 USB 장치에 대해 **터치스크린을 켜기 전에 `power/control=on`(깨움), 끈 뒤에 `auto`(절전)** 로 쓴다. **덮개를 닫았을 때도 `auto`**: 덮개를 닫으면 힌지가 0°/360° 경계라 **359° 로 읽히면 `tablet`(터치 강제 켜짐), 3° 로 읽히면 `laptop`** 으로 분류된다(2026-10-19 에 두 값을 모두 관측; 어느 쪽이든 화면이 꺼져 터치할 수 없다). 덮개 스위치는 360° 로 접어도 `open` 이라(위 첫 항목) 닫힘이면 실제로 닫은 것이다. 켜진 채로는 절대 재우지 않는다(`TLP USB_DENYLIST` 는 그대로).
   - 권한: `power/control` 은 root 소유라 호스트의 udev 규칙이 해당 장치(04f3:2ffa)의 파일을 `users` 그룹이 쓸 수 있게 한다(`chgrp users` + `chmod g+w`, `udevadm test` 로 매칭 확인). 이번 부팅에서는 규칙이 아직 안 돌아서 같은 명령을 직접 한 번 실행했다(다음 부팅부터는 규칙이 처리).
   - 시험(자세 CLI 를 가짜로 바꾼 복사본으로 정책을 실행, 실제 sysfs 확인): 노트북+터치 꺼짐 → `auto`/`suspended`; 노트북+터치 켬 → `on`/`active`; 접은 태블릿(덮개 open) → `on`; **덮개 닫힘(힌지 359°) → `auto`/`suspended`**; 덮개 다시 열면 `on`. 실제 사용 모드로 복원한 뒤 `auto`/`suspended` 확인(지금 덮개가 닫혀 있음). **터치로 깨어나는지 자체는 여전히 시험하지 못했지만, 터치를 켜기 전에 먼저 깨우므로 이 설계에서는 필요 없다.**
 
@@ -375,4 +375,20 @@ lsmod | grep idma64                          # 비어 있어야 함
 - 원인: 부팅 initrd(`/run/booted-system/initrd`)에 `idma64.ko.xz` 가 **들어 있고**(`intel_lpss` 의 `softdep pre: platform:idma64` 때문에 모듈 closure 에 포함), initrd 의 `etc/modprobe.d/nixos.conf` 에 `blacklist idma64` 가 **있는데도** 커널 로그상 부팅 2.0초(initrd 단계)에 `idma64 idma64.0: Found Intel integrated DMA 64-bit` 가 찍혔다. softdep 이 모듈 이름을 별칭(`platform:idma64`)으로 해석하는 경로라 modprobe 의 `blacklist` 가 걸러주지 못한 것으로 보인다(정확한 kmod 내부 동작은 확인하지 못함).
 - 대책: **`boot.kernelParams = ["module_blacklist=idma64"]`** — 커널이 직접 그 이름의 모듈 로드를 거부(누가 요청하든, initrd 의 modprobe 포함). 부팅 항목(세대 449)의 `options` 에 들어간 것을 확인했고, `modprobe blacklist` 항목은 효과가 없어 제거했다. **다음 재부팅에서** 위 체크리스트(`lsmod | grep idma64` 가 비어야 함, IRQ 27 이 `i2c_designware.0` 단독)로 확인한다. 이번에도 안 되면 후보 (a)(부팅 후 `intel-lpss` 재바인드 oneshot).
 - 부수 확인: 이 initrd 는 microcode cpio 뒤에 zstd 로 압축된 cpio 가 이어지는 구조(`zstd` 매직 오프셋부터 잘라 `zstd -dc | cpio -t` 로 목록을 볼 수 있다).
+
+#### tty2(그래픽 세션에 안 묶인 Claude)에서 한 쉬는 전력 시험 결과 (2026-10-19 20:41~20:53)
+이 Claude 는 `login ← kmscon`(VT2, 자체 `session-5.scope`) 아래에서 돌아 Hyprland 세션(VT1)을 종료해도 살아남는다. 덮개를 닫은 채(화면 꺼짐) 방전 중, `idle_ab.py ... session` 모드(구간 90초 × 2, 그래픽 켜짐 → `wayland-wm@hyprland\x2duwsm.desktop.service` 정지 → 그래픽 꺼짐 → Netdata 정지). 첫 시도는 root 서비스의 PATH 에 `pgrep` 이 없어서 첫 구간 뒤에 중단됐고(PATH 와 프로세스 이름 검사 `.Hyprland-wrapped` 를 고쳐 다시 실행), 아래는 두 번째 실행.
+| 상태 | 배터리 소비 | psys | CPU 패키지 | GPE/s | pc2 | pc8 |
+|---|---|---|---|---|---|---|
+| 그래픽 세션 켜짐 | 6.79 W (6.93, 6.65) | 7.08 W | 3.21 W | 39.0 | 48.5% | 2.0% |
+| **그래픽 세션 꺼짐** | **6.77 W** (6.79, 6.76) | 6.98 W | 3.13 W | 38.6 | 57.2% | 2.1% |
+| 그래픽 꺼짐 + **Netdata 정지** | **6.44 W** (6.43, 6.45) | 6.64 W | 2.99 W | 22.8 | 61.9% | 4.7% |
+- **그래픽 세션(Hyprland, waybar, kitty 등)은 덮개를 닫은 쉬는 상태에서 거의 영향이 없다**: 6.79 → 6.77 W(−0.02 W, 켜짐 두 구간의 차이 0.28 W 안). 패키지 C-state 도 달라지지 않았다. → 패키지가 깊이 못 자는 원인은 그래픽이 아니다(앞의 "덮개 닫아도 동일" 관찰을 확정).
+- **Netdata 는 약 0.33 W(−4.9%)**: 배터리 −0.33 W, psys −0.34 W, 패키지 −0.14 W, GPE −16/s(−41%), pc8 2.1 → 4.7%. 앞선 A/B(−0.23 W)와 같은 방향.
+- 그래픽도 Netdata 도 없는 쉬는 바닥은 약 **6.4 W** 이고 깨어남은 여전히 초당 약 650 회: `tick_nohz_handler` 332/s, sched softirq 47/s, `tailscaled` 32/s, `hrtimer_wakeup` 17/s, **`intel_ish_ipc` 인터럽트 17/s(+`ishtp_bus_event_work` 10/s)**, `claude`(이 세션, 그래픽 안의 kitty 에서보다 훨씬 작음), `irq/9-acpi` 8/s, `containerd`, `irq/211-AudioDS`, `irq/178-iwlwifi`. 패키지 pc3 이상은 여전히 pc8 5% 정도뿐이라 **남은 방해자는 아직 못 찾았다**(타이머 틱 331/s 가 큼 — 코어가 쉬는데도 틱이 도는 이유는 확인 못함).
+- 한 구간의 `wakeups` 값이 6.0 으로 파싱된 것은 powertop 헤더 값이 이상하게 나온 것으로 보고 무시했다.
+
+**ISH 인터럽트 단서 → 수정**: 위 목록의 `intel_ish_ipc`(Intel Sensor Hub: 힌지/가속도 센서가 붙어 있음)가 쉬는 상태에서도 초당 약 17 회였다. 원인으로 **posture 데몬이 덮개를 닫아도 가속도 센서를 0.33 초마다 읽고 있었다**(`mode != "laptop"` 이면 읽는데, 덮개를 닫아 힌지가 359° 로 읽히면 `tablet` 이라 계속 읽음). 덮개를 닫으면 화면이 꺼져 방향이 필요 없으므로 **덮개가 닫혀 있는 동안은 읽지 않고, 다시 열면 즉시 한 번 읽도록** 고쳤다(`posture_daemon.py`; 시험 2개 추가: 고치기 전 코드에서는 두 시험이 실패하고 고친 뒤 79개 모두 통과). **전력 효과는 측정하지 못했다**(기대되는 변화는 ISH 깨움 약 17/s 로 0.1 W 미만일 가능성이 커서 측정 잡음 0.3 W 아래; 힌지가 3° 로 읽히는 지금은 어차피 `laptop` 이라 폴링을 안 해 현장에서 전/후 비교도 못 함).
+
+**잘못된 의심의 정정**: 재부팅 뒤 `always` 컨테이너 5개가 "Up Less than a second" 로 계속 보여 재시작 반복을 의심했으나 **재시작 횟수는 0** 이었다. 부팅 직후 약 30초 동안 시스템 시계가 9시간 앞서(RTC 문제) 컨테이너의 `StartedAt` 이 미래(20:26 UTC)로 기록돼 도커가 지금(약 12:12 UTC)과 비교해 "1초 미만" 으로 표시한 것이다. 부팅 때 `always` 컨테이너 5개(LibreChat, rag_api, vectordb, chat-mongodb, chat-meilisearch)만 되살아났고 CPU 는 각각 1% 미만이다(80% 를 쓰던 `genple` 은 `unless-stopped` 라 멈춘 채 유지됨). 따라서 오늘 밤 측정에는 그 큰 컨테이너 부하가 섞이지 않았다.
 

@@ -126,6 +126,13 @@ check("laptop 에서는 센서가 돌아가 있어도 방향을 읽지 않음(0 
 os.write(wfd, rec(268) + rec(110)); time.sleep(1.0)
 check("한 번에 여러 레코드가 와도 마지막 값으로 정리됨", state()["mode"] == "laptop" and state()["hinge"]["angle"] == 110, str(state()))
 os.write(wfd, rec(359)); wait(lambda s: s["mode"] == "tablet")
+# 덮개를 닫으면(닫으면 힌지가 359° 로 읽혀 tablet) 가속도를 읽지 않는다: 닫은 채 기기를 돌려도 방향은 그대로, 다시 열면 바로 반영
+s = wait(lambda s: s["orientation"]["rotation"] == 90)
+lid_event(True); wait(lambda s: s["lid"] == "closed")
+set_accel(-8.77, -0.24, -4.01); time.sleep(1.0)
+check("덮개를 닫은 동안에는 가속도를 읽지 않아 방향이 그대로(90)", state()["orientation"]["rotation"] == 90 and state()["lid"] == "closed", str(state()))
+lid_event(False); s = wait(lambda s: s["orientation"]["rotation"] == 270)
+check("덮개를 다시 열면 현재 방향을 바로 읽어 반영(270)", s["lid"] == "open" and s["orientation"]["rotation"] == 270, str(s))
 proc.send_signal(signal.SIGTERM); proc.wait(timeout=5)
 s = state()
 check("종료하면 안전한 값(laptop) 발행", s["mode"] == "laptop" and s["sensors"]["hinge"] == "stopped", str(s))
