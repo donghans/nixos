@@ -129,8 +129,7 @@
     inputPolicy = pkgs.writeShellScriptBin "hypr-input-policy" ''
       STATE_DIR="$HOME/.local/state/hypr"
       mkdir -p "$STATE_DIR"
-      mode=$(${config.posture.cli}/bin/posture get mode)
-      angle=$(${config.posture.cli}/bin/posture get angle)
+      read -r mode angle < <(${config.posture.cli}/bin/posture get mode angle)   # (한 번에 읽음: 호출당 파이썬 시작 ~50ms)
       [ -n "$angle" ] || angle=-1
       case "$mode" in
         tent|tablet) kb=false; tp=false; ts=true ;;

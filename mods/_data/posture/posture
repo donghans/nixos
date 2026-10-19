@@ -3,7 +3,8 @@
 
   posture                 사람이 읽는 요약
   posture json            원본 상태(JSON) — 안전한 기본값 처리가 된 것
-  posture get <키>        mode | lid | angle | screen | keyboard | orientation | rotation | flat   (값만 출력. rotation: 기기를 시계방향으로 돌린 각도 0/90/180/270)
+  posture get <키> [키…]  mode | lid | angle | screen | keyboard | orientation | rotation | flat   (값만 출력. 여러 키는 공백으로 이어서 한 줄 — 파이썬 시작이 호출당 ~50ms 라 한 번에 읽는 쪽이 싸다.
+                          값이 없으면 빈 칸. rotation: 기기를 시계방향으로 돌린 각도 0/90/180/270)
   posture sig             소비자가 반응해야 하는 값의 서명 한 줄(모드/덮개/회전/눕힘). 각도는 빠짐 — posture-apply 가 실행 도중 상태가 바뀌었는지 비교하는 데 씀
   posture watch           바뀔 때마다 한 줄씩 출력 (Ctrl+C 로 종료)
 
@@ -68,8 +69,8 @@ def main(argv: list[str]) -> int:
         if len(argv) < 2:
             print("사용: posture get <mode|lid|angle|screen|keyboard|orientation|rotation|flat>", file=sys.stderr)
             return 2
-        v = field(load(), argv[1])
-        print("" if v is None else v)
+        d = load()
+        print(" ".join("" if (v := field(d, k)) is None else str(v) for k in argv[1:]))
     elif cmd == "sig":
         d = load()
         o = d.get("orientation") if isinstance(d.get("orientation"), dict) else {}

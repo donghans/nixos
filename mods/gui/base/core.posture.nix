@@ -28,6 +28,11 @@
     postureCli = pkgs.writeShellScriptBin "posture" ''
       exec ${pkgs.python3}/bin/python3 -I ${../../_data/posture/posture} "$@"
     '';
+    # 허브와 소비자들이 제대로 이어져 있는지 점검(서비스 환경의 Hyprland 변수, 데몬/센서/덮개, 소비자 실패, 화면 상태): `posture-doctor`
+    doctorCli = pkgs.writeShellScriptBin "posture-doctor" ''
+      exec ${pkgs.python3}/bin/python3 -I ${../../_data/posture/doctor.py} "$@"
+    '';
+
     # 소비자들을 차례로 실행. 하나가 실패해도 나머지는 실행하고 기록만 남김(소비자끼리 서로 영향 없음)
     # **실행 도중 상태가 바뀌면 다시 돈다**: 경로 유닛은 이미 실행 중인 서비스를 다시 시작하지 못해서(start 요청이 무시됨) 그 변경을 놓친다.
     # (실측 2026-10-19: 덮개를 닫고 1초 안에 열면 닫힘 처리 중에 온 열림이 유실돼 백라이트가 0 인 채 남았다.) 시작 때와 끝날 때의 `posture sig`
@@ -44,7 +49,7 @@
         [ "$before" = "$after" ] && break
         ${pkgs.util-linux}/bin/logger -t posture-apply "실행 중 상태가 바뀜($before → $after): 다시 적용($pass)"
       done
-      ${pkgs.util-linux}/bin/logger -t posture-apply "applied: $(${postureCli}/bin/posture get mode) lid=$(${postureCli}/bin/posture get lid)"
+      ${pkgs.util-linux}/bin/logger -t posture-apply "applied: $(${postureCli}/bin/posture get mode lid)"
     '';
   in {
     os = lib.mkIf isLaptop {
@@ -67,7 +72,7 @@
     };
 
     hm = lib.mkIf isLaptop {
-      home.packages = [postureCli applyAll];
+      home.packages = [postureCli applyAll doctorCli];
       posture.cli = postureCli;
 
       # 상태 파일이 바뀌면 소비자를 한 번 실행. 서비스가 정지할 때도 안전한 값(laptop)이 발행되므로 같은 경로로 복원됨

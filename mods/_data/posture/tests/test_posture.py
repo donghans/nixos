@@ -6,11 +6,10 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 import posture_daemon as pd
 
-ok = bad = 0
-def check(name, cond, extra=""):
-    global ok, bad
-    if cond: ok += 1
-    else: bad += 1; print("  FAIL", name, extra)
+sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "_testkit"))
+from harness import checker
+from fakes import Sandbox
+check, finish = checker()
 
 # ───── 순수 로직 ─────
 for a, want in ((96, "laptop"), (121, "laptop"), (182, "laptop"), (204, "laptop"), (205, "tent"), (268, "tent"), (334, "tent"), (335, "tablet"), (359, "tablet")):
@@ -154,10 +153,10 @@ os.remove(f"{ST}/state.json")
 check("파일이 없으면 안전한 기본값(laptop, 회전 0, 덮개 열림)", cli("get", "mode") == "laptop" and cli("get", "rotation").strip() == "0" and cli("get", "flat").strip() == "False" and cli("get", "lid") == "open")
 json.dump({"schema": 1, "ts": 1, "mode": "tablet", "sensors": {}}, open(f"{ST}/state.json", "w"))
 # 서비스 상태 확인은 가짜 systemctl 로(실제 시스템의 서비스 상태에 시험이 영향을 받지 않게): 종료 코드 1 = 실행 중 아님, 0 = 실행 중
+fsb = Sandbox()
 for code, want in ((1, "laptop"), (0, "tablet")):
-    fake = f"{T}/fake-systemctl-{code}"
-    open(fake, "w").write(f"#!/bin/sh\nexit {code}\n"); os.chmod(fake, 0o755)
-    got = subprocess.run([sys.executable, "-I", f"{ROOT}/posture", "get", "mode"], capture_output=True, text=True, env=dict(os.environ, POSTURE_STATE_DIR=ST, POSTURE_SYSTEMCTL=fake)).stdout.strip()
+    fsb.write_json("rc.json", {"is-active": code})                      # 공용 가짜 systemctl 의 is-active 종료 코드
+    got = subprocess.run([sys.executable, "-I", f"{ROOT}/posture", "get", "mode"], capture_output=True, text=True, env=fsb.env(POSTURE_STATE_DIR=ST, POSTURE_SYSTEMCTL=fsb.path("systemctl"))).stdout.strip()
     check(f"서비스 {'실행 중 아님' if code else '실행 중'}이면 파일이 tablet 일 때 {want}", got == want, got)
 json.dump({"schema": 1, "ts": int(time.time()), "mode": "tablet", "hinge": {"angle": 359, "screen": 1, "keyboard": 2}, "orientation": {"rotation": 270, "flat": True}, "sensors": {}}, open(f"{ST}/state.json", "w"))
 check("CLI get rotation / flat", cli("get", "rotation").strip() == "270" and cli("get", "flat").strip() == "True", cli("get", "rotation"))
@@ -173,6 +172,13 @@ json.dump({"schema": 1, "ts": 2, "mode": "tent", "orientation": {"rotation": 90,
 check("sig: 덮개가 바뀌면 서명이 달라짐", cli("sig") != sig1 and cli("sig").split()[1] == "open")
 os.remove(f"{ST}/state.json")
 check("sig: 파일이 없으면 안전한 기본값", cli("sig") == "laptop open 0 False")
+
+json.dump({"schema": 1, "ts": 1, "mode": "tent", "orientation": {"rotation": 90, "flat": False}, "lid": "closed", "sensors": {}}, open(f"{ST}/state.json", "w"))
+json.dump({"ts": 1, "hinge": {"angle": 250, "screen": 0, "keyboard": 0}}, open(f"{ST}/telemetry.json", "w"))
+check("get 여러 키: 한 번에 공백으로 이어서", cli("get", "mode", "lid", "rotation", "angle") == "tent closed 90 250", cli("get", "mode", "lid", "rotation", "angle"))
+os.remove(f"{ST}/telemetry.json")
+check("get 여러 키: 값이 없으면 빈 칸(출력의 앞뒤 공백은 cli() 가 제거)", cli("get", "mode", "angle") == "tent" and cli("get", "angle", "mode") == "tent", repr(cli("get", "angle", "mode")))
+os.remove(f"{ST}/state.json")
 
 # ───── 힌지 센서가 없는 일반 노트북: 덮개만으로 동작 ─────
 T2 = tempfile.mkdtemp(); ST2 = f"{T2}/run"; os.makedirs(f"{T2}/iio"); os.makedirs(f"{T2}/dev")
@@ -195,5 +201,4 @@ proc2.send_signal(signal.SIGTERM); proc2.wait(timeout=5)
 p3 = subprocess.run([sys.executable, "-I", f"{ROOT}/posture_daemon.py"], env=dict(env2, POSTURE_LID_DEV="none"), capture_output=True, text=True, timeout=10)
 check("힌지도 덮개도 없으면 바로 종료(0)", p3.returncode == 0 and "종료" in p3.stderr, p3.stderr[-100:])
 
-print(f"\nposture {ok} 통과 / {bad} 실패")
-sys.exit(1 if bad else 0)
+finish("posture")
