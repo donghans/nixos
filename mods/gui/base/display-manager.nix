@@ -20,11 +20,15 @@ mkPartOf "mods.gui" ({
   py = pkgs.python3.withPackages (ps: [ps.textual]);
   src = name: builtins.readFile (../../_data/display + "/${name}");
 
-  # displayui.py 가 displayctl.py 를 import 하므로 같은 디렉터리에 둔다
+  # displayctl.py(얇은 진입점)와 displayui.py, 본체 패키지 dispctl/ 를 한 디렉터리에 둔다(displayui.py 가 `import displayctl` 하므로 같은 디렉터리여야 함).
+  # Nix 자리표시자(@hyprctl@, @notify_send@)는 dispctl/config.py 한 곳에만 있다.
+  dispctlModules = ["__init__" "hypr" "state" "layout" "apply" "transaction" "ops" "cli"];
   dir = pkgs.runCommand "display-py" {} ''
-    mkdir -p $out
-    cp ${pkgs.writeText "displayctl.py" (builtins.replaceStrings ["@hyprctl@" "@notify_send@"] [hyprctl "${pkgs.libnotify}/bin/notify-send"] (src "displayctl.py"))} $out/displayctl.py
+    mkdir -p $out/dispctl
+    cp ${pkgs.writeText "displayctl.py" (src "displayctl.py")} $out/displayctl.py
     cp ${pkgs.writeText "displayui.py" (src "displayui.py")} $out/displayui.py
+    cp ${pkgs.writeText "config.py" (builtins.replaceStrings ["@hyprctl@" "@notify_send@"] [hyprctl "${pkgs.libnotify}/bin/notify-send"] (src "dispctl/config.py"))} $out/dispctl/config.py
+    ${lib.concatMapStrings (n: "cp ${pkgs.writeText "${n}.py" (src "dispctl/${n}.py")} $out/dispctl/${n}.py\n") dispctlModules}
   '';
   displayctl = pkgs.writeShellScriptBin "displayctl" ''exec ${py}/bin/python3 ${dir}/displayctl.py "$@"'';
   displayui = pkgs.writeShellScriptBin "displayui" ''exec ${py}/bin/python3 ${dir}/displayui.py "$@"'';
