@@ -4,6 +4,10 @@
   sudo systemd-run --unit=idle-ab-test --collect <python3> idle_ab.py <powertop 경로> <모드>
   모드 netdata : Netdata 를 켠/끈 구간 비교(끝나면 원래 상태로)
   모드 usb-ts  : ELAN 터치스크린 USB 절전을 on/auto 로 번갈아(끝나면 on). 덮개가 닫혀 터치가 필요 없을 때만 의미가 있음
+  모드 bisect  : 덮개 닫힘+방전에서 **한 가지씩 누적해서 끄며**(EDAC → Thunderbolt → 프로세서 열관리 → Wi-Fi 절전 켬 → tailscaled → 컨테이너 pause → Netdata → LPSS/ISH 런타임 PM) 구간마다 패키지 C-state/깨어남/전력을 재서
+               패키지가 C2 에서 못 내려가는 원인을 찾는다. 끝에 모두 되돌리고 기준 구간을 한 번 더 재 흔들림을 본다. 터치패드/힌지가 잠깐 안 될 수 있음(LPSS/ISH 단계, 맨 마지막)
+  모드 ab2     : bisect 의 후속. 시간이 지나며 쉬는 전력이 저절로 줄어드는 영향(부팅 직후 백그라운드 작업이 잦아듦)을 빼려고 후보마다 **기준-변경-기준-변경(ABAB)** 으로 번갈아 잰다(Wi-Fi 절전, Netdata, LPSS/ISH).
+               덮개 닫힘+방전 조건이 되면 2분 더 기다린 뒤 시작. 끝에 모두 원래대로.
   모드 session : **tty2(kmscon)의 Claude 처럼 그래픽 세션에 안 묶인 세션에서만.** 그래픽 세션 켜짐 2구간 → Hyprland 세션 종료(`wayland-wm@hyprland\\x2duwsm.desktop.service` 정지) → 꺼짐 2구간 → Netdata 정지 2구간.
                한 방향(그래픽 세션은 복구하지 않음: 사용자가 다시 로그인/재부팅). Netdata 는 끝에 다시 켠다
 
@@ -12,7 +16,7 @@
 끝나거나 죽을 때 Netdata 는 반드시 다시 켠다."""
 import atexit, json, os, re, signal, statistics, subprocess, sys, time
 
-os.environ["PATH"] = "/run/current-system/sw/bin:/run/wrappers/bin:" + os.environ.get("PATH", "")   # systemd-run 서비스의 PATH 는 거의 비어 있음(pgrep/runuser 등이 필요)
+os.environ["PATH"] = (os.environ.get("IDLE_AB_EXTRA_PATH", "") + ":" if os.environ.get("IDLE_AB_EXTRA_PATH") else "") + "/run/current-system/sw/bin:/run/wrappers/bin:" + os.environ.get("PATH", "")   # systemd-run 서비스의 PATH 는 거의 비어 있음(pgrep/runuser 등이 필요)
 PT = sys.argv[1]
 MODE = sys.argv[2] if len(sys.argv) > 2 else "netdata"
 LOG, OUT = f"/tmp/idle-ab-{MODE}.log", f"/tmp/idle-ab-{MODE}.json"
@@ -104,13 +108,14 @@ def parse_powertop(path):
     return out
 
 
-def window(label):
+def window(label, seconds=None, settle=None):
     csv = f"/tmp/idle-ab-{MODE}-{label}.csv"
-    time.sleep(SETTLE)
-    p = subprocess.Popen([PT, f"--time={WINDOW}", f"--csv={csv}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    seconds = seconds or WINDOW
+    time.sleep(SETTLE if settle is None else settle)
+    p = subprocess.Popen([PT, f"--time={seconds}", f"--csv={csv}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     pk0, ps0, g0, t0 = rapl("intel-rapl:0"), rapl("intel-rapl:1"), gpe(), time.time()
     w = []
-    while p.poll() is None and time.time() - t0 < WINDOW + 25:
+    while p.poll() is None and time.time() - t0 < seconds + 25:
         time.sleep(2)
         x = watts()
         if x is not None and rd(f"{BAT}/status") == "Discharging":
@@ -173,7 +178,207 @@ def run_session():
         log("완료")
 
 
+# ───────── bisect 모드: 한 가지씩 누적해서 끄고(되돌릴 수 있게) 구간마다 재기 ─────────
+def pci_unbind(drv, addr):
+    try:
+        open(f"/sys/bus/pci/drivers/{drv}/unbind", "w").write(addr)
+        return True
+    except OSError as e:
+        log(f"  unbind {drv} {addr} 실패: {e}")
+        return False
+
+
+def pci_bind(drv, addr):
+    try:
+        open(f"/sys/bus/pci/drivers/{drv}/bind", "w").write(addr)
+    except OSError as e:
+        log(f"  bind {drv} {addr} 실패: {e}")
+
+
+def as_user(*cmd):
+    uid = sh("id", "-u", "donghans").stdout.strip() or "1000"
+    return sh("runuser", "-u", "donghans", "--", "env", f"XDG_RUNTIME_DIR=/run/user/{uid}", f"DOCKER_HOST=unix:///run/user/{uid}/docker.sock", *cmd)
+
+
+def wifi_iface():
+    out = sh("iw", "dev").stdout
+    m = re.search(r"Interface\s+(\S+)", out)
+    return m[1] if m else None
+
+
+def run_bisect():
+    log("bisect 모드 시작: 덮개 닫힘 + 방전 대기")
+    deadline = time.time() + 3600
+    while time.time() < deadline:
+        if "closed" in rd("/proc/acpi/button/lid/LID0/state") and rd(f"{BAT}/status") == "Discharging":
+            break
+        time.sleep(5)
+    else:
+        log("조건(덮개 닫힘+방전)이 1시간 안에 안 맞아 중단")
+        return
+    time.sleep(40)                                           # 덮개를 닫은 직후의 정리(화면 끄기, TLP 전환 등)가 끝나도록
+    iface = wifi_iface()
+    wifi_orig = (re.search(r"Power save:\s*(\w+)", sh("iw", "dev", iface, "get", "power_save").stdout or "") or [None, "off"])[1] if iface else None
+    containers = [c for c in as_user("docker", "ps", "-q").stdout.split() if c]
+    nd_active = sh("systemctl", "is-active", "netdata").stdout.strip() == "active"
+    ts_active = sh("systemctl", "is-active", "tailscaled").stdout.strip() == "active"
+    log(f"측정 시작 wifi={iface}({wifi_orig}) 컨테이너 {len(containers)}개 netdata={nd_active} tailscaled={ts_active}")
+    undo = []                                                # 되돌릴 일(역순 실행)
+    results = []
+
+    def step(label, desc, do):
+        if rd(f"{BAT}/status") != "Discharging" or "closed" not in rd("/proc/acpi/button/lid/LID0/state"):
+            raise RuntimeError("조건이 바뀜(충전/덮개 열림)")
+        log(f"단계 {label}: {desc}")
+        do()
+        res = dict(window(label, seconds=45, settle=12), step=label, desc=desc)
+        results.append(res)
+        json.dump(results, open(OUT, "w"), ensure_ascii=False, indent=1)
+
+    def revert_all():
+        for f in reversed(undo):
+            try:
+                f()
+            except Exception as e:
+                log(f"  되돌리기 오류: {e}")
+        undo.clear()
+
+    def edac():
+        if pci_unbind("igen6_edac", "0000:00:00.0"):
+            undo.append(lambda: pci_bind("igen6_edac", "0000:00:00.0"))
+
+    def tb():
+        if pci_unbind("thunderbolt", "0000:00:0d.2"):
+            undo.append(lambda: pci_bind("thunderbolt", "0000:00:0d.2"))
+
+    def thermal():
+        if pci_unbind("proc_thermal_pci", "0000:00:04.0"):
+            undo.append(lambda: pci_bind("proc_thermal_pci", "0000:00:04.0"))
+
+    def wifi():
+        if iface:
+            sh("iw", "dev", iface, "set", "power_save", "on")
+            undo.append(lambda: sh("iw", "dev", iface, "set", "power_save", wifi_orig or "off"))
+
+    def tailscale():
+        if ts_active:
+            sh("systemctl", "stop", "tailscaled")
+            undo.append(lambda: sh("systemctl", "start", "tailscaled"))
+
+    def docker_pause():
+        if containers:
+            as_user("docker", "pause", *containers)
+            undo.append(lambda: as_user("docker", "unpause", *containers))
+
+    def netdata():
+        if nd_active:
+            sh("systemctl", "stop", "netdata")
+            undo.append(lambda: sh("systemctl", "start", "netdata"))
+
+    def lpss_ish():
+        for dev in ("0000:00:15.0", "0000:00:12.0"):
+            path = f"/sys/bus/pci/devices/{dev}/power/control"
+            old = rd(path)
+            try:
+                open(path, "w").write("auto")
+                undo.append(lambda path=path, old=old: open(path, "w").write(old or "on"))
+            except OSError as e:
+                log(f"  {dev} control=auto 실패: {e}")
+
+    try:
+        step("s0-base", "기준(아무것도 안 끔)", lambda: None)
+        step("s1-edac", "+ igen6_edac(메모리 EDAC) 해제", edac)
+        step("s2-thunderbolt", "+ Thunderbolt NHI(00:0d.2) 해제", tb)
+        step("s3-thermal", "+ proc_thermal_pci(00:04.0) 해제", thermal)
+        step("s4-wifi", "+ Wi-Fi 절전 켬", wifi)
+        step("s5-tailscale", "+ tailscaled 정지", tailscale)
+        step("s6-docker", "+ 컨테이너 pause", docker_pause)
+        step("s7-netdata", "+ Netdata 정지", netdata)
+        step("s8-lpss-ish", "+ LPSS(00:15.0)/ISH(00:12.0) 런타임 PM auto(터치패드/힌지 영향 가능)", lpss_ish)
+        revert_all()
+        time.sleep(5)
+        res = dict(window("s9-reverted", seconds=45, settle=12), step="s9-reverted", desc="모두 되돌린 뒤 기준(흔들림 확인)")
+        results.append(res)
+        json.dump(results, open(OUT, "w"), ensure_ascii=False, indent=1)
+    except Exception as e:
+        log(f"중단: {e}")
+    finally:
+        revert_all()
+        sh("systemctl", "restart", "posture-daemon.service")   # ISH 를 건드렸다면 힌지 센서 설정을 다시 잡게
+        log("모두 되돌림, posture-daemon 재시작")
+        if os.path.exists(OUT):
+            os.chmod(OUT, 0o644)
+        log("완료")
+
+
+def run_ab2():
+    log("ab2 모드 시작: 덮개 닫힘 + 방전 대기")
+    deadline = time.time() + 3600
+    while time.time() < deadline:
+        if "closed" in rd("/proc/acpi/button/lid/LID0/state") and rd(f"{BAT}/status") == "Discharging":
+            break
+        time.sleep(5)
+    else:
+        log("조건이 1시간 안에 안 맞아 중단")
+        return
+    time.sleep(int(os.environ.get("IDLE_AB_SETTLE", "120")))
+    iface = wifi_iface()
+    wifi_orig = (re.search(r"Power save:\s*(\w+)", sh("iw", "dev", iface, "get", "power_save").stdout or "") or [None, "off"])[1] if iface else None
+    nd_active = sh("systemctl", "is-active", "netdata").stdout.strip() == "active"
+    log(f"측정 시작 wifi={iface}({wifi_orig}) netdata={nd_active}")
+    results = []
+    ctl = {d: f"/sys/bus/pci/devices/{d}/power/control" for d in ("0000:00:15.0", "0000:00:12.0")}
+    orig_ctl = {d: rd(p) or "on" for d, p in ctl.items()}
+
+    def wifi_set(on):
+        if iface:
+            sh("iw", "dev", iface, "set", "power_save", "on" if on else (wifi_orig or "off"))
+
+    def nd_set(on):
+        if nd_active:
+            sh("systemctl", "stop" if on else "start", "netdata")
+
+    def ish_set(on):
+        for d, p in ctl.items():
+            try:
+                open(p, "w").write("auto" if on else orig_ctl[d])
+            except OSError as e:
+                log(f"  {d} 실패: {e}")
+
+    def win(label, cand, state):
+        if rd(f"{BAT}/status") != "Discharging" or "closed" not in rd("/proc/acpi/button/lid/LID0/state"):
+            raise RuntimeError("조건이 바뀜(충전/덮개 열림)")
+        res = dict(window(label, seconds=45, settle=15), step=label, cand=cand, state=state, bl=rd("/sys/class/backlight/intel_backlight/brightness"))
+        results.append(res)
+        log(f"  {label}: batt={res.get('battery_w') and round(res['battery_w'], 2)} psys={res.get('psys_w') and round(res['psys_w'], 2)} pkg={res.get('pkg_w') and round(res['pkg_w'], 2)}")
+        json.dump(results, open(OUT, "w"), ensure_ascii=False, indent=1)
+
+    try:
+        only = [c for c in os.environ.get("IDLE_AB_CANDS", "").split(",") if c]   # 일부 후보만(예: netdata-off)
+        for cand, setter in (("wifi-ps", wifi_set), ("netdata-off", nd_set), ("lpss-ish-auto", ish_set)):
+            if only and cand not in only:
+                continue
+            log(f"후보 {cand}: A(기준) B(변경) A B")
+            for i, state in enumerate(("A", "B", "A", "B")):
+                setter(state == "B")
+                win(f"{cand}-{i + 1}{state}", cand, state)
+            setter(False)
+    except Exception as e:
+        log(f"중단: {e}")
+    finally:
+        wifi_set(False); nd_set(False); ish_set(False)
+        sh("systemctl", "restart", "posture-daemon.service")
+        log("모두 원래대로, posture-daemon 재시작")
+        if os.path.exists(OUT):
+            os.chmod(OUT, 0o644)
+        log("완료")
+
+
 def main():
+    if MODE == "ab2":
+        return run_ab2()
+    if MODE == "bisect":
+        return run_bisect()
     if MODE == "session":
         return run_session()
     log("시작: 덮개 닫힘 + 방전 대기")
