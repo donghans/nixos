@@ -43,7 +43,7 @@ MSI Summit E16 Flip(360도 힌지)에서 **힌지 각도 → 사용 모드(lapto
 - 접힌 채 잠금 화면(hyprlock)이 뜨면 내장 키보드로 비밀번호를 칠 수 없음(얼굴 인식은 별개).
 
 ## 검증
-- 자동 시험 `mods/_data/posture/tests/test_posture.py`(71개): 판정 경계/히스테리시스, 방향 판정, 레코드 해석, 가짜 sysfs + FIFO 로 **데몬 프로세스 전체**(디바운스, 튐 무시, 다중 레코드, 각도/상태 파일 분리, 덮개 이벤트와 중복 무시, 종료 시 원복), 힌지 없는 노트북(덮개만)과 아무 센서도 없을 때 종료, CLI 안전한 기본값(깨진 파일/스키마/파일 없음/서비스 정지/덮개 모름).
+- 자동 시험 `mods/_data/posture/tests/test_posture.py`(75개): 판정 경계/히스테리시스, 방향 판정, 레코드 해석, 가짜 sysfs + FIFO 로 **데몬 프로세스 전체**(디바운스, 튐 무시, 다중 레코드, 각도/상태 파일 분리, 덮개 이벤트와 중복 무시, 종료 시 원복), 힌지 없는 노트북(덮개만)과 아무 센서도 없을 때 종료, CLI 안전한 기본값(깨진 파일/스키마/파일 없음/서비스 정지/덮개 모름).
   `python3 -I mods/_data/posture/tests/test_posture.py`
 - **실제 힌지로 종단 시험(사용자가 직접 접고 엶)**: 접는 도중 `laptop(190°) → tent(325°) → tablet(353°→358°)` 로 전환되며 `keyboard=false touchpad=false touchscreen=true` 가 적용됨(저널 `hypr-input-policy`).
   사용자가 키보드를 눌러 **입력이 실제로 막힌 것**과 **터치스크린이 켜진 것**을 확인. 열면(11:52:04) `mode=laptop keyboard=true touchpad=true touchscreen=false` 로 복원됨.
@@ -162,3 +162,28 @@ tent/tablet 에서 기기를 돌리면 내장 화면과 터치가 같이 돈다.
 - 내장 키보드 이름은 공용 모듈이 아니라 호스트가 `wayland.windowManager.hyprland.internalKeyboardName` 로 지정한다(비어 있으면 정책이 키보드를 건드리지 않음).
 - 아직 남은 것(위험 낮음, 필요할 때): `posture` CLI 를 소비자가 값마다 한 번씩 부름(파이썬 시작 + systemctl 확인이 매번);
   `_data/*/tests/` 마다 가짜 hyprctl/systemctl 을 따로 만들어 쓰는 중복; `displayctl.py` 가 1000줄이 넘는 단일 파일.
+
+### 알려진 함정과 점검 방법 (2026-10-19)
+- **깨어남 유실(고침)**: 경로 유닛(`posture-apply.path`)은 이미 실행 중인 `posture-apply.service` 를 다시 시작하지 못해(start 요청이 무시됨) 실행 도중에 온 상태 변경을 놓친다.
+  실제로 덮개를 닫고 1초 안에 열면 닫힘 처리(`lid-policy`) 중에 온 열림이 유실돼 백라이트가 0 인 채 남았고(로그에 `lid=closed` 만 있고 `lid=open` 이 없음), 다음 이벤트가 와서야 복구됐다. 모드 변경 등 모든 소비자가 같은 위험이었다.
+  → `posture-apply` 가 시작 때와 끝날 때의 `posture sig`(모드/덮개/회전/눕힘, 각도 제외)를 비교해 같아질 때까지 반복한다(최대 5회). 소비자가 멱등이라 다시 돌려도 안전하다. 가짜 소비자로 검증(도중에 바뀌면 2패스 8회, 안 바뀌면 1패스 4회).
+- **중첩 Hyprland 시험이 사용자 서비스 환경을 오염시킨다**: 시험 뒤 `systemctl --user show-environment` 에서 `WAYLAND_DISPLAY` 가 죽은 `wayland-2` 로 바뀌고 `HYPRLAND_INSTANCE_SIGNATURE`/`HYPRLAND_CMD`/`DISPLAY` 가 사라져,
+  서비스(`posture-apply` 등)에서 부르는 모든 `hyprctl` 이 실패했다(`jq: parse error` 가 소비자 실행마다 3번, 입력 정책/회전/가상 키보드가 아무것도 적용 못 함). 시험이 끝났을 때 아래로 확인하고 복구한다(재로그인해도 복구됨):
+  ```sh
+  systemctl --user show-environment | grep -E 'WAYLAND_DISPLAY|HYPRLAND_INSTANCE_SIGNATURE'
+  systemctl --user set-environment WAYLAND_DISPLAY="$WAYLAND_DISPLAY" HYPRLAND_INSTANCE_SIGNATURE="$HYPRLAND_INSTANCE_SIGNATURE" HYPRLAND_CMD="$HYPRLAND_CMD" DISPLAY="$DISPLAY"
+  dbus-update-activation-environment --systemd WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE HYPRLAND_CMD DISPLAY
+  ```
+- **저널 시각이 부팅 직후 약 30초간 9시간 앞선다**(RTC 가 로컬 시각 + 윈도우 듀얼부팅, "윈도우 시각 문제" 참고): `journalctl --since "-5min"` 같은 창에 부팅 초기의 옛 기록이 "미래 시각"으로 섞여 들어온다(실제로 옛 오류를 지금 오류로 오판할 뻔함). 시각이 아니라 PID/순서로 판단할 것.
+- **`lid-policy` 의 추가 명령(`tlp bat`/`tlp start`)은 root 권한이 없어 `Error: missing root privilege.` 로 실패**한다(로그에 `추가 명령 실패`). 예전 구조(Hyprland 바인딩에서 사용자 권한으로 실행)도 같았을 가능성이 크지만 당시 오류 출력이 저널에 남지 않아 확인은 못 함.
+
+## Hyprland 버전을 올릴 때 점검표 (예: nixpkgs 26.05 → 26.11)
+Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직접 붙어 있다. 올리면 **아래를 순서대로** 확인한다. (stable 26.05 는 0.55.2, 2026-10 의 unstable 은 0.56.2)
+1. **플러그인(hyprgrass)**: 꺼 둔 상태(`core.touch.nix` 의 `enableHyprgrass`)에서 시작. 새 Hyprland 헤더로 빌드가 되는지부터 확인 — unstable 0.56.2 에서는 패키지/고정 커밋/최신 모두 컴파일 실패였다(API 변경, wf-touch 불일치, LOG 매크로). 업스트림 `hyprpm.toml` 의 "Hyprland 커밋 ↔ hyprgrass 커밋" 고정표에서 맞는 커밋을 찾되, 그 고정은 컴파일 호환일 뿐 Lua 런타임 호환은 아니다(3236fbb1 이 그 예).
+   실제 세션에서 켜기 전에 반드시 중첩 Hyprland(`systemd-run --user`)로 로드해 본다. 정리는 유닛 이름/PID 로만, 끝나면 위의 환경 오염을 확인.
+2. **우리가 쓰는 Lua API**(`hl.*`): `hl.on`, `hl.bind`, `hl.window_rule`, `hl.device`, `hl.monitor`, `hl.config`, `hl.exec_cmd`, `hl.dsp.{exec_cmd,window.move/resize/float/close/drag/alter_zorder,focus,workspace.*,exit}`, `hl.plugin.load`.
+   `hyprctl eval '<lua>'` 로 쓰는 곳: `displayctl`(`hl.monitor`, `hl.device`), 입력 정책(`hl.device`), `vkb`(`hl.dsp.window.resize/move` 를 `hyprctl dispatch` 로). 올린 뒤 `hyprctl configerrors` 가 비어 있는지 본다.
+3. **자동 시험**: `mods/_data/{posture,vkb,display}/tests` 전부(가짜 hyprctl 이라 실제 API 변화는 못 잡는다 — 4 로 보완).
+4. **실기 확인**: `displayctl status`/`displayctl rotate 1` 후 `rotate 0`, `vkb show`/`vkb mode toggle`/`vkb hide`, 덮개 닫기/열기, 터치패드 토글, waybar 버튼.
+5. **함께 움직이는 것들**: `wvkbd` 패치(`mods/_data/wvkbd/README.md` 의 재생성 방법 + `test_vkb.py` 가 적용 여부를 검사), hyprlock/hypridle 설정 옵션(0.9.5 에서 `grace` 등이 사라져 오류가 났던 전례), xdg-desktop-portal-hyprland.
+6. 올리기 전 `nixup` 의 `unstable-fallback` 고정 장치(`nixup fix <패키지>`)로 되돌릴 수 있는 커밋을 확보해 둔다(`core/lib/host.nix`).

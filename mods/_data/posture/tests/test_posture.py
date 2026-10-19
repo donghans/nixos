@@ -163,6 +163,17 @@ json.dump({"schema": 1, "ts": int(time.time()), "mode": "tablet", "hinge": {"ang
 check("CLI get rotation / flat", cli("get", "rotation").strip() == "270" and cli("get", "flat").strip() == "True", cli("get", "rotation"))
 json.dump({"schema": 1, "ts": int(time.time()), "mode": "tablet", "hinge": {"angle": 359, "screen": 1, "keyboard": 2}, "orientation": "엉뚱한 값", "sensors": {}}, open(f"{ST}/state.json", "w"))
 check("orientation 형식이 이상하면 rotation 0 (오류 없이)", cli("get", "rotation").strip() == "0")
+json.dump({"schema": 1, "ts": 1, "mode": "tent", "orientation": {"rotation": 90, "flat": False}, "lid": "closed", "sensors": {}}, open(f"{ST}/state.json", "w"))
+json.dump({"ts": 1, "hinge": {"angle": 250, "screen": 0, "keyboard": 0}}, open(f"{ST}/telemetry.json", "w"))
+sig1 = cli("sig")
+json.dump({"ts": 2, "hinge": {"angle": 300, "screen": 0, "keyboard": 0}}, open(f"{ST}/telemetry.json", "w"))
+check("sig: 모드/덮개/회전/눕힘", sig1 == "tent closed 90 False", sig1)
+check("sig: 각도만 바뀌면 서명이 그대로(소비자를 다시 돌릴 이유가 없음)", cli("sig") == sig1)
+json.dump({"schema": 1, "ts": 2, "mode": "tent", "orientation": {"rotation": 90, "flat": False}, "lid": "open", "sensors": {}}, open(f"{ST}/state.json", "w"))
+check("sig: 덮개가 바뀌면 서명이 달라짐", cli("sig") != sig1 and cli("sig").split()[1] == "open")
+os.remove(f"{ST}/state.json")
+check("sig: 파일이 없으면 안전한 기본값", cli("sig") == "laptop open 0 False")
+
 # ───── 힌지 센서가 없는 일반 노트북: 덮개만으로 동작 ─────
 T2 = tempfile.mkdtemp(); ST2 = f"{T2}/run"; os.makedirs(f"{T2}/iio"); os.makedirs(f"{T2}/dev")
 os.mkfifo(f"{T2}/dev/lid"); lw2 = os.open(f"{T2}/dev/lid", os.O_RDWR)
