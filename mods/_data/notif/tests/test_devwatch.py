@@ -96,8 +96,25 @@ ID_VENDOR_FROM_DATABASE=SanDisk Corp.
 """
 evs, rest = dw.parse_udev(blk + "\nUDEV  [103.0] add")
 check("udev 블록을 이벤트로 나누고 덜 온 마지막은 남김", len(evs) == 5 and rest.startswith("UDEV  [103.0]"), f"{len(evs)} {rest!r}")
-us = [dw.usb_event(e) for e in evs]
+cache = {}
+us = [dw.usb_event(e, cache) for e in evs]
 check("USB: 장치만(인터페이스/허브 제외), 이름은 제조사+모델, 추가/제거", us == [("add", "SanDisk Corp. USB DISK 3.0"), None, None, None, ("remove", "SanDisk Corp. USB DISK 3.0")], str(us))
+
+# USB 이름 기억: 제거 이벤트에는 이름 정보가 없다
+rm = {"ACTION": "remove", "SUBSYSTEM": "usb", "DEVTYPE": "usb_device", "TYPE": "0/0/0", "DEVPATH": "/devices/usb1/1-4", "PRODUCT": "db0/2ff9/2"}
+ad = dict(rm, ACTION="add", ID_MODEL="MSI_Dock", ID_VENDOR="Realtek")
+c2 = {}
+check("USB: 연결 때 이름을 기억해 두었다가 해제 때 사용(제품 코드가 나오지 않음)", dw.usb_event(ad, c2) == ("add", "Realtek MSI Dock") and dw.usb_event(rm, c2) == ("remove", "Realtek MSI Dock") and c2 == {}, str(c2))
+check("USB: 기억이 없으면 PRODUCT 코드로(마지막 수단)", dw.usb_event(rm, {}) == ("remove", "db0/2ff9/2"))
+sd = tmpdir(); os.makedirs(f"{sd}/devices/usb1/1-4"); os.makedirs(f"{sd}/devices/usb1/1-4:1.0"); os.makedirs(f"{sd}/devices/usb1/1-1"); os.makedirs(f"{sd}/bus/usb/devices")
+open(f"{sd}/devices/usb1/1-4/product", "w").write("Billboard\n"); open(f"{sd}/devices/usb1/1-4/manufacturer", "w").write("Acme\n")
+open(f"{sd}/devices/usb1/1-1/product", "w").write("Root Hub\n"); open(f"{sd}/devices/usb1/1-1/bDeviceClass", "w").write("09\n")
+for n in ("1-4", "1-4:1.0", "1-1"): os.symlink(f"{sd}/devices/usb1/{n}", f"{sd}/bus/usb/devices/{n}")
+seed = dw.seed_usb_cache(sd)
+check("USB: 시작 때 이미 꽂힌 장치는 sysfs 에서 이름을 읽어 기억(허브·인터페이스 제외)", seed == {"/devices/usb1/1-4": "Acme Billboard"}, str(seed))
+rm2 = dict(rm, DEVPATH="/devices/usb1/1-4"); rm2.pop("PRODUCT")
+check("USB: 시작 전부터 있던 장치를 뽑으면 기억해 둔 이름으로", dw.usb_event(rm2, seed) == ("remove", "Acme Billboard"))
+check("USB: 연결 이벤트에 ID_MODEL 이 없으면 sysfs 의 product 로", dw.usb_event(dict(rm, ACTION="add", DEVPATH="/devices/usb1/1-4"), {}, sd) == ("add", "Acme Billboard"))
 
 # 전원
 d = tmpdir()

@@ -104,16 +104,60 @@ def parse_udev(text: str):
     return events, rest
 
 
-def usb_event(props: dict):
-    """usb_device 추가/제거 → (action, 이름) 또는 None. 허브(TYPE 9/…)와 인터페이스 이벤트는 제외."""
+def usb_name(props: dict, sysroot: str = "/sys") -> str:
+    """udev 속성(ID_MODEL…)이 있으면 그것으로, 없으면 sysfs 의 product/manufacturer 파일로, 그래도 없으면 PRODUCT 코드."""
+    model = props.get("ID_MODEL_FROM_DATABASE") or props.get("ID_MODEL") or ""
+    vendor = props.get("ID_VENDOR_FROM_DATABASE") or props.get("ID_VENDOR") or ""
+    if not model:
+        base = f"{sysroot}{props.get('DEVPATH', '')}"
+        model, vendor = _read(f"{base}/product"), vendor or _read(f"{base}/manufacturer")
+    model, vendor = model.replace("_", " "), vendor.replace("_", " ")
+    if not model:
+        return props.get("PRODUCT", "?")
+    return model if not vendor or vendor.split()[0].lower() in model.lower() else f"{vendor} {model}"
+
+
+def _read(path: str) -> str:
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def usb_event(props: dict, cache: dict = None, sysroot: str = "/sys"):
+    """usb_device 추가/제거 → (action, 이름) 또는 None. 허브(TYPE 9/…)와 인터페이스 이벤트는 제외.
+    제거 이벤트에는 이름 정보가 없으므로 cache(DEVPATH → 이름)에 연결 때 기억해 둔 이름을 쓴다."""
     if props.get("SUBSYSTEM") != "usb" or props.get("DEVTYPE") != "usb_device" or props.get("ACTION") not in ("add", "remove"):
         return None
     if props.get("TYPE", "").startswith("9/"):
         return None
-    model = (props.get("ID_MODEL_FROM_DATABASE") or props.get("ID_MODEL") or props.get("PRODUCT", "?")).replace("_", " ")
-    vendor = (props.get("ID_VENDOR_FROM_DATABASE") or props.get("ID_VENDOR") or "").replace("_", " ")
-    name = model if not vendor or vendor.split()[0].lower() in model.lower() else f"{vendor} {model}"
-    return props["ACTION"], name
+    cache = {} if cache is None else cache
+    path = props.get("DEVPATH", "")
+    if props["ACTION"] == "add":
+        cache[path] = usb_name(props, sysroot)
+        return "add", cache[path]
+    return "remove", cache.pop(path, None) or usb_name(props, sysroot)
+
+
+def seed_usb_cache(sysroot: str = "/sys") -> dict:
+    """시작할 때 이미 꽂혀 있는 USB 장치의 이름(DEVPATH → 이름) — 나중에 뽑을 때 이름을 알기 위해. 허브는 제외."""
+    cache = {}
+    try:
+        names = os.listdir(f"{sysroot}/bus/usb/devices")
+    except OSError:
+        return cache
+    for n in names:
+        if ":" in n:                                     # 인터페이스(1-2:1.0)
+            continue
+        real = os.path.realpath(f"{sysroot}/bus/usb/devices/{n}")
+        if not real.startswith(sysroot) or _read(f"{real}/bDeviceClass") == "09":
+            continue
+        path = real[len(sysroot):]
+        name = usb_name({"DEVPATH": path}, sysroot)
+        if name != "?":
+            cache[path] = name
+    return cache
 
 
 def power_state(root: str = POWER_ROOT) -> dict:
@@ -257,7 +301,7 @@ def run(send=notify_send) -> int:
     threading.Thread(target=reader, args=(["pw-dump", "-m"], "pw", q, json_arrays), daemon=True).start()
     threading.Thread(target=reader, args=(["udevadm", "monitor", "--udev", "--property", "--subsystem-match=usb", "--subsystem-match=power_supply"], "udev", q, parse_udev), daemon=True).start()
     threading.Thread(target=mount_watcher, args=(q,), daemon=True).start()
-    mounts, power = {}, power_state()
+    mounts, power, usb_cache = {}, power_state(), seed_usb_cache()
     while True:
         now = time.monotonic()
         try:
@@ -273,7 +317,7 @@ def run(send=notify_send) -> int:
                     (eng.add_internal if internal else eng.add)("audio", action, label, kind, t=now)
         elif tag == "udev":
             for props in data:
-                u = usb_event(props)
+                u = usb_event(props, usb_cache)
                 if u:
                     eng.add("usb", u[0], u[1], t=now)
                 if props.get("SUBSYSTEM") == "power_supply":
