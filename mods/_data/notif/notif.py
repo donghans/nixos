@@ -87,15 +87,22 @@ def is_problem(e: dict) -> bool:
     return e["app"] == HEALTH_APP or e["urgency"] == 2
 
 
-def select(entries: list, app=None, since=None, grep=None, urgent=False, problems=False) -> list:
-    """최신이 앞(1번)이 되도록 걸러서 돌려준다."""
+def select(entries: list, app=None, since=None, grep=None, urgent=False, problems=False, app_like=None, words=()) -> list:
+    """최신(가장 나중에 기록된 것)이 앞(1번)이 되도록 걸러서 돌려준다.
+    app: 앱 이름 정확히 / app_like: 앱 이름에 글자가 들어 있음 / grep: 앱·제목·본문에 글자 / words: 그 글자들이 모두 들어 있음(검색창용)"""
     out = []
+    words = [w.lower() for w in words]
     for e in reversed(entries):
         if app and e["app"] != app:
             continue
+        if app_like and app_like.lower() not in e["app"].lower():
+            continue
         if since and e["ts"] < since:
             continue
-        if grep and grep.lower() not in f"{e['app']} {e['summary']} {e['body']}".lower():
+        hay = f"{e['app']} {e['summary']} {e['body']}".lower()
+        if grep and grep.lower() not in hay:
+            continue
+        if words and not all(w in hay for w in words):
             continue
         if urgent and e["urgency"] != 2:
             continue
@@ -103,6 +110,28 @@ def select(entries: list, app=None, since=None, grep=None, urgent=False, problem
             continue
         out.append(e)
     return out
+
+
+def parse_query(text: str, now: datetime.datetime) -> dict:
+    """검색창 글자 → select 인자. `app:이름`(앱 이름에 포함) `is:problem` `is:urgent` `since:3h` 와 나머지 글자(모두 포함).
+    clipui 의 검색창과 같은 방식. 잘못된 기간 등은 일반 글자로 취급한다."""
+    q = {"app_like": None, "problems": False, "urgent": False, "since": None, "words": []}
+    for tok in text.split():
+        low = tok.lower()
+        if low.startswith("app:") and len(tok) > 4:
+            q["app_like"] = tok[4:]
+        elif low == "is:problem":
+            q["problems"] = True
+        elif low == "is:urgent":
+            q["urgent"] = True
+        elif low.startswith("since:"):
+            try:
+                q["since"] = parse_since(low[6:], now)
+            except ValueError:
+                q["words"].append(tok)
+        else:
+            q["words"].append(tok)
+    return q
 
 
 def group_by_app(entries: list) -> list:

@@ -35,6 +35,7 @@ vivaldi       = false
 slack         = false
 bitwarden     = false
 speedcrunch   = true
+gimp          = false
 incus-vm      = false
 
 [mods.gui.utils]
