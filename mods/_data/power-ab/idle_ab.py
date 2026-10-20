@@ -13,6 +13,8 @@
   모드 morning : 어댑터(독)를 **뽑고 덮개를 닫을 때까지 기다렸다가**(최대 12시간) ① 장치 절전 상태 스냅샷(독 연결 전 저장본과 비교용) + Wi-Fi 절전 끈 채 구간 2개(독을 뺀 뒤 전력이 낮아지는지)
                ② Wi-Fi 절전 켬/끔 번갈아 4구간(ABAB)을 연달아 잰다. 끝나면 Wi-Fi 절전은 TLP 가 정한 값으로 둔다. 환경변수 PM_SNAPSHOT=<저장 경로>(pm_snapshot.py 가 있는 디렉터리는 PM_TOOL).
   모드 vt      : **어느 VT 가 화면을 쓰는지**에 따른 차이. 지금 활성 VT(예: kmscon 의 tty2)와 다른 VT(Hyprland 의 tty1)로 `chvt` 해 가며 ABAB(RAPL, powertop). 끝나면 원래 VT 로 돌린다. AC 연결 상태에서도 가능(배터리 전력은 안 잼).
+  모드 lock    : hyprlock **잠금 ↔ 해제**를 번갈아(해제→잠금→해제→잠금) 재고 원래 상태(해제)로 돌린다. 잠금은 hyprlock 을 사용자 권한으로 직접 실행(IDLE_AB_HYPRLOCK=경로; `loginctl lock-session` 은 hypridle 에 listener 가 없어 안 먹음), 해제는 hyprlock PID 에 SIGUSR1. 덮개를 닫은 채 가능.
+  모드 audio   : 오디오 PCI(00:1f.3, sof-audio) 런타임 절전을 on(D0 강제) ↔ auto(재우기) 로 번갈아(on,auto,on,auto) 재고 auto 로 복구. 낮은 전력 상태(오디오 D3hot)와 높은 상태(D0) 가설 검증용.
   모드 session : **tty2(kmscon)의 Claude 처럼 그래픽 세션에 안 묶인 세션에서만.** 그래픽 세션 켜짐 2구간 → Hyprland 세션 종료(`wayland-wm@hyprland\\x2duwsm.desktop.service` 정지) → 꺼짐 2구간 → Netdata 정지 2구간.
                한 방향(그래픽 세션은 복구하지 않음: 사용자가 다시 로그인/재부팅). Netdata 는 끝에 다시 켠다
 
@@ -557,7 +559,92 @@ def run_vt():
         log("완료")
 
 
+def run_lock():
+    sid = sh("loginctl", "list-sessions", "--no-legend").stdout
+    wid = None
+    for l in sid.splitlines():
+        sess = l.split()[0]
+        if "wayland" in sh("loginctl", "show-session", sess, "-p", "Type", "--value").stdout:
+            wid = sess
+    log(f"lock 모드 시작: wayland 세션={wid} 덮개 {rd('/proc/acpi/button/lid/LID0/state')} 활성VT {rd('/sys/class/tty/tty0/active')}")
+    if not wid:
+        log("wayland 세션을 못 찾아 중단")
+        return
+
+    def hl_pids():
+        return [int(x) for x in sh("pgrep", "-x", "hyprlock").stdout.split()]
+
+    def set_state(want):
+        if want == "locked" and not hl_pids():
+            # hypridle 은 listener 가 없어 lock-session 에 반응하지 않으므로 hyprlock 을 사용자 권한으로 직접 띄운다(덮개 바인드와 같은 방식)
+            import pwd
+            user = pwd.getpwuid(1000).pw_name
+            sig = sh("ls", "/run/user/1000/hypr").stdout.split()[0]
+            hyprlock = os.environ.get("IDLE_AB_HYPRLOCK", "hyprlock")
+            subprocess.Popen(["runuser", "-u", user, "--", "env", "XDG_RUNTIME_DIR=/run/user/1000", "WAYLAND_DISPLAY=wayland-1",
+                              f"HYPRLAND_INSTANCE_SIGNATURE={sig}", hyprlock], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        for i in range(40):
+            if bool(hl_pids()) == (want == "locked"):
+                return True
+            if want == "unlocked" and i % 4 == 0:        # 잠금이 완전히 걸리기 전에 보낸 신호는 무시될 수 있어 다시 보낸다
+                for p in hl_pids():
+                    os.kill(p, signal.SIGUSR1)
+            time.sleep(1)
+        return False
+
+    results = []
+    start = "locked" if hl_pids() else "unlocked"
+    try:
+        for i, st in enumerate(("unlocked", "locked", "unlocked", "locked")):
+            ok = set_state(st)
+            label = f"k{i + 1}-{st}"
+            if not ok:
+                log(f"  {label}: 상태 전환 실패, 중단")
+                break
+            res = dict(window(label, seconds=45, settle=25), step=label, lock=st, vt=rd("/sys/class/tty/tty0/active"))
+            results.append(res)
+            log(f"  {label}: batt={res.get('battery_w') and round(res['battery_w'], 2)} psys={res.get('psys_w') and round(res['psys_w'], 2)} pkg={res.get('pkg_w') and round(res['pkg_w'], 2)} 깨어남={res.get('wakeups')} pc8={res.get('pc8')} pc10={res.get('pc10')}")
+            json.dump(results, open(OUT, "w"), ensure_ascii=False, indent=1)
+    except Exception as e:
+        log(f"중단: {e}")
+    finally:
+        set_state(start)
+        log(f"원래 상태({start})로 복구: hyprlock={'있음' if hl_pids() else '없음'}")
+        if os.path.exists(OUT):
+            os.chmod(OUT, 0o644)
+        log("완료")
+
+
+def run_audio():
+    dev = "/sys/bus/pci/devices/0000:00:1f.3"
+    ctl, st = f"{dev}/power/control", f"{dev}/power/runtime_status"
+    log(f"audio 모드 시작: 현재 control={rd(ctl)} status={rd(st)} 덮개 {rd('/proc/acpi/button/lid/LID0/state')}")
+    results, orig = [], rd(ctl)
+    try:
+        for i, mode in enumerate(("on", "auto", "on", "auto")):
+            open(ctl, "w").write(mode)
+            time.sleep(6)
+            label = f"a{i + 1}-{mode}"
+            pre = rd(st)
+            res = dict(window(label, seconds=45, settle=20), step=label, control=mode, status_pre=pre, status_post=rd(st))
+            results.append(res)
+            log(f"  {label}: 상태 {pre}→{res['status_post']} batt={res.get('battery_w') and round(res['battery_w'], 2)} psys={res.get('psys_w') and round(res['psys_w'], 2)} pkg={res.get('pkg_w') and round(res['pkg_w'], 2)} 깨어남={res.get('wakeups')} pc8={res.get('pc8')} pc10={res.get('pc10')}")
+            json.dump(results, open(OUT, "w"), ensure_ascii=False, indent=1)
+    except Exception as e:
+        log(f"중단: {e}")
+    finally:
+        open(ctl, "w").write(orig if orig in ("on", "auto") else "auto")
+        log(f"원래 값({orig})으로 복구: status={rd(st)}")
+        if os.path.exists(OUT):
+            os.chmod(OUT, 0o644)
+        log("완료")
+
+
 def main():
+    if MODE == "audio":
+        return run_audio()
+    if MODE == "lock":
+        return run_lock()
     if MODE == "vt":
         return run_vt()
     if MODE == "morning":

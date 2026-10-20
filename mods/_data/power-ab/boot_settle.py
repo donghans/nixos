@@ -22,6 +22,16 @@ def rd(p, d=""):
         return d
 
 
+def wifi_chan():
+    """연결된 Wi-Fi 의 주파수(MHz). /sys/class/net/wlan0 에는 없어 iw 를 쓰되, 없으면 빈 값."""
+    import subprocess
+    try:
+        o = subprocess.run(["iw", "dev", "wlan0", "link"], capture_output=True, text=True, timeout=5).stdout
+        return next((l.split()[1] for l in o.splitlines() if l.strip().startswith("freq:")), "")
+    except Exception:
+        return ""
+
+
 def rapl(n):
     e, m = rd(f"/sys/class/powercap/{n}/energy_uj"), rd(f"/sys/class/powercap/{n}/max_energy_range_uj")
     return (int(e), int(m)) if e and m else None
@@ -81,7 +91,10 @@ def main():
         rec = {"uptime": float(rd("/proc/uptime").split()[0]), "pkg_w": watts(pk, pk2, dt), "psys_w": watts(ps, ps2, dt),
                "batt_w": int(v) * abs(int(i)) / 1e12 if v and i else None, "ac": rd("/sys/class/power_supply/ADP1/online"),
                "status": rd(f"{BAT}/status"), "lid": lid[-1] if lid else "?",
-               "load1": rd("/proc/loadavg").split()[0], "top_cpu": cpu, "top_wake": wake}
+               "load1": rd("/proc/loadavg").split()[0], "vt": rd("/sys/class/tty/tty0/active"),
+               "audio_pci": rd("/sys/bus/pci/devices/0000:00:1f.3/power/runtime_status"), "wifi_chan": wifi_chan(),
+               "hyprlock": os.path.exists("/proc") and any(rd(f"/proc/{d}/comm") == "hyprlock" for d in os.listdir("/proc") if d.isdigit()),
+               "top_cpu": cpu, "top_wake": wake}
         with open(OUT, "a") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         os.chmod(OUT, 0o644)
