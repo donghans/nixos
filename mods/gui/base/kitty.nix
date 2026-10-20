@@ -28,6 +28,8 @@ mkPartOf "mods.gui" (_: {
         confirm_os_window_close = -1;
 
         cursor_shape = "beam";
+        # 커서 깜빡임(기본 0.5초)이 초당 약 2회 화면 갱신을 일으켜 PSR 진입을 끊음(측정: _docs/…/power-evidence.md #57)
+        cursor_blink_interval = 0;
         shell_integration = "disabled";
       };
 
