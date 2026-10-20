@@ -6,6 +6,7 @@ import os
 import time
 from datetime import datetime
 
+from rich.cells import cell_len
 from rich.text import Text
 
 import powergraph as pg
@@ -55,7 +56,7 @@ def graph_text(title, points, t0, t1, width, height, unit="W", style="dark_orang
 def band_text(title, labels, styles, width):
     """한 줄 상태 띠(구간마다 색 블록). labels=[키|None], styles={키: 색}."""
     t = Text()
-    t.append(f"{title:>{AXIS_W - 1}} ", style="grey70")
+    t.append(" " * max(0, AXIS_W - 1 - cell_len(title)) + title + " ", style="grey70")   # 한글은 2칸 폭이라 글자 수가 아니라 칸 수로 맞춘다
     for k in labels:
         t.append("█" if k is not None else "░", style=styles.get(k, "grey50") if k is not None else "grey23")
     return t

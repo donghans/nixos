@@ -79,6 +79,8 @@ if have_rich:
     lines = ts.plain.split("\n")
     check("timeseries_text: 줄 수가 높이 이내", len(lines) <= 40, str(len(lines)))
     check("timeseries_text: 너비 초과 줄 없음", all(len(l) <= 100 for l in lines), str(max(len(l) for l in lines)))
+    from rich.cells import cell_len
+    check("timeseries_text: 한글 라벨 줄도 칸 폭이 너비 이내", all(cell_len(l) <= 100 for l in lines), str(max(cell_len(l) for l in lines)))
     check("timeseries_text: 그래프 4개 제목", all(k in ts.plain for k in ("배터리 소비", "psys", "패키지", "배터리 잔량")))
     for rng in ("1시간", "6시간", "오늘", "3일"):
         check(f"timeseries_text 구간 {rng} 렌더", len(pv.timeseries_text(st.recs, rng, now, 60, 24).plain) > 100)
