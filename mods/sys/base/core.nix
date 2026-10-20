@@ -133,6 +133,12 @@ mkPartOf "mods.sys.base" ({
           graph_symbol = "braille";
           update_ms = 2000;
           shown_boxes = "cpu mem net proc";
+          # 디스크 용량은 보이되 실시간 읽기/쓰기 활동(I/O)은 끔 (/, /home, /nix, /var/log 는 같은 btrfs 풀이라 I/O 도 구분되지 않음)
+          show_disks = true;
+          show_io_stat = false;
+          io_mode = false;
+          # 같은 btrfs 풀의 서브볼륨(/home, /nix, /var/log, incus 마운트 등)은 용량이 같으니 대표로 / 만, 별도 파티션인 /boot 는 따로 표시
+          disks_filter = "/ /boot";
           proc_sorting = "cpu lazy";
         };
         themes.lazygit = ''
