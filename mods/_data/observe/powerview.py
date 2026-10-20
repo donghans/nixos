@@ -29,11 +29,15 @@ def _stats(vals):
     return (min(v), sum(v) / len(v), max(v), v[-1]) if v else None
 
 
-def graph_text(title, points, t0, t1, width, height, unit="W", style="dark_orange", lo=0.0, hi=None, fmt="{:.1f}"):
+GRADIENT = ["#2ecc71", "#7ddc4c", "#c7e03a", "#f1c40f", "#f39c12", "#e67e22", "#e74c3c"]   # 아래(초록) → 위(빨강), btop 의 세로 그라데이션과 같은 방식
+
+
+def graph_text(title, points, t0, t1, width, height, unit="W", style="dark_orange", lo=0.0, hi=None, fmt="{:.1f}", gradient=False, max_gap_s=120):
     """제목 줄 + 점자 면적 그래프(왼쪽 눈금). points=[(t, v)]. 반환 Text(줄 수 = 1 + height)."""
     plot_w = max(8, width - AXIS_W)
-    vals = pg.bucketize(points, t0, t1, plot_w * 2)
-    st = _stats(vals)
+    raw = pg.bucketize(points, t0, t1, plot_w * 2)
+    st = _stats(raw)
+    vals = pg.fill_gaps(raw, (t1 - t0) / (plot_w * 2), max_gap_s)
     if hi is None:
         lo, hi = pg.nice_range(vals, floor=lo)
     t = Text()
@@ -47,7 +51,7 @@ def graph_text(title, points, t0, t1, width, height, unit="W", style="dark_orang
     for i, r in enumerate(rows):
         label = fmt.format(hi) if i == 0 else (fmt.format(lo) if i == len(rows) - 1 else "")
         t.append(f"{label:>{AXIS_W - 1}} ", style="grey50")
-        t.append(r, style=style)
+        t.append(r, style=GRADIENT[round((height - 1 - i) / max(1, height - 1) * (len(GRADIENT) - 1))] if gradient else style)
         if i < len(rows) - 1:
             t.append("\n")
     return t
@@ -89,7 +93,7 @@ def timeseries_text(recs, rng, now, width, height):
     out = Text(f" 구간 {rng} · 표본 {len(sel)}개 · {datetime.fromtimestamp(t0):%m-%d %H:%M} ~ {datetime.fromtimestamp(t1):%H:%M}\n", style="grey70")
     for title, key, unit, style, lo, hi, fmt in spec:
         pts = [(r["t"], r[key] if key != "batt" or r["status"] == "Discharging" else None) for r in sel]
-        out.append_text(graph_text(title, pts, t0, t1, width, each, unit, style, lo, hi, fmt))
+        out.append_text(graph_text(title, pts, t0, t1, width, each, unit, style, lo, hi, fmt, gradient=unit == "W"))
         out.append("\n")
     plot_w = max(8, width - AXIS_W)
     out.append_text(band_text("상태", pg.bucket_labels([(r["t"], r["state"]) for r in sel], t0, t1, plot_w), STATE_STYLE, plot_w))

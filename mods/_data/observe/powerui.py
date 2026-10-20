@@ -51,11 +51,12 @@ class PowerUI(App):
         Binding("f5", "refresh_now", "새로고침"),
     ]
 
-    def __init__(self, interval=10.0, store=None):
+    def __init__(self, interval=10.0, store=None, tab="now", range_i=0):
         super().__init__()
+        self.start_tab = tab
         self.interval = interval
         self.store = store or pd.Store()
-        self.range_i = 0
+        self.range_i = range_i
         self.group_i = 0
         self.clean = False
         self.last = 0.0
@@ -67,7 +68,7 @@ class PowerUI(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static("", id="status")
-        with TabbedContent(initial="now", id="tabs"):
+        with TabbedContent(initial=self.start_tab, id="tabs"):
             with TabPane("지금 [1]", id="now"):
                 yield Panel(self._now_view, id="nowtext")
                 yield Panel(self._now_graphs, id="nowgraphs")
@@ -123,9 +124,9 @@ class PowerUI(App):
         t0, t1 = now - 1800, now
         recs = [r for r in self.store.recs if r["t"] >= t0]
         each = max(2, (h - 2 - 1) // 2)
-        out = pv.graph_text("최근 30분 · psys", [(r["t"], r["psys"]) for r in recs], t0, t1, w, each, "W", "cyan")
+        out = pv.graph_text("최근 30분 · psys", [(r["t"], r["psys"]) for r in recs], t0, t1, w, each, "W", "cyan", gradient=True)
         out.append("\n")
-        out.append_text(pv.graph_text("최근 30분 · 배터리 소비 (방전 중만)", [(r["t"], r["batt"] if r["status"] == "Discharging" else None) for r in recs], t0, t1, w, each, "W", "dark_orange"))
+        out.append_text(pv.graph_text("최근 30분 · 배터리 소비 (방전 중만)", [(r["t"], r["batt"] if r["status"] == "Discharging" else None) for r in recs], t0, t1, w, each, "W", "dark_orange", gradient=True))
         out.append("\n")
         out.append_text(pv.time_axis(t0, t1, w))
         return out
@@ -203,8 +204,10 @@ class PowerUI(App):
 def main(argv=None):
     p = argparse.ArgumentParser(prog="powerui", description="전력·배터리 현황 TUI")
     p.add_argument("--interval", type=float, default=10.0, help="갱신 주기(초, 기본 10)")
+    p.add_argument("--tab", default="now", choices=["now", "series", "compare", "netdata"], help="처음 열 탭")
+    p.add_argument("--range", default="1시간", choices=[r[0] for r in pv.RANGES], help="처음 구간")
     a = p.parse_args(argv)
-    PowerUI(interval=max(2.0, a.interval)).run()
+    PowerUI(interval=max(2.0, a.interval), tab=a.tab, range_i=[r[0] for r in pv.RANGES].index(a.range)).run()
 
 
 if __name__ == "__main__":

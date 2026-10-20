@@ -23,6 +23,21 @@ def bucketize(points, t0, t1, n):
     return [sums[i] / cnt[i] if cnt[i] else None for i in range(n)]
 
 
+def fill_gaps(vals, bucket_s, max_gap_s):
+    """값 사이의 빈 구간(None)을 선형 보간으로 이어 준다(표본 간격이 구간 폭보다 넓을 때 점선처럼 듬성듬성 보이는 것을 막음).
+    양쪽에 값이 있고 두 값 사이 시간이 max_gap_s 이하일 때만 채운다(수집이 끊긴 구간은 그대로 비워 둠). 새 리스트를 돌려준다."""
+    out = list(vals)
+    last = None
+    for i, v in enumerate(vals):
+        if v is None:
+            continue
+        if last is not None and i - last > 1 and (i - last) * bucket_s <= max_gap_s:
+            for j in range(last + 1, i):
+                out[j] = vals[last] + (v - vals[last]) * (j - last) / (i - last)
+        last = i
+    return out
+
+
 def bucket_labels(keys_points, t0, t1, n):
     """[(t, 문자열)] 을 n 등분하고 구간마다 가장 많이 나온 값(없으면 None)을 돌려준다(상태 띠용)."""
     if n <= 0 or t1 <= t0:
