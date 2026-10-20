@@ -29,6 +29,8 @@
 | 23 | 8초 `wakers`(AC, L1 수집 중): `tick_nohz_handler` 1476/s, `hrtimer_wakeup` 787/s, IRQ xhci_hcd 40/s·acpi 34/s·i915 20/s | **측정(1회)** | ftrace 8.2초, 21583건 | 낮은/높은 상태, 배터리/덮개 닫힘에서 반복해 비교 |
 | 24 | 깨우는 쪽 상위: HeapHelper(Claude Code V8 스레드) 232/s, go.d.plugin(Netdata) 144/s, .claude 121/s, actix-rt(meilisearch) 65/s, LIBSENSORS(Netdata) 50/s, idlejitter(Netdata) 48/s | **측정(1회)** | `wakers --waking` 8초 | 같은 방식으로 상태별 반복 |
 | 25 | ~~낮은 상태에서 Wi-Fi 절전 켬/끔은 차이 없음~~ | **취소(무효 시험)** | 시험 스크립트의 PATH 앞에 `/run/current-system/sw/bin` 을 넣어 `sudo` 가 setuid 래퍼가 아닌 것을 잡았고(`must be owned by uid 0`), 절전도 VT 도 **바뀌지 않았다**. 수집기가 기록한 실제 값으로 확인: A·B 구간 모두 `wifi.ps=on`, VT 는 계속 tty2 → A=B 인 시험이라 효과가 0 인 것은 당연. 이 시험에서 얻은 것은 **노이즈 바닥**뿐: 낮은 상태에서 구간 평균 psys sd 0.01~0.11 W, 26분 동안 계속 low | 검증형 시험(#26, #27) |
-| 26 | (진행 중) 낮은 상태에서 Wi-Fi 절전 효과 — 조건 검증 포함 재시험 | **미측정** | `observectl ab --expect-a dev.wifi.ps=off --expect-b dev.wifi.ps=on` 로 실제 조건 확인 | 결과 반영 |
-| 27 | (진행 중) 높은 상태(tty1 다녀온 뒤)에서 Wi-Fi 절전 효과 — 사무실 Wi-Fi | **미측정** | 같은 방식 | 결과 반영 |
+| 26 | **낮은 상태**(psys 2.6 W)에서 Wi-Fi 절전 켬/끔 차이 ≈ 0 | **측정(ABAB 2쌍, 조건 검증 통과)** | 사무실 Wi-Fi(2.4 GHz), 덮개 닫힘, 배터리, no-quirks 부팅. psys 끔 2.56/2.59 ↔ 켬 2.55/2.46(평균 −0.07 W), 배터리 −0.08 W, 패키지 −0.01 W. 쌍별 부호 혼재 → 판정 "불확실"이지만 효과가 있어도 0.1 W 안팎 | — |
+| 27 | **높은 상태**(psys 3.65 W)에서 Wi-Fi 절전 켬/끔 차이 ≈ 0 | **측정(ABAB 2쌍, 조건 검증 통과)** | 같은 조건에서 tty1 다녀온 뒤. psys 끔 3.66/3.65 ↔ 켬 3.71/3.62(+0.02 W), 배터리 +0.18 W(켬 구간 하나가 5.83 로 튐), 패키지 +0.03 W | — |
+| 28 | no-quirks 부팅(`pcie_aspm=off`·`acpi_osi=Linux`·`irqpoll` 없음)의 절대 전력이 이전 부팅보다 낮다: 낮음 배터리 3.6 W/psys 2.6 W(이전 4.3~4.5/3.9~4.1), 높음 5.4 W/psys 3.65 W(이전 6.0~6.8/5~6), 패키지 pc10 낮음 약 48%(이전 17~24%), 높음에서 pc8 약 45%(이전 20~30%) | **추정(부팅 간 비교)** | 이전 값은 다른 시각·다른 Wi-Fi(집/핫스팟/사무실)·수집 방식(powertop)에서 잰 것 | 일반 부팅에서 같은 조건(사무실 Wi-Fi, 덮개 닫힘)으로 `observectl window --by state` 를 같은 시간 쌓아 비교(다음 재부팅) |
+| 29 | 집에서 잰 Wi-Fi 절전 −0.62 W(#1)가 이번에 안 나타난 이유 — 가설: ① 이전 부팅 인자(특히 `pcie_aspm=off`)가 있을 때만 절전 이득이 있음 ② 집 5 GHz AP 와 사무실 2.4 GHz AP 의 차이 | **미검증 가설** | #1 은 일반 부팅·집 Wi-Fi, #26/#27 은 no-quirks·사무실 Wi-Fi 라 두 가지가 섞임 | 일반 부팅에서 사무실 Wi-Fi 로 같은 검증형 ABAB(① 분리), 집 Wi-Fi 에서 no-quirks 로 ABAB(② 분리) |
 

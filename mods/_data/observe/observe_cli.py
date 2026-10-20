@@ -293,7 +293,10 @@ def expect_mismatch(seg, cond, expect):
 
 def cmd_ab(a):
     rows = samples(core.parse_when(a.since))
-    seg = [(c, g) for c, g in segments(rows, a.settle) if g]
+    seg = [(c, g) for c, g in segments(rows, a.settle) if len(g) >= a.min_samples]
+    dropped = [(c, len(g)) for c, g in segments(rows, a.settle) if 0 < len(g) < a.min_samples]
+    if dropped:
+        print(f"(표본 {a.min_samples}개 미만인 짧은 구간 {len(dropped)}개는 제외: {dropped} — 표지 변경 직후의 잔여 표본 등)")
     if len(seg) < 4:
         sys.exit("A/B 구간이 4개 미만입니다. `observectl mark A` … `observectl mark B` … 를 번갈아 두 번 이상 하세요.")
     path = METRICS[a.metric]
@@ -361,6 +364,7 @@ def main(argv=None):
     s = sub.add_parser("drmdebug"); s.add_argument("sec", nargs="?", type=int, default=15); s.set_defaults(f=cmd_drmdebug)
     sub.add_parser("display").set_defaults(f=cmd_display)
     s = sub.add_parser("ab"); s.add_argument("--since", default="-3h"); s.add_argument("--metric", default="psys_w", choices=list(METRICS)); s.add_argument("--threshold", type=float, default=0.3); s.add_argument("--settle", type=float, default=20)
+    s.add_argument("--min-samples", type=int, default=5, help="구간당 최소 표본 수(미만이면 제외)")
     s.add_argument("--expect-a", help="A 구간 표본의 기대 조건 '경로=값' (예: dev.wifi.ps=off). 다르면 시험 무효"); s.add_argument("--expect-b", help="B 구간 표본의 기대 조건 (예: dev.wifi.ps=on)"); s.set_defaults(f=cmd_ab)
     s = sub.add_parser("hyprtrace"); s.add_argument("mode", choices=["on", "off"]); s.set_defaults(f=cmd_hyprtrace)
     a = p.parse_args(argv)

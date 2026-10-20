@@ -459,7 +459,7 @@ def main():
                 if os.path.exists(core.REQ_DIR) and os.listdir(core.REQ_DIR):
                     break
             s = sampler.sample()
-            s["mark"] = ctl.get("mark")
+            s["mark"] = core.read_control().get("mark")        # 표본 직전에 다시 읽는다(루프 시작에서 읽은 값을 쓰면 표지 변경이 한 표본 늦게 반영됨)
             core.append_jsonl(core.SAMPLE_DIR, "samples", s)
             if time.monotonic() - last_prune > 3600:
                 core.prune(core.SAMPLE_DIR, "samples", ctl["retention_days"], ctl["max_total_mb"])
