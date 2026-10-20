@@ -43,7 +43,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 
 ## 한계
 - 수집기 자체의 **CPU 비용(측정)**: L0(30초) 코어 1개의 약 0.35%, L1(5초+스레드 스캔) 약 1.9%. `observectl off` 뒤 15초 안에 프로세스가 사라진다. **전력(W)으로의 비용은 아직 측정하지 않았다** — 독립 계량(Netdata 의 RAPL/배터리 차트)으로 켬/끔을 번갈아 재야 한다. 그때까지 **전력 A/B 에는 L0 만 쓰고**(L1 은 프로파일링 전용), 표본에 수집기가 켜져 있었다는 사실이 남으므로(`observectl status`) 결과 해석에 반영한다.
-- **측정 환경 자체의 부하**: 이 기기에서는 Claude Code(TUI)가 kmscon 위에서 돌고, 작업 중에는 kmscon 이 CPU 36%·Claude 가 32% 안팎을 쓴다(L1 스레드 표, 80초). 쉬는 전력 비교 때 Claude 가 출력 중인지 대기 중인지가 결과에 섞일 수 있으니 `observectl top --by cpu` 로 같이 본다.
+- **측정 환경 자체의 부하(교란 요인)**: 목적은 Wayland 세션 사용 시 배터리 최적화이고, 내 Claude 세션은 Wayland 위에서 돌리지 않으려고 VT2(kmscon)에 둔다. 그런데 VT2 가 활성일 때 내가 화면을 갱신(스피너 등)하면 약 +1.3 W 가 섞인다(kmscon·Claude CPU 각 약 18%, power-evidence.md #34). **측정 중에는 내 세션을 한가하게 두고**(턴을 끝내고 백그라운드로 기다림), 같은 구간의 `observectl top --by cpu` 로 교란이 없었는지 확인한다.
 - MSR PC-state 는 `msr` 모듈이 필요(`boot.kernelModules`), 패키지 값만 본다(코어별 C-state 는 cpuidle 의 평균).
 - `observectl wakers` 는 ftrace 이벤트 4종(timer, hrtimer, irq, workqueue; `--waking` 시 sched_waking)을 N초 켠다 — 이벤트 수가 많은 시스템에서는 8MiB/CPU 버퍼가 넘칠 수 있다(결과의 총 건수가 매우 크면 `sec` 를 줄일 것).
 
