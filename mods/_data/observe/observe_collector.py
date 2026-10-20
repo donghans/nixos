@@ -121,6 +121,26 @@ def quirks_tag(cmdline):
     return "quirks" if len(has) == 3 else "no-quirks" if not has else "partial:" + "+".join(has)
 
 
+def pc3_stuck(state, cs):
+    """패키지가 PC3 이하에 막힌 표본인가: 높은 상태이고 pc3 가 30% 이상, pc6/pc8/pc10 합이 1% 미만(2026-10-20 오후에 AC 전환 뒤 2시간 넘게 이 상태였음)."""
+    if state != "high" or not cs:
+        return False
+    return (cs.get("pc3") or 0) >= 30 and sum(cs.get(k) or 0 for k in ("pc6", "pc8", "pc10")) < 1
+
+
+def take_knobs(path):
+    """절전 설정 스냅샷(power_knobs.snap)을 저장. 모듈을 못 찾으면 None. 읽기 전용(sysfs/proc)이라 측정에 영향이 없다."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for d in (here, os.path.join(here, "examples")):
+        if os.path.exists(os.path.join(d, "power_knobs.py")):
+            if d not in sys.path:
+                sys.path.insert(0, d)
+            import power_knobs
+            json.dump(power_knobs.snap(), open(path, "w"), ensure_ascii=False, sort_keys=True)
+            return path
+    return None
+
+
 def classify(cs):
     """깊은 절전 상태 분류. pc10 이 5% 이상이면 low. MSR 을 못 읽었으면 unknown."""
     if not cs or "pc10" not in cs:
@@ -454,6 +474,7 @@ def main():
     for d in (core.REQ_DIR, core.RES_DIR, core.SAMPLE_DIR):
         os.makedirs(d, exist_ok=True)
     sampler, idle_since, last_prune = None, time.monotonic(), 0.0
+    stuck_n, last_knobs = 0, 0.0
     while not stop:
         ctl = core.read_control()
         did = process_requests()
@@ -469,6 +490,18 @@ def main():
                 if os.path.exists(core.REQ_DIR) and os.listdir(core.REQ_DIR):
                     break
             s = sampler.sample()
+            if pc3_stuck(s.get("state"), s.get("cs")):
+                stuck_n += 1
+            else:
+                stuck_n = 0
+            if stuck_n >= 20:                                   # 10분(30초 간격) 연속
+                s["flag"] = "pc3-stuck"
+                if time.time() - last_knobs > 3600:             # 시간당 한 번만 스냅샷
+                    try:
+                        s["knobs"] = take_knobs(os.path.join(core.SAMPLE_DIR, f"knobs-{int(time.time())}.json"))
+                    except Exception as e:
+                        s["knobs"] = f"실패: {e}"
+                    last_knobs = time.time()
             s["mark"] = core.read_control().get("mark")        # 표본 직전에 다시 읽는다(루프 시작에서 읽은 값을 쓰면 표지 변경이 한 표본 늦게 반영됨)
             core.append_jsonl(core.SAMPLE_DIR, "samples", s)
             if time.monotonic() - last_prune > 3600:

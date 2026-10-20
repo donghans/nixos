@@ -15,6 +15,7 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
   dir = pkgs.runCommand "observe-src" {} ''
     mkdir -p $out
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py"]}
+    cp ${../../_data/observe/examples/power_knobs.py} $out/power_knobs.py
   '';
   observectl = pkgs.writeShellScriptBin "observectl" ''exec ${py}/bin/python3 ${dir}/observe_cli.py "$@"'';
   observeEmit = pkgs.writeShellScriptBin "observe-emit" ''exec ${py}/bin/python3 ${dir}/observe_emit.py "$@"'';

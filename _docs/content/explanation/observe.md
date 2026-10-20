@@ -64,3 +64,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 - `input_rate.py`(root) — 30초 동안 입력 장치별 이벤트 개수만 센다(내용은 기록 안 함).
 - `socks5_udp_test.py` — SOCKS5 서버가 UDP 를 중계하는지 직접 시험한다.
 
+## 자동 포착: `pc3-stuck`
+수집기는 **높은 상태이고 패키지가 PC3 에 20회(10분) 연속 막혀 있으면**(pc3 ≥ 30%, pc6+pc8+pc10 < 1%) 그 표본에 `flag = "pc3-stuck"` 를 달고, **절전 설정 스냅샷**(`power_knobs`)을 `/var/lib/observe/data/knobs-<epoch>.json` 에 한 번(시간당 최대 1회) 저장한다. 읽기 전용이라 측정에 영향이 없다.
+다음에 이 상태가 생기면: `observectl window --by flag`, 저장된 스냅샷을 기준 스냅샷과 `power_knobs.py diff` 로 비교한다(기준은 정상 상태에서 `power_knobs.py save` 로 만들어 둔다). 2026-10-20 오후에 2시간 41분 지속된 상태의 원인은 이 도구가 없어서 못 잡았다(#48~#51).
+
