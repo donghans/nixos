@@ -378,17 +378,32 @@ def run_ab2():
         if on:
             log(f"  electron {len(frozen)}개 프로세스 정지")
 
+    ts_frozen = []
+
+    def tailscaled_set(on):
+        """tailscaled(root 데몬)를 SIGSTOP 으로 얼리거나(on) SIGCONT 로 푼다. 인터페이스·로그인 상태는 보존되고 데몬의 일(netcheck 등)만 멈춘다."""
+        import signal as _sg
+        if on:
+            ts_frozen[:] = [int(x) for x in sh("pgrep", "-f", "tailscaled --state").stdout.split()]
+            log(f"  tailscaled {len(ts_frozen)}개 프로세스 정지")
+        for pid in ts_frozen:
+            try:
+                os.kill(pid, _sg.SIGSTOP if on else _sg.SIGCONT)
+            except OSError:
+                pass
+
     def win(label, cand, state):
         if rd(f"{BAT}/status") != "Discharging" or "closed" not in rd("/proc/acpi/button/lid/LID0/state"):
             raise RuntimeError("조건이 바뀜(충전/덮개 열림)")
-        res = dict(window(label, seconds=45, settle=15), step=label, cand=cand, state=state, bl=rd("/sys/class/backlight/intel_backlight/brightness"))
+        res = dict(window(label, seconds=45, settle=15), step=label, cand=cand, state=state, bl=rd("/sys/class/backlight/intel_backlight/brightness"),
+                   dpms=rd("/sys/class/drm/card1-eDP-1/dpms"), ssid=(re.search(r"SSID:\s*(.+)", sh("iw", "dev", iface, "link").stdout or "") or [None, "?"])[1] if iface else "?")
         results.append(res)
         log(f"  {label}: batt={res.get('battery_w') and round(res['battery_w'], 2)} psys={res.get('psys_w') and round(res['psys_w'], 2)} pkg={res.get('pkg_w') and round(res['pkg_w'], 2)}")
         json.dump(results, open(OUT, "w"), ensure_ascii=False, indent=1)
 
     try:
         only = [c for c in os.environ.get("IDLE_AB_CANDS", "").split(",") if c]   # 일부 후보만(예: netdata-off)
-        for cand, setter in (("wifi-ps", wifi_set), ("netdata-off", nd_set), ("lpss-ish-auto", ish_set), ("electron-freeze", electron_set)):
+        for cand, setter in (("wifi-ps", wifi_set), ("netdata-off", nd_set), ("lpss-ish-auto", ish_set), ("electron-freeze", electron_set), ("tailscaled-freeze", tailscaled_set)):
             if only and cand not in only:
                 continue
             log(f"후보 {cand}: A(기준) B(변경) A B")
@@ -399,7 +414,7 @@ def run_ab2():
     except Exception as e:
         log(f"중단: {e}")
     finally:
-        wifi_set(False); nd_set(False); ish_set(False); electron_set(False)
+        wifi_set(False); nd_set(False); ish_set(False); electron_set(False); tailscaled_set(False)
         sh("systemctl", "restart", "posture-daemon.service")
         log("모두 원래대로, posture-daemon 재시작")
         if os.path.exists(OUT):
