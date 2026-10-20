@@ -57,6 +57,8 @@ def group_key(s, by):
         return "AC" if get(s, "pw.ac") else "배터리"
     if by == "mark":
         return (s.get("mark") or {}).get("cond") or "-"
+    if by == "wifips":
+        return get(s, "dev.wifi.ps") or "?"
     return "전체"
 
 
@@ -276,6 +278,19 @@ def segments(rows, settle):
     return [(c, [r for r in g if r["t"] >= (t or 0) + settle]) for c, g, t in segs]
 
 
+def expect_mismatch(seg, cond, expect):
+    """구간 목록(seg)에서 조건 cond 의 표본 중 기대값("경로=값", 예: dev.wifi.ps=off)과 다른 개수와 전체 개수.
+    A/B 조건을 실제로 바꿨는지 검증하는 용도 — 스크립트가 조건을 못 바꿨는데 통계만 내는 일을 막는다."""
+    path, _, want = expect.partition("=")
+    bad = tot = 0
+    for c, g in seg:
+        if c == cond:
+            for r in g:
+                tot += 1
+                bad += str(get(r, path)) != want
+    return bad, tot
+
+
 def cmd_ab(a):
     rows = samples(core.parse_when(a.since))
     seg = [(c, g) for c, g in segments(rows, a.settle) if g]
@@ -292,6 +307,12 @@ def cmd_ab(a):
     # 교대 순서(A B A B)가 아닌 경우를 경고
     order = "".join(c for c, _ in seg)
     st = stats.verdict(A, B, a.threshold)
+    invalid = []
+    for cond, expect in ((ca, a.expect_a), (cb, a.expect_b)):
+        if expect:
+            bad, tot = expect_mismatch(seg, cond, expect)
+            if bad:
+                invalid.append(f"{cond} 구간 표본 {tot}개 중 {bad}개가 기대({expect})와 다름")
     mix = {x.get("state") for _, g in seg for x in g}
     print(f"조건 순서 {order} · {ca}=기준 {cb}=변경 · 지표 {a.metric} · 임계 {a.threshold} W · 구간 시작 {a.settle}초 제외")
     print(f"{ca}: {', '.join(f'{x:.2f}' for x in A)} (평균 {st['mean_a']:.2f}, sd {st['sd_a']:.2f})")
@@ -299,7 +320,11 @@ def cmd_ab(a):
     ci = st["ci95"]
     print(f"쌍별 {cb}−{ca}: {', '.join(f'{x:+.2f}' for x in st['diffs'])} → 평균 효과 {st['effect']:+.3f} W"
           + (f" · 95% CI [{ci[0]:+.2f}, {ci[1]:+.2f}]" if ci else " · CI 는 쌍 3개 이상부터") + f" · 부호검정 p={st['sign_p']:.2f}")
-    print(f"판정: {st['verdict']}")
+    if invalid:
+        print("✗ 조건 검증 실패 — 이 시험은 무효입니다: " + "; ".join(invalid))
+        print("판정: 무효(조건이 실제로 바뀌지 않음)")
+        return
+    print(f"판정: {st['verdict']}" + (" (조건 검증 통과)" if a.expect_a or a.expect_b else " (조건 검증 안 함)"))
     if len(mix - {None, "unknown"}) > 1:
         print("⚠ 측정 구간에 low/high 상태가 섞여 있음 — 효과가 상태 전환에 가려질 수 있으니 `observectl window --by state` 로 확인하세요.")
     if order not in ("ABAB", "ABABAB", "BABA", "BABABA") and len(set(conds)) == 2:
@@ -327,7 +352,7 @@ def main(argv=None):
     sub.add_parser("off").set_defaults(f=cmd_off)
     s = sub.add_parser("level"); s.add_argument("component"); s.add_argument("level"); s.set_defaults(f=cmd_level)
     s = sub.add_parser("mark"); s.add_argument("cond", nargs="?", default=""); s.add_argument("note", nargs="*"); s.add_argument("--clear", action="store_true"); s.set_defaults(f=cmd_mark)
-    s = sub.add_parser("window"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "none"]); s.set_defaults(f=cmd_window)
+    s = sub.add_parser("window"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "none"]); s.set_defaults(f=cmd_window)
     s = sub.add_parser("states"); s.add_argument("--since", default="-2h"); s.set_defaults(f=cmd_states)
     s = sub.add_parser("top"); s.add_argument("--since", default="-30m"); s.add_argument("--by", default="wake", choices=["cpu", "wake", "thr", "io"]); s.add_argument("-n", type=int, default=12); s.set_defaults(f=cmd_top)
     s = sub.add_parser("events"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--level", default="trace", choices=list(core.LEVELS)); s.add_argument("--grep"); s.set_defaults(f=cmd_events)
@@ -335,7 +360,8 @@ def main(argv=None):
     s = sub.add_parser("wakers"); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--waking", action="store_true"); s.set_defaults(f=cmd_wakers)
     s = sub.add_parser("drmdebug"); s.add_argument("sec", nargs="?", type=int, default=15); s.set_defaults(f=cmd_drmdebug)
     sub.add_parser("display").set_defaults(f=cmd_display)
-    s = sub.add_parser("ab"); s.add_argument("--since", default="-3h"); s.add_argument("--metric", default="psys_w", choices=list(METRICS)); s.add_argument("--threshold", type=float, default=0.3); s.add_argument("--settle", type=float, default=20); s.set_defaults(f=cmd_ab)
+    s = sub.add_parser("ab"); s.add_argument("--since", default="-3h"); s.add_argument("--metric", default="psys_w", choices=list(METRICS)); s.add_argument("--threshold", type=float, default=0.3); s.add_argument("--settle", type=float, default=20)
+    s.add_argument("--expect-a", help="A 구간 표본의 기대 조건 '경로=값' (예: dev.wifi.ps=off). 다르면 시험 무효"); s.add_argument("--expect-b", help="B 구간 표본의 기대 조건 (예: dev.wifi.ps=on)"); s.set_defaults(f=cmd_ab)
     s = sub.add_parser("hyprtrace"); s.add_argument("mode", choices=["on", "off"]); s.set_defaults(f=cmd_hyprtrace)
     a = p.parse_args(argv)
     a.f(a)

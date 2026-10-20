@@ -13,7 +13,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 | 하고 싶은 것 | 명령 |
 |---|---|
 | 지금 상태 | `observectl status` |
-| 구간 요약(상태/VT/SSID/덮개/AC/표지별) | `observectl window --since 11:00 --until 11:30 --by state` |
+| 구간 요약(상태/VT/SSID/덮개/AC/표지/실제 Wi-Fi 절전별 `--by wifips`) | `observectl window --since 11:00 --until 11:30 --by state` |
 | 낮은 전력 상태(low) 전환 시각 | `observectl states --since 3h` |
 | 상위 프로세스·스레드 | `observectl top --by wake` / `--by cpu` / `--by thr`(L1) / `--by io`(L1) |
 | **누가 CPU 를 깨우나**(타이머/하이타이머 함수, IRQ, workqueue) | `observectl wakers 10` (`--waking` 이면 깨우는 쪽 프로세스도) |
@@ -26,8 +26,8 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 
 ## 전력 A/B 측정 절차 (이 절차로 잰 것만 "측정"으로 표기)
 1. `observectl on L0`(또는 L1)을 켜고 안정화(≥ 2분). 어댑터/덮개/VT/Wi-Fi 상태를 `observectl status` 로 확인.
-2. **A 와 B 를 번갈아 최소 2쌍(ABAB)**: `observectl mark A` → 조건 A 를 60초 유지 → `observectl mark B` → 조건 B 를 60초 유지 → `observectl mark A` → … (조건을 바꾸는 작업은 표지 직후 settle 로 제외됨).
-3. `observectl ab --metric psys_w --threshold 0.3 --settle 20` 으로 판정. **쌍이 모두 같은 부호이고 평균 효과가 임계 이상일 때만 "확인(측정)"**, 아니면 "불확실". 불확실한 효과로는 코드를 바꾸지 않는다.
+2. **A 와 B 를 번갈아 최소 2쌍(ABAB)**: `observectl mark A` → 조건 A 를 60초 유지 → `observectl mark B` → 조건 B 를 60초 유지 → `observectl mark A` → … (조건을 바꾸는 작업은 표지 직후 settle 로 제외됨). **스크립트에서 root 명령은 `/run/wrappers/bin/sudo` 를 써야 한다**(PATH 앞에 `/run/current-system/sw/bin` 을 두면 setuid 가 아닌 sudo 가 잡힘), 바꾼 직후 값을 읽어 확인(`iw dev wlan0 get power_save` 등)하고 다르면 중단.
+3. `observectl ab --metric psys_w --threshold 0.3 --settle 40 --expect-a dev.wifi.ps=off --expect-b dev.wifi.ps=on` 으로 판정. **`--expect-*` 로 실제 조건을 검증한다** — 스크립트가 조건을 못 바꾸고 통계만 내는 사고(2026-10-20: 시험 스크립트의 sudo 경로 오류로 Wi-Fi 절전이 안 바뀐 채 "효과 없음"으로 잘못 결론) 를 막는다. 다르면 "무효". **쌍이 모두 같은 부호이고 평균 효과가 임계 이상일 때만 "확인(측정)"**, 아니면 "불확실". 불확실한 효과로는 코드를 바꾸지 않는다.
 4. 같은 구간에 low/high 상태가 섞였다는 경고가 나오면 `observectl window --by state` 로 확인 — 낮은 상태 전환이 효과를 가렸을 수 있다(2026-10-20 사무실 Wi-Fi 시험이 그랬음).
 5. 결과는 `power-evidence.md` 의 장부에 근거 수준과 함께 기록.
 

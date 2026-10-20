@@ -142,4 +142,8 @@ check("segments: 4구간 ABAB, 표지 직후 20초 제외", [c for c, _ in segs]
 A = [observe_cli.mean_of(g, lambda r: observe_cli.get(r, "pw.psys_w")) for c, g in segs if c == "A"]
 check("구간 평균 계산", abs(A[0] - 6.0) < 0.01 and abs(A[1] - 6.1) < 0.01, str(A))
 check("group_key: state/mark/ac", observe_cli.group_key(rows[0], "state") == "high" and observe_cli.group_key(rows[0], "mark") == "A" and observe_cli.group_key({"pw": {"ac": 1}}, "ac") == "AC")
+seg_t = [("A", [{"dev": {"wifi": {"ps": "off"}}}] * 3), ("B", [{"dev": {"wifi": {"ps": "on"}}}] * 2 + [{"dev": {"wifi": {"ps": "off"}}}])]
+check("expect_mismatch: 기대와 같으면 0", observe_cli.expect_mismatch(seg_t, "A", "dev.wifi.ps=off") == (0, 3))
+check("expect_mismatch: 바뀌지 않은 표본을 센다", observe_cli.expect_mismatch(seg_t, "B", "dev.wifi.ps=on") == (1, 3))
+check("group_key wifips", observe_cli.group_key({"dev": {"wifi": {"ps": "on"}}}, "wifips") == "on" and observe_cli.group_key({}, "wifips") == "?")
 finish("observe")
