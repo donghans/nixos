@@ -57,6 +57,10 @@ def group_key(s, by):
         return "AC" if get(s, "pw.ac") else "배터리"
     if by == "mark":
         return (s.get("mark") or {}).get("cond") or "-"
+    if by == "boot":
+        return get(s, "dev.boot") or "?"
+    if by == "quirks":
+        return get(s, "dev.quirks") or "?"
     if by == "wifips":
         return get(s, "dev.wifi.ps") or "?"
     return "전체"
@@ -355,7 +359,7 @@ def main(argv=None):
     sub.add_parser("off").set_defaults(f=cmd_off)
     s = sub.add_parser("level"); s.add_argument("component"); s.add_argument("level"); s.set_defaults(f=cmd_level)
     s = sub.add_parser("mark"); s.add_argument("cond", nargs="?", default=""); s.add_argument("note", nargs="*"); s.add_argument("--clear", action="store_true"); s.set_defaults(f=cmd_mark)
-    s = sub.add_parser("window"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "none"]); s.set_defaults(f=cmd_window)
+    s = sub.add_parser("window"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "boot", "quirks", "none"]); s.set_defaults(f=cmd_window)
     s = sub.add_parser("states"); s.add_argument("--since", default="-2h"); s.set_defaults(f=cmd_states)
     s = sub.add_parser("top"); s.add_argument("--since", default="-30m"); s.add_argument("--by", default="wake", choices=["cpu", "wake", "thr", "io"]); s.add_argument("-n", type=int, default=12); s.set_defaults(f=cmd_top)
     s = sub.add_parser("events"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--level", default="trace", choices=list(core.LEVELS)); s.add_argument("--grep"); s.set_defaults(f=cmd_events)

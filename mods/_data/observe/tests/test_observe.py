@@ -49,6 +49,10 @@ check("prune: 보존 일수를 넘긴 파일 삭제", core.prune(d, "samples", 1
 big = os.path.join(d, "samples-20260101.jsonl"); open(big, "w").write("x" * 2_000_000); os.utime(big, (time.time() - 10,) * 2)
 check("prune: 총 용량 초과 시 오래된 것부터", core.prune(d, "samples", 365, 1) >= 1 and len(os.listdir(d)) >= 1)
 
+core.append_jsonl(d, "future", {"t": time.time() + 9 * 3600, "i": 99})
+core.append_jsonl(d, "future", {"t": time.time() - 5, "i": 1})
+check("부팅 직후 9시간 앞선 가짜 미래 시각 줄은 건너뜀", [r["i"] for r in core.iter_jsonl(d, "future")] == [1])
+
 # --- 이벤트 로그
 ev = observe_events.Events("displayui")
 check("debug 는 displayui 에서 기록", ev.debug("hello", k=1) is True)
@@ -146,4 +150,6 @@ seg_t = [("A", [{"dev": {"wifi": {"ps": "off"}}}] * 3), ("B", [{"dev": {"wifi": 
 check("expect_mismatch: 기대와 같으면 0", observe_cli.expect_mismatch(seg_t, "A", "dev.wifi.ps=off") == (0, 3))
 check("expect_mismatch: 바뀌지 않은 표본을 센다", observe_cli.expect_mismatch(seg_t, "B", "dev.wifi.ps=on") == (1, 3))
 check("group_key wifips", observe_cli.group_key({"dev": {"wifi": {"ps": "on"}}}, "wifips") == "on" and observe_cli.group_key({}, "wifips") == "?")
+check("quirks_tag: 모두 있음/없음/일부", col.quirks_tag("a pcie_aspm=off acpi_osi=Linux irqpoll b") == "quirks" and col.quirks_tag("nowatchdog loglevel=3") == "no-quirks" and col.quirks_tag("irqpoll x").startswith("partial:irqpoll"))
+check("group_key boot/quirks", observe_cli.group_key({"dev": {"boot": "ab12", "quirks": "quirks"}}, "boot") == "ab12" and observe_cli.group_key({"dev": {"quirks": "no-quirks"}}, "quirks") == "no-quirks")
 finish("observe")

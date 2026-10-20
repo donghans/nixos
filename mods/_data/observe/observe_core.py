@@ -107,7 +107,9 @@ def prune(directory, prefix, days, max_mb):
 
 
 def iter_jsonl(directory, prefix, since=None, until=None):
-    """표본/이벤트를 시간순으로 돌려준다(키 "t" 가 epoch 초). 깨진 줄은 건너뜀."""
+    """표본/이벤트를 시간순으로 돌려준다(키 "t" 가 epoch 초). 깨진 줄은 건너뛰고, **현재보다 미래 시각(+5분 초과)인 줄도 건너뛴다** —
+    이 기기는 부팅 직후 약 30초 동안 시계가 9시간 앞서(RTC 가 로컬 시각 모드) 그때 기록된 표본의 t 가 가짜 미래 값이다."""
+    horizon = time.time() + 300
     for f in sorted(glob.glob(os.path.join(directory, prefix + "-*.jsonl"))):
         m = re.search(r"-(\d{8})\.jsonl$", f)
         if m:
@@ -127,7 +129,7 @@ def iter_jsonl(directory, prefix, since=None, until=None):
                 except ValueError:
                     continue
                 t = o.get("t")
-                if t is None or (since is not None and t < since) or (until is not None and t > until):
+                if t is None or t > horizon or (since is not None and t < since) or (until is not None and t > until):
                     continue
                 yield o
 

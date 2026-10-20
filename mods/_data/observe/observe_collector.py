@@ -114,6 +114,13 @@ def cpuidle_pct(prev, cur, wall_s, ncpu):
     return {k: round(max(0.0, (cur[k] - prev.get(k, cur[k])) / cap * 100), 2) for k in cur} if cap > 0 else {}
 
 
+def quirks_tag(cmdline):
+    """커널 인자에서 이 기기에서 의심 중인 3개(pcie_aspm=off, acpi_osi=Linux, irqpoll)를 태그로: 'quirks'(모두), 'no-quirks'(모두 없음), 아니면 'partial:…'. 부팅 간 비교용."""
+    toks = cmdline.split()
+    has = [t for t in ("pcie_aspm=off", "acpi_osi=Linux", "irqpoll") if t in toks]
+    return "quirks" if len(has) == 3 else "no-quirks" if not has else "partial:" + "+".join(has)
+
+
 def classify(cs):
     """깊은 절전 상태 분류. pc10 이 5% 이상이면 low. MSR 을 못 읽었으면 unknown."""
     if not cs or "pc10" not in cs:
@@ -334,6 +341,7 @@ class Sampler:
         bl = glob.glob(f"{SYS}/class/backlight/*/brightness")
         out["dev"] = {"vt": rd(f"{SYS}/class/tty/tty0/active"), "lid": (rd(f"{PROC}/acpi/button/lid/LID0/state").split() or [None])[-1],
                       "bl": rd(bl[0]) if bl else None, "wifi": self.wifi, "tlp": (rd("/run/tlp/last_pwr").split() or [None])[0],
+                      "boot": rd(f"{PROC}/sys/kernel/random/boot_id")[:8], "quirks": quirks_tag(rd(f"{PROC}/cmdline")),
                       "gpu_rpm": next((rd(f) for f in glob.glob(f"{SYS}/class/drm/card*/device/power/runtime_status")), None),
                       "audio_rpm": rd(f"{SYS}/bus/pci/devices/0000:00:1f.3/power/runtime_status") or None}
         self.prev = cur
