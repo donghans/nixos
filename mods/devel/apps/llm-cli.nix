@@ -11,9 +11,9 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   ...
 }: let
   # 노트북에서는 Claude Code TUI 의 애니메이션(스피너 등)을 줄여서 켠다(`--settings` 로 한 키만 덧씌움; 사용자 settings.json 은 Claude 가 직접 쓰는 가변 파일이라 건드리지 않음).
-  # **목적은 측정 위생**이다: 이 저장소의 목적은 Wayland 세션 사용 시 배터리 최적화이고, Claude 를 VT2(kmscon)에서 돌리는 것도 그 측정에 변수를 섞지 않으려는 것이다.
-  # 그런데 VT2 가 활성일 때 TUI 가 화면을 갱신하면 약 +1.3 W 가 섞인다(2026-10-20 측정, power-evidence.md #34). 이 설정이 그 교란을 줄이는지는 #35 에서 측정 중이며,
-  # VT1(Wayland)이 활성일 때는 비용 자체가 없을 수 있다(#34 의 T14). 효과가 없거나 필요 없으면 이 블록을 지운다. `CLAUDE_MOTION=normal claude` 로 끌 수 있다.
+  # 목적: (1) **측정 위생** — 이 저장소의 목적은 Wayland 세션 사용 시 배터리 최적화이고 Claude 를 VT2(kmscon)에 두는 것도 그 측정에 변수를 섞지 않으려는 것인데,
+  # VT2 가 활성일 때 TUI 가 화면을 갱신하면 약 +1.3 W 가 섞인다(2026-10-20 측정, power-evidence.md #34). (2) 화면 갱신이 줄면 PSR 등 모니터 출력 최적화가 더 잘 걸리므로
+  # 모션 감소는 효과 측정 결과와 무관하게 유지한다(사용자 결정). `CLAUDE_MOTION=normal claude` 로 끌 수 있다.
   reduceMotion = config.workspace.type == "laptop";
   reduceMotionSnippet = lib.optionalString reduceMotion ''
     if [ "''${CLAUDE_MOTION:-reduced}" != normal ]; then
