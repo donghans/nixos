@@ -6,8 +6,19 @@
 mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   pkgs,
   unstable,
+  config,
+  lib,
   ...
 }: let
+  # 노트북에서는 Claude Code TUI 의 애니메이션(스피너 등)을 줄여서 켠다(`--settings` 로 한 키만 덧씌움; 사용자 settings.json 은 Claude 가 직접 쓰는 가변 파일이라 건드리지 않음).
+  # 이유(2026-10-20 측정, power-evidence.md #34): kmscon 위에서 TUI 가 화면을 갱신하는 동안(스피너 등) 쉬는 상태보다 약 +1.3 W(psys, 배터리 모두), kmscon·Claude CPU 각 약 18%.
+  # 효과는 **측정 전**(#35)이며 `CLAUDE_MOTION=normal claude` 로 끌 수 있다(번갈아 시험용). 효과가 없으면 이 블록을 지운다.
+  reduceMotion = config.workspace.type == "laptop";
+  reduceMotionSnippet = lib.optionalString reduceMotion ''
+    if [ "''${CLAUDE_MOTION:-reduced}" != normal ]; then
+      set -- --settings '{"prefersReducedMotion":true}' "$@"
+    fi
+  '';
   # (목적: Wayland 터미널(kitty, alacritty 등)에서 LLM CLI의 Home/End 키 깨짐 현상 수정)
   #
   # (claude-code 쪽 패치는 제거함: 4월에 패키지가 네이티브 바이너리 배포로 바뀌면서 패치 대상 cli.js 가 사라져
@@ -88,6 +99,7 @@ in {
       claude() {
         sudo -v || return 1
         ( while sudo -n true 2>/dev/null; do sleep 60; kill -0 "$$" 2>/dev/null || exit; done & ) 2>/dev/null
+        ${reduceMotionSnippet}
         command claude "$@"
       }
     '';
