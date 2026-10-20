@@ -101,6 +101,21 @@ pc = col.pkg_cstate_pct({"tsc": 0, "pc2": 0, "pc10": 0}, {"tsc": 1000, "pc2": 30
 check("pkg_cstate_pct: TSC 대비 %", pc == {"pc2": 30.0, "pc10": 25.0}, str(pc))
 check("pkg_cstate_pct: 증가 없음/역행은 빈 값", col.pkg_cstate_pct({"tsc": 5}, {"tsc": 5}) == {})
 check("cpuidle_pct: CPU 시간 대비 %", col.cpuidle_pct({"C6": 0}, {"C6": 4_000_000}, 1.0, 8) == {"C6": 50.0})
+sd = col.statsd_lines({"pw": {"psys_w": 4.1234, "pkg_w": 1.5, "batt_w": 5.0, "status": "Discharging", "batt_pct": "50"}, "cs": {"pc8": 12.0, "pc10": 0.0},
+                       "state": "high", "proc": [{"wake": 3}, {"wake": 4}], "irq": {"cpu_busy_pct": 2.0},
+                       "dev": {"psr": {"mode": "PSR1 enabled", "sink": "inactive"}, "wifi": {"ps": "off"}}})
+sdm = dict(l.split("|")[0].split(":") for l in sd)
+check("statsd_lines: 게이지 형식·접두사", all(l.startswith("observe.") and l.endswith("|g") for l in sd), str(sd))
+check("statsd_lines: 방전 중이면 방전 전력만 값, 충전 전력 0", sdm["observe.batt_discharge_w"] == "5.0" and sdm["observe.batt_charge_w"] == "0", str(sdm))
+check("statsd_lines: 상태/PSR/깨움/패키지 C-state", sdm["observe.state_low"] == "0" and sdm["observe.psr_on"] == "1" and sdm["observe.psr_sink_active"] == "0" and sdm["observe.wake_per_s"] == "7" and sdm["observe.pkg_pc8"] == "12.0" and sdm["observe.pkg_pc10"] == "0.0", str(sdm))
+check("statsd_lines: 값이 없으면 줄을 만들지 않는다(문자열은 보내지 않음)", "observe.pkg_pc2" not in sdm and "observe.psys_w" in sdm and not any(not v.replace(".", "", 1).replace("-", "", 1).isdigit() for v in sdm.values()))
+check("statsd_lines: 빈 표본은 빈 목록", col.statsd_lines({}) == [])
+import socket as _s
+rx = _s.socket(_s.AF_INET, _s.SOCK_DGRAM); rx.bind(("127.0.0.1", 0)); rx.settimeout(2)
+col.STATSD_ADDR = rx.getsockname()
+check("statsd_send: UDP 로 실제 전송", col.statsd_send({"pw": {"psys_w": 3.0}}) == 1 and rx.recv(1000).decode() == "observe.psys_w:3.0|g")
+col.STATSD_ADDR = ("127.0.0.1", 1)                                   # 아무도 안 듣는 포트: 오류 없이 지나가야 한다
+check("statsd_send: 수신자가 없어도 예외 없음", isinstance(col.statsd_send({"pw": {"psys_w": 3.0}}), int))
 check("classify: pc10 ≥ 5% 면 low", col.classify({"pc10": 24.0}) == "low" and col.classify({"pc10": 0.0}) == "high" and col.classify({}) == "unknown")
 tr = col.parse_trace("""# tracer: nop
           <idle>-0       [003] d.h1.  100.000001: hrtimer_expire_entry: hrtimer=00000000 function=tick_nohz_highres_handler now=1

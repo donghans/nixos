@@ -148,6 +148,49 @@ def classify(cs):
     return "low" if cs["pc10"] >= 5 else "high"
 
 
+STATSD_ADDR = ("127.0.0.1", 8125)
+
+
+def statsd_lines(s, prefix="observe"):
+    """표본 숫자 일부를 Netdata statsd 게이지 줄로 만든다(관측의 원본은 JSONL 이고 이건 한쪽 방향 미러: Netdata 차트와 같은 시간축에서 겹쳐 보려는 용도).
+    문자열·이벤트·프로세스 상세는 보내지 않는다. 방전/충전 전력은 섞이지 않게 둘로 나누고 해당 없을 땐 0."""
+    pw, cs, dev = s.get("pw") or {}, s.get("cs") or {}, s.get("dev") or {}
+    psr = dev.get("psr") or {}
+    batt = pw.get("batt_w")
+    st = pw.get("status")
+    vals = {
+        "psys_w": pw.get("psys_w"), "pkg_w": pw.get("pkg_w"), "core_w": pw.get("core_w"), "uncore_w": pw.get("uncore_w"),
+        "batt_discharge_w": batt if st == "Discharging" and batt is not None else 0 if batt is not None else None,
+        "batt_charge_w": batt if st == "Charging" and batt is not None else 0 if batt is not None else None,
+        "batt_pct": float(pw["batt_pct"]) if pw.get("batt_pct") not in (None, "") else None,
+        "state_low": (1 if s.get("state") == "low" else 0) if s.get("state") in ("low", "high") else None,
+        "psr_on": (1 if "enabled" in str(psr.get("mode")) else 0) if psr else None,
+        "psr_sink_active": (1 if psr.get("sink") == "active" else 0) if psr else None,
+        "wake_per_s": sum(p.get("wake", 0) for p in s.get("proc") or []) if s.get("proc") is not None else None,
+        "cpu_busy_pct": (s.get("irq") or {}).get("cpu_busy_pct"),
+        "wifi_ps_on": (1 if (dev.get("wifi") or {}).get("ps") == "on" else 0) if (dev.get("wifi") or {}).get("ps") else None,
+    }
+    for k in ("pc2", "pc3", "pc6", "pc8", "pc10", "s0ix_pct"):
+        vals["pkg_" + k if k.startswith("pc") else k] = cs.get(k)
+    return [f"{prefix}.{k}:{round(v, 3)}|g" for k, v in vals.items() if isinstance(v, (int, float))]
+
+
+def statsd_send(s, sock=None):
+    """미러 전송(UDP, 실패는 무시: Netdata 가 꺼져 있어도 수집은 계속). 보낸 줄 수를 돌려준다."""
+    import socket
+    lines = statsd_lines(s)
+    if not lines:
+        return 0
+    try:
+        sk = sock or socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sk.sendto("\n".join(lines).encode(), STATSD_ADDR)
+        if sock is None:
+            sk.close()
+    except OSError:
+        return 0
+    return len(lines)
+
+
 def parse_trace(text):
     """ftrace 텍스트 → {'timer': Counter(함수), 'hrtimer': Counter(함수), 'irq': Counter('N name'), 'work': Counter(함수), 'waker': Counter(comm)}."""
     out = {k: collections.Counter() for k in ("timer", "hrtimer", "irq", "work", "waker")}
@@ -517,6 +560,7 @@ def main():
                     last_knobs = time.time()
             s["mark"] = core.read_control().get("mark")        # 표본 직전에 다시 읽는다(루프 시작에서 읽은 값을 쓰면 표지 변경이 한 표본 늦게 반영됨)
             core.append_jsonl(core.SAMPLE_DIR, "samples", s)
+            statsd_send(s)
             if time.monotonic() - last_prune > 3600:
                 core.prune(core.SAMPLE_DIR, "samples", ctl["retention_days"], ctl["max_total_mb"])
                 last_prune = time.monotonic()
