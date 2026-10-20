@@ -30,21 +30,30 @@ import powerview as pv
 
 
 class Panel(Static):
-    """크기가 바뀔 때마다 provider(폭, 높이) 로 내용을 새로 만들어 그리는 칸. provider 는 Text 또는 (Text, 부제 문자열)을 돌려준다(부제는 박스 아래 테두리에 표시)."""
+    """provider(폭, 높이) 로 내용을 만들어 그리는 칸. provider 는 Text 또는 (Text, 부제 문자열)을 돌려준다(부제는 박스 아래 테두리에 표시).
+    내용은 build() 에서 미리 만들어 캐시한다 — 부제(테두리)를 그리는 도중에 바꾸면 테두리가 이전 값으로 남기 때문이다.
+    build() 는 데이터가 갱신될 때(App.redraw)와 크기가 바뀔 때 부른다."""
 
     def __init__(self, provider, **kw):
         super().__init__(**kw)
         self.provider = provider
+        self._text = Text("")
 
-    def render(self):
+    def build(self):
         w, h = self.size.width, self.size.height
         if not (w and h):
-            return Text("")
+            return
         out = self.provider(max(20, w), max(3, h))
-        text, sub = out if isinstance(out, tuple) else (out, "")
-        if (self.border_subtitle or "") != sub:      # 같을 때는 건드리지 않는다(바꾸면 다시 그려져 무한 반복)
+        self._text, sub = out if isinstance(out, tuple) else (out, "")
+        if (self.border_subtitle or "") != sub:
             self.border_subtitle = sub
-        return text
+
+    def on_resize(self, _ev):
+        self.build()
+        self.refresh()
+
+    def render(self):
+        return self._text
 
 
 class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
@@ -125,6 +134,7 @@ class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
 
     def redraw(self):
         for panel in self.query(Panel):
+            panel.build()
             panel.refresh()
         self._fill_compare()
         label = pv.RANGES[self.range_i][0]

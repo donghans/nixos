@@ -131,6 +131,8 @@ else:
             await pilot.press("2"); await pilot.pause(0.3)
             check("화면: 시계열은 그래프마다 박스(4개 + 띠 박스)", len(app.query("#series .box")) == 5 and app.query_one("#ser0").border_title == "배터리 소비 (V×I, 방전 중)", str(len(app.query("#series .box"))))
             check("화면: 박스 아래 테두리에 통계", "평균" in (app.query_one("#ser1").border_subtitle or ""), str(app.query_one("#ser1").border_subtitle))
+            check("화면: 띠 박스 부제에 표본 수(0 아님)", "표본 0개" not in (app.query_one("#serbands").border_subtitle or "") and "표본" in (app.query_one("#serbands").border_subtitle or ""), str(app.query_one("#serbands").border_subtitle))
+            check("화면: 렌더 결과(화면 글자)에도 부제 반영", any("평균" in "".join(s.text for s in app.screen._compositor.render_strips()).replace("\n", "") for _ in [0]))
             await pilot.press("question_mark"); await pilot.pause(0.3)
             check("화면: ? 로 도움말(키 목록)", type(app.screen).__name__ == "HelpScreen")
             await pilot.press("escape"); await pilot.pause(0.2)
