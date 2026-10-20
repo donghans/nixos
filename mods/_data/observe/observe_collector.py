@@ -294,6 +294,8 @@ class Sampler:
             v, i = rd(self.bat + "/voltage_now"), rd(self.bat + "/current_now")
             pw["batt_w"] = round(int(v) * abs(int(i)) / 1e12, 3) if v and i else None
             pw["batt_pct"] = rd(self.bat + "/capacity")
+            pw["q_uah"] = int(rd(self.bat + "/charge_now") or 0) or None        # 누적 계량값(1 mAh 단위, ≈15 mWh) — 10분 이상 평균에 쓰는 가장 믿을 만한 기준(observectl energy)
+            pw["v_uv"] = int(v) if v else None
             pw["status"] = rd(self.bat + "/status")
         pw["ac"] = max([int(rd(d + "/online", "0") or 0) for d in glob.glob(f"{SYS}/class/power_supply/*") if rd(d + "/type") == "Mains"] or [0])
         out["pw"] = pw

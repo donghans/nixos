@@ -152,4 +152,13 @@ check("expect_mismatch: 바뀌지 않은 표본을 센다", observe_cli.expect_m
 check("group_key wifips", observe_cli.group_key({"dev": {"wifi": {"ps": "on"}}}, "wifips") == "on" and observe_cli.group_key({}, "wifips") == "?")
 check("quirks_tag: 모두 있음/없음/일부", col.quirks_tag("a pcie_aspm=off acpi_osi=Linux irqpoll b") == "quirks" and col.quirks_tag("nowatchdog loglevel=3") == "no-quirks" and col.quirks_tag("irqpoll x").startswith("partial:irqpoll"))
 check("group_key boot/quirks", observe_cli.group_key({"dev": {"boot": "ab12", "quirks": "quirks"}}, "boot") == "ab12" and observe_cli.group_key({"dev": {"quirks": "no-quirks"}}, "quirks") == "no-quirks")
+erows = []
+for i in range(21):   # 10분(30초 × 20), 3600 mAh 전지 가정: 8 W → 15 V 에서 약 0.533 A → 30초에 4.44 mAh. 1 mAh 단위로 양자화
+    q = 2_900_000 - round(i * 30 * 8.0 / 15.0 / 3600 * 1e6 / 1000) * 1000
+    erows.append({"t": 1000.0 + i * 30, "state": "low", "pw": {"q_uah": q, "v_uv": 15_000_000, "status": "Discharging", "psys_w": 5.0 + (i % 2), "batt_w": 9.0}})
+en = observe_cli.energy_by_group(erows, "state")["low"]
+check("energy_by_group: 누적 계량으로 8 W 평균을 복원(양자화 오차 ±0.2 W)", abs(en["coulomb_w"] - 8.0) < 0.2 and abs(en["hours"] * 60 - 10.0) < 0.01, str(en))
+check("energy_by_group: psys/V×I 평균도 함께", abs(en["psys_w"] - 5.5) < 0.1 and abs(en["vi_w"] - 9.0) < 1e-9)
+erows[5]["pw"]["status"] = "Charging"
+check("충전 중인 쌍은 제외", observe_cli.energy_by_group(erows, "state")["low"]["n"] == 18)
 finish("observe")

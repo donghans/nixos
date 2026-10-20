@@ -6,6 +6,7 @@
   observectl level <컴포넌트|*> <수준>        이벤트 로그 수준(trace|debug|info|warn|error)을 즉시 변경
   observectl mark <조건> [메모] / --clear     실험 조건 표지(A/B …). 이후 표본이 이 조건으로 묶임
   observectl window [--since 11:00 --until 11:30 --by state|vt|ssid|mark|lid|ac]   그룹별 전력/C-state 요약
+  observectl energy [--since 1h --by state|quirks]   누적 계량(charge_now) 기준 평균 전력을 psys·V×I 와 나란히 비교(측정 검증용)
   observectl states [--since 2h]           low/high(깊은 절전 여부) 전환 시각과 지속 시간
   observectl top [--since 30m] [--by cpu|wake|thr|io]   프로세스/스레드 상위
   observectl events [--since 1h --comp displayui --level debug --grep 키워드]   우리 유틸리티 이벤트 로그
@@ -105,6 +106,39 @@ def cmd_mark(a):
     core.write_control({"mark": {"cond": a.cond, "t": round(time.time(), 1), "note": " ".join(a.note)}})
     core.append_jsonl(core.state_dir(), "events", {"t": round(time.time(), 3), "pid": os.getpid(), "comp": "observectl", "lvl": "info", "ev": "mark", "cond": a.cond, "note": " ".join(a.note)})
     print(f"표지: {a.cond} ({core.hms(time.time())})")
+
+
+def energy_by_group(rows, by, max_gap=90):
+    """연속한 표본 쌍(a→b)마다 b 의 그룹에 (방전량 ΔQ, 시간 dt, psys·V×I 평균)을 누적한다. 누적 계량값(q_uah)은 1 mAh 단위라
+    짧은 쌍으로는 양자화가 크므로 **그룹 전체를 합산**해서 평균 전력을 낸다. 반환: {그룹: dict(n, hours, coulomb_w, psys_w, vi_w)} (방전 중인 쌍만)."""
+    acc = collections.defaultdict(lambda: {"dq": 0.0, "dt": 0.0, "wh": 0.0, "n": 0, "psys": [], "vi": []})
+    for a, b in zip(rows, rows[1:]):
+        qa, qb = get(a, "pw.q_uah"), get(b, "pw.q_uah")
+        va, vb = get(a, "pw.v_uv"), get(b, "pw.v_uv")
+        dt = b["t"] - a["t"]
+        if None in (qa, qb, va, vb) or not (0 < dt <= max_gap) or get(b, "pw.status") != "Discharging" or get(a, "pw.status") != "Discharging":
+            continue
+        g = acc[group_key(b, by)]
+        dq = qa - qb                                   # µAh (방전이면 양수)
+        g["dq"] += dq; g["dt"] += dt; g["n"] += 1
+        g["wh"] += dq / 1e6 * ((va + vb) / 2) / 1e6    # Wh
+        for lst, key in ((g["psys"], "pw.psys_w"), (g["vi"], "pw.batt_w")):
+            x = get(b, key)
+            if isinstance(x, (int, float)):
+                lst.append(x)
+    return {k: {"n": g["n"], "hours": g["dt"] / 3600, "coulomb_w": g["wh"] / (g["dt"] / 3600) if g["dt"] else float("nan"),
+                "psys_w": stats.mean(g["psys"]), "vi_w": stats.mean(g["vi"])} for k, g in acc.items() if g["dt"] > 0}
+
+
+def cmd_energy(a):
+    rows = samples(core.parse_when(a.since), core.parse_when(a.until) if a.until else None)
+    res = energy_by_group(rows, a.by)
+    if not res:
+        sys.exit("누적 계량값(q_uah)이 있는 방전 표본이 없습니다(수집기를 새 버전으로 재시작한 뒤 쌓인 표본만 가능)")
+    print(f"누적 계량 기준 평균 전력 vs psys vs 순간 V×I — 그룹 기준 {a.by} (쌍을 합산하므로 짧은 그룹은 부정확)")
+    print(f"{'그룹':<18}{'n':>4}{'시간(분)':>9}{'계량 W':>8}{'psys W':>8}{'V×I W':>8}{'계량−psys':>10}{'V×I−계량':>10}")
+    for k, g in sorted(res.items(), key=lambda kv: -kv[1]["hours"]):
+        print(f"{str(k)[:17]:<18}{g['n']:>4}{g['hours'] * 60:>9.1f}{fmt(g['coulomb_w'], 8)}{fmt(g['psys_w'], 8)}{fmt(g['vi_w'], 8)}{fmt(g['coulomb_w'] - g['psys_w'], 10)}{fmt(g['vi_w'] - g['coulomb_w'], 10)}")
 
 
 def cmd_window(a):
@@ -360,6 +394,7 @@ def main(argv=None):
     s = sub.add_parser("level"); s.add_argument("component"); s.add_argument("level"); s.set_defaults(f=cmd_level)
     s = sub.add_parser("mark"); s.add_argument("cond", nargs="?", default=""); s.add_argument("note", nargs="*"); s.add_argument("--clear", action="store_true"); s.set_defaults(f=cmd_mark)
     s = sub.add_parser("window"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "boot", "quirks", "none"]); s.set_defaults(f=cmd_window)
+    s = sub.add_parser("energy"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "boot", "quirks", "none"]); s.set_defaults(f=cmd_energy)
     s = sub.add_parser("states"); s.add_argument("--since", default="-2h"); s.set_defaults(f=cmd_states)
     s = sub.add_parser("top"); s.add_argument("--since", default="-30m"); s.add_argument("--by", default="wake", choices=["cpu", "wake", "thr", "io"]); s.add_argument("-n", type=int, default=12); s.set_defaults(f=cmd_top)
     s = sub.add_parser("events"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--level", default="trace", choices=list(core.LEVELS)); s.add_argument("--grep"); s.set_defaults(f=cmd_events)
