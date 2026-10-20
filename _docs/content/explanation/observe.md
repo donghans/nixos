@@ -51,3 +51,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 - **표지(mark)가 한 표본 늦게 반영되던 버그**(2026-10-20): 수집기가 제어 파일을 루프 시작에서만 읽어서, `observectl mark` 변경이 다음 표본에야 반영됐다. 실험 사이의 `mark --clear` 뒤 잔여 표본이 이전 조건으로 남아 `ab` 의 구간이 5개(BABAB)로 갈리고 "무효" 판정이 났다. 수정: 표본 직전에 제어 파일을 다시 읽고, `ab` 는 표본 5개 미만 구간을 제외(`--min-samples`).
 - **스크립트의 sudo 경로**: PATH 앞에 `/run/current-system/sw/bin` 을 두면 setuid 가 아닌 `sudo` 가 잡혀 조건이 안 바뀐다 → `/run/wrappers/bin` 을 앞에 둘 것. 그래서 `ab --expect-a/--expect-b` 로 실제 조건을 검증한다.
 
+## 예제 스크립트 (`mods/_data/observe/examples/`)
+- `wifi_abab.sh` — 검증형 Wi-Fi 절전 A/B(바꾼 직후 실제 값 확인, `--expect-*` 로 판정 검증). 다른 조건(Netdata, 장치 PM 등)을 바꿀 때의 틀로 쓴다.
+- `wifi_switch.sh` — Wi-Fi 프로필 전환 + 게이트웨이 핑 실패 시 자동 복귀(원격 세션 보호).
+
