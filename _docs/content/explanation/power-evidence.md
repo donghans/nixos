@@ -28,4 +28,5 @@
 | 22 | 작업 중 kmscon 36%·Claude Code 32% CPU(80초, L1) | **측정(활성 작업 중 1회)** | 스레드별 표 16개 표본 | 대기 중(idle)일 때 값은 따로 측정 필요 |
 | 23 | 8초 `wakers`(AC, L1 수집 중): `tick_nohz_handler` 1476/s, `hrtimer_wakeup` 787/s, IRQ xhci_hcd 40/s·acpi 34/s·i915 20/s | **측정(1회)** | ftrace 8.2초, 21583건 | 낮은/높은 상태, 배터리/덮개 닫힘에서 반복해 비교 |
 | 24 | 깨우는 쪽 상위: HeapHelper(Claude Code V8 스레드) 232/s, go.d.plugin(Netdata) 144/s, .claude 121/s, actix-rt(meilisearch) 65/s, LIBSENSORS(Netdata) 50/s, idlejitter(Netdata) 48/s | **측정(1회)** | `wakers --waking` 8초 | 같은 방식으로 상태별 반복 |
+| 25 | **낮은 상태**에서 Wi-Fi 절전 켬/끔은 차이 없음(psys +0.02 W, 배터리 −0.005 W, 쌍별 부호 반대) | **측정(1회, ABAB 2쌍)** | 사무실 Wi-Fi(2.4 GHz), 덮개 닫힘, 배터리, 63개 표본 전부 low(pc10 약 48%, 배터리 3.6 W/psys 2.6 W/패키지 1.4 W), `observectl ab` 판정 불확실(효과 ±0.05 W 이내) | 높은 상태에서 같은 시험(#26) |
 
