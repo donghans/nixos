@@ -32,17 +32,29 @@ SCALES = [1, 1.25, 1.5, 1.6, 1.75, 2, 2.5, 3]
 RELS = {"above": "위", "below": "아래", "left": "왼쪽", "right": "오른쪽"}
 ALIGNS = {"start": "시작(위/왼쪽) 맞춤", "center": "가운데 맞춤", "end": "끝(아래/오른쪽) 맞춤"}
 
-# 확장 배치(외부 모니터를 노트북 기준 어디에 둘지). 모두 가운데 정렬. stack = 기본(외부 위, 노트북 아래)
+# 확장 배치(외부 모니터를 내장 화면 기준 어디에 둘지). 모두 가운데 정렬. stack = 기본(외부 위, 내장 아래)
 ARRANGES = {
-    "stack": "위아래: 외부 위 / 노트북 아래",
-    "left": "좌우: 외부 왼쪽 / 노트북 오른쪽",
-    "right": "좌우: 외부 오른쪽 / 노트북 왼쪽",
+    "stack": "위아래: 외부 위 / 내장 아래",
+    "left": "좌우: 외부 왼쪽 / 내장 오른쪽",
+    "right": "좌우: 외부 오른쪽 / 내장 왼쪽",
+}
+
+# PC(내장 패널 없음): 첫 모니터가 메인, 나머지가 보조. 화면을 끄는 선택지(메인만/보조만)는 두지 않는다(모니터별로 켜고 끌 수는 있음).
+ARRANGES_PC = {
+    "stack": "위아래: 보조 위 / 메인 아래",
+    "left": "좌우: 보조 왼쪽 / 메인 오른쪽",
+    "right": "좌우: 보조 오른쪽 / 메인 왼쪽",
+}
+
+LAYOUTS_PC = {
+    "extend": "확장 (메인 + 보조)",
+    "mirror": "미러 (보조에 메인을 복제)",
 }
 
 LAYOUTS = {
-    "extend": "확장 (노트북 + 외부)",
+    "extend": "확장 (내장 + 외부)",
     "mirror": "미러",
-    "internal": "노트북 화면만",
+    "internal": "내장 화면만",
     "external": "외부 화면만",
 }
 
@@ -53,6 +65,6 @@ BUILTIN_PRESETS = {
     "presentation-1200p": {"label": "프리젠테이션 1920x1200 (미러)", "layout": "mirror", "modes": {"@external": "1920x1200@60"}},
     "presentation-900p": {"label": "프리젠테이션 1600x900 (미러)", "layout": "mirror", "modes": {"@external": "1600x900@60"}},
     "presentation-720p": {"label": "프리젠테이션 1280x720 (미러)", "layout": "mirror", "modes": {"@external": "1280x720@60"}},
-    "laptop-1200p": {"label": "노트북만 1920x1200", "layout": "internal", "modes": {"@internal": "1920x1200@60"}},
-    "laptop-native": {"label": "노트북만 2560x1600 60Hz", "layout": "internal", "modes": {"@internal": "2560x1600@60"}},
+    "laptop-1200p": {"label": "내장만 1920x1200", "layout": "internal", "modes": {"@internal": "1920x1200@60"}},
+    "laptop-native": {"label": "내장만 2560x1600 60Hz", "layout": "internal", "modes": {"@internal": "2560x1600@60"}},
 }

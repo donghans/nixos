@@ -7,7 +7,7 @@ import json
 import subprocess
 import sys
 from .config import ARRANGES, BUILTIN_PRESETS, COMMON_HZ, COMMON_RES, LAYOUTS, POSTURE, RELS
-from .hypr import fmt_mode, get_monitors, hyprctl
+from .hypr import fmt_mode, get_monitors, hyprctl, split_roles
 from .state import load_state, locked, save_state
 from .apply import sync_touch, target_transform
 from .transaction import Transaction, _pending_clear, _pending_load, cancel_timer, revert_pending
@@ -152,8 +152,9 @@ def cmd_present(a) -> int:
     st = mutated_state()
     before = {k: copy.deepcopy(st[k]) for k in ("layout", "monitors", "pos")}
     mons = get_monitors()
-    ext = next((m for m in mons if not m.internal), None)
-    target = ext or next((m for m in mons if m.internal), None)
+    mains, subs = split_roles(mons)
+    ext = subs[0] if subs else None
+    target = ext or (mains[0] if mains else None)
     if target is None:
         print("모니터 없음", file=sys.stderr)
         return 1
@@ -225,9 +226,9 @@ def main(argv: list[str]) -> int:
     s.add_argument("value")
     s.add_argument("monitor", nargs="?", help="기본은 내장 화면")
     s.set_defaults(fn=cmd_rotate)
-    s = sub.add_parser("layout", help="확장/미러/노트북만/외부만")
+    s = sub.add_parser("layout", help="확장/미러/내장만/외부만")
     s.add_argument("name", choices=list(LAYOUTS))
-    s.add_argument("--arrange", choices=list(ARRANGES), help="확장 배치(가운데 정렬): stack=외부 위/노트북 아래, left=외부 왼쪽, right=외부 오른쪽")
+    s.add_argument("--arrange", choices=list(ARRANGES), help="확장 배치(가운데 정렬): stack=외부 위/내장 아래, left=외부 왼쪽, right=외부 오른쪽")
     s.set_defaults(fn=cmd_layout)
     s = sub.add_parser("set", help="해상도/주사율/배율/위치 변경")
     s.add_argument("monitor")

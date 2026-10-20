@@ -75,6 +75,18 @@ def fmt_mode(w: int, h: int, hz: float) -> str:
     return f"{w}x{h}@{('%.2f' % hz).rstrip('0').rstrip('.')}"
 
 
+def split_roles(mons: list["Mon"]) -> tuple[list["Mon"], list["Mon"]]:
+    """(메인, 보조) 모니터 목록. 내장 패널(노트북)이 있으면 그것이 메인, 없으면(PC) 첫 모니터가 메인이고 나머지가 보조"""
+    internals = [m for m in mons if m.internal]
+    if internals:
+        return internals, [m for m in mons if not m.internal]
+    return mons[:1], mons[1:]
+
+
+def has_internal(mons: list["Mon"]) -> bool:
+    return any(m.internal for m in mons)
+
+
 def get_monitors() -> list[Mon]:
     r = hyprctl("monitors", "all", "-j")
     data = json.loads(r.stdout or "[]")

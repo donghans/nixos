@@ -1,6 +1,6 @@
 """구성 계산(순수 함수): 상태 + 모니터 → 모니터별 규칙, Lua 규칙 문자열."""
 from __future__ import annotations
-from .hypr import Mon
+from .hypr import Mon, split_roles
 
 
 # ───────────────────────── 구성 계산 ─────────────────────────
@@ -11,8 +11,8 @@ def _off(ref_len: int, my_len: int, align: str) -> int:
 def build(mons: list[Mon], st: dict) -> tuple[dict, str]:
     """상태 + 현재 모니터 목록 → 모니터별 규칙. (규칙, 실제로 적용된 레이아웃) 을 돌려준다.
     연결된 모니터로 불가능한 레이아웃(예: 외장이 없는데 '외부만')은 확장으로 바꿔 화면이 모두 꺼지지 않게 한다."""
-    internals = [m for m in mons if m.internal]
-    externals = [m for m in mons if not m.internal]
+    internals, externals = split_roles(mons)        # 메인/보조 (노트북이면 내장/외부, PC 이면 첫 모니터/나머지)
+    real_internal = any(m.internal for m in mons)
     layout = st.get("layout", "extend")
     if layout in ("mirror", "external") and not externals:
         layout = "extend"
@@ -39,14 +39,14 @@ def build(mons: list[Mon], st: dict) -> tuple[dict, str]:
         sizes[m.name] = m.logical(mode, scale, tr)
         cfg[m.name] = {"mode": mode, "scale": scale, "transform": tr}
 
-    layout_mons = [m for m in enabled if not (layout == "mirror" and m.internal)]
+    layout_mons = [m for m in enabled if not (layout == "mirror" and m in internals)]
     order = [m.name for m in layout_mons]
 
     def default_spec(m: Mon) -> dict | None:
         i = order.index(m.name)
         if i == 0:
             return None
-        if layout == "extend" and m.name == (externals[0].name if externals else "") and internals:
+        if layout == "extend" and m.name == (externals[0].name if externals else "") and real_internal:
             return {"rel": "above", "of": internals[0].name, "align": "center"}
         return {"rel": "right", "of": order[i - 1], "align": "center"}
 
@@ -78,7 +78,7 @@ def build(mons: list[Mon], st: dict) -> tuple[dict, str]:
     for m in layout_mons:
         cfg[m.name]["x"], cfg[m.name]["y"] = resolve(m.name)
     for m in enabled:
-        if layout == "mirror" and m.internal:
+        if layout == "mirror" and m in internals:
             cfg[m.name]["mirror"] = mirror_src.name
     return cfg, layout
 

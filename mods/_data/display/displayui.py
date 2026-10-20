@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """displayui — Hyprland 화면 관리 TUI (Textual). 코어는 displayctl.py
 
-왼쪽: 화면 모드(확장/미러/노트북만/외부만)와 프리셋(프리젠테이션 등). Enter 로 바로 적용.
+왼쪽: 화면 모드(확장/미러/내장만/외부만)와 프리셋(프리젠테이션 등). Enter 로 바로 적용.
 오른쪽: 모니터 목록과, 선택한 모니터의 해상도·주사율·배율·상대 위치. 적용하면 10초 안에 확인하지 않으면 되돌린다
 (되지 않는 모드로 화면이 안 나와도 스스로 복구되게).
 
@@ -238,17 +238,21 @@ class DisplayUI(App):
         st = dc.load_state()
         cur = st["layout"] if st else "extend"
         arr = dc.current_arrange(st, self.mons)
-        for k, label in dc.LAYOUTS.items():
+        laptop = dc.has_internal(self.mons)     # 내장 패널이 있으면 노트북 용어/선택지, 없으면 PC(메인/보조)
+        layouts, arranges = (dc.LAYOUTS, dc.ARRANGES) if laptop else (dc.LAYOUTS_PC, dc.ARRANGES_PC)
+        for k, label in layouts.items():
             ol.add_option(Option(("● " if k == cur and not (st and st.get("preset")) else "  ") + label, id=f"layout:{k}"))
         # 확장 배치(위아래/좌우, 모두 가운데 정렬). 위쪽 4줄의 순서는 그대로 둬서 ↓ Enter 같은 기존 동작이 바뀌지 않게 별도 구역으로 둠
         ol.add_option(Option("── 확장 배치 ──", disabled=True))
         in_extend = cur == "extend" and not (st and st.get("preset"))
-        for ak, alabel in dc.ARRANGES.items():
+        for ak, alabel in arranges.items():
             ol.add_option(Option(("● " if in_extend and arr == ak else "  ") + alabel, id=f"arrange:{ak}"))
         if in_extend and arr == "custom":
             ol.add_option(Option("● 사용자 지정 배치 (아래 위치 설정)", disabled=True))
         ol.add_option(Option("── 프리셋 ──", disabled=True))
         for k, v in dc.BUILTIN_PRESETS.items():
+            if not laptop and v["layout"] == "internal":
+                continue                      # 내장 화면 전용 프리셋
             ol.add_option(Option(("● " if st and st.get("preset") == k else "  ") + v["label"], id=f"preset:{k}"))
         users = dc.load_presets()
         for k in users:

@@ -203,4 +203,27 @@ check("target_transform 순수 함수: laptop 은 항상 0", dc.target_transform
 r = subprocess.run([sys.executable, "-I", DC, "rotate", "auto"], capture_output=True, text=True, env=dict(os.environ, DISPLAYCTL_HYPRCTL=os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_hyprctl_down.sh")))
 check("컴포지터가 없어 hyprctl 이 JSON 이 아닌 문장을 내도 rotate auto 는 오류 없이 종료(0)", r.returncode == 0 and "Traceback" not in r.stderr, r.stderr[-120:])
 
+# ── PC(내장 패널 없음): 첫 모니터가 메인, 나머지가 보조 ──
+reset()
+base = json.load(open(FS)) if os.path.exists(FS) else None
+if base is None:
+    run("layout", "extend"); base = json.load(open(FS))
+for d, n in zip(base, ("DP-1", "DP-2")):
+    d["name"] = n
+d1, d2 = base
+d1.update(x=0, y=0, width=2560, height=1600, refreshRate=60.0, availableModes=["2560x1600@60.00Hz"]); d2.update(x=0, y=-2560)
+json.dump(base, open(FS, "w"))
+mm = dc.get_monitors()
+check("PC: 내장이 없으면 노트북 판정이 아님", not dc.has_internal(mm))
+mains, subs = dc.split_roles(mm)
+check("PC: 첫 모니터가 메인, 나머지가 보조", [m.name for m in mains] == ["DP-1"] and [m.name for m in subs] == ["DP-2"])
+cfg, lay = dc.build(mm, dc.default_state())
+check("PC: 기본 확장은 보조가 메인 오른쪽(노트북의 '외부 위' 기본이 아님)", cfg["DP-2"]["x"] == 2560 and cfg["DP-2"]["y"] == (1600 - 2560) // 2, str(cfg))
+check("PC: 배치 기본값은 right", dc.current_arrange(None, mm) == "right")
+cfg, lay = dc.build(mm, {**dc.default_state(), "layout": "mirror"})
+check("PC: 미러는 메인이 보조를 복제", cfg["DP-1"].get("mirror") == "DP-2" and "mirror" not in cfg["DP-2"], str(cfg))
+st = dc.op_layout("extend", "stack")
+check("PC: 보조 위/메인 아래 배치", st["pos"]["DP-2"] == {"rel": "above", "of": "DP-1", "align": "center"}, str(st["pos"]))
+check("PC: 배치를 정한 뒤 current_arrange 가 stack", dc.current_arrange(st, mm) == "stack")
+
 finish("코어")

@@ -1,4 +1,4 @@
-"""dispctl — displayctl 의 본체 패키지: Hyprland 화면 관리 (확장/미러/노트북만/외부만, 해상도·주사율·배율·상대 위치, 프리젠테이션)
+"""dispctl — displayctl 의 본체 패키지: Hyprland 화면 관리 (확장/미러/내장만/외부만, 해상도·주사율·배율·상대 위치, 프리젠테이션)
 
 원리
 - 모니터 정보는 `hyprctl monitors all -j`, 변경은 `hyprctl eval 'hl.monitor({...})'` 로 한다.

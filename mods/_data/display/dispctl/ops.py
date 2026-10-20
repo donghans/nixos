@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from .config import BUILTIN_PRESETS, CONF_DIR, PRESET_FILE
-from .hypr import Mon, fmt_mode, get_monitors, mode_groups, parse_mode
+from .hypr import Mon, fmt_mode, get_monitors, has_internal, mode_groups, parse_mode, split_roles
 from .state import default_state, load_state, locked, seed
 from .layout import build
 from .apply import apply_cfg, migrate_windows, sync_touch
@@ -21,8 +21,9 @@ def mutated_state() -> dict:
 # ───────────────────────── 동작 ─────────────────────────
 def current_arrange(st: dict | None, mons: list["Mon"]) -> str:
     """저장된 위치 설정에서 지금 확장 배치가 stack/left/right 중 무엇인지 (사용자 지정이면 'custom')"""
-    ext = next((m for m in mons if not m.internal), None)
-    internal = next((m for m in mons if m.internal), None)
+    mains, subs = split_roles(mons)
+    ext = subs[0] if subs else None
+    internal = mains[0] if mains else None
     if ext is None or internal is None:
         return "stack"
     pos = (st or {}).get("pos") or {}
@@ -31,7 +32,7 @@ def current_arrange(st: dict | None, mons: list["Mon"]) -> str:
     if other:
         return "custom"
     if not spec:
-        return "stack"
+        return "stack" if has_internal(mons) else "right"    # 기본 배치: 노트북은 외부가 위, PC 는 보조가 메인 오른쪽
     if spec.get("of") != internal.name or spec.get("align", "center") != "center":
         return "custom"
     return {"above": "stack", "left": "left", "right": "right"}.get(spec.get("rel"), "custom")
@@ -42,13 +43,14 @@ def op_layout(layout: str, arrange: str | None = None) -> dict:
     st["layout"] = layout
     if arrange:
         mons = get_monitors()
-        ext = next((m for m in mons if not m.internal), None)
-        internal = next((m for m in mons if m.internal), None)
+        mains, subs = split_roles(mons)
+        ext = subs[0] if subs else None
+        internal = mains[0] if mains else None
         if ext is not None and internal is not None:
             st["pos"].pop(ext.name, None)
             st["pos"].pop(internal.name, None)
-            if arrange in ("left", "right"):
-                st["pos"][ext.name] = {"rel": arrange, "of": internal.name, "align": "center"}
+            if arrange in ("left", "right") or (arrange == "stack" and not has_internal(mons)):
+                st["pos"][ext.name] = {"rel": "above" if arrange == "stack" else arrange, "of": internal.name, "align": "center"}
     return st
 
 
@@ -100,8 +102,9 @@ def resolve_preset(name: str, mons: list[Mon]) -> dict | None:
     if not b:
         return None
     before = {k: copy.deepcopy(st[k]) for k in ("layout", "monitors", "pos")}
-    ext = next((m for m in mons if not m.internal), None)
-    internal = next((m for m in mons if m.internal), None)
+    mains, subs = split_roles(mons)
+    ext = subs[0] if subs else None
+    internal = mains[0] if mains else None
     for target, mode in b["modes"].items():
         m = ext if target == "@external" else internal
         if m is None:
