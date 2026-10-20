@@ -529,3 +529,30 @@ tty2 (VT2) ── kmsconvt@tty2.service ── kmscon ── login ── zsh �
 - **DRM 커넥터 `dpms` 는 구분 기준이 아니다**: 높은 상태에서도 `Off`(10:21, 5.5~6.2 W)로 읽혔고 09:43(높은 상태)에는 `On`이었다. 또한 이 기기에서는 `dpms enable` 뒤 화면이 안 돌아오는 문제가 있어(`core.bind.hwctl.nix` 주석) dpms 로 패널을 끄는 방법은 쓰지 않는다. Hyprland 0.55(Lua)에서는 `hyprctl dispatch dpms off` 가 문법 오류이고 `hl.dsp.dpms({ action = ... })` 형식이다.
 - **지금까지의 결론**: 낮은 상태(≈4.3 W)는 실재하며 약 10% 의 시간에 저절로 나타났다 사라진다. 알려진 원인(Wi-Fi 절전, Netdata, hyprlock, 오디오, PSR, 활성 VT, 네트워크, 프로세스)으로는 설명되지 않고, tty1 전환은 낮은 → 높은 방향으로만 작동한다. 이후 접근: ① 낮은 상태에서 장치/레지스터를 더 깊이 비교(`pm_snapshot` 외에 `pmc_core`/`slp_s0`, i915 `i915_display_info`, DMC 상태, `/sys/kernel/debug/pmc_core/substate_residencies`), ② 낮은 상태가 어떤 조건에서 유지되는지 장시간 기록 분석, ③ 필요하면 `no-quirks` 부팅으로 같은 기록 비교.
 
+### 핫스팟 프록시 경로와 전력 — 전수조사와 가설 정리 (2026-10-20 10:30, 오후 시험 예정)
+**1. 구조(코드 `hosts/msi-summit-me/hotspot-proxy-dispatcher.nix`로 확인; 주석이 낡았을 수 있어 실제 상태도 같이 확인)**
+- Wi-Fi 연결(`up`) 때마다 NetworkManager dispatcher 가 **게이트웨이:1080 이 열려 있으면**(= 폰이 SOCKS5 를 연 핫스팟) `redsocks-hotspot` 을 띄우고, nft 로 **uid 1000 과 root(uid 0)의 모든 아웃바운드 TCP 를 REDIRECT**, **UDP 를 TPROXY(`redudp`, ip rule fwmark 1 → table 100 → lo)** 로 사용자 공간 릴레이에 태운다. 사설대역(10/8, 100.64/10, 172.16/12, 192.168/16 등)은 제외. `redsocks_conn_max=1024`. 연결이 끊기면(`down`) nft 테이블·ip rule·서비스·환경변수 모두 원복.
+- **`sing-box` 는 이 저장소·이 노트북 어디에도 없다**(저장소 전체 검색 결과 없음, 바이너리/프로세스 없음). 게이트웨이:1080 의 SOCKS5 서버는 폰(또는 핫스팟 공급자) 쪽 프로그램이며 노트북은 클라이언트일 뿐이다. 따라서 "노트북 쪽 sing-box 비용"은 없고, 비용은 **redsocks 릴레이 + 막힌 UDP/직접 경로에 대한 재시도**에서 나온다.
+- 확인한 상태: 사무실 Wi-Fi(`사무실 Wi-Fi`)로 옮기자 `redsocks-hotspot` inactive, `/tmp/current_hotspot_proxy`·`/run/redsocks-hotspot.conf` 없음, 프록시 환경변수(셸/사용자 systemd) 없음, `ip rule` 에 fwmark 1 규칙 없음, nft 테이블 `redsocks_hotspot*` 없음 → 정리는 깨끗하다. 프록시 없이 직접 https 정상(0.13 s).
+**2. 기록(`boot_settle.py`, 방전·덮개 닫힘)으로 본 핫스팟 ↔ 사무실 차이**(핫스팟 n=88, 사무실 n=29 — 시간대·절전 설정이 다른 **비교 불완전** 자료)
+| 프로세스 | 깨어남/s 핫스팟 → 사무실 | CPU% 핫스팟 → 사무실 |
+|---|---|---|
+| electron(Bitwarden) | 256.8 → 1.2 | 8.9 → 1.6 |
+| tailscaled | 87.0 → 41.2 | 3.42 → 0.02 |
+| netdata / claude / mongod / meilisearch | 거의 같음 | 거의 같음 |
+- 높은 상태 평균 6.76 W(핫스팟) ↔ 6.30 W(사무실), **낮은 상태는 4.46 W 로 둘이 같다.** → 핫스팟 경로의 비용은 높은 상태에서 최대 약 0.45 W 로 보이나 확정은 아님(시간대, PS off/on 혼합, 표본 수 차이).
+- **electron 의 257/s·9% CPU 는 핫스팟 전용이 아니다**: 어제 밤 집 Wi-Fi 에서도(재부팅 직후 기록) 같았고(257/s), **10:07 사무실로 옮기며 멈췄다.** 같은 무렵 AC 연결(≈10:05)과 분리(10:10)도 있었으므로 원인(네트워크 전환/AC 사건/재시도 루프 종료)은 미확정. 같은 시각 `tailscaled` 의 3.4% CPU·80~93/s 도 40/s·0% 로 내려왔다(핫스팟에서는 `netcheck: UDP is blocked, trying HTTPS/ICMP` 가 약 12초마다 반복되고 redsocks 로그에 `Socks5 server status: server failure` 가 섞임 — 핫스팟은 UDP 직접 경로가 막혀 tailscale 이 계속 재탐색).
+- 반복 작업(전수조사): `touchpad-watchdog` 약 32초마다(시간당 112회), `notif-health` 약 60초마다(56회), 그 외 타이머는 하루 1회 이하 — 초당 1,000회가 넘는 깨어남(netdata 약 340/s, claude 150~200/s, electron 257/s, meilisearch 65/s, mongod 57/s, tailscaled 40~90/s, go.d.plugin 36/s, irq/9-acpi 20~30/s)에 비해 무시할 수준.
+**3. 가설(핫스팟/프록시 경로가 전력에 미칠 수 있는 경로) — 모두 미검증**
+- H1 electron(Bitwarden, `--autostart`) 재시도 루프: 막힌 UDP/프록시 경로 연결 실패 후 반복. 이전 SIGSTOP ABAB 효과는 −0.20 W(배터리), −0.25 W(psys).
+- H2 tailscaled netcheck 루프(핫스팟에서 UDP 차단): CPU 3.4%·깨어남 +45/s.
+- H3 redsocks 릴레이 자체의 CPU/깨어남(로그에는 top-N 에 안 잡혀 정량 없음), 유저·root 모든 TCP/UDP 가 사용자 공간 경유(Docker 컨테이너의 아웃바운드도 root 로 걸림).
+- H4 링크 차이: 핫스팟은 2.4 GHz 20 MHz(−41~−42 dBm)·폰 AP 의 절전(DTIM/U-APSD) 지원 불확실 → 같은 트래픽에 에어타임·RF 전력이 더 듦. 사무실도 2.4 GHz 라서 이것만으로는 설명이 약함.
+- H5 폰 쪽 SOCKS 서버가 UDP ASSOCIATE 를 구현하지 않아 UDP 가 그냥 나감(dispatcher 주석의 '한계') → 재시도.
+**4. 오후 시험 계획**(핫스팟 가능해지면; 낮은/높은 상태 구분 위해 `boot_settle` 기록 유지, 시험마다 SSID·상태 기록)
+- T1 재현: 사무실 → 핫스팟 전환 후 `thread_top.py electron`, `thread_top.py tailscaled` 를 0·5·10·20분에 찍어 257/s 가 다시 나타나는지, 어느 스레드(`Chrome_IOThread`, ThreadPool 등)인지 본다. 다시 사무실로 돌려 멈추는지 확인.
+- T2 효과 크기(핫스팟, ABAB 구간 45초): electron SIGSTOP / Bitwarden 종료(PID) / `tailscale down` / redsocks 우회(서비스 중지 + nft 테이블 삭제; 핫스팟이 비프록시 트래픽을 막으면 연결 끊기므로 짧게, 안전장치 필수).
+- T3 같은 시험을 사무실 Wi-Fi 에서 하고 핫스팟 결과와 비교, 낮은/높은 상태를 분리해 해석.
+- 개선 후보(시험 후 판단): Bitwarden `--autostart` 제거 또는 필요 시에만 실행, tailscale 의 핫스팟 중 비활성/`--accept-routes` 점검, redsocks UDP 릴레이 조건 완화.
+**5. 도구**: `thread_top.py <이름> [초] [상위]`(스레드별 CPU%·자발적 깨어남, 일반 권한). 사무실 조용한 기준값: electron 합계 약 16/s(CPU 2.6%), tailscaled 약 28/s(1.4%).
+
