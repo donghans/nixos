@@ -110,6 +110,29 @@ in {
     security.pam.howdy.enable = false; # (이유: 기본값은 모든 PAM 서비스에 적용되므로 끄고 아래 한 곳만 켬)
     security.pam.services.hyprlock.howdy.enable = false; # (2026-10-17 끔: 잠금 중 pam_howdy 가 ~37분 멈춰 비밀번호 입력창이 안 떴음. pam_howdy 는 비밀번호 프롬프트 전에 동기 실행돼 timeout=4 가 안 먹으면 잠금 해제 불가. 재현은 안 됨(pamtester 로 5초 만에 정상))
 
+    # == eDP 패널 PSR1 강제 켜기 ==
+    # 펌웨어 VBT 가 이 패널의 PSR 을 꺼 두어(`PSR disabled by flag`) `i915.enable_psr=1` 이 무시된다. debugfs `i915_edp_psr_debug`=2 는 VBT 를 무시하게 하며
+    # 다음 모드셋부터 적용되므로 링크 재훈련으로 모드셋을 한 번 일으킨다(부팅 중 화면이 잠깐 깜빡임). 측정: psys −0.35 W·배터리 −0.44 W(_docs/…/power-evidence.md #54, #56).
+    # 화면 이상(깜빡임·잔상)이 보이면 이 서비스를 끄면 된다: `sudo systemctl disable --now psr-force`(끄면 다음 부팅부터 원래대로).
+    systemd.services.psr-force = {
+      description = "Force eDP PSR1 on (override VBT disable)";
+      wantedBy = ["multi-user.target"];
+      serviceConfig.Type = "oneshot";
+      serviceConfig.RemainAfterExit = true;
+      script = ''
+        for d in /sys/kernel/debug/dri/*/; do
+          [ -e "$d/i915_edp_psr_debug" ] || continue
+          echo 2 > "$d/i915_edp_psr_debug"
+          echo 1 > "$d/eDP-1/i915_dp_force_link_retrain"
+        done
+      '';
+      preStop = ''
+        for d in /sys/kernel/debug/dri/*/; do
+          [ -e "$d/i915_edp_psr_debug" ] && echo 0 > "$d/i915_edp_psr_debug"
+        done
+      '';
+    };
+
     # == 터치패드 재인식 (장치 메뉴의 "터치패드 재인식" 항목) ==
     # 터치패드(ELAN0305, I2C HID)가 먹통이 될 때 드라이버를 unbind/bind 해서 다시 인식시킴.
     # sysfs 쓰기는 root 만 가능하므로 root 서비스로 두고, 로컬 활성 세션 사용자가 비밀번호 없이 이 유닛만 시작하게 허용.
