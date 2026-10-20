@@ -4,7 +4,7 @@ D=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d)
 export FAKE_STATE=$T/fake.json DISPLAYCTL_HYPRCTL=$D/fake_hyprctl.py DISPLAYCTL_STATE=$T/state DISPLAYCTL_CONF=$T/conf DISPLAYCTL_SETTLE=0 DISPLAYCTL_VERIFY_TIMEOUT=0 DISPLAYUI_CONFIRM=3
 export DISPLAYCTL_SYSTEMD_RUN=$D/fake_systemd_run.py DISPLAYCTL_SYSTEMCTL=$D/fake_systemctl.py FAKE_UNITS=$T/units DISPLAYCTL_NOTIFY= DISPLAYCTL_POSTURE=$D/fake_posture.py FAKE_POSTURE=$T/posture.json
-export PYTHONDONTWRITEBYTECODE=1 TESTS_TMP=$T
+export PYTHONDONTWRITEBYTECODE=1 TESTS_TMP=$T OBSERVE_STATE_DIR=$T/observectl-state OBSERVE_DATA_DIR=$T/observectl-data   # observectl 이벤트 로그가 실제 ~/.local/state 로 새지 않게
 PY=${PYTHON:-python3}
 rc=0
 $PY -I "$D/test_core.py" || rc=1

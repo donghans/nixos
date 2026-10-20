@@ -15,7 +15,7 @@ import argparse
 import os
 import sys
 
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -25,6 +25,7 @@ from textual.widgets.option_list import Option
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import displayctl as dc  # noqa: E402
+from dispctl.observelog import events as observe_events  # noqa: E402
 
 FOCUS_IDS = {
     "mode": "modes", "monitors": "mons", "resolution": "res", "refresh": "hz", "scale": "scale", "position": "rel",
@@ -73,16 +74,20 @@ class Confirm(ModalScreen[bool]):
     def _tick(self) -> None:
         self.query_one("#ccount", Static).update(f"{self.left}초 안에 선택하지 않으면 자동으로 되돌립니다")
         if self.left <= 0:
+            self.app.ev.warn("confirm", choice="undo", via="timeout")
             self.dismiss(False)
         self.left -= 1
 
     def action_keep(self) -> None:
+        self.app.ev.info("confirm", choice="keep", via="key", left=self.left)
         self.dismiss(True)
 
     def action_undo(self) -> None:
+        self.app.ev.info("confirm", choice="undo", via="key", left=self.left)
         self.dismiss(False)
 
     def on_button_pressed(self, ev: Button.Pressed) -> None:
+        self.app.ev.info("confirm", choice="keep" if ev.button.id == "keep" else "undo", via="button", left=self.left)
         self.dismiss(ev.button.id == "keep")
 
 
@@ -119,11 +124,13 @@ class DisplayUI(App):
     #left { width: 38; }
     #right { width: 1fr; background: #000000; }
     #modes { height: 1fr; background: #000000; border: none; padding: 0 1; }
-    #modes > .option-list--option-highlighted, #modes:focus > .option-list--option-highlighted { background: #268bd2; color: #ffffff; text-style: none; }
+    #modes > .option-list--option-highlighted { background: #1b2a38; color: #cfcfcf; text-style: none; }
+    #modes:focus > .option-list--option-highlighted { background: #268bd2; color: #ffffff; text-style: none; }
     #modes > .option-list--option-disabled { color: #7a7a7a; }
     #mons { height: 6; padding: 0 1; }
     #mons > .datatable--header { background: #000000; color: #9a9a9a; text-style: none; }
-    #mons > .datatable--cursor, #mons:focus > .datatable--cursor { background: #268bd2; color: #ffffff; text-style: none; }
+    #mons > .datatable--cursor { background: #1b2a38; color: #cfcfcf; text-style: none; }
+    #mons:focus > .datatable--cursor { background: #268bd2; color: #ffffff; text-style: none; }
     #form { height: auto; padding: 0 1; }
     .row { height: 1; margin-bottom: 1; }
     .row Label { width: 12; color: #9a9a9a; }
@@ -198,12 +205,37 @@ class DisplayUI(App):
                 yield Static("", id="msg")
         yield Footer()
 
+    ev = observe_events("displayui")
+
+    async def on_event(self, event) -> None:
+        # 위젯이 처리하기 전에 키를 기록(어느 위젯에 포커스가 있었는지 포함). 입력창에서는 글자 내용을 기록하지 않음
+        if isinstance(event, events.Key):
+            f = self.focused
+            typing = isinstance(f, Input)
+            self.ev.debug("key", key="(입력)" if typing and event.is_printable else event.key, focus=getattr(f, "id", None) or type(f).__name__,
+                          screen=type(self.screen).__name__)
+        await super().on_event(event)
+
+    def on_descendant_focus(self, event) -> None:
+        w = event.widget
+        pane = next((a.id for a in [w, *w.ancestors] if a.id in ("left", "mons", "form")), None)
+        self.ev.debug("focus", widget=w.id or type(w).__name__, pane=pane)
+        for wid, title in self._pane_titles.items():
+            try:
+                self.query_one(wid).border_title = ("▶ " if wid == "#" + str(pane) else "") + title
+            except Exception:
+                pass
+
     def on_mount(self) -> None:
-        # lazygit 처럼 제목을 테두리 안에 둠 ("[키]-이름")
+        # lazygit 처럼 제목을 테두리 안에 둠 ("[키]-이름"). 포커스가 있는 칸은 제목 앞에 ▶ 를 붙여 Enter 가 어디로 가는지 분명히 함
+        self._pane_titles = {}
         for wid, title, sub in (("#left", "\\[m] 화면 모드 / 프리셋", "Enter 적용"), ("#mons", "모니터", ""), ("#form", "선택한 모니터 설정", "")):
             box = self.query_one(wid)
             box.border_title = title
             box.border_subtitle = sub
+            self._pane_titles[wid] = title
+        self.ev.info("mount", focus=self.focus_target, quick=self.quick, size=f"{self.size.width}x{self.size.height}",
+                     monitors=[(m.name, m.mode, m.disabled) for m in dc.get_monitors()])
         t = self.query_one("#mons", DataTable)
         t.add_columns("모니터", "설명", "모드", "배율", "위치", "상태")
         self.reload_all()
@@ -371,6 +403,7 @@ class DisplayUI(App):
 
     def on_option_list_option_selected(self, ev: OptionList.OptionSelected) -> None:
         oid = ev.option.id or ""
+        self.ev.info("option.selected", option=oid)
         if oid.startswith("layout:"):
             self.run_layout(dc.op_layout(oid[7:]), confirm=False)
         elif oid.startswith("arrange:"):
@@ -387,6 +420,7 @@ class DisplayUI(App):
             self.do_reset()
 
     def on_button_pressed(self, ev: Button.Pressed) -> None:
+        self.ev.info("button", id=ev.button.id)
         if ev.button.id == "apply":
             self.action_apply()
         elif ev.button.id == "reset":
@@ -402,6 +436,7 @@ class DisplayUI(App):
         pos = None
         if rel != "auto" and v("of") not in ("-", Select.BLANK):
             pos = {"rel": rel, "of": v("of"), "align": v("align")}
+        self.ev.info("action.apply", mon=m.name, res=str(v("res")), hz=str(v("hz")), scale=str(v("scale")), rel=rel)
         st = dc.op_set(m.name, str(v("res")), float(v("hz")), float(v("scale")), pos)
         if rel == "auto":
             st["pos"].pop(m.name, None)
@@ -410,8 +445,14 @@ class DisplayUI(App):
     @work(thread=True, exclusive=True)
     def run_layout(self, st: dict, confirm: bool) -> None:
         self.call_from_thread(self.msg, "적용 중…")
+        self.ev.info("run_layout.begin", layout=st.get("layout"), confirm=confirm)
         tx = dc.Transaction()
-        issues = tx.apply(st)
+        try:
+            issues = tx.apply(st)
+        except Exception as e:
+            self.ev.error("run_layout.fail", exc=f"{type(e).__name__}: {e}")
+            raise
+        self.ev.info("run_layout.applied", issues=issues)
         if confirm:
             # 이 TUI(또는 터미널)가 죽어도 되돌려지도록 별도 프로세스(systemd 타이머)에도 되돌리기를 예약.
             # 보통은 아래 확인 창의 타이머가 먼저 끝나므로 여유를 둠
@@ -422,6 +463,7 @@ class DisplayUI(App):
         text = "\n".join(issues) if issues else "적용했습니다."
 
         def done(keep: bool | None) -> None:
+            self.ev.info("after_apply.done", keep=bool(keep), confirm=confirm)
             if keep or not confirm:
                 tx.commit()
                 self.msg(("⚠ " + text.replace("\n", "\n⚠ ")) if issues else "적용했습니다.")

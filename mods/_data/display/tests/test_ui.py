@@ -170,9 +170,47 @@ async def t_misc():
         async with app.run_test(size=(w, 40)) as pilot:
             await settle(pilot, 10); check(f"폭 {w}: narrow={narrow}", app.has_class("narrow") == narrow)
 
+async def t_obs():
+    """포커스 표시(▶)와 observectl 이벤트 기록: Enter 가 어디로 가는지 눈으로 구분되고, 키/포커스/모드 선택이 로그에 남는다(입력창 글자는 기록 안 함)."""
+    reset()
+    import json, glob
+    observe_dir = os.environ["OBSERVE_STATE_DIR"]
+    for f in glob.glob(os.path.join(observe_dir, "events-*.jsonl")): os.remove(f)
+    def events():
+        out = []
+        for f in sorted(glob.glob(os.path.join(observe_dir, "events-*.jsonl"))):
+            out += [json.loads(l) for l in open(f) if l.strip()]
+        return out
+    app = ui.DisplayUI(focus="refresh")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await settle(pilot, 10)
+        titles = {w: app.query_one(w).border_title or "" for w in ("#left", "#mons", "#form")}
+        check("시작 포커스가 주사율 칸이면 '선택한 모니터 설정' 제목에만 ▶", titles["#form"].startswith("▶") and not titles["#left"].startswith("▶") and not titles["#mons"].startswith("▶"), str(titles))
+        await pilot.press("m"); await settle(pilot, 5)
+        titles = {w: app.query_one(w).border_title or "" for w in ("#left", "#mons", "#form")}
+        check("m 로 모드 목록에 포커스하면 ▶ 가 '화면 모드' 쪽으로 이동", titles["#left"].startswith("▶") and not titles["#form"].startswith("▶"), str(titles))
+        await pilot.press("down"); await pilot.press("enter"); await settle(pilot, 20)
+    ev = events()
+    names = [e["ev"] for e in ev]
+    check("mount 이벤트에 모니터 목록이 담김", any(e["ev"] == "mount" and e.get("monitors") for e in ev), str(names[:6]))
+    check("key 이벤트에 키 이름과 포커스 위젯이 기록됨", any(e["ev"] == "key" and e.get("key") == "enter" and e.get("focus") == "modes" for e in ev), str([e for e in ev if e["ev"] == "key"][:4]))
+    check("focus 이벤트가 기록됨", any(e["ev"] == "focus" and e.get("pane") == "left" for e in ev))
+    check("모드 선택 → option.selected, run_layout, tx.apply 가 한 흐름으로 남음", {"option.selected", "run_layout.begin", "run_layout.applied"} <= set(names) and "tx.apply.begin" in names, str(names))
+    check("hyprctl 변경 명령이 기록됨(eval 규칙)", any(e["ev"] == "hyprctl" and str(e.get("args", "")).startswith("eval") for e in ev))
+    kill_units(); reset()
+    for f in glob.glob(os.path.join(observe_dir, "events-*.jsonl")): os.remove(f)
+    app = ui.DisplayUI(focus="mode")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await settle(pilot, 10)
+        await pilot.press("S"); await settle(pilot, 5)
+        await pilot.press(*"비밀글자abc"); await settle(pilot, 3)
+        await pilot.press("escape"); await settle(pilot, 3)
+    dump = json.dumps(events(), ensure_ascii=False)
+    check("입력창에 친 글자는 이벤트 로그에 남지 않음", "비밀" not in dump and '"key":"a"' not in dump.replace(" ", "") and "abc" not in dump, dump[:200])
+
 async def main():
     only = os.environ.get("ONLY")
-    for t in [x for x in (t_basic, t_arrange, t_focus, t_cursor, t_layout_quick, t_apply_confirm, t_misc) if not only or x.__name__ == only]:
+    for t in [x for x in (t_basic, t_arrange, t_focus, t_cursor, t_layout_quick, t_apply_confirm, t_misc, t_obs) if not only or x.__name__ == only]:
         try: await t()
         except Exception:
             import traceback; traceback.print_exc(); results.append(False); print("FAIL (예외)", t.__name__)

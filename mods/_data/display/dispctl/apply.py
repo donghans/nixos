@@ -5,6 +5,9 @@ import json
 import time
 from .config import SETTLE, VERIFY_TIMEOUT
 from .hypr import Mon, eval_lua, get_monitors, hyprctl, parse_mode
+from .observelog import events
+
+_ev = events("dispctl")
 from .layout import _overlap, lua_rule
 
 def apply_cfg(cfg: dict, mons: list[Mon] | None = None) -> list[str]:
@@ -31,9 +34,12 @@ def apply_cfg(cfg: dict, mons: list[Mon] | None = None) -> list[str]:
     early_mir = [n for n in mir if cfg[n]["mirror"] in on and cfg[n]["mirror"] in plain]
     late_mir = [n for n in mir if n not in early_mir]
     errs: list[str] = []
+    _ev.info("apply.plan", lit=sorted(lit), disable=dis, mirror=mir, plain=plain, late=late, early_mirror=early_mir)
 
     def run(name: str, c: dict) -> None:
         out = eval_lua(lua_rule(name, c))
+        _ev.info("apply.rule", mon=name, disabled=bool(c.get("disabled")), mirror=c.get("mirror"), mode=c.get("mode"), scale=c.get("scale"),
+                 x=c.get("x"), y=c.get("y"), out=(out or "")[:200])
         if out and out != "ok":
             errs.append(f"{name}: {out}")
 
@@ -145,6 +151,7 @@ def migrate_windows(cfg: dict) -> int:
             moved += 1
     if moved:
         time.sleep(0.3)
+    _ev.info("migrate.windows", leaving=sorted(leaving), target=target, moved=moved)
     return moved
 
 

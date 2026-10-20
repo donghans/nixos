@@ -8,6 +8,9 @@ import sys
 import time
 from .config import NOTIFY, PENDING_FILE, SYSTEMCTL, SYSTEMD_RUN, TIMER_UNIT
 from .hypr import get_monitors, parse_mode
+from .observelog import events
+
+_ev = events("dispctl")
 from .state import load_state, locked, save_state
 from .layout import build, current_cfg
 from .apply import apply_cfg, migrate_windows, verify
@@ -90,6 +93,7 @@ class Transaction:
 
     def apply(self, st: dict, do_verify: bool = True) -> list[str]:
         mons = get_monitors()
+        _ev.info("tx.apply.begin", layout=st.get("layout"), monitors=[{"n": m.name, "mode": m.mode, "dis": m.disabled, "x": m.x, "y": m.y} for m in mons])
         self.cfg, self.layout = build(mons, st)
         self.new_state = st
         migrate_windows(self.cfg)
@@ -97,6 +101,7 @@ class Transaction:
         if not do_verify:
             return errs
         issues = verify(self.cfg)
+        _ev.info("tx.apply.end", errs=errs, issues=issues, monitors=[{"n": m.name, "mode": m.mode, "dis": m.disabled} for m in get_monitors()])
         # 모니터가 거부해 다른 모드로 돌아간 항목은 상태를 실제 값으로 정정 (거부된 요청이 이후 작업에 계속 남지 않도록)
         actual = {m.name: m for m in get_monitors()}
         for name, c in self.cfg.items():
@@ -124,11 +129,13 @@ class Transaction:
             schedule_timer(seconds)
 
     def commit(self) -> None:
+        _ev.info("tx.commit")
         with locked():
             save_state(self.new_state)
             _pending_clear()
         cancel_timer()
 
     def revert(self) -> list[str]:
+        _ev.warn("tx.revert")
         revert_pending(fallback=(self.prev_cfg, self.prev_state))
         return []

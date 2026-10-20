@@ -5,8 +5,13 @@ import json
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from .config import HYPRCTL
+from .observelog import events
+
+_ev = events("dispctl")
+_READS = ("monitors", "clients", "devices", "version", "activeworkspace", "workspaces")
 
 # ───────────────────────── Hyprland 접근 ─────────────────────────
 def _env() -> dict:
@@ -26,7 +31,17 @@ def _env() -> dict:
 
 
 def hyprctl(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run([HYPRCTL, *args], capture_output=True, text=True, env=_env(), timeout=15)
+    t0 = time.monotonic()
+    try:
+        r = subprocess.run([HYPRCTL, *args], capture_output=True, text=True, env=_env(), timeout=15)
+    except Exception as e:
+        _ev.error("hyprctl.exc", args=" ".join(args)[:300], exc=f"{type(e).__name__}: {e}", ms=round((time.monotonic() - t0) * 1000, 1))
+        raise
+    # 읽기 명령은 trace, 상태를 바꾸는 명령(eval/dispatch/reload/keyword)은 debug. 출력은 앞 300자만(모니터 설정에는 개인정보 없음)
+    lvl = "trace" if args and args[0] in _READS else "debug"
+    _ev.emit(lvl, "hyprctl", args=" ".join(args)[:300], rc=r.returncode, ms=round((time.monotonic() - t0) * 1000, 1),
+             out=(r.stdout or "").strip()[:300] if lvl == "debug" else None, err=(r.stderr or "").strip()[:200] or None)
+    return r
 
 
 @dataclass

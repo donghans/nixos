@@ -7,3 +7,4 @@ cpuCount   = 16
 [mods.sys.services]
 tailpass = true
 netdata  = true
+observe  = true   # 관측 시스템(수집기/이벤트 로그/프로파일 CLI) — `observectl on` 으로 켜서 씀
