@@ -77,6 +77,37 @@ mkHostConfiguration ({
       ];
     };
 
+    # 인자를 **하나씩만** 뺀 시험 항목(2026-10-20): no-quirks 와 일반 부팅의 비교에서 일반 쪽이 쉬는 전력이 높았다(낮은 상태 psys +0.40 W·pc10 47→28%, 높은 상태 +0.82 W)
+    # 어느 인자의 비용인지 가리기 위함. 의심 순서: pcie_aspm=off → irqpoll → acpi_osi=Linux. 각 항목은 다른 인자는 일반 부팅과 같다.
+    # (목록을 통째로 지정하므로 일반 목록(`tr ' ' '\n' < /proc/cmdline`)이 바뀌면 여기도 맞출 것. 시험이 끝나면 지운다.)
+    specialisation.aspm-on.configuration.boot.kernelParams = lib.mkForce [
+      "nowatchdog"
+      "loglevel=3"
+      "acpi_osi=Linux"
+      "i915.enable_psr=1"
+      "module_blacklist=idma64"
+      "irqpoll"
+      "lsm=landlock,yama,bpf"
+    ];
+    specialisation.no-irqpoll.configuration.boot.kernelParams = lib.mkForce [
+      "nowatchdog"
+      "loglevel=3"
+      "pcie_aspm=off"
+      "acpi_osi=Linux"
+      "i915.enable_psr=1"
+      "module_blacklist=idma64"
+      "lsm=landlock,yama,bpf"
+    ];
+    specialisation.osi-default.configuration.boot.kernelParams = lib.mkForce [
+      "nowatchdog"
+      "loglevel=3"
+      "pcie_aspm=off"
+      "i915.enable_psr=1"
+      "module_blacklist=idma64"
+      "irqpoll"
+      "lsm=landlock,yama,bpf"
+    ];
+
     # (이유: TLP RUNTIME_PM_DENYLIST는 TLP 서비스 시작 후 적용되어 부팅 초기 probe 시점엔 늦음.
     #  kernel 6.18+ 에서 i2c_designware 모듈이 없어 disable_ps 파라미터도 무효가 됨.
     #  I2C 컨트롤러(0x51e8)가 runtime suspend 상태로 터치패드 probe 실패 방지를 위해
