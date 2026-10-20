@@ -3,7 +3,23 @@ mkHostConfiguration ({
   pkgs,
   lib,
   ...
-}: {
+}: let
+  # 기본 커널 인자(2026-10-20 변경). 이전에는 공통 설정(core.optimize.nix)이 `pcie_aspm=off`·`acpi_osi=Linux` 를, 이 호스트가 `irqpoll` 을 더 넣었으나 모두 뺐다:
+  #  - 같은 조건(사무실 Wi-Fi, 덮개 닫힘, VT2)의 부팅 간 비교에서 옛 인자가 있을 때 **배터리 기준 쉬는 전력이 낮은 상태 +0.09 W(구분 안 됨)·높은 상태 +0.21 W(약 4%)**,
+  #    패키지 절전도 얕았다(pc10 47→28%, pc8 45→30%). 누적 계량기로 확인한 배터리 V×I 기준(posture 가 아닌 power-evidence.md #28, #31).
+  #  - irqpoll 은 터치패드 먹통 대응이었으나 진짜 원인(idma64 가 IRQ 27 을 공유)을 module_blacklist 로 막아 필요가 없어졌다(3시간 정상).
+  #  - pcie_aspm=off / acpi_osi=Linux 는 일반 노트북용 기본값으로 들어간 것이고 이 기기에서 검증된 적이 없다.
+  # 문제가 생기면(터치패드·키보드·밝기·PCIe 장치) 부팅 메뉴의 `legacy-quirks` 로 옛 구성으로 부팅할 수 있고, `with-*` 항목으로 인자를 하나씩 되살려 원인을 가릴 수 있다.
+  # (목록을 통째로 지정하므로 확인은 `tr ' ' '\n' < /proc/cmdline`.)
+  kernelBase = [
+    "nowatchdog"
+    "loglevel=3"
+    "i915.enable_psr=1"
+    "module_blacklist=idma64" # (아래 boot.kernelParams 주석 참고: idma64/IRQ 27 공유 → 터치패드 먹통의 진짜 원인 차단)
+    "lsm=landlock,yama,bpf"
+  ];
+  legacy = ["pcie_aspm=off" "acpi_osi=Linux" "irqpoll"];
+in {
   os = {
     imports = [
       ./msi-summit-me/touchpad-watchdog.nix
@@ -27,24 +43,14 @@ mkHostConfiguration ({
       initrd.kernelModules = ["i2c_hid_acpi"];
 
       kernelModules = ["ec_sys"];
-      kernelParams = [
-        "i915.enable_psr=1"
-        # (이유, 2026-10-19: idma64(DMA 컨트롤러)가 i2c_designware 와 IRQ 27 을 공유해 DMA 모드에서 spurious interrupt 가 생기면
-        #  irqpoll 이 필요하거나 "controller timed out" 폭주(2~3주에 한 번, 터치패드 먹통)가 났다. udev unbind 규칙은 부팅 때 안 걸리고
-        #  (initrd 에서 이미 바인딩), `boot.blacklistedKernelModules`(= modprobe blacklist)도 **효과가 없었다**: intel_lpss 가 `softdep pre: platform:idma64` 를 가져서
-        #  initrd 안에서(부팅 2초) 블랙리스트가 있는데도 로드됨(실제로 확인). 그래서 커널이 직접 로드를 거부하는 module_blacklist 를 쓴다(누가 요청하든, initrd 포함).
-        #  기대 상태(런타임 실험으로 확인): idma64.0 장치만 있고 드라이버 없음 → i2c_designware 가 IRQ 27 단독(PIO), 터치패드 정상.
-        #  재부팅 뒤 `lsmod | grep idma64` 가 비고 IRQ 27 이 i2c_designware.0 단독이면 성공 → 위 udev unbind 규칙은 지워도 됨. posture.md 참고.)
-        "module_blacklist=idma64"
-        # pci=nocrs 제거 (2026-06-30): 의도였던 firmware-bug/리소스충돌 완화 효과가 전무했고
-        #   (실재 firmware bug는 CPU토폴로지·WMI 뿐, PCI 충돌 0건), ACPI _CRS 무시 → E820 사용이
-        #   오히려 LPSS I2C(00:15.0) 컨트롤러 hang(controller timed out)의 유력 원인으로 판단됨.
-        "irqpoll" # (이유: 인터럽트 스톰/누락 IRQ를 폴링으로 정리 — 제거 시 발열·배터리소모 악화 체감하여 유지)
-        # 정리(2026-06-30): 아래 두 파라미터 제거.
-        #   - psmouse.synaptics_intertouch=1 : psmouse 모듈을 blacklist 했고 터치패드는 i2c_hid_acpi라 무효(no-op)
-        #   - i8042.nopnp=1 : i8042는 터치패드(I2C)가 아닌 내장 키보드용 — 터치패드 문제와 무관
-        # 참고: i2c_designware.disable_ps=1 은 kernel 6.18+ 에서 모듈이 없어 무효 → udev 룰로 대체
-      ];
+      # (idma64 차단 이유, 2026-10-19)
+      # (이유, 2026-10-19: idma64(DMA 컨트롤러)가 i2c_designware 와 IRQ 27 을 공유해 DMA 모드에서 spurious interrupt 가 생기면
+      #  irqpoll 이 필요하거나 "controller timed out" 폭주(2~3주에 한 번, 터치패드 먹통)가 났다. udev unbind 규칙은 부팅 때 안 걸리고
+      #  (initrd 에서 이미 바인딩), `boot.blacklistedKernelModules`(= modprobe blacklist)도 **효과가 없었다**: intel_lpss 가 `softdep pre: platform:idma64` 를 가져서
+      #  initrd 안에서(부팅 2초) 블랙리스트가 있는데도 로드됨(실제로 확인). 그래서 커널이 직접 로드를 거부하는 module_blacklist 를 쓴다(누가 요청하든, initrd 포함).
+      #  기대 상태(런타임 실험으로 확인): idma64.0 장치만 있고 드라이버 없음 → i2c_designware 가 IRQ 27 단독(PIO), 터치패드 정상.
+      #  재부팅 뒤 `lsmod | grep idma64` 가 비고 IRQ 27 이 i2c_designware.0 단독이면 성공 → 위 udev unbind 규칙은 지워도 됨. posture.md 참고.)
+      kernelParams = lib.mkForce kernelBase;
 
       blacklistedKernelModules = [
         "nouveau"
@@ -62,51 +68,13 @@ mkHostConfiguration ({
 
     services.libinput.enable = true;
 
-    # 시험용 임시 부팅 항목(2026-10-20): 기본 항목은 그대로 두고, 부팅 메뉴(또는 `bootctl set-oneshot`)로 **한 번만** 고를 수 있다.
-    # 공통/호스트 설정이 넣은 `pcie_aspm=off`, `acpi_osi=Linux`(일반 노트북용 기본값으로 들어간 것, 이 기종에서 검증 안 됨)와 `irqpoll`(터치패드 IRQ 공유 대응으로 넣은 것)을 모두 뺀다.
-    # 용도: (1) 내장 키보드의 Backspace/→ 키가 신호를 아예 안 보내는 문제(커널 이벤트 0건)가 이 인자들과 관련 있는지, (2) 쉬는 전력이 달라지는지.
-    # 시험이 끝나면 이 블록을 지우면 된다. 목록을 통째로 지정하므로 위 인자가 바뀌면 여기도 맞춰야 한다(확인: `tr ' ' '\n' < /proc/cmdline`).
-
-    specialisation.no-quirks.configuration = {
-      boot.kernelParams = lib.mkForce [
-        "nowatchdog"
-        "loglevel=3"
-        "i915.enable_psr=1"
-        "module_blacklist=idma64"
-        "lsm=landlock,yama,bpf"
-      ];
-    };
-
-    # 인자를 **하나씩만** 뺀 시험 항목(2026-10-20): no-quirks 와 일반 부팅의 비교에서 일반 쪽이 쉬는 전력이 높았다(낮은 상태 psys +0.40 W·pc10 47→28%, 높은 상태 +0.82 W)
-    # 어느 인자의 비용인지 가리기 위함. 의심 순서: pcie_aspm=off → irqpoll → acpi_osi=Linux. 각 항목은 다른 인자는 일반 부팅과 같다.
-    # (목록을 통째로 지정하므로 일반 목록(`tr ' ' '\n' < /proc/cmdline`)이 바뀌면 여기도 맞출 것. 시험이 끝나면 지운다.)
-    specialisation.aspm-on.configuration.boot.kernelParams = lib.mkForce [
-      "nowatchdog"
-      "loglevel=3"
-      "acpi_osi=Linux"
-      "i915.enable_psr=1"
-      "module_blacklist=idma64"
-      "irqpoll"
-      "lsm=landlock,yama,bpf"
-    ];
-    specialisation.no-irqpoll.configuration.boot.kernelParams = lib.mkForce [
-      "nowatchdog"
-      "loglevel=3"
-      "pcie_aspm=off"
-      "acpi_osi=Linux"
-      "i915.enable_psr=1"
-      "module_blacklist=idma64"
-      "lsm=landlock,yama,bpf"
-    ];
-    specialisation.osi-default.configuration.boot.kernelParams = lib.mkForce [
-      "nowatchdog"
-      "loglevel=3"
-      "pcie_aspm=off"
-      "i915.enable_psr=1"
-      "module_blacklist=idma64"
-      "irqpoll"
-      "lsm=landlock,yama,bpf"
-    ];
+    # 부팅 메뉴(또는 `sudo bootctl set-oneshot nixos-generation-<N>-specialisation-<이름>.conf`)로 **한 번만** 고를 수 있는 항목(우선순위 40 = 기본의 mkForce 보다 높음):
+    #  legacy-quirks : 이전 기본(옛 인자 3개 모두) — 문제가 생겼을 때 비상용
+    #  with-aspm-off / with-irqpoll / with-osi-linux : 기본에 인자 **하나만** 되살림 — 문제가 생겼을 때 어느 인자가 필요한지 가리는 용도(반응형으로만 사용)
+    specialisation.legacy-quirks.configuration.boot.kernelParams = lib.mkOverride 40 (kernelBase ++ legacy);
+    specialisation.with-aspm-off.configuration.boot.kernelParams = lib.mkOverride 40 (kernelBase ++ ["pcie_aspm=off"]);
+    specialisation.with-irqpoll.configuration.boot.kernelParams = lib.mkOverride 40 (kernelBase ++ ["irqpoll"]);
+    specialisation.with-osi-linux.configuration.boot.kernelParams = lib.mkOverride 40 (kernelBase ++ ["acpi_osi=Linux"]);
 
     # (이유: TLP RUNTIME_PM_DENYLIST는 TLP 서비스 시작 후 적용되어 부팅 초기 probe 시점엔 늦음.
     #  kernel 6.18+ 에서 i2c_designware 모듈이 없어 disable_ps 파라미터도 무효가 됨.
