@@ -556,3 +556,21 @@ tty2 (VT2) ── kmsconvt@tty2.service ── kmscon ── login ── zsh �
 - 개선 후보(시험 후 판단): Bitwarden `--autostart` 제거 또는 필요 시에만 실행, tailscale 의 핫스팟 중 비활성/`--accept-routes` 점검, redsocks UDP 릴레이 조건 완화.
 **5. 도구**: `thread_top.py <이름> [초] [상위]`(스레드별 CPU%·자발적 깨어남, 일반 권한). 사무실 조용한 기준값: electron 합계 약 16/s(CPU 2.6%), tailscaled 약 28/s(1.4%).
 
+### 키보드 두 번째 사건: 덮개를 연 뒤 Backspace 와 밝기 조절이 안 먹음 (2026-10-20 10:28~10:32, 재부팅 뒤 정상)
+**경과(이전 부팅 `journalctl -b -1` 로 복원)**: 10:28:30 덮개 열림 → 10:28:31 `lid-policy lid=open`(밝기 복원 정상 기록) → 10:28:32 `hypr-input-policy mode=laptop angle=121 lid=open keyboard=true touchpad=true` 적용 → 10:30:14 힌지로 `tent`(282°, 키보드 false) → 10:30:17 `laptop`(140°, 키보드 true) → 10:30:47 Hyprland 세션 종료(fcitx5 언로드)·재로그인(10:30:49~55) → 10:32 재부팅. 사용자 보고: 이 동안 Backspace 와 밝기 조절이 안 먹었고 **Hyprland 를 다시 로그인해도 안 풀렸다**(추정; 재부팅 뒤 모두 정상).
+**알게 된 것**
+- 이전 부팅 커널 로그에는 `atkbd`/`i8042`/ACPI EC 오류가 한 줄도 없었다(야간 사건 때의 `Unknown key pressed (0xf0)` 같은 흔적도 없음) → 커널이 오류로 인식하지 못하는 조용한 실패.
+- 밝기 처리 코드(`lid-screen`/`brt-control`)는 정상 경로로 실행된 기록이 있고 덮개 열림 시 복원은 성공 → 밝기 문제는 **스크립트가 아니라 키 입력 자체가 안 오는 쪽**일 가능성이 크다. Backspace(`AT Translated Set 2 keyboard`, i8042)와 밝기 키(`MSI WMI hotkeys`/`Intel HID 5 button array`/`Video Bus` 중 하나; 어느 장치인지 미확인)는 **서로 다른 입력 장치 경로**인데 같이 죽었다 → Hyprland 아래의 공통 원인(EC/펌웨어 이벤트 경로, 또는 입력 장치가 Hyprland 에서 한꺼번에 비활성)을 의심.
+- 지난 밤 사건(Backspace, → 가 커널 이벤트 0)과 합치면: 둘 다 **덮개 닫힘/열림 이력이 있는 긴 가동 뒤**에 나타났고 재부팅/EC 리셋으로 풀렸다. 야간 사건 때는 serio 재연결로 안 풀렸다.
+**kmscon `cannot swap display [eDP] -22` 경고(별도 단서)**: 이전 부팅에서 13,662건(08:06 ~ 10:28, 덮개 닫힘·VT2 활성 중 화면을 다시 그릴 때마다). `-22`(EINVAL)는 eDP 에 갱신(page flip)이 안 먹는다는 뜻이다. 낮은 전력 상태(08:14~08:20, 09:09~09:33, 10:16:46~)와 분 단위로 정확히 맞지는 않아(경고는 화면이 갱신을 시도할 때만 나온다) **상관은 미확정**. 가설 H6: 낮은 상태 = VT2 가 DRM master 인데 eDP 파이프가 꺼진(scanout 없음) 상태, 높은 상태 = 파이프가 켜진 상태(10:21 에 DRM `dpms=Off` 를 읽었을 때도 높은 상태였으므로 `dpms` 속성만으로는 구분 안 됨). 검증: 두 상태에서 `/sys/kernel/debug/dri/0000:00:02.0/i915_display_info`(CRTC active/파이프/전원 우물)와 `i915_dmc_info`, `pmc_core` 의 `slp_s0`/substate 를 비교.
+**다음에 같은 증상이 나오면(재부팅·재로그인 하기 전에) — 1분이면 된다**
+1. `sudo python3 ~/nixos/mods/_data/input-debug/key_probe.py 15` 를 실행하고 15초 동안 **Backspace, →, 밝기 올림, 밝기 내림을 각각 3번씩** 누른다(눌린 글자 내용은 기록 안 함, 키 이름별 눌림 횟수만).
+2. 결과 해석: `irq1_delta` = i8042 키보드 인터럽트(PS/2 신호가 하드웨어에서 커널까지 오는지), `gpe6e_delta` = EC 이벤트 인터럽트(밝기/Fn 계열).
+   - 키를 눌렀는데 `irq1_delta`=0 → **키보드/EC 가 신호를 안 보냄**(하드웨어·펌웨어, EC 리셋 대상)
+   - `irq1_delta` 는 늘었는데 키 이벤트 0 → **커널 입력층에서 버려짐**(atkbd/serio 쪽)
+   - 이벤트는 있는데 화면에서 안 먹음 → **Hyprland/입력기 문제**(`hypr-input-policy` 의 키보드 enable 상태, fcitx5 점검)
+   - 밝기 키가 어느 장치(`MSI WMI hotkeys`/`Intel HID`/`Video Bus`)에서 오는지도 같이 나온다.
+3. 그 다음 순서: 덮개 한 번 더 닫았다 열기 → (소용없으면) 재부팅. 해결 수단이 아니라 **원인 구분이 목적**이므로 위 1~2 를 먼저 한다.
+**도구 변경**: `key_probe.py` 가 4개 입력 장치를 동시에 읽고 `irq1_delta`·`gpe6e_delta`·덮개·VT 를 함께 낸다(시험 10개 통과). 기준(키 입력 없는 3초): 모든 키 0, `irq1_delta` 0, `gpe6e_delta` 196(약 65/s, 덮개 닫힘).
+**참고(측정 도구의 부작용 가능성)**: `power-log`(30초마다 배터리 sysfs 와 `iw`)는 EC 를 읽는다. 다만 `systemd-logind` 가 이미 6초에 약 44회, waybar 가 15회 읽던 것에 비하면 30초에 한두 번은 무시할 수준이라 원인으로 보기 어렵고, 야간 사건은 도구가 켜져 있기 전부터 있었다고 사용자가 말했다. 그래도 완전히 배제된 것은 아니므로, 재발하면 그 시점에 도구가 돌고 있었는지 같이 기록한다.
+

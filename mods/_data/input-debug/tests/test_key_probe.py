@@ -21,4 +21,11 @@ check("watch 밖 키는 개수만(3개 이벤트), 어떤 키인지는 기록하
 check("EV_KEY 가 아닌 이벤트(SYN, MSC)는 무시", True)
 check("키 이름 → 코드 표에 방향키/백스페이스가 있음", kp.CODES["backspace"] == 14 and kp.CODES["left"] == 105 and kp.CODES["right"] == 106)
 check("없는 장치 이름이면 None", kp.find_device("존재하지 않는 키보드") is None)
+check("밝기 키 코드(224/225)가 표에 있음", kp.CODES["brightnessdown"] == 224 and kp.CODES["brightnessup"] == 225)
+f = kp.find_devices(["존재하지 않는 키보드", "다른 없는 장치"])
+check("없는 장치 이름 목록 → 모두 빈 목록", f == {"존재하지 않는 키보드": [], "다른 없는 장치": []}, str(f))
+check("카운터 파일이 없으면 None", kp.read_counter("/nonexistent/gpe", "x") is None)
+import tempfile
+t = tempfile.NamedTemporaryFile("w", delete=False); t.write("  1234  other\n"); t.close()
+check("gpe 파일 첫 숫자 읽기", kp.read_counter(t.name, "x") == 1234)
 finish("key_probe")
