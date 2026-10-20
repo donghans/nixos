@@ -57,4 +57,6 @@
 | T12 | #11 | 독 연결/분리 반복·독 단 채 부팅이 낮은 상태에 주는 영향 | 필요할 때만 | 독 | — |
 
 **우선순위 제안**: T1(상태를 가르는 가장 큰 레버) → T2·T3·T5(같은 자리에서 연달아) → T6·T7(핫스팟) → T8(집) → T9~T11 은 자동 축적.
+| 35 | `prefersReducedMotion`(스피너 등 애니메이션 감소)이 TUI 활동 비용(#34)을 줄이는가 | **미측정(첫 시도 무효)** | 본체에서 설정 키 확인(`prefersReducedMotion` 31곳, `CLAUDE_CODE_NO_FLICKER`, `CLAUDE_CODE_FRAME_TIMING_LOG` 등). 17:49 의 "R1" 구간은 **설정 쓰기가 권한 오류**(`~/nixos/.claude/settings.local.json` 이 root:root 644)로 실패했는데 확인 없이 진행해 **무효**(kmscon 18%·psys 4.1~4.3 W 로 기본과 같음). 시험 절차 규칙: 조건을 바꾸는 명령의 **종료 코드·출력을 확인한 뒤** 다음 단계로 | 쓸 수 있는 곳(`~/.claude/settings.json`, 백업·복원)에서 N R N R. 사용자 사용 환경이 `tui=fullscreen` 인 점도 변수(#36) |
+| 36 | `tui: fullscreen`(사용자 설정) 이 갱신 비용을 키우는가(전체 화면 모드는 매 프레임 전체를 다시 그릴 수 있음) | **미측정 가설** | 사용자 설정에 `tui = fullscreen` | 세션 재시작이 필요해 `default` 와 번갈아 비교하려면 새 세션으로 각각 측정 |
 
