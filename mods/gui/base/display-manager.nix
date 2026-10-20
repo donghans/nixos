@@ -27,6 +27,7 @@ mkPartOf "mods.gui" ({
     mkdir -p $out/dispctl
     cp ${pkgs.writeText "displayctl.py" (src "displayctl.py")} $out/displayctl.py
     cp ${pkgs.writeText "displayui.py" (src "displayui.py")} $out/displayui.py
+    cp ${../../_data/_uikit/uikit.py} $out/uikit.py
     cp ${../../_data/observe/observe_core.py} $out/observe_core.py   # 이벤트 로그(observe_events). 못 찾아도 dispctl/observelog.py 가 무동작 대체를 씀
     cp ${../../_data/observe/observe_events.py} $out/observe_events.py
     cp ${pkgs.writeText "config.py" (builtins.replaceStrings ["@hyprctl@" "@notify_send@"] [hyprctl "${pkgs.libnotify}/bin/notify-send"] (src "dispctl/config.py"))} $out/dispctl/config.py

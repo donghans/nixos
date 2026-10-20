@@ -40,6 +40,14 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 import clipmeta
+import os
+import sys
+
+try:
+    import uikit                                   # 배포: 같은 디렉터리에 복사됨
+except ImportError:                                # 소스 트리: ../_uikit
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "_uikit"))
+    import uikit
 
 CLIPCTL = os.environ.get("CLIPUI_CLIPCTL", "@clipctl@")
 COPY_CMD = os.environ.get("CLIPUI_COPY", "@wlcopy@")
@@ -295,12 +303,11 @@ class Preview(TextArea):
     ]
 
 
-class ClipUI(App):
+class ClipUI(uikit.HelpMixin, App):
     TITLE = "클립보드"
     ENABLE_COMMAND_PALETTE = False  # 푸터의 ^p palette 안내 숨김 (쓰지 않음)
 
-    CSS = """
-    Screen { background: #000000; }
+    CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
     #search { background: #000000; border: round #595959; }
     #search:focus { border: round #33ccff; }
     #main { height: 1fr; layout: horizontal; }
@@ -319,23 +326,12 @@ class ClipUI(App):
     #main.short ClipList { width: 100%; }
     #main.hide-preview #preview-box { display: none; }
     #main.hide-preview ClipList { width: 100%; height: 1fr; }
-    #status-row { height: 1; }
-    #status { width: 1fr; color: #9a9a9a; padding: 0 1; }
     #progress { width: 30; display: none; }
     #progress.active { display: block; }
-    ConfirmScreen, InfoScreen, BusyScreen, StatsScreen { align: center middle; }
-    #dialog { width: 70%; max-width: 90; height: auto; background: #101010; border: round #33ccff; padding: 1 2; }
-    #stats-box { width: 90%; max-width: 120; height: 90%; background: #101010; border: round #33ccff; padding: 1 2; }
-    #stats-scroll { height: 1fr; }
-    #dialog-title { text-style: bold; padding-bottom: 1; }
-    #dialog-hint { color: #7a7a7a; padding-top: 1; }
-    Footer { background: #000000; color: #9a9a9a; }
-    Footer FooterKey { background: #000000; }
-    Footer .footer-key--key { background: #000000; color: #33ccff; text-style: none; }
-    Footer .footer-key--description { background: #000000; color: #9a9a9a; }
     """
 
     BINDINGS = [
+        *uikit.HelpMixin.HELP_BINDINGS,
         Binding("enter", "copy_quit", "복사", priority=True),
         Binding("escape", "escape", "지우기/종료"),
         Binding("down", "move(1)", "아래", show=False),

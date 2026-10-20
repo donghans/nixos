@@ -71,17 +71,27 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 
 ## `powerui` — 전력 현황 TUI (2026-10-21)
 
-`powerui` (앱 런처에서는 "Power Monitor") 는 수집기가 남긴 표본을 그래프와 표로 보여주는 Textual 앱이다. 터미널 표 대신 한눈에 보려는 용도이고, 본체는 `mods/_data/observe/powerui.py`(화면) · `powerview.py`(rich 조각) · `powerdata.py`(증분 읽기·집계·추정) · `powergraph.py`(점자 그래프 계산).
+`powerui` (앱 런처에서는 "Power Monitor") 는 수집기가 남긴 표본을 그래프와 표로 보여주는 Textual 앱이다. 본체는 `mods/_data/observe/powerui.py`(화면) · `powerview.py`(rich 조각) · `powerdata.py`(증분 읽기·집계·추정) · `powergraph.py`(점자 그래프 계산).
 
-| 탭 | 내용 |
+**그래프·표 하나마다 박스 하나**(btop 처럼 제목이 달린 테두리, 아래 테두리에 지금/평균/최소/최대).
+
+| 탭 | 박스 |
 |---|---|
-| 1 지금 | 전원 상태·잔량(Wh), psys/배터리/패키지 W, low/high 상태, **PSR 모드·싱크**, 밝기·덮개·Wi-Fi 절전, **남은 시간 추정**(최근 30분 / 최근 6시간 깨끗한 표본 / 지금 순간), 최근 30분 그래프 |
-| 2 시계열 | 배터리·psys·패키지 W, 잔량 %, 아래에 상태(low/high)·PSR·전원(AC) 띠. 구간 `r`: 1시간/6시간/오늘/3일 |
-| 3 비교 | 그룹별 평균(`g`: 상태·PSR 켬끔·AC·덮개·VT·부팅), `c`: 내 활동·빌드가 섞인 표본 제외. 계량 W 는 10분 이상 쌓인 그룹만 |
-| 4 Netdata | CPU·네트워크·디스크·메모리·NVMe 온도(Netdata REST API; 웹 화면이 없는 빌드라 이 탭이 대신) |
+| 1 지금 | 현황(전원·잔량 Wh·psys/배터리/패키지 W·low/high·**PSR 모드/싱크**·밝기·덮개·Wi-Fi 절전·**남은 시간 추정**) / 최근 30분 psys / 최근 30분 배터리 |
+| 2 시계열 | 배터리 소비 / psys / 패키지 / 배터리 잔량 / 상태·PSR·전원 띠. 구간 `r`: 1시간·6시간·오늘·3일 |
+| 3 비교 | 그룹별 평균 표(`g`: 상태·PSR 켬끔·AC·덮개·VT·부팅, `c`: 내 활동·빌드가 섞인 표본 제외). 계량 W 는 10분 이상 쌓인 그룹만 |
+| 4 Netdata | CPU / 네트워크 / 디스크 / 메모리 / NVMe 온도(Netdata REST API; 웹 화면이 없는 빌드라 이 탭이 대신) |
 
-- 점자 문자(2×4 점)로 그려 글자 칸보다 가로 2배·세로 4배 해상도(btop 과 같은 방식).
-- **화면 갱신은 PSR 을 방해**하므로 기본 10초 주기이고 터미널이 포커스를 잃으면 갱신을 멈춘다(`--interval`). **측정 중에는 열어 두지 말 것.**
+- 그래프는 점자 문자(2×4 점) 면적 그래프(btop 과 같은 방식): 글자 칸보다 가로 2배·세로 4배 해상도이고, 세로 위치에 따라 초록→빨강 그라데이션. 표본 사이는 선형 보간(2분 넘게 끊긴 구간은 비움).
+- 키: `1`~`4` 탭, `r` 구간, `g` 그룹, `c` 깨끗한 표본, `f5` 새로고침, `?`/`F1` 도움말, `q` 종료. 옵션 `--tab`, `--range`, `--interval`.
+- **화면 갱신은 PSR 을 방해**하므로 기본 10초 주기이고 터미널이 포커스를 잃으면 갱신을 멈춘다. **측정 중에는 열어 두지 말 것.**
 - 남은 시간은 `잔량 Wh ÷ 전력`(0%까지 쓴다고 가정). 잔량 Wh 는 누적 계량값(`q_uah`)×최근 방전 전압, 만충은 `charge_full`(마모 반영). 충전 중 전압은 방전 때보다 높아 Wh 를 부풀리므로 쓰지 않는다.
-- 수집기가 새로 기록하는 필드: `dev.psr`(`mode`, `sink`), `pw.full_uah`. 옛 표본에는 PSR 정보가 없다("정보 없음" 표시). `observectl window --by psr` 로도 비교한다.
-- 시험: `tests/test_powerui.py`(순수 23 + 화면 23, `mods/_data/run-tests.sh`).
+- 수집기가 새로 기록하는 필드: `dev.psr`(`mode`, `sink`), `pw.full_uah`. `observectl window --by psr` 로도 비교한다.
+
+### Netdata 로의 미러링
+
+수집기는 표본마다 숫자 일부를 Netdata statsd(`127.0.0.1:8125`)에 게이지로도 보낸다(`observe.*`: psys/pkg/core/uncore W, 방전·충전 전력, 잔량 %, state_low, psr_on, psr_sink_active, 깨움/s, CPU, 패키지 C-state pc2~pc10, s0ix). Netdata 에서는 `statsd_observe.<이름>_gauge` 차트로 보인다. **원본은 observectl(JSONL)** 이고 이쪽은 한쪽 방향 복사다 — 문자열·이벤트·표지·프로세스 상세·A/B 통계는 observectl 에만 있다. Netdata 쪽 이점은 시스템 지표(CPU·PSI·네트워크·디스크·온도)와 같은 시간축·같은 API 로 겹쳐 볼 수 있다는 것.
+
+## `uikit` — 우리 TUI 공통 틀 (2026-10-21)
+
+`mods/_data/_uikit/uikit.py`. displayui · clipui · notif_ui · powerui 가 복사해 쓰던 겉모습과 동작을 모았다: 검정 배경·둥근 회색 테두리(포커스 시 하늘색)·선택 줄 파랑·Footer 색(`BASE_CSS`), 대화상자 모양(`DIALOG_CSS`), 제목 달린 박스(`.box`, `uikit.box(위젯, 제목)`), `?`/F1 도움말(`HelpMixin`, 키 목록은 BINDINGS 에서 자동 생성), 포커스를 잃으면 갱신 정지(`PauseOnBlurMixin`). 각 앱은 `CSS = uikit.BASE_CSS + (앱 고유 규칙)` 로 쓴다. 배포 시 각 모듈이 `uikit.py` 를 같은 디렉터리에 복사하고, 소스 트리에서는 `../_uikit` 에서 가져온다. 시험: `_uikit/tests/test_uikit.py`.

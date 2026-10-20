@@ -18,6 +18,7 @@
       mkdir -p $out
       cp ${../../_data/notif/notif.py} $out/notif.py
       cp ${../../_data/notif/notif_ui.py} $out/notif_ui.py
+      cp ${../../_data/_uikit/uikit.py} $out/uikit.py
       cp ${../../_data/notif/devwatch.py} $out/devwatch.py
     '';
     # busctl/systemctl/journalctl(systemd), pkill(procps), wl-copy, notify-send 를 PATH 에 넣어 서비스 환경에서도 동작하게 함

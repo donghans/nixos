@@ -10,6 +10,7 @@ PY=${PYTHON:-$(grep -o '/nix/store/[^ "]*python3[^ "]*/bin/python3[^ "]*' "$(com
 # notif 는 위에서 (textual 없이) 핵심만 돌렸고, 화면 시험은 textual 이 있는 python 으로 한 번 더
 [ -n "$PY" ] && { out=$(cd "$D/notif" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$PY" tests/test_notif.py 2>&1); r=$?; printf '%-9s %s\n' notif-ui "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
 [ -n "$PY" ] && { out=$(cd "$D/observe" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$PY" tests/test_powerui.py 2>&1); r=$?; printf '%-9s %s\n' powerui-ui "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
+[ -n "$PY" ] && { out=$(cd "$D/_uikit" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$PY" tests/test_uikit.py 2>&1); r=$?; printf '%-9s %s\n' uikit "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
 out=$(cd "$D/display" && PYTHON=${PY:-python3} sh tests/run.sh 2>&1); r=$?
 printf '%-9s %s\n' display "$(echo "$out" | grep -E '코어|TUI' | tr '\n' ' ')"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep -E "FAIL|Traceback"; }
 find "$D" -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null

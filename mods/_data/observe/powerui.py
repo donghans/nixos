@@ -8,22 +8,29 @@
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 import time
 
 from rich.text import Text
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
-from textual.widgets import DataTable, Footer, Header, Static, TabbedContent, TabPane
+from textual.containers import Vertical
+from textual.widgets import DataTable, Footer, Static, TabbedContent, TabPane
 
+try:
+    import uikit                                   # 배포: 같은 디렉터리에 복사됨
+except ImportError:                                # 소스 트리: ../_uikit
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "_uikit"))
+    import uikit
 import powerdata as pd
 import powergraph as pg
 import powerview as pv
 
 
 class Panel(Static):
-    """크기가 바뀔 때마다 provider(폭, 높이) 로 Text 를 새로 만들어 그리는 칸."""
+    """크기가 바뀔 때마다 provider(폭, 높이) 로 내용을 새로 만들어 그리는 칸. provider 는 Text 또는 (Text, 부제 문자열)을 돌려준다(부제는 박스 아래 테두리에 표시)."""
 
     def __init__(self, provider, **kw):
         super().__init__(**kw)
@@ -31,24 +38,32 @@ class Panel(Static):
 
     def render(self):
         w, h = self.size.width, self.size.height
-        return self.provider(max(20, w), max(6, h)) if w and h else Text("")
+        if not (w and h):
+            return Text("")
+        out = self.provider(max(20, w), max(3, h))
+        text, sub = out if isinstance(out, tuple) else (out, "")
+        if (self.border_subtitle or "") != sub:      # 같을 때는 건드리지 않는다(바꾸면 다시 그려져 무한 반복)
+            self.border_subtitle = sub
+        return text
 
 
-class PowerUI(App):
-    TITLE = "powerui — 전력 현황"
-    CSS = """
-    #status { height: 1; padding: 0 1; color: $text-muted; }
+class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
+    TITLE = "powerui"
+    CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
+    TabbedContent { height: 1fr; }
+    TabPane { padding: 0; }
     Panel { height: 1fr; }
-    #nowtext { height: 12; }
-    #nowgraphs { height: 1fr; }
-    DataTable { height: 1fr; }
-    #cmphead { height: 1; color: $text-muted; padding: 0 1; }
+    #nowtext { height: 13; }
+    #serbands { height: 8; }
+    #cmpbox { height: 1fr; }
+    DataTable { height: 1fr; background: #000000; }
     """
     BINDINGS = [
         Binding("q", "quit", "종료"),
         Binding("1", "tab('now')", "지금"), Binding("2", "tab('series')", "시계열"), Binding("3", "tab('compare')", "비교"), Binding("4", "tab('netdata')", "Netdata"),
         Binding("r", "cycle_range", "구간"), Binding("g", "cycle_group", "그룹"), Binding("c", "toggle_clean", "깨끗한 표본"),
         Binding("f5", "refresh_now", "새로고침"),
+        *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
     def __init__(self, interval=10.0, store=None, tab="now", range_i=0):
@@ -64,21 +79,25 @@ class PowerUI(App):
         self._nd_cache = {}       # chart -> (t, points)
         self._nd_at = 0.0
 
-    # --- 구성
+    # --- 구성: 그래프·표 하나마다 박스 하나(btop 처럼 제목이 달린 테두리)
     def compose(self) -> ComposeResult:
-        yield Header()
-        yield Static("", id="status")
         with TabbedContent(initial=self.start_tab, id="tabs"):
             with TabPane("지금 [1]", id="now"):
-                yield Panel(self._now_view, id="nowtext")
-                yield Panel(self._now_graphs, id="nowgraphs")
+                yield uikit.box(Panel(self._now_view, id="nowtext"), "현황")
+                yield uikit.box(Panel(lambda w, h: self._now_chart("psys", "psys", "cyan", w, h), id="nowg0"), "최근 30분 · psys (플랫폼 합계)")
+                yield uikit.box(Panel(lambda w, h: self._now_chart("batt", "배터리", "dark_orange", w, h, axis=True), id="nowg1"), "최근 30분 · 배터리 소비 (방전 중)")
             with TabPane("시계열 [2]", id="series"):
-                yield Panel(self._series_view, id="seriestext")
+                for i, spec in enumerate(pv.SERIES):
+                    yield uikit.box(Panel(lambda w, h, i=i: self._series_chart(i, w, h), id=f"ser{i}"), spec[0])
+                yield uikit.box(Panel(self._series_bands, id="serbands"), "상태 · PSR · 전원")
             with TabPane("비교 [3]", id="compare"):
-                yield Static("", id="cmphead")
-                yield DataTable(id="cmptable", cursor_type="row", zebra_stripes=True)
+                with Vertical(id="cmpbox", classes="box"):
+                    yield DataTable(id="cmptable", cursor_type="row", zebra_stripes=True)
             with TabPane("Netdata [4]", id="netdata"):
-                yield Panel(self._netdata_view, id="netdatatext")
+                for i, nd in enumerate(pd.NETDATA_CHARTS):
+                    yield uikit.box(Panel(lambda w, h, i=i: self._netdata_chart(i, w, h), id=f"nd{i}"), nd[1])
+        with Vertical(id="status-row"):
+            yield Static("", id="status")
         yield Footer()
 
     def on_mount(self):
@@ -105,12 +124,13 @@ class PowerUI(App):
         self._nd_at = time.time()
 
     def redraw(self):
-        for pid in ("#nowtext", "#nowgraphs", "#seriestext", "#netdatatext"):
-            self.query_one(pid, Panel).refresh()
+        for panel in self.query(Panel):
+            panel.refresh()
         self._fill_compare()
+        label = pv.RANGES[self.range_i][0]
         n = len(self.store.recs)
         self.query_one("#status", Static).update(
-            f"마지막 갱신 {time.strftime('%H:%M:%S', time.localtime(self.last))} · 주기 {self.interval:g}초 · 표본 {n}개 (최근 3일) · 구간 {pv.RANGES[self.range_i][0]}")
+            f"마지막 갱신 {time.strftime('%H:%M:%S', time.localtime(self.last))} · 주기 {self.interval:g}초 · 표본 {n}개 (최근 3일) · 구간 {label}")
 
     # --- 보기 만들기
     def _est(self):
@@ -119,20 +139,35 @@ class PowerUI(App):
     def _now_view(self, w, h):
         return pv.now_text(self.store.recs, self._est(), w)
 
-    def _now_graphs(self, w, h):
+    def _now_chart(self, key, _name, style, w, h, axis=False):
         now = time.time()
         t0, t1 = now - 1800, now
         recs = [r for r in self.store.recs if r["t"] >= t0]
-        each = max(2, (h - 2 - 1) // 2)
-        out = pv.graph_text("최근 30분 · psys", [(r["t"], r["psys"]) for r in recs], t0, t1, w, each, "W", "cyan", gradient=True)
-        out.append("\n")
-        out.append_text(pv.graph_text("최근 30분 · 배터리 소비 (방전 중만)", [(r["t"], r["batt"] if r["status"] == "Discharging" else None) for r in recs], t0, t1, w, each, "W", "dark_orange", gradient=True))
-        out.append("\n")
-        out.append_text(pv.time_axis(t0, t1, w))
-        return out
+        text, st = pv.chart(pv.series_points(recs, key), t0, t1, w, h, "W", style, gradient=True, axis=axis)
+        return text, pv.stats_str(st)
 
-    def _series_view(self, w, h):
-        return pv.timeseries_text(self.store.recs, pv.RANGES[self.range_i][0], time.time(), w, h)
+    def _series_chart(self, i, w, h):
+        _title, key, unit, style, lo, hi, fmt = pv.SERIES[i]
+        t0, t1 = pv.range_bounds(pv.RANGES[self.range_i][0], time.time())
+        recs = [r for r in self.store.recs if t0 <= r["t"] <= t1]
+        text, st = pv.chart(pv.series_points(recs, key), t0, t1, w, h, unit, style, lo, hi, fmt, gradient=unit == "W")
+        return text, pv.stats_str(st, unit, fmt)
+
+    def _series_bands(self, w, h):
+        t0, t1 = pv.range_bounds(pv.RANGES[self.range_i][0], time.time())
+        recs = [r for r in self.store.recs if t0 <= r["t"] <= t1]
+        return pv.bands_text(recs, t0, t1, w), f"구간 {pv.RANGES[self.range_i][0]} · 표본 {len(recs)}개"
+
+    def _netdata_chart(self, i, w, h):
+        chart, title, unit, _e, _a = pd.NETDATA_CHARTS[i]
+        if not self._nd_cache:
+            return Text(" Netdata 데이터를 읽는 중… (이 탭을 열면 읽어 옵니다. Netdata 가 꺼져 있으면 표시되지 않습니다)", style="grey70"), ""
+        _, pts = self._nd_cache.get(chart, (0, None))
+        if pts is None:
+            return Text(" 읽지 못함: Netdata 꺼짐 또는 차트 없음", style="grey50"), ""
+        t0, t1 = pv.range_bounds(pv.RANGES[self.range_i][0], time.time())
+        text, st = pv.chart(pts, t0, t1, w, h, unit, "green", fmt=None, axis=i == len(pd.NETDATA_CHARTS) - 1)
+        return text, pv.stats_str(st, unit)
 
     def _fill_compare(self):
         by = list(pd.GROUPS)[self.group_i]
@@ -140,30 +175,14 @@ class PowerUI(App):
         t0, t1 = pv.range_bounds(label, time.time())
         recs = self.store.since(t0, t1)
         rows = pd.group_table(recs, by, self.clean)
-        self.query_one("#cmphead", Static).update(pv.compare_header(pd.GROUPS[by], label, self.clean, len(recs)))
+        box = self.query_one("#cmpbox")
+        box.border_title = f"그룹별 평균 · {pd.GROUPS[by]}"
+        box.border_subtitle = f"구간 {label} · {'깨끗한 표본만' if self.clean else '모든 표본'} · 표본 {len(recs)}개"
         t = self.query_one("#cmptable", DataTable)
         t.clear()
         f = lambda x, p=2: "-" if x is None else f"{x:.{p}f}"
         for r in rows:
             t.add_row(str(r["group"]), str(r["n"]), pg.fmt_dur(r["hours"]), f(r["coulomb"]), f(r["batt"]), f(r["psys"]), f(r["pkg"]), f(r["pc8"], 0), f(r["pc10"], 0), f(r["wake"], 0), f(r["cpu"], 0))
-
-    def _netdata_view(self, w, h):
-        t = Text()
-        if not self._nd_cache:
-            t.append(" Netdata 데이터를 읽는 중… (이 탭을 열면 읽어 옵니다. Netdata 가 꺼져 있으면 표시되지 않습니다)", style="grey70")
-            return t
-        label = pv.RANGES[self.range_i][0]
-        t0, t1 = pv.range_bounds(label, time.time())
-        each = max(2, (h - len(pd.NETDATA_CHARTS) - 3) // len(pd.NETDATA_CHARTS))
-        for chart, title, unit, _e, _a in pd.NETDATA_CHARTS:
-            _, pts = self._nd_cache.get(chart, (0, None))
-            if pts is None:
-                t.append(f" {title}   (읽지 못함: Netdata 꺼짐 또는 차트 없음)\n", style="grey50")
-                continue
-            t.append_text(pv.graph_text(title, pts, t0, t1, w, each, unit, "green"))
-            t.append("\n")
-        t.append_text(pv.time_axis(t0, t1, w))
-        return t
 
     # --- 동작
     def action_tab(self, name):
@@ -188,16 +207,6 @@ class PowerUI(App):
         self.redraw()
 
     def action_refresh_now(self):
-        self.refresh_data()
-
-    # 창이 포커스를 잃으면 갱신을 멈춘다(보이지 않는 화면 갱신이 PSR 을 방해하지 않도록)
-    def on_app_blur(self, _ev: events.AppBlur):
-        if self._timer:
-            self._timer.pause()
-
-    def on_app_focus(self, _ev: events.AppFocus):
-        if self._timer:
-            self._timer.resume()
         self.refresh_data()
 
 

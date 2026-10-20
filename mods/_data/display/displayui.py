@@ -25,6 +25,14 @@ from textual.widgets.option_list import Option
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import displayctl as dc  # noqa: E402
+import os
+import sys
+
+try:
+    import uikit                                   # 배포: 같은 디렉터리에 복사됨
+except ImportError:                                # 소스 트리: ../_uikit
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "_uikit"))
+    import uikit
 from dispctl.observelog import events as observe_events  # noqa: E402
 
 FOCUS_IDS = {
@@ -112,12 +120,11 @@ class NameInput(ModalScreen[str]):
         self.dismiss("")
 
 
-class DisplayUI(App):
+class DisplayUI(uikit.HelpMixin, App):
     TITLE = "화면 관리"
     ENABLE_COMMAND_PALETTE = False  # 푸터의 ^p palette 안내 숨김 (clipui 와 같음, 쓰지 않음)
     # 색은 lazygit(mods/sys/utils/lazygit.nix) / clipui 와 같음: 비활성 테두리 #595959, 포커스 #33ccff, 선택 줄 #268bd2, 배경 검정.
-    CSS = """
-    Screen { background: #000000; }
+    CSS = uikit.BASE_CSS + """
     #body { height: 1fr; }
     #left, #mons, #form { background: #000000; border: round #595959; border-title-color: #9a9a9a; border-subtitle-color: #7a7a7a; }
     #left:focus-within, #mons:focus-within, #form:focus-within { border: round #33ccff; border-title-color: #33ccff; border-title-style: bold; }
@@ -145,14 +152,11 @@ class DisplayUI(App):
     Button.-primary { background: #1b4f7a; color: #ffffff; }
     Button.-primary:hover, Button.-primary:focus { background: #268bd2; }
     #msg { height: auto; min-height: 1; padding: 0 1; color: #b8a46a; }
-    Footer { background: #000000; color: #9a9a9a; }
-    Footer FooterKey { background: #000000; }
-    Footer .footer-key--key { background: #000000; color: #33ccff; text-style: none; }
-    Footer .footer-key--description { background: #000000; color: #9a9a9a; }
     .narrow #body { layout: vertical; }
     .narrow #left { width: 1fr; height: 10; }
     """
     BINDINGS = [
+        *uikit.HelpMixin.HELP_BINDINGS,
         Binding("m", "focus_to('modes')", "모드"),
         Binding("s", "focus_to('res')", "해상도"),
         Binding("r", "focus_to('hz')", "주사율"),
