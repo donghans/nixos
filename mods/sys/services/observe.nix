@@ -14,14 +14,27 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
   py = pkgs.python3;
   dir = pkgs.runCommand "observe-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "powergraph.py" "powerdata.py" "powerview.py" "powerui.py"]}
     cp ${../../_data/observe/examples/power_knobs.py} $out/power_knobs.py
   '';
   observectl = pkgs.writeShellScriptBin "observectl" ''exec ${py}/bin/python3 ${dir}/observe_cli.py "$@"'';
+  # 전력 현황 TUI(Textual) — 같은 디렉터리의 observe_core 를 import 하므로 dir 에서 실행한다
+  powerui = pkgs.writeShellScriptBin "powerui" ''exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${dir}/powerui.py "$@"'';
   observeEmit = pkgs.writeShellScriptBin "observe-emit" ''exec ${py}/bin/python3 ${dir}/observe_emit.py "$@"'';
 in {
+  # 앱 런처(SUPER+Space)에서도 열리도록 등록(터미널 앱이라 uwsm 이 xdg-terminal-exec 로 kitty 에 띄움)
+  hm.xdg.desktopEntries.powerui = {
+    name = "Power Monitor";
+    genericName = "Battery and power graphs";
+    comment = "Battery, power and PSR graphs from the observectl collector";
+    exec = "${powerui}/bin/powerui";
+    terminal = true;
+    categories = ["System" "Monitor"];
+    icon = "battery";
+  };
+
   os = {
-    environment.systemPackages = [observectl observeEmit];
+    environment.systemPackages = [observectl observeEmit powerui];
 
     # MSR(패키지 C-state 잔여율)을 읽으려면 msr 모듈이 필요(root 만 접근). 수집기가 없을 때 modprobe 도 시도하지만 부팅 때 올려 둔다.
     boot.kernelModules = ["msr"];

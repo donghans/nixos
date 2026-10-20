@@ -317,6 +317,7 @@ class Sampler:
             pw["q_uah"] = int(rd(self.bat + "/charge_now") or 0) or None        # 누적 계량값(1 mAh 단위, ≈15 mWh) — 10분 이상 평균에 쓰는 가장 믿을 만한 기준(observectl energy)
             pw["v_uv"] = int(v) if v else None
             pw["status"] = rd(self.bat + "/status")
+            pw["full_uah"] = int(rd(self.bat + "/charge_full") or 0) or None    # 현재 만충 용량(마모 반영) — powerui 의 남은 시간 추정용
         pw["ac"] = max([int(rd(d + "/online", "0") or 0) for d in glob.glob(f"{SYS}/class/power_supply/*") if rd(d + "/type") == "Mains"] or [0])
         out["pw"] = pw
         cs = pkg_cstate_pct(p["msr"], cur["msr"]) if p["msr"] and cur["msr"] else {}
@@ -365,9 +366,21 @@ class Sampler:
                       "bl": rd(bl[0]) if bl else None, "wifi": self.wifi, "tlp": (rd("/run/tlp/last_pwr").split() or [None])[0],
                       "boot": rd(f"{PROC}/sys/kernel/random/boot_id")[:8], "quirks": quirks_tag(rd(f"{PROC}/cmdline")),
                       "gpu_rpm": next((rd(f) for f in glob.glob(f"{SYS}/class/drm/card*/device/power/runtime_status")), None),
-                      "audio_rpm": rd(f"{SYS}/bus/pci/devices/0000:00:1f.3/power/runtime_status") or None}
+                      "audio_rpm": rd(f"{SYS}/bus/pci/devices/0000:00:1f.3/power/runtime_status") or None,
+                      "psr": psr_info()}
         self.prev = cur
         return out
+
+
+def psr_info():
+    """eDP 패널 PSR 상태(debugfs, root). {"mode": "PSR1 enabled"|"disabled"…, "sink": "active"|"inactive"…}; 없으면 None.
+    sink 는 그 순간의 스냅샷(PSR 은 화면이 한가할 때만 active)이라 30초 표본에서는 '들어갈 수 있는 상태인가'의 근사다."""
+    for d in glob.glob(f"{SYS}/kernel/debug/dri/*/eDP-1"):
+        st, sk = rd(d + "/i915_psr_status").splitlines(), rd(d + "/i915_psr_sink_status").splitlines()
+        mode = next((l.split(":", 1)[1].strip() for l in st if l.startswith("PSR mode:")), None)
+        m = re.search(r"\[(\w[\w ,]*)\]", sk[0]) if sk else None
+        return {"mode": mode, "sink": m.group(1).split(",")[0] if m else None}
+    return None
 
 
 # ---------------------------------------------------------------- 요청 작업

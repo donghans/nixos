@@ -68,3 +68,20 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 수집기는 **높은 상태이고 패키지가 PC3 에 20회(10분) 연속 막혀 있으면**(pc3 ≥ 30%, pc6+pc8+pc10 < 1%) 그 표본에 `flag = "pc3-stuck"` 를 달고, **절전 설정 스냅샷**(`power_knobs`)을 `/var/lib/observe/data/knobs-<epoch>.json` 에 한 번(시간당 최대 1회) 저장한다. 읽기 전용이라 측정에 영향이 없다.
 다음에 이 상태가 생기면: `observectl window --by flag`, 저장된 스냅샷을 기준 스냅샷과 `power_knobs.py diff` 로 비교한다(기준은 정상 상태에서 `power_knobs.py save` 로 만들어 둔다). 2026-10-20 오후에 2시간 41분 지속된 상태의 원인은 이 도구가 없어서 못 잡았다(#48~#51).
 
+
+## `powerui` — 전력 현황 TUI (2026-10-21)
+
+`powerui` (앱 런처에서는 "Power Monitor") 는 수집기가 남긴 표본을 그래프와 표로 보여주는 Textual 앱이다. 터미널 표 대신 한눈에 보려는 용도이고, 본체는 `mods/_data/observe/powerui.py`(화면) · `powerview.py`(rich 조각) · `powerdata.py`(증분 읽기·집계·추정) · `powergraph.py`(점자 그래프 계산).
+
+| 탭 | 내용 |
+|---|---|
+| 1 지금 | 전원 상태·잔량(Wh), psys/배터리/패키지 W, low/high 상태, **PSR 모드·싱크**, 밝기·덮개·Wi-Fi 절전, **남은 시간 추정**(최근 30분 / 최근 6시간 깨끗한 표본 / 지금 순간), 최근 30분 그래프 |
+| 2 시계열 | 배터리·psys·패키지 W, 잔량 %, 아래에 상태(low/high)·PSR·전원(AC) 띠. 구간 `r`: 1시간/6시간/오늘/3일 |
+| 3 비교 | 그룹별 평균(`g`: 상태·PSR 켬끔·AC·덮개·VT·부팅), `c`: 내 활동·빌드가 섞인 표본 제외. 계량 W 는 10분 이상 쌓인 그룹만 |
+| 4 Netdata | CPU·네트워크·디스크·메모리·NVMe 온도(Netdata REST API; 웹 화면이 없는 빌드라 이 탭이 대신) |
+
+- 점자 문자(2×4 점)로 그려 글자 칸보다 가로 2배·세로 4배 해상도(btop 과 같은 방식).
+- **화면 갱신은 PSR 을 방해**하므로 기본 10초 주기이고 터미널이 포커스를 잃으면 갱신을 멈춘다(`--interval`). **측정 중에는 열어 두지 말 것.**
+- 남은 시간은 `잔량 Wh ÷ 전력`(0%까지 쓴다고 가정). 잔량 Wh 는 누적 계량값(`q_uah`)×최근 방전 전압, 만충은 `charge_full`(마모 반영). 충전 중 전압은 방전 때보다 높아 Wh 를 부풀리므로 쓰지 않는다.
+- 수집기가 새로 기록하는 필드: `dev.psr`(`mode`, `sink`), `pw.full_uah`. 옛 표본에는 PSR 정보가 없다("정보 없음" 표시). `observectl window --by psr` 로도 비교한다.
+- 시험: `tests/test_powerui.py`(순수 23 + 화면 23, `mods/_data/run-tests.sh`).
