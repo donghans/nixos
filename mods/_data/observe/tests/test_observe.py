@@ -161,4 +161,7 @@ check("energy_by_group: 누적 계량으로 8 W 평균을 복원(양자화 오�
 check("energy_by_group: psys/V×I 평균도 함께", abs(en["psys_w"] - 5.5) < 0.1 and abs(en["vi_w"] - 9.0) < 1e-9)
 erows[5]["pw"]["status"] = "Charging"
 check("충전 중인 쌍은 제외", observe_cli.energy_by_group(erows, "state")["low"]["n"] == 18)
+check("is_clean: 한가한 표본은 통과", observe_cli.is_clean({"proc": [{"comm": "netdata", "cpu": 2.0}, {"comm": "kmscon", "cpu": 0.1}]}))
+check("is_clean: kmscon CPU 가 높으면(내 세션 활동) 제외", not observe_cli.is_clean({"proc": [{"comm": "kmscon", "cpu": 18.0}]}))
+check("is_clean: nix-daemon 이 보이면(빌드) 제외", not observe_cli.is_clean({"proc": [{"comm": "nix-daemon", "cpu": 30.0}, {"comm": "kmscon", "cpu": 0.0}]}))
 finish("observe")

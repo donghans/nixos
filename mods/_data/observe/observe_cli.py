@@ -45,6 +45,15 @@ def fmt(x, w=6, p=2):
     return f"{x:>{w}.{p}f}" if isinstance(x, (int, float)) and x == x else " " * (w - 1) + "-"
 
 
+BUSY_COMMS = {"nix-daemon", "nix", "nixos-rebuild", "nixup", ".nixup-wrapped", "cc1", "ld", "rustc"}
+
+
+def is_clean(r):
+    """측정 위생: 내 세션이 화면을 갱신 중(kmscon CPU ≥ 1%)이거나 빌드(nix 등)가 도는 표본은 '한가한 상태' 비교에서 뺀다."""
+    kc = next((p["cpu"] for p in r.get("proc", []) if p["comm"] == "kmscon"), 0)
+    return kc < 1.0 and not any(p["comm"] in BUSY_COMMS for p in r.get("proc", []))
+
+
 def group_key(s, by):
     if by == "state":
         return s.get("state", "?")
@@ -132,6 +141,8 @@ def energy_by_group(rows, by, max_gap=90):
 
 def cmd_energy(a):
     rows = samples(core.parse_when(a.since), core.parse_when(a.until) if a.until else None)
+    if a.clean:
+        rows = [r for r in rows if is_clean(r)]
     res = energy_by_group(rows, a.by)
     if not res:
         sys.exit("누적 계량값(q_uah)이 있는 방전 표본이 없습니다(수집기를 새 버전으로 재시작한 뒤 쌓인 표본만 가능)")
@@ -144,16 +155,21 @@ def cmd_energy(a):
 def cmd_window(a):
     since, until = core.parse_when(a.since), core.parse_when(a.until) if a.until else None
     rows = samples(since, until)
+    if a.clean:
+        n0 = len(rows)
+        rows = [r for r in rows if is_clean(r)]
+        print(f"(--clean: 내 세션 활동·빌드 표본 {n0 - len(rows)}개 제외, {len(rows)}개 사용)")
     if not rows:
         sys.exit("표본이 없습니다(observectl on 으로 켠 뒤 시간이 지나야 함)")
     groups = collections.defaultdict(list)
     for r in rows:
         groups[group_key(r, a.by)].append(r)
     print(f"{core.hms(rows[0]['t'])} ~ {core.hms(rows[-1]['t'])} · 표본 {len(rows)}개 · 그룹 기준 {a.by}")
+    print("(batt 열은 방전 중인 표본만 평균: 충전 중의 전류는 방전 전력이 아님)")
     print(f"{'그룹':<18}{'n':>4}{'batt':>7}{'psys':>7}{'pkg':>6}{'core':>6}{'pc8%':>6}{'pc10%':>6}{'깨어남/s':>9}{'cpu%':>6}")
     for k, g in sorted(groups.items(), key=lambda kv: -len(kv[1])):
         wake = mean_of(g, lambda r: sum(p.get("wake", 0) for p in r.get("proc", [])))
-        print(f"{str(k)[:17]:<18}{len(g):>4}{fmt(mean_of(g, lambda r: get(r, 'pw.batt_w')), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.psys_w')), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.pkg_w')))}"
+        print(f"{str(k)[:17]:<18}{len(g):>4}{fmt(mean_of(g, lambda r: get(r, 'pw.batt_w') if get(r, 'pw.status') == 'Discharging' else None), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.psys_w')), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.pkg_w')))}"
               f"{fmt(mean_of(g, lambda r: get(r, 'pw.core_w')))}{fmt(mean_of(g, lambda r: get(r, 'cs.pc8')), 6, 1)}{fmt(mean_of(g, lambda r: get(r, 'cs.pc10')), 6, 1)}{fmt(wake, 9, 0)}{fmt(mean_of(g, lambda r: get(r, 'irq.cpu_busy_pct')), 6, 1)}")
 
 
@@ -393,8 +409,8 @@ def main(argv=None):
     sub.add_parser("off").set_defaults(f=cmd_off)
     s = sub.add_parser("level"); s.add_argument("component"); s.add_argument("level"); s.set_defaults(f=cmd_level)
     s = sub.add_parser("mark"); s.add_argument("cond", nargs="?", default=""); s.add_argument("note", nargs="*"); s.add_argument("--clear", action="store_true"); s.set_defaults(f=cmd_mark)
-    s = sub.add_parser("window"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "boot", "quirks", "none"]); s.set_defaults(f=cmd_window)
-    s = sub.add_parser("energy"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "boot", "quirks", "none"]); s.set_defaults(f=cmd_energy)
+    s = sub.add_parser("window"); s.add_argument("--clean", action="store_true", help="내 세션 활동·빌드가 섞인 표본 제외"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "boot", "quirks", "none"]); s.set_defaults(f=cmd_window)
+    s = sub.add_parser("energy"); s.add_argument("--clean", action="store_true", help="내 세션 활동·빌드가 섞인 표본 제외"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "boot", "quirks", "none"]); s.set_defaults(f=cmd_energy)
     s = sub.add_parser("states"); s.add_argument("--since", default="-2h"); s.set_defaults(f=cmd_states)
     s = sub.add_parser("top"); s.add_argument("--since", default="-30m"); s.add_argument("--by", default="wake", choices=["cpu", "wake", "thr", "io"]); s.add_argument("-n", type=int, default=12); s.set_defaults(f=cmd_top)
     s = sub.add_parser("events"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--level", default="trace", choices=list(core.LEVELS)); s.add_argument("--grep"); s.set_defaults(f=cmd_events)
