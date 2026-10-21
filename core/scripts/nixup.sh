@@ -19,6 +19,14 @@ if [ "$(id -u)" -eq 0 ]; then
     exit 1
 fi
 
+# 관측: nixup 전체를 하나의 구간(스팬)으로 감싸 다시 실행한다. 안쪽 단계(log_exec 의 Exec 쌍)가 이 구간 아래로 붙는다(observectl trace).
+# observe-emit 이 없으면 건너뛰고, 이미 감쌌으면(NIXUP_SPAN) 다시 감싸지 않는다.
+# (span-probe: 옛 observe-emit 은 span-run 을 몰라 사용법 오류로 끝나므로 nixup 이 안 돌게 된다 — 새 버전일 때만 감싼다)
+if [ -z "${NIXUP_SPAN:-}" ] && command -v observe-emit >/dev/null 2>&1 && observe-emit span-probe >/dev/null 2>&1; then
+    export NIXUP_SPAN=1
+    exec observe-emit span-run nixup run "sub=${1:-all}" -- "$0" "$@"
+fi
+
 source "$SCRIPT_DIR/nixup.lib-ui.sh"
 source "$SCRIPT_DIR/lib-build.sh"
 source "$SCRIPT_DIR/nixup.lib-lock.sh"

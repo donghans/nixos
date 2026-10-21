@@ -93,15 +93,20 @@ class Transaction:
 
     def apply(self, st: dict, do_verify: bool = True) -> list[str]:
         mons = get_monitors()
-        _ev.info("tx.apply.begin", layout=st.get("layout"), monitors=[{"n": m.name, "mode": m.mode, "dis": m.disabled, "x": m.x, "y": m.y} for m in mons])
-        self.cfg, self.layout = build(mons, st)
-        self.new_state = st
-        migrate_windows(self.cfg)
-        errs = apply_cfg(self.cfg, mons)
-        if not do_verify:
-            return errs
-        issues = verify(self.cfg)
-        _ev.info("tx.apply.end", errs=errs, issues=issues, monitors=[{"n": m.name, "mode": m.mode, "dis": m.disabled} for m in get_monitors()])
+        # 단계마다 스팬으로 남긴다(observectl trace: 어느 단계가 오래 걸렸는지, 그동안의 에너지). 이벤트 이름 tx.apply.begin/end 는 그대로.
+        with _ev.span("tx.apply", level="info", layout=st.get("layout"), monitors=[{"n": m.name, "mode": m.mode, "dis": m.disabled, "x": m.x, "y": m.y} for m in mons]) as sp:
+            with _ev.span("tx.build", level="info"):
+                self.cfg, self.layout = build(mons, st)
+            self.new_state = st
+            with _ev.span("tx.migrate", level="info"):
+                migrate_windows(self.cfg)
+            with _ev.span("tx.apply_cfg", level="info"):
+                errs = apply_cfg(self.cfg, mons)
+            if not do_verify:
+                return errs
+            with _ev.span("tx.verify", level="info"):
+                issues = verify(self.cfg)
+            sp.set(errs=errs, issues=issues, monitors=[{"n": m.name, "mode": m.mode, "dis": m.disabled} for m in get_monitors()])
         # 모니터가 거부해 다른 모드로 돌아간 항목은 상태를 실제 값으로 정정 (거부된 요청이 이후 작업에 계속 남지 않도록)
         actual = {m.name: m for m in get_monitors()}
         for name, c in self.cfg.items():

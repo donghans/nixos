@@ -12,6 +12,17 @@ class _Null:
 
 
 class _NullSpan:
+    id = trace = parent = None
+
+    def set(self, **kv):
+        pass
+
+    def ids(self):
+        return {}
+
+    def env(self):
+        return {}
+
     def __enter__(self):
         return self
 

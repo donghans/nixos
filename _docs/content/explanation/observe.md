@@ -95,3 +95,31 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 ## `uikit` — 우리 TUI 공통 틀 (2026-10-21)
 
 `mods/_data/_uikit/uikit.py`. displayui · clipui · notif_ui · powerui 가 복사해 쓰던 겉모습과 동작을 모았다: 검정 배경·둥근 회색 테두리(포커스 시 하늘색)·선택 줄 파랑·Footer 색(`BASE_CSS`), 대화상자 모양(`DIALOG_CSS`), 제목 달린 박스(`.box`, `uikit.box(위젯, 제목)`), `?`/F1 도움말(`HelpMixin`, 키 목록은 BINDINGS 에서 자동 생성), 포커스를 잃으면 갱신 정지(`PauseOnBlurMixin`). 각 앱은 `CSS = uikit.BASE_CSS + (앱 고유 규칙)` 로 쓴다. 배포 시 각 모듈이 `uikit.py` 를 같은 디렉터리에 복사하고, 소스 트리에서는 `../_uikit` 에서 가져온다. 시험: `_uikit/tests/test_uikit.py`.
+
+## 스팬(구간)과 `observectl trace` (2026-10-21)
+
+OTel 의 트레이스 개념만 빌린 것(OTel 을 넣거나 흉내 내는 게 아님): 작업 하나를 **시작·끝 이벤트 한 쌍(스팬)** 으로 묶고 부모-자식으로 연결해, 어디서 시간이 걸렸나와 **그 구간의 에너지**를 본다. 별도 서비스 없이 기존 이벤트 로그(JSONL)를 쓴다.
+
+- 기록: 파이썬 `Events("comp").span("이름", level="info", k=v)`(`with` 문, `sp.set()` 으로 끝 이벤트에 속성 추가), 셸 `observe-emit span-run <comp> <이름> [k=v] -- 명령…`(종료 코드 그대로 전달, 인자는 기록하지 않고 실행 파일 이름만), `observe-emit span-begin/span-end`(셸 흐름 중간에 토큰으로).
+- 연결: 같은 프로세스는 contextvar, **자식 프로세스는 환경변수 `OBSERVE_TRACE=trace:span`** 으로 부모를 이어받는다(안쪽 도구의 스팬이 바깥 스팬 아래로 붙음).
+- 조회: `observectl trace [--since 1h] [--comp X] [--name 글자] [--min-ms N] [-n 5]` → 폭포(waterfall: 들여쓴 이름·소요·에너지·막대). `--by` → 이름별 요약(횟수·실패·소요 중앙값/95%/최대·평균/합 Wh). `--trace <id 앞부분>`.
+- 에너지: 구간과 겹친 시간만큼 가중한 psys W 적분(표본 간격 30초). **구간이 짧거나 표본이 3개 미만이면 `~` 를 붙인 추정치.** 10분 이상이고 방전 중이면 누적 계량값(`q_uah`) 기준 Wh 도 함께 계산해 그쪽을 보여 준다. 더 촘촘히 보려면 `observectl on L1`(5초).
+- 이미 심어 둔 곳: **nixup 전체**(`nixup:run`, 안쪽은 `log_exec` 의 Exec 시작/끝 쌍이 자동으로 자식 스팬 — nix build, 활성화, deadnix/statix 등), **displayui 적용**(`dispctl:tx.apply` 아래 build/migrate/apply_cfg/verify), **덮개 정책**(`lid-policy:apply`).
+- 시험: `tests/test_trace.py`. 개인정보 원칙은 이벤트 로그와 같다(입력한 글자·URL·명령 인자 금지).
+
+## eBPF 프리셋 `observectl bpf` (2026-10-21)
+
+수집기(root)가 `bpftrace` 를 **요청할 때만 N초** 붙였다 뗀다(상시 계측 아님; 커널은 BTF·BPF JIT·kprobe/uprobe 지원). Wayland 가 없어도(VT 만 있어도) 동작한다. 프로그램은 코드에 고정된 프리셋이고 `--comm` 필터만 받는다(영숫자·`._-` 15자로 검증 — 프로그램 문자열 주입 방지). 개인정보 원칙: comm·pid·실행 파일 이름·횟수/바이트 합계만 본다(명령 인자·파일/패킷 내용·URL 안 봄).
+
+| 프리셋 | 보는 것 | 쓰임 |
+|---|---|---|
+| `exec` | 프로세스 생성/종료 → **프로세스 스팬**(부모-자식, CPU 시간) | 누가 프로세스를 자주 만드나. 결과를 이벤트 로그에 적어 `observectl trace --comp bpf` 로 폭포·에너지를 본다 |
+| `wake` | 깨우는 쪽 → 깨어나는 쪽 comm 쌍(sched_waking) | 전력의 원인 추적(기존 `wakers` 의 eBPF 판) |
+| `profile` | 99Hz CPU 샘플링: 프로세스별 CPU %, 가장 많이 걸린 커널/사용자 맨 위 함수 | JFR 의 가벼운 버전 |
+| `psr` | drm atomic 커밋을 일으킨 comm 별 횟수 + i915 PSR flush/exit/activate | **PSR 이 왜 풀리나**(화면을 계속 그리는 프로세스 찾기) |
+| `io` | 블록 입출력 comm 별 횟수·바이트 | 디스크 깨움 |
+| `net` | TCP/UDP 송수신 호출 comm 별 횟수 | 네트워크로 깨우는 프로세스 |
+
+- 사용: `observectl bpf <프리셋> [초=10] [--comm X] [-n 12]`. 시험: `tests/test_bpf.py`(가짜 bpftrace 로 파서·요약·job 검증).
+- 의존: nixpkgs `bpftrace`(clang 라이브러리 때문에 풀면 약 1 GiB, 내려받기 약 165 MB). 수집기 서비스 환경변수 `OBSERVE_BPFTRACE` 로 지정.
+- 안전: `observe-emit span-run` 은 신호를 자식에게 맡긴다(Ctrl-C 를 받아도 자식을 강제로 죽이지 않아 nixup 의 정리/잠금 해제가 실행됨). `nixup`·`log_exec` 계측은 `observe-emit span-probe` 가 통과할 때만 켜진다(옛 observe-emit 이 설치된 상태에서 nixup 이 막히지 않게).

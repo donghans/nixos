@@ -67,6 +67,8 @@
       lid=$(${config.posture.cli}/bin/posture get lid)
       last=$(cat "$f" 2>/dev/null || echo open)
       [ "$lid" = "$last" ] && exit 0
+      # 관측(observectl trace): 덮개 변화 처리 전체를 하나의 구간으로 남긴다(화면 끄기/켜기 + 전원 프로필 명령). observe-emit 이 없으면 건너뜀.
+      tok=$(observe-emit span-begin lid-policy apply "lid=$lid" 2>/dev/null) || tok=""
       if [ "$lid" = closed ]; then
         ${lidScreen}/bin/lid-screen off
         ${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd != "") "${config.wayland.windowManager.hyprland.lidSwitchOnExtraCmd} || ${pkgs.util-linux}/bin/logger -t lid-policy \"추가 명령 실패(닫힘)\""}
@@ -75,6 +77,7 @@
         ${lib.optionalString (config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd != "") "${config.wayland.windowManager.hyprland.lidSwitchOffExtraCmd} || ${pkgs.util-linux}/bin/logger -t lid-policy \"추가 명령 실패(열림)\""}
       fi
       echo "$lid" > "$f"
+      [ -n "$tok" ] && observe-emit span-end "$tok" >/dev/null 2>&1
       ${pkgs.util-linux}/bin/logger -t lid-policy "lid=$lid"
     '';
 

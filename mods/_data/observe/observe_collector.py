@@ -12,7 +12,7 @@
 개인정보: 프로세스는 comm 과 exe 이름만(명령줄 인자는 읽지 않음).
 요청 작업(requests/*.json → results/<id>.json): ping, wakers(ftrace 로 깨움 원인 프로파일), drmdebug(drm.debug 를 잠시 켬), display(debugfs 스냅샷 — 디스플레이를 깨워 상태를 바꿀 수 있음).
 """
-import collections, glob, json, os, re, signal, struct, subprocess, sys, time
+import collections, glob, json, os, re, shutil, signal, struct, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import observe_core as core
@@ -490,7 +490,34 @@ def job_display(args):
     return out
 
 
-JOBS = {"ping": job_ping, "wakers": job_wakers, "drmdebug": job_drmdebug, "display": job_display}
+BPFTRACE = os.environ.get("OBSERVE_BPFTRACE") or shutil.which("bpftrace")
+
+
+def job_bpf(args):
+    """eBPF(bpftrace) 프리셋을 N초 동안 실행해 요약을 돌려준다(observe_bpf.PRESETS). 프리셋은 고정이고 comm 필터만 받는다(프로그램 문자열 주입 방지를 위해 검증).
+    exec 프리셋은 프로세스 스팬 이벤트(events)도 돌려줘서 CLI 가 observectl trace 로 볼 수 있게 이벤트 로그에 적는다."""
+    import observe_bpf as bpf
+    if not BPFTRACE:
+        return {"error": "bpftrace 를 찾을 수 없음(수집기 서비스의 OBSERVE_BPFTRACE)"}
+    preset, sec = args.get("preset"), max(1, min(int(args.get("sec", 10)), 60))
+    n = max(1, min(int(args.get("n", 15)), 50))
+    try:
+        prog = bpf.program(preset, sec, args.get("comm") or None)
+    except ValueError as e:
+        return {"error": str(e)}
+    try:
+        p = subprocess.run([BPFTRACE, "-f", "json", "-e", prog], capture_output=True, text=True, timeout=sec + 25)
+    except subprocess.TimeoutExpired:
+        return {"error": f"bpftrace 가 {sec + 25}초 안에 끝나지 않음"}
+    offset = time.time() - time.monotonic()                      # bpftrace nsecs(CLOCK_MONOTONIC) → epoch
+    lines, maps = bpf.parse_output(p.stdout)
+    res = {"preset": preset, "sec": sec, "rc": p.returncode, "stderr": p.stderr[-400:] if p.returncode else "", "summary": bpf.summarize(preset, lines, maps, sec, n)}
+    if preset == "exec":
+        res["events"] = bpf.exec_spans(lines, lambda ns: ns / 1e9 + offset)[:4000]
+    return res
+
+
+JOBS = {"ping": job_ping, "wakers": job_wakers, "drmdebug": job_drmdebug, "display": job_display, "bpf": job_bpf}
 
 
 def process_requests():

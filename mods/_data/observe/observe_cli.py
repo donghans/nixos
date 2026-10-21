@@ -241,6 +241,44 @@ def cmd_events(a):
         print(fmt_event(e))
 
 
+def cmd_trace(a):
+    import observe_trace as tr
+    since, until = core.parse_when(a.since), core.parse_when(a.until) if a.until else None
+    now = time.time()
+    ev = list(read_events(argparse.Namespace(comp=None, level="trace", grep=None), since - 3600, until))   # 시작이 구간 밖인 스팬의 끝을 놓치지 않게 앞쪽을 넉넉히
+    spans = [s for s in tr.build_spans(ev) if (s["t1"] or now) >= since and s["t0"] <= (until or now)]
+    if a.comp:
+        spans = [s for s in spans if s["comp"] == a.comp]
+    if a.name:
+        spans = [s for s in spans if a.name in s["name"]]
+    if a.min_ms:
+        spans = [s for s in spans if s["ms"] is None or s["ms"] >= a.min_ms]
+    if not spans:
+        sys.exit("스팬이 없습니다. 도구에 `observe-emit span-run …` 또는 Events.span() 이 있어야 합니다(observectl events 로 원본 확인)")
+    samples = samples_between(since - 60, (until or now) + 60)
+    if a.by:
+        print(f"{'컴포넌트:이름':<34}{'횟수':>5}{'실패':>5}{'중앙값':>9}{'95%':>9}{'최대':>9}{'평균 Wh':>10}{'합 Wh':>9}{'에너지 n':>9}")
+        for r in tr.summarize(spans, samples):
+            print(f"{(r['comp'] + ':' + r['name'])[:33]:<34}{r['n']:>5}{r['fail']:>5}{tr.fmt_dur(r['p50']):>9}{tr.fmt_dur(r['p95']):>9}{tr.fmt_dur(r['max']):>9}{fmt(r['wh_mean'], 10, 3)}{fmt(r['wh_sum'], 9, 3)}{r['wh_n']:>9}")
+        print("(에너지 = psys W 를 구간에 걸쳐 적분. 표본 간격(30초)보다 짧은 구간은 추정치 — `observectl on L1` 로 5초 간격이면 더 낫다)")
+        return
+    groups = tr.traces(spans)
+    pick = sorted(groups.items(), key=lambda kv: kv[1][0]["t0"])
+    if a.trace:
+        pick = [(k, v) for k, v in pick if k.startswith(a.trace)]
+    pick = pick[-a.n:]
+    for tid, sp in pick:
+        root = sp[0]
+        print(f"== trace {tid}  {core.hms(root['t0'])}  스팬 {len(sp)}개")
+        for line in tr.render_trace(sp, samples, a.width, now):
+            print(line)
+        print()
+
+
+def samples_between(t0, t1):
+    return list(core.iter_jsonl(core.SAMPLE_DIR, "samples", t0, t1))
+
+
 def journal(since, until, mode):
     if mode == "none":
         return []
@@ -292,6 +330,56 @@ def request(typ, args, wait):
             return json.load(open(path))
         time.sleep(0.5)
     sys.exit("수집기가 응답하지 않음(observe-collector.path 유닛이 켜져 있는지, `systemctl status observe-collector` 확인)")
+
+
+def _tbl(rows, cols):
+    """rows(dict 목록)를 (제목, 키, 너비, 정렬) 열로 출력."""
+    print("  ".join(f"{t:<{w}}" if al == "<" else f"{t:>{w}}" for t, _k, w, al in cols))
+    for r in rows:
+        print("  ".join((f"{str(r.get(k, ''))[:w]:<{w}}" if al == "<" else f"{str(r.get(k, ''))[:w]:>{w}}") for _t, k, w, al in cols))
+
+
+def cmd_bpf(a):
+    res = request("bpf", {"preset": a.preset, "sec": a.sec, "comm": a.comm, "n": a.n}, a.sec + 40)
+    if res.get("error"):
+        sys.exit(f"오류: {res['error']}")
+    if res.get("rc"):
+        print(f"(bpftrace 종료 코드 {res['rc']}: {res.get('stderr', '').strip()[-200:]})")
+    s = res["summary"]
+    print(f"== bpf {a.preset} {res['sec']}초" + (f" (comm={a.comm})" if a.comm else ""))
+    if a.preset == "wake":
+        print(f"깨움 합계 {s['total']}회 ({s['total'] / res['sec']:.0f}/s)\n[깨우는 쪽]")
+        _tbl(s["by_waker"], [("comm", "comm", 22, "<"), ("횟수", "count", 8, ">"), ("/s", "per_s", 8, ">")])
+        print("[깨어나는 쪽]")
+        _tbl(s["by_wakee"], [("comm", "comm", 22, "<"), ("횟수", "count", 8, ">"), ("/s", "per_s", 8, ">")])
+        print("[쌍]")
+        _tbl(s["pairs"], [("깨우는 쪽", "waker", 22, "<"), ("깨어나는 쪽", "wakee", 22, "<"), ("횟수", "count", 8, ">"), ("/s", "per_s", 8, ">")])
+    elif a.preset == "profile":
+        print(f"샘플 {s['samples']}개 ({s['hz']}Hz)\n[프로세스별 CPU 비율]")
+        _tbl(s["cpu"], [("comm", "comm", 22, "<"), ("샘플", "count", 8, ">"), ("%", "pct", 7, ">")])
+        print("[커널 맨 위 함수]")
+        _tbl(s["kernel_leaf"], [("comm", "comm", 20, "<"), ("함수", "frame", 44, "<"), ("%", "pct", 7, ">")])
+        print("[사용자 맨 위 함수]")
+        _tbl(s["user_leaf"], [("comm", "comm", 20, "<"), ("함수", "frame", 44, "<"), ("%", "pct", 7, ">")])
+    elif a.preset == "psr":
+        print(f"i915 PSR: flush {s['psr_flush']}회 · exit {s['psr_exit']}회 · activate {s['psr_activate']}회 ({s['sec']}초)")
+        print("[화면 갱신(drm atomic 커밋)을 일으킨 프로세스]")
+        _tbl(s["atomic_ioctl"], [("comm", "comm", 22, "<"), ("횟수", "count", 8, ">"), ("/s", "per_s", 8, ">")])
+        print("(exit 가 많고 activate 가 적으면 PSR 이 켜져도 곧 풀리는 중 — 위 프로세스가 화면을 계속 그리고 있다는 뜻)")
+    elif a.preset == "io":
+        _tbl(s["rows"], [("comm", "comm", 22, "<"), ("요청", "count", 8, ">"), ("/s", "per_s", 8, ">"), ("바이트", "bytes", 12, ">")])
+    elif a.preset == "net":
+        _tbl(s["rows"], [("comm", "comm", 22, "<"), ("tcp 송신", "tcp_send", 9, ">"), ("tcp 수신", "tcp_recv", 9, ">"), ("udp 송신", "udp_send", 9, ">"), ("udp 수신", "udp_recv", 9, ">"), ("/s", "per_s", 8, ">")])
+    elif a.preset == "exec":
+        print(f"프로세스 {s['processes']}개 생성 ({s['forks_per_s']}/s)")
+        _tbl(s["by_comm"], [("comm", "comm", 22, "<"), ("생성", "count", 7, ">"), ("/s", "per_s", 7, ">"), ("CPU ms", "cpu_ms", 10, ">"), ("수명 합 ms", "wall_ms", 12, ">")])
+        print("[자식을 많이 만든 부모]")
+        _tbl(s["top_parents"], [("pid", "pid", 8, ">"), ("comm", "comm", 20, "<"), ("자식", "children", 7, ">")])
+        ev = res.get("events") or []
+        if ev and not a.no_spans:
+            for e in ev:
+                core.append_jsonl(core.state_dir(), "events", e, t=e["t"])
+            print(f"\n프로세스 스팬 {len(ev) // 2}개를 이벤트 로그에 적었습니다 → observectl trace --comp bpf --since {max(60, a.sec + 60)}s")
 
 
 def cmd_wakers(a):
@@ -418,7 +506,9 @@ def main(argv=None):
     s = sub.add_parser("states"); s.add_argument("--since", default="-2h"); s.set_defaults(f=cmd_states)
     s = sub.add_parser("top"); s.add_argument("--since", default="-30m"); s.add_argument("--by", default="wake", choices=["cpu", "wake", "thr", "io"]); s.add_argument("-n", type=int, default=12); s.set_defaults(f=cmd_top)
     s = sub.add_parser("events"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--level", default="trace", choices=list(core.LEVELS)); s.add_argument("--grep"); s.set_defaults(f=cmd_events)
+    s = sub.add_parser("trace", help="스팬(구간) 폭포 · 구간별 에너지 · 이름별 요약"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--name", help="이름에 포함된 글자"); s.add_argument("--min-ms", type=float, default=0); s.add_argument("--trace", help="트레이스 id 앞부분"); s.add_argument("-n", type=int, default=5, help="폭포로 보여 줄 최근 트레이스 수"); s.add_argument("--width", type=int, default=110); s.add_argument("--by", action="store_true", help="폭포 대신 이름별 요약표(횟수·소요·에너지)"); s.set_defaults(f=cmd_trace)
     s = sub.add_parser("timeline"); s.add_argument("--at", required=True); s.add_argument("--span", type=float, default=60); s.add_argument("--journal", default="all", choices=["all", "warn", "none"]); s.set_defaults(f=cmd_timeline)
+    s = sub.add_parser("bpf", help="eBPF(bpftrace) 프리셋을 N초 동안 실행: exec wake profile psr io net"); s.add_argument("preset", choices=["exec", "wake", "profile", "psr", "io", "net"]); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--comm", help="프로세스 이름 필터(영숫자·._- 15자)"); s.add_argument("-n", type=int, default=12, help="표의 상위 행 수"); s.add_argument("--no-spans", action="store_true", help="exec: 프로세스 스팬을 이벤트 로그에 적지 않음"); s.set_defaults(f=cmd_bpf)
     s = sub.add_parser("wakers"); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--waking", action="store_true"); s.set_defaults(f=cmd_wakers)
     s = sub.add_parser("drmdebug"); s.add_argument("sec", nargs="?", type=int, default=15); s.set_defaults(f=cmd_drmdebug)
     sub.add_parser("display").set_defaults(f=cmd_display)

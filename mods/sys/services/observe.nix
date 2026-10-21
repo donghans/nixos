@@ -14,7 +14,7 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
   py = pkgs.python3;
   dir = pkgs.runCommand "observe-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "powergraph.py" "powerdata.py" "powerview.py" "powerui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "powergraph.py" "powerdata.py" "powerview.py" "powerui.py"]}
     cp ${../../_data/observe/examples/power_knobs.py} $out/power_knobs.py
     cp ${../../_data/_uikit/uikit.py} $out/uikit.py
   '';
@@ -53,6 +53,7 @@ in {
       wantedBy = ["multi-user.target"]; # 부팅 때 한 번 떠서 제어 파일이 켜져 있으면 이어서 수집, 꺼져 있으면 15초 뒤 종료
       restartIfChanged = false;
       environment.OBSERVE_IW = "${pkgs.iw}/bin/iw";
+      environment.OBSERVE_BPFTRACE = "${pkgs.bpftrace}/bin/bpftrace"; # `observectl bpf <프리셋>`(eBPF): 요청할 때만 N초 실행
       unitConfig.StartLimitIntervalSec = 0;
       serviceConfig = {
         Type = "simple";

@@ -30,6 +30,28 @@ log_msg() {
 
 log_exec() {
     printf "${_LOG_PREFIX_COLOR}${_LOG_PREFIX}${NC} ${BLUE}Exec %-4s${NC} %s %s\n" "$1" "$2" "$3"
+    _obs_span "$2" "$3"
+}
+
+# 관측(observectl): Exec 시작(">")/끝("<") 쌍을 구간(스팬)으로 남긴다 — `observectl trace` 로 단계별 소요 시간·에너지를 본다.
+# observe-emit 이 없으면 아무것도 하지 않고, 어떤 실패도 스크립트 흐름에 영향을 주지 않는다. 상위 스팬(nixup 전체)은 OBSERVE_TRACE 로 이어진다.
+declare -A _OBS_TOK=()
+_obs_span() {
+    [ "${_OBS_OFF:-}" = 1 ] && return 0
+    if [ -z "${_OBS_CHECKED:-}" ]; then
+        _OBS_CHECKED=1
+        { command -v observe-emit >/dev/null 2>&1 && observe-emit span-probe >/dev/null 2>&1; } || { _OBS_OFF=1; return 0; }
+    fi
+    case "$1" in
+        ">") _OBS_TOK["$2"]=$(observe-emit span-begin "${_OBS_COMP:-nixup}" "$2" 2>/dev/null) || true ;;
+        "<")
+            if [ -n "${_OBS_TOK["$2"]:-}" ]; then
+                observe-emit span-end "${_OBS_TOK["$2"]}" >/dev/null 2>&1 || true
+                unset '_OBS_TOK[$2]'
+            fi
+            ;;
+    esac
+    return 0
 }
 
 # ── 단일행 입력 프롬프트 ──────────────────────────────────────────────────────
