@@ -9,7 +9,7 @@
 결과는 표준출력 한 줄(JSON)이고, 눌러 달라고 한 횟수와 비교하면 된다. 다른 키는 `other_events`(개수)로만 합산된다."""
 import glob, json, os, select, struct, sys, time
 
-CODES = {"brightnessdown": 224, "brightnessup": 225, "backspace": 14, "left": 105, "right": 106, "up": 103, "down": 108, "enter": 28, "esc": 1, "tab": 15, "delete": 111, "space": 57}
+CODES = {"brightnessdown": 224, "brightnessup": 225, "backspace": 14, "left": 105, "right": 106, "up": 103, "down": 108, "enter": 28, "esc": 1, "tab": 15, "delete": 111, "space": 57, "comma": 51, "dot": 52, "a": 30, "s": 31, "d": 32}
 FMT = "llHHi"
 
 
