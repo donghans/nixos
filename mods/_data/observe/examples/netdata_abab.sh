@@ -7,4 +7,5 @@ abab_verify_a() { [ "$(systemctl is-active netdata)" = active ]; }
 abab_verify_b() { [ "$(systemctl is-active netdata)" = inactive ]; }
 ND_WAS=$(systemctl is-active netdata)
 abab_restore()  { if [ "$ND_WAS" = active ]; then sudo -n systemctl start netdata >/dev/null 2>&1; else sudo -n systemctl stop netdata >/dev/null 2>&1; fi; echo "netdata=$(systemctl is-active netdata)"; }
+AB_ARGS="--ignore-app netdata $AB_ARGS"
 abab_run

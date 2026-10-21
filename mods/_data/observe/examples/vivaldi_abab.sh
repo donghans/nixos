@@ -23,4 +23,5 @@ abab_set_b() {
 abab_verify_a() { _vv_running; }
 abab_verify_b() { ! _vv_running; }
 abab_restore()  { if [ "$VV_WAS_RUNNING" = 1 ]; then abab_set_a; else abab_set_b; fi; echo "vivaldi=$(_vv_running && echo 켜짐 || echo 꺼짐)"; }
+AB_ARGS="--ignore-app vivaldi $AB_ARGS"
 abab_run

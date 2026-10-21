@@ -740,6 +740,9 @@ def ab_rows(seg, ca, cb, metrics, threshold, ndv=None):
             if m == "coulomb_w":
                 w, err = segment_coulomb(g)
                 per.append((c, w, err, len(g)))
+            elif m == "batt_vi_w":
+                dis = [r for r in g if get(r, "pw.status") == "Discharging"]
+                per.append((c, mean_of(dis, lambda r: get(r, "pw.batt_vi_w")) if dis else float("nan"), None, len(dis)))
             else:
                 per.append((c, mean_of(g, lambda r: get(r, ".".join(METRICS[m]))), None, len(g)))
         A = [w for c, w, _, _ in per if c == ca and w is not None and w == w]
@@ -763,7 +766,7 @@ def ab_rows(seg, ca, cb, metrics, threshold, ndv=None):
     return out
 
 
-def confounders(seg, min_abs=10.0, ratio=3.0):
+def confounders(seg, min_abs=10.0, ratio=3.0, ignore=()):
     """구간들에서 **한 구간에서만 CPU 가 튄 앱**(교란 의심). 반환 [(구간 번호, 앱, 그 구간 CPU, 다른 구간 중앙값)].
     앱 CPU = 코어 1개=100%. 튄 기준: 중앙값보다 min_abs 이상 크고 ratio 배 이상. 조건(A/B)을 바꾼 효과와 무관한 부하(브라우저 탭·빌드 등)가 한 구간을 오염시켰는지 잡는다."""
     per = []
@@ -772,7 +775,7 @@ def confounders(seg, min_abs=10.0, ratio=3.0):
         per.append({k: v["cpu"] for k, v in got[0].items()} if got else {})
     apps = set().union(*per) if per else set()
     out = []
-    for app in apps:
+    for app in apps - set(ignore):             # 켜고 끄는 대상 앱 자체는 교란이 아니다(--ignore-app)
         vals = [p.get(app, 0.0) for p in per]
         for i, v in enumerate(vals):
             others = sorted(vals[:i] + vals[i + 1:])
@@ -860,7 +863,7 @@ def cmd_ab(a):
             print(f"{AB_LABELS.get(m, m):<24}{note}")
             continue
         print(f"{AB_LABELS.get(m, m):<24}{' '.join(f'{x:.2f}' for x in A):<26}{' '.join(f'{x:.2f}' for x in B):<26}{' '.join(f'{x:+.2f}' for x in v['diffs']):<22}{v['effect']:>+8.2f}  {v['verdict']}" + (f"  [{note}]" if note else ""))
-    conf = confounders(seg)
+    conf = confounders(seg, ignore=a.ignore_app or ())
     if conf:
         print("⚠ 교란 의심 — 한 구간에서만 CPU 가 튄 앱(조건 변경과 무관한 부하일 수 있음):")
         for i, app, v, med in conf[:6]:
@@ -937,7 +940,7 @@ def main(argv=None):
     s.add_argument("--min-samples", type=int, default=5, help="구간당 최소 표본 수(미만이면 제외)")
     s.add_argument("--expect-a", help="A 구간 표본의 기대 조건 '경로=값' (예: dev.wifi.ps=off). 다르면 시험 무효"); s.add_argument("--expect-b", help="B 구간 표본의 기대 조건 (예: dev.wifi.ps=on)")
     s.add_argument("--require", action="append", help="모든 구간의 모든 표본이 만족해야 하는 조건 '경로=값'(여러 번 가능, 예: --require dev.lid=closed)")
-    s.add_argument("--no-netdata", action="store_true", help="Netdata 1초 지표를 비교에서 뺀다"); s.add_argument("--allow-mixed", help="구간 사이에 달라도 되는 항목(쉼표: lid,ac,ssid). 기본은 덮개·AC 가 다르면 무효, SSID 가 다르면 경고"); s.set_defaults(f=cmd_ab)
+    s.add_argument("--no-netdata", action="store_true", help="Netdata 1초 지표를 비교에서 뺀다"); s.add_argument("--ignore-app", action="append", help="교란 감지에서 뺄 앱(켜고 끄는 대상 앱 자체, 예: bitwarden-desktop). 여러 번 지정 가능"); s.add_argument("--allow-mixed", help="구간 사이에 달라도 되는 항목(쉼표: lid,ac,ssid). 기본은 덮개·AC 가 다르면 무효, SSID 가 다르면 경고"); s.set_defaults(f=cmd_ab)
     s = sub.add_parser("hyprtrace"); s.add_argument("mode", choices=["on", "off"]); s.set_defaults(f=cmd_hyprtrace)
     a = p.parse_args(argv)
     a.f(a)

@@ -9,4 +9,5 @@ abab_verify_a() { _bw_running; }
 abab_verify_b() { ! _bw_running; }
 BW_WAS_RUNNING=0; _bw_running && BW_WAS_RUNNING=1
 abab_restore()  { if [ "$BW_WAS_RUNNING" = 1 ]; then bw_start; else bw_stop; fi; echo "bitwarden=$(_bw_running && echo 켜짐 || echo 꺼짐)"; }
+AB_ARGS="--ignore-app bitwarden-desktop $AB_ARGS"
 abab_run
