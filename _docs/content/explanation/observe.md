@@ -157,3 +157,12 @@ OTel 의 트레이스 개념만 빌린 것(OTel 을 넣거나 흉내 내는 게 
 - 화면 열 이름: `observectl window` 는 `V×I`·`상위전환/s`(**저장된 상위 프로세스 최대 16행의 합 — 시스템 전체가 아님**)·`전체CPU%`, `observectl top` 은 `CPU(코어1개=100%)`·`자발전환/s`. powerui 현황은 "전환 시스템 전체 / 상위 프로세스(합계 아님)" 와 "CPU 전체 대비" 를 따로 보여 준다.
 - 옵션 호환: `observectl top --by wake` 와 `observectl ab --metric batt_w` 는 새 이름의 옛 별칭으로 계속 받는다(안내를 출력).
 - "지금 CPU" 를 볼 때는 `ps` 의 %CPU(프로세스 시작 이후 누적 평균)가 아니라 `observectl top --since 1m`(구간 평균) 이나 `observectl bpf profile`(99Hz 표본)을 쓴다.
+
+## 종합 조회 `observectl explain`과 Netdata 어댑터 (2026-10-21)
+
+**구조 결정**: observectl 이 분석의 입구이고, Netdata 는 **켜져 있을 때만 쓰는 내부 어댑터**(`observe_netdata.py`)다. Netdata 를 배터리에서 끄는 정책(#2·#58·T3)과 양립하도록, 꺼져 있으면 해당 항목을 **"관측 공백"**(0 이 아님)으로 표시하고 observectl 만으로 계속 분석한다. 1초 간격 전체 수집을 observectl 에 다시 만들지 않는다(파이썬으로 1초마다 전 프로세스를 읽으면 CPU 약 5% — Netdata 의 C 수집기보다 전력이 더 든다). 대신 **Netdata 가 틀린 부분(앱별 자발적 전환: 메인 스레드만 읽음)은 우리가 정확하게 직접 구현**했다(수집기 v3, 30초 간격 +0.17% CPU).
+
+- `observectl explain [--since 30m | --at HH:MM --span 300] [--baseline prev|none|시작..끝] [--no-netdata] [--json]` — 한 구간을 **기준 구간(기본: 바로 앞 같은 길이)과 비교**해 한 화면에: ① 요약(상태 low/high·PSR·덮개·전원) ② 전력 4지표(psys·패키지·순간 V×I·누적 계량, 신뢰 낮은 값은 표시하고 순위에서 제외, Netdata 1초 값 병기) ③ 시스템 활동(전체 CPU·문맥 전환·인터럽트, Netdata 가 있으면 네트워크·디스크·온도·프로세스 생성) ④ 프로세스(observectl 저장분 + Netdata 앱 그룹 CPU) ⑤ 포커스한 앱·열린 구간과 에너지 ⑥ **기준 대비 달라진 것의 순위(상관일 뿐 인과가 아님)** ⑦ 한계. 같은 계산을 powerui **5 원인 탭**(`w` 로 구간 15분/30분/1시간/3시간)이 쓴다.
+- `observectl nd defs|stats|apps` — 어댑터가 가져오는 신호의 정의·구간 평균·앱 그룹 CPU. 정의는 실제 Netdata API 메타데이터와 교차 검증했다(예: `app.*_cpu_utilization` 제목 "100% = 1 core" 와 수집기 값이 일치).
+- Netdata 에 **있고 observectl 에 없는 것**: 1초 해상도(RAPL·전압·전류·CPU·인터럽트), 앱 그룹 88개 전체의 CPU, 네트워크·디스크·온도. **observectl 에 있고 Netdata 에 없는 것**: 패키지 C-state(MSR), PSR 상태, 표지·스팬·포커스, 누적 계량, eBPF 프리셋, A/B 통계.
+- **한계(그대로 둠)**: 표본 30초라 짧은 사건은 흐림, 저장하는 프로세스는 상위 16행(전환 커버리지를 `explain` 이 표시), 프로세스별 전력은 측정이 아니라 CPU 시간 기반 대용치, 포커스 구간 에너지는 시간 분배일 뿐 원인 귀속이 아님.

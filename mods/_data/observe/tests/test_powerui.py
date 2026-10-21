@@ -156,6 +156,26 @@ else:
             await pilot.press("escape"); await pilot.pause(0.2)
             await pilot.press("4"); await pilot.pause(0.8)
             check("화면: Netdata 꺼져도 안내만(예외 없음)", app.query_one("#tabs").active == "netdata")
+            # --- 원인(5) 탭: explain 결과를 섹션마다 박스로(여기서는 compute_explain 을 가짜로 바꿔 내용을 확인)
+            import observe_explain as _ex
+            T = now
+            fake_rows = [dict(r_, t=T - 1200 + i * 30) for i, r_ in enumerate(
+                [{"v": 3, "dt": 30, "state": "low", "pw": {"psys_w": 4.0 if i < 20 else 6.0, "pkg_w": 2.0, "batt_vi_w": 5.0, "status": "Discharging", "ac": 0}, "irq": {"cpu_all_pct": 3.0, "ctxt_s": 2000, "intr_s": 1000},
+                  "dev": {"lid": "closed", "vt": "tty1", "psr": {"mode": "PSR1 enabled"}}, "proc": [{"comm": "x", "cpu_core_pct": 1.0 + (i >= 20) * 20, "ctxsw_vol_s": 5.0}]} for i in range(40)])]
+            fake = _ex.build(fake_rows, [], T - 600, T, (T - 1200, T - 600), None)
+            powerui.compute_explain = lambda seconds, **kw: fake
+            await pilot.press("5"); await pilot.pause(1.0)
+            check("화면: 5 키 → 원인 탭", app.query_one("#tabs").active == "explain")
+            boxes = [app.query_one(f"#ex{i}") for i in range(len(_ex.SECTION_TITLES))]
+            check("원인 탭: 섹션마다 박스 하나(7개) + 제목", len(boxes) == 7 and all(b.has_class("box") for b in boxes) and boxes[1].border_title == "전력", str([b.border_title for b in boxes]))
+            body = " ".join(str(b.render()) for b in boxes)
+            check("원인 탭: 전력·시스템 활동·'상관일 뿐 인과가 아님' 내용이 채워짐", "psys(RAPL" in body and "전체 CPU" in body and "x" in body and "한계" in app.query_one("#ex6").border_title, body[:200])
+            check("원인 탭: 첫 박스 제목에 구간(최근 30분 vs 바로 앞 30분)", "최근 30분" in boxes[0].border_title, boxes[0].border_title)
+            await pilot.press("w"); await pilot.pause(0.8)
+            check("원인 탭: w 로 구간 전환(30분 → 1시간)", app.explain_i == 2 and "1시간" in app.query_one("#ex0").border_title, str(app.query_one("#ex0").border_title))
+            powerui.compute_explain = lambda seconds, **kw: None
+            await pilot.press("w"); await pilot.pause(0.8)
+            check("원인 탭: 표본이 없으면 이유를 안내(예외 없음)", "표본이 없습니다" in str(app.query_one("#ex0").render()), str(app.query_one("#ex0").render()))
             await pilot.press("q")
     asyncio.run(drive())
     async def small():

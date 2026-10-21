@@ -22,6 +22,8 @@ import argparse, collections, json, os, subprocess, sys, time, uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import observe_core as core
 import observe_stats as stats
+import observe_explain as ex
+import observe_netdata as nd
 
 METRICS = {"psys_w": ("pw", "psys_w"), "pkg_w": ("pw", "pkg_w"), "batt_vi_w": ("pw", "batt_vi_w"), "core_w": ("pw", "core_w"), "uncore_w": ("pw", "uncore_w")}
 
@@ -292,6 +294,66 @@ def samples_between(t0, t1):
     return list(core.iter_jsonl(core.SAMPLE_DIR, "samples", t0, t1))
 
 
+def _span_events(since, until):
+    ev = list(read_events(argparse.Namespace(comp=None, level="trace", grep=None), since - 3600, until))
+    import observe_trace as tr
+    return tr.build_spans(ev)
+
+
+def cmd_explain(a):
+    now = time.time()
+    if a.at:
+        center = core.parse_when(a.at)
+        t0, t1 = center - a.span / 2, center + a.span / 2
+    else:
+        t0, t1 = core.parse_when(a.since), core.parse_when(a.until) if a.until else now
+    if t1 <= t0:
+        sys.exit("구간이 비었습니다(--since/--until 확인)")
+    if a.baseline == "none":
+        base = None
+    elif a.baseline == "prev":
+        base = (t0 - (t1 - t0), t0)
+    else:
+        x, _, y = a.baseline.partition("..")
+        if not y:
+            sys.exit("--baseline 은 none | prev | 시작..끝 (예: 10:00..10:30)")
+        base = (core.parse_when(x), core.parse_when(y))
+    lo = min(t0, base[0] if base else t0)
+    rows = samples(lo - 60, t1 + 60)
+    if not rows:
+        sys.exit("표본이 없습니다(observectl on 으로 켠 뒤 시간이 지나야 함)")
+    provider = None if a.no_netdata else (lambda x, y: nd.snapshot(x, y))
+    res = ex.build(rows, _span_events(lo, t1), t0, t1, base, provider)
+    if a.json:
+        print(json.dumps(res, ensure_ascii=False, default=str, indent=1))
+        return
+    print("\n".join(ex.render(res, core.hms)))
+
+
+def cmd_nd(a):
+    if a.what == "defs":
+        print(f"Netdata 어댑터가 가져오는 신호(정의는 실제 API 메타데이터로 교차 검증) — 주소 {nd.BASE}")
+        for k, (label, unit, d) in nd.SIGNALS.items():
+            print(f"  {k:<16}{label} [{unit}]\n      {d}")
+        print(f"  (앱 그룹) {nd.APPS_NOTE}")
+        print("\n일부러 가져오지 않는 것: 앱별 자발적 문맥 전환(app.*_cpu_context_switches) — Netdata 가 /proc/<pid>/status 의 메인 스레드 값만 읽어 멀티스레드 앱을 크게 과소 집계함.")
+        print("앱별 전환이 필요하면 `observectl bpf wake`(시스템 전체 sched_waking)나 thread_top.py(스레드 단위)를 쓴다.")
+        return
+    if not nd.available(ttl=0):
+        sys.exit(f"Netdata 가 응답하지 않습니다({nd.BASE}) — 켜져 있어야 이 명령이 동작합니다. observectl 의 나머지 분석은 Netdata 없이도 됩니다.")
+    t0, t1 = core.parse_when(a.since), core.parse_when(a.until) if a.until else time.time()
+    if a.what == "stats":
+        snap = nd.snapshot(t0, t1, 0)
+        print(f"Netdata {core.hms(t0)} ~ {core.hms(t1)} · 이 구간 데이터 {snap['coverage'] * 100:.0f}%")
+        for k, v in snap["signals"].items():
+            label, unit, _ = nd.SIGNALS[k]
+            print(f"  {label:<20}{'관측 공백' if v is None else f'{v:.2f}':>12} {unit}")
+    else:
+        print(f"Netdata 앱 그룹 CPU(코어 1개=100%) {core.hms(t0)} ~ {core.hms(t1)}")
+        for name, v in nd.top_apps(t0, t1, a.n):
+            print(f"  {name:<30}{v:>8.2f}")
+
+
 def journal(since, until, mode):
     if mode == "none":
         return []
@@ -453,15 +515,7 @@ def expect_mismatch(seg, cond, expect):
     return bad, tot
 
 
-def segment_coulomb(g):
-    """구간의 누적 계량 평균 전력(W)과 양자화 오차 범위(W). 방전 중 표본 2개 미만이면 (None, None).
-    계량값은 1 mAh(≈15 mWh) 단위라 구간이 짧을수록 오차가 크다(오차 ≈ 15 mWh ÷ 구간 시간)."""
-    pts = [r for r in g if get(r, "pw.q_uah") is not None and get(r, "pw.v_uv") and get(r, "pw.status") == "Discharging"]
-    if len(pts) < 2 or pts[-1]["t"] <= pts[0]["t"]:
-        return None, None
-    dt = pts[-1]["t"] - pts[0]["t"]
-    v = sum(p["pw"]["v_uv"] for p in pts) / len(pts) / 1e6
-    return (pts[0]["pw"]["q_uah"] - pts[-1]["pw"]["q_uah"]) / 1e6 * v / (dt / 3600), (1e-3 * v) / (dt / 3600)
+segment_coulomb = ex.coulomb_w          # 구간의 누적 계량 평균 전력(W)과 양자화 오차(W) — 구현은 observe_explain 한 곳
 
 
 AB_METRICS = ["psys_w", "pkg_w", "batt_vi_w", "coulomb_w"]
@@ -622,6 +676,8 @@ def main(argv=None):
     s = sub.add_parser("top"); s.add_argument("--since", default="-30m"); s.add_argument("--by", default="ctxsw", choices=["cpu", "ctxsw", "wake", "thr", "io"], help="ctxsw=자발적 문맥 전환/s, cpu=코어 1개 기준 CPU%%. wake 는 ctxsw 의 옛 이름"); s.add_argument("-n", type=int, default=12); s.set_defaults(f=cmd_top)
     s = sub.add_parser("events"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--level", default="trace", choices=list(core.LEVELS)); s.add_argument("--grep"); s.set_defaults(f=cmd_events)
     s = sub.add_parser("trace", help="스팬(구간) 폭포 · 구간별 에너지 · 이름별 요약"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--name", help="이름에 포함된 글자"); s.add_argument("--min-ms", type=float, default=0); s.add_argument("--trace", help="트레이스 id 앞부분"); s.add_argument("-n", type=int, default=5, help="폭포로 보여 줄 최근 트레이스 수"); s.add_argument("--width", type=int, default=110); s.add_argument("--by", action="store_true", help="폭포 대신 이름별 요약표(횟수·소요·에너지)"); s.set_defaults(f=cmd_trace)
+    s = sub.add_parser("explain", help="한 구간을 여러 출처(전력·상태·시스템·Netdata·프로세스·포커스·스팬)로 묶어 설명하고 기준 구간과 비교"); s.add_argument("--since", default="30m"); s.add_argument("--until"); s.add_argument("--at", help="중심 시각(HH:MM 등) — --span 초 만큼의 구간"); s.add_argument("--span", type=float, default=300); s.add_argument("--baseline", default="prev", help="none | prev(바로 앞의 같은 길이, 기본) | 시작..끝"); s.add_argument("--no-netdata", action="store_true"); s.add_argument("--json", action="store_true"); s.set_defaults(f=cmd_explain)
+    s = sub.add_parser("nd", help="Netdata 어댑터(있을 때만): defs=신호 정의, stats=구간 평균, apps=앱 그룹 CPU"); s.add_argument("what", choices=["defs", "stats", "apps"]); s.add_argument("--since", default="10m"); s.add_argument("--until"); s.add_argument("-n", type=int, default=10); s.set_defaults(f=cmd_nd)
     s = sub.add_parser("timeline"); s.add_argument("--at", required=True); s.add_argument("--span", type=float, default=60); s.add_argument("--journal", default="all", choices=["all", "warn", "none"]); s.set_defaults(f=cmd_timeline)
     s = sub.add_parser("bpf", help="eBPF(bpftrace) 프리셋을 N초 동안 실행: exec wake profile psr io net"); s.add_argument("preset", choices=["exec", "wake", "profile", "psr", "io", "net"]); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--comm", help="프로세스 이름 필터(영숫자·._- 15자)"); s.add_argument("-n", type=int, default=12, help="표의 상위 행 수"); s.add_argument("--no-spans", action="store_true", help="exec: 프로세스 스팬을 이벤트 로그에 적지 않음"); s.set_defaults(f=cmd_bpf)
     s = sub.add_parser("wakers"); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--waking", action="store_true"); s.set_defaults(f=cmd_wakers)

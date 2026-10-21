@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """powerui — 전력·배터리 현황 TUI (Textual). observectl 수집기가 남긴 표본을 그래프와 표로 보여준다.
 
-탭: 1 지금(전원·W·상태·PSR·남은 시간 추정) / 2 시계열(점자 그래프 + 상태·PSR·전원 띠) / 3 비교(그룹별 평균: 상태·PSR·AC·덮개…) / 4 Netdata(CPU·네트워크·디스크·메모리·온도).
+탭: 1 지금(전원·W·상태·PSR·남은 시간 추정) / 2 시계열(점자 그래프 + 상태·PSR·전원 띠) / 3 비교(그룹별 평균: 상태·PSR·AC·덮개…) / 4 Netdata(CPU·네트워크·디스크·메모리·온도) / 5 원인(`observectl explain` 과 같은 종합: 전력·시스템 활동·프로세스·포커스·기준 대비 달라진 것).
 화면 갱신은 PSR 을 방해하므로(화면이 바뀔 때마다 패널이 깨어남) 기본 10초 주기이고, 터미널 창이 포커스를 잃으면 갱신을 멈춘다(`--interval` 로 조절).
 측정 중에는 열어 두지 마세요(보이는 화면이 한가함 기준선을 흔듭니다). 데이터: /var/lib/observe (observectl on 으로 수집을 켜야 함).
 """
@@ -16,7 +16,7 @@ from rich.text import Text
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import DataTable, Footer, Static, TabbedContent, TabPane
 
 try:
@@ -24,9 +24,28 @@ try:
 except ImportError:                                # 소스 트리: ../_uikit
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "_uikit"))
     import uikit
+import observe_core as core
+import observe_explain as ex
+import observe_netdata as ndmod
+import observe_trace as tr
 import powerdata as pd
 import powergraph as pg
 import powerview as pv
+
+
+EXPLAIN_WINDOWS = [("15분", 900), ("30분", 1800), ("1시간", 3600), ("3시간", 10800)]
+
+
+def compute_explain(seconds, now=None, use_netdata=True):
+    """최근 seconds 초를 바로 앞의 같은 길이와 비교한 explain 결과(ex.build). 표본이 없으면 None. 네트워크(Netdata) 조회가 있어 스레드에서 부른다."""
+    now = now if now is not None else time.time()
+    t0 = now - seconds
+    base = (t0 - seconds, t0)
+    rows = list(core.iter_jsonl(core.SAMPLE_DIR, "samples", base[0] - 60, now + 60))
+    if not rows:
+        return None
+    spans = tr.build_spans(list(core.iter_jsonl(core.state_dir(), "events", base[0] - 3600, now)))
+    return ex.build(rows, spans, t0, now, base, (lambda a, b: ndmod.snapshot(a, b)) if use_netdata else None)
 
 
 class Panel(Static):
@@ -64,12 +83,14 @@ class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     Panel { height: 1fr; }
     #nowtext { height: 13; }
     #serbands { height: 8; }
+    #exscroll Static { height: auto; }
     #cmpbox { height: 1fr; }
     DataTable { height: 1fr; background: #000000; }
     """
     BINDINGS = [
         Binding("q", "quit", "종료"),
         Binding("1", "tab('now')", "지금"), Binding("2", "tab('series')", "시계열"), Binding("3", "tab('compare')", "비교"), Binding("4", "tab('netdata')", "Netdata"),
+        Binding("5", "tab('explain')", "원인"), Binding("w", "cycle_explain", "원인 구간"),
         Binding("r", "cycle_range", "구간"), Binding("g", "cycle_group", "그룹"), Binding("c", "toggle_clean", "깨끗한 표본"),
         Binding("f5", "refresh_now", "새로고침"),
         *uikit.HelpMixin.HELP_BINDINGS,
@@ -83,6 +104,9 @@ class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         self.range_i = range_i
         self.group_i = 0
         self.clean = False
+        self.explain_i = 1            # 원인 탭의 구간(EXPLAIN_WINDOWS 의 30분)
+        self._explain = None
+        self._explain_busy = False
         self.last = 0.0
         self._timer = None
         self._nd_cache = {}       # chart -> (t, points)
@@ -105,6 +129,10 @@ class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             with TabPane("Netdata [4]", id="netdata"):
                 for i, nd in enumerate(pd.NETDATA_CHARTS):
                     yield uikit.box(Panel(lambda w, h, i=i: self._netdata_chart(i, w, h), id=f"nd{i}"), nd[1])
+            with TabPane("원인 [5]", id="explain"):
+                with VerticalScroll(id="exscroll"):
+                    for i, title in enumerate(ex.SECTION_TITLES):
+                        yield uikit.box(Static("계산 중… (Netdata 조회가 있어 몇 초 걸릴 수 있습니다)" if i == 0 else "", id=f"ex{i}"), title)
         with Vertical(id="status-row"):
             yield Static("", id="status")
         yield Footer()
@@ -119,8 +147,11 @@ class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     @work(thread=True, exclusive=True, group="data")
     def refresh_data(self):
         self.store.refresh()
-        if self.query_one("#tabs", TabbedContent).active == "netdata":
+        active = self.query_one("#tabs", TabbedContent).active
+        if active == "netdata":
             self._fetch_netdata()
+        if active == "explain":
+            self._explain = compute_explain(EXPLAIN_WINDOWS[self.explain_i][1])
         self.last = time.time()
         self.call_from_thread(self.redraw)
 
@@ -137,6 +168,7 @@ class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             panel.build()
             panel.refresh()
         self._fill_compare()
+        self._fill_explain()
         label = pv.RANGES[self.range_i][0]
         n = len(self.store.recs)
         legacy = sum(1 for r in self.store.recs if r["legacy"])
@@ -180,6 +212,19 @@ class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         text, st = pv.chart(pts, t0, t1, w, h, unit, "green", fmt=None, axis=i == len(pd.NETDATA_CHARTS) - 1)
         return text, pv.stats_str(st, unit)
 
+    def _fill_explain(self):
+        """원인 탭: 섹션마다 박스 하나. 계산 결과가 없으면 이유를 적는다(표본 없음/계산 중)."""
+        win = EXPLAIN_WINDOWS[self.explain_i][0]
+        secs = ex.sections(self._explain, core.hms) if self._explain else None
+        for i, title in enumerate(ex.SECTION_TITLES):
+            w = self.query_one(f"#ex{i}", Static)
+            if secs:
+                w.update(Text("\n".join(secs[i][1])))
+                w.border_title = f"{title} · 최근 {win} vs 바로 앞 {win}" if i == 0 else title
+            else:
+                w.update(Text("표본이 없습니다(observectl on 으로 켠 뒤 시간이 지나야 함)" if i == 0 and self._explain is None and self.last else ("계산 중…" if i == 0 else "")))
+                w.border_title = title
+
     def _fill_compare(self):
         by = list(pd.GROUPS)[self.group_i]
         label = pv.RANGES[self.range_i][0]
@@ -198,15 +243,20 @@ class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     # --- 동작
     def action_tab(self, name):
         self.query_one("#tabs", TabbedContent).active = name
-        if name == "netdata":
+        if name in ("netdata", "explain"):
             self.refresh_data()
 
     def on_tabbed_content_tab_activated(self, ev):
-        if ev.pane.id == "netdata":
+        if ev.pane.id in ("netdata", "explain"):
             self.refresh_data()
 
     def action_cycle_range(self):
         self.range_i = (self.range_i + 1) % len(pv.RANGES)
+        self.refresh_data()
+
+    def action_cycle_explain(self):
+        self.explain_i = (self.explain_i + 1) % len(EXPLAIN_WINDOWS)
+        self._explain = None
         self.refresh_data()
 
     def action_cycle_group(self):
