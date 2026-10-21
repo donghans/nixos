@@ -23,9 +23,9 @@ def _f(x, p=2, unit=""):
     return "-" if x is None or x != x else f"{x:.{p}f}{unit}"
 
 
-def _line(t, label, value, note="", vstyle="bold"):
-    t.append(" " + pad(label, 16), style="grey70")
-    t.append(pad(value, 22), style=vstyle)
+def _line(t, label, value, note="", vstyle="bold", lw=16, vw=22):
+    t.append(" " + pad(label, lw), style="grey70")
+    t.append(pad(value, vw), style=vstyle)
     if note:
         t.append(note, style="grey50")
     t.append("\n")
@@ -48,12 +48,12 @@ def freshness(view, now=None):
 def summary_range(view):
     s, rng = view["summary"], view["range"]
     t = Text()
-    _line(t, "범위", f"{s['range']}", f"{rng.label}" + (" · 지금까지" if rng.follows_now else ""))
-    _line(t, "수집", f"표본 {s['n']}개", f"{pg.fmt_dur(s['hours'])}" + (f" · 공백 {int(s['gap_s'])}초" if s["gap_s"] >= 60 else ""))
+    _line(t, "범위", f"{s['range']}", f"{rng.label}" + (" · 지금까지" if rng.follows_now else ""), lw=14, vw=14)
+    _line(t, "수집", f"표본 {s['n']}개", f"{pg.fmt_dur(s['hours'])}" + (f" · 공백 {int(s['gap_s'])}초" if s["gap_s"] >= 60 else ""), lw=14, vw=14)
     b = view["baseline"]
     if b:
         f = lambda x: time.strftime("%H:%M", time.localtime(x))
-        _line(t, "비교 기준", f"{f(b[0])} ~ {f(b[1])}", "원인 탭에서 비교")
+        _line(t, "비교 기준", f"{f(b[0])} ~ {f(b[1])}", "원인 탭", lw=14, vw=14)
     return t
 
 
@@ -63,16 +63,16 @@ def summary_power(view):
     if not s["n"]:
         t.append(" 이 범위에는 표본이 없습니다 — `observectl on` 으로 수집을 켜고 시간이 지나야 합니다.\n", style="grey70")
         return t
-    _line(t, "평균 전력", _f(s["avg_psys_w"], 2, " W"), "측정 · psys")
-    _line(t, "쓴 전력량", _f(s["psys_wh"], 2, " Wh"), "측정 · 적분")
+    _line(t, "평균 전력", _f(s["avg_psys_w"], 2, " W"), "측정 · psys", lw=14, vw=14)
+    _line(t, "쓴 전력량", _f(s["psys_wh"], 2, " Wh"), "측정 · 적분", lw=14, vw=14)
     c = s["coulomb"]
     if c:
         short = c["hours"] < 10 / 60
-        _line(t, "배터리에서 쓴", f"{c['wh']:.2f} Wh · {pg.fmt_dur(c['hours'])}", f"측정 · 계량 {c['avg_w']:.1f} W ±{c['err_w']:.2f}" + (" 오차 큼" if short else ""),
-              vstyle="bold" if not short else "grey70")
+        _line(t, "배터리에서 쓴", f"{c['wh']:.2f} Wh · {pg.fmt_dur(c['hours'])}", f"측정 · ±{c['err_w']:.2f} W" + (" 오차 큼" if short else ""),
+              vstyle="bold" if not short else "grey70", lw=14, vw=14)
     else:
-        _line(t, "배터리에서 쓴", "-", "방전 구간 없음", vstyle="grey50")
-    _line(t, "배터리 잔량", f"{_f(s['pct_first'], 0, '%')} → {_f(s['pct_last'], 0, '%')}", f"충전 시작 {s['charges']}회")
+        _line(t, "배터리에서 쓴", "-", "방전 구간 없음", vstyle="grey50", lw=14, vw=14)
+    _line(t, "배터리 잔량", f"{_f(s['pct_first'], 0, '%')} → {_f(s['pct_last'], 0, '%')}", f"충전 {s['charges']}회", lw=14, vw=14)
     return t
 
 
@@ -100,24 +100,24 @@ def summary_habit(view, w):
 def summary_apps(view, w):
     s = view["summary"]
     t = Text()
-    bw = max(8, min(24, w - 50))
+    bw = max(4, min(24, w - 40))
     if s["top_apps"]:
-        t.append(" CPU 시간을 많이 쓴 앱(코어 1개 = 100%, 전력 점유율 아님)\n", style="bold")
+        t.append(" CPU 점유가 큰 앱 (코어 1개=100%)\n", style="bold")
         for name, cpu, share, ctx in s["top_apps"]:
-            t.append(" " + pad(name[:20], 21) + f"{cpu:>6.1f}%  ", style="white")
+            t.append(" " + pad(name[:16], 17) + f"{cpu:>6.1f}%  ", style="white")
             t.append(pg.hbar(share / 100, bw), style="magenta")
-            t.append(f" {share:>3.0f}%  전환 {ctx:.0f}/s\n", style="grey50")
+            t.append(f" {share:>3.0f}%\n", style="grey50")
     else:
-        t.append(" 앱 단위 표본(v4)이 없습니다 — 수집기가 새 버전으로 쌓은 뒤에 보입니다.\n", style="grey50")
+        t.append(" 앱 단위 표본(v4)이 아직 없습니다.\n", style="grey50")
     t.append("\n")
     if s["focus"]:
         t.append(" 가장 오래 본 앱(창 포커스 시간)\n", style="bold")
         for name, sec, pct in s["focus"]:
-            t.append(" " + pad(name[:20], 21) + pad(pg.fmt_dur(sec / 3600), 9) + "  ", style="white")
+            t.append(" " + pad(name[:16], 17) + pad(pg.fmt_dur(sec / 3600), 9) + "  ", style="white")
             t.append(pg.hbar(pct / 100, bw), style="cyan")
             t.append(f" {pct:>3.0f}%\n", style="grey50")
     else:
-        t.append(" 창 포커스 기록이 없습니다(observe-focus 서비스가 꺼져 있었거나 범위가 짧음).\n", style="grey50")
+        t.append(" 창 포커스 기록이 없습니다.\n", style="grey50")
     return t
 
 

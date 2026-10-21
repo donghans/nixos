@@ -72,7 +72,7 @@ t = uv.summary_power(v).plain
 check("summary_power: 라벨 '측정'과 단위 W·Wh", "측정" in t and "W" in t and "Wh" in t, t)
 check("summary_power: 표본이 없으면 안내", "표본이 없습니다" in uv.summary_power(old).plain)
 check("summary_estimate: '추정' 표시", "추정" in uv.summary_estimate(v).plain)
-check("summary_apps: 앱 점유율 막대와 '전력 점유율 아님' 안내", "전력 점유율 아님" in uv.summary_apps(v, 100).plain and "claude" in uv.summary_apps(v, 100).plain)
+check("summary_apps: 앱 점유율 막대와 '전력 점유율 아님' 안내", "CPU 점유" in uv.summary_apps(v, 100).plain and "claude" in uv.summary_apps(v, 100).plain)
 check("apps_rows: 전력량 추정은 psys 전력량 × 점유율(claude 75%)", uv.apps_rows(v)[0][0] == "claude" and abs(float(uv.apps_rows(v)[0][6]) - S["psys_wh"] * 0.75) < 0.01)
 check("pad: 한글 칸 폭 기준", uv.pad("가나", 6) == "가나  " and uv.pad("ab", 4) == "ab  ")
 fresh = uv.freshness(v, now + 900)
@@ -125,5 +125,15 @@ async def drive():
         check("범위 대화상자: 잘못된 입력은 오류를 보이고 닫히지 않음", isinstance(app.screen, usageui.RangeScreen))
         inp.value = "-30m"; await pilot.press("enter"); await pilot.pause(1.0)
         check("범위 대화상자: -30m 입력 → 범위 변경·재조회", app.view["range"].secs < 1900 and not isinstance(app.screen, usageui.RangeScreen))
+async def narrow():
+    app = usageui.UsageUI(ud.preset("1시간", now))
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause(1.0)
+        check("앱: 폭 100칸이면 대시보드가 1열(narrow)", app.query_one("#dash").has_class("narrow"))
+    app = usageui.UsageUI(ud.preset("1시간", now))
+    async with app.run_test(size=(150, 40)) as pilot:
+        await pilot.pause(1.0)
+        check("앱: 폭 150칸이면 2열", not app.query_one("#dash").has_class("narrow"))
 asyncio.run(drive())
+asyncio.run(narrow())
 finish("usageui")

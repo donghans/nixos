@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import collections
+import unicodedata
 import statistics
 
 import observe_tiers as tiers
@@ -257,6 +258,21 @@ def _f(x, p=2):
     return "-" if x is None else f"{x:.{p}f}"
 
 
+def _w(s):
+    """문자열의 터미널 칸 폭(한글·전각은 2칸). f-string 의 :<n 은 글자 수라 한글이 섞인 표가 어긋난다."""
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 0 if unicodedata.combining(c) else 1 for c in str(s))
+
+
+def _l(s, n):
+    """왼쪽 정렬(칸 폭 기준)"""
+    return str(s) + " " * max(0, n - _w(s))
+
+
+def _r(s, n):
+    """오른쪽 정렬(칸 폭 기준)"""
+    return " " * max(0, n - _w(s)) + str(s)
+
+
 SECTION_TITLES = ["요약", "전력", "시스템 활동", "프로세스·앱", "포커스·열린 구간", "기준 대비 달라진 것 — 상관일 뿐 인과가 아님", "한계와 주의"]
 
 
@@ -272,7 +288,7 @@ def sections(res, hms):
         fmt = lambda d: " ".join(f"{k} {v}개" for k, v in sorted(d.items(), key=lambda kv: -kv[1]))
         head.append(f"상태: low {st['low_pct']}%(깊은 절전 진입) · PSR 켬 {st['psr_pct']}% · 덮개 [{fmt(st['lid'])}] · 전원 [{fmt(st['ac'])}] · 화면 [{fmt(st['vt'])}]" + (f"   | 기준: low {sb['low_pct']}% · PSR {sb['psr_pct']}%" if sb else ""))
     S.append(("요약", head))
-    P = ["                         이 구간   기준     변화      Netdata(1초)   신뢰"]
+    P = [_l("", 26) + _r("이 구간", 8) + _r("기준", 8) + _r("변화", 9) + _r("Netdata(1초)", 14) + "   신뢰"]
     for key, label, unit in POWER:
         p = res["power"].get(key) or {}
         v, b = p.get("value"), p.get("base")
@@ -281,31 +297,33 @@ def sections(res, hms):
         note = p.get("note", "")
         if key == "batt_vi_w" and v is None and ndv is not None:
             note = "방전 표본 없음(충전 중) — Netdata 값은 충전 전력"
-        P.append(f"{label:<24}{_f(v):>7}{_f(b):>8}{d:>9}{_f(ndv):>14}   {note}" + ("" if p.get("reliable", True) else "  ← 순위에서 제외"))
+        P.append(_l(label, 26) + _r(_f(v), 8) + _r(_f(b), 8) + _r(d, 9) + _r(_f(ndv), 14) + f"   {note}" + ("" if p.get("reliable", True) else "  ← 순위에서 제외"))
     S.append(("전력", P))
-    Y = ["                         이 구간   기준     변화      출처"]
+    Y = [_l("", 24) + _r("이 구간", 9) + _r("기준", 9) + _r("변화", 9) + "   출처"]
     for s in res["system"]:
         if s["nd"] is None and s["obs"] is None:
-            Y.append(f"{s['label']:<22}{'관측 공백':>8}   (Netdata 필요)")
+            Y.append(_l(s["label"], 24) + _r("관측 공백", 9) + "   (Netdata 필요)")
             continue
         v, b, src = (s["nd"], s["nd_base"], "Netdata 1초") if s["nd"] is not None else (s["obs"], s["obs_base"], "observectl 30초")
         d = f"{v - b:+.1f}" if v is not None and b is not None else "-"
-        Y.append(f"{s['label']:<22}{_f(v, 1):>8}{_f(b, 1):>8}{d:>9}   {src} · {s['unit']}")
+        Y.append(_l(s["label"], 24) + _r(_f(v, 1), 9) + _r(_f(b, 1), 9) + _r(d, 9) + f"   {src} · {s['unit']}")
     S.append(("시스템 활동", Y))
     pr = res["procs"]
     Q = []
     ap = res["apps"]
     if ap["cur"] is not None:
         apb = ap["base"] or {}
-        Q.append(f"앱 단위(전체 프로세스를 앱으로 묶은 합 — 커버리지 100%, 표본 {ap['samples']}개) CPU 는 코어 1개=100%      이 구간 CPU   기준   | 자발 전환/s(모든 스레드)  프로세스 수")
+        Q.append(f"앱 단위(전체 프로세스를 앱으로 묶은 합 — 커버리지 100%, 표본 {ap['samples']}개) · CPU 는 코어 1개=100%")
+        Q.append(_l("앱", 26) + _r("이 구간 CPU", 12) + _r("기준 CPU", 10) + _r("전환/s", 10) + _r("프로세스", 10))
         for k, v in sorted(ap["cur"].items(), key=lambda kv: -(kv[1]["cpu"] + kv[1]["ctxsw"] / 100))[:10]:
-            Q.append(f"{k[:26]:<26}{v['cpu']:>8.1f}{apb.get(k, {}).get('cpu', 0.0):>8.1f}   | {v['ctxsw']:>8.0f}{v['n']:>12.0f}")
+            Q.append(_l(k[:26], 26) + _r(f"{v['cpu']:.1f}", 12) + _r(f"{apb.get(k, {}).get('cpu', 0.0):.1f}", 10) + _r(f"{v['ctxsw']:.0f}", 10) + _r(f"{v['n']:.0f}", 10))
         Q.append("")
-    Q.append("observectl 저장분(상위 16행, 이름별) — CPU 는 코어 1개=100%      이 구간 CPU   기준   | 자발 전환/s(모든 스레드)" + ("   (앱 단위 표가 있으면 그쪽이 전체)" if ap["cur"] is not None else ""))
+    Q.append("observectl 저장분(상위 16행, 이름별) · CPU 는 코어 1개=100%, 전환/s 는 모든 스레드의 자발적 문맥 전환" + (" · 앱 단위 표가 있으면 그쪽이 전체" if ap["cur"] is not None else ""))
+    Q.append(_l("이름", 26) + _r("이 구간 CPU", 12) + _r("기준 CPU", 10) + _r("전환/s", 10))
     cur, base = pr["cur"], pr["base"]
     for c, v in sorted(cur.items(), key=lambda kv: -kv[1]["cpu"])[:8]:
         ctx = "-" if v["ctxsw"] is None else f"{v['ctxsw']:.0f}"
-        Q.append(f"{c:<26}{v['cpu']:>8.1f}{base.get(c, {}).get('cpu', 0.0):>8.1f}   | {ctx:>6}")
+        Q.append(_l(c[:26], 26) + _r(f"{v['cpu']:.1f}", 12) + _r(f"{base.get(c, {}).get('cpu', 0.0):.1f}", 10) + _r(ctx, 10))
     ctxrank = sorted(((c, v["ctxsw"]) for c, v in cur.items() if v["ctxsw"] is not None), key=lambda x: -x[1])[:5]
     if ctxrank:
         Q.append("자발 전환 상위: " + ", ".join(f"{c} {v:.0f}/s" for c, v in ctxrank))
@@ -313,16 +331,18 @@ def sections(res, hms):
     if eb:
         Q.append("")
         info = ", ".join(f"{tiers.TIERS[t]['label']} — 정확성 {tiers.TIERS[t]['accuracy']}" for t in eb["tiers"] if t in tiers.TIERS)
-        Q.append(f"정밀(eBPF, 이 구간 간격 {eb['records']}개 평균; {info})      CPU(코어1=100%)  자발 전환/s  비자발/s  총 전환/s")
+        Q.append(f"정밀(eBPF, 이 구간 간격 {eb['records']}개 평균; {info})")
+        Q.append(_l("이름", 26) + _r("CPU(코어1=100%)", 16) + _r("자발 전환/s", 12) + _r("비자발/s", 10) + _r("총 전환/s", 10))
         for p in eb["procs"]:
             f = lambda k, w=7: "-" if k not in p else f"{p[k]:.1f}"
-            Q.append(f"{p['comm'][:24]:<26}{f('cpu'):>8}{f('vol'):>12}{f('invol'):>10}{f('sw'):>10}")
+            Q.append(_l(p["comm"][:24], 26) + _r(f("cpu"), 16) + _r(f("vol"), 12) + _r(f("invol"), 10) + _r(f("sw"), 10))
     if res["apps_nd"]["cur"] is not None:
         Q.append("")
-        Q.append("앱 그룹 CPU — Netdata(전체 프로세스, 코어 1개=100%)      이 구간   기준")
+        Q.append("앱 그룹 CPU — Netdata(전체 프로세스, 코어 1개=100%)")
+        Q.append(_l("앱", 26) + _r("이 구간", 10) + _r("기준", 10))
         a, ab = res["apps_nd"]["cur"], res["apps_nd"]["base"] or {}
         for k, v in sorted(a.items(), key=lambda kv: -kv[1])[:8]:
-            Q.append(f"{k:<26}{v:>8.1f}{ab.get(k, 0.0):>8.1f}")
+            Q.append(_l(k, 26) + _r(f"{v:.1f}", 10) + _r(f"{ab.get(k, 0.0):.1f}", 10))
     S.append(("프로세스·앱", Q))
     F = []
     if res["focus"]:
@@ -335,7 +355,7 @@ def sections(res, hms):
         C.append("(기준과 의미 있게 다른 항목 없음)" if res["baseline"] else "(기준 구간이 없어 비교하지 않음)")
     for c in res["changes"]:
         rel = "신규" if c["rel"] == float("inf") else ("-" if c["rel"] is None else f"{c['rel'] * 100:+.0f}%")
-        C.append(f"{c['kind']:<10}{c['name']:<28}{c['base']:>9.2f} → {c['cur']:<9.2f}{c['unit']:<8}{rel:>7}")
+        C.append(_l(c["kind"], 14) + _l(c["name"], 30) + _r(f"{c['base']:.2f}", 9) + " → " + _l(f"{c['cur']:.2f}", 9) + _l(c["unit"], 8) + _r(rel, 7))
     S.append((SECTION_TITLES[5], C))
     S.append(("한계와 주의", [f"※ {n}" for n in res["notes"]]))
     return S

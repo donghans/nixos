@@ -86,6 +86,15 @@ check("옛 표본 섞임: 안내 문구", any("옛 형식 표본 10개" in n for
 cov = ex.ctxsw_coverage(cur_rows)
 check("전환 커버리지: 저장된 상위 행 합 410 / 시스템 9000 ≈ 4.6% — 낮으면 긴 꼬리 안내", abs(cov - 410 / 9000) < 1e-6 and any("긴 꼬리" in n for n in res["notes"]), str((cov, res["notes"])))
 
+# 한글 칸 폭 정렬(문자 수가 아니라 터미널 칸 수) — 실제 터미널에서 표가 어긋났던 문제
+check("칸 폭: 한글 2칸·영문 1칸, _l/_r 이 칸 수로 맞춤", ex._w("가나a") == 5 and ex._w(ex._l("가나", 7)) == 7 and ex._w(ex._r("가나", 7)) == 7 and ex._l("ab", 4) == "ab  ")
+tab = ex.sections(res, core.hms)[1][1]
+def prefix_at(line, n):
+    """칸 폭이 정확히 n 이 되는 앞부분(한글이 걸쳐 있어 n 이 안 나오면 None)"""
+    return next((line[:i] for i in range(len(line) + 1) if ex._w(line[:i]) == n), None)
+ends = [prefix_at(l, 34) for l in tab[1:]]
+check("전력 표: '이 구간' 열이 모든 줄에서 같은 칸(34)에 끝나고 숫자로 끝남(한글 라벨이 있어도)", all(e is not None and e.rstrip()[-1] in "0123456789-" for e in ends), str(tab))
+
 # 충전 중: 순간 V×I·계량 없음 — Netdata 의 충전 전력과 혼동하지 않게
 chg = windowed(C0, 20, psys=9.0, status="Charging", ac=1)
 r5 = ex.build(chg, [], C0, C1, None, nd_fake)

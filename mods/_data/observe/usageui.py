@@ -81,7 +81,7 @@ class UsageUI(uikit.HelpMixin, App):
     #dashscroll { height: 1fr; }
     #dash { height: 1fr; min-height: 46; }
     #dleft { width: 3fr; height: 1fr; }
-    #dright { width: 2fr; height: 1fr; }
+    #dright { width: 2fr; min-width: 52; height: 1fr; }
     #dash.narrow { layout: vertical; height: auto; }
     #dash.narrow #dleft, #dash.narrow #dright { width: 100%; height: auto; }
     #dash.narrow .box { height: 12; }
@@ -110,8 +110,9 @@ class UsageUI(uikit.HelpMixin, App):
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
-    def __init__(self, rng=None, baseline="prev", tab="dashboard"):
+    def __init__(self, rng=None, baseline="prev", tab="dashboard", expand=False):
         super().__init__()
+        self.expand = expand
         self.rng = rng or ud.preset("1시간", time.time())
         self.baseline = baseline
         self.start_tab = tab
@@ -141,7 +142,7 @@ class UsageUI(uikit.HelpMixin, App):
                         with Vertical(id="dright"):
                             yield uikit.box(Panel(lambda w, h: self._v(self._sumtext), id="dsum"), "구간 · 전력 요약")
                             yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.summary_habit(v, w)), id="dhab"), "시간 배분 — 어떻게 썼나")
-                            yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.summary_apps(v, w)), id="dapps"), "앱 — CPU 를 많이 쓴 앱 · 오래 본 앱")
+                            yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.summary_apps(v, w)), id="dapps"), "앱 — CPU 점유(전력 점유율 아님) · 오래 본 앱")
             with TabPane("앱·프로세스 [2]", id="apps"):
                 with VerticalScroll():
                     yield self._table_box("tapps", "앱(전체 프로세스를 앱으로 묶은 합) — CPU 는 코어 1개=100%", ("앱", "CPU %", "CPU 점유", "전환/s", "메모리 MB", "프로세스", "전력량 추정 Wh*"), "xl")
@@ -156,7 +157,7 @@ class UsageUI(uikit.HelpMixin, App):
                     for i, title in enumerate(ex.SECTION_TITLES):
                         if i in (0, 5):
                             continue
-                        with Collapsible(title=f"{title} (펼치기)", collapsed=True, id=f"excol{i}"):
+                        with Collapsible(title=f"{title} (펼치기)", collapsed=not self.expand, id=f"excol{i}"):
                             yield Static("", id=f"ex{i}")
             with TabPane("시스템·기기 [4]", id="system"):
                 with VerticalScroll():
@@ -187,11 +188,20 @@ class UsageUI(uikit.HelpMixin, App):
     def _health(self):
         return uv.summary_battery(self.view, ud.battery_health()) if self.view else Text(" 불러오는 중…", style="grey50")
 
-    def on_resize(self, ev):
+    NARROW_COLS = 125                  # 이보다 좁으면 대시보드를 1열로(오른쪽 칸 글이 줄바꿈되기 때문)
+
+    def _fit(self):
         try:
-            self.query_one("#dash").set_class(ev.size.width < 110, "narrow")
+            self.query_one("#dash").set_class(self.size.width < self.NARROW_COLS, "narrow")
         except Exception:
             pass
+
+    def on_resize(self, ev):
+        self._fit()
+
+    def on_mount(self):
+        self._fit()
+        self.reload()
 
     def _table_box(self, tid, title, cols, cls):
         return TableBox(tid, title, cols, cls)
@@ -221,9 +231,6 @@ class UsageUI(uikit.HelpMixin, App):
         return t
 
     # --- 데이터: 수동 갱신만(타이머 없음)
-    def on_mount(self):
-        self.reload()
-
     def action_reload(self):
         self.reload()
 
@@ -388,13 +395,14 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="usageui", description="전력·자원 사용 습관 TUI")
     p.add_argument("--range", default="1시간", help="처음 범위: 1시간·6시간·오늘·어제·3일 · -30m · 10:00..11:30")
     p.add_argument("--tab", default="dashboard", choices=["dashboard", "apps", "cause", "system", "help"])
+    p.add_argument("--expand", action="store_true", help="원인 탭의 상세 표를 처음부터 펼침")
     p.add_argument("--baseline", default="prev", choices=[k for k, _ in BASELINES])
     a = p.parse_args(argv)
     try:
         rng = ud.parse_range(a.range)
     except ValueError as e:
         sys.exit(str(e))
-    UsageUI(rng, a.baseline, a.tab).run()
+    UsageUI(rng, a.baseline, a.tab, a.expand).run()
 
 
 if __name__ == "__main__":
