@@ -8,6 +8,7 @@ from __future__ import annotations
 import collections
 import statistics
 
+import observe_tiers as tiers
 import observe_trace as tr
 
 POWER = [("psys_w", "psys(RAPL, 약 1 W 누락)", "W"), ("pkg_w", "패키지(RAPL)", "W"), ("batt_vi_w", "순간 V×I(방전 중)", "W"), ("coulomb_w", "누적 계량", "W")]
@@ -90,6 +91,24 @@ def ctxsw_coverage(g):
     return a / b if b else None
 
 
+def ebpf_table(g):
+    """구간 표본에 붙은 정밀(eBPF) 집계 `ebpf` 를 프로세스별 평균으로. 없으면 None. {"tiers": {단계}, "records": 개수, "procs": [{"comm","pid","cpu","vol","sw"}…]}."""
+    recs = [r["ebpf"] for r in g if r.get("ebpf")]
+    if not recs:
+        return None
+    acc = collections.defaultdict(lambda: collections.defaultdict(float))
+    for rec in recs:
+        for p in rec["procs"]:
+            key = (p["comm"], p["pid"])
+            for src, dst in (("cpu_core_pct", "cpu"), ("vol_s", "vol"), ("invol_s", "invol"), ("sw_s", "sw")):
+                if src in p:
+                    acc[key][dst] += p[src]
+    n = len(recs)
+    rows = [{"comm": c, "pid": pid, **{k: v / n for k, v in d.items()}} for (c, pid), d in acc.items()]
+    rows.sort(key=lambda r: -(r.get("cpu", 0) + r.get("vol", 0) / 100 + r.get("sw", 0) / 100))
+    return {"tiers": sorted({r["tier"] for r in recs}), "records": n, "procs": rows[:8]}
+
+
 def focus_table(spans, t0, t1):
     """포커스 스팬(`windows` 의 `focus:<앱>`)을 구간에 잘라 앱별 시간(초)으로. [(앱, 초, 구간 대비 %)] 큰 순."""
     acc = collections.defaultdict(float)
@@ -157,6 +176,7 @@ def build(rows, spans, t0, t1, base=None, nd=None, threshold=0.3):
     pt, nctx = proc_table(cur)
     ptb, _ = proc_table(ref) if ref else ({}, 0)
     res["procs"] = {"cur": pt, "base": ptb, "ctx_samples": nctx, "ctx_coverage": ctxsw_coverage(cur), "legacy_samples": legacy}
+    res["ebpf"] = ebpf_table(cur)
     res["apps_nd"] = {"cur": dict(snap["apps_cpu"]) if snap else None, "base": dict(snap_b["apps_cpu"]) if snap_b else None}
     # 포커스·구간
     res["focus"] = focus_table(spans, t0, t1)
@@ -249,6 +269,14 @@ def sections(res, hms):
     ctxrank = sorted(((c, v["ctxsw"]) for c, v in cur.items() if v["ctxsw"] is not None), key=lambda x: -x[1])[:5]
     if ctxrank:
         Q.append("자발 전환 상위: " + ", ".join(f"{c} {v:.0f}/s" for c, v in ctxrank))
+    eb = res.get("ebpf")
+    if eb:
+        Q.append("")
+        info = ", ".join(f"{tiers.TIERS[t]['label']} — 정확성 {tiers.TIERS[t]['accuracy']}" for t in eb["tiers"] if t in tiers.TIERS)
+        Q.append(f"정밀(eBPF, 이 구간 간격 {eb['records']}개 평균; {info})      CPU(코어1=100%)  자발 전환/s  비자발/s  총 전환/s")
+        for p in eb["procs"]:
+            f = lambda k, w=7: "-" if k not in p else f"{p[k]:.1f}"
+            Q.append(f"{p['comm'][:24]:<26}{f('cpu'):>8}{f('vol'):>12}{f('invol'):>10}{f('sw'):>10}")
     if res["apps_nd"]["cur"] is not None:
         Q.append("")
         Q.append("앱 그룹 CPU — Netdata(전체 프로세스, 코어 1개=100%)      이 구간   기준")

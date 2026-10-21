@@ -17,13 +17,14 @@
   observectl ab [--metric psys_w] [--threshold 0.3] [--settle 20]   observectl mark 로 나눈 A/B 구간을 통계로 판정(임계 이상 + 모든 쌍 같은 부호일 때만 '확인')
   observectl hyprtrace on|off               다음 로그인부터 Hyprland TRACE 로그(HYPRLAND_TRACE=1). 켜면 로그/전력에 영향이 있으니 필요할 때만
 """
-import argparse, collections, json, os, subprocess, sys, time, uuid
+import argparse, collections, json, os, re, subprocess, sys, time, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import observe_core as core
 import observe_stats as stats
 import observe_explain as ex
 import observe_netdata as nd
+import observe_tiers as tiers
 
 METRICS = {"psys_w": ("pw", "psys_w"), "pkg_w": ("pw", "pkg_w"), "batt_vi_w": ("pw", "batt_vi_w"), "core_w": ("pw", "core_w"), "uncore_w": ("pw", "uncore_w")}
 
@@ -328,6 +329,53 @@ def cmd_explain(a):
         print(json.dumps(res, ensure_ascii=False, default=str, indent=1))
         return
     print("\n".join(ex.render(res, core.hms)))
+
+
+def _dur_seconds(text):
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)([smh])", str(text).strip())
+    if not m:
+        sys.exit("--for 는 10m, 90s, 1h 같은 형식(최대 60분)")
+    return float(m[1]) * {"s": 1, "m": 60, "h": 3600}[m[2]]
+
+
+def cmd_ebpf(a):
+    if a.action == "tiers":
+        print("시간 제한형 eBPF 정밀 모드의 단계(2026-10-21 실측, 코어 1개 기준 — 장부 #61). 기본 수집(L0, 30초, 스레드 정확)은 약 0.5% 이고 이 모드는 그 위에 얹힌다.")
+        for k, t in tiers.TIERS.items():
+            print(f"  {k:<7}{t['label']:<12}비용 {t['cost']}\n          정확성 {t['accuracy']} · 얻는 것: {t['gives']}")
+        print(f"안전장치: --for 로 제한 시간(최대 {tiers.MAX_MINUTES}분) 뒤 자동 종료, counts·full 은 시스템 전환이 초당 {tiers.GUARD_SW_PER_S} 를 넘으면 스스로 멈춤.")
+        return
+    ctl = core.read_control()
+    if a.action == "off":
+        core.write_control({"ebpf": None})
+        print("정밀 모드를 껐습니다(수집기가 다음 반복에서 bpftrace 를 끝냅니다).")
+        return
+    if a.action == "on":
+        if a.tier not in tiers.TIERS:
+            sys.exit(f"단계는 {'|'.join(tiers.TIERS)} 중 하나")
+        if not ctl.get("enabled"):
+            sys.exit("수집이 꺼져 있습니다 — 먼저 `observectl on` 으로 켜세요(정밀 모드는 수집 표본에 합쳐집니다)")
+        secs = min(_dur_seconds(a.for_), tiers.MAX_MINUTES * 60)
+        until = time.time() + secs
+        core.write_control({"ebpf": {"tier": a.tier, "until": until}})
+        t = tiers.TIERS[a.tier]
+        print(f"정밀 모드 {a.tier}({t['label']}) 를 {secs / 60:.0f}분 동안 켭니다 — 비용 {t['cost']}, 정확성 {t['accuracy']}. {core.hms(until)} 에 자동으로 꺼집니다.")
+        return
+    e = ctl.get("ebpf")
+    now = time.time()
+    if e and float(e.get("until", 0)) > now:
+        print(f"켜짐: {e['tier']} — {(float(e['until']) - now) / 60:.1f}분 남음 ({core.hms(float(e['until']))} 까지)")
+    else:
+        print("꺼짐")
+    last = [r for r in samples(now - 600) if r.get("ebpf")]
+    if last:
+        r = last[-1]["ebpf"]
+        print(f"최근 집계 {core.hms(last[-1]['t'])} ({r['tier']}, {r['dt']}초):")
+        for p in r["procs"][:5]:
+            print("   " + " · ".join(f"{k}={v}" for k, v in p.items()))
+    stopped = [r for r in samples(now - 3600) if r.get("ebpf_stopped")]
+    if stopped:
+        print(f"⚠ 스스로 멈춤({core.hms(stopped[-1]['t'])}): {stopped[-1]['ebpf_stopped']}")
 
 
 def cmd_nd(a):
@@ -677,6 +725,7 @@ def main(argv=None):
     s = sub.add_parser("events"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--level", default="trace", choices=list(core.LEVELS)); s.add_argument("--grep"); s.set_defaults(f=cmd_events)
     s = sub.add_parser("trace", help="스팬(구간) 폭포 · 구간별 에너지 · 이름별 요약"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--name", help="이름에 포함된 글자"); s.add_argument("--min-ms", type=float, default=0); s.add_argument("--trace", help="트레이스 id 앞부분"); s.add_argument("-n", type=int, default=5, help="폭포로 보여 줄 최근 트레이스 수"); s.add_argument("--width", type=int, default=110); s.add_argument("--by", action="store_true", help="폭포 대신 이름별 요약표(횟수·소요·에너지)"); s.set_defaults(f=cmd_trace)
     s = sub.add_parser("explain", help="한 구간을 여러 출처(전력·상태·시스템·Netdata·프로세스·포커스·스팬)로 묶어 설명하고 기준 구간과 비교"); s.add_argument("--since", default="30m"); s.add_argument("--until"); s.add_argument("--at", help="중심 시각(HH:MM 등) — --span 초 만큼의 구간"); s.add_argument("--span", type=float, default=300); s.add_argument("--baseline", default="prev", help="none | prev(바로 앞의 같은 길이, 기본) | 시작..끝"); s.add_argument("--no-netdata", action="store_true"); s.add_argument("--json", action="store_true"); s.set_defaults(f=cmd_explain)
+    s = sub.add_parser("ebpf", help="시간 제한형 eBPF 정밀 모드: tiers(단계·비용) | on <sample|counts|full> [--for 10m] | off | status"); s.add_argument("action", choices=["tiers", "on", "off", "status"]); s.add_argument("tier", nargs="?"); s.add_argument("--for", dest="for_", default="10m", help="제한 시간(기본 10m, 최대 60분)"); s.set_defaults(f=cmd_ebpf)
     s = sub.add_parser("nd", help="Netdata 어댑터(있을 때만): defs=신호 정의, stats=구간 평균, apps=앱 그룹 CPU"); s.add_argument("what", choices=["defs", "stats", "apps"]); s.add_argument("--since", default="10m"); s.add_argument("--until"); s.add_argument("-n", type=int, default=10); s.set_defaults(f=cmd_nd)
     s = sub.add_parser("timeline"); s.add_argument("--at", required=True); s.add_argument("--span", type=float, default=60); s.add_argument("--journal", default="all", choices=["all", "warn", "none"]); s.set_defaults(f=cmd_timeline)
     s = sub.add_parser("bpf", help="eBPF(bpftrace) 프리셋을 N초 동안 실행: exec wake profile psr io net"); s.add_argument("preset", choices=["exec", "wake", "profile", "psr", "io", "net"]); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--comm", help="프로세스 이름 필터(영숫자·._- 15자)"); s.add_argument("-n", type=int, default=12, help="표의 상위 행 수"); s.add_argument("--no-spans", action="store_true", help="exec: 프로세스 스팬을 이벤트 로그에 적지 않음"); s.set_defaults(f=cmd_bpf)

@@ -14,7 +14,7 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
   py = pkgs.python3;
   dir = pkgs.runCommand "observe-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_focus.py" "powergraph.py" "powerdata.py" "powerview.py" "powerui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_tiers.py" "observe_focus.py" "powergraph.py" "powerdata.py" "powerview.py" "powerui.py"]}
     cp ${../../_data/observe/examples/power_knobs.py} $out/power_knobs.py
     cp ${../../_data/_uikit/uikit.py} $out/uikit.py
   '';

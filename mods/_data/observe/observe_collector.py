@@ -16,6 +16,7 @@ import collections, glob, json, os, re, shutil, signal, struct, subprocess, sys,
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import observe_core as core
+import observe_tiers as tiers
 
 PROC = os.environ.get("OBSERVE_PROC", "/proc")
 SYS = os.environ.get("OBSERVE_SYS", "/sys")
@@ -525,6 +526,19 @@ def job_bpf(args):
     return res
 
 
+def attach_ebpf(s, runner):
+    """실행기가 모은 가장 최근 정밀 집계를 표본 s 에 붙인다(s["ebpf"]). 스스로 멈춘 이유가 있으면 한 번만 s["ebpf_stopped"] 로 알린다."""
+    rec = runner.take()
+    if rec:
+        s["ebpf"] = rec
+    if runner.stopped_reason and not getattr(runner, "_reported", False) and not runner.running:
+        s["ebpf_stopped"] = runner.stopped_reason
+        runner._reported = True
+    elif runner.running:
+        runner._reported = False
+    return s
+
+
 JOBS = {"ping": job_ping, "wakers": job_wakers, "drmdebug": job_drmdebug, "display": job_display, "bpf": job_bpf}
 
 
@@ -566,9 +580,18 @@ def main():
         os.makedirs(d, exist_ok=True)
     sampler, idle_since, last_prune = None, time.monotonic(), 0.0
     stuck_n, last_knobs = 0, 0.0
+    runner = tiers.Runner(BPFTRACE)             # 시간 제한형 eBPF 정밀 모드(observectl ebpf on)
+    try:
+        return _loop(stop, sampler, idle_since, last_prune, stuck_n, last_knobs, runner)
+    finally:
+        runner.stop("수집기 종료")
+
+
+def _loop(stop, sampler, idle_since, last_prune, stuck_n, last_knobs, runner):
     while not stop:
         ctl = core.read_control()
         did = process_requests()
+        runner.ensure(ctl.get("ebpf") if ctl["enabled"] else None)
         if ctl["enabled"]:
             lvl = ctl["level"] if ctl["level"] in ("L0", "L1") else "L0"
             if sampler is None or sampler.level != lvl:
@@ -593,6 +616,7 @@ def main():
                     except Exception as e:
                         s["knobs"] = f"실패: {e}"
                     last_knobs = time.time()
+            attach_ebpf(s, runner)
             s["mark"] = core.read_control().get("mark")        # 표본 직전에 다시 읽는다(루프 시작에서 읽은 값을 쓰면 표지 변경이 한 표본 늦게 반영됨)
             core.append_jsonl(core.SAMPLE_DIR, "samples", s)
             statsd_send(s)

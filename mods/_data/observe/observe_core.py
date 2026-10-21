@@ -31,6 +31,7 @@ DEFAULT_CONTROL = {
     "retention_days": 14,
     "max_total_mb": 1024,
     "mark": None,                          # 실험 조건 표지(observectl mark): {"cond": "A", "t": epoch, "note": ""}
+    "ebpf": None,                          # 시간 제한형 정밀 모드(observectl ebpf on): {"tier": "sample|counts|full", "until": epoch}
 }
 
 
