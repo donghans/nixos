@@ -214,7 +214,17 @@ def cmd_top(a):
         if not rows:
             sys.exit("새 형식(모든 스레드 합) 표본이 아직 없습니다 — 수집기가 새 버전으로 쌓은 뒤에 보세요")
     acc = collections.defaultdict(lambda: [0.0, 0.0, 0])
-    if a.by == "thr":
+    if a.by == "app":                        # 앱 단위 합계(v4, 전체 프로세스 포함)
+        have = [r for r in rows if r.get("apps")]
+        if not have:
+            sys.exit("앱 단위(v4) 표본이 아직 없습니다 — 수집기가 새 버전으로 쌓은 뒤에 보세요")
+        if len(have) < len(rows):
+            print(f"(앱 단위 표본 {len(have)}개만 사용, 그 이전 {len(rows) - len(have)}개는 제외)")
+        rows = have
+        for r in rows:
+            for p_ in r["apps"]:
+                acc[p_["app"]][0] += p_["cpu_core_pct"]; acc[p_["app"]][1] += p_["ctxsw_vol_s"]; acc[p_["app"]][2] += 1
+    elif a.by == "thr":
         for r in rows:
             for t in r.get("thr", []):
                 k = f"{t['comm']}/{t['thr']}"
@@ -230,7 +240,7 @@ def cmd_top(a):
                 acc[k][0] += p["cpu_core_pct"]; acc[k][1] += p.get("ctxsw_vol_s", p.get("ctxsw_vol_leader_s", 0)); acc[k][2] += 1
     n = len(rows)
     key = (lambda kv: -kv[1][1]) if a.by in ("ctxsw", "io") else (lambda kv: -kv[1][0])
-    head = "이름              읽기B/s  쓰기B/s" if a.by == "io" else "이름                      CPU(코어1개=100%)  자발전환/s  (등장)"
+    head = "이름              읽기B/s  쓰기B/s" if a.by == "io" else ("앱(전체 프로세스 합)          CPU(코어1개=100%)  자발전환/s  (등장)" if a.by == "app" else "이름                      CPU(코어1개=100%)  자발전환/s  (등장)")
     print(f"표본 {n}개 평균 기준(등장하지 않은 표본은 0 으로 계산) · 정렬 {a.by}\n{head}")
     for k, (c, w, m) in sorted(acc.items(), key=key)[:a.n]:
         print(f"{k[:28]:<28}{c / n:>8.2f}{w / n:>16.1f}   ({m}/{n})")
@@ -721,7 +731,7 @@ def main(argv=None):
     s = sub.add_parser("window"); s.add_argument("--clean", action="store_true", help="내 세션 활동·빌드가 섞인 표본 제외"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.set_defaults(f=cmd_window)
     s = sub.add_parser("energy"); s.add_argument("--clean", action="store_true", help="내 세션 활동·빌드가 섞인 표본 제외"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.set_defaults(f=cmd_energy)
     s = sub.add_parser("states"); s.add_argument("--since", default="-2h"); s.set_defaults(f=cmd_states)
-    s = sub.add_parser("top"); s.add_argument("--since", default="-30m"); s.add_argument("--by", default="ctxsw", choices=["cpu", "ctxsw", "wake", "thr", "io"], help="ctxsw=자발적 문맥 전환/s, cpu=코어 1개 기준 CPU%%. wake 는 ctxsw 의 옛 이름"); s.add_argument("-n", type=int, default=12); s.set_defaults(f=cmd_top)
+    s = sub.add_parser("top"); s.add_argument("--since", default="-30m"); s.add_argument("--by", default="ctxsw", choices=["cpu", "ctxsw", "wake", "thr", "io", "app"], help="ctxsw=자발적 문맥 전환/s, cpu=코어 1개 기준 CPU%%. wake 는 ctxsw 의 옛 이름"); s.add_argument("-n", type=int, default=12); s.set_defaults(f=cmd_top)
     s = sub.add_parser("events"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--level", default="trace", choices=list(core.LEVELS)); s.add_argument("--grep"); s.set_defaults(f=cmd_events)
     s = sub.add_parser("trace", help="스팬(구간) 폭포 · 구간별 에너지 · 이름별 요약"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--name", help="이름에 포함된 글자"); s.add_argument("--min-ms", type=float, default=0); s.add_argument("--trace", help="트레이스 id 앞부분"); s.add_argument("-n", type=int, default=5, help="폭포로 보여 줄 최근 트레이스 수"); s.add_argument("--width", type=int, default=110); s.add_argument("--by", action="store_true", help="폭포 대신 이름별 요약표(횟수·소요·에너지)"); s.set_defaults(f=cmd_trace)
     s = sub.add_parser("explain", help="한 구간을 여러 출처(전력·상태·시스템·Netdata·프로세스·포커스·스팬)로 묶어 설명하고 기준 구간과 비교"); s.add_argument("--since", default="30m"); s.add_argument("--until"); s.add_argument("--at", help="중심 시각(HH:MM 등) — --span 초 만큼의 구간"); s.add_argument("--span", type=float, default=300); s.add_argument("--baseline", default="prev", help="none | prev(바로 앞의 같은 길이, 기본) | 시작..끝"); s.add_argument("--no-netdata", action="store_true"); s.add_argument("--json", action="store_true"); s.set_defaults(f=cmd_explain)

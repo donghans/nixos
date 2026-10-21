@@ -155,9 +155,9 @@ old = {"t": 1700000000.0, "pw": {"psys_w": 4.0, "batt_w": 5.5, "status": "Discha
 n1 = core.normalize_sample(json.loads(json.dumps(old)))
 check("normalize_sample: 필드 이름 v1 → 최신(값 그대로, proc 전환은 ctxsw_vol_leader_s)", n1["pw"]["batt_vi_w"] == 5.5 and "batt_w" not in n1["pw"] and n1["irq"]["cpu_all_pct"] == 3.2 and "cpu_busy_pct" not in n1["irq"]
       and n1["proc"][0]["cpu_core_pct"] == 8.5 and n1["proc"][0]["ctxsw_vol_leader_s"] == 30.0 and not ({"cpu", "wake", "ctxsw_vol_s"} & set(n1["proc"][0])) and n1["thr"][0]["cpu_core_pct"] == 1.5 and n1["thr"][0]["ctxsw_vol_s"] == 9.0, str(n1))
-check("normalize_sample: 옛 표본은 v=3, legacy=True", n1["v"] == 3 and n1["legacy"] is True)
-v2 = {"v": 3, "t": 1.0, "pw": {"batt_vi_w": 1.0}}
-check("normalize_sample: 최신(v3)은 그대로(legacy 없음)", core.normalize_sample(dict(v2)) == v2 and "legacy" not in core.normalize_sample(dict(v2)))
+check("normalize_sample: 옛 표본(v1)은 최신 버전으로 올라가고 legacy=True", n1["v"] == core.SCHEMA and n1["legacy"] is True)
+v2 = {"v": core.SCHEMA, "t": 1.0, "pw": {"batt_vi_w": 1.0}}
+check("normalize_sample: 최신 버전은 그대로(legacy 없음)", core.normalize_sample(dict(v2)) == v2 and "legacy" not in core.normalize_sample(dict(v2)))
 check("normalize_sample: 두 번 적용해도 같음(멱등)", core.normalize_sample(core.normalize_sample(json.loads(json.dumps(old)))) == n1)
 core.append_jsonl(core.SAMPLE_DIR, "samples", {**old, "t": time.time() - 100})
 rd = list(core.iter_jsonl(core.SAMPLE_DIR, "samples", time.time() - 200))
@@ -280,12 +280,13 @@ check("수집기 L1: 같은 합계 + 스레드별 행(3개)을 한 번에", proc
 # v1/v2 → v3 변환: proc 행의 ctxsw_vol_s 는 ctxsw_vol_leader_s 로(합산·비교 금지), thr 행은 그대로
 v2s = {"v": 2, "t": 1.0, "pw": {"batt_vi_w": 1.0}, "irq": {"cpu_all_pct": 1.0}, "proc": [{"comm": "x", "cpu_core_pct": 3.0, "ctxsw_vol_s": 9.0}], "thr": [{"comm": "x", "thr": "t", "cpu_core_pct": 1.0, "ctxsw_vol_s": 4.0}]}
 n3 = core.normalize_sample(json.loads(json.dumps(v2s)))
-check("v2→v3: proc 행 ctxsw_vol_s 는 ctxsw_vol_leader_s 로 바뀜(메인 스레드만이라는 뜻)", n3["proc"][0].get("ctxsw_vol_leader_s") == 9.0 and "ctxsw_vol_s" not in n3["proc"][0] and n3["v"] == 3 and n3["legacy"], str(n3))
+check("v2→v3: proc 행 ctxsw_vol_s 는 ctxsw_vol_leader_s 로 바뀜(메인 스레드만이라는 뜻)", n3["proc"][0].get("ctxsw_vol_leader_s") == 9.0 and "ctxsw_vol_s" not in n3["proc"][0] and n3["v"] == core.SCHEMA and n3["legacy"], str(n3))
 check("v2→v3: thr 행(스레드 단위)은 그대로 ctxsw_vol_s", n3["thr"][0].get("ctxsw_vol_s") == 4.0 and "ctxsw_vol_leader_s" not in n3["thr"][0])
 n13 = core.normalize_sample(json.loads(json.dumps(old)))
 check("v1→v3: wake 는 두 단계를 거쳐 ctxsw_vol_leader_s", n13["proc"][0].get("ctxsw_vol_leader_s") == 30.0 and "wake" not in n13["proc"][0] and "ctxsw_vol_s" not in n13["proc"][0], str(n13["proc"]))
 v3s = {"v": 3, "t": 1.0, "proc": [{"comm": "x", "ctxsw_vol_s": 9.0}]}
-check("v3 는 그대로(이름·legacy 변화 없음)", core.normalize_sample(json.loads(json.dumps(v3s))) == v3s)
+n34 = core.normalize_sample(json.loads(json.dumps(v3s)))
+check("v3 → 최신: 이름은 그대로(ctxsw_vol_s 는 모든 스레드 합이라 유효)·legacy 아님(apps 가 없을 뿐)", n34["v"] == core.SCHEMA and n34["proc"][0]["ctxsw_vol_s"] == 9.0 and "legacy" not in n34, str(n34))
 check("정규화는 멱등(v1→v3 를 두 번 적용해도 같음)", core.normalize_sample(core.normalize_sample(json.loads(json.dumps(old)))) == n13)
 
 # observectl: 옛 표본은 전환 순위·합계에서 제외하고 안내

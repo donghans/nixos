@@ -107,18 +107,19 @@ def prune(directory, prefix, days, max_mb):
     return removed
 
 
-SCHEMA = 3     # 표본 형식 버전. v2(2026-10-21): 단위가 이름에 드러나는 필드명. v3(2026-10-21): proc 행의 ctxsw_vol_s 가 **모든 스레드 합**(v1·v2 는 메인 스레드만이라 멀티스레드 프로세스를 크게 과소 집계).
+SCHEMA = 4     # 표본 형식 버전. v2(2026-10-21): 단위가 이름에 드러나는 필드명. v3: proc 행의 ctxsw_vol_s 가 **모든 스레드 합**(v1·v2 는 메인 스레드만이라 멀티스레드 프로세스를 크게 과소 집계). v4: `apps`(앱 단위 합계, 전체 프로세스 포함) 추가.
 _RENAME_PROC = {"cpu": "cpu_core_pct", "wake": "ctxsw_vol_s"}
 
 
 def normalize_sample(o):
-    """옛 형식 표본을 최신 이름으로 바꿔 돌려준다(원본 파일은 그대로, 바뀐 표본은 legacy=True).
+    """옛 형식 표본을 최신 이름으로 바꿔 돌려준다(원본 파일은 그대로). **v1·v2 만 legacy=True**(값의 뜻이 달라서); v3 는 `apps` 가 없을 뿐이라 legacy 가 아니다.
     v1→v2: pw.batt_w→batt_vi_w(순간 V×I), irq.cpu_busy_pct→cpu_all_pct(전체 CPU 대비 %), proc/thr 행 cpu→cpu_core_pct(코어 1개=100%), wake→ctxsw_vol_s(자발적 문맥 전환/s).
     v2→v3: **proc 행의 ctxsw_vol_s → ctxsw_vol_leader_s**(옛 값은 `/proc/<pid>/status` 의 메인 스레드 카운터뿐이라 멀티스레드 프로세스가 거의 0 으로 보임 — 합산·비교에 쓰면 안 됨).
     thr 행(L1)은 스레드 단위라 정확하므로 ctxsw_vol_s 를 그대로 둔다."""
     if not isinstance(o, dict) or o.get("v", 1) >= SCHEMA:
         return o
-    if o.get("v", 1) < 2:
+    orig = o.get("v", 1)
+    if orig < 2:
         pw, irq = o.get("pw"), o.get("irq")
         if isinstance(pw, dict) and "batt_w" in pw:
             pw["batt_vi_w"] = pw.pop("batt_w")
@@ -130,10 +131,13 @@ def normalize_sample(o):
                     for a, b in _RENAME_PROC.items():
                         if a in r:
                             r[b] = r.pop(a)
-    for r in o.get("proc") or []:
-        if isinstance(r, dict) and "ctxsw_vol_s" in r:
-            r["ctxsw_vol_leader_s"] = r.pop("ctxsw_vol_s")
-    o["v"], o["legacy"] = SCHEMA, True
+    if orig < 3:
+        for r in o.get("proc") or []:
+            if isinstance(r, dict) and "ctxsw_vol_s" in r:
+                r["ctxsw_vol_leader_s"] = r.pop("ctxsw_vol_s")
+    o["v"] = SCHEMA
+    if orig < 3:
+        o["legacy"] = True
     return o
 
 

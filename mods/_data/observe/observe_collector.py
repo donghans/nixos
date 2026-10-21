@@ -16,6 +16,7 @@ import collections, glob, json, os, re, shutil, signal, struct, subprocess, sys,
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import observe_core as core
+import observe_apps as apps
 import observe_tiers as tiers
 
 PROC = os.environ.get("OBSERVE_PROC", "/proc")
@@ -88,6 +89,11 @@ def parse_pid_stat(text):
     i, j = text.index("("), text.rindex(")")
     f = text[j + 2:].split()
     return text[i + 1:j], int(f[11]) + int(f[12]), int(f[17]), int(f[21])
+
+
+def parse_ppid(text):
+    """/proc/<pid>/stat → 부모 pid(`)` 뒤 둘째 필드)."""
+    return int(text[text.rindex(")") + 2:].split()[1])
 
 
 def parse_ctxt(text):
@@ -288,6 +294,7 @@ def wifi_info():
 
 class Sampler:
     def __init__(self, level):
+        self.apps = apps.AppResolver()
         self.level = level
         self.msr = Msr()
         self.bat = find_battery()
@@ -322,7 +329,9 @@ class Sampler:
             if not d.isdigit():
                 continue
             try:
-                comm, cpu, nthr, rss = parse_pid_stat(rd(f"{PROC}/{d}/stat"))
+                stat_text = rd(f"{PROC}/{d}/stat")
+                comm, cpu, nthr, rss = parse_pid_stat(stat_text)
+                ppid = parse_ppid(stat_text)
                 if nthr > 1 or self.level == "L1":
                     vol, tids = 0, os.listdir(f"{PROC}/{d}/task")      # /proc/<pid>/status 의 카운터는 메인 스레드뿐이라 스레드마다 읽어 합한다(30초 간격 +0.17% CPU)
                     for t in tids:
@@ -348,10 +357,28 @@ class Sampler:
                     t = rd(f"{PROC}/{d}/io")
                     mr, mw = re.search(r"read_bytes:\s*(\d+)", t), re.search(r"write_bytes:\s*(\d+)", t)
                     io = (int(mr[1]) if mr else 0, int(mw[1]) if mw else 0)
-                procs[int(d)] = (comm, exe, cpu, vol, rss, io)
+                procs[int(d)] = (comm, exe, cpu, vol, rss, io, ppid)
             except (OSError, ValueError, IndexError):
                 continue
         return procs, threads
+
+    def app_table(self, cur, prev, dt):
+        """두 시점의 프로세스 표(pid → (comm, exe, cpu, vol, rss, io, ppid))에서 **앱 단위** 합계 행을 만든다: 전체 프로세스를 앱으로 묶고 상위 24개 + '(기타)'(observe_apps)."""
+        exe_of = {pid: (v[1] or v[0]) for pid, v in cur.items()}      # exe 를 못 읽는 프로세스(예: 보호된 electron 루트)는 comm 으로 보강
+        ppid_of = {pid: v[6] for pid, v in cur.items()}
+        read_cmdline = lambda pid: rd(f"{PROC}/{pid}/cmdline").split("\0")
+        acc = {}
+        for pid, (comm, exe, cpu, vol, rss, io, ppid) in cur.items():
+            q = prev.get(pid)
+            if not q:
+                continue
+            name = self.apps.resolve(pid, comm, exe, ppid, exe_of, ppid_of, read_cmdline)
+            ag = acc.setdefault(name, {"app": name, "n": 0, "cpu_core_pct": 0.0, "ctxsw_vol_s": 0.0, "rss_mb": 0.0})
+            ag["n"] += 1
+            ag["cpu_core_pct"] += (cpu - q[2]) / HZ / dt * 100
+            ag["ctxsw_vol_s"] += max(0, vol - q[3]) / dt
+            ag["rss_mb"] += rss * 4096 / 1048576
+        return apps.aggregate([{**v, "cpu_core_pct": round(v["cpu_core_pct"], 2), "ctxsw_vol_s": round(v["ctxsw_vol_s"], 1), "rss_mb": round(v["rss_mb"], 1)} for v in acc.values()])
 
     def sample(self):
         cur = self._snapshot()
@@ -388,7 +415,7 @@ class Sampler:
                       "cpu_all_pct": round((cur["stat"]["busy"] - p["stat"]["busy"]) / max(1, cur["stat"]["total"] - p["stat"]["total"]) * 100, 1),
                       "load1": rd(f"{PROC}/loadavg").split()[0] if rd(f"{PROC}/loadavg") else None}
         agg = {}
-        for pid, (comm, exe, cpu, vol, rss, io) in cur["procs"].items():
+        for pid, (comm, exe, cpu, vol, rss, io, ppid) in cur["procs"].items():
             q = p["procs"].get(pid)
             if not q:
                 continue
@@ -402,6 +429,8 @@ class Sampler:
         rows = [{"comm": k[0], "exe": k[1], "n": v["n"], "cpu_core_pct": round(v["cpu_core_pct"], 2), "ctxsw_vol_s": round(v["ctxsw_vol_s"], 1), "rss_mb": round(v["rss"] * 4096 / 1048576, 1)} for k, v in agg.items()]
         top = {r["comm"] + "|" + r["exe"]: r for r in sorted(rows, key=lambda r: -r["cpu_core_pct"])[:8] + sorted(rows, key=lambda r: -r["ctxsw_vol_s"])[:8] if r["cpu_core_pct"] > 0 or r["ctxsw_vol_s"] > 0}
         out["proc"] = list(top.values())
+        # 앱 단위 합계(전체 프로세스를 앱으로 묶음 + '(기타)') — 상위 행만 저장하던 proc 의 커버리지 한계를 없앤다(표본 형식 v4)
+        out["apps"] = self.app_table(cur["procs"], p["procs"], dt)
         if self.level == "L1":
             trows = []
             for key, (comm, tn, tcpu, tv) in cur["threads"].items():

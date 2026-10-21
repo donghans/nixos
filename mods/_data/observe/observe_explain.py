@@ -109,6 +109,19 @@ def ebpf_table(g):
     return {"tiers": sorted({r["tier"] for r in recs}), "records": n, "procs": rows[:8]}
 
 
+def apps_table(g):
+    """구간 표본의 `apps`(앱 단위 합계, 전체 프로세스 포함, v4)를 앱별 평균으로. 표본에 apps 가 없으면(v3 이하) None. {앱: {"cpu","ctxsw","rss","n"}}(없는 표본은 0 으로 센다)."""
+    have = [r for r in g if r.get("apps")]
+    if not have:
+        return None
+    cpu, ctx, rss, n = collections.defaultdict(float), collections.defaultdict(float), collections.defaultdict(float), collections.defaultdict(float)
+    for r in have:
+        for a in r["apps"]:
+            cpu[a["app"]] += a["cpu_core_pct"]; ctx[a["app"]] += a["ctxsw_vol_s"]; rss[a["app"]] += a.get("rss_mb", 0.0); n[a["app"]] = max(n[a["app"]], a.get("n", 0))
+    m = len(have)
+    return {k: {"cpu": cpu[k] / m, "ctxsw": ctx[k] / m, "rss": rss[k] / m, "n": n[k]} for k in cpu}, m
+
+
 def focus_table(spans, t0, t1):
     """포커스 스팬(`windows` 의 `focus:<앱>`)을 구간에 잘라 앱별 시간(초)으로. [(앱, 초, 구간 대비 %)] 큰 순."""
     acc = collections.defaultdict(float)
@@ -177,6 +190,8 @@ def build(rows, spans, t0, t1, base=None, nd=None, threshold=0.3):
     ptb, _ = proc_table(ref) if ref else ({}, 0)
     res["procs"] = {"cur": pt, "base": ptb, "ctx_samples": nctx, "ctx_coverage": ctxsw_coverage(cur), "legacy_samples": legacy}
     res["ebpf"] = ebpf_table(cur)
+    at, atb = apps_table(cur), apps_table(ref)
+    res["apps"] = {"cur": at[0] if at else None, "base": atb[0] if atb else None, "samples": at[1] if at else 0}
     res["apps_nd"] = {"cur": dict(snap["apps_cpu"]) if snap else None, "base": dict(snap_b["apps_cpu"]) if snap_b else None}
     # 포커스·구간
     res["focus"] = focus_table(spans, t0, t1)
@@ -192,7 +207,7 @@ def build(rows, spans, t0, t1, base=None, nd=None, threshold=0.3):
     if legacy:
         res["notes"].append(f"옛 형식 표본 {legacy}개: 프로세스별 자발 전환은 메인 스레드만 센 값이라 전환 표에서 제외(CPU 는 유효)")
     cov = res["procs"]["ctx_coverage"]
-    if cov is not None and cov < 0.5:
+    if res["apps"]["cur"] is None and cov is not None and cov < 0.5:
         res["notes"].append(f"저장된 상위 프로세스(최대 16행)의 자발 전환 합은 시스템 전체 문맥 전환의 {cov * 100:.0f}% 이하 — 나머지(긴 꼬리)는 프로세스 표에 없음")
     res["notes"].append("psys 는 총 소비보다 약 1 W 적게 보임(차이는 유효, 절대값 비교는 배터리 계량으로). 표본은 30초 간격(Netdata 는 1초)")
     return res
@@ -213,7 +228,15 @@ def rank_changes(res):
         b = s["nd_base"] if s["nd"] is not None else s["obs_base"]
         if v is not None and b is not None and abs(v - b) >= s["min_abs"]:
             out.append({"kind": "시스템", "name": s["label"], "cur": v, "base": b, "unit": s["unit"], "rel": _rel(v, b)})
-    cur, base = res["procs"]["cur"], res["procs"]["base"]
+    if res["apps"]["cur"] is not None and res["apps"]["base"] is not None:        # 앱 단위(전체 프로세스)가 있으면 그것으로 비교 — 프로세스 행과 이중으로 세지 않는다
+        ca, ba = res["apps"]["cur"], res["apps"]["base"]
+        for app in set(ca) | set(ba):
+            v, b = ca.get(app, {}).get("cpu", 0.0), ba.get(app, {}).get("cpu", 0.0)
+            if abs(v - b) >= 1.0:
+                out.append({"kind": "앱 CPU", "name": app, "cur": v, "base": b, "unit": "코어%", "rel": _rel(v, b)})
+        cur, base = {}, {}
+    else:
+        cur, base = res["procs"]["cur"], res["procs"]["base"]
     for c in (set(cur) | set(base)) if res["n_base"] else ():       # 기준 표본이 없으면 프로세스 비교를 하지 않는다(전부 '신규'로 보이는 오류 방지)
         v, b = cur.get(c, {}).get("cpu", 0.0), base.get(c, {}).get("cpu", 0.0)
         if abs(v - b) >= 1.0:
@@ -261,7 +284,15 @@ def sections(res, hms):
         Y.append(f"{s['label']:<22}{_f(v, 1):>8}{_f(b, 1):>8}{d:>9}   {src} · {s['unit']}")
     S.append(("시스템 활동", Y))
     pr = res["procs"]
-    Q = ["observectl 저장분(상위 16행) — CPU 는 코어 1개=100%      이 구간 CPU   기준   | 자발 전환/s(모든 스레드)"]
+    Q = []
+    ap = res["apps"]
+    if ap["cur"] is not None:
+        apb = ap["base"] or {}
+        Q.append(f"앱 단위(전체 프로세스를 앱으로 묶은 합 — 커버리지 100%, 표본 {ap['samples']}개) CPU 는 코어 1개=100%      이 구간 CPU   기준   | 자발 전환/s(모든 스레드)  프로세스 수")
+        for k, v in sorted(ap["cur"].items(), key=lambda kv: -(kv[1]["cpu"] + kv[1]["ctxsw"] / 100))[:10]:
+            Q.append(f"{k[:26]:<26}{v['cpu']:>8.1f}{apb.get(k, {}).get('cpu', 0.0):>8.1f}   | {v['ctxsw']:>8.0f}{v['n']:>12.0f}")
+        Q.append("")
+    Q.append("observectl 저장분(상위 16행, 이름별) — CPU 는 코어 1개=100%      이 구간 CPU   기준   | 자발 전환/s(모든 스레드)" + ("   (앱 단위 표가 있으면 그쪽이 전체)" if ap["cur"] is not None else ""))
     cur, base = pr["cur"], pr["base"]
     for c, v in sorted(cur.items(), key=lambda kv: -kv[1]["cpu"])[:8]:
         ctx = "-" if v["ctxsw"] is None else f"{v['ctxsw']:.0f}"

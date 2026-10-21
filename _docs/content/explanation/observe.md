@@ -153,7 +153,7 @@ OTel 의 트레이스 개념만 빌린 것(OTel 을 넣거나 흉내 내는 게 
 | (없음) `irq.ctxt_s` | 그대로 | 시스템 전체 문맥 전환/s(비자발 포함, `/proc/stat` ctxt) |
 | `state` = low/high | 그대로 | **패키지 pc10 ≥ 5%(깊은 절전 진입) 여부**이지 전력 높낮이가 아님. 화면에는 `low(깊은 절전)` 처럼 뜻을 함께 쓴다 |
 
-- 새 표본은 `v: 3`(v2 는 이름 정리, **v3 는 proc 행 `ctxsw_vol_s` 를 모든 스레드 합으로 정정**). **옛 표본(v 없음·v2)은 파일을 고쳐 쓰지 않고 읽을 때 새 이름으로 바꾸며 `legacy: true` 를 단다**(`observe_core.normalize_sample`; `iter_jsonl` 과 powerui 의 `Store` 가 적용). `observectl window` 와 powerui 상태줄은 옛 형식 표본이 섞이면 개수를 알려 준다. 보관 기간이 지나면 옛 표본은 사라진다.
+- 새 표본은 `v: 4`(v2 는 이름 정리, **v3 는 proc 행 `ctxsw_vol_s` 를 모든 스레드 합으로 정정**, **v4 는 `apps` 추가**). v3→v4 는 값의 뜻이 바뀌지 않아 legacy 가 아니다(apps 가 없을 뿐). **옛 표본(v 없음·v2)은 파일을 고쳐 쓰지 않고 읽을 때 새 이름으로 바꾸며 `legacy: true` 를 단다**(`observe_core.normalize_sample`; `iter_jsonl` 과 powerui 의 `Store` 가 적용). `observectl window` 와 powerui 상태줄은 옛 형식 표본이 섞이면 개수를 알려 준다. 보관 기간이 지나면 옛 표본은 사라진다.
 - 화면 열 이름: `observectl window` 는 `V×I`·`상위전환/s`(**저장된 상위 프로세스 최대 16행의 합 — 시스템 전체가 아님**)·`전체CPU%`, `observectl top` 은 `CPU(코어1개=100%)`·`자발전환/s`. powerui 현황은 "전환 시스템 전체 / 상위 프로세스(합계 아님)" 와 "CPU 전체 대비" 를 따로 보여 준다.
 - 옵션 호환: `observectl top --by wake` 와 `observectl ab --metric batt_w` 는 새 이름의 옛 별칭으로 계속 받는다(안내를 출력).
 - "지금 CPU" 를 볼 때는 `ps` 의 %CPU(프로세스 시작 이후 누적 평균)가 아니라 `observectl top --since 1m`(구간 평균) 이나 `observectl bpf profile`(99Hz 표본)을 쓴다.
@@ -182,3 +182,12 @@ OTel 의 트레이스 개념만 빌린 것(OTel 을 넣거나 흉내 내는 게 
 - 권장 쓰임: `sample`(0.12%)은 분석 구간 내내 켜 둘 만한 가장 싼 단계, `full` 은 "누가 깨우나/얼마나 쓰나"를 정확히 봐야 하는 몇 분짜리 구간. 상시 켜 두지는 않는다(장부 #61).
 - **정수 Hz 샘플링은 쓰지 않는다**: 19Hz 로 처음 만들었더니 1초 주기로 일하는 Netdata 와 위상이 고정돼 기본 수집의 약 3.2배(2.9~3.4배)로 과대 추정됐다(장부 #61). 주기를 1/(18+0.618…)초(53,711µs)로 잡아 위상이 골고루 이동하게 한 뒤 1.09배. `observectl bpf profile` 도 99Hz → 10,038µs 로 같은 이유로 고쳤다.
 - 한계: 맵 집계라 30초 안의 순서는 모름, `comm` 은 해석 시점의 `/proc` 이름(끝난 프로세스는 `?`), 시험은 가짜 bpftrace 로 하고 실제 비용은 `bpftool prog show`(`kernel.bpf_stats_enabled`)로 잰다.
+
+## 앱 단위 집계 `apps` (표본 형식 v4, 2026-10-21)
+
+Netdata 의 "앱 그룹" 개념을 우리 시스템에 맞게 가져왔다(`observe_apps.py`). 옛 `proc` 행은 표본마다 **상위 16행만** 저장해 전체 CPU 의 약 60%·문맥 전환의 약 34%만 담았다(긴 꼬리가 빠짐). 새 `apps` 필드는 **전체 프로세스를 앱으로 묶은 합계 + `(기타)` 한 행**이라 합계가 빠짐없이 보존된다(커버리지 100%).
+
+- 행: `{app, n(프로세스 수), cpu_core_pct(코어 1개=100%, 모든 스레드), ctxsw_vol_s(모든 스레드 자발 전환/s), rss_mb}` — 상위 24개 + `(기타)`.
+- 묶는 규칙: 커널 스레드 → `kernel` · Nix 래퍼 이름 정리(`.claude-wrapped` → `claude`) · 알려 둔 계열(netdata+플러그인, vivaldi+도우미, nix 계열, hyprland 계열, kitty, tailscaled, waybar) · **Electron 은 맨 위 프로세스의 `app.asar` 경로(Nix 저장소 이름)로 앱을 정함**(예: `bitwarden-desktop`; 도우미 zygote·renderer·gpu 가 같은 앱으로 묶임) · 그 밖에는 정리한 이름 그대로. 명령줄은 asar 경로만 보고 저장하지 않는다. 실행 파일을 못 읽는 보호된 프로세스는 comm 으로 보강한다.
+- 사용: `observectl top --by app`, `observectl explain` 의 "프로세스·앱" 섹션(앱 단위 표 + 기준 대비 변화 순위는 앱 CPU 로). v3 이하 표본에는 `apps` 가 없어 옛 표(상위 16행)로 대체한다.
+- 한계: 규칙 표에 없는 앱은 정리한 프로세스 이름으로 나온다(필요하면 `observe_apps.RULES` 에 추가). 맵이 아니라 30초 구간의 합계라 짧은 사건은 흐림.
