@@ -1,5 +1,7 @@
 # 사용 모드(posture) — 힌지 각도로 laptop/tent/tablet 판정, 입력 장치 자동 전환
 
+> **용어 주의 (2026-10-21)**: 이 문서의 "깨어남/s"·"CPU %" 는 시기별로 도구가 달라(powertop · boot_settle/thread_top · 수집기) 서로 다른 양이다. 해당 수치에 `〔구표기 Ln〕` 를 붙였고 정의는 `power-evidence.md` 의 "용어·단위 정정표" 에 있다.
+
 MSI Summit E16 Flip(360도 힌지)에서 **힌지 각도 → 사용 모드(laptop / tent / tablet)** 를 판정해 한 곳에 발행하고, 소비자들이 그 값에 맞춰 동작한다. 2026-10-17 작업.
 
 ## 하드웨어 사실 (실측)
@@ -285,7 +287,7 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
   - 밝기별 소비(60Hz, 정지): 100% 14.87 W → 50% 12.34 W → **5% 10.01 W**. 거의 직선이라 밝기 1% 당 약 0.05 W. 5% 에서도 약 10 W 가 남는데, 이는 밝기와 무관한 부분(CPU 평균 15% 의 컨테이너 부하 등, 추정)이 대부분이라는 뜻이다. 5% 정지 기준 예상 사용시간은 약 5.5시간(100% 밝기 3.7시간).
   - **48Hz 와 60Hz 의 차이(−0.1~−0.2 W)는 바퀴 간 흔들림(0.02~0.35 W) 안**이라 의미 있는 절전으로 볼 수 없다. 모든 밝기·화면 조건에서 같은 결론(주사율은 절전 수단이 아님)이어서 저장 설정을 60Hz 로 유지한다.
   - 포인터 이동은 5% 밝기에서도 +0.77 W(10.01 → 10.78 W, CPU +1.5%p) — 50% 밝기에서의 +0.7 W 와 일치한다.
-- **컨테이너를 일시정지(`docker pause`)하고 측정** (밝기 5%, 60Hz, 방전 중, 2바퀴씩, `power-ab --containers`; 18:43~18:54). 이 노트북에는 약 30개의 컨테이너(`genple`, `genple-new-*` 등)가 항상 도는데, 그중 `genple` 하나가 순간 CPU 약 80% 를 쓴다.
+- **컨테이너를 일시정지(`docker pause`)하고 측정** (밝기 5%, 60Hz, 방전 중, 2바퀴씩, `power-ab --containers`; 18:43~18:54). 이 노트북에는 약 30개의 컨테이너(`genple`, `genple-new-*` 등)가 항상 도는데, 그중 `genple` 하나가 순간 CPU 약 80% 를 쓴다〔구표기 미확정: 측정 도구·코어 기준 기록 없음〕.
 
 | 상태 | 소비전력(배터리 전압×전류) | psys(플랫폼 전체, Netdata RAPL) | CPU 패키지(RAPL) | CPU 사용률 | 예상 사용시간 |
 |---|---|---|---|---|---|
@@ -323,7 +325,7 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 - 결론: `irqpoll` 을 지워도 되는지는 **판단할 수 없다**(unbind 가 안 되는 상태에서 지우면 원래의 발열 문제가 되살아날 수 있음). 비용(전력)도 측정하지 못했다 — 지우는 시험은 재부팅이 필요. 먼저 unbind 룰이 실제로 동작하게 만든 뒤 제거 시험을 해야 한다.
 
 **배터리 방전 + 덮개 닫힘(화면 꺼짐) 에서의 A/B** — `mods/_data/power-ab/idle_ab.py`(root 로 `systemd-run`, 구간 90초 × 2바퀴 번갈아; 구간마다 배터리 전압×전류, RAPL, powertop 의 C-state/깨어남, GPE 비율). 일회성 실험용이라 시험은 없고, 저장된 스크립트는 실제로 돌린 두 스크립트를 합친 것이라 합친 뒤 다시 실행해 보지는 않았다.
-| 비교 | 배터리 소비 | psys | CPU 패키지 | 깨어남/s | GPE/s | 패키지 pc2 |
+| 비교 | 배터리 소비 | psys | CPU 패키지 | 깨어남/s〔구표기 L1: powertop 시스템 전체〕 | GPE/s | 패키지 pc2 |
 |---|---|---|---|---|---|---|
 | Netdata 실행 | 7.23 W | 7.57 W | 3.49 W | 705~740 | 41~43 | 66~68% |
 | Netdata 정지 | 7.00 W (**−0.23 W, −3%**) | 7.36 W | 3.34 W | 459~547 | 24~27 | 79~83% |
@@ -334,7 +336,7 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
   - 권한: `power/control` 은 root 소유라 호스트의 udev 규칙이 해당 장치(04f3:2ffa)의 파일을 `users` 그룹이 쓸 수 있게 한다(`chgrp users` + `chmod g+w`, `udevadm test` 로 매칭 확인). 이번 부팅에서는 규칙이 아직 안 돌아서 같은 명령을 직접 한 번 실행했다(다음 부팅부터는 규칙이 처리).
   - 시험(자세 CLI 를 가짜로 바꾼 복사본으로 정책을 실행, 실제 sysfs 확인): 노트북+터치 꺼짐 → `auto`/`suspended`; 노트북+터치 켬 → `on`/`active`; 접은 태블릿(덮개 open) → `on`; **덮개 닫힘(힌지 359°) → `auto`/`suspended`**; 덮개 다시 열면 `on`. 실제 사용 모드로 복원한 뒤 `auto`/`suspended` 확인(지금 덮개가 닫혀 있음). **터치로 깨어나는지 자체는 여전히 시험하지 못했지만, 터치를 켜기 전에 먼저 깨우므로 이 설계에서는 필요 없다.**
 
-**프로세스 기준 소비**(powertop, 어댑터 연결 상태, 컨테이너 정지 후): `claude --resume`(이 세션) CPU 약 15%·깨어남 116/s(가장 큼; 스피너 애니메이션 때문일 가능성, 확인 못함), Netdata 합쳐서 CPU 약 4~5%·깨어남 약 250/s, kitty 3.5%·26/s, `irq/9-acpi` 1%·32/s, Hyprland 4%·15/s. 디스플레이 갱신 커밋(`intel_atomic_commit`)이 초당 약 12회(터미널 애니메이션).
+**프로세스 기준 소비**(powertop, 어댑터 연결 상태, 컨테이너 정지 후): `claude --resume`(이 세션) CPU 약 15%·깨어남 116/s〔구표기 L8: powertop 프로세스 표, CPU % 기준 미확정〕(가장 큼; 스피너 애니메이션 때문일 가능성, 확인 못함), Netdata 합쳐서 CPU 약 4~5%·깨어남 약 250/s, kitty 3.5%·26/s, `irq/9-acpi` 1%·32/s, Hyprland 4%·15/s. 디스플레이 갱신 커밋(`intel_atomic_commit`)이 초당 약 12회(터미널 애니메이션).
 
 #### idma64 unbind 규칙이 안 먹는 이유 조사 (2026-10-19)
 - `/etc/udev/rules.d/99-local.rules` 에 규칙이 들어 있고 `udevadm test --action=bind /sys/bus/platform/devices/idma64.0` 시뮬레이션에서는 `RUN+=… echo idma64.0 > …/unbind` 가 실행되도록 **매칭된다**. 그런데 실제로는 `idma64.0` 의 드라이버 링크 시각이 부팅 시각과 같고(한 번도 unbind 되지 않음), `/proc/interrupts` 의 IRQ 27 은 `idma64.0, i2c_designware.0` 둘이 공유한다. 커널/저널에는 idma64 관련 기록이 없어서 **규칙이 안 돌았는지, 돌았는데 쓰기가 막혔는지 구분하지 못했다.**
@@ -365,7 +367,7 @@ lsmod | grep idma64                          # 비어 있어야 함
 성공이면: `hosts/msi-summit-me.nix` 의 idma64 udev unbind 규칙(진단 로그 포함)을 지워도 된다. 실패(터치패드가 안 잡히거나 IRQ 27 이 여전히 공유)면 되돌리고(블랙리스트 항목 삭제) 후보 (a)(부팅 후 `intel-lpss` 재바인드 oneshot 서비스)로 간다. 이 결과는 **며칠 쓴 뒤 폭주(`ls /var/log/touchpad-watchdog/`)가 없는지**로 장기 확인하고, 그 다음에야 `irqpoll` 제거를 시험한다(재부팅 두 번째; 한 번에 같이 바꾸지 않는다).
 
 **2) tty2 에서 할 쉬는 전력 시험(그래픽 세션을 끈 상태)** — 어댑터 분리 + 방전 중, 덮개는 닫아도/열어도 되지만 조건을 기록한다. 열린 작업은 사라지니 사용자가 저장한 뒤 시작.
-- 목적: 패키지가 C2 에서 못 내려가는 원인이 그래픽 세션(컴포지터/waybar/kitty/Netdata 등)인지 가른다. 지금까지: 코어는 깊게 자는데 패키지는 pc2 뿐(덮개를 닫아 화면이 꺼져도 동일), 시스템 깨어남 약 450~740/s, EC GPE 초당 25~43회(EC 레지스터 읽기 초당 약 10번: `systemd-logind` 44/6s, waybar 15/6s, Netdata 계열 약 30/6s).
+- 목적: 패키지가 C2 에서 못 내려가는 원인이 그래픽 세션(컴포지터/waybar/kitty/Netdata 등)인지 가른다. 지금까지: 코어는 깊게 자는데 패키지는 pc2 뿐(덮개를 닫아 화면이 꺼져도 동일), 시스템 깨어남 약 450~740/s〔구표기 L1〕, EC GPE 초당 25~43회(EC 레지스터 읽기 초당 약 10번: `systemd-logind` 44/6s, waybar 15/6s, Netdata 계열 약 30/6s).
 - 방법: `sudo -v` 를 사용자가 한 번 입력(이 시스템의 sudo 는 비밀번호 필요, 캐시 5분) → root 서비스로 한 번에 실행(`sudo systemd-run --unit=... --collect <python3> mods/_data/power-ab/idle_ab.py <powertop 경로> <모드>`; powertop 은 `nix shell nixpkgs#powertop` 로 받은 경로). 구간별(90초×2바퀴 번갈아) 배터리 전력/RAPL/powertop(pc 상태·깨어남)/GPE 비율을 기록하는 틀은 `idle_ab.py` 에 있고, 모드는 `netdata`, `usb-ts` 가 있으니 필요한 모드(예: 그래픽 세션 정지/시작, waybar 정지/시작)를 추가해 쓴다.
 - 순서 제안: (i) 그래픽 세션이 떠 있는 기준 구간(아직 Hyprland 가 살아 있는 tty1) (ii) Hyprland 세션 종료(`loginctl terminate-session`) 후 구간 (iii) 가능하면 Netdata 도 정지한 구간. 각 구간에서 pc2/pc3+/깨어남/GPE/배터리 W 를 비교.
 - **EC GPE 0x6E(`/sys/firmware/acpi/interrupts/gpe6E`)를 끄는 시험은 하지 않는다**(덮개/어댑터/배터리/단축키 이벤트의 통로; 하려면 자동 복구 타이머 필수). 폴러(waybar/logind/Netdata)를 멈춰 GPE 비율이 어떻게 바뀌는지만 본다.
@@ -386,7 +388,7 @@ lsmod | grep idma64                          # 비어 있어야 함
 | 그래픽 꺼짐 + **Netdata 정지** | **6.44 W** (6.43, 6.45) | 6.64 W | 2.99 W | 22.8 | 61.9% | 4.7% |
 - **그래픽 세션(Hyprland, waybar, kitty 등)은 덮개를 닫은 쉬는 상태에서 거의 영향이 없다**: 6.79 → 6.77 W(−0.02 W, 켜짐 두 구간의 차이 0.28 W 안). 패키지 C-state 도 달라지지 않았다. → 패키지가 깊이 못 자는 원인은 그래픽이 아니다(앞의 "덮개 닫아도 동일" 관찰을 확정).
 - **Netdata 는 약 0.33 W(−4.9%)**: 배터리 −0.33 W, psys −0.34 W, 패키지 −0.14 W, GPE −16/s(−41%), pc8 2.1 → 4.7%. 앞선 A/B(−0.23 W)와 같은 방향.
-- 그래픽도 Netdata 도 없는 쉬는 바닥은 약 **6.4 W** 이고 깨어남은 여전히 초당 약 650 회: `tick_nohz_handler` 332/s, sched softirq 47/s, `tailscaled` 32/s, `hrtimer_wakeup` 17/s, **`intel_ish_ipc` 인터럽트 17/s(+`ishtp_bus_event_work` 10/s)**, `claude`(이 세션, 그래픽 안의 kitty 에서보다 훨씬 작음), `irq/9-acpi` 8/s, `containerd`, `irq/211-AudioDS`, `irq/178-iwlwifi`. 패키지 pc3 이상은 여전히 pc8 5% 정도뿐이라 **남은 방해자는 아직 못 찾았다**(타이머 틱 331/s 가 큼 — 코어가 쉬는데도 틱이 도는 이유는 확인 못함).
+- 그래픽도 Netdata 도 없는 쉬는 바닥은 약 **6.4 W** 이고 깨어남은 여전히 초당 약 650 회〔구표기 L1〕: `tick_nohz_handler` 332/s, sched softirq 47/s, `tailscaled` 32/s, `hrtimer_wakeup` 17/s, **`intel_ish_ipc` 인터럽트 17/s(+`ishtp_bus_event_work` 10/s)**, `claude`(이 세션, 그래픽 안의 kitty 에서보다 훨씬 작음), `irq/9-acpi` 8/s, `containerd`, `irq/211-AudioDS`, `irq/178-iwlwifi`. 패키지 pc3 이상은 여전히 pc8 5% 정도뿐이라 **남은 방해자는 아직 못 찾았다**(타이머 틱 331/s 가 큼 — 코어가 쉬는데도 틱이 도는 이유는 확인 못함).
 - 한 구간의 `wakeups` 값이 6.0 으로 파싱된 것은 powertop 헤더 값이 이상하게 나온 것으로 보고 무시했다.
 
 **ISH 인터럽트 단서 → 수정**: 위 목록의 `intel_ish_ipc`(Intel Sensor Hub: 힌지/가속도 센서가 붙어 있음)가 쉬는 상태에서도 초당 약 17 회였다. 원인으로 **posture 데몬이 덮개를 닫아도 가속도 센서를 0.33 초마다 읽고 있었다**(`mode != "laptop"` 이면 읽는데, 덮개를 닫아 힌지가 359° 로 읽히면 `tablet` 이라 계속 읽음). 덮개를 닫으면 화면이 꺼져 방향이 필요 없으므로 **덮개가 닫혀 있는 동안은 읽지 않고, 다시 열면 즉시 한 번 읽도록** 고쳤다(`posture_daemon.py`; 시험 2개 추가: 고치기 전 코드에서는 두 시험이 실패하고 고친 뒤 79개 모두 통과). **전력 효과는 측정하지 못했다**(기대되는 변화는 ISH 깨움 약 17/s 로 0.1 W 미만일 가능성이 커서 측정 잡음 0.3 W 아래; 힌지가 3° 로 읽히는 지금은 어차피 `laptop` 이라 폴링을 안 해 현장에서 전/후 비교도 못 함).
@@ -405,18 +407,18 @@ lsmod | grep idma64                          # 비어 있어야 함
 | 후보 | 배터리 B−A | psys B−A | 그 외 | 판단 |
 |---|---|---|---|---|
 | **Wi-Fi 절전 켬**(`iw dev wlan0 set power_save on`) | 약 −0.6 W (4.37 → 3.74) | 약 −0.4 W (3.81 → 3.39) | **패키지가 pc10 에 들어감(약 21~22%, 꺼두면 0%)**, 두 번 다 재현 | **효과 있음** |
-| **Netdata 정지** | −0.7 W (4.34 → 3.63) | −1.0 W (3.90 → 2.89) | 깨어남 1054 → 641/s(−414), GPE 36 → 20/s, pc8 +21%p, 두 번 다 재현 | **효과 큼**(쉬는 전력의 약 16%) |
+| **Netdata 정지** | −0.7 W (4.34 → 3.63) | −1.0 W (3.90 → 2.89) | 깨어남 1054 → 641/s(−414)〔구표기 L1: powertop 시스템 전체〕, GPE 36 → 20/s, pc8 +21%p, 두 번 다 재현 | **효과 큼**(쉬는 전력의 약 16%) |
 | LPSS(00:15.0)/ISH(00:12.0) 런타임 PM `auto` | −0.2 W | −0.3 W | 같은 상태 A1→A2 변화(0.64 W)보다 작음 | 효과 없음(터치패드/힌지만 위험) |
 | EDAC, Thunderbolt NHI, proc_thermal 드라이버 해제, tailscaled 정지, 컨테이너 pause | 변화 0.05~0.2 W | | 누적 시험의 한 단계였고 변화가 잡음 수준 | 효과 없음으로 봄 |
-- **안정된 쉬는 상태의 기준값**(전부 기본, 덮개 닫힘, 방전): 배터리 약 **4.3~4.4 W**, psys 약 3.9 W, 패키지 약 2.0 W, 깨어남 약 1,050/s, 패키지 pc2 약 20%·pc8 약 33%·pc10 0%. 즉 앞의 "패키지가 C2 에만 머문다"는 **부팅 직후 한정**이었다(안정되면 C8 까지 간다). 부팅 후 약 40분 지나서 재야 한다.
+- **안정된 쉬는 상태의 기준값**(전부 기본, 덮개 닫힘, 방전): 배터리 약 **4.3~4.4 W**, psys 약 3.9 W, 패키지 약 2.0 W, 깨어남 약 1,050/s〔구표기 L1〕, 패키지 pc2 약 20%·pc8 약 33%·pc10 0%. 즉 앞의 "패키지가 C2 에만 머문다"는 **부팅 직후 한정**이었다(안정되면 C8 까지 간다). 부팅 후 약 40분 지나서 재야 한다.
 - **Wi-Fi 절전이 꺼져 있는 이유**: TLP `laptopSettings`(`mods/sys/base/core.power.nix`, 모든 노트북 공통)에 `WIFI_PWR_ON_AC/BAT = "off"`("Wi-Fi 절전 시 주기적 연결 끊김 방지"), NetworkManager 도 `wifi.powersave = false`(TLP 값을 NM 이 덮어쓰지 못하게). 이 기종에서 연결 끊김이 실제로 있었다는 기록은 없다(일반 노트북 공통 안전 설정). 켜려면 TLP 는 `WIFI_PWR_ON_BAT = "on"`(배터리만), NM 쪽은 `wifi.powersave` 를 TLP 가 제어하게 비워야 하고, 대가는 지연(핑)이 늘 수 있음 — **아직 적용하지 않았다**(사용자 결정 대기).
-- **Netdata 가 큰 이유는 아직 모른다**: 수집기 중 `idlejitter`(20 ms 마다 깨어나는 것으로 악명 높음)를 끄는 것을 시험했으나 **효과 없음**(ABAB: 4.42 W vs 기본 4.34 W, 깨어남 1113 vs 1054/s, 정지는 여전히 −0.66 W) → 설정을 되돌렸다. 남은 후보: `apps.plugin`(프로세스 스캔), `go.d`, `proc`(2,121개 차트 × 10초), `nfacct`, `timex`, `debugfs`. Netdata 는 `power-report`/이번 조사의 RAPL 기록원이라 통째로 끄는 대신 수집기를 하나씩 줄이는 방향이 낫다(배터리일 때만 끄는 방법도 있음).
+- **Netdata 가 큰 이유는 아직 모른다**: 수집기 중 `idlejitter`(20 ms 마다 깨어나는 것으로 악명 높음)를 끄는 것을 시험했으나 **효과 없음**(ABAB: 4.42 W vs 기본 4.34 W, 깨어남 1113 vs 1054/s〔구표기 L1: powertop 시스템 전체〕, 정지는 여전히 −0.66 W) → 설정을 되돌렸다. 남은 후보: `apps.plugin`(프로세스 스캔), `go.d`, `proc`(2,121개 차트 × 10초), `nfacct`, `timex`, `debugfs`. Netdata 는 `power-report`/이번 조사의 RAPL 기록원이라 통째로 끄는 대신 수집기를 하나씩 줄이는 방향이 낫다(배터리일 때만 끄는 방법도 있음).
 - 시험 중 알게 된 것: `hypridle.conf` 는 `general { lock_cmd }` 뿐이라 유휴 타이머가 없다. `iw` 는 시스템에 없어서 일회성(`nix shell nixpkgs#iw`)으로 받아 `IDLE_AB_EXTRA_PATH` 로 넘겼다. 이 시험들의 틀은 `mods/_data/power-ab/idle_ab.py`(`bisect`, `ab2` 모드, 환경변수 `IDLE_AB_CANDS`/`IDLE_AB_SETTLE`).
 - 아직 못 한 것: Wi-Fi 절전을 켠 채 실제 사용(지연/끊김) 확인, Netdata 수집기별 기여, 부팅 인자(`acpi_osi=Linux`, `pcie_aspm=off`, `irqpoll`) 제거 시험(재부팅 필요).
 
 ### 후속 조사 (2026-10-20 새벽): 안정화 가설 철회, Wi-Fi 절전 적용, 키보드 문제, 아침 자동 측정
-**1. "부팅 후 40분이 지나야 안정화된다"는 틀렸다** — 재부팅 직후(4분)부터 1시간(`boot_settle.py`, 30초 간격, 프로세스별 CPU/깨어남과 RAPL) 기록: 쉬는 전력(덮개 닫힘, 방전)이 **10분 만에 약 6.7 W 로 안정되고 이후 60분간 변하지 않았다**(배터리 6.66~6.86 W, psys 6.73~6.78 W, 패키지 약 2.9 W). 줄지 않는 상시 소비자: `electron`(Bitwarden 데스크톱) CPU 9~10%·깨어남 약 257/s, `netdata` 깨어남 약 341/s. 부팅 직후 이 Claude 세션 자체가 60% CPU 까지 쓰지만(긴 세션 재개 + 명령 실행) 가만히 두면 2~4%.
-- **Electron 을 SIGSTOP 으로 얼려 ABAB**: 배터리 −0.20 W, psys −0.25 W, 깨어남 −20/s — 깨어남 257/s 가 실제 전력으로는 크게 이어지지 않는다.
+**1. "부팅 후 40분이 지나야 안정화된다"는 틀렸다** — 재부팅 직후(4분)부터 1시간(`boot_settle.py`, 30초 간격, 프로세스별 CPU/깨어남〔구표기 L2: 코어 1개=100%·자발 전환/s〕과 RAPL) 기록: 쉬는 전력(덮개 닫힘, 방전)이 **10분 만에 약 6.7 W 로 안정되고 이후 60분간 변하지 않았다**(배터리 6.66~6.86 W, psys 6.73~6.78 W, 패키지 약 2.9 W). 줄지 않는 상시 소비자: `electron`(Bitwarden 데스크톱) CPU 9~10%·깨어남 약 257/s, `netdata` 깨어남 약 341/s. 부팅 직후 이 Claude 세션 자체가 60% CPU 까지 쓰지만(긴 세션 재개 + 명령 실행) 가만히 두면 2~4%.
+- **Electron 을 SIGSTOP 으로 얼려 ABAB**: 배터리 −0.20 W, psys −0.25 W, 깨어남 −20/s — 깨어남 257/s〔구표기 L2 추정(boot_settle 프로세스 값), 미확정〕 가 실제 전력으로는 크게 이어지지 않는다.
 **2. 어제 저녁의 약 4.3 W 상태는 이 조작들의 지속 효과가 아니다**: (a) 조작을 **하나씩 적용했다 되돌린 뒤** 구간을 잰 `cycles` 시험(posture-daemon/tailscaled 재시작, 컨테이너 pause→unpause, Netdata 재시작, Wi-Fi 절전 켰다 끔, EDAC/proc_thermal/Thunderbolt 재바인드, LPSS/ISH auto→원래)에서 어느 단계도 전력이 내려가지 않았다(6.80~6.93 W). (b) 어제의 **누적(bisect) 시험을 그대로 재현**해도 되돌린 기준(s9 6.87 W)이 처음 기준(s0 6.89 W)과 같았다. 재현에서의 단계별 효과는 번갈아 재기 결과와 일치(Wi-Fi 절전 약 −0.5 W, Netdata 약 −0.6 W, LPSS/ISH·EDAC·열관리 등은 효과 없음).
 - 사용자 가설 "Wayland 를 끄고 Claude 만 남아서"는 기록으로 반증됐다: 지난 부팅(22:42)의 로그인 기록에 Hyprland 세션(3번)이 만들어진 뒤 23:50 종료(재부팅)까지 로그아웃이 없다(Wayland 가 계속 떠 있었음).
 - **남은 가설: 독(어댑터) 연결/분리 이력.** 장치 감시 알림 기록: 22:40:57 AC 연결(부팅 22:41 에 독이 붙어 있었음), 22:43:22 분리, 22:46:31 연결, 22:55:20 분리 — 그 뒤 약 4.3 W 상태가 나타났다. 오늘 부팅(독 없이 시작)은 6.8 W. 독의 붙고 떨어짐이 Thunderbolt/USB4·PCIe 컨트롤러의 절전 상태를 바꿀 수 있다는 가설이고 **아직 검증 전**. `pm_snapshot.py`(PCI/USB 런타임 절전 상태 저장/비교; 독 연결 전 저장본 `/tmp/pm-before-dock.json`, 활성 장치 15개)와 아침 자동 측정(아래)이 이를 확인한다.
@@ -444,7 +446,7 @@ lsmod | grep idma64                          # 비어 있어야 함
 
 ### 활성 VT 비교 (2026-10-20 07:53~07:58, `idle_ab.py vt`)
 사용자 가설: "어제 4.3 W 는 화면에 떠 있던 게 Wayland/Hyprland 가 아니라 pts/0(= kmscon, VT2)이어서일 것." 활성 VT 를 `chvt` 로 tty2(kmscon) ↔ tty1(Hyprland) 번갈아 ABAB(덮개 닫힘, **AC 연결**이라 배터리 전력은 못 재고 RAPL psys/패키지로 비교):
-| 구간 | 활성 VT | psys | 패키지 | 깨어남/s | pc2 | pc8 |
+| 구간 | 활성 VT | psys | 패키지 | 깨어남/s〔구표기 L1〕 | pc2 | pc8 |
 |---|---|---|---|---|---|---|
 | v1 | tty2 | 7.89 W | 3.30 W | 1173 | 37.3% | 1.6% |
 | v2 | tty1 | 8.08 W | 3.35 W | 1241 | 36.3% | 1.1% |
@@ -489,7 +491,7 @@ tty2 (VT2) ── kmsconvt@tty2.service ── kmscon ── login ── zsh �
 
 ### 배터리·핫스팟에서 활성 VT 비교 (2026-10-20 08:51~08:56, 덮개 닫힘, Hyprland 는 끄지 않음)
 `idle_ab.py vt`(활성 VT 만 tty2 kmscon ↔ tty1 Hyprland 로 번갈아, 구간 45초 + 안정화 20초):
-| 구간 | 활성 VT | 배터리 | psys | 패키지 | 깨어남/s | pc8 |
+| 구간 | 활성 VT | 배터리 | psys | 패키지 | 깨어남/s〔구표기 L1〕 | pc8 |
 |---|---|---|---|---|---|---|
 | v1 | tty2 | 6.35 W | 5.84 W | 2.72 W | 1222 | 20.0% |
 | v2 | tty1 | 6.48 W | 6.35 W | 2.93 W | 1272 | 17.5% |
@@ -525,7 +527,7 @@ tty2 (VT2) ── kmsconvt@tty2.service ── kmscon ── login ── zsh �
 | w4 | 켬 | 4.62 W | 5.12 | 2.72 |
 - **w1 → w2 에서 −1.7 W 가 떨어졌지만 절전 때문이 아니다**: w3 에서 절전을 다시 꺼도 4.69 W 로 그대로(−0.07 W 차이는 잡음). 상시 기록(`boot_settle.py`)상 **전환은 10:16:46**(6.07 → 4.42 W, psys 6.32 → 5.52 → 4.85)이고 이 시각은 w2 시작(10:16:34) 직후지만, 되돌려도 안 돌아왔으므로 우연 또는 별개 사건. **이 시험으로는 사무실 Wi-Fi 에서의 절전 효과를 깨끗이 못 쟀다**(집 Wi-Fi 기준 −0.62 W 는 유효).
 - **낮은 상태는 이번에도 저절로 나타났다**(세 번째 포착). 기록(방전·덮개 닫힘 217행) 중 낮은 상태(<5.2 W)는 23행(약 10%), 평균 4.51 W 대 높음 6.77 W.
-- **프로세스와는 강한 상관이 없다**: 전력과의 상관 상위가 rcu_preempt 깨어남 +0.45, netdata CPU −0.36, kmscon CPU +0.35 등으로 모두 약하다(|r| < 0.5). 전환 전후 평균 차이도 containerd 깨어남 7.8 → 0, scripts.d 4.7 → 0, kmscon CPU 0.5 → 0 정도로 작다. → **특정 프로그램이 아니라 디스플레이/펌웨어(하드웨어) 쪽 상태**일 가능성이 높다.
+- **프로세스와는 강한 상관이 없다**: 전력과의 상관 상위가 rcu_preempt 깨어남 +0.45, netdata CPU −0.36, kmscon CPU +0.35〔구표기 L2: boot_settle 프로세스별 값〕 등으로 모두 약하다(|r| < 0.5). 전환 전후 평균 차이도 containerd 깨어남 7.8 → 0, scripts.d 4.7 → 0, kmscon CPU 0.5 → 0 정도로 작다. → **특정 프로그램이 아니라 디스플레이/펌웨어(하드웨어) 쪽 상태**일 가능성이 높다.
 - **DRM 커넥터 `dpms` 는 구분 기준이 아니다**: 높은 상태에서도 `Off`(10:21, 5.5~6.2 W)로 읽혔고 09:43(높은 상태)에는 `On`이었다. 또한 이 기기에서는 `dpms enable` 뒤 화면이 안 돌아오는 문제가 있어(`core.bind.hwctl.nix` 주석) dpms 로 패널을 끄는 방법은 쓰지 않는다. Hyprland 0.55(Lua)에서는 `hyprctl dispatch dpms off` 가 문법 오류이고 `hl.dsp.dpms({ action = ... })` 형식이다.
 - **지금까지의 결론**: 낮은 상태(≈4.3 W)는 실재하며 약 10% 의 시간에 저절로 나타났다 사라진다. 알려진 원인(Wi-Fi 절전, Netdata, hyprlock, 오디오, PSR, 활성 VT, 네트워크, 프로세스)으로는 설명되지 않고, tty1 전환은 낮은 → 높은 방향으로만 작동한다. 이후 접근: ① 낮은 상태에서 장치/레지스터를 더 깊이 비교(`pm_snapshot` 외에 `pmc_core`/`slp_s0`, i915 `i915_display_info`, DMC 상태, `/sys/kernel/debug/pmc_core/substate_residencies`), ② 낮은 상태가 어떤 조건에서 유지되는지 장시간 기록 분석, ③ 필요하면 `no-quirks` 부팅으로 같은 기록 비교.
 
@@ -535,17 +537,17 @@ tty2 (VT2) ── kmsconvt@tty2.service ── kmscon ── login ── zsh �
 - **`sing-box` 는 이 저장소·이 노트북 어디에도 없다**(저장소 전체 검색 결과 없음, 바이너리/프로세스 없음). 게이트웨이:1080 의 SOCKS5 서버는 폰(또는 핫스팟 공급자) 쪽 프로그램이며 노트북은 클라이언트일 뿐이다. 따라서 "노트북 쪽 sing-box 비용"은 없고, 비용은 **redsocks 릴레이 + 막힌 UDP/직접 경로에 대한 재시도**에서 나온다.
 - 확인한 상태: 사무실 Wi-Fi(`사무실 Wi-Fi`)로 옮기자 `redsocks-hotspot` inactive, `/tmp/current_hotspot_proxy`·`/run/redsocks-hotspot.conf` 없음, 프록시 환경변수(셸/사용자 systemd) 없음, `ip rule` 에 fwmark 1 규칙 없음, nft 테이블 `redsocks_hotspot*` 없음 → 정리는 깨끗하다. 프록시 없이 직접 https 정상(0.13 s).
 **2. 기록(`boot_settle.py`, 방전·덮개 닫힘)으로 본 핫스팟 ↔ 사무실 차이**(핫스팟 n=88, 사무실 n=29 — 시간대·절전 설정이 다른 **비교 불완전** 자료)
-| 프로세스 | 깨어남/s 핫스팟 → 사무실 | CPU% 핫스팟 → 사무실 |
+| 프로세스 | 깨어남/s 핫스팟 → 사무실〔구표기 L2: 자발 전환/s〕 | CPU% 핫스팟 → 사무실〔구표기 L2: 코어 1개=100%〕 |
 |---|---|---|
 | electron(Bitwarden) | 256.8 → 1.2 | 8.9 → 1.6 |
 | tailscaled | 87.0 → 41.2 | 3.42 → 0.02 |
 | netdata / claude / mongod / meilisearch | 거의 같음 | 거의 같음 |
 - 높은 상태 평균 6.76 W(핫스팟) ↔ 6.30 W(사무실), **낮은 상태는 4.46 W 로 둘이 같다.** → 핫스팟 경로의 비용은 높은 상태에서 최대 약 0.45 W 로 보이나 확정은 아님(시간대, PS off/on 혼합, 표본 수 차이).
 - **electron 의 257/s·9% CPU 는 핫스팟 전용이 아니다**: 어제 밤 집 Wi-Fi 에서도(재부팅 직후 기록) 같았고(257/s), **10:07 사무실로 옮기며 멈췄다.** 같은 무렵 AC 연결(≈10:05)과 분리(10:10)도 있었으므로 원인(네트워크 전환/AC 사건/재시도 루프 종료)은 미확정. 같은 시각 `tailscaled` 의 3.4% CPU·80~93/s 도 40/s·0% 로 내려왔다(핫스팟에서는 `netcheck: UDP is blocked, trying HTTPS/ICMP` 가 약 12초마다 반복되고 redsocks 로그에 `Socks5 server status: server failure` 가 섞임 — 핫스팟은 UDP 직접 경로가 막혀 tailscale 이 계속 재탐색).
-- 반복 작업(전수조사): `touchpad-watchdog` 약 32초마다(시간당 112회), `notif-health` 약 60초마다(56회), 그 외 타이머는 하루 1회 이하 — 초당 1,000회가 넘는 깨어남(netdata 약 340/s, claude 150~200/s, electron 257/s, meilisearch 65/s, mongod 57/s, tailscaled 40~90/s, go.d.plugin 36/s, irq/9-acpi 20~30/s)에 비해 무시할 수준.
+- 반복 작업(전수조사): `touchpad-watchdog` 약 32초마다(시간당 112회), `notif-health` 약 60초마다(56회), 그 외 타이머는 하루 1회 이하 — 초당 1,000회가 넘는 깨어남〔구표기: 합계는 L1 powertop, 괄호 안 프로세스별은 L2〕(netdata 약 340/s, claude 150~200/s, electron 257/s, meilisearch 65/s, mongod 57/s, tailscaled 40~90/s, go.d.plugin 36/s, irq/9-acpi 20~30/s)에 비해 무시할 수준.
 **3. 가설(핫스팟/프록시 경로가 전력에 미칠 수 있는 경로) — 모두 미검증**
 - H1 electron(Bitwarden, `--autostart`) 재시도 루프: 막힌 UDP/프록시 경로 연결 실패 후 반복. 이전 SIGSTOP ABAB 효과는 −0.20 W(배터리), −0.25 W(psys).
-- H2 tailscaled netcheck 루프(핫스팟에서 UDP 차단): CPU 3.4%·깨어남 +45/s.
+- H2 tailscaled netcheck 루프(핫스팟에서 UDP 차단): CPU 3.4%·깨어남 +45/s〔구표기 L2〕.
 - H3 redsocks 릴레이 자체의 CPU/깨어남(로그에는 top-N 에 안 잡혀 정량 없음), 유저·root 모든 TCP/UDP 가 사용자 공간 경유(Docker 컨테이너의 아웃바운드도 root 로 걸림).
 - H4 링크 차이: 핫스팟은 2.4 GHz 20 MHz(−41~−42 dBm)·폰 AP 의 절전(DTIM/U-APSD) 지원 불확실 → 같은 트래픽에 에어타임·RF 전력이 더 듦. 사무실도 2.4 GHz 라서 이것만으로는 설명이 약함.
 - H5 폰 쪽 SOCKS 서버가 UDP ASSOCIATE 를 구현하지 않아 UDP 가 그냥 나감(dispatcher 주석의 '한계') → 재시도.
@@ -593,7 +595,7 @@ tty2 (VT2) ── kmsconvt@tty2.service ── kmscon ── login ── zsh �
 | electron(Bitwarden) SIGSTOP | −0.16, −0.25 W | **−0.20 W** | −0.1~−0.2 |
 | tailscaled SIGSTOP(2회, 4쌍) | −0.74, −0.09, +0.15, −0.11 W | **−0.20 W** (A 5.76 → B 5.56) | **−0.31 W**(4쌍 모두 음수: −0.61, −0.05, −0.41, −0.15), 패키지 4쌍 모두 음수 |
 - 기준(두 쌍 모두 −0.3 W 이상)을 **어느 것도 통과하지 못했다**. 효과는 실재하지만 작다(각각 약 −0.2 W; 둘을 합쳐도 사무실 대비 핫스팟의 차이 약 0.45 W 의 절반~전부 수준이며 합산 효과는 직접 안 쟀다). → **코드 변경 안 함.**
-- 핫스팟 연결 직후 `thread_top.py`: tailscaled CPU **9.3%**, 깨어남 **148/s**(사무실 1.4%, 28/s). redsocks 0.7/s(무시). electron 15/s(조용; 밤사이 257/s 는 재현 안 됨).
+- 핫스팟 연결 직후 `thread_top.py`: tailscaled CPU **9.3%**, 깨어남 **148/s**(사무실 1.4%, 28/s)〔구표기 L2: thread_top, 코어 1개=100%·자발 전환/s〕. redsocks 0.7/s(무시). electron 15/s(조용; 밤사이 257/s 는 재현 안 됨).
 - `conn_log.py`(root, conntrack 직접 읽기; 내용은 안 보고 목적지·개수만): 노트북에서 나가는 새 연결 **초당 1.15개**(60초 69개: TCP 65, UDP 4). 프로세스는 대부분 `?`(너무 짧음), tailscaled 5. 목적지는 서로 다른 여러 IP:443 에 2개씩(tailscale DERP 탐색과 닮았으나 이름으로 확인하지 못함)과 Cloudflare DNS(1.1.1.1/1.0.0.1:53 TCP·UDP). 폰의 sing-box 가 TRACE/DEBUG 로 "connection … finished/closed" 를 많이 찍는다는 사용자 관찰과 일치(이 프록시는 통신사 테더링 한도 우회용이라 노트북 쪽 연결 로그가 곧 프록시 로그).
 - 폰 로그 레벨을 `warn`/`error` 로 낮추면 폰 쪽 부하는 줄지만 노트북 전력과는 무관.
 **3. 도구**: `display_snap.py save <디렉터리>` / `diff A B`(주의: save 가 디스플레이를 깨워 낮은 상태를 깨뜨릴 수 있음), `conn_log.py [초] [주기]`, `idle_ab.py ab2` 후보 `tailscaled-freeze` 추가, `thread_top.py`.
