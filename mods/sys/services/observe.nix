@@ -14,7 +14,7 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
   py = pkgs.python3;
   dir = pkgs.runCommand "observe-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_tiers.py" "observe_apps.py" "observe_query.py" "observe_focus.py" "usagegraph.py" "usagechart.py" "usagedata.py" "usageview.py" "usageui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_tiers.py" "observe_apps.py" "observe_query.py" "observe_focus.py" "observe_browser.py" "usagegraph.py" "usagechart.py" "usagedata.py" "usageview.py" "usageui.py"]}
     cp ${../../_data/observe/examples/power_knobs.py} $out/power_knobs.py
     cp ${../../_data/_uikit/uikit.py} $out/uikit.py
   '';
@@ -34,6 +34,22 @@ in {
     Service = {
       ExecStart = "${py}/bin/python3 ${dir}/observe_focus.py";
       Environment = ["PATH=${lib.makeBinPath [pkgs.hyprland]}"]; # 시작할 때 이미 열린 창을 읽는 hyprctl
+      Nice = 10;
+    };
+    Install.WantedBy = ["graphical-session.target"];
+  };
+
+  # 브라우저(Vivaldi) CPU 폭주 감시: 평소에는 /proc 만 보고(15초마다 가볍게), 합계 CPU 가 30% 이상인 폴이 2번 연속이면 디버깅 포트(127.0.0.1:9222)로
+  # 탭·확장별 CPU 를 5초 재서 `browser.burst` 이벤트로 남긴다(`observectl browser bursts`). 읽기 전용(Performance.getMetrics·탭 목록만), 제목·주소는 저장 안 함 — 호스트 이름만.
+  # 전제: Vivaldi 를 --remote-debugging-port=9222 로 시작(mods/gui/apps/vivaldi.nix). 포트가 없으면 /proc 합계만 기록한다. 재시작 정책은 두지 않는다(문제가 생기면 그때 수정).
+  hm.systemd.user.services.observe-browser = {
+    Unit = {
+      Description = "Watch browser CPU bursts and attribute them to tabs (read-only CDP)";
+      PartOf = ["graphical-session.target"];
+      After = ["graphical-session.target"];
+    };
+    Service = {
+      ExecStart = "${py}/bin/python3 ${dir}/observe_browser.py";
       Nice = 10;
     };
     Install.WantedBy = ["graphical-session.target"];

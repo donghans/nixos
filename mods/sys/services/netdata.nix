@@ -4,6 +4,9 @@
 #  - 전원 정책(노트북): AC 연결 시 1초 간격, 배터리일 땐 10초 간격으로 수집(완전히 끄지 않는 이유: 배터리에서 TLP 상한으로
 #    느려진 때의 기록이 오히려 쓸모 있음). 수집 주기는 서비스 시작 때 정해지므로 전원 상태가 바뀌면 udev 가 서비스를 재시작함(몇 초 공백).
 #  - 익명 통계 전송은 모듈 기본값으로 꺼져 있고(DO_NOT_TRACK, .opt-out-from-anonymous-statistics), 클라우드 연결(claim)은 안 함.
+#  - **기본은 꺼짐(2026-10-21)**: 부팅 때 시작하지 않는다. 켤 때만 `netdata-on`, 끌 때 `netdata-off`. 이유: Netdata 가 배터리·hwmon·thermal·AC 센서를 읽을 때마다
+#    ACPI 임베디드 컨트롤러(EC)에 트랜잭션이 생겨 EC 이벤트(GPE 6E)가 초당 20~50회 올라가고(끄면 약 9회), 켠 채로 쉬는 전력이 배터리 기준 약 0.5~0.6 W(psys 약 1 W) 높았다
+#    (장부 #62, 켬/끔 ABAB 4쌍). 키보드 키 소실(#18)과 시간적으로 겹쳐 인과 확인 중. observectl 은 Netdata 없이도 동작하고, 켜져 있을 때만 1초 지표를 병기한다.
 #  - 부하를 줄이려고 머신러닝(이상 탐지), 알람(health), freeipmi 플러그인(서버용 센서, 노트북엔 대상 없음)은 끔. 보존: 초 단위 7일(최대 1GiB), 더 거친 단계(분/시간 단위)는 기본값.
 {mkMod, ...}:
 mkMod __curPos "Netdata (시스템 지표 기록: AC 1초 / 배터리 10초)" ({
@@ -58,6 +61,13 @@ mkMod __curPos "Netdata (시스템 지표 기록: AC 1초 / 배터리 10초)" ({
     exec ${pkgs.python3.withPackages (p: [p.matplotlib])}/bin/python3 ${../../_data/netdata/power_report.py} "$@"
   '';
   # 어댑터를 뽑은 상태에서 화면 주사율별 소비 전력을 번갈아 재서 비교(스크립트: _data/power-ab/power_ab.py)
+  # 켜고 끄는 명령(기본은 꺼짐). sudo 는 setuid 래퍼(/run/wrappers/bin/sudo)를 써야 한다.
+  netdataOn = pkgs.writeShellScriptBin "netdata-on" ''
+    /run/wrappers/bin/sudo systemctl start netdata netdata-power-state && echo "netdata 켬 — 켜 둔 동안 EC 이벤트가 늘고 쉬는 전력이 오른다(끄기: netdata-off)"
+  '';
+  netdataOff = pkgs.writeShellScriptBin "netdata-off" ''
+    /run/wrappers/bin/sudo systemctl stop netdata netdata-power-state && echo "netdata 끔"
+  '';
   powerAb = pkgs.writeShellScriptBin "power-ab" ''
     # displayctl 은 사용자 프로필(~/.nix-profile/bin)에 있어서 PATH 를 덧붙임
     export PATH=${lib.makeBinPath [pkgs.hyprland]}:$HOME/.nix-profile/bin:/run/current-system/sw/bin:/run/wrappers/bin:$PATH   # docker(--containers), sudo(RAPL 읽기)
@@ -84,6 +94,11 @@ in {
       };
     };
 
+    environment.systemPackages = [netdataOn netdataOff];
+
+    # 기본 꺼짐: 부팅 때 시작하지 않는다(netdata-on 으로만). 전원 상태 기록기(아래)도 같이.
+    systemd.services.netdata.wantedBy = lib.mkForce [];
+
     systemd.services.netdata.serviceConfig = {
       ExecStartPre = "${genConf}";
       ExecStart = lib.mkForce "${nd.package}/bin/netdata -P /run/netdata/netdata.pid -D -c /run/netdata/netdata.conf";
@@ -93,7 +108,7 @@ in {
       # (부팅 콘솔(가상 콘솔)은 한글 글리프가 없어 네모로 보이므로 시스템 유닛 Description 은 영어로: 전원 상태(AC/충전/TLP 모드)를 Netdata 에 기록)
       description = "Record power state (AC/charging/TLP mode) for Netdata";
       after = ["netdata.service"];
-      wantedBy = ["multi-user.target"];
+      wantedBy = ["multi-user.target"]; # 위에서 mkForce [] 로 비움(기본 꺼짐)
       serviceConfig = {
         ExecStart = "${powerState}";
         DynamicUser = true;

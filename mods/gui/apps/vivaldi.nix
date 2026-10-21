@@ -18,7 +18,9 @@ in {
     home.packages = [
       ((unstable.vivaldi.override {
           proprietaryCodecs = true;
-          commandLineArgs = ["--lang=ko"];
+          # 디버깅 포트는 127.0.0.1 에만 열린다(웹 페이지의 WebSocket 접근은 크로미움이 막음). observe-browser 가 폭주 시 탭별 CPU 를 읽기 전용으로 잰다.
+          # 같은 PC 의 다른 프로그램도 접근할 수 있으므로 필요 없어지면 이 인자를 지운다.
+          commandLineArgs = ["--lang=ko" "--remote-debugging-port=9222"];
         }).overrideAttrs (old: {
           postInstall =
             (old.postInstall or "")

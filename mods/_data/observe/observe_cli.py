@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import observe_core as core
 import observe_stats as stats
 import observe_explain as ex
+import observe_browser as br
 import observe_netdata as nd
 import observe_query as qy
 import observe_tiers as tiers
@@ -240,6 +241,26 @@ def cmd_query(a):
     for g, n, vals in res:
         label = core.hms(g) if a.step else str(g)[:17]
         print(f"{label:<18}{n:>5}" + "".join(fmt(v, 24, a.digits) for v in vals))
+
+
+def cmd_browser(a):
+    if a.what == "bursts":
+        evs = [e for e in read_events(argparse.Namespace(comp="browser", level="info", grep="browser.burst"), core.parse_when(a.since), None)]
+        if not evs:
+            print("이 기간에 기록된 브라우저 폭주가 없습니다(감시기 observe-browser 가 켜져 있어야 함).")
+        for e in evs:
+            top = ", ".join(f"{t['host']}({t['type']}) {t['cpu']:.0f}%" for t in e.get("top", [])) or (e.get("cdp_error") and f"탭 조회 실패: {e['cdp_error']}") or "탭 조회 결과 없음"
+            print(f"{core.hms(e['t'])} 브라우저 합계 CPU {e.get('cpu_pct', 0):.0f}% — {top}")
+        return
+    if not br.available():
+        sys.exit(f"브라우저의 디버깅 포트(127.0.0.1:{br.PORT})가 열려 있지 않습니다 — Vivaldi 를 `--remote-debugging-port={br.PORT}` 로 시작해야 합니다(nix 설정으로 기본 적용).")
+    rows = br.cpu_by_target(a.seconds)
+    print(f"브라우저 탭·확장별 CPU(메인 스레드, 코어 1개=100%) {a.seconds:g}초 동안 — 제목·주소는 읽지 않고 호스트만 표시")
+    print(f"{'호스트':<48}{'종류':<18}{'CPU%':>7}{'스크립트%':>10}")
+    for h, t, c, sc in rows[:a.n]:
+        print(f"{h[:46]:<48}{t:<18}{c:>7.1f}{sc:>10.1f}")
+    if not rows:
+        print("(읽을 수 있는 탭이 없습니다 — 아직 불러오지 않은 탭은 값이 없음)")
 
 
 def cmd_states(a):
@@ -905,6 +926,7 @@ def main(argv=None):
     s = sub.add_parser("explain", help="한 구간을 여러 출처(전력·상태·시스템·Netdata·프로세스·포커스·스팬)로 묶어 설명하고 기준 구간과 비교"); s.add_argument("--since", default="30m"); s.add_argument("--until"); s.add_argument("--at", help="중심 시각(HH:MM 등) — --span 초 만큼의 구간"); s.add_argument("--span", type=float, default=300); s.add_argument("--baseline", default="prev", help="none | prev(바로 앞의 같은 길이, 기본) | 시작..끝"); s.add_argument("--no-netdata", action="store_true"); s.add_argument("--json", action="store_true"); s.set_defaults(f=cmd_explain)
     s = sub.add_parser("ebpf", help="시간 제한형 eBPF 정밀 모드: tiers(단계·비용) | on <sample|counts|full> [--for 10m] | off | status"); s.add_argument("action", choices=["tiers", "on", "off", "status"]); s.add_argument("tier", nargs="?"); s.add_argument("--for", dest="for_", default="10m", help="제한 시간(기본 10m, 최대 60분)"); s.set_defaults(f=cmd_ebpf)
     s = sub.add_parser("query", help="범용 조회: 신호 여러 개를 시간 간격(--step)이나 그룹(--by)으로 묶어 집계(--agg). 신호 = 별칭(psys pkg vi core uncore pc8 pc10 cpu_all) · 표본 경로(pw.psys_w) · app:<앱>.cpu|ctxsw · proc:<comm>.cpu|ctxsw · nd:<Netdata 신호>"); s.add_argument("signal", nargs="+"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--step", help="시간 간격(예: 5m). 없으면 --by 로 묶음"); s.add_argument("--by", default="none", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.add_argument("--agg", default="mean", choices=list(qy.AGGS)); s.add_argument("--digits", type=int, default=2); s.set_defaults(f=cmd_query)
+    s = sub.add_parser("browser", help="브라우저(Vivaldi) 탭·확장별 CPU(top) 또는 감시기가 잡은 폭주 기록(bursts)"); s.add_argument("what", nargs="?", default="top", choices=["top", "bursts"]); s.add_argument("--seconds", type=float, default=5.0); s.add_argument("-n", type=int, default=12); s.add_argument("--since", default="24h"); s.set_defaults(f=cmd_browser)
     s = sub.add_parser("nd", help="Netdata 어댑터(있을 때만): defs=신호 정의, stats=구간 평균, apps=앱 그룹 CPU, charts=차트 찾기, get=차트 값"); s.add_argument("what", choices=["defs", "stats", "apps", "charts", "get"]); s.add_argument("chart", nargs="?", help="charts: 이름 조각 · get: 차트 이름"); s.add_argument("--since", default="10m"); s.add_argument("--until"); s.add_argument("-n", type=int, default=10); s.set_defaults(f=cmd_nd)
     s = sub.add_parser("timeline"); s.add_argument("--at", required=True); s.add_argument("--span", type=float, default=60); s.add_argument("--journal", default="all", choices=["all", "warn", "none"]); s.set_defaults(f=cmd_timeline)
     s = sub.add_parser("bpf", help="eBPF(bpftrace) 프리셋을 N초 동안 실행: exec wake profile psr io net"); s.add_argument("preset", choices=["exec", "wake", "profile", "psr", "io", "net"]); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--comm", help="프로세스 이름 필터(영숫자·._- 15자)"); s.add_argument("-n", type=int, default=12, help="표의 상위 행 수"); s.add_argument("--no-spans", action="store_true", help="exec: 프로세스 스팬을 이벤트 로그에 적지 않음"); s.set_defaults(f=cmd_bpf)
