@@ -19,8 +19,5 @@ for i in 1 2; do
   setps on;  $OBS mark B "ps on #$i"  >/dev/null; sleep 120
 done
 $OBS mark --clear >/dev/null
-for m in psys_w batt_w pkg_w; do
-  echo "===== $m"
-  $OBS ab --since $T0 --metric $m --settle 40 --expect-a dev.wifi.ps=off --expect-b dev.wifi.ps=on
-done
+$OBS ab --since $T0 --settle 40 --expect-a dev.wifi.ps=off --expect-b dev.wifi.ps=on          # 4지표를 한꺼번에 비교(덮개·AC 자동 검증)
 $OBS window --since $T0 --by wifips

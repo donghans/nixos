@@ -221,4 +221,66 @@ check("pc3_stuck: pc3 가 적으면 대상 아님", not col.pc3_stuck("high", {"
 kn = col.take_knobs(os.path.join(TMP, "knobs-test.json"))
 check("take_knobs: 스냅샷 저장(읽기 전용)", kn and os.path.exists(kn) and len(json.load(open(kn))) > 20, str(kn))
 check("group_key flag", observe_cli.group_key({"flag": "pc3-stuck"}, "flag") == "pc3-stuck" and observe_cli.group_key({}, "flag") == "-")
+
+
+# --- observectl ab (다지표·자동 검증·판정 문구)
+import io as _io2, contextlib as _cx2
+def _ab_rows(deltas, seg_len=16, lids=None, acs=None, vi_noise=None, base_t=None):
+    """deltas: [(조건, psys, pkg, vi, 계량 W)] 구간 목록 — 구간마다 30초 표본 seg_len 개. q_uah 는 계량 W 에서 역산(15 V)."""
+    out, t, q = [], (base_t or time.time() - 7200), 3_000_000
+    for i, (cond, psys, pkg, vi, cw) in enumerate(deltas):
+        mt = t
+        for k in range(seg_len):
+            out.append({"t": t, "dt": 30, "state": "low", "mark": {"cond": cond, "t": mt, "note": ""},
+                        "pw": {"psys_w": psys, "pkg_w": pkg, "batt_vi_w": vi + (0.5 if (vi_noise and k % 2) else 0), "q_uah": int(q), "v_uv": 15_000_000, "status": "Discharging", "ac": (acs or {}).get(i, 0)},
+                        "dev": {"lid": (lids or {}).get(i, "closed"), "wifi": {"ssid": "x"}}})
+            t += 30
+            q -= cw / 15.0 * 1e6 * 30 / 3600          # 계량 W → 30초 동안 줄어든 µAh
+    return out
+def _run_ab(rows, *argv):
+    d = os.path.join(TMP, "ab"); os.makedirs(d, exist_ok=True)
+    for f in os.listdir(d):
+        os.unlink(os.path.join(d, f))
+    for r in rows:
+        core.append_jsonl(d, "samples", r, t=r["t"])
+    old = core.SAMPLE_DIR
+    core.SAMPLE_DIR = d; observe_cli.core.SAMPLE_DIR = d
+    buf = _io2.StringIO()
+    try:
+        with _cx2.redirect_stdout(buf):
+            observe_cli.main(["ab", "--since", "3h", "--settle", "20", "--min-samples", "3", *argv])
+    finally:
+        core.SAMPLE_DIR = old; observe_cli.core.SAMPLE_DIR = old
+    return buf.getvalue()
+A = ("A", 5.0, 2.0, 6.0, 6.0); B = ("B", 4.0, 1.6, 5.0, 5.0)
+out = _run_ab(_ab_rows([A, B, A, B, A, B]))
+check("ab: 3쌍·모든 지표 같은 방향 → 종합 '확인(측정)'", "종합: 확인(측정)" in out, out)
+out = _run_ab(_ab_rows([A, B, A, B]))
+check("ab: 2쌍이면 종합이 '일치(약함)'(확인이라 하지 않음)", "종합: 일치(약함)" in out and "종합: 확인" not in out, out)
+check("ab: 지표 4개를 한꺼번에 출력(psys·패키지·순간 V×I·누적 계량)", all(k in out for k in ("psys(RAPL", "패키지(RAPL)", "순간 V×I", "누적 계량")), out)
+# 순간 V×I 만 반대 부호(표본 적음 → 신뢰 낮음으로 제외) — 실제 #58 상황
+vi_bad = [("A", 5.0, 2.0, 5.0, 6.0), ("B", 4.0, 1.6, 5.8, 5.0), ("A", 5.0, 2.0, 5.0, 6.0), ("B", 4.0, 1.6, 5.8, 5.0), ("A", 5.0, 2.0, 5.0, 6.0), ("B", 4.0, 1.6, 5.8, 5.0)]
+out = _run_ab(_ab_rows(vi_bad, seg_len=6))
+check("ab: V×I 가 반대여도 표본이 적으면 '신뢰 낮음'으로 표시하고 종합에서 제외", "신뢰 낮음" in out and "신뢰 낮아 제외한 지표" in out and "부호가 다름" not in out, out)
+# 신뢰 가능한 지표끼리 반대 → 불확실
+conf = [("A", 5.0, 2.0, 6.0, 6.0), ("B", 4.0, 2.4, 5.0, 5.0)] * 3          # psys 는 줄고 pkg 는 늘어남
+out = _run_ab(_ab_rows(conf))
+check("ab: 신뢰 가능한 지표끼리 부호가 다르면 종합 '불확실'", "종합: 불확실 — 신뢰 가능한 지표끼리 부호가 다름" in out, out)
+# 덮개가 구간 중간에 바뀜 → 무효
+out = _run_ab(_ab_rows([A, B, A, B, A, B], lids={4: "open", 5: "open"}))
+check("ab: 구간 사이에 덮개 상태가 다르면 '무효'", "종합: 무효" in out and "lid" in out, out)
+out = _run_ab(_ab_rows([A, B, A, B, A, B], lids={4: "open", 5: "open"}), "--allow-mixed", "lid")
+check("ab: --allow-mixed lid 면 허용", "종합: 무효" not in out, out)
+out = _run_ab(_ab_rows([A, B, A, B], acs={2: 1, 3: 1}))
+check("ab: AC 상태가 구간마다 다르면 무효", "종합: 무효" in out and "ac" in out, out)
+short = _ab_rows([A, B, A, B]) + _ab_rows([A], seg_len=2, lids={0: "open"}, base_t=time.time() - 7200 + 16 * 30 * 4 + 60)
+out = _run_ab(short)
+check("ab: 짧아서 버려진 구간에서 덮개가 달랐으면 경고(통계는 유지)", "버려진 짧은 구간" in out and "종합: 무효" not in out, out)
+out = _run_ab(_ab_rows([A, B, A, B, A, B]), "--require", "dev.lid=open")
+check("ab: --require 가 어긋나면 무효", "종합: 무효" in out and "--require" in out, out)
+out = _run_ab(_ab_rows([A, B, A, B, A, B]), "--metric", "psys_w")
+check("ab: --metric 으로 한 지표만도 가능", "psys(RAPL" in out and "패키지(RAPL)" not in out, out)
+w, err = observe_cli.segment_coulomb(_ab_rows([A], seg_len=16)[0:16])
+check("segment_coulomb: 계량 W 복원(6 W)·양자화 오차(≈54/구간초)", w is not None and abs(w - 6.0) < 0.15 and 0.05 < err < 0.2, str((w, err)))
+check("segment_coulomb: 충전 중이면 None", observe_cli.segment_coulomb([dict(r, pw={**r["pw"], "status": "Charging"}) for r in _ab_rows([A], seg_len=16)]) == (None, None))
 finish("observe")

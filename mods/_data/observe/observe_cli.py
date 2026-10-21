@@ -446,6 +446,66 @@ def expect_mismatch(seg, cond, expect):
     return bad, tot
 
 
+def segment_coulomb(g):
+    """구간의 누적 계량 평균 전력(W)과 양자화 오차 범위(W). 방전 중 표본 2개 미만이면 (None, None).
+    계량값은 1 mAh(≈15 mWh) 단위라 구간이 짧을수록 오차가 크다(오차 ≈ 15 mWh ÷ 구간 시간)."""
+    pts = [r for r in g if get(r, "pw.q_uah") is not None and get(r, "pw.v_uv") and get(r, "pw.status") == "Discharging"]
+    if len(pts) < 2 or pts[-1]["t"] <= pts[0]["t"]:
+        return None, None
+    dt = pts[-1]["t"] - pts[0]["t"]
+    v = sum(p["pw"]["v_uv"] for p in pts) / len(pts) / 1e6
+    return (pts[0]["pw"]["q_uah"] - pts[-1]["pw"]["q_uah"]) / 1e6 * v / (dt / 3600), (1e-3 * v) / (dt / 3600)
+
+
+AB_METRICS = ["psys_w", "pkg_w", "batt_vi_w", "coulomb_w"]
+AB_LABELS = {"psys_w": "psys(RAPL, 약 1 W 누락)", "pkg_w": "패키지(RAPL)", "batt_vi_w": "순간 V×I", "coulomb_w": "누적 계량"}
+
+
+def ab_checks(seg, allow):
+    """교란 자동 검증. 덮개·AC 가 구간들 사이에서 다르면 무효(allow 로 허용), Wi-Fi SSID 가 다르면 경고. 반환 (무효 사유 목록, 경고 목록)."""
+    bad, warn = [], []
+    for name, path, hard in (("lid", "dev.lid", True), ("ac", "pw.ac", True), ("ssid", "dev.wifi.ssid", False)):
+        if name in allow:
+            continue
+        vals = collections.Counter(str(get(r, path)) for _, g in seg for r in g)
+        if len(vals) > 1:
+            msg = f"{name} 값이 구간에 따라 다름 {dict(vals)}"
+            (bad if hard else warn).append(msg)
+    return bad, warn
+
+
+def ab_rows(seg, ca, cb, metrics, threshold):
+    """지표마다 (이름, A 구간값, B 구간값, 판정 dict, 신뢰 표시, 신뢰 가능 여부)."""
+    out = []
+    for m in metrics:
+        per = []
+        for c, g in seg:
+            if m == "coulomb_w":
+                w, err = segment_coulomb(g)
+                per.append((c, w, err, len(g)))
+            else:
+                per.append((c, mean_of(g, lambda r: get(r, ".".join(METRICS[m]))), None, len(g)))
+        A = [w for c, w, _, _ in per if c == ca and w is not None and w == w]
+        B = [w for c, w, _, _ in per if c == cb and w is not None and w == w]
+        n = min(len(A), len(B))
+        if n < 2:
+            out.append((m, A, B, None, "(값 부족: 방전 중 구간이 필요)", False))
+            continue
+        v = stats.verdict(A, B, threshold)
+        if m == "coulomb_w":
+            err = max(e for c, w, e, _ in per if e is not None)
+            ok = err <= threshold / 2
+            note = f"오차 ±{err:.2f} W" + ("" if ok else " — 구간이 짧아 신뢰 낮음(5분 이상 권장)")
+        elif m == "batt_vi_w":
+            k = min(nn for _, _, _, nn in per)
+            ok = k >= 8
+            note = f"구간당 표본 {k}개" + ("" if ok else " — 순간값이라 노이즈 큼, 신뢰 낮음")
+        else:
+            ok, note = True, ""
+        out.append((m, A, B, v, note, ok))
+    return out
+
+
 def cmd_ab(a):
     if a.metric == "batt_w":
         a.metric = "batt_vi_w"
@@ -456,35 +516,72 @@ def cmd_ab(a):
         print(f"(표본 {a.min_samples}개 미만인 짧은 구간 {len(dropped)}개는 제외: {dropped} — 표지 변경 직후의 잔여 표본 등)")
     if len(seg) < 4:
         sys.exit("A/B 구간이 4개 미만입니다. `observectl mark A` … `observectl mark B` … 를 번갈아 두 번 이상 하세요.")
-    path = METRICS[a.metric]
     conds = []
     for c, _ in seg:
         if c not in conds:
             conds.append(c)
     ca, cb = conds[0], conds[1]
-    A = [mean_of(g, lambda r: get(r, ".".join(path))) for c, g in seg if c == ca]
-    B = [mean_of(g, lambda r: get(r, ".".join(path))) for c, g in seg if c == cb]
-    # 교대 순서(A B A B)가 아닌 경우를 경고
     order = "".join(c for c, _ in seg)
-    st = stats.verdict(A, B, a.threshold)
-    invalid = []
+    allow = {x for x in (a.allow_mixed or "").split(",") if x}
+    invalid, warn = [], []
+    bad, w = ab_checks(seg, allow)
+    invalid += bad
+    warn += w
+    # 짧아서 버려진 구간·안정화 구간에서 덮개/AC 가 달랐다면 시험 도중 조건이 바뀐 흔적(예: 중간에 덮개를 엶) — 경고
+    used = {name: {str(get(r, path)) for _, g in seg for r in g} for name, path in (("lid", "dev.lid"), ("ac", "pw.ac"))}
+    everything = [r for _, g in segments(rows, 0) for r in g]
+    for name, path in (("lid", "dev.lid"), ("ac", "pw.ac")):
+        extra = {str(get(r, path)) for r in everything} - used[name]
+        if extra and name not in allow:
+            warn.append(f"버려진 짧은 구간/안정화 구간에서 {name} 값이 {sorted(extra)} 로 달랐음 — 시험 도중 조건이 바뀐 흔적(해당 구간은 통계에서 빠짐)")
     for cond, expect in ((ca, a.expect_a), (cb, a.expect_b)):
         if expect:
-            bad, tot = expect_mismatch(seg, cond, expect)
-            if bad:
-                invalid.append(f"{cond} 구간 표본 {tot}개 중 {bad}개가 기대({expect})와 다름")
-    mix = {x.get("state") for _, g in seg for x in g}
-    print(f"조건 순서 {order} · {ca}=기준 {cb}=변경 · 지표 {a.metric} · 임계 {a.threshold} W · 구간 시작 {a.settle}초 제외")
-    print(f"{ca}: {', '.join(f'{x:.2f}' for x in A)} (평균 {st['mean_a']:.2f}, sd {st['sd_a']:.2f})")
-    print(f"{cb}: {', '.join(f'{x:.2f}' for x in B)} (평균 {st['mean_b']:.2f}, sd {st['sd_b']:.2f})")
-    ci = st["ci95"]
-    print(f"쌍별 {cb}−{ca}: {', '.join(f'{x:+.2f}' for x in st['diffs'])} → 평균 효과 {st['effect']:+.3f} W"
-          + (f" · 95% CI [{ci[0]:+.2f}, {ci[1]:+.2f}]" if ci else " · CI 는 쌍 3개 이상부터") + f" · 부호검정 p={st['sign_p']:.2f}")
+            nbad, tot = expect_mismatch(seg, cond, expect)
+            if nbad:
+                invalid.append(f"{cond} 구간 표본 {tot}개 중 {nbad}개가 기대({expect})와 다름")
+    for req in a.require or []:
+        nbad = tot = 0
+        path, _, want = req.partition("=")
+        for _, g in seg:
+            for r in g:
+                tot += 1
+                nbad += str(get(r, path)) != want
+        if nbad:
+            invalid.append(f"--require {req}: 표본 {tot}개 중 {nbad}개가 다름")
+    metrics = AB_METRICS if a.metric == "all" else [a.metric]
+    table = ab_rows(seg, ca, cb, metrics, a.threshold)
+    n_in = [len(g) for _, g in seg]
+    print(f"조건 순서 {order} · {ca}=기준 {cb}=변경 · 구간 {len(seg)}개(구간당 표본 {min(n_in)}~{max(n_in)}개) · 임계 {a.threshold} W · 구간 시작 {a.settle}초 제외")
+    checks = ["덮개·AC 가 전 구간 동일" if not any(x.startswith(("lid", "ac")) for x in invalid) else None]
+    print("자동 검증: " + (" · ".join(x for x in checks if x) or "✗ 교란 발견") + ("" if not (a.expect_a or a.expect_b or a.require) else " · 사용자 조건(--expect/--require) 적용"))
+    for x in warn:
+        print(f"⚠ {x}")
+    print(f"{'지표':<24}{ca + ' 구간값':<26}{cb + ' 구간값':<26}{'쌍별 ' + cb + '−' + ca:<22}{'효과':>8}  판정 / 신뢰")
+    for m, A, B, v, note, ok in table:
+        if v is None:
+            print(f"{AB_LABELS.get(m, m):<24}{note}")
+            continue
+        print(f"{AB_LABELS.get(m, m):<24}{' '.join(f'{x:.2f}' for x in A):<26}{' '.join(f'{x:.2f}' for x in B):<26}{' '.join(f'{x:+.2f}' for x in v['diffs']):<22}{v['effect']:>+8.2f}  {v['verdict']}" + (f"  [{note}]" if note else ""))
     if invalid:
         print("✗ 조건 검증 실패 — 이 시험은 무효입니다: " + "; ".join(invalid))
-        print("판정: 무효(조건이 실제로 바뀌지 않음)")
+        print("종합: 무효(조건이 실제로 바뀌지 않았거나 다른 교란이 있음)")
         return
-    print(f"판정: {st['verdict']}" + (" (조건 검증 통과)" if a.expect_a or a.expect_b else " (조건 검증 안 함)"))
+    usable = [(m, v) for m, _, _, v, _, ok in table if v is not None and ok]
+    signs = {(-1 if v["effect"] < 0 else 1) for _, v in usable}
+    labels = {v["verdict"] for _, v in usable}
+    if not usable:
+        overall = "판정 불가(신뢰할 수 있는 지표가 없음: 구간을 늘리세요)"
+    elif len(signs) > 1:
+        overall = "불확실 — 신뢰 가능한 지표끼리 부호가 다름: " + ", ".join(f"{AB_LABELS.get(m, m)} {v['effect']:+.2f}" for m, v in usable)
+    elif labels == {"확인(측정)"}:
+        overall = "확인(측정)"
+    elif labels <= {"확인(측정)", "일치(약함, 2쌍)"}:
+        overall = "일치(약함) — 같은 방향이나 쌍이 적음(3쌍 이상 필요)"
+    else:
+        overall = "불확실"
+    low = [AB_LABELS.get(m, m) for m, _, _, v, _, ok in table if v is not None and not ok]
+    print(f"종합: {overall}" + (f"   (신뢰 낮아 제외한 지표: {', '.join(low)})" if low else ""))
+    mix = {x.get("state") for _, g in seg for x in g}
     if len(mix - {None, "unknown"}) > 1:
         print("⚠ 측정 구간에 low/high 상태가 섞여 있음 — 효과가 상태 전환에 가려질 수 있으니 `observectl window --by state` 로 확인하세요.")
     if order not in ("ABAB", "ABABAB", "BABA", "BABABA") and len(set(conds)) == 2:
@@ -523,9 +620,11 @@ def main(argv=None):
     s = sub.add_parser("wakers"); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--waking", action="store_true"); s.set_defaults(f=cmd_wakers)
     s = sub.add_parser("drmdebug"); s.add_argument("sec", nargs="?", type=int, default=15); s.set_defaults(f=cmd_drmdebug)
     sub.add_parser("display").set_defaults(f=cmd_display)
-    s = sub.add_parser("ab"); s.add_argument("--since", default="-3h"); s.add_argument("--metric", default="psys_w", choices=list(METRICS) + ["batt_w"], help="batt_w 는 batt_vi_w(순간 V×I)의 옛 이름"); s.add_argument("--threshold", type=float, default=0.3); s.add_argument("--settle", type=float, default=20)
+    s = sub.add_parser("ab", help="번갈아(ABAB) 측정 판정: 기본은 psys·패키지·순간 V×I·누적 계량을 한꺼번에 비교하고 지표끼리 어긋나면 알림"); s.add_argument("--since", default="-3h"); s.add_argument("--metric", default="all", choices=["all"] + list(METRICS) + ["coulomb_w", "batt_w"], help="all=네 지표 모두(기본). batt_w 는 batt_vi_w(순간 V×I)의 옛 이름"); s.add_argument("--threshold", type=float, default=0.3); s.add_argument("--settle", type=float, default=20)
     s.add_argument("--min-samples", type=int, default=5, help="구간당 최소 표본 수(미만이면 제외)")
-    s.add_argument("--expect-a", help="A 구간 표본의 기대 조건 '경로=값' (예: dev.wifi.ps=off). 다르면 시험 무효"); s.add_argument("--expect-b", help="B 구간 표본의 기대 조건 (예: dev.wifi.ps=on)"); s.set_defaults(f=cmd_ab)
+    s.add_argument("--expect-a", help="A 구간 표본의 기대 조건 '경로=값' (예: dev.wifi.ps=off). 다르면 시험 무효"); s.add_argument("--expect-b", help="B 구간 표본의 기대 조건 (예: dev.wifi.ps=on)")
+    s.add_argument("--require", action="append", help="모든 구간의 모든 표본이 만족해야 하는 조건 '경로=값'(여러 번 가능, 예: --require dev.lid=closed)")
+    s.add_argument("--allow-mixed", help="구간 사이에 달라도 되는 항목(쉼표: lid,ac,ssid). 기본은 덮개·AC 가 다르면 무효, SSID 가 다르면 경고"); s.set_defaults(f=cmd_ab)
     s = sub.add_parser("hyprtrace"); s.add_argument("mode", choices=["on", "off"]); s.set_defaults(f=cmd_hyprtrace)
     a = p.parse_args(argv)
     a.f(a)

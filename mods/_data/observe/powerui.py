@@ -93,7 +93,7 @@ class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         with TabbedContent(initial=self.start_tab, id="tabs"):
             with TabPane("지금 [1]", id="now"):
                 yield uikit.box(Panel(self._now_view, id="nowtext"), "현황")
-                yield uikit.box(Panel(lambda w, h: self._now_chart("psys", "psys", "cyan", w, h), id="nowg0"), "최근 30분 · psys (플랫폼 합계)")
+                yield uikit.box(Panel(lambda w, h: self._now_chart("psys", "psys", "cyan", w, h), id="nowg0"), "최근 30분 · psys (RAPL 플랫폼, 총 소비보다 약 1 W 적게 보임)")
                 yield uikit.box(Panel(lambda w, h: self._now_chart("batt_vi", "배터리", "dark_orange", w, h, axis=True), id="nowg1"), "최근 30분 · 배터리 소비 (방전 중)")
             with TabPane("시계열 [2]", id="series"):
                 for i, spec in enumerate(pv.SERIES):

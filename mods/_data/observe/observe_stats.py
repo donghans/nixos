@@ -1,9 +1,10 @@
 """observe_stats — A/B(번갈아 재기) 결과를 **추정이 아니라 통계로** 판정한다. 표준 라이브러리만.
 
 입력: 조건별 표본 목록(예: 구간 평균 전력) 또는 A→B 쌍 목록.
-판정 규칙(문서 power-evidence.md 와 같음):
+판정 규칙(문서 power-evidence.md 와 같음; 2026-10-21 강화):
   - 효과 = 평균(B) − 평균(A), 쌍별 차이 d_i = B_i − A_i.
-  - 쌍이 모두 같은 부호이고 |평균 효과| ≥ 임계값 → "확인(측정)".
+  - 쌍이 **3개 이상**이고 모두 같은 부호이며 |평균 효과| ≥ 임계값 → "확인(측정)".
+  - 쌍이 2개뿐이면(같은 부호·임계 이상이어도) → "일치(약함, 2쌍)" — 2쌍으로는 부호검정 p 가 0.5 라 우연과 구분되지 않는다.
   - 부호가 섞이거나 임계값 미만 → "불확실" (효과가 있어도 작다고 보고 코드를 바꾸지 않음).
 """
 import math, random, statistics as st
@@ -51,8 +52,10 @@ def verdict(a, b, threshold):
     big = (not math.isnan(eff)) and abs(eff) >= threshold
     if len(d) < 2:
         label = "표본 부족"
-    elif same_sign and big:
+    elif same_sign and big and len(d) >= 3:
         label = "확인(측정)"
+    elif same_sign and big:
+        label = "일치(약함, 2쌍)"
     else:
         label = "불확실"
     return {"n_pairs": len(d), "mean_a": mean(a), "mean_b": mean(b), "effect": eff, "diffs": d, "sd_a": sd(a), "sd_b": sd(b),

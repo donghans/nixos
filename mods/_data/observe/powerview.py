@@ -71,7 +71,7 @@ def stats_str(st, unit="W", fmt="{:.1f}"):
 
 SERIES = [  # (제목, 필드, 단위, 색, 하한, 상한, 형식)
     ("배터리 소비 (순간 V×I, 방전 중)", "batt_vi", "W", "dark_orange", 0.0, None, "{:.1f}"),
-    ("psys (플랫폼 합계)", "psys", "W", "cyan", 0.0, None, "{:.1f}"),
+    ("psys (RAPL 플랫폼 — 총 소비보다 약 1 W 적게 보임)", "psys", "W", "cyan", 0.0, None, "{:.1f}"),
     ("패키지 (CPU+GPU)", "pkg", "W", "magenta", 0.0, None, "{:.1f}"),
     ("배터리 잔량", "pct", "%", "green", 0.0, 100.0, "{:.0f}"),
 ]

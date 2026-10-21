@@ -25,11 +25,13 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 | 디스플레이 debugfs 스냅샷 | `observectl display` — **읽는 것이 디스플레이를 깨워 낮은 상태를 깨뜨릴 수 있음** |
 
 ## 전력 A/B 측정 절차 (이 절차로 잰 것만 "측정"으로 표기)
-1. `observectl on L0`(또는 L1)을 켜고 안정화(≥ 2분). 어댑터/덮개/VT/Wi-Fi 상태를 `observectl status` 로 확인.
-2. **A 와 B 를 번갈아 최소 2쌍(ABAB)**: `observectl mark A` → 조건 A 를 60초 유지 → `observectl mark B` → 조건 B 를 60초 유지 → `observectl mark A` → … (조건을 바꾸는 작업은 표지 직후 settle 로 제외됨). **스크립트에서 root 명령은 `/run/wrappers/bin/sudo` 를 써야 한다**(PATH 앞에 `/run/current-system/sw/bin` 을 두면 setuid 가 아닌 sudo 가 잡힘), 바꾼 직후 값을 읽어 확인(`iw dev wlan0 get power_save` 등)하고 다르면 중단.
-3. `observectl ab --metric psys_w --threshold 0.3 --settle 40 --expect-a dev.wifi.ps=off --expect-b dev.wifi.ps=on` 으로 판정. **`--expect-*` 로 실제 조건을 검증한다** — 스크립트가 조건을 못 바꾸고 통계만 내는 사고(2026-10-20: 시험 스크립트의 sudo 경로 오류로 Wi-Fi 절전이 안 바뀐 채 "효과 없음"으로 잘못 결론) 를 막는다. 다르면 "무효". **쌍이 모두 같은 부호이고 평균 효과가 임계 이상일 때만 "확인(측정)"**, 아니면 "불확실". 불확실한 효과로는 코드를 바꾸지 않는다.
-4. 같은 구간에 low/high 상태가 섞였다는 경고가 나오면 `observectl window --by state` 로 확인 — 낮은 상태 전환이 효과를 가렸을 수 있다(2026-10-20 사무실 Wi-Fi 시험이 그랬음).
-5. 결과는 `power-evidence.md` 의 장부에 근거 수준과 함께 기록.
+**틀을 쓴다**: `examples/abab_lib.sh` 를 불러와 `abab_set_a/b`·`abab_verify_a/b`·`abab_restore` 만 정의하고 `abab_run` 을 부른다(예: `examples/netdata_abab.sh`). 틀이 아래를 대신 지켜 준다 — Ctrl-C/TERM 때 복구하고 **끝낸다**, 시작 때의 덮개·AC 가 구간 사이에 바뀌면 즉시 중단(예: 중간에 덮개를 엶), 조건을 바꾼 직후 실제 값을 읽어 확인, 복구는 정확히 한 번, 마지막 `ab` 에 `--require dev.lid=… --require pw.ac=…` 자동 부착.
+1. `observectl on L0`(또는 L1)을 켜고 안정화(≥ 2분). 어댑터/덮개/VT/Wi-Fi 상태를 `observectl status` 로 확인. **어댑터는 뽑고**, 시험 종류에 맞게 덮개를 닫거나(대리 조건) 열어 두고(실제 사용) 손대지 않는다.
+2. **A 와 B 를 번갈아 3쌍 이상(ABABAB)**, **구간은 5분 이상**: 순간 V×I 는 30초 표본이라 구간이 짧으면 표본이 4~5개뿐이고, 누적 계량(1 mAh ≈ 15 mWh 단위)은 구간이 짧을수록 오차가 크다(오차 ≈ 15 mWh ÷ 구간 시간: 5분이면 ±0.18 W, 90초면 ±0.6 W). **스크립트에서 root 명령은 `/run/wrappers/bin/sudo` 를 써야 한다**(틀이 PATH 를 맞춘다).
+3. `observectl ab --since <T0>` — 기본은 **psys · 패키지 · 순간 V×I · 누적 계량을 한꺼번에** 보여 주고, 신뢰가 낮은 지표(구간당 표본 8개 미만의 V×I, 오차가 임계의 절반을 넘는 계량)는 표시하고 종합에서 뺀다. 신뢰 가능한 지표끼리 부호가 다르면 "불확실". 자동 검증: 덮개·AC 가 구간마다 다르면 **무효**(`--allow-mixed` 로 허용), SSID 가 다르면 경고, 짧아서 버려진 구간에서 조건이 달랐으면 경고. 추가 검증은 `--expect-a/-b 경로=값`(예: `dev.wifi.ps=off`), `--require 경로=값`.
+4. 판정 문구: **3쌍 이상**이고 모든 쌍이 같은 부호이며 임계(0.3 W) 이상이면 "확인(측정)", 2쌍이면 **"일치(약함)"**, 그 외 "불확실". (2쌍은 부호검정 p 가 0.5 라 우연과 구분되지 않는다 — 2026-10-21 #58 에서 순간 V×I 가 다른 지표와 반대였는데도 옛 도구가 "확인"이라 한 일이 계기.)
+5. 같은 구간에 low/high 상태가 섞였다는 경고가 나오면 `observectl window --by state` 로 확인 — 낮은 상태 전환이 효과를 가렸을 수 있다.
+6. 결과는 `power-evidence.md` 의 장부에 근거 수준(측정 / 측정(약) / 유보 / 추정)과 함께 기록.
 
 ## 낮은/높은 상태 분류(휴리스틱)
 `state = low` ⇔ 패키지 pc10 잔여율 ≥ 5%. 근거: powertop 측정에서 낮은 상태 pc10 17~24%, 높은 상태 0%. 낮은 상태의 하드웨어 정체는 "eDP 파이프 꺼짐"(display_snap 비교)이지만 pc10 은 그 결과 지표다. 이 분류가 틀리는 경우가 보이면 기준을 조정한다.
@@ -52,7 +54,8 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 - **스크립트의 sudo 경로**: PATH 앞에 `/run/current-system/sw/bin` 을 두면 setuid 가 아닌 `sudo` 가 잡혀 조건이 안 바뀐다 → `/run/wrappers/bin` 을 앞에 둘 것. 그래서 `ab --expect-a/--expect-b` 로 실제 조건을 검증한다.
 
 ## 예제 스크립트 (`mods/_data/observe/examples/`)
-- `wifi_abab.sh` — 검증형 Wi-Fi 절전 A/B(바꾼 직후 실제 값 확인, `--expect-*` 로 판정 검증). 다른 조건(Netdata, 장치 PM 등)을 바꿀 때의 틀로 쓴다.
+- `abab_lib.sh` — **번갈아(ABAB) 측정 틀**(신호 처리·덮개/AC 변화 자동 중단·적용 확인·복구 한 번·`ab` 자동 검증). 새 시험은 이 틀에 조건 적용 함수만 채워서 만든다. `netdata_abab.sh` 가 사용 예.
+- `wifi_abab.sh` — 검증형 Wi-Fi 절전 A/B(바꾼 직후 실제 값 확인, `--expect-*` 로 판정 검증). 틀 도입 이전 스크립트.
 - `wifi_switch.sh` — Wi-Fi 프로필 전환 + 게이트웨이 핑 실패 시 자동 복귀(원격 세션 보호).
 
 ## 어느 지표를 믿을까 (2026-10-20 검증)
