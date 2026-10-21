@@ -80,6 +80,23 @@ check("freshness: 15분 지난 지금까지 범위는 경고, 신선하면 새�
 nd_rows = uv.nd_signal_rows({"snap": {"signals": {"batt_vi_w": 2.0, "psys_w": 5.0}}}, {"recs": [rec(NOW, status="Charging")]})
 check("Netdata 신호 표: 충전·AC 가 섞인 구간의 V×I 는 '비교 불가'", dict((a, b) for a, b, _ in nd_rows)["배터리 V×I"] == "비교 불가" and dict((a, b) for a, b, _ in nd_rows)["RAPL psys"] == "5.00", str(nd_rows))
 
+# --- 원인 탭 조각
+import collections
+def fake_res(v, b, ac=("AC", "AC"), changes=()):
+    mk = lambda acn, lo: {"n": 10, "low_pct": lo, "psr_pct": 100, "lid": {"open": 10}, "ac": {acn: 10}, "vt": {"tty1": 10}}
+    return {"power": {"psys_w": {"value": v, "base": b}}, "baseline": (NOW - 7200, NOW - 3600), "state": mk(ac[0], 5), "state_base": mk(ac[1], 5), "changes": list(changes)}
+h = uv.cause_headline(fake_res(15.3, 11.9, changes=[{"kind": "앱 CPU", "name": "gimp", "cur": 1.6, "base": 0.0, "rel": float("inf"), "unit": "코어%"}])).plain
+check("원인 결론: 오른 전력·변화량·같이 달라진 앱(신규)·'상관일 뿐'", "11.9 W → 15.3 W" in h and "+3.4 W" in h and "올랐습니다" in h and "gimp 신규" in h and "상관일 뿐" in h, h)
+h = uv.cause_headline(fake_res(11.0, 11.1)).plain
+check("원인 결론: 0.3 W 미만은 '거의 같음'", "거의 같습니다" in h, h)
+h = uv.cause_headline(fake_res(15.0, 11.0, ac=("Battery", "AC"))).plain
+check("원인 결론: 전원이 다르면 조건 경고를 먼저 알림", "전원이 다름" in h and "⚠" in h, h)
+check("원인 결론: 결과가 없을 때 안내(None=계산 전, False=표본 없음)", "열면 계산" in uv.cause_headline(None).plain and "표본이 없어" in uv.cause_headline(False).plain)
+nb = fake_res(10.0, None); nb["baseline"] = None
+check("원인 결론: 기준이 없으면 변화를 말하지 않음", "기준이 없어" in uv.cause_headline(nb).plain)
+ch = uv.cause_changes(fake_res(1, 1, changes=[{"kind": "프로세스 CPU", "name": "vivaldi-bin", "cur": 4.3, "base": 1.8, "rel": 1.38, "unit": "코어%"}, {"kind": "시스템", "name": "프로세스 생성", "cur": 11.0, "base": 17.0, "rel": -0.35, "unit": "/s"}]))
+check("원인 변화표: 늘면 ▲ 빨강, 줄면 ▼ 초록, ABAB 안내", "▲" in ch.plain and "▼" in ch.plain and "ABAB" in ch.plain and any("red" in str(sp.style) for sp in ch.spans) and any("green" in str(sp.style) for sp in ch.spans))
+
 # --- Textual 앱
 import usageui
 from textual.widgets import DataTable, TabbedContent, Input
@@ -93,9 +110,10 @@ async def drive():
         n0 = app.view["loaded_at"]
         await pilot.press("r"); await pilot.pause(1.0)
         check("앱: r 로 새로고침하면 데이터 기준 시각이 갱신", app.view["loaded_at"] > n0)
-        for key, tab in (("2", "power"), ("3", "apps"), ("5", "system"), ("6", "hardware"), ("7", "help"), ("1", "summary")):
+        for key, tab in (("2", "apps"), ("3", "cause"), ("4", "system"), ("5", "help"), ("1", "dashboard")):
             await pilot.press(key); await pilot.pause(0.5)
             check(f"앱: {key} 키로 {tab} 탭", app.query_one("#tabs", TabbedContent).active == tab)
+        await pilot.press("2"); await pilot.pause(0.5)
         t = app.query_one("#tapps", DataTable)
         check("앱: 앱 표에 claude 행, 열 7개", t.row_count >= 1 and len(t.columns) == 7 and str(t.get_row_at(0)[0]) == "claude")
         await pilot.press("v"); await pilot.pause(1.0)

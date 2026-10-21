@@ -48,12 +48,12 @@ def freshness(view, now=None):
 def summary_range(view):
     s, rng = view["summary"], view["range"]
     t = Text()
-    _line(t, "범위", f"{s['range']}", f"{rng.label}" + (" · 끝이 '지금'" if rng.follows_now else ""))
-    _line(t, "수집", f"표본 {s['n']}개", f"수집된 시간 {pg.fmt_dur(s['hours'])}" + (f" · 수집 공백 {int(s['gap_s'])}초" if s["gap_s"] >= 60 else ""))
+    _line(t, "범위", f"{s['range']}", f"{rng.label}" + (" · 지금까지" if rng.follows_now else ""))
+    _line(t, "수집", f"표본 {s['n']}개", f"{pg.fmt_dur(s['hours'])}" + (f" · 공백 {int(s['gap_s'])}초" if s["gap_s"] >= 60 else ""))
     b = view["baseline"]
     if b:
         f = lambda x: time.strftime("%H:%M", time.localtime(x))
-        _line(t, "비교 기준", f"{f(b[0])} ~ {f(b[1])}", "원인 탭에서 이 구간과 비교(v 로 바꿈)")
+        _line(t, "비교 기준", f"{f(b[0])} ~ {f(b[1])}", "원인 탭에서 비교")
     return t
 
 
@@ -63,15 +63,15 @@ def summary_power(view):
     if not s["n"]:
         t.append(" 이 범위에는 표본이 없습니다 — `observectl on` 으로 수집을 켜고 시간이 지나야 합니다.\n", style="grey70")
         return t
-    _line(t, "평균 전력", _f(s["avg_psys_w"], 2, " W"), "측정 · RAPL psys(플랫폼 전체보다 약 1 W 적게 보임)")
-    _line(t, "쓴 전력량", _f(s["psys_wh"], 2, " Wh"), "측정 · psys 를 시간으로 적분")
+    _line(t, "평균 전력", _f(s["avg_psys_w"], 2, " W"), "측정 · psys")
+    _line(t, "쓴 전력량", _f(s["psys_wh"], 2, " Wh"), "측정 · 적분")
     c = s["coulomb"]
     if c:
         short = c["hours"] < 10 / 60
-        _line(t, "배터리에서 쓴", f"{c['wh']:.2f} Wh · {pg.fmt_dur(c['hours'])}", f"측정 · 누적 계량 평균 {c['avg_w']:.2f} W ±{c['err_w']:.2f}" + (" — 방전 10분 미만이라 오차 큼" if short else ""),
+        _line(t, "배터리에서 쓴", f"{c['wh']:.2f} Wh · {pg.fmt_dur(c['hours'])}", f"측정 · 계량 {c['avg_w']:.1f} W ±{c['err_w']:.2f}" + (" 오차 큼" if short else ""),
               vstyle="bold" if not short else "grey70")
     else:
-        _line(t, "배터리에서 쓴", "-", "방전 중 구간이 없음(AC 연결)", vstyle="grey50")
+        _line(t, "배터리에서 쓴", "-", "방전 구간 없음", vstyle="grey50")
     _line(t, "배터리 잔량", f"{_f(s['pct_first'], 0, '%')} → {_f(s['pct_last'], 0, '%')}", f"충전 시작 {s['charges']}회")
     return t
 
@@ -134,8 +134,8 @@ def summary_estimate(view):
     t.append(f" 잔량 {_f(e.get('remain_wh'), 1, ' Wh')} / 만충 {_f(e.get('full_wh'), 1, ' Wh')} ({_f(e.get('pct'), 0, '%')})\n", style="white")
     for key, lab in (("now", "지금 전력 기준"), ("recent", "최근 30분 기준"), ("typical", "최근 6시간 평소 기준")):
         w, h = e.get(key + "_w"), e.get(key + "_h")
-        t.append(" " + pad(lab, 16), style="grey70")
-        t.append(pad(pg.fmt_dur(h), 12), style="bold")
+        t.append(" " + pad(lab, 14), style="grey70")
+        t.append(pad(pg.fmt_dur(h), 10), style="bold")
         t.append(f"{_f(w, 1, ' W')}\n", style="grey50")
     t.append(" 추정: 잔량 ÷ 전력, 0% 까지 쓴다고 가정(실제로는 5~10% 남기고 끔). 검증은 하드웨어·배터리 탭의 방전 곡선(하루 이상 쌓인 뒤).", style="grey50")
     return t
@@ -241,6 +241,16 @@ def nd_signal_rows(sysdata, view=None):
     return rows
 
 
+def summary_battery(view, health):
+    """대시보드 '배터리' 칸: 건강 + 예상 사용 시간(추정)을 한 칸에."""
+    t = Text()
+    if health["health_pct"] is not None:
+        _line(t, "배터리 건강", f"{health['health_pct']:.0f}%", f"만충 {_f(health['full_wh'], 1, ' Wh')} / 설계 {_f(health['design_wh'], 1, ' Wh')}")
+    t.append("\n")
+    t.append_text(summary_estimate(view))
+    return t
+
+
 def battery_text(h):
     t = Text()
     if h["full_wh"] is None and h["health_pct"] is None:
@@ -301,3 +311,90 @@ GLOSSARY = [
     ("가장 오래 본 앱", "창 포커스 기록(observe-focus)에서 가져온 시간. 창 제목·내용은 기록하지 않습니다."),
     ("관측 공백", "그 시간에 수집이 없었다는 뜻이며 0 이 아닙니다(예: Netdata 가 꺼져 있던 시간)."),
 ]
+
+
+# ------------------------------------------------------------------ 원인 탭
+def _share(counter, keys):
+    tot = sum(counter.values()) or 1
+    return sum(v for k, v in counter.items() if k in keys) * 100 / tot
+
+
+def condition_diffs(res):
+    """이 구간과 기준 구간의 '조건' 차이(전원·덮개·PSR·low 비율). 전력 차이를 읽기 전에 조건이 같았는지 먼저 알린다. [문장]"""
+    st, sb = res.get("state"), res.get("state_base")
+    if not st or not sb:
+        return []
+    out = []
+    a, b = _share(st["ac"], {"AC"}), _share(sb["ac"], {"AC"})
+    if abs(a - b) >= 30:
+        out.append(f"전원이 다름 — AC 연결 비율 이 구간 {a:.0f}% / 기준 {b:.0f}% (충전·AC 는 전력을 크게 바꿈)")
+    a, b = _share(st["lid"], {"open"}), _share(sb["lid"], {"open"})
+    if abs(a - b) >= 30:
+        out.append(f"덮개 상태가 다름 — 열림 비율 이 구간 {a:.0f}% / 기준 {b:.0f}% (덮개 닫힘은 화면이 꺼져 전력이 크게 낮음)")
+    if abs(st["psr_pct"] - sb["psr_pct"]) >= 30:
+        out.append(f"PSR(화면 절전) 상태가 다름 — 이 구간 {st['psr_pct']}% / 기준 {sb['psr_pct']}%")
+    if abs(st["low_pct"] - sb["low_pct"]) >= 30:
+        out.append(f"깊은 절전 진입 비율이 다름 — 이 구간 {st['low_pct']}% / 기준 {sb['low_pct']}%")
+    return out
+
+
+def cause_headline(res):
+    """원인 탭 맨 위: 결론 한두 문장(+조건 경고). res 는 ex.build 결과, False/None 이면 안내."""
+    t = Text()
+    if res is None:
+        t.append(" 이 탭을 열면 계산합니다(Netdata 조회가 있어 몇 초 걸릴 수 있음).\n", style="grey50")
+        return t
+    if res is False:
+        t.append(" 이 범위에는 표본이 없어 비교할 수 없습니다.\n", style="grey70")
+        return t
+    p = (res["power"].get("psys_w") or {})
+    v, b = p.get("value"), p.get("base")
+    if v is None:
+        t.append(" 전력 값이 없습니다.\n", style="grey70")
+        return t
+    if not res["baseline"] or b is None:
+        t.append(f" 평균 전력(psys) {v:.1f} W. 비교 기준이 없어 무엇이 달라졌는지는 말할 수 없습니다(v 로 기준을 고르세요).\n")
+        return t
+    d = v - b
+    if abs(d) < 0.3:
+        t.append(f" 평균 전력(psys)이 기준과 거의 같습니다: {b:.1f} W → {v:.1f} W ({d:+.1f} W, 0.3 W 미만은 차이로 보지 않음).\n", style="bold")
+    else:
+        word, st = ("올랐습니다", "bold red") if d > 0 else ("내렸습니다", "bold green")
+        t.append(f" 평균 전력(psys)이 기준보다 ", style="bold")
+        t.append(f"{b:.1f} W → {v:.1f} W ({d:+.1f} W, {d / b * 100:+.0f}%) {word}.\n", style=st)
+    for c in condition_diffs(res):
+        t.append(f" ⚠ {c}\n", style="dark_orange")
+    top = [c for c in res["changes"] if c["kind"] in ("앱 CPU", "프로세스 CPU")][:3]
+    if top and abs(d) >= 0.3:
+        t.append(" 같이 달라진 것(상관일 뿐): ", style="grey70")
+        t.append(" · ".join(f"{c['name']} {_change_word(c)}" for c in top) + "\n")
+    elif abs(d) >= 0.3:
+        t.append(" 눈에 띄게 달라진 앱은 없습니다 — 전력 차이는 조건(위 경고)이나 화면·무선 같은 앱 밖 요인일 수 있습니다.\n", style="grey70")
+    return t
+
+
+def _change_word(c):
+    if c["rel"] == float("inf"):
+        return f"신규(+{c['cur']:.1f})"
+    return f"{c['base']:.1f}→{c['cur']:.1f} ({c['rel'] * 100:+.0f}%)" if c["rel"] is not None else f"{c['base']:.1f}→{c['cur']:.1f}"
+
+
+def cause_changes(res):
+    """'달라진 것 순위' 박스 본문: 늘어남 ▲ 빨강 / 줄어듦 ▼ 초록. 읽는 법을 맨 아래에 적는다."""
+    t = Text()
+    if not res:
+        return t
+    if not res["changes"]:
+        t.append(" (기준과 의미 있게 다른 항목 없음)" if res["baseline"] else " (기준 구간이 없어 비교하지 않음)", style="grey50")
+        return t
+    t.append(" " + pad("종류", 14) + pad("항목", 30) + pad("기준 → 이 구간", 24) + "변화\n", style="grey50")
+    for c in res["changes"]:
+        up = c["cur"] >= c["base"]
+        st = "red" if up else "green"
+        rel = "신규" if c["rel"] == float("inf") else ("" if c["rel"] is None else f"{c['rel'] * 100:+.0f}%")
+        t.append(f" {pad(c['kind'], 14)}{pad(c['name'][:28], 30)}", style="white")
+        t.append(("▲ " if up else "▼ ") + pad(f"{c['base']:.2f} → {c['cur']:.2f} {c['unit']}", 22), style=st)
+        t.append(f"{rel}\n", style=st)
+    t.append("\n ▲ 늘어남(빨강) ▼ 줄어듦(초록). 코어% = 코어 1개를 100% 로 본 CPU 시간. 순서는 상대 변화가 큰 순.", style="grey50")
+    t.append("\n 이 표는 '같이 달라진 것'이지 원인이 아닙니다 — 원인을 확인하려면 의심 가는 것 하나만 바꿔 번갈아 재는 ABAB 측정(observectl ab)이 필요합니다.", style="grey50")
+    return t
