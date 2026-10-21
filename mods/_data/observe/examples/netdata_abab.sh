@@ -5,5 +5,6 @@ abab_set_a()    { sudo -n systemctl start netdata; }
 abab_set_b()    { sudo -n systemctl stop netdata; }
 abab_verify_a() { [ "$(systemctl is-active netdata)" = active ]; }
 abab_verify_b() { [ "$(systemctl is-active netdata)" = inactive ]; }
-abab_restore()  { sudo -n systemctl start netdata >/dev/null 2>&1; echo "netdata=$(systemctl is-active netdata)"; }
+ND_WAS=$(systemctl is-active netdata)
+abab_restore()  { if [ "$ND_WAS" = active ]; then sudo -n systemctl start netdata >/dev/null 2>&1; else sudo -n systemctl stop netdata >/dev/null 2>&1; fi; echo "netdata=$(systemctl is-active netdata)"; }
 abab_run

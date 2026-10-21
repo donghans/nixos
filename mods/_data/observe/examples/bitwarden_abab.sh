@@ -7,5 +7,6 @@ abab_set_a()    { bw_start; }
 abab_set_b()    { bw_stop; }
 abab_verify_a() { _bw_running; }
 abab_verify_b() { ! _bw_running; }
-abab_restore()  { bw_start; echo "bitwarden=$(_bw_running && echo 켜짐 || echo 꺼짐)"; }
+BW_WAS_RUNNING=0; _bw_running && BW_WAS_RUNNING=1
+abab_restore()  { if [ "$BW_WAS_RUNNING" = 1 ]; then bw_start; else bw_stop; fi; echo "bitwarden=$(_bw_running && echo 켜짐 || echo 꺼짐)"; }
 abab_run

@@ -7,5 +7,6 @@ abab_set_a()    { sudo -n systemctl start netdata && bw_start; }
 abab_set_b()    { sudo -n systemctl stop netdata && bw_stop; }
 abab_verify_a() { [ "$(systemctl is-active netdata)" = active ] && _bw_running; }
 abab_verify_b() { [ "$(systemctl is-active netdata)" = inactive ] && ! _bw_running; }
-abab_restore()  { sudo -n systemctl start netdata >/dev/null 2>&1; bw_start; echo "netdata=$(systemctl is-active netdata) bitwarden=$(_bw_running && echo 켜짐 || echo 꺼짐)"; }
+ND_WAS=$(systemctl is-active netdata); BW_WAS_RUNNING=0; _bw_running && BW_WAS_RUNNING=1
+abab_restore()  { [ "$ND_WAS" = active ] && sudo -n systemctl start netdata >/dev/null 2>&1 || sudo -n systemctl stop netdata >/dev/null 2>&1; if [ "$BW_WAS_RUNNING" = 1 ]; then bw_start; else bw_stop; fi; echo "netdata=$(systemctl is-active netdata) bitwarden=$(_bw_running && echo 켜짐 || echo 꺼짐)"; }
 abab_run
