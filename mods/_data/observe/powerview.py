@@ -80,14 +80,18 @@ def series_points(recs, key):
     return [(r["t"], r[key] if key != "batt" or r["status"] == "Discharging" else None) for r in recs]
 
 
-def bands_text(recs, t0, t1, width):
-    """상태/PSR/전원 띠 3줄 + 시간축 + 범례(마지막에 줄바꿈 없음)."""
+def bands_text(recs, t0, t1, width, max_gap_s=120):
+    """상태/PSR/전원 띠 3줄 + 시간축 + 범례(마지막에 줄바꿈 없음). 칸 폭이 표본 간격보다 짧아도 끊겨 보이지 않게 직전 값으로 이어 준다."""
     plot_w = max(8, width - AXIS_W)
-    out = band_text("상태", pg.bucket_labels([(r["t"], r["state"]) for r in recs], t0, t1, plot_w), STATE_STYLE, plot_w)
+    bs = (t1 - t0) / plot_w
+
+    def lab(f):
+        return pg.hold_labels(pg.bucket_labels([(r["t"], f(r)) for r in recs], t0, t1, plot_w), bs, max_gap_s)
+    out = band_text("상태", lab(lambda r: r["state"]), STATE_STYLE, plot_w)
     out.append("\n")
-    out.append_text(band_text("PSR", pg.bucket_labels([(r["t"], "on" if r["psr"] else "off") for r in recs], t0, t1, plot_w), {"on": "cyan", "off": "grey35"}, plot_w))
+    out.append_text(band_text("PSR", lab(lambda r: "on" if r["psr"] else "off"), {"on": "cyan", "off": "grey35"}, plot_w))
     out.append("\n")
-    out.append_text(band_text("전원", pg.bucket_labels([(r["t"], "ac" if r["ac"] else "bat") for r in recs], t0, t1, plot_w), {"ac": "dodger_blue1", "bat": "grey35"}, plot_w))
+    out.append_text(band_text("전원", lab(lambda r: "ac" if r["ac"] else "bat"), {"ac": "dodger_blue1", "bat": "grey35"}, plot_w))
     out.append("\n")
     out.append_text(time_axis(t0, t1, width))
     out.append("\n 상태: 초록 low · 주황 high    PSR: 청록 켬    전원: 파랑 AC    (빈 칸 ░ = 데이터 없음)", style="grey50")

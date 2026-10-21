@@ -52,6 +52,21 @@ def bucket_labels(keys_points, t0, t1, n):
     return [max(b, key=b.get) if b else None for b in bins]
 
 
+def hold_labels(labels, bucket_s, max_gap_s):
+    """상태 띠용: 표본이 없는 칸(None)을 직전 값으로 이어 준다(칸 폭이 표본 간격보다 짧으면 표본 없는 칸이 주기적으로 생겨 띠가 끊겨 보임).
+    양쪽에 값이 있고 두 값 사이 시간이 max_gap_s 이하일 때만 채우며, 수집이 끊긴 구간은 비워 둔다. 새 리스트를 돌려준다."""
+    out = list(labels)
+    last = None
+    for i, k in enumerate(labels):
+        if k is None:
+            continue
+        if last is not None and i - last > 1 and (i - last) * bucket_s <= max_gap_s:
+            for j in range(last + 1, i):
+                out[j] = labels[last]
+        last = i
+    return out
+
+
 def nice_range(values, floor=0.0, pad=0.1):
     """그래프 세로 범위 (lo, hi). 값이 없으면 (0, 1). 위쪽에 pad 만큼 여유."""
     v = [x for x in values if x is not None]

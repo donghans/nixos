@@ -18,6 +18,8 @@ check("braille_area 높이·너비", len(rows) == 2 and all(len(r) == 2 for r in
 check("braille_area 꽉 찬 열은 반쪽 ⢸(오른쪽 열)/⡇(왼쪽 열)", rows[1][0] == "⢸" and rows[1][1] == "⡇", str(rows))
 check("braille_area None/하한 이하는 빈칸", pg.braille_area([None, 0], 1, 0, 8) == ["⠀"])
 check("braille_area 상한 이상은 꼭대기까지", pg.braille_area([99, 99], 1, 0, 8) == ["⣿"])
+check("hold_labels: 표본 없는 칸을 직전 값으로", pg.hold_labels(["a", None, "b", None, None, "b"], 25, 120) == ["a", "a", "b", "b", "b", "b"])
+check("hold_labels: 큰 틈(수집 끊김)·가장자리는 비움", pg.hold_labels(["a", None, None, None, "b", None], 60, 120) == ["a", None, None, None, "b", None])
 check("fill_gaps 선형 보간", pg.fill_gaps([0, None, None, 3], 30, 120) == [0, 1.0, 2.0, 3], str(pg.fill_gaps([0, None, None, 3], 30, 120)))
 check("fill_gaps 큰 틈(수집 끊김)은 비워 둔다", pg.fill_gaps([0, None, None, None, 4], 60, 120) == [0, None, None, None, 4])
 check("fill_gaps 가장자리 None 유지", pg.fill_gaps([None, 1, None], 30, 120) == [None, 1, None])
@@ -92,6 +94,14 @@ if have_rich:
     from rich.cells import cell_len
     bt = pv.bands_text(st.recs, t0, t1, 100)
     check("bands_text: 한글 라벨 줄도 칸 폭이 너비 이내", all(cell_len(l) <= 100 for l in bt.plain.split("\n")), str(max(cell_len(l) for l in bt.plain.split("\n"))))
+    # 칸 폭(25초)이 표본 간격(30초)보다 짧은 넓은 화면에서도 띠가 끊기지 않아야 한다(회귀: 일정 간격으로 빈 칸이 생겼음)
+    t0n, t1n = now - 3600, now
+    dense = [dict(st.recs[0], t=t0n + i * 30, state="low", ac=False, psr=True) for i in range(120)]
+    bt2 = pv.bands_text(dense, t0n, t1n, 150)
+    first_band = bt2.plain.split("\n")[0]
+    raw_lab = pg.bucket_labels([(r["t"], "x") for r in dense], t0n, t1n, 142)
+    check("(대조) 보간 없이는 칸 폭 < 표본 간격에서 빈 칸이 실제로 생긴다", None in raw_lab[: raw_lab.index(None, 0) + 1] and sum(1 for k in raw_lab[:-3] if k is None) > 5)
+    check("bands_text: 칸 폭 < 표본 간격이어도 띠에 빈 칸(░) 없음(끝의 아직 표본 없는 칸 제외)", "░" not in first_band.rstrip("░"), first_band)
     check("bands_text: 상태·PSR·전원·범례", "PSR" in bt.plain and "전원" in bt.plain and "초록 low" in bt.plain)
     check("SERIES: 그래프 4개(배터리·psys·패키지·잔량)", [x[1] for x in pv.SERIES] == ["batt", "psys", "pkg", "pct"])
     check("chart: 작은 높이·빈 데이터에서도 예외 없음", len(pv.chart([], t0, t1, 30, 3)[0].plain) > 0)
