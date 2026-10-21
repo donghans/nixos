@@ -24,6 +24,7 @@ import observe_core as core
 import observe_stats as stats
 import observe_explain as ex
 import observe_netdata as nd
+import observe_query as qy
 import observe_tiers as tiers
 
 METRICS = {"psys_w": ("pw", "psys_w"), "pkg_w": ("pw", "pkg_w"), "batt_vi_w": ("pw", "batt_vi_w"), "core_w": ("pw", "core_w"), "uncore_w": ("pw", "uncore_w")}
@@ -209,6 +210,36 @@ def window_netdata_table(groups, t0, t1, provider=None):
             xs = [x for x in xs if x is not None]
             res[k].append(sum(xs) / len(xs) if xs else None)
     return keys, res
+
+
+def cmd_query(a):
+    t0, t1 = core.parse_when(a.since), core.parse_when(a.until) if a.until else None
+    rows = samples(t0, t1)
+    if not rows:
+        sys.exit("표본이 없습니다(observectl on 으로 켠 뒤 시간이 지나야 함)")
+    sigs = a.signal
+    nd_series = None
+    if any(s.startswith(qy.ND_PREFIX) for s in sigs):
+        if not nd.available():
+            sys.exit(f"nd: 신호는 Netdata 가 켜져 있어야 합니다({nd.BASE}). 켜져 있는 구간만 값이 있고 나머지는 '-'(관측 공백)입니다.")
+        nd_series = nd.sample_series(rows[0]["t"], rows[-1]["t"] + 30)
+        bad = [s for s in sigs if s.startswith(qy.ND_PREFIX) and s[len(qy.ND_PREFIX):] not in nd_series]
+        if bad:
+            sys.exit(f"알 수 없거나 비어 있는 Netdata 신호 {bad} — 가능한 이름: {', '.join(sorted(nd_series))}")
+    key = None if a.step or a.by == "none" else (lambda r: group_key(r, a.by))
+    try:
+        step = qy.parse_step(a.step) if a.step else None
+        res = qy.run(rows, sigs, a.agg, step, key, nd_series)
+    except ValueError as e:
+        sys.exit(str(e))
+    legacy = sum(1 for r in rows if r.get("legacy"))
+    print(f"{core.hms(rows[0]['t'])} ~ {core.hms(rows[-1]['t'])} · 표본 {len(rows)}개 · 집계 {a.agg} · " + (f"{a.step} 간격" if a.step else f"그룹 {a.by}"))
+    if legacy and any(s.startswith(("app:", "proc:")) for s in sigs):
+        print(f"(옛 형식 표본 {legacy}개는 앱·프로세스 값이 없거나 메인 스레드만 센 값이라 그 신호에서는 빠짐)")
+    print(f"{'구간' if a.step else '그룹':<18}{'n':>5}" + "".join(f"{s[:22]:>24}" for s in sigs))
+    for g, n, vals in res:
+        label = core.hms(g) if a.step else str(g)[:17]
+        print(f"{label:<18}{n:>5}" + "".join(fmt(v, 24, a.digits) for v in vals))
 
 
 def cmd_states(a):
@@ -827,6 +858,7 @@ def main(argv=None):
     s = sub.add_parser("trace", help="스팬(구간) 폭포 · 구간별 에너지 · 이름별 요약"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--name", help="이름에 포함된 글자"); s.add_argument("--min-ms", type=float, default=0); s.add_argument("--trace", help="트레이스 id 앞부분"); s.add_argument("-n", type=int, default=5, help="폭포로 보여 줄 최근 트레이스 수"); s.add_argument("--width", type=int, default=110); s.add_argument("--by", action="store_true", help="폭포 대신 이름별 요약표(횟수·소요·에너지)"); s.set_defaults(f=cmd_trace)
     s = sub.add_parser("explain", help="한 구간을 여러 출처(전력·상태·시스템·Netdata·프로세스·포커스·스팬)로 묶어 설명하고 기준 구간과 비교"); s.add_argument("--since", default="30m"); s.add_argument("--until"); s.add_argument("--at", help="중심 시각(HH:MM 등) — --span 초 만큼의 구간"); s.add_argument("--span", type=float, default=300); s.add_argument("--baseline", default="prev", help="none | prev(바로 앞의 같은 길이, 기본) | 시작..끝"); s.add_argument("--no-netdata", action="store_true"); s.add_argument("--json", action="store_true"); s.set_defaults(f=cmd_explain)
     s = sub.add_parser("ebpf", help="시간 제한형 eBPF 정밀 모드: tiers(단계·비용) | on <sample|counts|full> [--for 10m] | off | status"); s.add_argument("action", choices=["tiers", "on", "off", "status"]); s.add_argument("tier", nargs="?"); s.add_argument("--for", dest="for_", default="10m", help="제한 시간(기본 10m, 최대 60분)"); s.set_defaults(f=cmd_ebpf)
+    s = sub.add_parser("query", help="범용 조회: 신호 여러 개를 시간 간격(--step)이나 그룹(--by)으로 묶어 집계(--agg). 신호 = 별칭(psys pkg vi core uncore pc8 pc10 cpu_all) · 표본 경로(pw.psys_w) · app:<앱>.cpu|ctxsw · proc:<comm>.cpu|ctxsw · nd:<Netdata 신호>"); s.add_argument("signal", nargs="+"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--step", help="시간 간격(예: 5m). 없으면 --by 로 묶음"); s.add_argument("--by", default="none", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.add_argument("--agg", default="mean", choices=list(qy.AGGS)); s.add_argument("--digits", type=int, default=2); s.set_defaults(f=cmd_query)
     s = sub.add_parser("nd", help="Netdata 어댑터(있을 때만): defs=신호 정의, stats=구간 평균, apps=앱 그룹 CPU, charts=차트 찾기, get=차트 값"); s.add_argument("what", choices=["defs", "stats", "apps", "charts", "get"]); s.add_argument("chart", nargs="?", help="charts: 이름 조각 · get: 차트 이름"); s.add_argument("--since", default="10m"); s.add_argument("--until"); s.add_argument("-n", type=int, default=10); s.set_defaults(f=cmd_nd)
     s = sub.add_parser("timeline"); s.add_argument("--at", required=True); s.add_argument("--span", type=float, default=60); s.add_argument("--journal", default="all", choices=["all", "warn", "none"]); s.set_defaults(f=cmd_timeline)
     s = sub.add_parser("bpf", help="eBPF(bpftrace) 프리셋을 N초 동안 실행: exec wake profile psr io net"); s.add_argument("preset", choices=["exec", "wake", "profile", "psr", "io", "net"]); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--comm", help="프로세스 이름 필터(영숫자·._- 15자)"); s.add_argument("-n", type=int, default=12, help="표의 상위 행 수"); s.add_argument("--no-spans", action="store_true", help="exec: 프로세스 스팬을 이벤트 로그에 적지 않음"); s.set_defaults(f=cmd_bpf)
