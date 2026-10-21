@@ -188,6 +188,7 @@ def sample_series(t0, t1, step=30):
         except NetdataError:
             return
         out[name] = [(t, pick(v)) for t, v in rows if pick(v) is not None]
+    put("psys_w", "cpu.powercap_intel_rapl_zone_psys", lambda v: next((x for x in v.values() if x is not None), None))
     put("cpu_all_pct", "system.cpu", lambda v: _sum(v, exclude=("idle", "iowait")) if any(x is not None for x in v.values()) else None)
     put("net_rx_kbps", "system.net", lambda v: abs(v["received"]) if v.get("received") is not None else None)
     put("net_tx_kbps", "system.net", lambda v: abs(v["sent"]) if v.get("sent") is not None else None)
