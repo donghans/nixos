@@ -3,7 +3,7 @@
 프리셋(모두 N초 동안만 붙었다가 떼어진다 — 상시 계측 아님):
   exec     프로세스 생성/종료 → 프로세스 구간(스팬: 부모-자식, CPU 시간). 누가 프로세스를 자주 만드나.
   wake     깨우는 쪽 → 깨어나는 쪽 comm 쌍의 횟수(sched_waking). 전력의 원인 추적.
-  profile  99Hz CPU 샘플링: 프로세스별 CPU 비율 + 가장 많이 걸린 커널/사용자 맨 위 함수(JFR 의 가벼운 버전).
+  profile  약 99.6Hz(10,038µs, 1초 주기와 위상이 고정되지 않는 비조화 주기) CPU 샘플링: 프로세스별 CPU 비율 + 가장 많이 걸린 커널/사용자 맨 위 함수(JFR 의 가벼운 버전).
   psr      화면 갱신 원인: drm atomic 커밋을 일으킨 comm 별 횟수 + i915 PSR flush/invalidate/exit/activate 횟수(PSR 이 왜 풀리나).
   io       블록 입출력 comm 별 횟수·바이트.
   net      TCP/UDP 송수신 호출 comm 별 횟수."""
@@ -30,7 +30,7 @@ def program(preset, sec, comm=None):
     if preset == "wake":
         return f"tracepoint:sched:sched_waking {flt} {{ @w[comm, args->comm] = count(); }} {end}"
     if preset == "profile":
-        return (f"profile:hz:99 {flt} {{ @cpu[comm] = count(); @kleaf[comm, kstack(1)] = count(); @uleaf[comm, ustack(1)] = count(); }} {end}")
+        return (f"profile:us:10038 {flt} {{ @cpu[comm] = count(); @kleaf[comm, kstack(1)] = count(); @uleaf[comm, ustack(1)] = count(); }} {end}")
     if preset == "psr":
         return ("kprobe:drm_mode_atomic_ioctl %s { @atomic[comm] = count(); } kprobe:i915:intel_psr_flush { @psr_flush = count(); } "
                 "kprobe:i915:intel_psr_invalidate { @psr_invalidate = count(); } kprobe:i915:intel_psr_exit { @psr_exit = count(); } kprobe:i915:intel_psr_activate { @psr_activate = count(); } %s") % (flt, end)
@@ -91,7 +91,7 @@ def summarize(preset, lines, maps, sec, n=15):
                 frame = next((ln.strip() for ln in stack.splitlines() if ln.strip()), "?")
                 out.append({"comm": comm, "frame": frame, "count": v, "pct": round(v * 100 / tot, 1)})
             return out
-        return {"samples": sum(cpu.values()), "hz": 99, "cpu": [{"comm": a, "count": b, "pct": round(b * 100 / tot, 1)} for a, b in top(cpu, n)],
+        return {"samples": sum(cpu.values()), "hz": round(1e6 / 10038, 1), "cpu": [{"comm": a, "count": b, "pct": round(b * 100 / tot, 1)} for a, b in top(cpu, n)],
                 "kernel_leaf": leaf("kleaf"), "user_leaf": leaf("uleaf")}
     if preset == "psr":
         return {"atomic_ioctl": [{"comm": a, "count": b, "per_s": round(b / sec, 1)} for a, b in top(maps.get("atomic", {}), n)],

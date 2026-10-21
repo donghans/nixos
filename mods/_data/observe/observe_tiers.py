@@ -1,6 +1,6 @@
 """observe_tiers — 단계형 eBPF 집계(상시 계측이 아니라 **시간 제한형 정밀 모드**). 수집기(root)가 bpftrace 를 자식으로 띄워 30초마다 프로세스(tgid)별 집계를 표본 흐름에 합친다.
 단계(2026-10-21 실측, 코어 1개 기준 비용 / 정확성 — 장부 #61):
-  sample  19Hz CPU 점유 샘플링       0.12%(부하와 무관)        CPU 상위 프로세스는 중앙값 95%, 작은 프로세스는 오차 큼(통계적 추정)
+  sample  약 18.6Hz(53,711µs) CPU 점유 샘플링   0.12%(부하와 무관)   통계적 추정 — 정수 Hz 는 1초 주기 작업과 위상이 고정돼 편향되므로 비조화 주기 사용
   counts  `sched_switch` 전환 합계    0.62%(전환 수에 비례)      프로세스별 총 전환(자발+비자발) /proc 대비 98%
   full    자발·비자발·on-CPU 시간    1.8%(전환 수에 비례)       /proc 모든 스레드 합과 99%, CPU 시간 101%
 안전장치: ① 제한 시간(`--for`, 최대 60분)이 지나면 자동으로 끈다 ② counts·full 은 시스템 전환이 초당 GUARD 를 넘으면 스스로 멈춘다(비용이 부하에 비례하므로) ③ 수집기가 끝나면 자식도 끝낸다.
@@ -16,10 +16,13 @@ import time
 INTERVAL = 30
 GUARD_SW_PER_S = 15000          # 이 이상이면 counts·full 은 비용이 코어의 10% 를 넘기 시작해 스스로 멈춘다(2026-10-21: 3,022/s 에서 full 1.8%)
 MAX_MINUTES = 60
-SAMPLE_HZ = 19
+# 샘플링 주기: 정수 Hz(19·99 등)는 1초 주기로 일하는 프로세스(Netdata 등)와 정수비라 위상이 고정돼 한쪽 위상만 계속 찍힌다(2026-10-21 실측: netdata 가 L0 값의 약 3배로 과대 추정).
+# 1/(18+0.618…)초 = 53,711µs 로 잡으면 1초마다 위상이 0.618 주기씩 이동해 골고루(저불일치 수열) 찍힌다.
+SAMPLE_PERIOD_US = 53711
+SAMPLE_HZ = 1e6 / SAMPLE_PERIOD_US          # 실효 주파수(약 18.62Hz) — 점유율 계산에 쓴다
 
 TIERS = {
-    "sample": {"label": "샘플링(E1)", "cost": "코어 약 0.12% (부하와 무관)", "accuracy": "CPU 큰 프로세스 약 95%, 작은 프로세스는 오차 큼", "gives": "프로세스별 CPU 점유 추정"},
+    "sample": {"label": "샘플링(E1)", "cost": "코어 약 0.12% (부하와 무관)", "accuracy": "통계적 추정(1초 주기 에일리어싱을 피하는 비조화 주기, 작은 프로세스는 오차 큼)", "gives": "프로세스별 CPU 점유 추정"},
     "counts": {"label": "전환 합계(E2)", "cost": "코어 약 0.6% (전환 3천/s 기준, 부하에 비례)", "accuracy": "프로세스별 총 전환 98%", "gives": "프로세스별 총 문맥 전환/s(자발+비자발, 짧게 사는 스레드 포함)"},
     "full": {"label": "전체(E3)", "cost": "코어 약 1.8% (전환 3천/s 기준, 부하에 비례)", "accuracy": "자발 전환 99%, CPU 시간 101%", "gives": "프로세스별 자발/비자발 전환/s·on-CPU 시간(코어 1개=100%)"},
 }
@@ -31,7 +34,7 @@ _TICK = 'printf("TICK %llu\\n", nsecs);'
 def script(tier, interval=INTERVAL):
     """tier 의 bpftrace 프로그램. 맵은 interval 초마다 출력하고 비운다."""
     if tier == "sample":
-        return (_HDR + f"profile:hz:{SAMPLE_HZ} {{ @cpu[((struct task_struct *)curtask)->tgid] = count(); }}\n"
+        return (_HDR + f"profile:us:{SAMPLE_PERIOD_US} {{ @cpu[((struct task_struct *)curtask)->tgid] = count(); }}\n"
                 f"interval:s:{interval} {{ print(@cpu); clear(@cpu); {_TICK} }}\n")
     if tier == "counts":
         return f"tracepoint:sched:sched_switch {{ @sw[pid] = count(); }}\ninterval:s:{interval} {{ print(@sw); clear(@sw); {_TICK} }}\n"

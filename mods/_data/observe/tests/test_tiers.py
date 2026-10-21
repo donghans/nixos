@@ -10,11 +10,12 @@ from harness import checker
 check, finish = checker()
 os.makedirs(core.DATA_DIR, exist_ok=True)
 
+check("실효 샘플링 주파수는 1초 주기와 정수비가 아님(분수부가 0 에서 충분히 멀다 = 위상이 골고루 이동)", abs((1e6 / 53711) % 1 - 0.618) < 0.01 and 18 < tiers.SAMPLE_HZ < 19)
 # --- 프로그램
 for t in tiers.TIERS:
     sc = tiers.script(t, 30)
     check(f"script({t}): 30초마다 맵을 출력·비우고 TICK 로 간격을 끝냄", "interval:s:30" in sc and "clear(" in sc and "TICK" in sc, sc)
-check("script(sample): 19Hz 프로파일, tgid 키", "profile:hz:19" in tiers.script("sample") and "->tgid" in tiers.script("sample"))
+check("script(sample): 비조화 주기(53,711µs, 정수 Hz 아님)·tgid 키 — 1초 주기 에일리어싱 방지", "profile:us:53711" in tiers.script("sample") and "profile:hz" not in tiers.script("sample") and "->tgid" in tiers.script("sample"))
 check("script(counts): sched_switch 에서 맵 한 번만 갱신(가벼운 변형)", tiers.script("counts").count("count()") == 1 and "sched_switch" in tiers.script("counts"))
 check("script(full): 자발/비자발(prev_state)·on-CPU 시간·tgid", all(k in tiers.script("full") for k in ("prev_state == 0", "@vol", "@invol", "@cpu_ns", "->tgid")))
 try:
@@ -37,8 +38,9 @@ f = tiers.summarize("full", recs[0], 30.0, res)
 r100 = next(p for p in f["procs"] if p["pid"] == 100)
 check("summarize(full): 자발 300/30=10/s·비자발 0.7/s·CPU 3초/30초=10%(코어1=100%)·이름 해석", r100 == {"pid": 100, "comm": "netdata", "cpu_core_pct": 10.0, "vol_s": 10.0, "invol_s": 0.7}, str(r100))
 check("summarize(full): 전체 전환 합((300+50+20)/30 = 12.3/s)", abs(f["sw_total_s"] - 370 / 30) < 0.1, str(f))
-s_ = tiers.summarize("sample", {"maps": {"cpu": {"100": 190, "0": 5000}}, "tick_ns": 0}, 10.0, res)
-check("summarize(sample): 190표본/(19Hz×10초)=100%(코어 1개), pid 0(idle) 제외", s_["procs"] == [{"pid": 100, "comm": "netdata", "cpu_core_pct": 100.0}] and s_["samples"] == 190, str(s_))
+n100 = round(tiers.SAMPLE_HZ * 10.0)
+s_ = tiers.summarize("sample", {"maps": {"cpu": {"100": n100, "0": 5000}}, "tick_ns": 0}, 10.0, res)
+check("summarize(sample): 실효 주파수×시간 표본이면 100%(코어 1개), pid 0(idle) 제외", abs(s_["procs"][0]["cpu_core_pct"] - 100.0) < 1.0 and s_["procs"][0]["pid"] == 100 and s_["samples"] == n100, str(s_))
 c_ = tiers.summarize("counts", {"maps": {"sw": {"100": 600, "200": 60, "0": 99999}}, "tick_ns": 0}, 30.0, res)
 check("summarize(counts): 전환/s(600/30=20), 큰 순, pid 0 제외, 합 22", c_["procs"][0] == {"pid": 100, "comm": "netdata", "sw_s": 20.0} and abs(c_["sw_total_s"] - 22.0) < 0.1, str(c_))
 many = {"maps": {"sw": {str(i): i for i in range(1, 50)}}, "tick_ns": 0}
@@ -69,7 +71,7 @@ rn = tiers.Runner("/fake/bpftrace", popen=popen_factory(tick), resolve=res, cloc
 check("실행기: 요구가 없으면 시작하지 않음", rn.ensure(None) is False and not made)
 check("실행기: bpftrace 경로가 없으면 시작하지 않음", tiers.Runner(None).ensure({"tier": "sample", "until": 9e9}) is False)
 check("실행기: 알 수 없는 단계는 시작하지 않음", rn.ensure({"tier": "bogus", "until": now[0] + 600}) is False and not made)
-check("실행기: 유효한 요구는 bpftrace 를 올바른 인자로 시작", rn.ensure({"tier": "sample", "until": now[0] + 600}) is True and made[0].cmd[:3] == ["/fake/bpftrace", "-f", "json"] and "profile:hz:19" in made[0].cmd[4], str(made[0].cmd[:3]))
+check("실행기: 유효한 요구는 bpftrace 를 올바른 인자로 시작", rn.ensure({"tier": "sample", "until": now[0] + 600}) is True and made[0].cmd[:3] == ["/fake/bpftrace", "-f", "json"] and "profile:us:53711" in made[0].cmd[4], str(made[0].cmd[:3]))
 time.sleep(0.3)
 got = rn.take()
 check("실행기: 집계 간격이 끝나면 요약이 쌓이고 take 가 가져감(한 번만)", got and got["tier"] == "sample" and got["procs"][0]["comm"] == "netdata" and rn.take() is None, str(got))
@@ -88,7 +90,7 @@ heavy = L({"type": "map", "data": {"@sw": {"100": 30000 * 30}}}, {"type": "print
 rn3 = tiers.Runner("/fake/bpftrace", popen=popen_factory(heavy), resolve=res, clock=lambda: now[0], interval=30)
 rn3.ensure({"tier": "counts", "until": now[0] + 600}); time.sleep(0.4)
 check("실행기: 전환이 상한(15000/s)을 넘으면 스스로 멈추고 이유를 남김", made[-1].terminated and "상한" in (rn3.stopped_reason or ""), str(rn3.stopped_reason))
-heavy_s = L({"type": "map", "data": {"@cpu": {"100": 19 * 30}}}, {"type": "printf", "data": "TICK 1\n"})
+heavy_s = L({"type": "map", "data": {"@cpu": {"100": 560}}}, {"type": "printf", "data": "TICK 1\n"})
 rn4 = tiers.Runner("/fake/bpftrace", popen=popen_factory(heavy_s), resolve=res, clock=lambda: now[0])
 rn4.ensure({"tier": "sample", "until": now[0] + 600}); time.sleep(0.3)
 check("실행기: sample 단계는 부하와 무관하므로 상한으로 멈추지 않음", not made[-1].terminated and rn4.stopped_reason is None)
