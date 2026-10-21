@@ -150,8 +150,12 @@ mkMod __curPos "Docker Daemon and tools" ({
       # (이유: 2026-08-04에 stress-test 반복 실행으로 이미지 197개/79GB, 볼륨 147개/21GB가
       #        쌓여 btrfs subvolume 과다로 btrfs-cleaner가 상시 부하 걸린 사고 재발 방지.
       #        볼륨은 디버깅용 데이터 보존 가능성 때문에 자동 삭제 대상에서 제외 — 수동 정리 유지)
+      # (2026-10-22: 부팅 직후 타이머가 놓친 실행(Persistent)을 곧바로 따라잡는데 그때 rootless docker 가 아직 소켓을 안 열어 "failed to connect to the docker API" 로 실패 →
+      #  waybar 에 실패 서비스 ⚠ 가 떴다. docker.service 뒤에 실행되도록 순서를 건다.)
       systemd.user.services.docker-prune = lib.mkIf cfg.rootless {
         description = "Prune dangling Docker images older than 48h";
+        after = ["docker.service"];
+        wants = ["docker.service"];
         serviceConfig = {
           Type = "oneshot";
           Environment = "DOCKER_HOST=unix://%t/docker.sock";
