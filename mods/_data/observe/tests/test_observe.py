@@ -198,7 +198,7 @@ def _ab_rows(deltas, seg_len=16, lids=None, acs=None, vi_noise=None, base_t=None
             t += 30
             q -= cw / 15.0 * 1e6 * 30 / 3600          # 계량 W → 30초 동안 줄어든 µAh
     return out
-def _run_ab(rows, *argv):
+def _run_ab(rows, *argv, nd_snap=None):
     d = os.path.join(TMP, "ab"); os.makedirs(d, exist_ok=True)
     for f in os.listdir(d):
         os.unlink(os.path.join(d, f))
@@ -206,14 +206,35 @@ def _run_ab(rows, *argv):
         core.append_jsonl(d, "samples", r, t=r["t"])
     old = core.SAMPLE_DIR
     core.SAMPLE_DIR = d; observe_cli.core.SAMPLE_DIR = d
+    old_snap = observe_cli.nd.snapshot
+    observe_cli.nd.snapshot = nd_snap or (lambda *x, **k: None)      # 시험이 이 PC 의 실제 Netdata 에 의존하지 않게
     buf = _io2.StringIO()
     try:
         with _cx2.redirect_stdout(buf):
             observe_cli.main(["ab", "--since", "3h", "--settle", "20", "--min-samples", "3", *argv])
     finally:
-        core.SAMPLE_DIR = old; observe_cli.core.SAMPLE_DIR = old
+        core.SAMPLE_DIR = old; observe_cli.core.SAMPLE_DIR = old; observe_cli.nd.snapshot = old_snap
     return buf.getvalue()
 A = ("A", 5.0, 2.0, 6.0, 6.0); B = ("B", 4.0, 1.6, 5.0, 5.0)
+# Netdata 1초 지표: 구간 시작 시각의 A/B 를 표본의 cond 로 판별하는 가짜 어댑터
+def _nd_stub(rows_, gap_conds=(), cov=1.0):
+    def snap(t0, t1, n=0):
+        r = min(rows_, key=lambda x: abs(x["t"] - t0))
+        c = r["mark"]["cond"]
+        if c in gap_conds:
+            return {"coverage": 0.0, "signals": {}, "apps_cpu": []}
+        a = c == "A"
+        return {"coverage": cov, "signals": {"psys_w": 5.2 if a else 4.1, "pkg_w": 2.1 if a else 1.7, "batt_vi_w": 6.1 if a else 5.1}, "apps_cpu": []}
+    return snap
+_r6 = _ab_rows([A, B, A, B, A, B])
+out = _run_ab(_r6, nd_snap=_nd_stub(_r6))
+check("ab: Netdata 1초 지표 3개를 같은 표에 출력하고 3쌍 모두 같은 방향이면 종합 '확인(측정)'", all(k in out for k in ("Netdata psys(1초)", "Netdata 패키지(1초)", "Netdata V×I(1초)")) and "종합: 확인(측정)" in out, out)
+out = _run_ab(_r6, "--no-netdata", nd_snap=_nd_stub(_r6))
+check("ab: --no-netdata 면 Netdata 지표를 빼다", "Netdata psys" not in out, out)
+out = _run_ab(_r6, nd_snap=_nd_stub(_r6, gap_conds=("B",)))
+check("ab: Netdata 가 꺼져 있던 구간이 있으면 그 지표는 '관측 공백'으로 판정하지 않고, 나머지 지표 판정은 그대로", "관측 공백" in out and "종합: 확인(측정)" in out, out)
+out = _run_ab(_r6)
+check("ab: Netdata 가 응답하지 않으면 안내 후 나머지 지표로 판정", "Netdata 응답 없음" in out and "종합: 확인(측정)" in out, out)
 out = _run_ab(_ab_rows([A, B, A, B, A, B]))
 check("ab: 3쌍·모든 지표 같은 방향 → 종합 '확인(측정)'", "종합: 확인(측정)" in out, out)
 out = _run_ab(_ab_rows([A, B, A, B]))

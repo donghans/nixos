@@ -181,6 +181,34 @@ def cmd_window(a):
         ctxsw_top = mean_of(g, lambda r: None if r.get("legacy") and any("ctxsw_vol_leader_s" in p for p in r.get("proc", [])) else sum(p.get("ctxsw_vol_s", 0) for p in r.get("proc", [])))
         print(f"{str(k)[:17]:<18}{len(g):>4}{fmt(mean_of(g, lambda r: get(r, 'pw.batt_vi_w') if get(r, 'pw.status') == 'Discharging' else None), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.psys_w')), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.pkg_w')))}"
               f"{fmt(mean_of(g, lambda r: get(r, 'pw.core_w')))}{fmt(mean_of(g, lambda r: get(r, 'cs.pc8')), 6, 1)}{fmt(mean_of(g, lambda r: get(r, 'cs.pc10')), 6, 1)}{fmt(ctxsw_top, 11, 0)}{fmt(mean_of(g, lambda r: get(r, 'irq.cpu_all_pct')), 9, 1)}")
+    if not a.no_netdata and nd.available():
+        got = window_netdata_table(groups, rows[0]["t"], rows[-1]["t"] + 30)
+        if got:
+            keys, res = got
+            print("\nNetdata 병기(1초 수집값을 같은 표본 시각에 맞춰 그룹 평균 · 없으면 '-' = 관측 공백)")
+            print(f"{'그룹':<18}" + "".join(f"{nd.SIGNALS[k][0] + ' ' + nd.SIGNALS[k][1]:>20}" for k in keys))
+            for k in groups:
+                print(f"{str(k)[:17]:<18}" + "".join(f"{fmt(v, 20, 1)}" for v in res[k]))
+
+
+def window_netdata_table(groups, t0, t1, provider=None):
+    """window 그룹마다 Netdata 신호의 평균(표본 시각 ±15초 값만 사용). 반환 (헤더 목록, {그룹: [값 또는 None]}) 또는 None(Netdata 없음)."""
+    sample = provider or nd.sample_series
+    try:
+        ser = sample(t0, t1)
+    except nd.NetdataError:
+        return None
+    keys = [k for k in ("net_rx_kbps", "net_tx_kbps", "disk_read_kibs", "disk_write_kibs", "nvme_temp_c") if k in ser]
+    if not keys:
+        return None
+    res = {}
+    for k, g in groups.items():
+        res[k] = []
+        for key in keys:
+            xs = [nd.bucket_mean(ser[key], r["t"]) for r in g]
+            xs = [x for x in xs if x is not None]
+            res[k].append(sum(xs) / len(xs) if xs else None)
+    return keys, res
 
 
 def cmd_states(a):
@@ -389,6 +417,32 @@ def cmd_ebpf(a):
 
 
 def cmd_nd(a):
+    if a.what == "charts":
+        if not nd.available(ttl=0):
+            sys.exit(f"Netdata 가 응답하지 않습니다({nd.BASE})")
+        lst = nd.chart_list(a.chart or "")
+        print(f"차트 {len(lst)}개" + (f" (이름에 '{a.chart}' 포함)" if a.chart else "") + " — 이름 · 단위 · 제목")
+        for name, unit, title in lst[:a.n if a.chart else a.n]:
+            print(f"  {name:<52}{unit:<14}{title[:60]}")
+        if len(lst) > a.n:
+            print(f"  … {len(lst) - a.n}개 더 (-n 으로 늘리거나 이름 조각으로 좁히세요)")
+        return
+    if a.what == "get":
+        if not a.chart:
+            sys.exit("차트 이름이 필요합니다: observectl nd get <차트> [--since 30m] (이름은 `nd charts <조각>`)")
+        if not nd.available(ttl=0):
+            sys.exit(f"Netdata 가 응답하지 않습니다({nd.BASE})")
+        t0, t1 = core.parse_when(a.since), core.parse_when(a.until) if a.until else time.time()
+        info = nd.charts().get(a.chart)
+        if not info:
+            sys.exit(f"차트 '{a.chart}' 없음 — `observectl nd charts {a.chart.split('.')[0]}` 로 찾아보세요")
+        rows = nd.series(a.chart, t0, t1, points=a.n)
+        print(f"{a.chart} [{info.get('units', '')}] {info.get('title', '')}\n{core.hms(t0)} ~ {core.hms(t1)} · {len(rows)}점(구간 평균) · None='관측 공백'")
+        dims = list(rows[0][1]) if rows else []
+        print(f"{'시각':<10}" + "".join(f"{d[:16]:>18}" for d in dims))
+        for t, v in rows:
+            print(f"{core.hms(t):<10}" + "".join(f"{'공백' if v[d] is None else format(v[d], '.2f'):>18}" for d in dims))
+        return
     if a.what == "defs":
         print(f"Netdata 어댑터가 가져오는 신호(정의는 실제 API 메타데이터로 교차 검증) — 주소 {nd.BASE}")
         for k, (label, unit, d) in nd.SIGNALS.items():
@@ -577,7 +631,26 @@ segment_coulomb = ex.coulomb_w          # 구간의 누적 계량 평균 전력(
 
 
 AB_METRICS = ["psys_w", "pkg_w", "batt_vi_w", "coulomb_w"]
-AB_LABELS = {"psys_w": "psys(RAPL, 약 1 W 누락)", "pkg_w": "패키지(RAPL)", "batt_vi_w": "순간 V×I", "coulomb_w": "누적 계량"}
+AB_LABELS = {"psys_w": "psys(RAPL, 약 1 W 누락)", "pkg_w": "패키지(RAPL)", "batt_vi_w": "순간 V×I", "coulomb_w": "누적 계량",
+             "nd_psys_w": "Netdata psys(1초)", "nd_pkg_w": "Netdata 패키지(1초)", "nd_batt_vi_w": "Netdata V×I(1초)"}
+ND_AB = {"nd_psys_w": "psys_w", "nd_pkg_w": "pkg_w", "nd_batt_vi_w": "batt_vi_w"}   # ab 지표 → 어댑터 신호
+ND_MIN_COVERAGE = 0.9           # 구간에서 Netdata 데이터가 이 비율 미만이면 그 구간은 "관측 공백"(값 없음)
+
+
+def netdata_segment_values(seg, provider=None):
+    """구간마다 Netdata 1초 평균 {지표: 값 또는 None}. 구간 일부만 Netdata 가 켜져 있었으면(커버리지 미만) 없음으로 둔다.
+    표본은 30초 간격이라 구간 끝에 한 간격을 더해 마지막 표본이 대표하는 시간까지 포함한다."""
+    provider = provider or (lambda x, y: nd.snapshot(x, y, 0))
+    snaps = [provider(g[0]["t"], g[-1]["t"] + 30) if g else None for _, g in seg]
+    if not any(snaps):                       # 어댑터가 아예 응답하지 않음 → 호출자가 "응답 없음"으로 안내
+        return None
+    res = []
+    for snap in snaps:
+        if not snap or snap["coverage"] < ND_MIN_COVERAGE:
+            res.append({k: None for k in ND_AB})
+        else:
+            res.append({k: snap["signals"].get(v) for k, v in ND_AB.items()})
+    return res
 
 
 def ab_checks(seg, allow):
@@ -593,10 +666,23 @@ def ab_checks(seg, allow):
     return bad, warn
 
 
-def ab_rows(seg, ca, cb, metrics, threshold):
-    """지표마다 (이름, A 구간값, B 구간값, 판정 dict, 신뢰 표시, 신뢰 가능 여부)."""
+def ab_rows(seg, ca, cb, metrics, threshold, ndv=None):
+    """지표마다 (이름, A 구간값, B 구간값, 판정 dict, 신뢰 표시, 신뢰 가능 여부). ndv = netdata_segment_values 결과."""
     out = []
     for m in metrics:
+        if m in ND_AB:                       # 쌍이 어긋나지 않게, 한 구간이라도 공백이면 이 지표는 판정하지 않는다
+            vals = [d[m] for d in (ndv or [])]
+            gaps = [f"{c}#{i + 1}" for i, ((c, _), v) in enumerate(zip(seg, vals)) if v is None]
+            if not ndv or gaps:
+                out.append((m, [], [], None, "(관측 공백: Netdata 가 꺼져 있던 구간 " + ", ".join(gaps) + " — 그 구간은 값이 없어 쌍을 만들 수 없음)" if ndv else "(Netdata 응답 없음)", False))
+                continue
+            A = [v for (c, _), v in zip(seg, vals) if c == ca]
+            B = [v for (c, _), v in zip(seg, vals) if c == cb]
+            if min(len(A), len(B)) < 2:
+                out.append((m, A, B, None, "(값 부족)", False))
+                continue
+            out.append((m, A, B, stats.verdict(A, B, threshold), "Netdata 1초 평균", True))
+            continue
         per = []
         for c, g in seg:
             if m == "coulomb_w":
@@ -668,7 +754,12 @@ def cmd_ab(a):
         if nbad:
             invalid.append(f"--require {req}: 표본 {tot}개 중 {nbad}개가 다름")
     metrics = AB_METRICS if a.metric == "all" else [a.metric]
-    table = ab_rows(seg, ca, cb, metrics, a.threshold)
+    ndv = None
+    if a.metric == "all" and not a.no_netdata or a.metric in ND_AB:
+        ndv = netdata_segment_values(seg)
+        if a.metric == "all":
+            metrics = metrics + list(ND_AB)
+    table = ab_rows(seg, ca, cb, metrics, a.threshold, ndv)
     n_in = [len(g) for _, g in seg]
     print(f"조건 순서 {order} · {ca}=기준 {cb}=변경 · 구간 {len(seg)}개(구간당 표본 {min(n_in)}~{max(n_in)}개) · 임계 {a.threshold} W · 구간 시작 {a.settle}초 제외")
     checks = ["덮개·AC 가 전 구간 동일" if not any(x.startswith(("lid", "ac")) for x in invalid) else None]
@@ -728,7 +819,7 @@ def main(argv=None):
     sub.add_parser("off").set_defaults(f=cmd_off)
     s = sub.add_parser("level"); s.add_argument("component"); s.add_argument("level"); s.set_defaults(f=cmd_level)
     s = sub.add_parser("mark"); s.add_argument("cond", nargs="?", default=""); s.add_argument("note", nargs="*"); s.add_argument("--clear", action="store_true"); s.set_defaults(f=cmd_mark)
-    s = sub.add_parser("window"); s.add_argument("--clean", action="store_true", help="내 세션 활동·빌드가 섞인 표본 제외"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.set_defaults(f=cmd_window)
+    s = sub.add_parser("window"); s.add_argument("--no-netdata", action="store_true", help="Netdata 병기 표를 뺀다"); s.add_argument("--clean", action="store_true", help="내 세션 활동·빌드가 섞인 표본 제외"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.set_defaults(f=cmd_window)
     s = sub.add_parser("energy"); s.add_argument("--clean", action="store_true", help="내 세션 활동·빌드가 섞인 표본 제외"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.set_defaults(f=cmd_energy)
     s = sub.add_parser("states"); s.add_argument("--since", default="-2h"); s.set_defaults(f=cmd_states)
     s = sub.add_parser("top"); s.add_argument("--since", default="-30m"); s.add_argument("--by", default="ctxsw", choices=["cpu", "ctxsw", "wake", "thr", "io", "app"], help="ctxsw=자발적 문맥 전환/s, cpu=코어 1개 기준 CPU%%. wake 는 ctxsw 의 옛 이름"); s.add_argument("-n", type=int, default=12); s.set_defaults(f=cmd_top)
@@ -736,17 +827,17 @@ def main(argv=None):
     s = sub.add_parser("trace", help="스팬(구간) 폭포 · 구간별 에너지 · 이름별 요약"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--name", help="이름에 포함된 글자"); s.add_argument("--min-ms", type=float, default=0); s.add_argument("--trace", help="트레이스 id 앞부분"); s.add_argument("-n", type=int, default=5, help="폭포로 보여 줄 최근 트레이스 수"); s.add_argument("--width", type=int, default=110); s.add_argument("--by", action="store_true", help="폭포 대신 이름별 요약표(횟수·소요·에너지)"); s.set_defaults(f=cmd_trace)
     s = sub.add_parser("explain", help="한 구간을 여러 출처(전력·상태·시스템·Netdata·프로세스·포커스·스팬)로 묶어 설명하고 기준 구간과 비교"); s.add_argument("--since", default="30m"); s.add_argument("--until"); s.add_argument("--at", help="중심 시각(HH:MM 등) — --span 초 만큼의 구간"); s.add_argument("--span", type=float, default=300); s.add_argument("--baseline", default="prev", help="none | prev(바로 앞의 같은 길이, 기본) | 시작..끝"); s.add_argument("--no-netdata", action="store_true"); s.add_argument("--json", action="store_true"); s.set_defaults(f=cmd_explain)
     s = sub.add_parser("ebpf", help="시간 제한형 eBPF 정밀 모드: tiers(단계·비용) | on <sample|counts|full> [--for 10m] | off | status"); s.add_argument("action", choices=["tiers", "on", "off", "status"]); s.add_argument("tier", nargs="?"); s.add_argument("--for", dest="for_", default="10m", help="제한 시간(기본 10m, 최대 60분)"); s.set_defaults(f=cmd_ebpf)
-    s = sub.add_parser("nd", help="Netdata 어댑터(있을 때만): defs=신호 정의, stats=구간 평균, apps=앱 그룹 CPU"); s.add_argument("what", choices=["defs", "stats", "apps"]); s.add_argument("--since", default="10m"); s.add_argument("--until"); s.add_argument("-n", type=int, default=10); s.set_defaults(f=cmd_nd)
+    s = sub.add_parser("nd", help="Netdata 어댑터(있을 때만): defs=신호 정의, stats=구간 평균, apps=앱 그룹 CPU, charts=차트 찾기, get=차트 값"); s.add_argument("what", choices=["defs", "stats", "apps", "charts", "get"]); s.add_argument("chart", nargs="?", help="charts: 이름 조각 · get: 차트 이름"); s.add_argument("--since", default="10m"); s.add_argument("--until"); s.add_argument("-n", type=int, default=10); s.set_defaults(f=cmd_nd)
     s = sub.add_parser("timeline"); s.add_argument("--at", required=True); s.add_argument("--span", type=float, default=60); s.add_argument("--journal", default="all", choices=["all", "warn", "none"]); s.set_defaults(f=cmd_timeline)
     s = sub.add_parser("bpf", help="eBPF(bpftrace) 프리셋을 N초 동안 실행: exec wake profile psr io net"); s.add_argument("preset", choices=["exec", "wake", "profile", "psr", "io", "net"]); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--comm", help="프로세스 이름 필터(영숫자·._- 15자)"); s.add_argument("-n", type=int, default=12, help="표의 상위 행 수"); s.add_argument("--no-spans", action="store_true", help="exec: 프로세스 스팬을 이벤트 로그에 적지 않음"); s.set_defaults(f=cmd_bpf)
     s = sub.add_parser("wakers"); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--waking", action="store_true"); s.set_defaults(f=cmd_wakers)
     s = sub.add_parser("drmdebug"); s.add_argument("sec", nargs="?", type=int, default=15); s.set_defaults(f=cmd_drmdebug)
     sub.add_parser("display").set_defaults(f=cmd_display)
-    s = sub.add_parser("ab", help="번갈아(ABAB) 측정 판정: 기본은 psys·패키지·순간 V×I·누적 계량을 한꺼번에 비교하고 지표끼리 어긋나면 알림"); s.add_argument("--since", default="-3h"); s.add_argument("--metric", default="all", choices=["all"] + list(METRICS) + ["coulomb_w", "batt_w"], help="all=네 지표 모두(기본). batt_w 는 batt_vi_w(순간 V×I)의 옛 이름"); s.add_argument("--threshold", type=float, default=0.3); s.add_argument("--settle", type=float, default=20)
+    s = sub.add_parser("ab", help="번갈아(ABAB) 측정 판정: 기본은 psys·패키지·순간 V×I·누적 계량을 한꺼번에 비교하고 지표끼리 어긋나면 알림"); s.add_argument("--since", default="-3h"); s.add_argument("--metric", default="all", choices=["all"] + list(METRICS) + ["coulomb_w", "batt_w"] + list(ND_AB), help="all=네 지표 모두(기본). batt_w 는 batt_vi_w(순간 V×I)의 옛 이름"); s.add_argument("--threshold", type=float, default=0.3); s.add_argument("--settle", type=float, default=20)
     s.add_argument("--min-samples", type=int, default=5, help="구간당 최소 표본 수(미만이면 제외)")
     s.add_argument("--expect-a", help="A 구간 표본의 기대 조건 '경로=값' (예: dev.wifi.ps=off). 다르면 시험 무효"); s.add_argument("--expect-b", help="B 구간 표본의 기대 조건 (예: dev.wifi.ps=on)")
     s.add_argument("--require", action="append", help="모든 구간의 모든 표본이 만족해야 하는 조건 '경로=값'(여러 번 가능, 예: --require dev.lid=closed)")
-    s.add_argument("--allow-mixed", help="구간 사이에 달라도 되는 항목(쉼표: lid,ac,ssid). 기본은 덮개·AC 가 다르면 무효, SSID 가 다르면 경고"); s.set_defaults(f=cmd_ab)
+    s.add_argument("--no-netdata", action="store_true", help="Netdata 1초 지표를 비교에서 뺀다"); s.add_argument("--allow-mixed", help="구간 사이에 달라도 되는 항목(쉼표: lid,ac,ssid). 기본은 덮개·AC 가 다르면 무효, SSID 가 다르면 경고"); s.set_defaults(f=cmd_ab)
     s = sub.add_parser("hyprtrace"); s.add_argument("mode", choices=["on", "off"]); s.set_defaults(f=cmd_hyprtrace)
     a = p.parse_args(argv)
     a.f(a)

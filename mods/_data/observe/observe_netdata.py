@@ -149,8 +149,8 @@ def signals(t0, t1):
     one("intr_all_s", lambda: (window_avg("system.intr", t0, t1) or {}).get("interrupts"))
     one("net_rx_kbps", lambda: abs((window_avg("system.net", t0, t1) or {}).get("received") or 0) if window_avg("system.net", t0, t1) else None)
     one("net_tx_kbps", lambda: abs((window_avg("system.net", t0, t1) or {}).get("sent") or 0) if window_avg("system.net", t0, t1) else None)
-    one("disk_read_kibs", lambda: abs((window_avg("system.io", t0, t1) or {}).get("in") or 0) if window_avg("system.io", t0, t1) else None)
-    one("disk_write_kibs", lambda: abs((window_avg("system.io", t0, t1) or {}).get("out") or 0) if window_avg("system.io", t0, t1) else None)
+    one("disk_read_kibs", lambda: abs((window_avg("system.io", t0, t1) or {}).get("reads") or 0) if window_avg("system.io", t0, t1) else None)
+    one("disk_write_kibs", lambda: abs((window_avg("system.io", t0, t1) or {}).get("writes") or 0) if window_avg("system.io", t0, t1) else None)
     one("nvme_temp_c", lambda: next(iter((window_avg(_find_chart("sensors.temperature_nvme") or "", t0, t1) or {}).values()), None))
     one("forks_s", lambda: (window_avg("system.forks", t0, t1) or {}).get("started"))
     return out
@@ -175,6 +175,40 @@ def top_apps(t0, t1, n=10):
         if isinstance(v, (int, float)) and v > 0:
             out.append((app_name(lab), float(v)))
     return sorted(out, key=lambda x: -x[1])[:n]
+
+
+def sample_series(t0, t1, step=30):
+    """표본(30초) 간격에 맞춘 Netdata 시계열 {신호: [(epoch, 값)]} — 한 번에 몇 개 차트만 읽어 `window --with-netdata` 가 그룹별로 평균을 낸다. 실패한 차트는 빠진다."""
+    n = max(2, int((t1 - t0) // step))
+    out = {}
+
+    def put(name, chart, pick):
+        try:
+            rows = series(chart, t0, t1, points=n)
+        except NetdataError:
+            return
+        out[name] = [(t, pick(v)) for t, v in rows if pick(v) is not None]
+    put("cpu_all_pct", "system.cpu", lambda v: _sum(v, exclude=("idle", "iowait")) if any(x is not None for x in v.values()) else None)
+    put("net_rx_kbps", "system.net", lambda v: abs(v["received"]) if v.get("received") is not None else None)
+    put("net_tx_kbps", "system.net", lambda v: abs(v["sent"]) if v.get("sent") is not None else None)
+    put("disk_read_kibs", "system.io", lambda v: abs(v["reads"]) if v.get("reads") is not None else None)
+    put("disk_write_kibs", "system.io", lambda v: abs(v["writes"]) if v.get("writes") is not None else None)
+    nv = _find_chart("sensors.temperature_nvme")
+    if nv:
+        put("nvme_temp_c", nv, lambda v: next((x for x in v.values() if x is not None), None))
+    return out
+
+
+def bucket_mean(points, t, half=15.0):
+    """points=[(epoch, 값)] 에서 t 주변(±half 초) 값의 평균. 없으면 None."""
+    xs = [v for tt, v in points if abs(tt - t) <= half and v is not None]
+    return sum(xs) / len(xs) if xs else None
+
+
+def chart_list(pattern=""):
+    """차트 이름·단위·제목 목록(패턴이 있으면 부분 일치). [(이름, 단위, 제목)] 이름순."""
+    p = pattern.lower()
+    return sorted((k, v.get("units", ""), v.get("title", "")) for k, v in charts().items() if p in k.lower())
 
 
 def snapshot(t0, t1, n_apps=8):

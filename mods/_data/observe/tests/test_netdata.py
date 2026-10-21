@@ -15,7 +15,7 @@ AVG = {
     "system.ctxt": {"labels": ["time", "switches"], "data": [[T0, 2500.0]]},
     "system.intr": {"labels": ["time", "interrupts"], "data": [[T0, 1400.0]]},
     "system.net": {"labels": ["time", "received", "sent"], "data": [[T0, 30.0, -50.0]]},
-    "system.io": {"labels": ["time", "in", "out"], "data": [[T0, 12.0, -34.0]]},
+    "system.io": {"labels": ["time", "reads", "writes"], "data": [[T0, 12.0, -34.0]]},
     "system.forks": {"labels": ["time", "started"], "data": [[T0, 3.0]]},
     "sensors.temperature_nvme-pci-0200_temp1_Composite_input": {"labels": ["time", "input"], "data": [[T0, 33.5]]},
 }
@@ -43,6 +43,7 @@ class H(http.server.BaseHTTPRequestHandler):
                 lab = (AVG.get(ch) or SERIES.get(ch) or {"labels": ["time", "v"]})["labels"]
                 return self._send({"labels": lab, "data": [[T0 + i] + [None] * (len(lab) - 1) for i in range(max(1, n))]})
             if n == 1 and ch in AVG: return self._send(AVG[ch])
+            if ch in AVG and ch != "system.ctxt": return self._send({"labels": AVG[ch]["labels"], "data": [[T0 + i * 30] + AVG[ch]["data"][0][1:] for i in range(n)]})
             if ch in SERIES: return self._send(SERIES[ch])
             if ch == "system.ctxt":                               # 커버리지: 앞 절반만 데이터
                 rows = [[T0 + i * 5, 2500.0 if i < n // 2 else None] for i in range(n)]
@@ -74,6 +75,11 @@ STATE["blank"] = True
 check("전 구간 공백(Netdata 가 꺼져 있던 시간): 구간 평균이 None", nd.window_avg("system.ctxt", T0, T0 + 60) is None and nd.signals(T0, T0 + 60)["psys_w"] is None)
 check("전 구간 공백: 커버리지 0, snapshot 은 신호가 전부 None(오류 아님)", nd.coverage(T0, T0 + 60) == 0.0 and all(v is None for v in nd.snapshot(T0, T0 + 60)["signals"].values()))
 STATE["blank"] = False
+# --- sample_series / bucket_mean / chart_list (window 병기·nd charts 용)
+ss = nd.sample_series(T0, T0 + 120)
+check("sample_series: 신호별 [(시각, 값)] — 수신·송신 부호 정리, 디스크 reads/writes, NVMe", ss.get("net_rx_kbps") and ss["net_tx_kbps"][0][1] == 50.0 and ss["disk_write_kibs"][0][1] == 34.0 and ss["nvme_temp_c"][0][1] == 33.5, str(ss))
+check("bucket_mean: ±15초 안의 값만 평균, 없으면 None", nd.bucket_mean([(100, 1.0), (110, 3.0), (200, 9.0)], 105) == 2.0 and nd.bucket_mean([(100, 1.0)], 300) is None)
+check("chart_list: 이름 조각 필터·정렬, 단위 포함", [c[0] for c in nd.chart_list("system.")] == sorted(k for k in CHARTS["charts"] if "system." in k) and nd.chart_list("rapl_zone_psys")[0][1] == "x")
 srv.shutdown(); srv.server_close()
 nd.reset_cache()
 check("서버가 꺼지면 available False·snapshot None(분석은 '관측 공백'으로 계속)", nd.available(ttl=0) is False and nd.snapshot(T0, T0 + 60) is None)
