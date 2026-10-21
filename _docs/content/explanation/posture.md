@@ -417,8 +417,8 @@ lsmod | grep idma64                          # 비어 있어야 함
 - 아직 못 한 것: Wi-Fi 절전을 켠 채 실제 사용(지연/끊김) 확인, Netdata 수집기별 기여, 부팅 인자(`acpi_osi=Linux`, `pcie_aspm=off`, `irqpoll`) 제거 시험(재부팅 필요).
 
 ### 후속 조사 (2026-10-20 새벽): 안정화 가설 철회, Wi-Fi 절전 적용, 키보드 문제, 아침 자동 측정
-**1. "부팅 후 40분이 지나야 안정화된다"는 틀렸다** — 재부팅 직후(4분)부터 1시간(`boot_settle.py`, 30초 간격, 프로세스별 CPU/깨어남〔구표기 L2: 코어 1개=100%·자발 전환/s〕과 RAPL) 기록: 쉬는 전력(덮개 닫힘, 방전)이 **10분 만에 약 6.7 W 로 안정되고 이후 60분간 변하지 않았다**(배터리 6.66~6.86 W, psys 6.73~6.78 W, 패키지 약 2.9 W). 줄지 않는 상시 소비자: `electron`(Bitwarden 데스크톱) CPU 9~10%·깨어남 약 257/s, `netdata` 깨어남 약 341/s. 부팅 직후 이 Claude 세션 자체가 60% CPU 까지 쓰지만(긴 세션 재개 + 명령 실행) 가만히 두면 2~4%.
-- **Electron 을 SIGSTOP 으로 얼려 ABAB**: 배터리 −0.20 W, psys −0.25 W, 깨어남 −20/s — 깨어남 257/s〔구표기 L2 추정(boot_settle 프로세스 값), 미확정〕 가 실제 전력으로는 크게 이어지지 않는다.
+**1. "부팅 후 40분이 지나야 안정화된다"는 틀렸다** — 재부팅 직후(4분)부터 1시간(`boot_settle.py`, 30초 간격, 프로세스별 CPU/깨어남〔구표기: CPU 는 L2(코어 1개=100%), 깨어남은 L9(메인 스레드만 센 값)〕과 RAPL) 기록: 쉬는 전력(덮개 닫힘, 방전)이 **10분 만에 약 6.7 W 로 안정되고 이후 60분간 변하지 않았다**(배터리 6.66~6.86 W, psys 6.73~6.78 W, 패키지 약 2.9 W). 줄지 않는 상시 소비자: `electron`(Bitwarden 데스크톱) CPU 9~10%·깨어남 약 257/s, `netdata` 깨어남 약 341/s. 부팅 직후 이 Claude 세션 자체가 60% CPU 까지 쓰지만(긴 세션 재개 + 명령 실행) 가만히 두면 2~4%.
+- **Electron 을 SIGSTOP 으로 얼려 ABAB**: 배터리 −0.20 W, psys −0.25 W, 깨어남 −20/s — 깨어남 257/s〔구표기 L9 추정(boot_settle 프로세스 값, 메인 스레드만 → 실제보다 작음), 미확정〕 가 실제 전력으로는 크게 이어지지 않는다.
 **2. 어제 저녁의 약 4.3 W 상태는 이 조작들의 지속 효과가 아니다**: (a) 조작을 **하나씩 적용했다 되돌린 뒤** 구간을 잰 `cycles` 시험(posture-daemon/tailscaled 재시작, 컨테이너 pause→unpause, Netdata 재시작, Wi-Fi 절전 켰다 끔, EDAC/proc_thermal/Thunderbolt 재바인드, LPSS/ISH auto→원래)에서 어느 단계도 전력이 내려가지 않았다(6.80~6.93 W). (b) 어제의 **누적(bisect) 시험을 그대로 재현**해도 되돌린 기준(s9 6.87 W)이 처음 기준(s0 6.89 W)과 같았다. 재현에서의 단계별 효과는 번갈아 재기 결과와 일치(Wi-Fi 절전 약 −0.5 W, Netdata 약 −0.6 W, LPSS/ISH·EDAC·열관리 등은 효과 없음).
 - 사용자 가설 "Wayland 를 끄고 Claude 만 남아서"는 기록으로 반증됐다: 지난 부팅(22:42)의 로그인 기록에 Hyprland 세션(3번)이 만들어진 뒤 23:50 종료(재부팅)까지 로그아웃이 없다(Wayland 가 계속 떠 있었음).
 - **남은 가설: 독(어댑터) 연결/분리 이력.** 장치 감시 알림 기록: 22:40:57 AC 연결(부팅 22:41 에 독이 붙어 있었음), 22:43:22 분리, 22:46:31 연결, 22:55:20 분리 — 그 뒤 약 4.3 W 상태가 나타났다. 오늘 부팅(독 없이 시작)은 6.8 W. 독의 붙고 떨어짐이 Thunderbolt/USB4·PCIe 컨트롤러의 절전 상태를 바꿀 수 있다는 가설이고 **아직 검증 전**. `pm_snapshot.py`(PCI/USB 런타임 절전 상태 저장/비교; 독 연결 전 저장본 `/tmp/pm-before-dock.json`, 활성 장치 15개)와 아침 자동 측정(아래)이 이를 확인한다.
@@ -527,7 +527,7 @@ tty2 (VT2) ── kmsconvt@tty2.service ── kmscon ── login ── zsh �
 | w4 | 켬 | 4.62 W | 5.12 | 2.72 |
 - **w1 → w2 에서 −1.7 W 가 떨어졌지만 절전 때문이 아니다**: w3 에서 절전을 다시 꺼도 4.69 W 로 그대로(−0.07 W 차이는 잡음). 상시 기록(`boot_settle.py`)상 **전환은 10:16:46**(6.07 → 4.42 W, psys 6.32 → 5.52 → 4.85)이고 이 시각은 w2 시작(10:16:34) 직후지만, 되돌려도 안 돌아왔으므로 우연 또는 별개 사건. **이 시험으로는 사무실 Wi-Fi 에서의 절전 효과를 깨끗이 못 쟀다**(집 Wi-Fi 기준 −0.62 W 는 유효).
 - **낮은 상태는 이번에도 저절로 나타났다**(세 번째 포착). 기록(방전·덮개 닫힘 217행) 중 낮은 상태(<5.2 W)는 23행(약 10%), 평균 4.51 W 대 높음 6.77 W.
-- **프로세스와는 강한 상관이 없다**: 전력과의 상관 상위가 rcu_preempt 깨어남 +0.45, netdata CPU −0.36, kmscon CPU +0.35〔구표기 L2: boot_settle 프로세스별 값〕 등으로 모두 약하다(|r| < 0.5). 전환 전후 평균 차이도 containerd 깨어남 7.8 → 0, scripts.d 4.7 → 0, kmscon CPU 0.5 → 0 정도로 작다. → **특정 프로그램이 아니라 디스플레이/펌웨어(하드웨어) 쪽 상태**일 가능성이 높다.
+- **프로세스와는 강한 상관이 없다**: 전력과의 상관 상위가 rcu_preempt 깨어남 +0.45, netdata CPU −0.36, kmscon CPU +0.35〔구표기: 깨어남은 L9(메인 스레드만), CPU 는 L2〕 등으로 모두 약하다(|r| < 0.5). 전환 전후 평균 차이도 containerd 깨어남 7.8 → 0, scripts.d 4.7 → 0, kmscon CPU 0.5 → 0 정도로 작다. → **특정 프로그램이 아니라 디스플레이/펌웨어(하드웨어) 쪽 상태**일 가능성이 높다.
 - **DRM 커넥터 `dpms` 는 구분 기준이 아니다**: 높은 상태에서도 `Off`(10:21, 5.5~6.2 W)로 읽혔고 09:43(높은 상태)에는 `On`이었다. 또한 이 기기에서는 `dpms enable` 뒤 화면이 안 돌아오는 문제가 있어(`core.bind.hwctl.nix` 주석) dpms 로 패널을 끄는 방법은 쓰지 않는다. Hyprland 0.55(Lua)에서는 `hyprctl dispatch dpms off` 가 문법 오류이고 `hl.dsp.dpms({ action = ... })` 형식이다.
 - **지금까지의 결론**: 낮은 상태(≈4.3 W)는 실재하며 약 10% 의 시간에 저절로 나타났다 사라진다. 알려진 원인(Wi-Fi 절전, Netdata, hyprlock, 오디오, PSR, 활성 VT, 네트워크, 프로세스)으로는 설명되지 않고, tty1 전환은 낮은 → 높은 방향으로만 작동한다. 이후 접근: ① 낮은 상태에서 장치/레지스터를 더 깊이 비교(`pm_snapshot` 외에 `pmc_core`/`slp_s0`, i915 `i915_display_info`, DMC 상태, `/sys/kernel/debug/pmc_core/substate_residencies`), ② 낮은 상태가 어떤 조건에서 유지되는지 장시간 기록 분석, ③ 필요하면 `no-quirks` 부팅으로 같은 기록 비교.
 
@@ -537,17 +537,17 @@ tty2 (VT2) ── kmsconvt@tty2.service ── kmscon ── login ── zsh �
 - **`sing-box` 는 이 저장소·이 노트북 어디에도 없다**(저장소 전체 검색 결과 없음, 바이너리/프로세스 없음). 게이트웨이:1080 의 SOCKS5 서버는 폰(또는 핫스팟 공급자) 쪽 프로그램이며 노트북은 클라이언트일 뿐이다. 따라서 "노트북 쪽 sing-box 비용"은 없고, 비용은 **redsocks 릴레이 + 막힌 UDP/직접 경로에 대한 재시도**에서 나온다.
 - 확인한 상태: 사무실 Wi-Fi(`사무실 Wi-Fi`)로 옮기자 `redsocks-hotspot` inactive, `/tmp/current_hotspot_proxy`·`/run/redsocks-hotspot.conf` 없음, 프록시 환경변수(셸/사용자 systemd) 없음, `ip rule` 에 fwmark 1 규칙 없음, nft 테이블 `redsocks_hotspot*` 없음 → 정리는 깨끗하다. 프록시 없이 직접 https 정상(0.13 s).
 **2. 기록(`boot_settle.py`, 방전·덮개 닫힘)으로 본 핫스팟 ↔ 사무실 차이**(핫스팟 n=88, 사무실 n=29 — 시간대·절전 설정이 다른 **비교 불완전** 자료)
-| 프로세스 | 깨어남/s 핫스팟 → 사무실〔구표기 L2: 자발 전환/s〕 | CPU% 핫스팟 → 사무실〔구표기 L2: 코어 1개=100%〕 |
+| 프로세스 | 깨어남/s 핫스팟 → 사무실〔구표기 L9: 메인 스레드만 — electron 256.8 같은 값은 멀티스레드라 실제는 더 큼〕 | CPU% 핫스팟 → 사무실〔구표기 L2: 코어 1개=100%〕 |
 |---|---|---|
 | electron(Bitwarden) | 256.8 → 1.2 | 8.9 → 1.6 |
 | tailscaled | 87.0 → 41.2 | 3.42 → 0.02 |
 | netdata / claude / mongod / meilisearch | 거의 같음 | 거의 같음 |
 - 높은 상태 평균 6.76 W(핫스팟) ↔ 6.30 W(사무실), **낮은 상태는 4.46 W 로 둘이 같다.** → 핫스팟 경로의 비용은 높은 상태에서 최대 약 0.45 W 로 보이나 확정은 아님(시간대, PS off/on 혼합, 표본 수 차이).
 - **electron 의 257/s·9% CPU 는 핫스팟 전용이 아니다**: 어제 밤 집 Wi-Fi 에서도(재부팅 직후 기록) 같았고(257/s), **10:07 사무실로 옮기며 멈췄다.** 같은 무렵 AC 연결(≈10:05)과 분리(10:10)도 있었으므로 원인(네트워크 전환/AC 사건/재시도 루프 종료)은 미확정. 같은 시각 `tailscaled` 의 3.4% CPU·80~93/s 도 40/s·0% 로 내려왔다(핫스팟에서는 `netcheck: UDP is blocked, trying HTTPS/ICMP` 가 약 12초마다 반복되고 redsocks 로그에 `Socks5 server status: server failure` 가 섞임 — 핫스팟은 UDP 직접 경로가 막혀 tailscale 이 계속 재탐색).
-- 반복 작업(전수조사): `touchpad-watchdog` 약 32초마다(시간당 112회), `notif-health` 약 60초마다(56회), 그 외 타이머는 하루 1회 이하 — 초당 1,000회가 넘는 깨어남〔구표기: 합계는 L1 powertop, 괄호 안 프로세스별은 L2〕(netdata 약 340/s, claude 150~200/s, electron 257/s, meilisearch 65/s, mongod 57/s, tailscaled 40~90/s, go.d.plugin 36/s, irq/9-acpi 20~30/s)에 비해 무시할 수준.
+- 반복 작업(전수조사): `touchpad-watchdog` 약 32초마다(시간당 112회), `notif-health` 약 60초마다(56회), 그 외 타이머는 하루 1회 이하 — 초당 1,000회가 넘는 깨어남〔구표기: 합계는 L1 powertop, 괄호 안 프로세스별은 L9(메인 스레드만)〕(netdata 약 340/s, claude 150~200/s, electron 257/s, meilisearch 65/s, mongod 57/s, tailscaled 40~90/s, go.d.plugin 36/s, irq/9-acpi 20~30/s)에 비해 무시할 수준.
 **3. 가설(핫스팟/프록시 경로가 전력에 미칠 수 있는 경로) — 모두 미검증**
 - H1 electron(Bitwarden, `--autostart`) 재시도 루프: 막힌 UDP/프록시 경로 연결 실패 후 반복. 이전 SIGSTOP ABAB 효과는 −0.20 W(배터리), −0.25 W(psys).
-- H2 tailscaled netcheck 루프(핫스팟에서 UDP 차단): CPU 3.4%·깨어남 +45/s〔구표기 L2〕.
+- H2 tailscaled netcheck 루프(핫스팟에서 UDP 차단): CPU 3.4%·깨어남 +45/s〔구표기: CPU 는 L2, 깨어남은 L9 또는 L2(도구 미확정)〕.
 - H3 redsocks 릴레이 자체의 CPU/깨어남(로그에는 top-N 에 안 잡혀 정량 없음), 유저·root 모든 TCP/UDP 가 사용자 공간 경유(Docker 컨테이너의 아웃바운드도 root 로 걸림).
 - H4 링크 차이: 핫스팟은 2.4 GHz 20 MHz(−41~−42 dBm)·폰 AP 의 절전(DTIM/U-APSD) 지원 불확실 → 같은 트래픽에 에어타임·RF 전력이 더 듦. 사무실도 2.4 GHz 라서 이것만으로는 설명이 약함.
 - H5 폰 쪽 SOCKS 서버가 UDP ASSOCIATE 를 구현하지 않아 UDP 가 그냥 나감(dispatcher 주석의 '한계') → 재시도.

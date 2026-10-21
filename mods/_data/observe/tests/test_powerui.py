@@ -30,7 +30,7 @@ check("nice_range 값 없으면 (0,1)", pg.nice_range([None]) == (0.0, 1.0))
 # --- 데이터: 합성 표본으로 증분 읽기/집계/추정
 now = time.time()
 def raw(t, psys=4.0, batt=5.0, q=3000000, status="Discharging", ac=0, psr=True, state="low", proc=None, pct="50"):
-    return {"v": 2, "t": t, "pw": {"psys_w": psys, "batt_vi_w": batt, "pkg_w": 1.5, "q_uah": q, "v_uv": 15000000, "full_uah": 3600000, "status": status, "ac": ac, "batt_pct": pct},
+    return {"v": 3, "t": t, "pw": {"psys_w": psys, "batt_vi_w": batt, "pkg_w": 1.5, "q_uah": q, "v_uv": 15000000, "full_uah": 3600000, "status": status, "ac": ac, "batt_pct": pct},
             "cs": {"pc8": 10.0, "pc10": 20.0}, "state": state, "proc": proc or [], "irq": {"cpu_all_pct": 2.0, "ctxt_s": 2400},
             "dev": {"vt": "tty1", "lid": "open", "bl": "9600", "boot": "abc", "wifi": {"ps": "off"}, "psr": {"mode": "PSR1 enabled" if psr else "disabled", "sink": "active"}}}
 d = os.path.join(TMP, "samples"); os.makedirs(d)
@@ -57,7 +57,7 @@ with open(fn, "a") as f:
 check("Store: 보류했던 줄은 완성되면 읽는다(시각 범위 밖이면 버림)", st.refresh(now) == 0)
 rc = [r for r in st.recs if r["psr"]]
 leg = [r for r in st.recs if r["legacy"]]
-check("옛 형식 표본: 새 이름으로 읽혀 값 유지(batt_vi 7.0, cpu_all 9.0, ctxsw_top 50, ctxsw_all 3000)·legacy 표시", len(leg) == 1 and leg[0]["batt_vi"] == 7.0 and leg[0]["cpu_all"] == 9.0 and leg[0]["ctxsw_top"] == 50.0 and leg[0]["ctxsw_all"] == 3000, str(leg))
+check("옛 형식 표본: 새 이름으로 읽혀 값 유지(batt_vi 7.0, cpu_all 9.0, ctxsw_all 3000), 프로세스 전환 합(ctxsw_top)은 메인 스레드만이라 None·legacy 표시", len(leg) == 1 and leg[0]["batt_vi"] == 7.0 and leg[0]["cpu_all"] == 9.0 and leg[0]["ctxsw_top"] is None and leg[0]["ctxsw_all"] == 3000, str(leg))
 check("새 형식 표본은 legacy 아님", sum(1 for r in st.recs if not r["legacy"]) == 81)
 check("compact: PSR 켬/끔 구분", 0 < len(rc) < len(st.recs) and st.recs[0]["psr"] is False)
 check("compact: nix 가 보인 표본은 clean=False", sum(1 for r in st.recs if not r["clean"]) == 1)
@@ -85,6 +85,8 @@ if have_rich:
     now_t = pv.now_text(st.recs, est, 100, now)
     s = now_t.plain
     check("now_text: 전원·PSR·남은 시간 줄", "방전 중" in s and "PSR1 enabled" in s and "남은 시간 추정" in s and "최근 30분 평균" in s, s)
+    leg_txt = pv.now_text([leg[0]], None, 100, now)
+    check("now_text: 옛 표본은 상위 프로세스 전환을 '- (옛 표본)' 으로(숫자로 오해하지 않게)", "(옛 표본)" in leg_txt.plain, leg_txt.plain)
     check("now_text: 빈 데이터 안내", "observectl on" in pv.now_text([], None, 100).plain)
     t0, t1 = pv.range_bounds("1시간", now)
     recs1 = [r for r in st.recs if t0 <= r["t"] <= t1]

@@ -166,7 +166,7 @@ def statsd_lines(s, prefix="observe"):
         "state_low": (1 if s.get("state") == "low" else 0) if s.get("state") in ("low", "high") else None,
         "psr_on": (1 if "enabled" in str(psr.get("mode")) else 0) if psr else None,
         "psr_sink_active": (1 if psr.get("sink") == "active" else 0) if psr else None,
-        "ctxsw_vol_top_per_s": sum(p.get("ctxsw_vol_s", 0) for p in s.get("proc") or []) if s.get("proc") is not None else None,   # 저장된 상위 프로세스(최대 16행)만의 합 — 시스템 전체 아님
+        "ctxsw_top_all_threads_per_s": sum(p.get("ctxsw_vol_s", 0) for p in s.get("proc") or []) if s.get("proc") is not None else None,   # 저장된 상위 프로세스(최대 16행)의 모든 스레드 합 — 시스템 전체 아님(2026-10-21 이전의 ctxsw_vol_top_per_s 는 메인 스레드만이라 이어 보면 안 됨)
         "ctxsw_all_per_s": (s.get("irq") or {}).get("ctxt_s"),                                                              # 시스템 전체 문맥 전환(/proc/stat ctxt, 비자발 포함)
         "cpu_all_pct": (s.get("irq") or {}).get("cpu_all_pct"),
         "wifi_ps_on": (1 if (dev.get("wifi") or {}).get("ps") == "on" else 0) if (dev.get("wifi") or {}).get("ps") else None,
@@ -322,7 +322,22 @@ class Sampler:
                 continue
             try:
                 comm, cpu, nthr, rss = parse_pid_stat(rd(f"{PROC}/{d}/stat"))
-                vol, inv = parse_ctxt(rd(f"{PROC}/{d}/status"))
+                if nthr > 1 or self.level == "L1":
+                    vol, tids = 0, os.listdir(f"{PROC}/{d}/task")      # /proc/<pid>/status 의 카운터는 메인 스레드뿐이라 스레드마다 읽어 합한다(30초 간격 +0.17% CPU)
+                    for t in tids:
+                        try:
+                            tv, _ = parse_ctxt(rd(f"{PROC}/{d}/task/{t}/status"))
+                        except (OSError, ValueError, IndexError):
+                            continue
+                        vol += tv
+                        if self.level == "L1":
+                            try:
+                                tn, tcpu, _, _ = parse_pid_stat(rd(f"{PROC}/{d}/task/{t}/stat"))
+                                threads[(int(d), int(t))] = (comm, tn, tcpu, tv)
+                            except (OSError, ValueError, IndexError):
+                                pass
+                else:
+                    vol, _ = parse_ctxt(rd(f"{PROC}/{d}/status"))
                 try:
                     exe = os.path.basename(os.readlink(f"{PROC}/{d}/exe"))
                 except OSError:
@@ -333,14 +348,6 @@ class Sampler:
                     mr, mw = re.search(r"read_bytes:\s*(\d+)", t), re.search(r"write_bytes:\s*(\d+)", t)
                     io = (int(mr[1]) if mr else 0, int(mw[1]) if mw else 0)
                 procs[int(d)] = (comm, exe, cpu, vol, rss, io)
-                if self.level == "L1":
-                    for t in os.listdir(f"{PROC}/{d}/task"):
-                        try:
-                            tn, tcpu, _, _ = parse_pid_stat(rd(f"{PROC}/{d}/task/{t}/stat"))
-                            tv, _ = parse_ctxt(rd(f"{PROC}/{d}/task/{t}/status"))
-                            threads[(int(d), int(t))] = (comm, tn, tcpu, tv)
-                        except (OSError, ValueError, IndexError):
-                            pass
             except (OSError, ValueError, IndexError):
                 continue
         return procs, threads
@@ -387,7 +394,7 @@ class Sampler:
             a = agg.setdefault((comm, exe), {"n": 0, "cpu_core_pct": 0.0, "ctxsw_vol_s": 0.0, "rss": 0, "rd": 0, "wr": 0})
             a["n"] += 1
             a["cpu_core_pct"] += (cpu - q[2]) / HZ / dt * 100
-            a["ctxsw_vol_s"] += (vol - q[3]) / dt
+            a["ctxsw_vol_s"] += max(0, vol - q[3]) / dt      # 스레드가 끝나면 그 카운터가 합에서 빠져 음수가 될 수 있어 0 으로 자름
             a["rss"] += rss
             a["rd"] += max(0, io[0] - q[5][0]) / dt
             a["wr"] += max(0, io[1] - q[5][1]) / dt

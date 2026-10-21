@@ -171,11 +171,11 @@ def cmd_window(a):
     print(f"{core.hms(rows[0]['t'])} ~ {core.hms(rows[-1]['t'])} · 표본 {len(rows)}개 · 그룹 기준 {a.by}")
     legacy = sum(1 for r in rows if r.get("legacy"))
     if legacy:
-        print(f"(옛 형식 표본 {legacy}개 포함 — 필드 이름만 다르고 값은 같게 읽음. 이름 뜻은 power-evidence.md 의 용어·단위 정정표)")
-    print("(V×I 열은 방전 중인 표본만 평균: 충전 중의 전류는 방전 전력이 아님 · 상위전환/s 는 저장된 상위 프로세스(최대 16행)의 자발적 문맥 전환 합으로 시스템 전체가 아님 · 전체CPU% 는 전체 CPU 대비(코어 1개=100% 가 아님))")
+        print(f"(옛 형식 표본 {legacy}개 포함 — 이름만 바뀐 값은 같게 읽음. 단 옛 표본의 프로세스별 자발적 전환은 메인 스레드만이라 멀티스레드 프로세스를 크게 과소 집계해서 '상위전환/s' 열에서 제외함. 용어는 power-evidence.md 정정표)")
+    print("(V×I 열은 방전 중인 표본만 평균: 충전 중의 전류는 방전 전력이 아님 · 상위전환/s 는 저장된 상위 프로세스(최대 16행)의 모든 스레드 자발적 문맥 전환 합으로 시스템 전체가 아님 · 전체CPU% 는 전체 CPU 대비(코어 1개=100% 가 아님))")
     print(f"{'그룹':<18}{'n':>4}{'V×I':>7}{'psys':>7}{'pkg':>6}{'core':>6}{'pc8%':>6}{'pc10%':>6}{'상위전환/s':>11}{'전체CPU%':>9}")
     for k, g in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-        ctxsw_top = mean_of(g, lambda r: sum(p.get("ctxsw_vol_s", 0) for p in r.get("proc", [])))
+        ctxsw_top = mean_of(g, lambda r: None if r.get("legacy") and any("ctxsw_vol_leader_s" in p for p in r.get("proc", [])) else sum(p.get("ctxsw_vol_s", 0) for p in r.get("proc", [])))
         print(f"{str(k)[:17]:<18}{len(g):>4}{fmt(mean_of(g, lambda r: get(r, 'pw.batt_vi_w') if get(r, 'pw.status') == 'Discharging' else None), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.psys_w')), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.pkg_w')))}"
               f"{fmt(mean_of(g, lambda r: get(r, 'pw.core_w')))}{fmt(mean_of(g, lambda r: get(r, 'cs.pc8')), 6, 1)}{fmt(mean_of(g, lambda r: get(r, 'cs.pc10')), 6, 1)}{fmt(ctxsw_top, 11, 0)}{fmt(mean_of(g, lambda r: get(r, 'irq.cpu_all_pct')), 9, 1)}")
 
@@ -203,6 +203,13 @@ def cmd_top(a):
     rows = samples(core.parse_when(a.since))
     if not rows:
         sys.exit("표본이 없습니다")
+    if a.by == "ctxsw":                      # 옛 표본(v1·v2)의 프로세스 전환은 메인 스레드만이라 순위가 왜곡됨 → 제외
+        skipped = sum(1 for r in rows if any("ctxsw_vol_leader_s" in p for p in r.get("proc", [])))
+        rows = [r for r in rows if not any("ctxsw_vol_leader_s" in p for p in r.get("proc", []))]
+        if skipped:
+            print(f"(옛 형식 표본 {skipped}개 제외: 프로세스별 자발적 전환이 메인 스레드만이라 멀티스레드 프로세스를 크게 과소 집계했음)")
+        if not rows:
+            sys.exit("새 형식(모든 스레드 합) 표본이 아직 없습니다 — 수집기가 새 버전으로 쌓은 뒤에 보세요")
     acc = collections.defaultdict(lambda: [0.0, 0.0, 0])
     if a.by == "thr":
         for r in rows:
@@ -217,7 +224,7 @@ def cmd_top(a):
         for r in rows:
             for p in r.get("proc", []):
                 k = p["comm"] if not p["exe"] or p["exe"].startswith(p["comm"][:6]) else f"{p['comm']}({p['exe']})"
-                acc[k][0] += p["cpu_core_pct"]; acc[k][1] += p["ctxsw_vol_s"]; acc[k][2] += 1
+                acc[k][0] += p["cpu_core_pct"]; acc[k][1] += p.get("ctxsw_vol_s", p.get("ctxsw_vol_leader_s", 0)); acc[k][2] += 1
     n = len(rows)
     key = (lambda kv: -kv[1][1]) if a.by in ("ctxsw", "io") else (lambda kv: -kv[1][0])
     head = "이름              읽기B/s  쓰기B/s" if a.by == "io" else "이름                      CPU(코어1개=100%)  자발전환/s  (등장)"

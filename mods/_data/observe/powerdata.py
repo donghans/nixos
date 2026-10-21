@@ -29,7 +29,9 @@ def compact(s):
         "psr": "enabled" in mode, "psr_sink": psr.get("sink"), "psr_mode": mode or None,
         "pc8": cs.get("pc8"), "pc10": cs.get("pc10"), "mhz": cs.get("mhz"),
         # 상위 프로세스(저장된 최대 16행)의 자발적 문맥 전환/s 합 — 시스템 전체 아님 / 시스템 전체 문맥 전환/s(비자발 포함) / 전체 CPU 대비 %
-        "ctxsw_top": sum(p.get("ctxsw_vol_s", 0) for p in procs), "ctxsw_all": (s.get("irq") or {}).get("ctxt_s"), "cpu_all": (s.get("irq") or {}).get("cpu_all_pct"),
+        # 옛 표본(메인 스레드만 센 proc 행)은 ctxsw_top 을 None 으로 둔다
+        "ctxsw_top": None if any("ctxsw_vol_leader_s" in p for p in procs) else sum(p.get("ctxsw_vol_s", 0) for p in procs),
+        "ctxsw_all": (s.get("irq") or {}).get("ctxt_s"), "cpu_all": (s.get("irq") or {}).get("cpu_all_pct"),
         "legacy": bool(s.get("legacy")),
         "clean": kc < 1.0 and not any(p.get("comm") in BUSY for p in procs),
         "lid": dev.get("lid"), "vt": dev.get("vt"), "bl": _num(dev.get("bl")), "boot": dev.get("boot"),

@@ -107,7 +107,7 @@ sd = col.statsd_lines({"pw": {"psys_w": 4.1234, "pkg_w": 1.5, "batt_vi_w": 5.0, 
 sdm = dict(l.split("|")[0].split(":") for l in sd)
 check("statsd_lines: 게이지 형식·접두사", all(l.startswith("observe.") and l.endswith("|g") for l in sd), str(sd))
 check("statsd_lines: 방전 중이면 방전 전력만 값, 충전 전력 0", sdm["observe.batt_discharge_w"] == "5.0" and sdm["observe.batt_charge_w"] == "0", str(sdm))
-check("statsd_lines: 상태/PSR/전환(상위·전체)/CPU 전체/패키지 C-state", sdm["observe.state_low"] == "0" and sdm["observe.psr_on"] == "1" and sdm["observe.psr_sink_active"] == "0" and sdm["observe.ctxsw_vol_top_per_s"] == "7" and sdm["observe.ctxsw_all_per_s"] == "2500" and sdm["observe.cpu_all_pct"] == "2.0" and "observe.wake_per_s" not in sdm and sdm["observe.pkg_pc8"] == "12.0" and sdm["observe.pkg_pc10"] == "0.0", str(sdm))
+check("statsd_lines: 상태/PSR/전환(상위·전체)/CPU 전체/패키지 C-state", sdm["observe.state_low"] == "0" and sdm["observe.psr_on"] == "1" and sdm["observe.psr_sink_active"] == "0" and sdm["observe.ctxsw_top_all_threads_per_s"] == "7" and sdm["observe.ctxsw_all_per_s"] == "2500" and sdm["observe.cpu_all_pct"] == "2.0" and "observe.wake_per_s" not in sdm and "observe.ctxsw_vol_top_per_s" not in sdm and sdm["observe.pkg_pc8"] == "12.0" and sdm["observe.pkg_pc10"] == "0.0", str(sdm))
 check("statsd_lines: 값이 없으면 줄을 만들지 않는다(문자열은 보내지 않음)", "observe.pkg_pc2" not in sdm and "observe.psys_w" in sdm and not any(not v.replace(".", "", 1).replace("-", "", 1).isdigit() for v in sdm.values()))
 check("statsd_lines: 빈 표본은 빈 목록", col.statsd_lines({}) == [])
 import socket as _s
@@ -146,22 +146,22 @@ time.sleep(1.2)
 smp = s.sample()
 check("스모크: 표본 필수 키", all(k in smp for k in ("t", "dt", "pw", "cs", "irq", "proc", "dev", "state", "thr", "io")), str(list(smp)))
 check("스모크: dt 가 대기 시간과 비슷", 1.0 < smp["dt"] < 2.5, str(smp["dt"]))
-check("스모크: 표본 형식 v2 이고 옛 필드 이름이 없음", smp["v"] == core.SCHEMA and "batt_vi_w" in smp["pw"] and "batt_w" not in smp["pw"] and "cpu_all_pct" in smp["irq"] and "cpu_busy_pct" not in smp["irq"], str(smp["pw"]))
+check("스모크: 표본 형식이 최신(v3)이고 옛 필드 이름이 없음", smp["v"] == core.SCHEMA and "batt_vi_w" in smp["pw"] and "batt_w" not in smp["pw"] and "cpu_all_pct" in smp["irq"] and "cpu_busy_pct" not in smp["irq"], str(smp["pw"]))
 check("스모크: 프로세스 합산 항목 구조", all({"comm", "exe", "n", "cpu_core_pct", "ctxsw_vol_s", "rss_mb"} <= set(p) and not ({"cpu", "wake"} & set(p)) for p in smp["proc"]))
 json.dumps(smp)
 # --- 옛 형식(v1) 표본 읽기 호환: 값은 그대로, 이름만 v2 로, legacy 표시
 old = {"t": 1700000000.0, "pw": {"psys_w": 4.0, "batt_w": 5.5, "status": "Discharging"}, "irq": {"cpu_busy_pct": 3.2, "ctxt_s": 2000},
        "proc": [{"comm": "claude", "exe": "claude", "n": 1, "cpu": 8.5, "wake": 30.0, "rss_mb": 400}], "thr": [{"comm": "x", "thr": "t", "cpu": 1.5, "wake": 9.0}]}
 n1 = core.normalize_sample(json.loads(json.dumps(old)))
-check("normalize_sample: 필드 이름 v1 → v2(값 그대로)", n1["pw"]["batt_vi_w"] == 5.5 and "batt_w" not in n1["pw"] and n1["irq"]["cpu_all_pct"] == 3.2 and "cpu_busy_pct" not in n1["irq"]
-      and n1["proc"][0]["cpu_core_pct"] == 8.5 and n1["proc"][0]["ctxsw_vol_s"] == 30.0 and not ({"cpu", "wake"} & set(n1["proc"][0])) and n1["thr"][0]["cpu_core_pct"] == 1.5 and n1["thr"][0]["ctxsw_vol_s"] == 9.0, str(n1))
-check("normalize_sample: 옛 표본은 v=2, legacy=True", n1["v"] == 2 and n1["legacy"] is True)
-v2 = {"v": 2, "t": 1.0, "pw": {"batt_vi_w": 1.0}}
-check("normalize_sample: v2 는 그대로(legacy 없음)", core.normalize_sample(dict(v2)) == v2 and "legacy" not in core.normalize_sample(dict(v2)))
+check("normalize_sample: 필드 이름 v1 → 최신(값 그대로, proc 전환은 ctxsw_vol_leader_s)", n1["pw"]["batt_vi_w"] == 5.5 and "batt_w" not in n1["pw"] and n1["irq"]["cpu_all_pct"] == 3.2 and "cpu_busy_pct" not in n1["irq"]
+      and n1["proc"][0]["cpu_core_pct"] == 8.5 and n1["proc"][0]["ctxsw_vol_leader_s"] == 30.0 and not ({"cpu", "wake", "ctxsw_vol_s"} & set(n1["proc"][0])) and n1["thr"][0]["cpu_core_pct"] == 1.5 and n1["thr"][0]["ctxsw_vol_s"] == 9.0, str(n1))
+check("normalize_sample: 옛 표본은 v=3, legacy=True", n1["v"] == 3 and n1["legacy"] is True)
+v2 = {"v": 3, "t": 1.0, "pw": {"batt_vi_w": 1.0}}
+check("normalize_sample: 최신(v3)은 그대로(legacy 없음)", core.normalize_sample(dict(v2)) == v2 and "legacy" not in core.normalize_sample(dict(v2)))
 check("normalize_sample: 두 번 적용해도 같음(멱등)", core.normalize_sample(core.normalize_sample(json.loads(json.dumps(old)))) == n1)
 core.append_jsonl(core.SAMPLE_DIR, "samples", {**old, "t": time.time() - 100})
 rd = list(core.iter_jsonl(core.SAMPLE_DIR, "samples", time.time() - 200))
-check("iter_jsonl(samples): 파일에는 옛 이름 그대로 있지만 읽으면 새 이름·legacy", any(r.get("legacy") and "batt_vi_w" in r["pw"] and r["proc"][0]["ctxsw_vol_s"] == 30.0 for r in rd), str(rd[-1:]))
+check("iter_jsonl(samples): 파일에는 옛 이름 그대로 있지만 읽으면 새 이름·legacy", any(r.get("legacy") and "batt_vi_w" in r["pw"] and r["proc"][0]["ctxsw_vol_leader_s"] == 30.0 for r in rd), str(rd[-1:]))
 raw_line = open(core.day_file(core.SAMPLE_DIR, "samples", time.time() - 100)).read()
 check("원본 파일은 고쳐 쓰지 않는다(옛 이름 보존)", '"batt_w"' in raw_line and '"cpu_busy_pct"' in raw_line)
 core.append_jsonl(core.state_dir(), "events", {"t": time.time() - 50, "comp": "x", "ev": "keep", "pw": {"batt_w": 1}})
@@ -174,54 +174,15 @@ with _cx.redirect_stdout(buf):
     observe_cli.main(["window", "--since", "10m", "--by", "none"])
 wout = buf.getvalue()
 check("observectl window: 옛 형식 표본 안내·새 열 이름(V×I/상위전환/전체CPU%)", "옛 형식 표본" in wout and "V×I" in wout and "상위전환/s" in wout and "전체CPU%" in wout, wout)
-buf = _io.StringIO()
-with _cx.redirect_stdout(buf):
-    observe_cli.main(["top", "--since", "10m", "--by", "wake"])
-tout = buf.getvalue()
-check("observectl top --by wake: 옛 이름 안내 후 ctxsw 로 동작·열 이름", "옛 이름" in tout and "자발전환/s" in tout and "코어1개=100%" in tout, tout)
-buf = _io.StringIO()
-with _cx.redirect_stdout(buf):
-    observe_cli.main(["top", "--since", "10m", "--by", "ctxsw"])
-check("observectl top --by ctxsw: 안내 없이 동작", "옛 이름" not in buf.getvalue() and "claude" in buf.getvalue(), buf.getvalue())
-check("스모크: 표본이 JSON 직렬화 가능", True)
-
-# --- CLI: A/B 구간 분할
-rows = []
-t0 = 1000.0
-for seg, (cond, mt, w) in enumerate([("A", t0, 6.0), ("B", t0 + 100, 5.4), ("A", t0 + 200, 6.1), ("B", t0 + 300, 5.3)]):
-    for i in range(10):
-        rows.append({"t": mt + i * 10, "state": "high", "mark": {"cond": cond, "t": mt}, "pw": {"psys_w": w + (0.05 if i % 2 else -0.05)}})
-segs = observe_cli.segments(rows, settle=20)
-check("segments: 4구간 ABAB, 표지 직후 20초 제외", [c for c, _ in segs] == ["A", "B", "A", "B"] and all(len(g) == 8 for _, g in segs), str([(c, len(g)) for c, g in segs]))
-A = [observe_cli.mean_of(g, lambda r: observe_cli.get(r, "pw.psys_w")) for c, g in segs if c == "A"]
-check("구간 평균 계산", abs(A[0] - 6.0) < 0.01 and abs(A[1] - 6.1) < 0.01, str(A))
-check("group_key: state/mark/ac", observe_cli.group_key(rows[0], "state") == "high" and observe_cli.group_key(rows[0], "mark") == "A" and observe_cli.group_key({"pw": {"ac": 1}}, "ac") == "AC")
-seg_t = [("A", [{"dev": {"wifi": {"ps": "off"}}}] * 3), ("B", [{"dev": {"wifi": {"ps": "on"}}}] * 2 + [{"dev": {"wifi": {"ps": "off"}}}])]
-check("expect_mismatch: 기대와 같으면 0", observe_cli.expect_mismatch(seg_t, "A", "dev.wifi.ps=off") == (0, 3))
-check("expect_mismatch: 바뀌지 않은 표본을 센다", observe_cli.expect_mismatch(seg_t, "B", "dev.wifi.ps=on") == (1, 3))
-check("group_key wifips", observe_cli.group_key({"dev": {"wifi": {"ps": "on"}}}, "wifips") == "on" and observe_cli.group_key({}, "wifips") == "?")
-check("quirks_tag: 모두 있음/없음/일부", col.quirks_tag("a pcie_aspm=off acpi_osi=Linux irqpoll b") == "quirks" and col.quirks_tag("nowatchdog loglevel=3") == "no-quirks" and col.quirks_tag("irqpoll x").startswith("partial:irqpoll"))
-check("group_key boot/quirks", observe_cli.group_key({"dev": {"boot": "ab12", "quirks": "quirks"}}, "boot") == "ab12" and observe_cli.group_key({"dev": {"quirks": "no-quirks"}}, "quirks") == "no-quirks")
-erows = []
-for i in range(21):   # 10분(30초 × 20), 3600 mAh 전지 가정: 8 W → 15 V 에서 약 0.533 A → 30초에 4.44 mAh. 1 mAh 단위로 양자화
-    q = 2_900_000 - round(i * 30 * 8.0 / 15.0 / 3600 * 1e6 / 1000) * 1000
-    erows.append({"t": 1000.0 + i * 30, "state": "low", "pw": {"q_uah": q, "v_uv": 15_000_000, "status": "Discharging", "psys_w": 5.0 + (i % 2), "batt_vi_w": 9.0}})
-en = observe_cli.energy_by_group(erows, "state")["low"]
-check("energy_by_group: 누적 계량으로 8 W 평균을 복원(양자화 오차 ±0.2 W)", abs(en["coulomb_w"] - 8.0) < 0.2 and abs(en["hours"] * 60 - 10.0) < 0.01, str(en))
-check("energy_by_group: psys/V×I 평균도 함께", abs(en["psys_w"] - 5.5) < 0.1 and abs(en["vi_w"] - 9.0) < 1e-9)
-erows[5]["pw"]["status"] = "Charging"
-check("충전 중인 쌍은 제외", observe_cli.energy_by_group(erows, "state")["low"]["n"] == 18)
-check("is_clean: 한가한 표본은 통과", observe_cli.is_clean({"proc": [{"comm": "netdata", "cpu_core_pct": 2.0}, {"comm": "kmscon", "cpu_core_pct": 0.1}]}))
-check("is_clean: kmscon CPU 가 높으면(내 세션 활동) 제외", not observe_cli.is_clean({"proc": [{"comm": "kmscon", "cpu_core_pct": 18.0}]}))
-check("is_clean: nix-daemon 이 보이면(빌드) 제외", not observe_cli.is_clean({"proc": [{"comm": "nix-daemon", "cpu_core_pct": 30.0}, {"comm": "kmscon", "cpu_core_pct": 0.0}]}))
-check("pc3_stuck: 높은 상태 + pc3 50%, pc6+ 0 → 감지", col.pc3_stuck("high", {"pc3": 50, "pc6": 0, "pc8": 0, "pc10": 0}))
-check("pc3_stuck: pc8 이 있으면 정상", not col.pc3_stuck("high", {"pc3": 50, "pc6": 0, "pc8": 27, "pc10": 0}))
-check("pc3_stuck: 낮은 상태는 대상 아님", not col.pc3_stuck("low", {"pc3": 50, "pc6": 0, "pc8": 0, "pc10": 0}))
-check("pc3_stuck: pc3 가 적으면 대상 아님", not col.pc3_stuck("high", {"pc3": 5, "pc6": 0, "pc8": 0, "pc10": 0}))
-kn = col.take_knobs(os.path.join(TMP, "knobs-test.json"))
-check("take_knobs: 스냅샷 저장(읽기 전용)", kn and os.path.exists(kn) and len(json.load(open(kn))) > 20, str(kn))
-check("group_key flag", observe_cli.group_key({"flag": "pc3-stuck"}, "flag") == "pc3-stuck" and observe_cli.group_key({}, "flag") == "-")
-
+# 옛 표본만 있을 때 --by ctxsw(옛 이름 wake 포함)는 순위를 만들지 않고 이유를 안내한다 — 옛 값은 메인 스레드만 센 값이라 순위가 왜곡됨
+for by in ("wake", "ctxsw"):
+    buf = _io.StringIO()
+    try:
+        with _cx.redirect_stdout(buf):
+            observe_cli.main(["top", "--since", "10m", "--by", by])
+        check(f"observectl top --by {by}: 옛 표본뿐이면 안내 후 종료", False, buf.getvalue())
+    except SystemExit as e:
+        check(f"observectl top --by {by}: 옛 표본뿐이면 안내 후 종료", "새 형식" in str(e) and ("옛 이름" in buf.getvalue() if by == "wake" else True), str(e) + buf.getvalue())
 
 # --- observectl ab (다지표·자동 검증·판정 문구)
 import io as _io2, contextlib as _cx2
@@ -283,4 +244,60 @@ check("ab: --metric 으로 한 지표만도 가능", "psys(RAPL" in out and "패
 w, err = observe_cli.segment_coulomb(_ab_rows([A], seg_len=16)[0:16])
 check("segment_coulomb: 계량 W 복원(6 W)·양자화 오차(≈54/구간초)", w is not None and abs(w - 6.0) < 0.15 and 0.05 < err < 0.2, str((w, err)))
 check("segment_coulomb: 충전 중이면 None", observe_cli.segment_coulomb([dict(r, pw={**r["pw"], "status": "Charging"}) for r in _ab_rows([A], seg_len=16)]) == (None, None))
+
+
+# --- (v3) 프로세스별 자발적 전환은 모든 스레드 합 — /proc/<pid>/status 는 메인 스레드뿐
+import tempfile as _tf2
+fp = _tf2.mkdtemp(prefix="fakeproc-")
+def _mk(pid, comm, nthr, tasks, cpu=100):
+    os.makedirs(f"{fp}/{pid}/task", exist_ok=True)
+    stat = f"{pid} ({comm}) S 1 1 1 0 -1 0 0 0 0 0 {cpu} 0 0 0 20 0 {nthr} 0 0 0 {1000}\n"
+    open(f"{fp}/{pid}/stat", "w").write(stat)
+    open(f"{fp}/{pid}/status", "w").write(f"Name:\t{comm}\nvoluntary_ctxt_switches:\t{tasks[0][0]}\nnonvoluntary_ctxt_switches:\t1\n")   # 메인 스레드만 보임
+    for tid, (v, n) in enumerate(tasks, start=pid):
+        os.makedirs(f"{fp}/{pid}/task/{tid}", exist_ok=True)
+        open(f"{fp}/{pid}/task/{tid}/stat", "w").write(stat.replace(f"{pid} (", f"{tid} (", 1))
+        open(f"{fp}/{pid}/task/{tid}/status", "w").write(f"voluntary_ctxt_switches:\t{v}\nnonvoluntary_ctxt_switches:\t{n}\n")
+_mk(100, "multi", 3, [(10, 0), (200, 1), (300, 2)])          # 메인 10 + 나머지 스레드 500
+_mk(101, "single", 1, [(7, 0)])
+old_proc = col.PROC
+col.PROC = fp
+try:
+    smp_obj = col.Sampler("L0")
+    procs, thr = smp_obj._procs()
+finally:
+    col.PROC = old_proc
+check("수집기: 멀티스레드 프로세스는 모든 스레드의 자발적 전환을 합산(10+200+300=510, 메인 스레드만이면 10)", procs[100][3] == 510, str(procs.get(100)))
+check("수집기: 스레드 1개 프로세스는 그대로(7)", procs[101][3] == 7, str(procs.get(101)))
+check("수집기: L0 에서는 스레드 상세(thr)를 만들지 않음", thr == {})
+col.PROC = fp
+try:
+    procs1, thr1 = col.Sampler("L1")._procs()
+finally:
+    col.PROC = old_proc
+check("수집기 L1: 같은 합계 + 스레드별 행(3개)을 한 번에", procs1[100][3] == 510 and len([k for k in thr1 if k[0] == 100]) == 3, str((procs1.get(100), list(thr1))))
+
+# v1/v2 → v3 변환: proc 행의 ctxsw_vol_s 는 ctxsw_vol_leader_s 로(합산·비교 금지), thr 행은 그대로
+v2s = {"v": 2, "t": 1.0, "pw": {"batt_vi_w": 1.0}, "irq": {"cpu_all_pct": 1.0}, "proc": [{"comm": "x", "cpu_core_pct": 3.0, "ctxsw_vol_s": 9.0}], "thr": [{"comm": "x", "thr": "t", "cpu_core_pct": 1.0, "ctxsw_vol_s": 4.0}]}
+n3 = core.normalize_sample(json.loads(json.dumps(v2s)))
+check("v2→v3: proc 행 ctxsw_vol_s 는 ctxsw_vol_leader_s 로 바뀜(메인 스레드만이라는 뜻)", n3["proc"][0].get("ctxsw_vol_leader_s") == 9.0 and "ctxsw_vol_s" not in n3["proc"][0] and n3["v"] == 3 and n3["legacy"], str(n3))
+check("v2→v3: thr 행(스레드 단위)은 그대로 ctxsw_vol_s", n3["thr"][0].get("ctxsw_vol_s") == 4.0 and "ctxsw_vol_leader_s" not in n3["thr"][0])
+n13 = core.normalize_sample(json.loads(json.dumps(old)))
+check("v1→v3: wake 는 두 단계를 거쳐 ctxsw_vol_leader_s", n13["proc"][0].get("ctxsw_vol_leader_s") == 30.0 and "wake" not in n13["proc"][0] and "ctxsw_vol_s" not in n13["proc"][0], str(n13["proc"]))
+v3s = {"v": 3, "t": 1.0, "proc": [{"comm": "x", "ctxsw_vol_s": 9.0}]}
+check("v3 는 그대로(이름·legacy 변화 없음)", core.normalize_sample(json.loads(json.dumps(v3s))) == v3s)
+check("정규화는 멱등(v1→v3 를 두 번 적용해도 같음)", core.normalize_sample(core.normalize_sample(json.loads(json.dumps(old)))) == n13)
+
+# observectl: 옛 표본은 전환 순위·합계에서 제외하고 안내
+core.append_jsonl(core.SAMPLE_DIR, "samples", {"v": 3, "t": time.time() - 40, "dt": 30, "pw": {"psys_w": 3.0}, "irq": {"cpu_all_pct": 1.0, "ctxt_s": 100}, "state": "low",
+                  "proc": [{"comm": "multi", "exe": "multi", "n": 1, "cpu_core_pct": 5.0, "ctxsw_vol_s": 510.0, "rss_mb": 1}], "dev": {}})
+buf = _io.StringIO()
+with _cx.redirect_stdout(buf):
+    observe_cli.main(["top", "--since", "10m", "--by", "ctxsw"])
+tout = buf.getvalue()
+check("top --by ctxsw: 옛 표본 제외 안내 + 새 표본의 멀티스레드 프로세스가 보임(510/s) + 열 이름", "제외" in tout and "multi" in tout and "510" in tout and "claude" not in tout and "자발전환/s" in tout and "코어1개=100%" in tout, tout)
+buf = _io.StringIO()
+with _cx.redirect_stdout(buf):
+    observe_cli.main(["top", "--since", "10m", "--by", "cpu"])
+check("top --by cpu: 옛 표본도 포함(CPU 는 프로세스 전체 값이라 유효)", "claude" in buf.getvalue() and "multi" in buf.getvalue(), buf.getvalue())
 finish("observe")

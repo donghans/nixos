@@ -93,7 +93,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 
 ### Netdata 로의 미러링
 
-수집기는 표본마다 숫자 일부를 Netdata statsd(`127.0.0.1:8125`)에 게이지로도 보낸다(`observe.*`: psys/pkg/core/uncore W, 방전·충전 전력, 잔량 %, state_low, psr_on, psr_sink_active, **ctxsw_vol_top_per_s(상위 프로세스만의 자발 전환 합)·ctxsw_all_per_s(시스템 전체 문맥 전환)**, **cpu_all_pct(전체 CPU 대비)**, 패키지 C-state pc2~pc10, s0ix. 2026-10-21 이전에 보낸 `wake_per_s`·`cpu_busy_pct` 차트는 이름이 달라 새 차트와 이어지지 않으며 7일 보관이 끝나면 사라진다. Netdata 에서는 `statsd_observe.<이름>_gauge` 차트로 보인다. **원본은 observectl(JSONL)** 이고 이쪽은 한쪽 방향 복사다 — 문자열·이벤트·표지·프로세스 상세·A/B 통계는 observectl 에만 있다. Netdata 쪽 이점은 시스템 지표(CPU·PSI·네트워크·디스크·온도)와 같은 시간축·같은 API 로 겹쳐 볼 수 있다는 것.
+수집기는 표본마다 숫자 일부를 Netdata statsd(`127.0.0.1:8125`)에 게이지로도 보낸다(`observe.*`: psys/pkg/core/uncore W, 방전·충전 전력, 잔량 %, state_low, psr_on, psr_sink_active, **ctxsw_top_all_threads_per_s(상위 프로세스의 모든 스레드 자발 전환 합)·ctxsw_all_per_s(시스템 전체 문맥 전환)**, **cpu_all_pct(전체 CPU 대비)**, 패키지 C-state pc2~pc10, s0ix. 2026-10-21 이전에 보낸 `wake_per_s`·`cpu_busy_pct`·`ctxsw_vol_top_per_s`(메인 스레드만) 차트는 이름이 달라 새 차트와 이어지지 않으며 7일 보관이 끝나면 사라진다. Netdata 에서는 `statsd_observe.<이름>_gauge` 차트로 보인다. **원본은 observectl(JSONL)** 이고 이쪽은 한쪽 방향 복사다 — 문자열·이벤트·표지·프로세스 상세·A/B 통계는 observectl 에만 있다. Netdata 쪽 이점은 시스템 지표(CPU·PSI·네트워크·디스크·온도)와 같은 시간축·같은 API 로 겹쳐 볼 수 있다는 것.
 
 ## `uikit` — 우리 TUI 공통 틀 (2026-10-21)
 
@@ -148,11 +148,12 @@ OTel 의 트레이스 개념만 빌린 것(OTel 을 넣거나 흉내 내는 게 
 | `pw.batt_w` | `pw.batt_vi_w` | 배터리 전압×전류의 **순간** 절댓값(방전 중에만 방전 전력, 충전 중엔 충전 전력) |
 | `irq.cpu_busy_pct` | `irq.cpu_all_pct` | **전체 CPU 대비** 사용률(100 = 모든 CPU 가 계속 일함) |
 | `proc[].cpu`, `thr[].cpu` | `cpu_core_pct` | **코어 1개 = 100%** (여러 코어를 쓰면 100 을 넘음) |
-| `proc[].wake`, `thr[].wake` | `ctxsw_vol_s` | **자발적 문맥 전환/s**(스스로 잠든 횟수). 시스템 전체 깨움(`sched_waking`)이 아니다 |
+| `proc[].wake`, `thr[].wake` | `ctxsw_vol_s` | **자발적 문맥 전환/s**(스스로 잠든 횟수). 시스템 전체 깨움(`sched_waking`)이 아니다. **proc 행은 v3 부터 모든 스레드 합**(스레드 1개 프로세스 외에는 `task/*/status` 를 합산), thr 행은 스레드 단위 |
+| (v1·v2 의) `proc[].ctxsw_vol_s` | `ctxsw_vol_leader_s` | **옛 값 — `/proc/<pid>/status` 의 메인 스레드만**이라 멀티스레드 프로세스를 크게 과소 집계(전체 합의 약 27%만 보임). 합산·순위·비교에 쓰지 않는다(`window`/`top`/powerui 는 제외하고 안내) |
 | (없음) `irq.ctxt_s` | 그대로 | 시스템 전체 문맥 전환/s(비자발 포함, `/proc/stat` ctxt) |
 | `state` = low/high | 그대로 | **패키지 pc10 ≥ 5%(깊은 절전 진입) 여부**이지 전력 높낮이가 아님. 화면에는 `low(깊은 절전)` 처럼 뜻을 함께 쓴다 |
 
-- 새 표본은 `v: 2`. **옛 표본(v 없음)은 파일을 고쳐 쓰지 않고 읽을 때 새 이름으로 바꾸며 `legacy: true` 를 단다**(`observe_core.normalize_sample`; `iter_jsonl` 과 powerui 의 `Store` 가 적용). `observectl window` 와 powerui 상태줄은 옛 형식 표본이 섞이면 개수를 알려 준다. 보관 기간이 지나면 옛 표본은 사라진다.
+- 새 표본은 `v: 3`(v2 는 이름 정리, **v3 는 proc 행 `ctxsw_vol_s` 를 모든 스레드 합으로 정정**). **옛 표본(v 없음·v2)은 파일을 고쳐 쓰지 않고 읽을 때 새 이름으로 바꾸며 `legacy: true` 를 단다**(`observe_core.normalize_sample`; `iter_jsonl` 과 powerui 의 `Store` 가 적용). `observectl window` 와 powerui 상태줄은 옛 형식 표본이 섞이면 개수를 알려 준다. 보관 기간이 지나면 옛 표본은 사라진다.
 - 화면 열 이름: `observectl window` 는 `V×I`·`상위전환/s`(**저장된 상위 프로세스 최대 16행의 합 — 시스템 전체가 아님**)·`전체CPU%`, `observectl top` 은 `CPU(코어1개=100%)`·`자발전환/s`. powerui 현황은 "전환 시스템 전체 / 상위 프로세스(합계 아님)" 와 "CPU 전체 대비" 를 따로 보여 준다.
 - 옵션 호환: `observectl top --by wake` 와 `observectl ab --metric batt_w` 는 새 이름의 옛 별칭으로 계속 받는다(안내를 출력).
 - "지금 CPU" 를 볼 때는 `ps` 의 %CPU(프로세스 시작 이후 누적 평균)가 아니라 `observectl top --since 1m`(구간 평균) 이나 `observectl bpf profile`(99Hz 표본)을 쓴다.
