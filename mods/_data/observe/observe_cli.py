@@ -340,7 +340,10 @@ def _tbl(rows, cols):
 
 
 def cmd_bpf(a):
-    res = request("bpf", {"preset": a.preset, "sec": a.sec, "comm": a.comm, "n": a.n}, a.sec + 40)
+    r = request("bpf", {"preset": a.preset, "sec": a.sec, "comm": a.comm, "n": a.n}, a.sec + 40)
+    if not r.get("ok"):
+        sys.exit(f"오류: {r.get('error')}")
+    res = r["data"]                                  # 수집기가 {id, type, ok, data|error, t_start, t_end} 로 감싸 돌려준다
     if res.get("error"):
         sys.exit(f"오류: {res['error']}")
     if res.get("rc"):
@@ -362,10 +365,10 @@ def cmd_bpf(a):
         print("[사용자 맨 위 함수]")
         _tbl(s["user_leaf"], [("comm", "comm", 20, "<"), ("함수", "frame", 44, "<"), ("%", "pct", 7, ">")])
     elif a.preset == "psr":
-        print(f"i915 PSR: flush {s['psr_flush']}회 · exit {s['psr_exit']}회 · activate {s['psr_activate']}회 ({s['sec']}초)")
+        print(f"i915 PSR ({s['sec']}초): flush {s['psr_flush']}회 · invalidate {s.get('psr_invalidate', '?')}회 · exit {s['psr_exit']}회 · activate {s['psr_activate']}회")
         print("[화면 갱신(drm atomic 커밋)을 일으킨 프로세스]")
         _tbl(s["atomic_ioctl"], [("comm", "comm", 22, "<"), ("횟수", "count", 8, ">"), ("/s", "per_s", 8, ">")])
-        print("(exit 가 많고 activate 가 적으면 PSR 이 켜져도 곧 풀리는 중 — 위 프로세스가 화면을 계속 그리고 있다는 뜻)")
+        print("(커밋이 많은 프로세스가 화면을 계속 그리는 것. PSR 이 꺼져 있으면 flush 만 세어질 수 있고, 켜진 상태에서 갱신이 잦으면 invalidate/exit 가 늘고 activate 가 따라 늘어난다)")
     elif a.preset == "io":
         _tbl(s["rows"], [("comm", "comm", 22, "<"), ("요청", "count", 8, ">"), ("/s", "per_s", 8, ">"), ("바이트", "bytes", 12, ">")])
     elif a.preset == "net":

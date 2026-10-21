@@ -4,7 +4,7 @@
   exec     프로세스 생성/종료 → 프로세스 구간(스팬: 부모-자식, CPU 시간). 누가 프로세스를 자주 만드나.
   wake     깨우는 쪽 → 깨어나는 쪽 comm 쌍의 횟수(sched_waking). 전력의 원인 추적.
   profile  99Hz CPU 샘플링: 프로세스별 CPU 비율 + 가장 많이 걸린 커널/사용자 맨 위 함수(JFR 의 가벼운 버전).
-  psr      화면 갱신 원인: drm atomic 커밋을 일으킨 comm 별 횟수 + i915 PSR flush/exit/activate 횟수(PSR 이 왜 풀리나).
+  psr      화면 갱신 원인: drm atomic 커밋을 일으킨 comm 별 횟수 + i915 PSR flush/invalidate/exit/activate 횟수(PSR 이 왜 풀리나).
   io       블록 입출력 comm 별 횟수·바이트.
   net      TCP/UDP 송수신 호출 comm 별 횟수."""
 from __future__ import annotations
@@ -33,7 +33,7 @@ def program(preset, sec, comm=None):
         return (f"profile:hz:99 {flt} {{ @cpu[comm] = count(); @kleaf[comm, kstack(1)] = count(); @uleaf[comm, ustack(1)] = count(); }} {end}")
     if preset == "psr":
         return ("kprobe:drm_mode_atomic_ioctl %s { @atomic[comm] = count(); } kprobe:i915:intel_psr_flush { @psr_flush = count(); } "
-                "kprobe:i915:intel_psr_exit { @psr_exit = count(); } kprobe:i915:intel_psr_activate { @psr_activate = count(); } %s") % (flt, end)
+                "kprobe:i915:intel_psr_invalidate { @psr_invalidate = count(); } kprobe:i915:intel_psr_exit { @psr_exit = count(); } kprobe:i915:intel_psr_activate { @psr_activate = count(); } %s") % (flt, end)
     if preset == "io":
         return f"tracepoint:block:block_rq_issue {flt} {{ @n[comm] = count(); @bytes[comm] = sum(args->bytes); }} {end}"
     return (f"kprobe:tcp_sendmsg {flt} {{ @tcp_send[comm] = count(); }} kprobe:tcp_recvmsg {flt} {{ @tcp_recv[comm] = count(); }} "
@@ -95,7 +95,7 @@ def summarize(preset, lines, maps, sec, n=15):
                 "kernel_leaf": leaf("kleaf"), "user_leaf": leaf("uleaf")}
     if preset == "psr":
         return {"atomic_ioctl": [{"comm": a, "count": b, "per_s": round(b / sec, 1)} for a, b in top(maps.get("atomic", {}), n)],
-                "psr_flush": _scalar(maps, "psr_flush"), "psr_exit": _scalar(maps, "psr_exit"), "psr_activate": _scalar(maps, "psr_activate"), "sec": sec}
+                "psr_flush": _scalar(maps, "psr_flush"), "psr_invalidate": _scalar(maps, "psr_invalidate"), "psr_exit": _scalar(maps, "psr_exit"), "psr_activate": _scalar(maps, "psr_activate"), "sec": sec}
     if preset == "io":
         io = maps.get("n", {})
         by = maps.get("bytes", {})
