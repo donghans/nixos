@@ -90,7 +90,12 @@ check("전환 커버리지: 저장된 상위 행 합 410 / 시스템 9000 ≈ 4.
 chg = windowed(C0, 20, psys=9.0, status="Charging", ac=1)
 r5 = ex.build(chg, [], C0, C1, None, nd_fake)
 t5 = "\n".join(ex.render(r5, core.hms))
-check("충전 중: 방전 표본이 없으면 '충전 중 — Netdata 값은 충전 전력' 표시", "충전 전력" in t5, t5)
+check("충전 중: 방전 표본이 없으면 Netdata V×I(충전 전력)를 방전 전력과 나란히 두지 않고 뺀다", r5["power"]["batt_vi_w"]["netdata"] is None and any("전원이 섞인" in n for n in r5["notes"]) and r5["power"]["psys_w"]["netdata"] is not None, t5)
+mixed = windowed(C0, 20, psys=9.0)
+for i in range(0, len(mixed), 2):
+    mixed[i]["pw"]["status"] = "Charging"
+r6 = ex.build(mixed, [], C0, C1, None, nd_fake)
+check("전원이 섞인 구간: Netdata V×I 제외 + 안내(psys·패키지는 유지), 방전 전용 구간은 그대로 병기", r6["power"]["batt_vi_w"]["netdata"] is None and r6["power"]["pkg_w"]["netdata"] is not None and res["power"]["batt_vi_w"]["netdata"] is not None, str(r6["notes"]))
 
 # CLI 통합
 now = time.time()

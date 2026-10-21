@@ -172,10 +172,19 @@ def build(rows, spans, t0, t1, base=None, nd=None, threshold=0.3):
     elif snap and snap["coverage"] < 0.9:
         res["notes"].append(f"Netdata 데이터가 이 구간의 {snap['coverage'] * 100:.0f}% 만 있음(그 외 시간은 꺼져 있었음) — Netdata 값은 있는 부분의 평균")
     if snap:
+        def all_discharging(rs):
+            return bool(rs) and all(_get(r, ("pw", "status")) == "Discharging" for r in rs)
         for key, lab in (("psys_w", "psys"), ("pkg_w", "pkg"), ("batt_vi_w", "batt_vi_w")):
             res["power"].setdefault(key, {})["netdata"] = snap["signals"].get(key)
             if snap_b:
                 res["power"][key]["netdata_base"] = snap_b["signals"].get(key)
+        # Netdata 의 V×I 는 구간 전체의 |전압×전류| 평균이라 충전·AC 시간이 섞이면 방전 전력이 아님 → 방전만인 구간에서만 병기
+        if not all_discharging(cur):
+            res["power"]["batt_vi_w"]["netdata"] = None
+            res["power"]["batt_vi_w"]["netdata_mixed"] = True
+            res["notes"].append("전원이 섞인 구간(충전·AC 포함)이라 Netdata V×I 는 방전 전력과 비교할 수 없어 뺐음(psys·패키지는 전원과 무관해 그대로)")
+        if snap_b and not all_discharging(ref):
+            res["power"]["batt_vi_w"]["netdata_base"] = None
     # 시스템 활동
     sysrows = []
     for name, label, unit, path, min_abs in SYSTEM:
