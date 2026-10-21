@@ -99,6 +99,22 @@ p = run(fail_cfg)
 out, _ = p.communicate(timeout=20)
 check("적용 실패: 종료 코드 3", p.returncode == 3 and "적용 실패" in out, out)
 
+# --- AC 모드: AC 를 꽂은 채 `tlp bat` 적용, 끝나면 `tlp start` 로 복구
+TLPLOG = os.path.join(T, "tlp.log")
+def tlp_stub():
+    if os.path.exists(TLPLOG):
+        os.unlink(TLPLOG)
+    fake = os.path.join(T, "tlp"); open(fake, "w").write('#!/bin/sh\necho "$@" >> %s\n' % TLPLOG); os.chmod(fake, 0o755)
+    return fake
+setup(ac="1\n")
+p = run(env_extra={"ABAB_AC_MODE": "1", "TLP_CMD": tlp_stub()}); out, _ = p.communicate(timeout=30)
+tl = open(TLPLOG).read().split()
+ab = next(x for x in calls() if x.startswith("ab "))
+check("AC 모드: tlp bat 으로 시작하고 끝에 tlp start 로 복구, AC=1 을 요구하는 --require", p.returncode == 0 and tl[0] == "bat" and tl[-1] == "start" and "--require pw.ac=1" in ab, out + str(tl))
+setup(ac="0\n")
+p = run(env_extra={"ABAB_AC_MODE": "1", "TLP_CMD": tlp_stub()}); out, _ = p.communicate(timeout=30)
+check("AC 모드: AC 가 빠져 있으면 거부(종료 코드 4)하고 tlp 를 건드리지 않음", p.returncode == 4 and not os.path.exists(TLPLOG), out)
+
 # --- 예제 스크립트가 문법·함수 계약을 지킴
 r = subprocess.run(["sh", "-n", os.path.join(ROOT, "examples", "netdata_abab.sh")])
 check("netdata_abab.sh 문법", r.returncode == 0)

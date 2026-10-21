@@ -5,6 +5,9 @@
 #   abab_set_b     B 조건을 적용                                   abab_verify_b  B 가 실제로 적용됐는지 확인
 #   abab_restore   원래 상태로 복구 — 끝나거나 중단되거나 실패하든 **반드시 한 번** 실행된다
 #
+# AC 모드(ABAB_AC_MODE=1): 어댑터를 뽑지 않고 잰다 — AC 가 연결된 채로 `tlp bat`(배터리 전원 정책을 수동 적용)로 바꿔 두고, 끝나면 `tlp start`(자동)로 되돌린다.
+#   배터리가 충전 중이 아니어야 깨끗하다(만충·"Not charging"). 이 모드에서는 배터리 쪽 지표(순간 V×I·누적 계량)가 없고 RAPL(psys·패키지)·Netdata 1초 값으로 판정한다.
+#   psys 는 배터리 쪽 지표보다 효과가 크게 나올 수 있어(예: Netdata 끔 psys −1.07 W 대 배터리 −0.5~−0.6 W) 최종 결정 전에는 배터리 모드로 한 번 확인한다.
 # 환경변수: SEG=구간 초(기본 300, 5분 이상 권장 — 짧으면 순간 V×I·누적 계량이 신뢰 낮음), PAIRS=쌍 수(기본 3), SETTLE=안정화 초(기본 40),
 #           AB_ARGS=`observectl ab` 에 더 넘길 인자(예: "--expect-a dev.wifi.ps=off --expect-b dev.wifi.ps=on")
 #
@@ -17,7 +20,7 @@
 # 주의: root 명령은 setuid 래퍼(/run/wrappers/bin/sudo)여야 한다(PATH 앞에 /run/current-system/sw/bin 을 두면 안 됨).
 export PATH=/run/wrappers/bin:/run/current-system/sw/bin:$PATH
 SEG=${SEG:-300}; PAIRS=${PAIRS:-3}; SETTLE=${SETTLE:-40}; OBS=${OBS:-observectl}
-_ABAB_DONE=0; _ABAB_SLP=""; _ABAB_RC=0
+_ABAB_DONE=0; _ABAB_SLP=""; _ABAB_RC=0; _ABAB_TLP=0
 
 abab_lid() { cat ${ABAB_LID_FILE:-/proc/acpi/button/lid/*/state} 2>/dev/null | awk '{print $2}' | head -1; }
 abab_ac()  { cat ${ABAB_AC_FILE:-/sys/class/power_supply/ADP1/online} 2>/dev/null | head -1; }
@@ -27,6 +30,7 @@ _abab_cleanup() {
     _ABAB_DONE=1
     [ -n "$_ABAB_SLP" ] && kill "$_ABAB_SLP" 2>/dev/null
     abab_restore
+    [ "$_ABAB_TLP" = 1 ] && ${TLP_CMD:-sudo -n tlp} start >/dev/null 2>&1
     $OBS mark --clear >/dev/null 2>&1
     echo "$(date +%T) 복구 완료"
 }
@@ -54,6 +58,12 @@ _abab_step() {   # $1=A|B  $2=표지 설명
 
 abab_run() {
     _LID0=$(abab_lid); _AC0=$(abab_ac); T0=$(date +%s)
+    if [ "${ABAB_AC_MODE:-0}" = 1 ]; then
+        [ "$_AC0" = 1 ] || { echo "✗ ABAB_AC_MODE=1 은 AC 를 꽂은 상태에서 쓰는 모드입니다(현재 AC=$_AC0)"; exit 4; }
+        ${TLP_CMD:-sudo -n tlp} bat >/dev/null || { echo "FAIL: tlp bat 적용 실패"; exit 3; }
+        _ABAB_TLP=1
+        echo "AC 모드: AC 를 꽂은 채 TLP 배터리 정책으로 측정합니다(배터리 지표 없음 — psys·패키지로 판정)"
+    fi
     echo "T0=$T0 · 구간 ${SEG}초 × $((PAIRS * 2)) · 덮개 $_LID0 · AC $_AC0"
     _pair=1       # 훅 함수(abab_set_* 등)가 같은 이름을 쓰지 못하게 앞에 밑줄(POSIX sh 는 변수가 전역 — 2026-10-21 T20 에서 훅의 i 가 쌍 카운터를 덮어 무한 반복했음)
     while [ "$_pair" -le "$PAIRS" ]; do
