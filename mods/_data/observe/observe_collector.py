@@ -156,7 +156,7 @@ def statsd_lines(s, prefix="observe"):
     문자열·이벤트·프로세스 상세는 보내지 않는다. 방전/충전 전력은 섞이지 않게 둘로 나누고 해당 없을 땐 0."""
     pw, cs, dev = s.get("pw") or {}, s.get("cs") or {}, s.get("dev") or {}
     psr = dev.get("psr") or {}
-    batt = pw.get("batt_w")
+    batt = pw.get("batt_vi_w")
     st = pw.get("status")
     vals = {
         "psys_w": pw.get("psys_w"), "pkg_w": pw.get("pkg_w"), "core_w": pw.get("core_w"), "uncore_w": pw.get("uncore_w"),
@@ -166,8 +166,9 @@ def statsd_lines(s, prefix="observe"):
         "state_low": (1 if s.get("state") == "low" else 0) if s.get("state") in ("low", "high") else None,
         "psr_on": (1 if "enabled" in str(psr.get("mode")) else 0) if psr else None,
         "psr_sink_active": (1 if psr.get("sink") == "active" else 0) if psr else None,
-        "wake_per_s": sum(p.get("wake", 0) for p in s.get("proc") or []) if s.get("proc") is not None else None,
-        "cpu_busy_pct": (s.get("irq") or {}).get("cpu_busy_pct"),
+        "ctxsw_vol_top_per_s": sum(p.get("ctxsw_vol_s", 0) for p in s.get("proc") or []) if s.get("proc") is not None else None,   # 저장된 상위 프로세스(최대 16행)만의 합 — 시스템 전체 아님
+        "ctxsw_all_per_s": (s.get("irq") or {}).get("ctxt_s"),                                                              # 시스템 전체 문맥 전환(/proc/stat ctxt, 비자발 포함)
+        "cpu_all_pct": (s.get("irq") or {}).get("cpu_all_pct"),
         "wifi_ps_on": (1 if (dev.get("wifi") or {}).get("ps") == "on" else 0) if (dev.get("wifi") or {}).get("ps") else None,
     }
     for k in ("pc2", "pc3", "pc6", "pc8", "pc10", "s0ix_pct"):
@@ -348,14 +349,14 @@ class Sampler:
         cur = self._snapshot()
         p = self.prev
         dt = cur["mono"] - p["mono"]
-        out = {"t": round(cur["t"], 3), "dt": round(dt, 2), "lvl": self.level}
+        out = {"v": core.SCHEMA, "t": round(cur["t"], 3), "dt": round(dt, 2), "lvl": self.level}
         pw = {"pkg_w": _watts(p["rapl"]["intel-rapl:0"], cur["rapl"]["intel-rapl:0"], dt),
               "psys_w": _watts(p["rapl"]["intel-rapl:1"], cur["rapl"]["intel-rapl:1"], dt),
               "core_w": _watts(p["rapl"]["intel-rapl:0:0"], cur["rapl"]["intel-rapl:0:0"], dt),
               "uncore_w": _watts(p["rapl"]["intel-rapl:0:1"], cur["rapl"]["intel-rapl:0:1"], dt)}
         if self.bat:
             v, i = rd(self.bat + "/voltage_now"), rd(self.bat + "/current_now")
-            pw["batt_w"] = round(int(v) * abs(int(i)) / 1e12, 3) if v and i else None
+            pw["batt_vi_w"] = round(int(v) * abs(int(i)) / 1e12, 3) if v and i else None
             pw["batt_pct"] = rd(self.bat + "/capacity")
             pw["q_uah"] = int(rd(self.bat + "/charge_now") or 0) or None        # 누적 계량값(1 mAh 단위, ≈15 mWh) — 10분 이상 평균에 쓰는 가장 믿을 만한 기준(observectl energy)
             pw["v_uv"] = int(v) if v else None
@@ -376,30 +377,30 @@ class Sampler:
                       "soft": [{"n": k, "per_s": round(v / dt, 1)} for v, k in d_soft if v > 0],
                       "gpe6e_s": round((cur["gpe"]["gpe6E"] - p["gpe"]["gpe6E"]) / dt, 1), "sci_s": round((cur["gpe"]["sci"] - p["gpe"]["sci"]) / dt, 1),
                       "ctxt_s": round((cur["stat"].get("ctxt", 0) - p["stat"].get("ctxt", 0)) / dt), "intr_s": round((cur["stat"].get("intr", 0) - p["stat"].get("intr", 0)) / dt),
-                      "cpu_busy_pct": round((cur["stat"]["busy"] - p["stat"]["busy"]) / max(1, cur["stat"]["total"] - p["stat"]["total"]) * 100, 1),
+                      "cpu_all_pct": round((cur["stat"]["busy"] - p["stat"]["busy"]) / max(1, cur["stat"]["total"] - p["stat"]["total"]) * 100, 1),
                       "load1": rd(f"{PROC}/loadavg").split()[0] if rd(f"{PROC}/loadavg") else None}
         agg = {}
         for pid, (comm, exe, cpu, vol, rss, io) in cur["procs"].items():
             q = p["procs"].get(pid)
             if not q:
                 continue
-            a = agg.setdefault((comm, exe), {"n": 0, "cpu": 0.0, "wake": 0.0, "rss": 0, "rd": 0, "wr": 0})
+            a = agg.setdefault((comm, exe), {"n": 0, "cpu_core_pct": 0.0, "ctxsw_vol_s": 0.0, "rss": 0, "rd": 0, "wr": 0})
             a["n"] += 1
-            a["cpu"] += (cpu - q[2]) / HZ / dt * 100
-            a["wake"] += (vol - q[3]) / dt
+            a["cpu_core_pct"] += (cpu - q[2]) / HZ / dt * 100
+            a["ctxsw_vol_s"] += (vol - q[3]) / dt
             a["rss"] += rss
             a["rd"] += max(0, io[0] - q[5][0]) / dt
             a["wr"] += max(0, io[1] - q[5][1]) / dt
-        rows = [{"comm": k[0], "exe": k[1], "n": v["n"], "cpu": round(v["cpu"], 2), "wake": round(v["wake"], 1), "rss_mb": round(v["rss"] * 4096 / 1048576, 1)} for k, v in agg.items()]
-        top = {r["comm"] + "|" + r["exe"]: r for r in sorted(rows, key=lambda r: -r["cpu"])[:8] + sorted(rows, key=lambda r: -r["wake"])[:8] if r["cpu"] > 0 or r["wake"] > 0}
+        rows = [{"comm": k[0], "exe": k[1], "n": v["n"], "cpu_core_pct": round(v["cpu_core_pct"], 2), "ctxsw_vol_s": round(v["ctxsw_vol_s"], 1), "rss_mb": round(v["rss"] * 4096 / 1048576, 1)} for k, v in agg.items()]
+        top = {r["comm"] + "|" + r["exe"]: r for r in sorted(rows, key=lambda r: -r["cpu_core_pct"])[:8] + sorted(rows, key=lambda r: -r["ctxsw_vol_s"])[:8] if r["cpu_core_pct"] > 0 or r["ctxsw_vol_s"] > 0}
         out["proc"] = list(top.values())
         if self.level == "L1":
             trows = []
             for key, (comm, tn, tcpu, tv) in cur["threads"].items():
                 q = p["threads"].get(key)
                 if q:
-                    trows.append({"pid": key[0], "tid": key[1], "comm": comm, "thr": tn, "cpu": round((tcpu - q[2]) / HZ / dt * 100, 2), "wake": round((tv - q[3]) / dt, 1)})
-            out["thr"] = sorted(trows, key=lambda r: -(r["wake"] + r["cpu"] * 10))[:15]
+                    trows.append({"pid": key[0], "tid": key[1], "comm": comm, "thr": tn, "cpu_core_pct": round((tcpu - q[2]) / HZ / dt * 100, 2), "ctxsw_vol_s": round((tv - q[3]) / dt, 1)})
+            out["thr"] = sorted(trows, key=lambda r: -(r["ctxsw_vol_s"] + r["cpu_core_pct"] * 10))[:15]
             ios = [{"comm": k[0], "rd_bps": round(v["rd"]), "wr_bps": round(v["wr"])} for k, v in agg.items() if v["rd"] + v["wr"] > 0]
             out["io"] = sorted(ios, key=lambda r: -(r["rd_bps"] + r["wr_bps"]))[:5]
         if time.monotonic() - self.wifi_t > 30:

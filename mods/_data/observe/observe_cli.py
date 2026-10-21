@@ -8,7 +8,7 @@
   observectl window [--since 11:00 --until 11:30 --by state|vt|ssid|mark|lid|ac]   그룹별 전력/C-state 요약
   observectl energy [--since 1h --by state|quirks]   누적 계량(charge_now) 기준 평균 전력을 psys·V×I 와 나란히 비교(측정 검증용)
   observectl states [--since 2h]           low/high(깊은 절전 여부) 전환 시각과 지속 시간
-  observectl top [--since 30m] [--by cpu|wake|thr|io]   프로세스/스레드 상위
+  observectl top [--since 30m] [--by cpu|ctxsw|thr|io]   프로세스/스레드 상위(cpu=코어 1개 기준 %, ctxsw=자발적 문맥 전환/s; wake 는 ctxsw 의 옛 이름)
   observectl events [--since 1h --comp displayui --level debug --grep 키워드]   우리 유틸리티 이벤트 로그
   observectl timeline --at 12:09:37 [--span 60]   그 순간 전후의 표본·이벤트·journal·커널 로그를 시간순으로 합침
   observectl wakers [초=10] [--waking]      ftrace 로 CPU 를 깨우는 원인(타이머/하이타이머 함수, IRQ, workqueue)을 센다 (root 작업은 수집기가 대행)
@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import observe_core as core
 import observe_stats as stats
 
-METRICS = {"psys_w": ("pw", "psys_w"), "pkg_w": ("pw", "pkg_w"), "batt_w": ("pw", "batt_w"), "core_w": ("pw", "core_w"), "uncore_w": ("pw", "uncore_w")}
+METRICS = {"psys_w": ("pw", "psys_w"), "pkg_w": ("pw", "pkg_w"), "batt_vi_w": ("pw", "batt_vi_w"), "core_w": ("pw", "core_w"), "uncore_w": ("pw", "uncore_w")}
 
 
 def samples(since=None, until=None):
@@ -50,7 +50,7 @@ BUSY_COMMS = {"nix-daemon", "nix", "nixos-rebuild", "nixup", ".nixup-wrapped", "
 
 def is_clean(r):
     """측정 위생: 내 세션이 화면을 갱신 중(kmscon CPU ≥ 1%)이거나 빌드(nix 등)가 도는 표본은 '한가한 상태' 비교에서 뺀다."""
-    kc = next((p["cpu"] for p in r.get("proc", []) if p["comm"] == "kmscon"), 0)
+    kc = next((p["cpu_core_pct"] for p in r.get("proc", []) if p["comm"] == "kmscon"), 0)   # 코어 1개 = 100%
     return kc < 1.0 and not any(p["comm"] in BUSY_COMMS for p in r.get("proc", []))
 
 
@@ -135,7 +135,7 @@ def energy_by_group(rows, by, max_gap=90):
         dq = qa - qb                                   # µAh (방전이면 양수)
         g["dq"] += dq; g["dt"] += dt; g["n"] += 1
         g["wh"] += dq / 1e6 * ((va + vb) / 2) / 1e6    # Wh
-        for lst, key in ((g["psys"], "pw.psys_w"), (g["vi"], "pw.batt_w")):
+        for lst, key in ((g["psys"], "pw.psys_w"), (g["vi"], "pw.batt_vi_w")):
             x = get(b, key)
             if isinstance(x, (int, float)):
                 lst.append(x)
@@ -169,12 +169,15 @@ def cmd_window(a):
     for r in rows:
         groups[group_key(r, a.by)].append(r)
     print(f"{core.hms(rows[0]['t'])} ~ {core.hms(rows[-1]['t'])} · 표본 {len(rows)}개 · 그룹 기준 {a.by}")
-    print("(batt 열은 방전 중인 표본만 평균: 충전 중의 전류는 방전 전력이 아님)")
-    print(f"{'그룹':<18}{'n':>4}{'batt':>7}{'psys':>7}{'pkg':>6}{'core':>6}{'pc8%':>6}{'pc10%':>6}{'깨어남/s':>9}{'cpu%':>6}")
+    legacy = sum(1 for r in rows if r.get("legacy"))
+    if legacy:
+        print(f"(옛 형식 표본 {legacy}개 포함 — 필드 이름만 다르고 값은 같게 읽음. 이름 뜻은 power-evidence.md 의 용어·단위 정정표)")
+    print("(V×I 열은 방전 중인 표본만 평균: 충전 중의 전류는 방전 전력이 아님 · 상위전환/s 는 저장된 상위 프로세스(최대 16행)의 자발적 문맥 전환 합으로 시스템 전체가 아님 · 전체CPU% 는 전체 CPU 대비(코어 1개=100% 가 아님))")
+    print(f"{'그룹':<18}{'n':>4}{'V×I':>7}{'psys':>7}{'pkg':>6}{'core':>6}{'pc8%':>6}{'pc10%':>6}{'상위전환/s':>11}{'전체CPU%':>9}")
     for k, g in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-        wake = mean_of(g, lambda r: sum(p.get("wake", 0) for p in r.get("proc", [])))
-        print(f"{str(k)[:17]:<18}{len(g):>4}{fmt(mean_of(g, lambda r: get(r, 'pw.batt_w') if get(r, 'pw.status') == 'Discharging' else None), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.psys_w')), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.pkg_w')))}"
-              f"{fmt(mean_of(g, lambda r: get(r, 'pw.core_w')))}{fmt(mean_of(g, lambda r: get(r, 'cs.pc8')), 6, 1)}{fmt(mean_of(g, lambda r: get(r, 'cs.pc10')), 6, 1)}{fmt(wake, 9, 0)}{fmt(mean_of(g, lambda r: get(r, 'irq.cpu_busy_pct')), 6, 1)}")
+        ctxsw_top = mean_of(g, lambda r: sum(p.get("ctxsw_vol_s", 0) for p in r.get("proc", [])))
+        print(f"{str(k)[:17]:<18}{len(g):>4}{fmt(mean_of(g, lambda r: get(r, 'pw.batt_vi_w') if get(r, 'pw.status') == 'Discharging' else None), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.psys_w')), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.pkg_w')))}"
+              f"{fmt(mean_of(g, lambda r: get(r, 'pw.core_w')))}{fmt(mean_of(g, lambda r: get(r, 'cs.pc8')), 6, 1)}{fmt(mean_of(g, lambda r: get(r, 'cs.pc10')), 6, 1)}{fmt(ctxsw_top, 11, 0)}{fmt(mean_of(g, lambda r: get(r, 'irq.cpu_all_pct')), 9, 1)}")
 
 
 def cmd_states(a):
@@ -194,6 +197,9 @@ def cmd_states(a):
 
 
 def cmd_top(a):
+    if a.by == "wake":
+        print("(--by wake 는 --by ctxsw 의 옛 이름입니다 — 프로세스의 자발적 문맥 전환/s. 시스템 전체 깨움은 `observectl bpf wake`)")
+        a.by = "ctxsw"
     rows = samples(core.parse_when(a.since))
     if not rows:
         sys.exit("표본이 없습니다")
@@ -202,7 +208,7 @@ def cmd_top(a):
         for r in rows:
             for t in r.get("thr", []):
                 k = f"{t['comm']}/{t['thr']}"
-                acc[k][0] += t["cpu"]; acc[k][1] += t["wake"]; acc[k][2] += 1
+                acc[k][0] += t["cpu_core_pct"]; acc[k][1] += t["ctxsw_vol_s"]; acc[k][2] += 1
     elif a.by == "io":
         for r in rows:
             for t in r.get("io", []):
@@ -211,13 +217,13 @@ def cmd_top(a):
         for r in rows:
             for p in r.get("proc", []):
                 k = p["comm"] if not p["exe"] or p["exe"].startswith(p["comm"][:6]) else f"{p['comm']}({p['exe']})"
-                acc[k][0] += p["cpu"]; acc[k][1] += p["wake"]; acc[k][2] += 1
+                acc[k][0] += p["cpu_core_pct"]; acc[k][1] += p["ctxsw_vol_s"]; acc[k][2] += 1
     n = len(rows)
-    key = (lambda kv: -kv[1][1]) if a.by in ("wake", "io") else (lambda kv: -kv[1][0])
-    head = "이름              읽기B/s  쓰기B/s" if a.by == "io" else "이름                          cpu%   깨어남/s  (등장)"
+    key = (lambda kv: -kv[1][1]) if a.by in ("ctxsw", "io") else (lambda kv: -kv[1][0])
+    head = "이름              읽기B/s  쓰기B/s" if a.by == "io" else "이름                      CPU(코어1개=100%)  자발전환/s  (등장)"
     print(f"표본 {n}개 평균 기준(등장하지 않은 표본은 0 으로 계산) · 정렬 {a.by}\n{head}")
     for k, (c, w, m) in sorted(acc.items(), key=key)[:a.n]:
-        print(f"{k[:28]:<28}{c / n:>8.2f}{w / n:>10.1f}   ({m}/{n})")
+        print(f"{k[:28]:<28}{c / n:>8.2f}{w / n:>16.1f}   ({m}/{n})")
 
 
 def read_events(a, since, until):
@@ -441,6 +447,8 @@ def expect_mismatch(seg, cond, expect):
 
 
 def cmd_ab(a):
+    if a.metric == "batt_w":
+        a.metric = "batt_vi_w"
     rows = samples(core.parse_when(a.since))
     seg = [(c, g) for c, g in segments(rows, a.settle) if len(g) >= a.min_samples]
     dropped = [(c, len(g)) for c, g in segments(rows, a.settle) if 0 < len(g) < a.min_samples]
@@ -507,7 +515,7 @@ def main(argv=None):
     s = sub.add_parser("window"); s.add_argument("--clean", action="store_true", help="내 세션 활동·빌드가 섞인 표본 제외"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.set_defaults(f=cmd_window)
     s = sub.add_parser("energy"); s.add_argument("--clean", action="store_true", help="내 세션 활동·빌드가 섞인 표본 제외"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.set_defaults(f=cmd_energy)
     s = sub.add_parser("states"); s.add_argument("--since", default="-2h"); s.set_defaults(f=cmd_states)
-    s = sub.add_parser("top"); s.add_argument("--since", default="-30m"); s.add_argument("--by", default="wake", choices=["cpu", "wake", "thr", "io"]); s.add_argument("-n", type=int, default=12); s.set_defaults(f=cmd_top)
+    s = sub.add_parser("top"); s.add_argument("--since", default="-30m"); s.add_argument("--by", default="ctxsw", choices=["cpu", "ctxsw", "wake", "thr", "io"], help="ctxsw=자발적 문맥 전환/s, cpu=코어 1개 기준 CPU%%. wake 는 ctxsw 의 옛 이름"); s.add_argument("-n", type=int, default=12); s.set_defaults(f=cmd_top)
     s = sub.add_parser("events"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--level", default="trace", choices=list(core.LEVELS)); s.add_argument("--grep"); s.set_defaults(f=cmd_events)
     s = sub.add_parser("trace", help="스팬(구간) 폭포 · 구간별 에너지 · 이름별 요약"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--name", help="이름에 포함된 글자"); s.add_argument("--min-ms", type=float, default=0); s.add_argument("--trace", help="트레이스 id 앞부분"); s.add_argument("-n", type=int, default=5, help="폭포로 보여 줄 최근 트레이스 수"); s.add_argument("--width", type=int, default=110); s.add_argument("--by", action="store_true", help="폭포 대신 이름별 요약표(횟수·소요·에너지)"); s.set_defaults(f=cmd_trace)
     s = sub.add_parser("timeline"); s.add_argument("--at", required=True); s.add_argument("--span", type=float, default=60); s.add_argument("--journal", default="all", choices=["all", "warn", "none"]); s.set_defaults(f=cmd_timeline)
@@ -515,7 +523,7 @@ def main(argv=None):
     s = sub.add_parser("wakers"); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--waking", action="store_true"); s.set_defaults(f=cmd_wakers)
     s = sub.add_parser("drmdebug"); s.add_argument("sec", nargs="?", type=int, default=15); s.set_defaults(f=cmd_drmdebug)
     sub.add_parser("display").set_defaults(f=cmd_display)
-    s = sub.add_parser("ab"); s.add_argument("--since", default="-3h"); s.add_argument("--metric", default="psys_w", choices=list(METRICS)); s.add_argument("--threshold", type=float, default=0.3); s.add_argument("--settle", type=float, default=20)
+    s = sub.add_parser("ab"); s.add_argument("--since", default="-3h"); s.add_argument("--metric", default="psys_w", choices=list(METRICS) + ["batt_w"], help="batt_w 는 batt_vi_w(순간 V×I)의 옛 이름"); s.add_argument("--threshold", type=float, default=0.3); s.add_argument("--settle", type=float, default=20)
     s.add_argument("--min-samples", type=int, default=5, help="구간당 최소 표본 수(미만이면 제외)")
     s.add_argument("--expect-a", help="A 구간 표본의 기대 조건 '경로=값' (예: dev.wifi.ps=off). 다르면 시험 무효"); s.add_argument("--expect-b", help="B 구간 표본의 기대 조건 (예: dev.wifi.ps=on)"); s.set_defaults(f=cmd_ab)
     s = sub.add_parser("hyprtrace"); s.add_argument("mode", choices=["on", "off"]); s.set_defaults(f=cmd_hyprtrace)

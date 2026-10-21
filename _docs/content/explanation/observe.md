@@ -1,12 +1,12 @@
 # observectl / observe — 관측 시스템 (전력·프로세스 프로파일, 유틸리티 이벤트 로그)
 
 전력 측정과 우리가 만든 유틸리티(displayui, dispctl, posture 등)를 **추정이 아니라 기록으로** 확인하기 위한 도구 묶음. 본체는 `mods/_data/observe/`, NixOS 모듈은 `mods/sys/services/observectl.nix`(호스트 toml 의 `[mods.sys.services] observectl = true`).
-Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 Netdata 가 못 보는 것을 맡는다: 스레드 단위 깨어남, **누가 CPU 를 깨우는지(ftrace)**, 패키지 C-state(MSR), 유틸리티 이벤트, 실험 표지와 통계 판정.
+Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 Netdata 가 못 보는 것을 맡는다: 스레드 단위 자발적 문맥 전환, **누가 CPU 를 깨우는지(ftrace·eBPF)**, 패키지 C-state(MSR), 유틸리티 이벤트, 실험 표지와 통계 판정.
 
 ## 켜고 끄기 (오버헤드 0 설계)
 - `observectl on [L0|L1]` / `observectl off` — 제어 파일(`/var/lib/observe/control.json`, 그룹 users 쓰기 가능)만 바꾼다. sudo 불필요.
 - 수집기(root)는 systemd **path 유닛**이 제어 파일 변경이나 `requests/` 에 파일이 생길 때만 띄우고, 꺼져 있고 할 일이 없으면 15초 뒤 스스로 종료한다. 꺼져 있는 동안은 **프로세스 자체가 없다**.
-- 수준: **L0** 30초 간격(전력, 패키지 C-state, IRQ/GPE, 프로세스별 CPU·깨어남·RSS, 장치 상태) / **L1** 5초 간격 + 스레드별 상위, 프로세스별 IO. 표본은 `/var/lib/observe/data/samples-YYYYMMDD.jsonl`(보존 14일·1GiB, 재부팅해도 남음).
+- 수준: **L0** 30초 간격(전력, 패키지 C-state, IRQ/GPE, 프로세스별 CPU(코어 1개=100%)·자발적 문맥 전환/s·RSS, 장치 상태) / **L1** 5초 간격 + 스레드별 상위, 프로세스별 IO. 표본은 `/var/lib/observe/data/samples-YYYYMMDD.jsonl`(보존 14일·1GiB, 재부팅해도 남음).
 - 개인정보: 프로세스는 comm 과 exe 이름만 기록. 명령 인자·URL·입력한 글자는 기록하지 않는다.
 
 ## 자주 쓰는 명령
@@ -15,7 +15,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 | 지금 상태 | `observectl status` |
 | 구간 요약(상태/VT/SSID/덮개/AC/표지/실제 Wi-Fi 절전별 `--by wifips`) | `observectl window --since 11:00 --until 11:30 --by state` |
 | 낮은 전력 상태(low) 전환 시각 | `observectl states --since 3h` |
-| 상위 프로세스·스레드 | `observectl top --by wake` / `--by cpu` / `--by thr`(L1) / `--by io`(L1) |
+| 상위 프로세스·스레드 | `observectl top --by ctxsw`(자발적 문맥 전환/s) / `--by cpu`(코어 1개 기준 %) / `--by thr`(L1) / `--by io`(L1) — `wake` 는 `ctxsw` 의 옛 이름 |
 | **누가 CPU 를 깨우나**(타이머/하이타이머 함수, IRQ, workqueue) | `observectl wakers 10` (`--waking` 이면 깨우는 쪽 프로세스도) |
 | 그 순간 무슨 일이 있었나 | `observectl timeline --at 12:09:37 --span 60` (표본 + 유틸리티 이벤트 + journal + 커널 로그를 시간순으로 합침) |
 | 유틸리티 이벤트 | `observectl events --comp displayui --level debug --grep key` |
@@ -90,7 +90,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 
 ### Netdata 로의 미러링
 
-수집기는 표본마다 숫자 일부를 Netdata statsd(`127.0.0.1:8125`)에 게이지로도 보낸다(`observe.*`: psys/pkg/core/uncore W, 방전·충전 전력, 잔량 %, state_low, psr_on, psr_sink_active, 깨움/s, CPU, 패키지 C-state pc2~pc10, s0ix). Netdata 에서는 `statsd_observe.<이름>_gauge` 차트로 보인다. **원본은 observectl(JSONL)** 이고 이쪽은 한쪽 방향 복사다 — 문자열·이벤트·표지·프로세스 상세·A/B 통계는 observectl 에만 있다. Netdata 쪽 이점은 시스템 지표(CPU·PSI·네트워크·디스크·온도)와 같은 시간축·같은 API 로 겹쳐 볼 수 있다는 것.
+수집기는 표본마다 숫자 일부를 Netdata statsd(`127.0.0.1:8125`)에 게이지로도 보낸다(`observe.*`: psys/pkg/core/uncore W, 방전·충전 전력, 잔량 %, state_low, psr_on, psr_sink_active, **ctxsw_vol_top_per_s(상위 프로세스만의 자발 전환 합)·ctxsw_all_per_s(시스템 전체 문맥 전환)**, **cpu_all_pct(전체 CPU 대비)**, 패키지 C-state pc2~pc10, s0ix. 2026-10-21 이전에 보낸 `wake_per_s`·`cpu_busy_pct` 차트는 이름이 달라 새 차트와 이어지지 않으며 7일 보관이 끝나면 사라진다. Netdata 에서는 `statsd_observe.<이름>_gauge` 차트로 보인다. **원본은 observectl(JSONL)** 이고 이쪽은 한쪽 방향 복사다 — 문자열·이벤트·표지·프로세스 상세·A/B 통계는 observectl 에만 있다. Netdata 쪽 이점은 시스템 지표(CPU·PSI·네트워크·디스크·온도)와 같은 시간축·같은 API 로 겹쳐 볼 수 있다는 것.
 
 ## `uikit` — 우리 TUI 공통 틀 (2026-10-21)
 
@@ -135,3 +135,21 @@ OTel 의 트레이스 개념만 빌린 것(OTel 을 넣거나 흉내 내는 게 
 - 사용자 서비스 `observe-focus`(graphical-session 에 묶임, 이벤트가 올 때만 깨어남, 재시작 정책 없음 — Hyprland 가 끝나면 열린 구간을 닫고 종료). 서비스 시작 전부터 있던 창은 시작 시점(관측 시작)부터로 기록된다.
 - **에너지는 30초 표본에 걸친 적분이라 포커스가 몇 초뿐인 구간은 `~` 추정치**다(몇 분 이상 쓴 구간에서 의미). 앱별 합계(`--by`)가 더 믿을 만하다. 정밀하게 보려면 `observectl on L1`(5초).
 - 시험: `tests/test_focus.py`(상태 기계·소켓·SIGTERM 정리).
+
+## 필드 이름과 단위 — 표본 형식 v2 (2026-10-21)
+
+같은 말이 도구마다 다른 양을 가리켜 생긴 오해(예: `ps` 의 %CPU 는 시작 이후 누적 평균)를 막으려고 **이름에 단위·범위를 넣었다.** 옛 이름과 뜻은 `power-evidence.md` 의 "용어·단위 정정표"(L1~L8)에 있다.
+
+| 옛 이름(v1) | 새 이름(v2) | 뜻 |
+|---|---|---|
+| `pw.batt_w` | `pw.batt_vi_w` | 배터리 전압×전류의 **순간** 절댓값(방전 중에만 방전 전력, 충전 중엔 충전 전력) |
+| `irq.cpu_busy_pct` | `irq.cpu_all_pct` | **전체 CPU 대비** 사용률(100 = 모든 CPU 가 계속 일함) |
+| `proc[].cpu`, `thr[].cpu` | `cpu_core_pct` | **코어 1개 = 100%** (여러 코어를 쓰면 100 을 넘음) |
+| `proc[].wake`, `thr[].wake` | `ctxsw_vol_s` | **자발적 문맥 전환/s**(스스로 잠든 횟수). 시스템 전체 깨움(`sched_waking`)이 아니다 |
+| (없음) `irq.ctxt_s` | 그대로 | 시스템 전체 문맥 전환/s(비자발 포함, `/proc/stat` ctxt) |
+| `state` = low/high | 그대로 | **패키지 pc10 ≥ 5%(깊은 절전 진입) 여부**이지 전력 높낮이가 아님. 화면에는 `low(깊은 절전)` 처럼 뜻을 함께 쓴다 |
+
+- 새 표본은 `v: 2`. **옛 표본(v 없음)은 파일을 고쳐 쓰지 않고 읽을 때 새 이름으로 바꾸며 `legacy: true` 를 단다**(`observe_core.normalize_sample`; `iter_jsonl` 과 powerui 의 `Store` 가 적용). `observectl window` 와 powerui 상태줄은 옛 형식 표본이 섞이면 개수를 알려 준다. 보관 기간이 지나면 옛 표본은 사라진다.
+- 화면 열 이름: `observectl window` 는 `V×I`·`상위전환/s`(**저장된 상위 프로세스 최대 16행의 합 — 시스템 전체가 아님**)·`전체CPU%`, `observectl top` 은 `CPU(코어1개=100%)`·`자발전환/s`. powerui 현황은 "전환 시스템 전체 / 상위 프로세스(합계 아님)" 와 "CPU 전체 대비" 를 따로 보여 준다.
+- 옵션 호환: `observectl top --by wake` 와 `observectl ab --metric batt_w` 는 새 이름의 옛 별칭으로 계속 받는다(안내를 출력).
+- "지금 CPU" 를 볼 때는 `ps` 의 %CPU(프로세스 시작 이후 누적 평균)가 아니라 `observectl top --since 1m`(구간 평균) 이나 `observectl bpf profile`(99Hz 표본)을 쓴다.

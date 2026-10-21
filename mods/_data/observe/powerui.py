@@ -94,7 +94,7 @@ class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             with TabPane("지금 [1]", id="now"):
                 yield uikit.box(Panel(self._now_view, id="nowtext"), "현황")
                 yield uikit.box(Panel(lambda w, h: self._now_chart("psys", "psys", "cyan", w, h), id="nowg0"), "최근 30분 · psys (플랫폼 합계)")
-                yield uikit.box(Panel(lambda w, h: self._now_chart("batt", "배터리", "dark_orange", w, h, axis=True), id="nowg1"), "최근 30분 · 배터리 소비 (방전 중)")
+                yield uikit.box(Panel(lambda w, h: self._now_chart("batt_vi", "배터리", "dark_orange", w, h, axis=True), id="nowg1"), "최근 30분 · 배터리 소비 (방전 중)")
             with TabPane("시계열 [2]", id="series"):
                 for i, spec in enumerate(pv.SERIES):
                     yield uikit.box(Panel(lambda w, h, i=i: self._series_chart(i, w, h), id=f"ser{i}"), spec[0])
@@ -111,7 +111,7 @@ class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
 
     def on_mount(self):
         t = self.query_one("#cmptable", DataTable)
-        t.add_columns("그룹", "표본", "시간", "계량 W", "V×I W", "psys W", "패키지 W", "pc8 %", "pc10 %", "깨움/s", "CPU %")
+        t.add_columns("그룹", "표본", "시간", "계량 W", "V×I W", "psys W", "패키지 W", "pc8 %", "pc10 %", "전환/s(상위)", "CPU 전체 %")
         self.refresh_data()
         self._timer = self.set_interval(self.interval, self.refresh_data)
 
@@ -139,8 +139,9 @@ class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         self._fill_compare()
         label = pv.RANGES[self.range_i][0]
         n = len(self.store.recs)
+        legacy = sum(1 for r in self.store.recs if r["legacy"])
         self.query_one("#status", Static).update(
-            f"마지막 갱신 {time.strftime('%H:%M:%S', time.localtime(self.last))} · 주기 {self.interval:g}초 · 표본 {n}개 (최근 3일) · 구간 {label}")
+            f"마지막 갱신 {time.strftime('%H:%M:%S', time.localtime(self.last))} · 주기 {self.interval:g}초 · 표본 {n}개 (최근 3일{'' if not legacy else f', 옛 형식 {legacy}개 포함'}) · 구간 {label}")
 
     # --- 보기 만들기
     def _est(self):
@@ -192,7 +193,7 @@ class PowerUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         t.clear()
         f = lambda x, p=2: "-" if x is None else f"{x:.{p}f}"
         for r in rows:
-            t.add_row(str(r["group"]), str(r["n"]), pg.fmt_dur(r["hours"]), f(r["coulomb"]), f(r["batt"]), f(r["psys"]), f(r["pkg"]), f(r["pc8"], 0), f(r["pc10"], 0), f(r["wake"], 0), f(r["cpu"], 0))
+            t.add_row(str(r["group"]), str(r["n"]), pg.fmt_dur(r["hours"]), f(r["coulomb"]), f(r["batt_vi"]), f(r["psys"]), f(r["pkg"]), f(r["pc8"], 0), f(r["pc10"], 0), f(r["ctxsw_top"], 0), f(r["cpu_all"], 0))
 
     # --- 동작
     def action_tab(self, name):

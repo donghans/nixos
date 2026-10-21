@@ -104,7 +104,7 @@ def mk(sid, parent, name, a, b, status="ok", comp="c"):
 spans = [mk("a", None, "root", 0, 100), mk("b", "a", "child1", 10, 40), mk("c", "a", "child2", 50, 90, "fail"), mk("d", "b", "grand", 15, 20), mk("z", "gone", "orphan", 5, 6)]
 order = [(d, s["name"]) for d, s in tr.order_tree(spans)]
 check("order_tree: 깊이우선·형제는 시작 순·부모 없는 건 루트", order == [(0, "root"), (1, "child1"), (2, "grand"), (1, "child2"), (0, "orphan")], str(order))
-samples = [{"t": T + 30 * i, "dt": 30, "pw": {"psys_w": 4.0, "batt_w": 5.0, "status": "Discharging", "q_uah": 3000000 - i * 1000, "v_uv": 15000000}} for i in range(-1, 8)]
+samples = [{"t": T + 30 * i, "dt": 30, "pw": {"psys_w": 4.0, "batt_vi_w": 5.0, "status": "Discharging", "q_uah": 3000000 - i * 1000, "v_uv": 15000000}} for i in range(-1, 8)]
 e = tr.energy(samples, T, T + 100)
 check("energy: 4 W × 100 s = 0.111 Wh, 평균 4 W", e and abs(e["psys_wh"] - 400 / 3600) < 1e-6 and abs(e["avg_psys_w"] - 4.0) < 1e-9 and abs(e["batt_wh"] - 500 / 3600) < 1e-6, str(e))
 e2 = tr.energy(samples, T + 15, T + 20)
@@ -129,7 +129,7 @@ for s in samples:
     pass
 now = time.time()
 for i in range(12):
-    core.append_jsonl(core.SAMPLE_DIR, "samples", {"t": now - 360 + i * 30, "dt": 30, "pw": {"psys_w": 4.0, "batt_w": 5.0, "status": "Discharging"}})
+    core.append_jsonl(core.SAMPLE_DIR, "samples", {"t": now - 360 + i * 30, "dt": 30, "pw": {"psys_w": 4.0, "batt_vi_w": 5.0, "status": "Discharging"}})
 def run_cli(*args):
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):

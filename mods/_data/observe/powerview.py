@@ -12,6 +12,7 @@ from rich.text import Text
 import powergraph as pg
 
 STATE_STYLE = {"low": "green", "high": "dark_orange", "?": "grey50"}
+STATE_GLOSS = {"low": "low(깊은 절전 진입)", "high": "high(깊은 절전 못 함)"}   # low/high 는 전력 높낮이가 아니라 패키지 pc10 ≥ 5% 여부
 RANGES = [("1시간", 3600), ("6시간", 6 * 3600), ("오늘", None), ("3일", 3 * 86400)]
 AXIS_W = 8
 
@@ -69,7 +70,7 @@ def stats_str(st, unit="W", fmt="{:.1f}"):
 
 
 SERIES = [  # (제목, 필드, 단위, 색, 하한, 상한, 형식)
-    ("배터리 소비 (V×I, 방전 중)", "batt", "W", "dark_orange", 0.0, None, "{:.1f}"),
+    ("배터리 소비 (순간 V×I, 방전 중)", "batt_vi", "W", "dark_orange", 0.0, None, "{:.1f}"),
     ("psys (플랫폼 합계)", "psys", "W", "cyan", 0.0, None, "{:.1f}"),
     ("패키지 (CPU+GPU)", "pkg", "W", "magenta", 0.0, None, "{:.1f}"),
     ("배터리 잔량", "pct", "%", "green", 0.0, 100.0, "{:.0f}"),
@@ -77,7 +78,7 @@ SERIES = [  # (제목, 필드, 단위, 색, 하한, 상한, 형식)
 
 
 def series_points(recs, key):
-    return [(r["t"], r[key] if key != "batt" or r["status"] == "Discharging" else None) for r in recs]
+    return [(r["t"], r[key] if key != "batt_vi" or r["status"] == "Discharging" else None) for r in recs]
 
 
 def bands_text(recs, t0, t1, width, max_gap_s=120):
@@ -94,7 +95,7 @@ def bands_text(recs, t0, t1, width, max_gap_s=120):
     out.append_text(band_text("전원", lab(lambda r: "ac" if r["ac"] else "bat"), {"ac": "dodger_blue1", "bat": "grey35"}, plot_w))
     out.append("\n")
     out.append_text(time_axis(t0, t1, width))
-    out.append("\n 상태: 초록 low · 주황 high    PSR: 청록 켬    전원: 파랑 AC    (빈 칸 ░ = 데이터 없음)", style="grey50")
+    out.append("\n 상태: 초록 low=깊은 절전 · 주황 high    PSR: 청록=켬    전원: 파랑=AC    ░=데이터 없음", style="grey50")
     return out
 
 
@@ -149,10 +150,12 @@ def now_text(recs, est, width, now=None):
         t.append(f"  ({est['remain_wh']:.1f}" + (f" / {est['full_wh']:.1f}" if est.get("full_wh") else "") + " Wh)", style="grey70")
     t.append("\n")
     t.append(" 지금  ", style="bold")
-    t.append(f"psys {pg.fmt_w(r['psys'])} · 배터리 {pg.fmt_w(r['batt']) if r['status'] == 'Discharging' else '(충전 중)'} · 패키지 {pg.fmt_w(r['pkg'])}\n")
+    t.append(f"psys {pg.fmt_w(r['psys'])} · 배터리 V×I {pg.fmt_w(r['batt_vi']) if r['status'] == 'Discharging' else '(충전 중)'} · 패키지 {pg.fmt_w(r['pkg'])}\n")
     t.append("       상태 ")
-    t.append(r["state"], style=STATE_STYLE.get(r["state"], "grey50") + " bold")
-    t.append(f" · 패키지 pc8 {r['pc8'] or 0:.0f}% pc10 {r['pc10'] or 0:.0f}% · 깨움 {r['wake']:.0f}/s · CPU {r['cpu'] or 0:.0f}%\n", style="grey70")
+    t.append(STATE_GLOSS.get(r["state"], r["state"]), style=STATE_STYLE.get(r["state"], "grey50") + " bold")
+    ctxall = f"{r['ctxsw_all']:.0f}" if r["ctxsw_all"] is not None else "-"
+    t.append(f" · 패키지 pc8 {r['pc8'] or 0:.0f}% pc10 {r['pc10'] or 0:.0f}%\n", style="grey70")
+    t.append(f"       전환 시스템 전체 {ctxall}/s · 상위 프로세스 {r['ctxsw_top']:.0f}/s(합계 아님) · CPU 전체 대비 {r['cpu_all'] or 0:.0f}%\n", style="grey70")
     t.append(" PSR   ", style="bold")
     on = r["psr"]
     t.append(r["psr_mode"] or "정보 없음(수집기 갱신 필요)", style="cyan" if on else "grey50")

@@ -106,6 +106,30 @@ def prune(directory, prefix, days, max_mb):
     return removed
 
 
+SCHEMA = 2     # 표본 형식 버전. v2(2026-10-21): 단위가 이름에 드러나는 필드명. 옛 표본(v 없음)은 읽을 때 새 이름으로 바꿔 `legacy: True` 를 단다(원본 파일은 그대로).
+_RENAME_PROC = {"cpu": "cpu_core_pct", "wake": "ctxsw_vol_s"}
+
+
+def normalize_sample(o):
+    """옛 형식(v1) 표본을 v2 이름으로 바꿔 돌려준다(값은 그대로). v1→v2 이름: pw.batt_w→batt_vi_w(순간 V×I), irq.cpu_busy_pct→cpu_all_pct(전체 CPU 대비 %),
+    proc/thr 행의 cpu→cpu_core_pct(코어 1개=100%), wake→ctxsw_vol_s(자발적 문맥 전환/s). 바꾼 표본은 legacy=True. 이미 v2 이면 그대로."""
+    if not isinstance(o, dict) or o.get("v", 1) >= SCHEMA:
+        return o
+    pw, irq = o.get("pw"), o.get("irq")
+    if isinstance(pw, dict) and "batt_w" in pw:
+        pw["batt_vi_w"] = pw.pop("batt_w")
+    if isinstance(irq, dict) and "cpu_busy_pct" in irq:
+        irq["cpu_all_pct"] = irq.pop("cpu_busy_pct")
+    for key in ("proc", "thr"):
+        for r in o.get(key) or []:
+            if isinstance(r, dict):
+                for a, b in _RENAME_PROC.items():
+                    if a in r:
+                        r[b] = r.pop(a)
+    o["v"], o["legacy"] = SCHEMA, True
+    return o
+
+
 def iter_jsonl(directory, prefix, since=None, until=None):
     """표본/이벤트를 시간순으로 돌려준다(키 "t" 가 epoch 초). 깨진 줄은 건너뛰고, **현재보다 미래 시각(+5분 초과)인 줄도 건너뛴다** —
     이 기기는 부팅 직후 약 30초 동안 시계가 9시간 앞서(RTC 가 로컬 시각 모드) 그때 기록된 표본의 t 가 가짜 미래 값이다."""
@@ -131,7 +155,7 @@ def iter_jsonl(directory, prefix, since=None, until=None):
                 t = o.get("t")
                 if t is None or t > horizon or (since is not None and t < since) or (until is not None and t > until):
                     continue
-                yield o
+                yield normalize_sample(o) if prefix == "samples" else o
 
 
 def parse_when(s, now=None):

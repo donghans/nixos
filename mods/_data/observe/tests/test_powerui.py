@@ -30,29 +30,35 @@ check("nice_range 값 없으면 (0,1)", pg.nice_range([None]) == (0.0, 1.0))
 # --- 데이터: 합성 표본으로 증분 읽기/집계/추정
 now = time.time()
 def raw(t, psys=4.0, batt=5.0, q=3000000, status="Discharging", ac=0, psr=True, state="low", proc=None, pct="50"):
-    return {"t": t, "pw": {"psys_w": psys, "batt_w": batt, "pkg_w": 1.5, "q_uah": q, "v_uv": 15000000, "full_uah": 3600000, "status": status, "ac": ac, "batt_pct": pct},
-            "cs": {"pc8": 10.0, "pc10": 20.0}, "state": state, "proc": proc or [], "irq": {"cpu_busy_pct": 2.0},
+    return {"v": 2, "t": t, "pw": {"psys_w": psys, "batt_vi_w": batt, "pkg_w": 1.5, "q_uah": q, "v_uv": 15000000, "full_uah": 3600000, "status": status, "ac": ac, "batt_pct": pct},
+            "cs": {"pc8": 10.0, "pc10": 20.0}, "state": state, "proc": proc or [], "irq": {"cpu_all_pct": 2.0, "ctxt_s": 2400},
             "dev": {"vt": "tty1", "lid": "open", "bl": "9600", "boot": "abc", "wifi": {"ps": "off"}, "psr": {"mode": "PSR1 enabled" if psr else "disabled", "sink": "active"}}}
 d = os.path.join(TMP, "samples"); os.makedirs(d)
 fn = os.path.join(d, time.strftime("samples-%Y%m%d.jsonl"))
+LEGACY = {"t": now - 3000, "dt": 30, "pw": {"psys_w": 6.0, "batt_w": 7.0, "pkg_w": 2.0, "q_uah": 3100000, "v_uv": 15000000, "status": "Discharging", "ac": 0, "batt_pct": "60"},
+          "cs": {"pc8": 5.0, "pc10": 0.0}, "state": "high", "irq": {"cpu_busy_pct": 9.0, "ctxt_s": 3000}, "proc": [{"comm": "x", "exe": "x", "n": 1, "cpu": 4.0, "wake": 50.0}], "dev": {}}
 with open(fn, "w") as f:
+    f.write(json.dumps(LEGACY) + "\n")                    # 옛 형식(v1) 표본 한 줄
     for i in range(80):                                   # 40분, 30초 간격, 방전: 1 mAh/30초 단위가 아니라 큼직하게 감소
         f.write(json.dumps(raw(now - 2400 + i * 30, q=3000000 - i * 1000, psr=i >= 40, state="low" if i % 2 else "high",
-                               proc=[{"comm": "nix-daemon", "cpu": 5, "wake": 1}] if i == 5 else [])) + "\n")
+                               proc=[{"comm": "nix-daemon", "cpu_core_pct": 5, "ctxsw_vol_s": 1}] if i == 5 else [])) + "\n")
     f.write(json.dumps(raw(now + 4 * 3600)) + "\n")       # 가짜 미래(RTC 글리치) → 버려져야 함
     f.write("깨진 줄\n")
 st = pd.Store(d)
 n = st.refresh(now)
-check("Store: 읽은 수 80(미래·깨진 줄 제외)", n == 80 and len(st.recs) == 80, str(n))
+check("Store: 읽은 수 81(옛 형식 1 + 새 80, 미래·깨진 줄 제외)", n == 81 and len(st.recs) == 81, str(n))
 check("Store: 증분 — 두 번째 읽기는 0", st.refresh(now) == 0)
 with open(fn, "a") as f:
     f.write(json.dumps(raw(now - 1, q=3000000 - 80 * 1000)) + "\n")
     f.write('{"t": 1')                                    # 쓰는 중인 마지막 줄(개행 없음)
-check("Store: 새 줄만 읽고 미완성 줄은 보류", st.refresh(now) == 1 and len(st.recs) == 81)
+check("Store: 새 줄만 읽고 미완성 줄은 보류", st.refresh(now) == 1 and len(st.recs) == 82)
 with open(fn, "a") as f:
     f.write(', "pw": {}}\n')
 check("Store: 보류했던 줄은 완성되면 읽는다(시각 범위 밖이면 버림)", st.refresh(now) == 0)
 rc = [r for r in st.recs if r["psr"]]
+leg = [r for r in st.recs if r["legacy"]]
+check("옛 형식 표본: 새 이름으로 읽혀 값 유지(batt_vi 7.0, cpu_all 9.0, ctxsw_top 50, ctxsw_all 3000)·legacy 표시", len(leg) == 1 and leg[0]["batt_vi"] == 7.0 and leg[0]["cpu_all"] == 9.0 and leg[0]["ctxsw_top"] == 50.0 and leg[0]["ctxsw_all"] == 3000, str(leg))
+check("새 형식 표본은 legacy 아님", sum(1 for r in st.recs if not r["legacy"]) == 81)
 check("compact: PSR 켬/끔 구분", 0 < len(rc) < len(st.recs) and st.recs[0]["psr"] is False)
 check("compact: nix 가 보인 표본은 clean=False", sum(1 for r in st.recs if not r["clean"]) == 1)
 w, hrs = pd.coulomb(st.recs)
@@ -62,8 +68,8 @@ est = pd.battery_estimate(st.recs)
 check("battery_estimate: 잔량 Wh·만충 Wh", abs(est["remain_wh"] - (3000000 - 80000) * 15 / 1e6) < 0.1 and abs(est["full_wh"] - 54.0) < 0.1, str(est))
 check("battery_estimate: 최근 30분 기준 남은 시간 = 잔량/전력", est["recent_h"] is None or abs(est["recent_h"] - est["remain_wh"] / est["recent_w"]) < 1e-6)
 tbl = {r["group"]: r for r in pd.group_table(st.recs, "psr")}
-check("group_table: PSR 켬/끔 두 그룹, 표본 합 81", set(tbl) == {"PSR 켬", "PSR 끔"} and sum(r["n"] for r in tbl.values()) == 81, str(tbl.keys()))
-check("group_table(clean): nix 표본 제외", sum(r["n"] for r in pd.group_table(st.recs, "psr", clean=True)) == 80)
+check("group_table: PSR 켬/끔 두 그룹, 표본 합 82(옛 형식 1 포함)", set(tbl) == {"PSR 켬", "PSR 끔"} and sum(r["n"] for r in tbl.values()) == 82, str(tbl.keys()))
+check("group_table(clean): nix 표본 제외", sum(r["n"] for r in pd.group_table(st.recs, "psr", clean=True)) == 81)
 ch = pd.battery_estimate([dict(st.recs[-1], status="Charging", ac=True)])
 check("충전 중이면 charging=True", ch["charging"] is True)
 check("Netdata 읽기 실패는 None(예외 아님)", pd.netdata_series("system.cpu", 60, 10, timeout=0.5) is None)
@@ -102,8 +108,8 @@ if have_rich:
     raw_lab = pg.bucket_labels([(r["t"], "x") for r in dense], t0n, t1n, 142)
     check("(대조) 보간 없이는 칸 폭 < 표본 간격에서 빈 칸이 실제로 생긴다", None in raw_lab[: raw_lab.index(None, 0) + 1] and sum(1 for k in raw_lab[:-3] if k is None) > 5)
     check("bands_text: 칸 폭 < 표본 간격이어도 띠에 빈 칸(░) 없음(끝의 아직 표본 없는 칸 제외)", "░" not in first_band.rstrip("░"), first_band)
-    check("bands_text: 상태·PSR·전원·범례", "PSR" in bt.plain and "전원" in bt.plain and "초록 low" in bt.plain)
-    check("SERIES: 그래프 4개(배터리·psys·패키지·잔량)", [x[1] for x in pv.SERIES] == ["batt", "psys", "pkg", "pct"])
+    check("bands_text: 상태·PSR·전원·범례", "PSR" in bt.plain and "전원" in bt.plain and "초록 low=깊은 절전" in bt.plain)
+    check("SERIES: 그래프 4개(배터리·psys·패키지·잔량)", [x[1] for x in pv.SERIES] == ["batt_vi", "psys", "pkg", "pct"])
     check("chart: 작은 높이·빈 데이터에서도 예외 없음", len(pv.chart([], t0, t1, 30, 3)[0].plain) > 0)
 
 # --- Textual 화면
@@ -139,7 +145,7 @@ else:
             await pilot.press("r"); await pilot.pause(0.3)
             check("화면: r 로 구간 전환", app.range_i == 1)
             await pilot.press("2"); await pilot.pause(0.3)
-            check("화면: 시계열은 그래프마다 박스(4개 + 띠 박스)", len(app.query("#series .box")) == 5 and app.query_one("#ser0").border_title == "배터리 소비 (V×I, 방전 중)", str(len(app.query("#series .box"))))
+            check("화면: 시계열은 그래프마다 박스(4개 + 띠 박스)", len(app.query("#series .box")) == 5 and app.query_one("#ser0").border_title == "배터리 소비 (순간 V×I, 방전 중)", str(len(app.query("#series .box"))))
             check("화면: 박스 아래 테두리에 통계", "평균" in (app.query_one("#ser1").border_subtitle or ""), str(app.query_one("#ser1").border_subtitle))
             check("화면: 띠 박스 부제에 표본 수(0 아님)", "표본 0개" not in (app.query_one("#serbands").border_subtitle or "") and "표본" in (app.query_one("#serbands").border_subtitle or ""), str(app.query_one("#serbands").border_subtitle))
             check("화면: 렌더 결과(화면 글자)에도 부제 반영", any("평균" in "".join(s.text for s in app.screen._compositor.render_strips()).replace("\n", "") for _ in [0]))

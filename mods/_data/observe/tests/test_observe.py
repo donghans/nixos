@@ -101,13 +101,13 @@ pc = col.pkg_cstate_pct({"tsc": 0, "pc2": 0, "pc10": 0}, {"tsc": 1000, "pc2": 30
 check("pkg_cstate_pct: TSC 대비 %", pc == {"pc2": 30.0, "pc10": 25.0}, str(pc))
 check("pkg_cstate_pct: 증가 없음/역행은 빈 값", col.pkg_cstate_pct({"tsc": 5}, {"tsc": 5}) == {})
 check("cpuidle_pct: CPU 시간 대비 %", col.cpuidle_pct({"C6": 0}, {"C6": 4_000_000}, 1.0, 8) == {"C6": 50.0})
-sd = col.statsd_lines({"pw": {"psys_w": 4.1234, "pkg_w": 1.5, "batt_w": 5.0, "status": "Discharging", "batt_pct": "50"}, "cs": {"pc8": 12.0, "pc10": 0.0},
-                       "state": "high", "proc": [{"wake": 3}, {"wake": 4}], "irq": {"cpu_busy_pct": 2.0},
+sd = col.statsd_lines({"pw": {"psys_w": 4.1234, "pkg_w": 1.5, "batt_vi_w": 5.0, "status": "Discharging", "batt_pct": "50"}, "cs": {"pc8": 12.0, "pc10": 0.0},
+                       "state": "high", "proc": [{"ctxsw_vol_s": 3}, {"ctxsw_vol_s": 4}], "irq": {"cpu_all_pct": 2.0, "ctxt_s": 2500},
                        "dev": {"psr": {"mode": "PSR1 enabled", "sink": "inactive"}, "wifi": {"ps": "off"}}})
 sdm = dict(l.split("|")[0].split(":") for l in sd)
 check("statsd_lines: 게이지 형식·접두사", all(l.startswith("observe.") and l.endswith("|g") for l in sd), str(sd))
 check("statsd_lines: 방전 중이면 방전 전력만 값, 충전 전력 0", sdm["observe.batt_discharge_w"] == "5.0" and sdm["observe.batt_charge_w"] == "0", str(sdm))
-check("statsd_lines: 상태/PSR/깨움/패키지 C-state", sdm["observe.state_low"] == "0" and sdm["observe.psr_on"] == "1" and sdm["observe.psr_sink_active"] == "0" and sdm["observe.wake_per_s"] == "7" and sdm["observe.pkg_pc8"] == "12.0" and sdm["observe.pkg_pc10"] == "0.0", str(sdm))
+check("statsd_lines: 상태/PSR/전환(상위·전체)/CPU 전체/패키지 C-state", sdm["observe.state_low"] == "0" and sdm["observe.psr_on"] == "1" and sdm["observe.psr_sink_active"] == "0" and sdm["observe.ctxsw_vol_top_per_s"] == "7" and sdm["observe.ctxsw_all_per_s"] == "2500" and sdm["observe.cpu_all_pct"] == "2.0" and "observe.wake_per_s" not in sdm and sdm["observe.pkg_pc8"] == "12.0" and sdm["observe.pkg_pc10"] == "0.0", str(sdm))
 check("statsd_lines: 값이 없으면 줄을 만들지 않는다(문자열은 보내지 않음)", "observe.pkg_pc2" not in sdm and "observe.psys_w" in sdm and not any(not v.replace(".", "", 1).replace("-", "", 1).isdigit() for v in sdm.values()))
 check("statsd_lines: 빈 표본은 빈 목록", col.statsd_lines({}) == [])
 import socket as _s
@@ -146,8 +146,43 @@ time.sleep(1.2)
 smp = s.sample()
 check("스모크: 표본 필수 키", all(k in smp for k in ("t", "dt", "pw", "cs", "irq", "proc", "dev", "state", "thr", "io")), str(list(smp)))
 check("스모크: dt 가 대기 시간과 비슷", 1.0 < smp["dt"] < 2.5, str(smp["dt"]))
-check("스모크: 프로세스 합산 항목 구조", all({"comm", "exe", "n", "cpu", "wake", "rss_mb"} <= set(p) for p in smp["proc"]))
+check("스모크: 표본 형식 v2 이고 옛 필드 이름이 없음", smp["v"] == core.SCHEMA and "batt_vi_w" in smp["pw"] and "batt_w" not in smp["pw"] and "cpu_all_pct" in smp["irq"] and "cpu_busy_pct" not in smp["irq"], str(smp["pw"]))
+check("스모크: 프로세스 합산 항목 구조", all({"comm", "exe", "n", "cpu_core_pct", "ctxsw_vol_s", "rss_mb"} <= set(p) and not ({"cpu", "wake"} & set(p)) for p in smp["proc"]))
 json.dumps(smp)
+# --- 옛 형식(v1) 표본 읽기 호환: 값은 그대로, 이름만 v2 로, legacy 표시
+old = {"t": 1700000000.0, "pw": {"psys_w": 4.0, "batt_w": 5.5, "status": "Discharging"}, "irq": {"cpu_busy_pct": 3.2, "ctxt_s": 2000},
+       "proc": [{"comm": "claude", "exe": "claude", "n": 1, "cpu": 8.5, "wake": 30.0, "rss_mb": 400}], "thr": [{"comm": "x", "thr": "t", "cpu": 1.5, "wake": 9.0}]}
+n1 = core.normalize_sample(json.loads(json.dumps(old)))
+check("normalize_sample: 필드 이름 v1 → v2(값 그대로)", n1["pw"]["batt_vi_w"] == 5.5 and "batt_w" not in n1["pw"] and n1["irq"]["cpu_all_pct"] == 3.2 and "cpu_busy_pct" not in n1["irq"]
+      and n1["proc"][0]["cpu_core_pct"] == 8.5 and n1["proc"][0]["ctxsw_vol_s"] == 30.0 and not ({"cpu", "wake"} & set(n1["proc"][0])) and n1["thr"][0]["cpu_core_pct"] == 1.5 and n1["thr"][0]["ctxsw_vol_s"] == 9.0, str(n1))
+check("normalize_sample: 옛 표본은 v=2, legacy=True", n1["v"] == 2 and n1["legacy"] is True)
+v2 = {"v": 2, "t": 1.0, "pw": {"batt_vi_w": 1.0}}
+check("normalize_sample: v2 는 그대로(legacy 없음)", core.normalize_sample(dict(v2)) == v2 and "legacy" not in core.normalize_sample(dict(v2)))
+check("normalize_sample: 두 번 적용해도 같음(멱등)", core.normalize_sample(core.normalize_sample(json.loads(json.dumps(old)))) == n1)
+core.append_jsonl(core.SAMPLE_DIR, "samples", {**old, "t": time.time() - 100})
+rd = list(core.iter_jsonl(core.SAMPLE_DIR, "samples", time.time() - 200))
+check("iter_jsonl(samples): 파일에는 옛 이름 그대로 있지만 읽으면 새 이름·legacy", any(r.get("legacy") and "batt_vi_w" in r["pw"] and r["proc"][0]["ctxsw_vol_s"] == 30.0 for r in rd), str(rd[-1:]))
+raw_line = open(core.day_file(core.SAMPLE_DIR, "samples", time.time() - 100)).read()
+check("원본 파일은 고쳐 쓰지 않는다(옛 이름 보존)", '"batt_w"' in raw_line and '"cpu_busy_pct"' in raw_line)
+core.append_jsonl(core.state_dir(), "events", {"t": time.time() - 50, "comp": "x", "ev": "keep", "pw": {"batt_w": 1}})
+ev_back = [e for e in core.iter_jsonl(core.state_dir(), "events", time.time() - 100) if e.get("ev") == "keep"]
+check("이벤트 로그(events)는 정규화하지 않는다(사용자 필드 보존)", ev_back and ev_back[0]["pw"] == {"batt_w": 1} and "legacy" not in ev_back[0], str(ev_back))
+# observectl: 옛 이름 옵션 호환
+import io as _io, contextlib as _cx
+buf = _io.StringIO()
+with _cx.redirect_stdout(buf):
+    observe_cli.main(["window", "--since", "10m", "--by", "none"])
+wout = buf.getvalue()
+check("observectl window: 옛 형식 표본 안내·새 열 이름(V×I/상위전환/전체CPU%)", "옛 형식 표본" in wout and "V×I" in wout and "상위전환/s" in wout and "전체CPU%" in wout, wout)
+buf = _io.StringIO()
+with _cx.redirect_stdout(buf):
+    observe_cli.main(["top", "--since", "10m", "--by", "wake"])
+tout = buf.getvalue()
+check("observectl top --by wake: 옛 이름 안내 후 ctxsw 로 동작·열 이름", "옛 이름" in tout and "자발전환/s" in tout and "코어1개=100%" in tout, tout)
+buf = _io.StringIO()
+with _cx.redirect_stdout(buf):
+    observe_cli.main(["top", "--since", "10m", "--by", "ctxsw"])
+check("observectl top --by ctxsw: 안내 없이 동작", "옛 이름" not in buf.getvalue() and "claude" in buf.getvalue(), buf.getvalue())
 check("스모크: 표본이 JSON 직렬화 가능", True)
 
 # --- CLI: A/B 구간 분할
@@ -170,15 +205,15 @@ check("group_key boot/quirks", observe_cli.group_key({"dev": {"boot": "ab12", "q
 erows = []
 for i in range(21):   # 10분(30초 × 20), 3600 mAh 전지 가정: 8 W → 15 V 에서 약 0.533 A → 30초에 4.44 mAh. 1 mAh 단위로 양자화
     q = 2_900_000 - round(i * 30 * 8.0 / 15.0 / 3600 * 1e6 / 1000) * 1000
-    erows.append({"t": 1000.0 + i * 30, "state": "low", "pw": {"q_uah": q, "v_uv": 15_000_000, "status": "Discharging", "psys_w": 5.0 + (i % 2), "batt_w": 9.0}})
+    erows.append({"t": 1000.0 + i * 30, "state": "low", "pw": {"q_uah": q, "v_uv": 15_000_000, "status": "Discharging", "psys_w": 5.0 + (i % 2), "batt_vi_w": 9.0}})
 en = observe_cli.energy_by_group(erows, "state")["low"]
 check("energy_by_group: 누적 계량으로 8 W 평균을 복원(양자화 오차 ±0.2 W)", abs(en["coulomb_w"] - 8.0) < 0.2 and abs(en["hours"] * 60 - 10.0) < 0.01, str(en))
 check("energy_by_group: psys/V×I 평균도 함께", abs(en["psys_w"] - 5.5) < 0.1 and abs(en["vi_w"] - 9.0) < 1e-9)
 erows[5]["pw"]["status"] = "Charging"
 check("충전 중인 쌍은 제외", observe_cli.energy_by_group(erows, "state")["low"]["n"] == 18)
-check("is_clean: 한가한 표본은 통과", observe_cli.is_clean({"proc": [{"comm": "netdata", "cpu": 2.0}, {"comm": "kmscon", "cpu": 0.1}]}))
-check("is_clean: kmscon CPU 가 높으면(내 세션 활동) 제외", not observe_cli.is_clean({"proc": [{"comm": "kmscon", "cpu": 18.0}]}))
-check("is_clean: nix-daemon 이 보이면(빌드) 제외", not observe_cli.is_clean({"proc": [{"comm": "nix-daemon", "cpu": 30.0}, {"comm": "kmscon", "cpu": 0.0}]}))
+check("is_clean: 한가한 표본은 통과", observe_cli.is_clean({"proc": [{"comm": "netdata", "cpu_core_pct": 2.0}, {"comm": "kmscon", "cpu_core_pct": 0.1}]}))
+check("is_clean: kmscon CPU 가 높으면(내 세션 활동) 제외", not observe_cli.is_clean({"proc": [{"comm": "kmscon", "cpu_core_pct": 18.0}]}))
+check("is_clean: nix-daemon 이 보이면(빌드) 제외", not observe_cli.is_clean({"proc": [{"comm": "nix-daemon", "cpu_core_pct": 30.0}, {"comm": "kmscon", "cpu_core_pct": 0.0}]}))
 check("pc3_stuck: 높은 상태 + pc3 50%, pc6+ 0 → 감지", col.pc3_stuck("high", {"pc3": 50, "pc6": 0, "pc8": 0, "pc10": 0}))
 check("pc3_stuck: pc8 이 있으면 정상", not col.pc3_stuck("high", {"pc3": 50, "pc6": 0, "pc8": 27, "pc10": 0}))
 check("pc3_stuck: 낮은 상태는 대상 아님", not col.pc3_stuck("low", {"pc3": 50, "pc6": 0, "pc8": 0, "pc10": 0}))

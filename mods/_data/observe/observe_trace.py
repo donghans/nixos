@@ -94,8 +94,8 @@ def energy(samples, t0, t1, now=None):
         cover += ov
         if isinstance(pw.get("psys_w"), (int, float)):
             psys += pw["psys_w"] * ov
-        if pw.get("status") == "Discharging" and isinstance(pw.get("batt_w"), (int, float)):
-            batt += pw["batt_w"] * ov
+        if pw.get("status") == "Discharging" and isinstance(pw.get("batt_vi_w"), (int, float)):
+            batt += pw["batt_vi_w"] * ov
     if n == 0:
         return None
     out = {"psys_wh": psys / 3600, "batt_wh": batt / 3600, "avg_psys_w": psys / cover if cover else None, "cover_s": cover, "n": n, "coulomb_wh": None}

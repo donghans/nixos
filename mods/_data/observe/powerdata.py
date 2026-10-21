@@ -12,7 +12,7 @@ import time
 import observe_core as core
 
 BUSY = {"nix-daemon", "nix", "nixos-rebuild", "nixup", ".nixup-wrapped", "cc1", "ld", "rustc"}
-GROUPS = {"state": "상태(low/high)", "psr": "PSR 켬/끔", "ac": "전원(AC/배터리)", "lid": "덮개", "vt": "화면(VT)", "boot": "부팅"}
+GROUPS = {"state": "상태(low=깊은 절전 진입)", "psr": "PSR 켬/끔", "ac": "전원(AC/배터리)", "lid": "덮개", "vt": "화면(VT)", "boot": "부팅"}
 
 
 def compact(s):
@@ -20,15 +20,17 @@ def compact(s):
     pw, cs, dev = s.get("pw") or {}, s.get("cs") or {}, s.get("dev") or {}
     psr = dev.get("psr") or {}
     procs = s.get("proc") or []
-    kc = next((p.get("cpu", 0) for p in procs if p.get("comm") == "kmscon"), 0)
+    kc = next((p.get("cpu_core_pct", 0) for p in procs if p.get("comm") == "kmscon"), 0)   # 코어 1개 = 100%
     mode = str(psr.get("mode") or "")
     return {
-        "t": s["t"], "psys": pw.get("psys_w"), "batt": pw.get("batt_w"), "pkg": pw.get("pkg_w"), "core": pw.get("core_w"),
+        "t": s["t"], "psys": pw.get("psys_w"), "batt_vi": pw.get("batt_vi_w"), "pkg": pw.get("pkg_w"), "core": pw.get("core_w"),
         "pct": _num(pw.get("batt_pct")), "q": pw.get("q_uah"), "v": pw.get("v_uv"), "full": pw.get("full_uah"),
         "status": pw.get("status"), "ac": bool(pw.get("ac")), "state": s.get("state") or "?",
         "psr": "enabled" in mode, "psr_sink": psr.get("sink"), "psr_mode": mode or None,
         "pc8": cs.get("pc8"), "pc10": cs.get("pc10"), "mhz": cs.get("mhz"),
-        "wake": sum(p.get("wake", 0) for p in procs), "cpu": (s.get("irq") or {}).get("cpu_busy_pct"),
+        # 상위 프로세스(저장된 최대 16행)의 자발적 문맥 전환/s 합 — 시스템 전체 아님 / 시스템 전체 문맥 전환/s(비자발 포함) / 전체 CPU 대비 %
+        "ctxsw_top": sum(p.get("ctxsw_vol_s", 0) for p in procs), "ctxsw_all": (s.get("irq") or {}).get("ctxt_s"), "cpu_all": (s.get("irq") or {}).get("cpu_all_pct"),
+        "legacy": bool(s.get("legacy")),
         "clean": kc < 1.0 and not any(p.get("comm") in BUSY for p in procs),
         "lid": dev.get("lid"), "vt": dev.get("vt"), "bl": _num(dev.get("bl")), "boot": dev.get("boot"),
         "wifi_ps": (dev.get("wifi") or {}).get("ps"),
@@ -83,7 +85,7 @@ class Store:
                     continue
                 if t is None or t > horizon or t < cutoff:
                     continue
-                self.recs.append(compact(o))
+                self.recs.append(compact(core.normalize_sample(o)))   # 옛 형식(v1) 표본도 새 이름으로 읽는다
                 new += 1
         if new:
             self.recs.sort(key=lambda r: r["t"])
@@ -136,12 +138,12 @@ def battery_estimate(recs, now=None):
     recent = [r for r in recs if r["t"] >= t_end - 1800]
     w, hrs = coulomb(recent)
     if w is None or hrs < 10 / 60:
-        w = _mean([r["batt"] for r in recent if r["status"] == "Discharging"])
+        w = _mean([r["batt_vi"] for r in recent if r["status"] == "Discharging"])
     out["recent_w"] = w
     typ = [r for r in recs if r["t"] >= t_end - 6 * 3600 and r["status"] == "Discharging" and r["clean"]]
     tw, thrs = coulomb(typ)
-    out["typical_w"] = tw if tw is not None and thrs >= 10 / 60 else _mean([r["batt"] for r in typ])
-    out["now_w"] = _mean([r["batt"] for r in recs[-3:] if r["status"] == "Discharging"])
+    out["typical_w"] = tw if tw is not None and thrs >= 10 / 60 else _mean([r["batt_vi"] for r in typ])
+    out["now_w"] = _mean([r["batt_vi"] for r in recs[-3:] if r["status"] == "Discharging"])
     rw = out.get("remain_wh")
     for key in ("recent", "typical", "now"):
         p = out.get(key + "_w")
@@ -185,11 +187,11 @@ def group_table(recs, by, clean=False, max_gap=90):
         cw, chrs = coulomb_pairs(pairs.get(k, []), max_gap)
         out.append({
             "group": k, "n": len(g), "hours": sum(min(b["t"] - a["t"], max_gap) for a, b in pairs.get(k, [])) / 3600,
-            "batt": _mean([r["batt"] for r in g if r["status"] == "Discharging"]),
+            "batt_vi": _mean([r["batt_vi"] for r in g if r["status"] == "Discharging"]),
             "coulomb": cw if cw is not None and chrs >= 10 / 60 else None,
             "psys": _mean([r["psys"] for r in g]), "pkg": _mean([r["pkg"] for r in g]),
             "pc8": _mean([r["pc8"] for r in g]), "pc10": _mean([r["pc10"] for r in g]),
-            "wake": _mean([r["wake"] for r in g]), "cpu": _mean([r["cpu"] for r in g]),
+            "ctxsw_top": _mean([r["ctxsw_top"] for r in g]), "ctxsw_all": _mean([r["ctxsw_all"] for r in g]), "cpu_all": _mean([r["cpu_all"] for r in g]),
         })
     return sorted(out, key=lambda x: -x["hours"])
 
