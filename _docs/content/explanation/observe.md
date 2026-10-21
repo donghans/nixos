@@ -72,24 +72,26 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 다음에 이 상태가 생기면: `observectl window --by flag`, 저장된 스냅샷을 기준 스냅샷과 `power_knobs.py diff` 로 비교한다(기준은 정상 상태에서 `power_knobs.py save` 로 만들어 둔다). 2026-10-20 오후에 2시간 41분 지속된 상태의 원인은 이 도구가 없어서 못 잡았다(#48~#51).
 
 
-## `powerui` — 전력 현황 TUI (2026-10-21)
+## `usageui` — 전력·자원 사용 습관 TUI (2026-10-21)
 
-`powerui` (앱 런처에서는 "Power Monitor") 는 수집기가 남긴 표본을 그래프와 표로 보여주는 Textual 앱이다. 본체는 `mods/_data/observe/powerui.py`(화면) · `powerview.py`(rich 조각) · `powerdata.py`(증분 읽기·집계·추정) · `powergraph.py`(점자 그래프 계산).
+`usageui` (앱 런처에서는 "Usage Monitor", `usageui.desktop`) 는 수집기가 남긴 표본을 **시간 범위 기준**으로 조회해 보여주는 Textual 앱이다(옛 `powerui` 를 제로베이스로 다시 만들어 교체했고 별칭은 없다). 본체는 `mods/_data/observe/` 의 `usageui.py`(화면) · `usageview.py`(문구·표 행·라벨) · `usagedata.py`(범위 모델·요약·배터리 추정·하드웨어 정보) · `usagechart.py`(차트·띠) · `usagegraph.py`(점자 그래프 계산).
 
-**그래프·표 하나마다 박스 하나**(btop 처럼 제목이 달린 테두리, 아래 테두리에 지금/평균/최소/최대).
+**원칙**: ① 조회는 범위 기준(기본 = 지금까지 최근 1시간, `t` 로 바꿈: 1시간·6시간·오늘·어제·3일 · `-30m` · `10:00..11:30`) ② **갱신은 수동만**(타이머 없음 — `r`/F5. 화면 갱신이 PSR 을 방해하지 않음) ③ 값마다 **측정/추정** 라벨 ④ 프로세스 *관리*(종료·nice)는 btop(`b`), *지표*는 여기 ⑤ 표·그래프마다 박스 하나, 대시보드는 2열(폭 125칸 미만이면 1열).
 
-| 탭 | 박스 |
+| 탭 | 내용 |
 |---|---|
-| 1 지금 | 현황(전원·잔량 Wh·psys/배터리/패키지 W·low/high·**PSR 모드/싱크**·밝기·덮개·Wi-Fi 절전·**남은 시간 추정**) / 최근 30분 psys / 최근 30분 배터리 |
-| 2 시계열 | 배터리 소비 / psys / 패키지 / 배터리 잔량 / 상태·PSR·전원 띠. 구간 `r`: 1시간·6시간·오늘·3일 |
-| 3 비교 | 그룹별 평균 표(`g`: 상태·PSR 켬끔·AC·덮개·VT·부팅, `c`: 내 활동·빌드가 섞인 표본 제외). 계량 W 는 10분 이상 쌓인 그룹만 |
-| 4 Netdata | CPU / 네트워크 / 디스크 / 메모리 / NVMe 온도(Netdata REST API; 웹 화면이 없는 빌드라 이 탭이 대신) |
+| 1 대시보드 | 왼쪽: 전력(psys·패키지·배터리 V×I·상태/PSR/전원 띠) + 배터리(잔량·건강·예상 사용 시간). 오른쪽: 구간·전력 요약 / 시간 배분(덮개·방전·AC·PSR·low) / 앱(CPU 점유 TOP5·오래 본 앱) |
+| 2 앱·프로세스 | 앱 표(전체 프로세스를 묶은 합) · 포커스 시간 · 프로세스 이름별 · 정밀(eBPF) · 기록된 작업 구간(nixup 등) |
+| 3 원인 | **결론 문장**(전력이 기준보다 얼마나 변했나 + 조건 차이 경고 + 같이 달라진 앱) · 달라진 것 순위(▲빨강/▼초록) · 접이식 상세 표(`observectl explain` 과 같은 계산) |
+| 4 시스템·기기 | 기기 상태 · 수집 상태 · Netdata 신호 표와 그래프(없으면 "관측 공백") |
+| 5 용어 | 값이 무엇을 뜻하나 |
 
-- 그래프는 점자 문자(2×4 점) 면적 그래프(btop 과 같은 방식): 글자 칸보다 가로 2배·세로 4배 해상도이고, 세로 위치에 따라 초록→빨강 그라데이션. 표본 사이는 선형 보간(2분 넘게 끊긴 구간은 비움).
-- 키: `1`~`4` 탭, `r` 구간, `g` 그룹, `c` 깨끗한 표본, `f5` 새로고침, `?`/`F1` 도움말, `q` 종료. 옵션 `--tab`, `--range`, `--interval`.
-- **화면 갱신은 PSR 을 방해**하므로 기본 10초 주기이고 터미널이 포커스를 잃으면 갱신을 멈춘다. **측정 중에는 열어 두지 말 것.**
-- 남은 시간은 `잔량 Wh ÷ 전력`(0%까지 쓴다고 가정). 잔량 Wh 는 누적 계량값(`q_uah`)×최근 방전 전압, 만충은 `charge_full`(마모 반영). 충전 중 전압은 방전 때보다 높아 Wh 를 부풀리므로 쓰지 않는다.
-- 수집기가 새로 기록하는 필드: `dev.psr`(`mode`, `sink`), `pw.full_uah`. `observectl window --by psr` 로도 비교한다.
+- 키: `1`~`5` 탭, `t` 범위, `v` 비교 기준(바로 앞/어제 같은 시간대/없음), `r`·`F5` 새로고침, `b` btop, `e` 현재 탭을 텍스트로 저장(`~/usageui-<탭>-<시각>.txt`), `?`/`F1` 도움말, `q` 종료. 옵션 `--range`, `--tab`, `--baseline`, `--expand`(원인 탭 상세를 펼침).
+- **원인 탭은 인과가 아니다**: 같이 달라진 것의 목록이며, 이 구간과 기준의 전원·덮개·PSR 이 다르면 맨 위에 경고한다. 원인 확인은 한 가지만 바꿔 번갈아 재는 ABAB(`observectl ab`).
+- 앱별 "전력량 추정"은 구간 psys 전력량 × CPU 점유율이며 유휴 전력도 비례 배분한 참고값이다(앱이 전력을 쓴 몫이 아님). Netdata V×I 는 충전·AC 시간이 섞인 구간에서는 방전 전력이 아니므로 "비교 불가"로 가린다.
+- 예상 사용 시간은 `잔량 Wh ÷ 전력`(0%까지 쓴다고 가정, **추정**). 잔량 Wh 는 누적 계량값(`q_uah`)×최근 방전 전압, 만충은 `charge_full`(마모 반영). 충전 중 전압은 방전 때보다 높아 Wh 를 부풀리므로 쓰지 않는다. 검증은 하루 이상 범위의 방전 곡선(T21).
+- **화면 확인은 실제 터미널로**: 헤드리스 `cage` 안에서 `kitty` 로 띄워 `grim` 으로 촬영한다(Textual 의 SVG 내보내기는 한글 칸 폭을 실제와 다르게 그려 정렬 문제를 놓친다).
+- 수집기가 기록하는 필드: `dev.psr`(`mode`, `sink`), `pw.full_uah`, `apps`(v4).
 
 ### Netdata 로의 미러링
 
@@ -97,7 +99,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 
 ## `uikit` — 우리 TUI 공통 틀 (2026-10-21)
 
-`mods/_data/_uikit/uikit.py`. displayui · clipui · notif_ui · powerui 가 복사해 쓰던 겉모습과 동작을 모았다: 검정 배경·둥근 회색 테두리(포커스 시 하늘색)·선택 줄 파랑·Footer 색(`BASE_CSS`), 대화상자 모양(`DIALOG_CSS`), 제목 달린 박스(`.box`, `uikit.box(위젯, 제목)`), `?`/F1 도움말(`HelpMixin`, 키 목록은 BINDINGS 에서 자동 생성), 포커스를 잃으면 갱신 정지(`PauseOnBlurMixin`). 각 앱은 `CSS = uikit.BASE_CSS + (앱 고유 규칙)` 로 쓴다. 배포 시 각 모듈이 `uikit.py` 를 같은 디렉터리에 복사하고, 소스 트리에서는 `../_uikit` 에서 가져온다. 시험: `_uikit/tests/test_uikit.py`.
+`mods/_data/_uikit/uikit.py`. displayui · clipui · notif_ui · usageui 가 복사해 쓰던 겉모습과 동작을 모았다: 검정 배경·둥근 회색 테두리(포커스 시 하늘색)·선택 줄 파랑·Footer 색(`BASE_CSS`), 대화상자 모양(`DIALOG_CSS`), 제목 달린 박스(`.box`, `uikit.box(위젯, 제목)`), `?`/F1 도움말(`HelpMixin`, 키 목록은 BINDINGS 에서 자동 생성), 포커스를 잃으면 갱신 정지(`PauseOnBlurMixin`). 각 앱은 `CSS = uikit.BASE_CSS + (앱 고유 규칙)` 로 쓴다. 배포 시 각 모듈이 `uikit.py` 를 같은 디렉터리에 복사하고, 소스 트리에서는 `../_uikit` 에서 가져온다. 시험: `_uikit/tests/test_uikit.py`.
 
 ## 스팬(구간)과 `observectl trace` (2026-10-21)
 
@@ -153,8 +155,8 @@ OTel 의 트레이스 개념만 빌린 것(OTel 을 넣거나 흉내 내는 게 
 | (없음) `irq.ctxt_s` | 그대로 | 시스템 전체 문맥 전환/s(비자발 포함, `/proc/stat` ctxt) |
 | `state` = low/high | 그대로 | **패키지 pc10 ≥ 5%(깊은 절전 진입) 여부**이지 전력 높낮이가 아님. 화면에는 `low(깊은 절전)` 처럼 뜻을 함께 쓴다 |
 
-- 새 표본은 `v: 4`(v2 는 이름 정리, **v3 는 proc 행 `ctxsw_vol_s` 를 모든 스레드 합으로 정정**, **v4 는 `apps` 추가**). v3→v4 는 값의 뜻이 바뀌지 않아 legacy 가 아니다(apps 가 없을 뿐). **옛 표본(v 없음·v2)은 파일을 고쳐 쓰지 않고 읽을 때 새 이름으로 바꾸며 `legacy: true` 를 단다**(`observe_core.normalize_sample`; `iter_jsonl` 과 powerui 의 `Store` 가 적용). `observectl window` 와 powerui 상태줄은 옛 형식 표본이 섞이면 개수를 알려 준다. 보관 기간이 지나면 옛 표본은 사라진다.
-- 화면 열 이름: `observectl window` 는 `V×I`·`상위전환/s`(**저장된 상위 프로세스 최대 16행의 합 — 시스템 전체가 아님**)·`전체CPU%`, `observectl top` 은 `CPU(코어1개=100%)`·`자발전환/s`. powerui 현황은 "전환 시스템 전체 / 상위 프로세스(합계 아님)" 와 "CPU 전체 대비" 를 따로 보여 준다.
+- 새 표본은 `v: 4`(v2 는 이름 정리, **v3 는 proc 행 `ctxsw_vol_s` 를 모든 스레드 합으로 정정**, **v4 는 `apps` 추가**). v3→v4 는 값의 뜻이 바뀌지 않아 legacy 가 아니다(apps 가 없을 뿐). **옛 표본(v 없음·v2)은 파일을 고쳐 쓰지 않고 읽을 때 새 이름으로 바꾸며 `legacy: true` 를 단다**(`observe_core.normalize_sample`; `iter_jsonl` 과 usageui 의 `load` 가 적용). `observectl window` 와 powerui 상태줄은 옛 형식 표본이 섞이면 개수를 알려 준다. 보관 기간이 지나면 옛 표본은 사라진다.
+- 화면 열 이름: `observectl window` 는 `V×I`·`상위전환/s`(**저장된 상위 프로세스 최대 16행의 합 — 시스템 전체가 아님**)·`전체CPU%`, `observectl top` 은 `CPU(코어1개=100%)`·`자발전환/s`. 옛 powerui 현황은 "전환 시스템 전체 / 상위 프로세스(합계 아님)" 와 "CPU 전체 대비" 를 따로 보여 준다.
 - 옵션 호환: `observectl top --by wake` 와 `observectl ab --metric batt_w` 는 새 이름의 옛 별칭으로 계속 받는다(안내를 출력).
 - "지금 CPU" 를 볼 때는 `ps` 의 %CPU(프로세스 시작 이후 누적 평균)가 아니라 `observectl top --since 1m`(구간 평균) 이나 `observectl bpf profile`(99Hz 표본)을 쓴다.
 
@@ -162,7 +164,7 @@ OTel 의 트레이스 개념만 빌린 것(OTel 을 넣거나 흉내 내는 게 
 
 **구조 결정**: observectl 이 분석의 입구이고, Netdata 는 **켜져 있을 때만 쓰는 내부 어댑터**(`observe_netdata.py`)다. Netdata 를 배터리에서 끄는 정책(#2·#58·T3)과 양립하도록, 꺼져 있으면 해당 항목을 **"관측 공백"**(0 이 아님)으로 표시하고 observectl 만으로 계속 분석한다. 1초 간격 전체 수집을 observectl 에 다시 만들지 않는다(파이썬으로 1초마다 전 프로세스를 읽으면 CPU 약 5%). **언어는 정해져 있지 않다** — 가장 강한 제로베이스 후보인 커널 안 eBPF 집계도 실험했다(장부 #61): 정확성은 `/proc` 모든 스레드 합과 99% 일치하지만 bpftrace 구현은 `sched_switch` 호출당 약 5.9 µs 라 지금 부하에서 코어의 1.8%, 부하에 비례해 커서 상시용으로는 보류(libbpf 로 다시 만들면 가능 — T23). 대신 **Netdata 가 틀린 부분(앱별 자발적 전환: 메인 스레드만 읽음)은 우리가 정확하게 직접 구현**했다(수집기 v3, 30초 간격 +0.17% CPU).
 
-- `observectl explain [--since 30m | --at HH:MM --span 300] [--baseline prev|none|시작..끝] [--no-netdata] [--json]` — 한 구간을 **기준 구간(기본: 바로 앞 같은 길이)과 비교**해 한 화면에: ① 요약(상태 low/high·PSR·덮개·전원) ② 전력 4지표(psys·패키지·순간 V×I·누적 계량, 신뢰 낮은 값은 표시하고 순위에서 제외, Netdata 1초 값 병기) ③ 시스템 활동(전체 CPU·문맥 전환·인터럽트, Netdata 가 있으면 네트워크·디스크·온도·프로세스 생성) ④ 프로세스(observectl 저장분 + Netdata 앱 그룹 CPU) ⑤ 포커스한 앱·열린 구간과 에너지 ⑥ **기준 대비 달라진 것의 순위(상관일 뿐 인과가 아님)** ⑦ 한계. 같은 계산을 powerui **5 원인 탭**(`w` 로 구간 15분/30분/1시간/3시간)이 쓴다.
+- `observectl explain [--since 30m | --at HH:MM --span 300] [--baseline prev|none|시작..끝] [--no-netdata] [--json]` — 한 구간을 **기준 구간(기본: 바로 앞 같은 길이)과 비교**해 한 화면에: ① 요약(상태 low/high·PSR·덮개·전원) ② 전력 4지표(psys·패키지·순간 V×I·누적 계량, 신뢰 낮은 값은 표시하고 순위에서 제외, Netdata 1초 값 병기) ③ 시스템 활동(전체 CPU·문맥 전환·인터럽트, Netdata 가 있으면 네트워크·디스크·온도·프로세스 생성) ④ 프로세스(observectl 저장분 + Netdata 앱 그룹 CPU) ⑤ 포커스한 앱·열린 구간과 에너지 ⑥ **기준 대비 달라진 것의 순위(상관일 뿐 인과가 아님)** ⑦ 한계. 같은 계산을 usageui **3 원인 탭**(`t`·`v` 로 범위·기준을 바꿈; 구 15분/30분/1시간/3시간)이 쓴다.
 - `observectl window` 는 Netdata 가 있으면 표 아래에 네트워크·디스크·NVMe 온도를 같은 그룹으로 병기한다(`--no-netdata` 로 뺌). `observectl nd charts [이름조각]` 으로 차트(이름·단위·제목)를 찾고 `observectl nd get <차트> --since 30m` 으로 값을 본다(공백은 '공백'으로 표시).
 - `observectl query <신호…> [--since 1h] [--step 5m | --by state] [--agg mean|min|max|p50|p95|sum|count]` — 범용 조회. 신호는 별칭(`psys pkg vi core uncore pc8 pc10 cpu_all`)·표본 경로(`pw.psys_w`)·`app:<앱>.cpu|ctxsw`·`proc:<comm>.cpu|ctxsw`·`nd:<Netdata 신호>`(예: `nd:net_rx_kbps`). `vi` 는 방전 중 표본만, 옛 표본의 프로세스 전환 값(메인 스레드만)은 쓰지 않는다, Netdata 가 꺼져 있던 구간은 '-'(관측 공백). 예: `observectl query psys app:claude.cpu nd:net_rx_kbps --since 2h --step 10m`.
 - `observectl nd defs|stats|apps` — 어댑터가 가져오는 신호의 정의·구간 평균·앱 그룹 CPU. 정의는 실제 Netdata API 메타데이터와 교차 검증했다(예: `app.*_cpu_utilization` 제목 "100% = 1 core" 와 수집기 값이 일치).

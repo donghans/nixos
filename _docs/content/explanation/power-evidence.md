@@ -15,10 +15,10 @@
 | **L1** | powertop (`idle_ab.py`) | `System: N wakeup/s` — 시스템 전체 CPU 깨어남 이벤트(타이머·인터럽트 포함) | L1 끼리만 |
 | **L2** | `thread_top.py`(**스레드 단위**), 그리고 `boot_settle.py`·수집기 프로세스 행의 **CPU %** | 깨어남 = 스레드의 `voluntary_ctxt_switches` 변화율(스스로 잠든 횟수; thread_top 은 스레드마다 읽어 정확), **CPU % = Δ(utime+stime)/HZ/Δt×100 → 코어 1개 = 100%**(`/proc/<pid>/stat` 은 프로세스 전체 스레드 합이라 정확) | 같은 프로세스끼리 |
 | **L9** | `boot_settle.py` 와 수집기 프로세스 행의 **자발적 전환**(수집기 v1·v2 표본, 옛 이름 `wake`; 지금은 `ctxsw_vol_leader_s`) | `/proc/<pid>/status` 의 카운터는 **메인(리더) 스레드 값뿐**이라 멀티스레드 프로세스를 크게 과소 집계: 2026-10-21 실측(10초) netdata 363.5/s 대 **0.0**, vivaldi 60.0 대 0.3, electron 59.8 대 0.3, claude 399.6 대 100.7, **전체 합 1,744/s 대 474/s(27%만 보임)**. Netdata `app.*_cpu_context_switches` 도 같은 방식이라 같은 한계(electron 5.8/s 대 실제 약 92/s) | 쓰지 말 것(상대 비교도 단일 스레드 프로세스에만) |
-| **L3** | 수집기 `observectl window` · powerui 현황의 "깨어남/깨움"(v1·v2 표본) | 표본마다 저장된 **상위 프로세스(CPU 상위 8 ∪ 깨어남 상위 8, 최대 16행)의 L9 합** — 시스템 전체가 아니고 메인 스레드만이라 이중으로 과소. 저장된 샘플 기준 시스템 전체 문맥 전환(`/proc/stat` ctxt)의 **약 4~6%** 만 본 값. **v3(2026-10-21 이후)부터 모든 스레드 합(`ctxsw_vol_s`)으로 고쳤다** | v3 끼리만 |
+| **L3** | 수집기 `observectl window` · 옛 powerui 현황의 "깨어남/깨움"(v1·v2 표본) | 표본마다 저장된 **상위 프로세스(CPU 상위 8 ∪ 깨어남 상위 8, 최대 16행)의 L9 합** — 시스템 전체가 아니고 메인 스레드만이라 이중으로 과소. 저장된 샘플 기준 시스템 전체 문맥 전환(`/proc/stat` ctxt)의 **약 4~6%** 만 본 값. **v3(2026-10-21 이후)부터 모든 스레드 합(`ctxsw_vol_s`)으로 고쳤다** | v3 끼리만 |
 | **L4** | `observectl wakers` (ftrace) | 타이머·hrtimer·IRQ 핸들러·workqueue 호출 횟수. `--waking` 의 "깨우는 쪽" = `sched_waking` 의 waker comm | L4 끼리 |
 | **L5** | `observectl bpf wake` (eBPF) | `sched_waking` 시스템 전체 (waker → wakee comm 쌍) | L5 끼리(L4 `--waking` 과 같은 종류) |
-| **L6** | 수집기 `observectl window` 의 "cpu%" 열 · powerui 의 "CPU %" | **전체 CPU 대비**(`irq.cpu_busy_pct`, 100 = 모든 CPU 가 계속 일함). 이 기기는 16스레드라 **코어 1개 기준(L2)과 최대 16배 차이** | L6 끼리 |
+| **L6** | 수집기 `observectl window` 의 "cpu%" 열 · 옛 powerui 의 "CPU %" | **전체 CPU 대비**(`irq.cpu_busy_pct`, 100 = 모든 CPU 가 계속 일함). 이 기기는 16스레드라 **코어 1개 기준(L2)과 최대 16배 차이** | L6 끼리 |
 | **L7** | 수집기 `state` 의 `low`/`high` | **패키지 pc10 ≥ 5%(깊은 절전에 들어감) 여부**이지 전력이 낮다/높다는 뜻이 아님 | — |
 | **L8** | powertop 프로세스 표(`posture.md` 의 "프로세스 기준 소비") | powertop 이 계산한 프로세스별 사용량·깨어남. CPU % 가 코어 1개 기준인지는 **미확정** | — |
 
@@ -98,7 +98,7 @@
 | T1 ✅ | #33, #34 | 콘솔 화면 갱신이 낮은↔높은 상태를 가르는가 → 아님(연속 비용 +1.3 W) | — | — | 완료 |
 | T2 ⚡ | #6, #39 | 낮은/높은 상태의 **깨움 원인 차이**(시스템 전체) | `observectl bpf wake 15` 를 낮은 상태 2회·높은 상태 2회(옛 `wakers` 는 ftrace) | 상태가 바뀌는 시점 포착 | 5분 |
 | T3 ⚡ | #2, #58 | **Netdata 정지 효과 재확인**(−0.6~0.7 W; #58 은 2쌍 약한 재현) | `examples/netdata_abab.sh` (SEG=300 PAIRS=3) | 덮개 닫힘·배터리·무입력 | 30분 |
-| T4 ⚡ | #21 | 수집기·observe-focus·powerui 열림의 **전력 비용**(자발 전환은 collector 2/s, focus 0/s 로 실측 — 전력은 측정 한계 이하로 추정) | 켬/끔 ABAB 로 "측정 불가"를 확인 | 장시간 | 20분 |
+| T4 ⚡ | #21 | 수집기·observe-focus·usageui 열림의 **전력 비용**(자발 전환은 collector 2/s, focus 0/s 로 실측 — 전력은 측정 한계 이하로 추정) | 켬/끔 ABAB 로 "측정 불가"를 확인 | 장시간 | 20분 |
 | T6 📱 | #13 | 핫스팟 vs 사무실의 전력 차(추정 0.45 W) | `wifi_switch.sh` 번갈아 | 폰 핫스팟 | 20분 |
 | T7 📱 | #4, #3, #15 | tailscaled·electron 정지 효과 쌍 늘리기 | `abab_lib.sh` | 폰 핫스팟 | 20분 |
 | T8 🏠 | #1, #29 | 집 5 GHz 에서 Wi-Fi 절전 −0.62 W 가 새 기본 인자에서도 나오나(#26·#27 과 모순 해소) | `examples/wifi_abab.sh` | 집 Wi-Fi | 15분 |
@@ -113,7 +113,7 @@
 | T18 ⚡ | #52 | **PSR 켠 상태에서 내 세션 활동 비용** | 한가함 ↔ 활동 ABAB(활동은 일정한 명령 반복) | 덮개 열림·무입력 | 30분 |
 | T19 ⚡ | #35, #36 | 모션 줄임·kitty 커서 깜빡임 끈 효과 | `CLAUDE_MOTION=normal` 과 비교, PSR 진입률(싱크 active 비율)과 psys | 덮개 열림·무입력 | 30분 |
 | T20 ⚡ | #59 | **Chromium 60fps 컴포지터 순환의 정체**(1단계 완료: Bitwarden 트레이 + Vivaldi 탭, 덮개 닫힘 확인·Bitwarden 정지 ABAB 남음) | `observectl bpf profile`·`wake --comm`, `observectl trace --comp windows` 의 포커스 앱과 대조 | 사용자 불필요 | 5분 |
-| T21 ⏳ | (신규) | 하루 방전 곡선(누적 계량)으로 **배터리 시간 추정 검증** | `observectl energy` / powerui 시계열, 방전 구간 합산 | 하루 사용 | 자동 |
+| T21 ⏳ | (신규) | 하루 방전 곡선(누적 계량)으로 **배터리 시간 추정 검증** | `observectl energy` / usageui 하드웨어·배터리(방전 곡선), 방전 구간 합산 | 하루 사용 | 자동 |
 | T22 ⚡ | (신규) | 사무실 **낮은 상태 기준선 재확립**(이동 중 덮개 닫힘 low 에서 psys 5.06 W — 이전 2.7~3.0 W 와 차이, 원인 미규명) | 덮개 닫힘 20분 + `observectl window --clean --by state` | 덮개 닫힘·배터리 | 20분 |
 
 | T23 ⏳ | #61 | 상시용 **libbpf(C/Rust) 집계기**가 호출당 수백 ns 이하로 가능한가(bpftrace 는 5,949 ns) — 정확성(99%)은 확인됨, 비용이 관건 | 프로토타입 후 `bpftool prog show` 로 호출당 ns 와 `ab` 로 전력 확인 | 개발 시간(선택) | 반나절+ |

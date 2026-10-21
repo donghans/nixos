@@ -6,7 +6,7 @@
 
 ## 0. 현재 상태(요약)
 - 수집: `observe-collector`(30초, 스레드 정확, v3) + 시간 제한형 eBPF 정밀 모드(`observectl ebpf`, 장부 #61) + Netdata(별도, 1초).
-- 분석 입구: `observectl`(`window`·`ab`·`trace`·`explain`·`bpf`·`ebpf`·`nd`), 화면은 `powerui`.
+- 분석 입구: `observectl`(`window`·`ab`·`trace`·`explain`·`bpf`·`ebpf`·`nd`), 화면은 `usageui`(2026-10-21 `powerui` 를 교체).
 - 반영됨: PSR1 강제(`psr-force`), 표본 형식 v3, 용어 정정표(L1~L9), `ab` 다지표·자동 검증, `abab_lib.sh` 시험 틀.
 - 미푸시 커밋이 많음(푸시는 사용자가 요청할 때 + 공개 정보 스캔 후).
 
@@ -31,7 +31,7 @@
 | 7 | D2 `ebpf` 자동 연동(abab 시험·pc3-stuck 때 `sample` 자동 켬), T23 libbpf 집계기 | 불필요 | 선택 | 비용 확인 후 |
 | 8 | 푸시 전 점검(공개 정보 스캔, 락 분리 확인) | 푸시 요청 시 | 15분 | |
 
-## 3. powerui 제로베이스 리메이크 사양 (제안 — R0 에서 사용자 확인)
+## 3. usageui 제로베이스 리메이크 사양 (2026-10-21 구현·교체 완료 — 최종 구성은 observe.md `usageui` 절. 아래는 최초 제안)
 **원칙**: ① 조회는 **시간 범위 기준**(기본 = 현재 시각까지의 최근 1시간) ② **갱신은 수동만**(타이머 없음 → PSR 을 방해하지 않고 측정 중 열어 둬도 영향 없음) ③ 이름은 단위·출처·"측정/추정"이 드러나게 ④ 프로세스 **관리**(종료·nice)는 btop, 프로세스 **지표(누가 전력을 쓰나)** 는 여기 ⑤ uikit 규약 재사용.
 
 - **앱 이름**: **`usageui`**(전력+자원 사용 습관) — 사용자 확정, `powerui` 별칭은 두지 않는다(리메이크 때 교체하고 옛 이름은 제거). 이름 충돌 확인 완료(`usageui`·`energyui`·`resourceui`·`hwinfoui` 모두 없음).

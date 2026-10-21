@@ -277,7 +277,7 @@ SECTION_TITLES = ["요약", "전력", "시스템 활동", "프로세스·앱", "
 
 
 def sections(res, hms):
-    """render 와 같은 내용을 SECTION_TITLES 순서의 [(제목, 줄 목록)] 로 — powerui 가 섹션마다 박스를 만든다."""
+    """render 와 같은 내용을 SECTION_TITLES 순서의 [(제목, 줄 목록)] 로 — usageui 가 섹션마다 박스를 만든다."""
     t0, t1 = res["window"]
     S = []
     head = [f"{hms(t0)} ~ {hms(t1)} ({(t1 - t0) / 60:.1f}분, 표본 {res['n']}개)" + (f"   기준 {hms(res['baseline'][0])} ~ {hms(res['baseline'][1])} (표본 {res['n_base']}개)" if res["baseline"] else "")]

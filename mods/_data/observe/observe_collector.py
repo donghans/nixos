@@ -396,7 +396,7 @@ class Sampler:
             pw["q_uah"] = int(rd(self.bat + "/charge_now") or 0) or None        # 누적 계량값(1 mAh 단위, ≈15 mWh) — 10분 이상 평균에 쓰는 가장 믿을 만한 기준(observectl energy)
             pw["v_uv"] = int(v) if v else None
             pw["status"] = rd(self.bat + "/status")
-            pw["full_uah"] = int(rd(self.bat + "/charge_full") or 0) or None    # 현재 만충 용량(마모 반영) — powerui 의 남은 시간 추정용
+            pw["full_uah"] = int(rd(self.bat + "/charge_full") or 0) or None    # 현재 만충 용량(마모 반영) — usageui 의 남은 시간 추정용
         pw["ac"] = max([int(rd(d + "/online", "0") or 0) for d in glob.glob(f"{SYS}/class/power_supply/*") if rd(d + "/type") == "Mains"] or [0])
         out["pw"] = pw
         cs = pkg_cstate_pct(p["msr"], cur["msr"]) if p["msr"] and cur["msr"] else {}

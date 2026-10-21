@@ -62,7 +62,7 @@ check("render: '상관일 뿐 인과가 아님'과 psys 누락 한계를 명시"
 check("render: 출처 표기(Netdata 1초 / observectl 30초)", "Netdata 1초" in text and "observectl(30초 표본)" in text)
 
 sec = ex.sections(res, core.hms)
-check("sections: 제목 순서가 SECTION_TITLES 와 같고 각 섹션에 내용이 있음(powerui 박스용)", [t for t, _ in sec] == ex.SECTION_TITLES and all(lines for _, lines in sec), str([t for t, _ in sec]))
+check("sections: 제목 순서가 SECTION_TITLES 와 같고 각 섹션에 내용이 있음(usageui 박스용)", [t for t, _ in sec] == ex.SECTION_TITLES and all(lines for _, lines in sec), str([t for t, _ in sec]))
 check("render 는 sections 와 같은 내용(줄 수가 섹션 합 이상)", len(ex.render(res, core.hms)) >= sum(len(l) for _, l in sec))
 
 # Netdata 꺼짐 → 관측 공백(0 이 아님), 알림

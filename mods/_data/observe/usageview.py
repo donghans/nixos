@@ -7,8 +7,8 @@ from rich.cells import cell_len
 from rich.text import Text
 
 import observe_explain as ex
-import powergraph as pg
-import powerview as pv
+import usagechart as uc
+import usagegraph as pg
 import usagedata as ud
 
 LOW_GLOSS = "low = 깊은 절전 상태에 들어간 시간(패키지 pc10 ≥ 5%) — 전력이 낮다는 뜻이 아님"
@@ -200,13 +200,13 @@ POWER_SERIES = [  # (제목, 필드, 단위, 색, 하한, 상한, 형식, 그라
 def power_chart(view, i, w, h):
     title, key, unit, style, lo, hi, fmt, grad = POWER_SERIES[i]
     rng = view["range"]
-    text, st = pv.chart(pv.series_points(view["recs"], key), rng.t0, rng.t1, w, h, unit, style, lo, hi, fmt, gradient=grad, axis=False)
-    return text, pv.stats_str(st, unit, fmt)
+    text, st = uc.chart(uc.series_points(view["recs"], key), rng.t0, rng.t1, w, h, unit, style, lo, hi, fmt, gradient=grad, axis=False)
+    return text, uc.stats_str(st, unit, fmt)
 
 
 def power_bands(view, w):
     rng = view["range"]
-    return pv.bands_text(view["recs"], rng.t0, rng.t1, w), f"{view['summary']['range']} · 표본 {len(view['recs'])}개"
+    return uc.bands_text(view["recs"], rng.t0, rng.t1, w), f"{view['summary']['range']} · 표본 {len(view['recs'])}개"
 
 
 # ------------------------------------------------------------------ 시스템(Netdata)·하드웨어
@@ -221,8 +221,8 @@ def nd_chart(sysdata, key, rng, w, h):
         return Text(" 이 범위에 Netdata 값이 없습니다(Netdata 가 꺼져 있었거나 응답 없음 → '관측 공백')", style="grey50"), ""
     unit = next(u for k, _, u, _ in ND_CHARTS if k == key)
     style = next(s for k, _, _, s in ND_CHARTS if k == key)
-    text, st = pv.chart(pts, rng.t0, rng.t1, w, h, unit, style, fmt=None, gradient=False)
-    return text, pv.stats_str(st, unit)
+    text, st = uc.chart(pts, rng.t0, rng.t1, w, h, unit, style, fmt=None, gradient=False)
+    return text, uc.stats_str(st, unit)
 
 
 def nd_signal_rows(sysdata, view=None):

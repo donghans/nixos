@@ -1,20 +1,21 @@
 """usageui 의 데이터 계층(터미널 없음): 시간 범위 모델 + 한 번의 조회(load)로 모든 탭이 쓸 보기 모델을 만든다.
-갱신은 수동 — load() 를 부를 때만 파일을 읽는다(타이머 없음). 계산은 observe_explain·observe_trace·powerdata 의 검증된 함수를 재사용하고,
-이 모듈은 범위·요약·배터리 곡선·하드웨어 정보만 새로 계산한다. 값마다 '측정'인지 '추정'인지 라벨을 붙여 돌려준다."""
+갱신은 수동 — load() 를 부를 때만 파일을 읽는다(타이머 없음). 계산은 observe_explain·observe_trace 의 검증된 함수를 재사용하고,
+이 모듈은 범위·요약·배터리 추정·방전 곡선·하드웨어 정보를 계산한다. 값마다 '측정'인지 '추정'인지 라벨을 붙여 돌려준다."""
 from __future__ import annotations
 
 import collections
 import glob
 import json
 import os
+import statistics
 import time
 from datetime import datetime, timedelta
 
 import observe_core as core
 import observe_explain as ex
 import observe_trace as tr
-import powerdata as pd
 
+BUSY = {"nix-daemon", "nix", "nixos-rebuild", "nixup", ".nixup-wrapped", "cc1", "ld", "rustc"}   # 빌드 중인 표본은 '한가한 기준'에서 뺀다(clean=False)
 MAX_GAP = 90                     # 표본 사이가 이보다 벌어지면 수집 공백(시간 합산에서 제외)
 PRESETS = ["1시간", "6시간", "오늘", "어제", "3일"]
 STALE_S = 300                    # 데이터 기준 시각이 이보다 오래되면 화면에 '오래됨' 표시
@@ -92,6 +93,104 @@ def baseline_for(rng, kind="prev"):
     return (rng.t0 - rng.secs, rng.t0)
 
 
+# ------------------------------------------------------------------ 표본 → 가벼운 레코드·배터리 추정
+def compact(s):
+    """수집기 표본 하나 → 그래프·집계에 필요한 필드만 남긴 dict. proc/irq/thr 같은 큰 필드는 버린다(깨끗한 표본 여부만 미리 계산)."""
+    pw, cs, dev = s.get("pw") or {}, s.get("cs") or {}, s.get("dev") or {}
+    psr = dev.get("psr") or {}
+    procs = s.get("proc") or []
+    kc = next((p.get("cpu_core_pct", 0) for p in procs if p.get("comm") == "kmscon"), 0)   # 코어 1개 = 100%
+    mode = str(psr.get("mode") or "")
+    return {
+        "t": s["t"], "psys": pw.get("psys_w"), "batt_vi": pw.get("batt_vi_w"), "pkg": pw.get("pkg_w"), "core": pw.get("core_w"),
+        "pct": _num(pw.get("batt_pct")), "q": pw.get("q_uah"), "v": pw.get("v_uv"), "full": pw.get("full_uah"),
+        "status": pw.get("status"), "ac": bool(pw.get("ac")), "state": s.get("state") or "?",
+        "psr": "enabled" in mode, "psr_sink": psr.get("sink"), "psr_mode": mode or None,
+        "pc8": cs.get("pc8"), "pc10": cs.get("pc10"), "mhz": cs.get("mhz"),
+        # 상위 프로세스(저장된 최대 16행)의 자발적 문맥 전환/s 합 — 시스템 전체 아님 / 시스템 전체 문맥 전환/s(비자발 포함) / 전체 CPU 대비 %
+        # 옛 표본(메인 스레드만 센 proc 행)은 ctxsw_top 을 None 으로 둔다
+        "ctxsw_top": None if any("ctxsw_vol_leader_s" in p for p in procs) else sum(p.get("ctxsw_vol_s", 0) for p in procs),
+        "ctxsw_all": (s.get("irq") or {}).get("ctxt_s"), "cpu_all": (s.get("irq") or {}).get("cpu_all_pct"),
+        "legacy": bool(s.get("legacy")),
+        "clean": kc < 1.0 and not any(p.get("comm") in BUSY for p in procs),
+        "lid": dev.get("lid"), "vt": dev.get("vt"), "bl": _num(dev.get("bl")), "boot": dev.get("boot"),
+        "wifi_ps": (dev.get("wifi") or {}).get("ps"),
+    }
+
+
+def _num(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def _mean(vals):
+    v = [x for x in vals if isinstance(x, (int, float))]
+    return statistics.mean(v) if v else None
+
+
+def coulomb(recs, max_gap=90):
+    """방전 중인 연속 쌍의 누적 계량값(q)으로 낸 평균 전력. 반환 (W 또는 None, 합산 시간(시간 단위)). 1 mAh 단위라 10분 이상에서만 믿을 만하다."""
+    dq = dt = wh = 0.0
+    for a, b in zip(recs, recs[1:]):
+        if None in (a["q"], b["q"], a["v"], b["v"]) or a["status"] != "Discharging" or b["status"] != "Discharging":
+            continue
+        d = b["t"] - a["t"]
+        if not 0 < d <= max_gap:
+            continue
+        x = a["q"] - b["q"]
+        dq += x
+        dt += d
+        wh += x / 1e6 * ((a["v"] + b["v"]) / 2) / 1e6
+    return (wh / (dt / 3600), dt / 3600) if dt > 0 else (None, 0.0)
+
+
+def battery_estimate(recs, now=None):
+    """현재 잔량·만충 용량(Wh)과 세 가지 기준 전력으로 본 남은 시간. 마지막 표본이 충전 중이면 charging=True 로만 알린다.
+    기준: recent(최근 30분 계량 평균, 없으면 V×I 평균) / typical(최근 6시간 방전 중 '깨끗한' 표본의 계량 평균) / now(최근 3표본 V×I)."""
+    if not recs:
+        return None
+    last = recs[-1]
+    out = {"pct": last["pct"], "status": last["status"], "charging": last["status"] == "Charging", "ac": last["ac"], "t": last["t"]}
+    # 충전 중 전압은 방전 때보다 높아 Wh 를 부풀리므로, 가장 최근 '방전 중' 전압을 기준으로 환산한다
+    v = next((r["v"] for r in reversed(recs) if r["status"] == "Discharging" and r["v"]), last["v"])
+    if v and last["q"]:
+        out["remain_wh"] = last["q"] * v / 1e12
+    full = last["full"] or _sysfs_int("charge_full")             # 오래된 표본에는 full_uah 가 없으므로 sysfs 로 보충
+    if v and full:
+        out["full_wh"] = full * v / 1e12
+    if "remain_wh" not in out and out.get("full_wh") and last["pct"] is not None:
+        out["remain_wh"] = out["full_wh"] * last["pct"] / 100
+    t_end = last["t"]
+    recent = [r for r in recs if r["t"] >= t_end - 1800]
+    w, hrs = coulomb(recent)
+    if w is None or hrs < 10 / 60:
+        w = _mean([r["batt_vi"] for r in recent if r["status"] == "Discharging"])
+    out["recent_w"] = w
+    typ = [r for r in recs if r["t"] >= t_end - 6 * 3600 and r["status"] == "Discharging" and r["clean"]]
+    tw, thrs = coulomb(typ)
+    out["typical_w"] = tw if tw is not None and thrs >= 10 / 60 else _mean([r["batt_vi"] for r in typ])
+    out["now_w"] = _mean([r["batt_vi"] for r in recs[-3:] if r["status"] == "Discharging"])
+    rw = out.get("remain_wh")
+    for key in ("recent", "typical", "now"):
+        p = out.get(key + "_w")
+        out[key + "_h"] = rw / p if rw and p and p > 0.5 else None
+    for key in ("recent", "typical", "now"):                    # 만충 시간(참고): 만충 용량 / 전력
+        p, fw = out.get(key + "_w"), out.get("full_wh")
+        out[key + "_full_h"] = fw / p if fw and p and p > 0.5 else None
+    return out
+
+
+def _sysfs_int(name):
+    for d in glob.glob("/sys/class/power_supply/BAT*"):
+        try:
+            return int(open(os.path.join(d, name)).read())
+        except (OSError, ValueError):
+            pass
+    return None
+
+
 # ------------------------------------------------------------------ 요약 계산
 def _pairs(recs):
     """연속한 표본 쌍 중 간격이 MAX_GAP 이하인 것 → [(a, b, 초)]"""
@@ -151,7 +250,7 @@ def summarize(rows, recs, spans, rng, now=None):
         table, _n = apps
         tot = sum(v["cpu"] for v in table.values()) or 1.0
         top_apps = sorted(((k, v["cpu"], v["cpu"] * 100 / tot, v["ctxsw"]) for k, v in table.items()), key=lambda x: -x[1])[:5]
-    est = pd.battery_estimate(recs) if recs and now - recs[-1]["t"] <= 600 and rng.t1 >= now - 600 else None
+    est = battery_estimate(recs) if recs and now - recs[-1]["t"] <= 600 and rng.t1 >= now - 600 else None
     return {
         "range": rng.text(), "n": len(rows), "hours": sh["hours"], "gap_s": max(0.0, rng.secs - sh["hours"] * 3600),
         "avg_psys_w": en["avg_psys_w"] if en else None, "psys_wh": en["psys_wh"] if en else None,
@@ -236,7 +335,7 @@ def load(rng, baseline="prev", now=None):
     rows = [r for r in all_rows if rng.t0 <= r["t"] <= rng.t1]
     base_rows = [r for r in all_rows if base and base[0] <= r["t"] < base[1]]
     spans = tr.build_spans(list(core.iter_jsonl(core.state_dir(), "events", lo - 3600, rng.t1 + 120)))
-    recs = [pd.compact(r) for r in rows]
+    recs = [compact(r) for r in rows]
     return {"range": rng, "baseline": base, "baseline_kind": baseline, "loaded_at": now, "rows": rows, "base_rows": base_rows,
             "all_rows": all_rows, "recs": recs, "spans": spans, "summary": summarize(rows, recs, spans, rng, now),
             "apps": ex.apps_table(rows), "procs": ex.proc_table(rows), "ebpf": ex.ebpf_table(rows),

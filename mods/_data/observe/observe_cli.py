@@ -586,7 +586,7 @@ def cmd_bpf(a):
         print(f"i915 PSR ({s['sec']}초): flush {s['psr_flush']}회 · invalidate {s.get('psr_invalidate', '?')}회 · exit {s['psr_exit']}회 · activate {s['psr_activate']}회")
         print("[화면 갱신(drm atomic 커밋)을 일으킨 프로세스]")
         _tbl(s["atomic_ioctl"], [("comm", "comm", 22, "<"), ("횟수", "count", 8, ">"), ("/s", "per_s", 8, ">")])
-        print("(flush = 화면 갱신(플립) 횟수이고 위 표가 그 원인 프로세스. 이 기기(PSR1)에서는 갱신이 잦아도 invalidate/exit/activate 가 0 으로 나왔다 — PSR 에 들어가 있는 시간 비율은 이 카운터가 아니라 powerui 의 PSR 싱크 active 로 본다)")
+        print("(flush = 화면 갱신(플립) 횟수이고 위 표가 그 원인 프로세스. 이 기기(PSR1)에서는 갱신이 잦아도 invalidate/exit/activate 가 0 으로 나왔다 — PSR 에 들어가 있는 시간 비율은 이 카운터가 아니라 usageui 의 PSR 싱크 active 로 본다)")
     elif a.preset == "io":
         _tbl(s["rows"], [("comm", "comm", 22, "<"), ("요청", "count", 8, ">"), ("/s", "per_s", 8, ">"), ("바이트", "bytes", 12, ">")])
     elif a.preset == "net":

@@ -14,13 +14,13 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
   py = pkgs.python3;
   dir = pkgs.runCommand "observe-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_tiers.py" "observe_apps.py" "observe_query.py" "observe_focus.py" "powergraph.py" "powerdata.py" "powerview.py" "powerui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_tiers.py" "observe_apps.py" "observe_query.py" "observe_focus.py" "usagegraph.py" "usagechart.py" "usagedata.py" "usageview.py" "usageui.py"]}
     cp ${../../_data/observe/examples/power_knobs.py} $out/power_knobs.py
     cp ${../../_data/_uikit/uikit.py} $out/uikit.py
   '';
   observectl = pkgs.writeShellScriptBin "observectl" ''exec ${py}/bin/python3 ${dir}/observe_cli.py "$@"'';
-  # 전력 현황 TUI(Textual) — 같은 디렉터리의 observe_core 를 import 하므로 dir 에서 실행한다
-  powerui = pkgs.writeShellScriptBin "powerui" ''exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${dir}/powerui.py "$@"'';
+  # 전력·자원 사용 습관 TUI(Textual) — 같은 디렉터리의 observe_core 를 import 하므로 dir 에서 실행한다
+  usageui = pkgs.writeShellScriptBin "usageui" ''exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${dir}/usageui.py "$@"'';
   observeEmit = pkgs.writeShellScriptBin "observe-emit" ''exec ${py}/bin/python3 ${dir}/observe_emit.py "$@"'';
 in {
   # 창 수명·포커스 구간(스팬) 기록: Hyprland 이벤트 소켓을 읽어 observectl trace --comp windows 로 앱별 포커스 시간·에너지를 본다(앱 수정 없음, 창 제목은 기록 안 함).
@@ -40,18 +40,18 @@ in {
   };
 
   # 앱 런처(SUPER+Space)에서도 열리도록 등록(터미널 앱이라 uwsm 이 xdg-terminal-exec 로 kitty 에 띄움)
-  hm.xdg.desktopEntries.powerui = {
-    name = "Power Monitor";
-    genericName = "Battery and power graphs";
-    comment = "Battery, power and PSR graphs from the observectl collector";
-    exec = "${powerui}/bin/powerui";
+  hm.xdg.desktopEntries.usageui = {
+    name = "Usage Monitor";
+    genericName = "Power and resource usage";
+    comment = "Battery, power, app usage and what changed — from the observectl collector";
+    exec = "${usageui}/bin/usageui";
     terminal = true;
     categories = ["System" "Monitor"];
-    icon = "battery";
+    icon = "utilities-system-monitor";
   };
 
   os = {
-    environment.systemPackages = [observectl observeEmit powerui];
+    environment.systemPackages = [observectl observeEmit usageui];
 
     # MSR(패키지 C-state 잔여율)을 읽으려면 msr 모듈이 필요(root 만 접근). 수집기가 없을 때 modprobe 도 시도하지만 부팅 때 올려 둔다.
     boot.kernelModules = ["msr"];

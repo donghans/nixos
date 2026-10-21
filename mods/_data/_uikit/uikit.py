@@ -1,4 +1,4 @@
-"""uikit — 우리 Textual TUI(displayui · clipui · notif_ui · powerui)가 공유하는 겉모습과 공통 동작.
+"""uikit — 우리 Textual TUI(displayui · clipui · notif_ui · usageui)가 공유하는 겉모습과 공통 동작.
 
 여기에 모은 것(각 앱이 복사해 쓰던 것들):
   - PALETTE / BASE_CSS : 검정 배경, 둥근 회색 테두리(포커스 시 하늘색), 선택 줄 파랑, 하단 키 안내줄(Footer) 색
