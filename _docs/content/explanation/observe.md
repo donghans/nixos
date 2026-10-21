@@ -123,3 +123,15 @@ OTel 의 트레이스 개념만 빌린 것(OTel 을 넣거나 흉내 내는 게 
 - 사용: `observectl bpf <프리셋> [초=10] [--comm X] [-n 12]`. 시험: `tests/test_bpf.py`(가짜 bpftrace 로 파서·요약·job 검증).
 - 의존: nixpkgs `bpftrace`(clang 라이브러리 때문에 풀면 약 1 GiB, 내려받기 약 165 MB). 수집기 서비스 환경변수 `OBSERVE_BPFTRACE` 로 지정.
 - 안전: `observe-emit span-run` 은 신호를 자식에게 맡긴다(Ctrl-C 를 받아도 자식을 강제로 죽이지 않아 nixup 의 정리/잠금 해제가 실행됨). `nixup`·`log_exec` 계측은 `observe-emit span-probe` 가 통과할 때만 켜진다(옛 observe-emit 이 설치된 상태에서 nixup 이 막히지 않게).
+
+## 창·포커스 구간 `observe-focus` (2026-10-21)
+
+앱을 수정하지 않고 "어느 앱을 쓰던 구간인가"를 스팬으로 남긴다. Hyprland 이벤트 소켓(`.socket2.sock`)의 `openwindow`/`closewindow`/`activewindowv2` 를 읽어:
+- `windows:window:<class>` — 창이 열려 있던 동안(루트, 속성 ws)
+- `windows:focus:<class>` — 그 창이 포커스였던 동안(창 스팬의 자식)
+
+조회: `observectl trace --comp windows --since 1h` (폭포), `--by` (앱별: 횟수·포커스 시간 중앙값/95%/최대·평균/합 Wh).
+- **창 제목은 기록하지 않는다**(메일 제목·URL 이 들어갈 수 있음). class(앱 이름)와 작업공간 이름만.
+- 사용자 서비스 `observe-focus`(graphical-session 에 묶임, 이벤트가 올 때만 깨어남, 재시작 정책 없음 — Hyprland 가 끝나면 열린 구간을 닫고 종료). 서비스 시작 전부터 있던 창은 시작 시점(관측 시작)부터로 기록된다.
+- **에너지는 30초 표본에 걸친 적분이라 포커스가 몇 초뿐인 구간은 `~` 추정치**다(몇 분 이상 쓴 구간에서 의미). 앱별 합계(`--by`)가 더 믿을 만하다. 정밀하게 보려면 `observectl on L1`(5초).
+- 시험: `tests/test_focus.py`(상태 기계·소켓·SIGTERM 정리).

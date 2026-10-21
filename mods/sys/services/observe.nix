@@ -14,7 +14,7 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
   py = pkgs.python3;
   dir = pkgs.runCommand "observe-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "powergraph.py" "powerdata.py" "powerview.py" "powerui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_focus.py" "powergraph.py" "powerdata.py" "powerview.py" "powerui.py"]}
     cp ${../../_data/observe/examples/power_knobs.py} $out/power_knobs.py
     cp ${../../_data/_uikit/uikit.py} $out/uikit.py
   '';
@@ -23,6 +23,22 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
   powerui = pkgs.writeShellScriptBin "powerui" ''exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${dir}/powerui.py "$@"'';
   observeEmit = pkgs.writeShellScriptBin "observe-emit" ''exec ${py}/bin/python3 ${dir}/observe_emit.py "$@"'';
 in {
+  # 창 수명·포커스 구간(스팬) 기록: Hyprland 이벤트 소켓을 읽어 observectl trace --comp windows 로 앱별 포커스 시간·에너지를 본다(앱 수정 없음, 창 제목은 기록 안 함).
+  # 이벤트가 올 때만 깨어난다. Hyprland 가 끝나 소켓이 닫히면 열린 구간을 닫고 스스로 끝난다(재시작 정책은 두지 않음 — 다음 로그인에 다시 뜸).
+  hm.systemd.user.services.observe-focus = {
+    Unit = {
+      Description = "Record Hyprland window/focus spans for observectl";
+      PartOf = ["graphical-session.target"];
+      After = ["graphical-session.target"];
+    };
+    Service = {
+      ExecStart = "${py}/bin/python3 ${dir}/observe_focus.py";
+      Environment = ["PATH=${lib.makeBinPath [pkgs.hyprland]}"]; # 시작할 때 이미 열린 창을 읽는 hyprctl
+      Nice = 10;
+    };
+    Install.WantedBy = ["graphical-session.target"];
+  };
+
   # 앱 런처(SUPER+Space)에서도 열리도록 등록(터미널 앱이라 uwsm 이 xdg-terminal-exec 로 kitty 에 띄움)
   hm.xdg.desktopEntries.powerui = {
     name = "Power Monitor";
