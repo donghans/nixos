@@ -742,10 +742,46 @@ def ab_rows(seg, ca, cb, metrics, threshold, ndv=None):
     return out
 
 
+def confounders(seg, min_abs=10.0, ratio=3.0):
+    """구간들에서 **한 구간에서만 CPU 가 튄 앱**(교란 의심). 반환 [(구간 번호, 앱, 그 구간 CPU, 다른 구간 중앙값)].
+    앱 CPU = 코어 1개=100%. 튄 기준: 중앙값보다 min_abs 이상 크고 ratio 배 이상. 조건(A/B)을 바꾼 효과와 무관한 부하(브라우저 탭·빌드 등)가 한 구간을 오염시켰는지 잡는다."""
+    per = []
+    for _, g in seg:
+        got = ex.apps_table(g)
+        per.append({k: v["cpu"] for k, v in got[0].items()} if got else {})
+    apps = set().union(*per) if per else set()
+    out = []
+    for app in apps:
+        vals = [p.get(app, 0.0) for p in per]
+        for i, v in enumerate(vals):
+            others = sorted(vals[:i] + vals[i + 1:])
+            med = others[len(others) // 2] if others else 0.0
+            if v - med >= min_abs and v >= ratio * max(med, 0.5):
+                out.append((i, app, v, med))
+    return sorted(out)
+
+
+def exclude_pairs(table, seg, ca, cb, flagged, threshold):
+    """교란 구간이 든 쌍(같은 순번의 A·B)을 빼고 다시 판정. 반환 [(지표, 남은 쌍 수, 판정 dict 또는 None)]."""
+    pos = {}
+    cnt = {ca: 0, cb: 0}
+    for i, (c, _) in enumerate(seg):
+        pos[i] = (c, cnt[c])
+        cnt[c] += 1
+    bad_pairs = {pos[i][1] for i in flagged if i in pos}
+    out = []
+    for m, A, B, v, note, ok in table:
+        if v is None or not ok:
+            continue
+        keep = [k for k in range(min(len(A), len(B))) if k not in bad_pairs]
+        out.append((m, len(keep), stats.verdict([A[k] for k in keep], [B[k] for k in keep], threshold) if len(keep) >= 2 else None))
+    return out
+
+
 def cmd_ab(a):
     if a.metric == "batt_w":
         a.metric = "batt_vi_w"
-    rows = samples(core.parse_when(a.since))
+    rows = samples(core.parse_when(a.since), core.parse_when(a.until) if a.until else None)
     seg = [(c, g) for c, g in segments(rows, a.settle) if len(g) >= a.min_samples]
     dropped = [(c, len(g)) for c, g in segments(rows, a.settle) if 0 < len(g) < a.min_samples]
     if dropped:
@@ -803,6 +839,16 @@ def cmd_ab(a):
             print(f"{AB_LABELS.get(m, m):<24}{note}")
             continue
         print(f"{AB_LABELS.get(m, m):<24}{' '.join(f'{x:.2f}' for x in A):<26}{' '.join(f'{x:.2f}' for x in B):<26}{' '.join(f'{x:+.2f}' for x in v['diffs']):<22}{v['effect']:>+8.2f}  {v['verdict']}" + (f"  [{note}]" if note else ""))
+    conf = confounders(seg)
+    if conf:
+        print("⚠ 교란 의심 — 한 구간에서만 CPU 가 튄 앱(조건 변경과 무관한 부하일 수 있음):")
+        for i, app, v, med in conf[:6]:
+            print(f"    구간 {i + 1}({seg[i][0]}) {app} CPU {v:.0f}% (다른 구간 중앙값 {med:.1f}%)")
+        redo = exclude_pairs(table, seg, ca, cb, {i for i, *_ in conf}, a.threshold)
+        if redo:
+            print("  → 교란 구간이 든 쌍을 뺀 재계산:")
+            for m, n, v in redo:
+                print(f"    {AB_LABELS.get(m, m):<24}" + (f"쌍 {n}개 효과 {v['effect']:+.2f} W  {v['verdict']}  (쌍별 {' '.join(f'{x:+.2f}' for x in v['diffs'])})" if v else f"쌍 {n}개 — 판정하기엔 부족"))
     if invalid:
         print("✗ 조건 검증 실패 — 이 시험은 무효입니다: " + "; ".join(invalid))
         print("종합: 무효(조건이 실제로 바뀌지 않았거나 다른 교란이 있음)")
@@ -865,7 +911,7 @@ def main(argv=None):
     s = sub.add_parser("wakers"); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--waking", action="store_true"); s.set_defaults(f=cmd_wakers)
     s = sub.add_parser("drmdebug"); s.add_argument("sec", nargs="?", type=int, default=15); s.set_defaults(f=cmd_drmdebug)
     sub.add_parser("display").set_defaults(f=cmd_display)
-    s = sub.add_parser("ab", help="번갈아(ABAB) 측정 판정: 기본은 psys·패키지·순간 V×I·누적 계량을 한꺼번에 비교하고 지표끼리 어긋나면 알림"); s.add_argument("--since", default="-3h"); s.add_argument("--metric", default="all", choices=["all"] + list(METRICS) + ["coulomb_w", "batt_w"] + list(ND_AB), help="all=네 지표 모두(기본). batt_w 는 batt_vi_w(순간 V×I)의 옛 이름"); s.add_argument("--threshold", type=float, default=0.3); s.add_argument("--settle", type=float, default=20)
+    s = sub.add_parser("ab", help="번갈아(ABAB) 측정 판정: 기본은 psys·패키지·순간 V×I·누적 계량을 한꺼번에 비교하고 지표끼리 어긋나면 알림"); s.add_argument("--since", default="-3h"); s.add_argument("--until", help="이 시각까지만(앞뒤에 다른 시험이 이어 붙어 있을 때)"); s.add_argument("--metric", default="all", choices=["all"] + list(METRICS) + ["coulomb_w", "batt_w"] + list(ND_AB), help="all=네 지표 모두(기본). batt_w 는 batt_vi_w(순간 V×I)의 옛 이름"); s.add_argument("--threshold", type=float, default=0.3); s.add_argument("--settle", type=float, default=20)
     s.add_argument("--min-samples", type=int, default=5, help="구간당 최소 표본 수(미만이면 제외)")
     s.add_argument("--expect-a", help="A 구간 표본의 기대 조건 '경로=값' (예: dev.wifi.ps=off). 다르면 시험 무효"); s.add_argument("--expect-b", help="B 구간 표본의 기대 조건 (예: dev.wifi.ps=on)")
     s.add_argument("--require", action="append", help="모든 구간의 모든 표본이 만족해야 하는 조건 '경로=값'(여러 번 가능, 예: --require dev.lid=closed)")

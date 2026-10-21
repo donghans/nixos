@@ -86,7 +86,8 @@ def _window(t0, t1):
 def series(chart, t0, t1, points=60, group="average"):
     """한 차트의 [(epoch, {차원: 값 또는 None})] (시간순). 실패하면 NetdataError."""
     t0, t1 = _window(t0, t1)
-    q = urllib.parse.urlencode({"chart": chart, "after": t0, "before": t1, "points": max(1, int(points)), "group": group, "format": "json"})
+    # options=unaligned: Netdata 는 기본으로 구간을 묶음 단위(wall clock)에 맞춰 **바깥으로 넓힌다** — 5분짜리 창이 앞뒤로 늘어나 다음/이전 구간의 급등이 섞였음(2026-10-21 T20 에서 발견)
+    q = urllib.parse.urlencode({"chart": chart, "after": t0, "before": t1, "points": max(1, int(points)), "group": group, "format": "json", "options": "unaligned"})
     d = _get("/api/v1/data?" + q)
     labels = d.get("labels", [])[1:]
     rows = [(r[0], dict(zip(labels, r[1:]))) for r in d.get("data", [])]
@@ -94,12 +95,18 @@ def series(chart, t0, t1, points=60, group="average"):
 
 
 def window_avg(chart, t0, t1):
-    """구간 평균 {차원: 값}. 데이터가 없으면 None(Netdata 가 그 시간에 꺼져 있었던 경우 등)."""
-    rows = series(chart, t0, t1, points=1)
-    if not rows:
+    """구간 평균 {차원: 값}. 데이터가 없으면 None(Netdata 가 그 시간에 꺼져 있었던 경우 등).
+    points=1 로 한 번에 평균을 받으면 구간이 묶음 단위로 넓어져 틀리므로, 같은 폭의 점을 여러 개(1초~최대 600개) 받아 직접 평균낸다."""
+    n = max(1, min(600, int(t1 - t0)))
+    rows = series(chart, t0, t1, points=n)
+    acc = {}
+    for _, vals in rows:
+        for k, v in vals.items():
+            if v is not None:
+                acc.setdefault(k, []).append(v)
+    if not acc:
         return None
-    vals = rows[0][1]
-    return None if all(v is None for v in vals.values()) else vals
+    return {k: sum(v) / len(v) for k, v in acc.items()}
 
 
 def coverage(t0, t1):

@@ -26,7 +26,7 @@ SERIES = {  # 시계열(점 여러 개): 배터리 전압·전류, 그리고 커
 CHARTS = {"charts": {k: {"units": "x"} for k in list(AVG) + list(SERIES)}}
 APPS = {"result": {"labels": ["time", "app.start-hyprland_cpu_utilization@u", "app._tailscaled-wra_cpu_utilization@u", "app.kernel_cpu_utilization@u", "app.idle_cpu_utilization@u"],
                    "data": [[T0, [50.5, 1, 2], [2.7, 1, 2], [0.8, 1, 2], [0, 1, 2]]]}}
-STATE = {"down_chart": None, "blank": False}
+STATE = {"down_chart": None, "blank": False, "opts": [], "pts": []}
 
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -39,6 +39,7 @@ class H(http.server.BaseHTTPRequestHandler):
         if u.path == "/api/v3/data": return self._send(APPS)
         if u.path == "/api/v1/data":
             ch = q["chart"][0]; n = int(q.get("points", ["1"])[0])
+            STATE["opts"].append(q.get("options", [""])[0]); STATE["pts"].append(n)
             if STATE["blank"]:
                 lab = (AVG.get(ch) or SERIES.get(ch) or {"labels": ["time", "v"]})["labels"]
                 return self._send({"labels": lab, "data": [[T0 + i] + [None] * (len(lab) - 1) for i in range(max(1, n))]})
@@ -75,6 +76,10 @@ STATE["blank"] = True
 check("전 구간 공백(Netdata 가 꺼져 있던 시간): 구간 평균이 None", nd.window_avg("system.ctxt", T0, T0 + 60) is None and nd.signals(T0, T0 + 60)["psys_w"] is None)
 check("전 구간 공백: 커버리지 0, snapshot 은 신호가 전부 None(오류 아님)", nd.coverage(T0, T0 + 60) == 0.0 and all(v is None for v in nd.snapshot(T0, T0 + 60)["signals"].values()))
 STATE["blank"] = False
+# --- 구간 평균은 묶음 단위로 넓어지지 않게(options=unaligned) 같은 폭의 점 여러 개를 받아 직접 평균
+STATE["opts"].clear(); STATE["pts"].clear()
+avg = nd.window_avg("cpu.powercap_intel_rapl_zone_psys", T0, T0 + 240)
+check("window_avg: 모든 요청이 options=unaligned 이고 points>1(한 점짜리 평균을 쓰지 않음 — Netdata 가 구간을 바깥으로 넓힘)", STATE["opts"] and set(STATE["opts"]) == {"unaligned"} and min(STATE["pts"]) > 1 and abs(avg["power"] - 5.5) < 1e-9, str((STATE, avg)))
 # --- sample_series / bucket_mean / chart_list (window 병기·nd charts 용)
 ss = nd.sample_series(T0, T0 + 120)
 check("sample_series: 신호별 [(시각, 값)] — 수신·송신 부호 정리, 디스크 reads/writes, NVMe", ss.get("net_rx_kbps") and ss["net_tx_kbps"][0][1] == 50.0 and ss["disk_write_kibs"][0][1] == 34.0 and ss["nvme_temp_c"][0][1] == 33.5, str(ss))

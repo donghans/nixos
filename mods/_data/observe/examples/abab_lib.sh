@@ -55,11 +55,11 @@ _abab_step() {   # $1=A|B  $2=표지 설명
 abab_run() {
     _LID0=$(abab_lid); _AC0=$(abab_ac); T0=$(date +%s)
     echo "T0=$T0 · 구간 ${SEG}초 × $((PAIRS * 2)) · 덮개 $_LID0 · AC $_AC0"
-    i=1
-    while [ "$i" -le "$PAIRS" ]; do
-        _abab_step A "A #$i"
-        _abab_step B "B #$i"
-        i=$((i + 1))
+    _pair=1       # 훅 함수(abab_set_* 등)가 같은 이름을 쓰지 못하게 앞에 밑줄(POSIX sh 는 변수가 전역 — 2026-10-21 T20 에서 훅의 i 가 쌍 카운터를 덮어 무한 반복했음)
+    while [ "$_pair" -le "$PAIRS" ]; do
+        _abab_step A "A #$_pair"
+        _abab_step B "B #$_pair"
+        _pair=$((_pair + 1))
     done
     $OBS mark --clear >/dev/null
     # shellcheck disable=SC2086
