@@ -235,8 +235,19 @@ async def spk():
         app.view["spikes"] = got
         await pilot.press("s"); await pilot.pause(0.5)
         check("s: 튄 순간 순위 대화상자가 열리고 행이 있음", isinstance(app.screen, SpikesScreen) and app.screen.query_one("#spk", DataTable).row_count == len(got), str(type(app.screen)))
+        before = app.rng
         await pilot.press("enter"); await pilot.pause(1.0)
-        check("Enter: 그 시각 앞뒤 30분으로 범위가 옮겨감(고정 범위)", app.rng.label == "직접" and not app.rng.follows_now and abs(app.rng.t0 - (got[0]["t0"] - 1800)) < 1, f"{app.rng.t0} {got[0]['t0']}")
+        pad = max(1800, got[0]["dur_s"])
+        check("Enter: 그 시각 앞뒤(최소 30분, 사건이 길면 그 길이)로 범위가 옮겨감(고정 범위)", app.rng.label.startswith("튄 순간") and not app.rng.follows_now and abs(app.rng.t0 - (got[0]["t0"] - pad)) < 1 and abs(app.rng.t1 - (got[0]["t1"] + pad)) < 1, f"{app.rng.t0} {got[0]['t0']}")
+        check("튄 순간을 보는 동안 상태줄에 Esc 안내", "Esc" in str(app.query_one("#status").render()))
+        await pilot.press("escape"); await pilot.pause(1.0)
+        check("Esc: 원래 범위로 복귀하고 안내가 사라짐", app.rng is before and "Esc" not in str(app.query_one("#status").render()) and app._back is None)
+        await pilot.press("escape"); await pilot.pause(0.5)
+        check("Esc 를 또 눌러도 아무 일 없음(범위 유지)", app.rng is before)
+        await pilot.press("s"); await pilot.pause(0.5); await pilot.press("enter"); await pilot.pause(1.0)
+        await pilot.press("s"); await pilot.pause(0.5); await pilot.press("enter"); await pilot.pause(1.0)
+        await pilot.press("escape"); await pilot.pause(1.0)
+        check("튄 순간에서 다시 다른 순간으로 가도 Esc 한 번에 처음 범위로", app.rng is before)
 asyncio.run(spk())
 check("기본 범위: 센서와 무관하게 7일", ud.preset("7일", now).secs == 7 * 86400 and "7일" in ud.PRESETS)
 os.environ["OBSERVE_USAGE_PROFILE"] = "laptop"

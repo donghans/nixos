@@ -79,7 +79,7 @@ class SpikesScreen(ModalScreen):
         with Vertical(id="dialog", classes="wide"):
             yield Static(f"튀었던 순간 순위 — 5분 평균 {uv.spike_basis(self.view)} 전력, 평소(중앙값)보다 더 쓴 에너지 순", id="dialog-title")
             yield DataTable(id="spk", cursor_type="row", zebra_stripes=True)
-            yield Static("Enter 그 시각으로 이동(앞뒤 30분) · Esc 닫기 · 상관일 뿐 원인 아님", id="dialog-hint")
+            yield Static("Enter 그 시각 근처 그래프로(대시보드에서 Esc 하면 원래 범위) · Esc 닫기 · 상관일 뿐 원인 아님", id="dialog-hint")
 
     def on_mount(self):
         t = self.query_one("#spk", DataTable)
@@ -91,7 +91,8 @@ class SpikesScreen(ModalScreen):
     def on_data_table_row_selected(self, ev):
         rank = int(str(ev.row_key.value))
         s = next(x for x in self.view["spikes"] if x["rank"] == rank)
-        self.dismiss(ud.Range(s["t0"] - 1800, s["t1"] + 1800, "직접", False))
+        pad = max(1800, s["dur_s"])          # 사건이 길면 그 길이만큼 앞뒤를 더 보여 줘서 사건이 화면의 1/3 쯤 되게
+        self.dismiss(ud.Range(s["t0"] - pad, s["t1"] + pad, f"튄 순간 {rank}위", False))
 
     def action_cancel(self):
         self.dismiss(None)
@@ -143,7 +144,7 @@ class UsageUI(uikit.HelpMixin, App):
         Binding("q", "quit", "종료"),
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('apps')", "앱"), Binding("3", "tab('cause')", "원인"),
         Binding("4", "tab('system')", "시스템"), Binding("5", "tab('help')", "용어"),
-        Binding("t", "set_range", "범위"), Binding("s", "spikes", "튄 순간"), Binding("v", "cycle_baseline", "비교 기준"),
+        Binding("t", "set_range", "범위"), Binding("s", "spikes", "튄 순간"), Binding("escape", "restore", "원래 범위", show=False), Binding("v", "cycle_baseline", "비교 기준"),
         Binding("r,f5", "reload", "새로고침"), Binding("b", "btop", "btop"), Binding("e", "export", "저장"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
@@ -163,6 +164,7 @@ class UsageUI(uikit.HelpMixin, App):
         self.cause = None            # ex.build 결과 | False(표본 없음) | None(아직)
         self.sysdata = None          # {"snap", "series"}
         self._busy = False
+        self._back = None            # 튄 순간으로 이동하기 전의 범위(Esc 로 복귀)
 
     # --- 구성: 표·그래프마다 박스(btop 처럼 박스 안 박스). 대시보드는 2열(좁으면 1열)
     def compose(self) -> ComposeResult:
@@ -353,7 +355,7 @@ class UsageUI(uikit.HelpMixin, App):
         extra = ""
         if v:
             kind = dict(BASELINES)[v["baseline_kind"]]
-            extra = f" · 범위 {v['summary']['range']}({v['range'].label}) · 비교 기준: {kind}"
+            extra = f" · 범위 {v['summary']['range']}({v['range'].label}) · 비교 기준: {kind}" + (" · Esc: 원래 범위로" if self._back is not None else "")
         self.query_one("#status", Static).update(msg + extra)
 
     def _fill_tables(self, v):
@@ -419,6 +421,7 @@ class UsageUI(uikit.HelpMixin, App):
         def done(rng):
             if rng is not None:
                 self.rng = rng
+                self._back = None            # 범위를 직접 고르면 '원래대로' 는 없어짐
                 self.reload()
         self.push_screen(RangeScreen(self.rng), done)
 
@@ -427,9 +430,17 @@ class UsageUI(uikit.HelpMixin, App):
             return
         def done(rng):
             if rng is not None:
+                if self._back is None:
+                    self._back = self.rng        # 원래 범위 기억(이미 튄 순간을 보는 중이면 처음 것을 유지)
                 self.rng = rng
                 self.reload()
         self.push_screen(SpikesScreen(self.view), done)
+
+    def action_restore(self):
+        """튄 순간을 보는 중이면 원래 범위로 되돌린다. 아니면 아무 일 없음."""
+        if self._back is not None:
+            self.rng, self._back = self._back, None
+            self.reload()
 
     def action_cycle_baseline(self):
         kinds = [k for k, _ in BASELINES]
