@@ -122,6 +122,11 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
     }
   ];
   hooksSettings = {
+    # 상태 표시줄(5시간·주간 한도 % 표시 + limits.jsonl 기록)도 훅과 같은 --settings 로 주입해, 이 모듈을 쓰는 모든 호스트에 적용한다(스크립트는 스토어 경로).
+    statusLine = {
+      type = "command";
+      command = "${../../_data/claude-usage/claude-usage-statusline}";
+    };
     hooks = lib.genAttrs ["UserPromptSubmit" "Stop" "SubagentStop" "SessionStart" "SessionEnd" "PreCompact"] ctxHook;
   };
   hooksFile = pkgs.writeText "claude-ctx-hooks.json" (builtins.toJSON hooksSettings);
@@ -249,7 +254,7 @@ in {
     };
 
     # 사용량 도구: 상태 표시줄 기록기 + 한도 감시기(Monitor 용).
-    # 상태 표시줄 연결은 ~/.claude/settings.json 의 statusLine.command = ~/.local/bin/claude-usage-statusline (수동 설정, nix 관리 아님)
+    # 상태 표시줄 연결은 위 hooksSettings.statusLine 이 --settings 로 주입한다(`claude` 셸 함수로 실행할 때). ~/.claude/settings.json 에 같은 항목이 수동으로 있어도 충돌하지 않는다.
     home.file.".local/bin/claude-usage-statusline" = {
       source = ../../_data/claude-usage/claude-usage-statusline;
       executable = true;
