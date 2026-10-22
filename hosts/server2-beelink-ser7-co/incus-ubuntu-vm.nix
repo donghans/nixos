@@ -213,6 +213,8 @@ in {
       find "$DUMP_DIR" -maxdepth 1 -type f -name '*.archive.gz' ! -path "$LATEST" > "$EXCL"
 
       restic snapshots &>/dev/null || restic init
+      # 비정상 종료(kill/재부팅)가 남긴 오래된 잠금만 제거한다 — 잠금이 남으면 뒤의 forget 이 계속 실패한다.
+      restic unlock
 
       # 종료코드 3 = 일부 파일을 못 읽음(실행 중 사라진 파일 등) → 스냅샷은 만들어졌으니 경고로만 취급
       rc=0
