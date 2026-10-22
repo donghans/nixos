@@ -12,6 +12,7 @@
 | 안전망 | user 타이머 `claude-ctx-ingest` (10분) | 훅이 놓친 것을 오프셋 기준으로 따라잡음 |
 
 ## 새 머신 연결 (수동 1회 — 비밀번호는 nix 에 두지 않는다)
+서버 머신(beelink-ser7-co) 자신은 unix 소켓 peer 인증이라 비밀번호·dsn 파일이 필요 없다. 아래는 원격 머신(노트북 등)용.
 1. 서버: `sudo -u postgres psql -c "ALTER ROLE claude_ctx WITH LOGIN PASSWORD '<새 비밀번호>'"` (이미 설정했다면 생략)
 2. 클라이언트: `~/.config/claude-ctx/dsn` (권한 600) 에 `postgresql://claude_ctx:<비밀번호>@beelink-ser7-co:5432/claude_ctx`
 3. `donghans ctx ingest --days 30` 으로 첫 적재. 머신 이름은 hostname (`CLAUDE_CTX_HOST` 로 덮어쓸 수 있음)

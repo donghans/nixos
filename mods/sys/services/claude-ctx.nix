@@ -31,9 +31,12 @@ in {
           ensureDBOwnership = true;
         }
       ];
+      identMap = "ctx ${config.workspace.username} claude_ctx";
       authentication = lib.mkForce ''
-        # 소켓: 서버 관리용(postgres 시스템 사용자)만 peer
+        # 소켓: 서버 관리용(postgres 시스템 사용자)은 peer, claude_ctx 는 사용자 계정(ident map 'ctx')이 비밀번호 없이 peer 로
+        # (이 서버 머신의 클라이언트는 비밀번호·dsn 파일이 필요 없다 — 같은 머신의 다른 사용자·컨테이너는 이 소켓으로 못 들어온다)
         local all postgres peer
+        local claude_ctx claude_ctx peer map=ctx
         # claude_ctx 는 비밀번호로만, localhost 와 허용 목록의 tailnet 기기에서
         host claude_ctx claude_ctx 127.0.0.1/32 scram-sha-256
         host claude_ctx claude_ctx ::1/128 scram-sha-256
