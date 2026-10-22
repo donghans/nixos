@@ -4,7 +4,7 @@
  - ID 없음: 현재 저장소에 등록된 가장 최근 인수인계, 없으면 저장소의 최신 HANDOFF-*.md.
  - --list: 등록된 인수인계 목록.
  저장소에 실행 파일 `.claude/resume-extra` 가 있으면 저장소 루트에서 실행해 그 출력을 덧붙인다(프로젝트 전용 사실 수집)."""
-import argparse, glob, json, os, subprocess, sys, time
+import argparse, glob, json, os, re, subprocess, sys, time
 
 ap = argparse.ArgumentParser()
 ap.add_argument('id', nargs='?'); ap.add_argument('--n', type=int, default=15)
@@ -23,6 +23,20 @@ def load_all():
         except Exception: pass
     return sorted(out, key=lambda r: r.get('created', ''), reverse=True)
 
+
+def from_db(prefix):
+    """로컬 기록이 없으면 공유 저장소(claude-ctx → Postgres)에서 인수인계를 받아 캐시에 푼다(다른 머신에서 만든 인수인계)."""
+    cache = os.path.expanduser('~/.claude/handoffs-cache')
+    out = sh('claude-ctx', 'handoff-get', prefix, '--out', cache)
+    first = out.splitlines()[0] if out else ''
+    try: d = json.loads(first)
+    except Exception: return None
+    top = sh('git', 'rev-parse', '--show-toplevel')
+    here = sh('git', '-C', top, 'remote', 'get-url', 'origin') if top else ''
+    repo = d.get('repo_root') if d.get('repo_root') and os.path.isdir(d['repo_root']) else (top or '')
+    return {'id': d['id'], 'repo': repo, 'doc': os.path.join(cache, d['doc']), 'branch': d.get('branch'), 'head': d.get('head'),
+            'created': (d.get('created') or '')[:19], 'note': f"(공유 저장소에서 받음 · 작성 머신 {d.get('host')} · 저장소 {d.get('repo_url')})" + (' ' + d['note'] if d.get('note') else '')}
+
 recs = load_all()
 if a.list:
     for r in recs: print(f"{r['id']}  {r['created'][:16]}  {r['repo']}  {r.get('note','')}")
@@ -32,7 +46,7 @@ rec = None
 if a.id:
     m = [r for r in recs if r['id'].startswith(a.id)]
     if len(m) > 1: sys.exit('접두가 여러 기록과 일치: ' + ', '.join(r['id'] for r in m))
-    rec = m[0] if m else None
+    rec = m[0] if m else from_db(a.id)
 else:
     top = sh('git', 'rev-parse', '--show-toplevel') or os.getcwd()
     rec = next((r for r in recs if r['repo'] == top), None)
@@ -107,7 +121,10 @@ SKIP = ('<system-reminder', '<task-notification', '<command-name>', '<local-comm
 if sid:
     fs = glob.glob(os.path.expanduser(f'~/.claude/projects/*/{sid}*.jsonl'))
     print('\n## 그 세션에서 사용자가 직접 보낸 메시지 (마지막 %d개)' % a.n)
-    if not fs: print('(트랜스크립트 없음 — 다른 머신이거나 정리됨)')
+    if not fs:
+        print('(로컬 트랜스크립트 없음 — 공유 저장소에서 조회)')
+        if re.fullmatch(r'[0-9a-f-]{6,36}', sid):
+            print(sh('claude-ctx', 'sql', f"select to_char(ts,'MM-DD HH24:MI') ts, left(text,500) prompt from messages where session_id like '{sid}%' and kind='prompt' and text not like '<%' order by ts desc limit {a.n}"))
     for f in fs[:1]:
         msgs = []
         for l in open(f, errors='ignore'):

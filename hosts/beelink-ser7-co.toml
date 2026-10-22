@@ -4,3 +4,4 @@ bootDevice = "/dev/disk/by-uuid/C125-54BB"
 
 [mods.sys.services]
 tailpass = true
+claude-ctx = true   # Claude 공유 컨텍스트 저장소(Postgres) 서버 — 접속은 tailnet 의 beelink-ser7-co:5432

@@ -15,11 +15,20 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # VT2 가 활성일 때 TUI 가 화면을 갱신하면 약 +1.3 W 가 섞인다(2026-10-20 측정, power-evidence.md #34). (2) 화면 갱신이 줄면 PSR 등 모니터 출력 최적화가 더 잘 걸리므로
   # 모션 감소는 효과 측정 결과와 무관하게 유지한다(사용자 결정). `CLAUDE_MOTION=normal claude` 로 끌 수 있다.
   reduceMotion = config.workspace.type == "laptop";
-  reduceMotionSnippet = lib.optionalString reduceMotion ''
-    if [ "''${CLAUDE_MOTION:-reduced}" != normal ]; then
-      set -- --settings '{"prefersReducedMotion":true}' "$@"
-    fi
-  '';
+  # 훅(claude-ctx)은 항상 --settings 로 주입한다 — ~/.claude/settings.json 은 Claude 가 직접 쓰는 가변 파일이라 nix 로 소유하지 않는다.
+  # --settings 를 두 번 주면 어떻게 합쳐지는지 확인하지 않아서(미확인) 모션 감소 키는 같은 파일에 넣어 한 번만 준다.
+  settingsSnippet =
+    if reduceMotion
+    then ''
+      if [ "''${CLAUDE_MOTION:-reduced}" != normal ]; then
+        set -- --settings ${hooksReducedFile} "$@"
+      else
+        set -- --settings ${hooksFile} "$@"
+      fi
+    ''
+    else ''
+      set -- --settings ${hooksFile} "$@"
+    '';
   # (목적: Wayland 터미널(kitty, alacritty 등)에서 LLM CLI의 Home/End 키 깨짐 현상 수정)
   #
   # (claude-code 쪽 패치는 제거함: 4월에 패키지가 네이티브 바이너리 배포로 바뀌면서 패치 대상 cli.js 가 사라져
@@ -72,6 +81,21 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
     inherit (claudeBase) meta;
   };
 
+  # (목적: 여러 머신·프로젝트의 대화·사용량을 공유 저장소(Postgres, mods.sys.services.claude-ctx)에 이벤트 시점에 적재)
+  # 클라이언트 CLI `claude-ctx`: 훅 적재 / 백필(ingest) / search·recent·session·usage·sql 조회 / handoff 업로드.
+  # 접속 문자열은 ~/.config/claude-ctx/dsn (nix 밖, 권한 600 — 비밀번호가 스토어에 남지 않게). 서버 위치는 거기서만 바꾼다.
+  claudeCtx = pkgs.writers.writePython3Bin "claude-ctx" {
+    libraries = [pkgs.python3Packages.psycopg];
+    doCheck = false;
+  } (builtins.readFile ../../_data/claude-ctx/claude_ctx.py);
+  # 훅은 비동기(입력을 막지 않음)이고 실패해도 조용히 끝난다. 놓친 것은 ingest 타이머가 따라잡는다.
+  ctxHook = event: [{hooks = [{type = "command"; command = "${claudeCtx}/bin/claude-ctx hook ${event}"; async = true; timeout = 30;}];}];
+  hooksSettings = {
+    hooks = lib.genAttrs ["UserPromptSubmit" "Stop" "SubagentStop" "SessionStart" "SessionEnd" "PreCompact"] ctxHook;
+  };
+  hooksFile = pkgs.writeText "claude-ctx-hooks.json" (builtins.toJSON hooksSettings);
+  hooksReducedFile = pkgs.writeText "claude-ctx-hooks-reduced.json" (builtins.toJSON (hooksSettings // {prefersReducedMotion = true;}));
+
   otelCollectorConfig = pkgs.writeText "claude-otel-collector.yaml" ''
     receivers:
       otlp:
@@ -93,7 +117,21 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   '';
 in {
   hm = {
-    home.packages = [claude unstable.antigravity-cli];
+    home.packages = [claude unstable.antigravity-cli claudeCtx];
+
+    # 훅이 놓친 대화·사용량을 따라잡는 안전망(오프셋 기반, 여러 번 돌아도 안전). 서버에 못 붙으면 다음 주기에 재시도.
+    systemd.user.services.claude-ctx-ingest = {
+      Unit.Description = "claude-ctx 백필(최근 2일)";
+      Service = {
+        Type = "oneshot";
+        ExecStart = "${claudeCtx}/bin/claude-ctx ingest --days 2";
+      };
+    };
+    systemd.user.timers.claude-ctx-ingest = {
+      Unit.Description = "claude-ctx 백필 주기";
+      Timer = {OnBootSec = "2min"; OnUnitActiveSec = "10min"; Persistent = true;};
+      Install.WantedBy = ["timers.target"];
+    };
 
     systemd.user.services.claude-otel-collector = {
       Unit.Description = "Claude Code 사용량(OTLP) 로컬 수집기 — 파일로만 저장";
@@ -150,6 +188,14 @@ in {
           `claude-limit-watch <접두>` 를 Monitor 로 실행합니다(5시간 한도가 10분 내 +5포인트 오르거나 50/70/80/90% 도달 시 알림).
           알림이 오면 하던 일을 멈추고 사용자에게 알리세요. 70% 이상에서는 새 작업을 시작하지 말고 묻습니다.
         - 세션을 닫거나 `/clear` 하기 전에는 `/donghans-handoff`, 새 세션에서는 `/donghans-resume <고유번호>` 로 이어갑니다.
+        # 공유 컨텍스트 (여러 머신·프로젝트의 대화/사용량 저장소 — Postgres, `claude-ctx` 명령)
+        - 「이전 세션에서 뭘 했는지 모르겠다」「그때 사용자가 뭐라고 했나」「다른 머신에서 하던 작업」처럼 **지난 대화·결정의 근거**가 필요하면,
+          추측하거나 사용자에게 되묻기 전에 먼저 조회하세요: `claude-ctx search "<키워드>" --here`(현재 저장소 한정, `--role user` 로 사용자 발언만),
+          `claude-ctx recent --here`(최근 세션), `claude-ctx session <세션ID접두> [--n 20]`(한 세션의 대화), `claude-ctx usage`(모델·일별 토큰/비용),
+          `claude-ctx sql "<SELECT …>"`(읽기 전용; 테이블: sessions·messages·usage_events·hook_events·handoffs). 각 행에 작업 머신(host)·작업 디렉터리(cwd)·
+          저장소(repo_url)·브랜치가 있으니 **다른 프로젝트의 기록이 섞이지 않았는지 repo_url 로 확인**하고 인용하세요.
+        - 조회 결과는 그 시점의 기록이다(코드의 현재 상태가 아님). 결함·완료 주장은 다시 실행해 확인하세요. 접속 실패 시(서버 `beelink-ser7-co` 꺼짐 등)
+          조용히 넘어가지 말고 사용자에게 알리세요. 기록에는 고객사 데이터·시크릿이 섞여 있을 수 있으니 원문을 외부로 보내지 마세요.
       '';
       force = true; # 기존 파일이 있더라도 Nix 관리 하에 둠 (읽기 전용 심볼릭링크)
     };
@@ -185,7 +231,7 @@ in {
       claude() {
         sudo -v || return 1
         ( while sudo -n true 2>/dev/null; do sleep 60; kill -0 "$$" 2>/dev/null || exit; done & ) 2>/dev/null
-        ${reduceMotionSnippet}
+        ${settingsSnippet}
         command claude "$@"
       }
     '';

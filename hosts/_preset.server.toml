@@ -29,6 +29,7 @@ aws-roles-anywhere      = false
 print-co                = false
 tailpass                = false
 netdata                 = false
+claude-ctx               = false
 observe                 = false
 
 [mods.gui]

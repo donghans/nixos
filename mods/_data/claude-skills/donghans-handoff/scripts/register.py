@@ -23,4 +23,10 @@ rec = {'id': sid, 'repo': repo, 'doc': doc, 'cwd': os.getcwd(), 'branch': git(re
        'head': git(repo, 'rev-parse', '--short', 'HEAD'), 'created': time.strftime('%Y-%m-%dT%H:%M:%S%z'), 'note': a.note}
 d = os.path.expanduser('~/.claude/handoffs'); os.makedirs(d, exist_ok=True)
 with open(os.path.join(d, sid + '.json'), 'w') as f: json.dump(rec, f, ensure_ascii=False, indent=1)
-print(f'등록됨: {sid}\n  저장소: {repo}\n  문서  : {doc}\n\n새 세션에서 이렇게 입력하세요:\n  /donghans-resume {sid}')
+# 공유 저장소(claude-ctx)에도 올린다 — 다른 머신에서 `/donghans-resume <ID>` 가 되게. 실패해도 로컬 등록은 유효하다.
+try:
+    r = subprocess.run(['claude-ctx', 'handoff-put', '--session', sid, '--doc', doc, '--note', a.note], capture_output=True, text=True, timeout=20)
+    shared = (r.stdout.strip() or r.stderr.strip()).splitlines()[-1:] or ['(출력 없음)']
+except Exception as e:
+    shared = [f'공유 저장소 업로드 건너뜀: {type(e).__name__}']
+print(f'등록됨: {sid}\n  저장소: {repo}\n  문서  : {doc}\n\n공유 저장소: {shared[0]}\n\n새 세션에서 이렇게 입력하세요:\n  /donghans-resume {sid}')
