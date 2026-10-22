@@ -11,14 +11,15 @@
 | 훅 | 같은 파일의 `claude` 래퍼가 `--settings` 로 주입 | UserPromptSubmit/Stop/SubagentStop/SessionStart/SessionEnd/PreCompact (async) |
 | 안전망 | user 타이머 `claude-ctx-ingest` (10분) | 훅이 놓친 것을 오프셋 기준으로 따라잡음 |
 
-## 새 머신 연결 (수동 1회 — 비밀번호는 nix 에 두지 않는다)
-서버 머신(beelink-ser7-co) 자신은 unix 소켓 peer 인증이라 비밀번호·dsn 파일이 필요 없다. 아래는 원격 머신(노트북 등)용.
-1. 서버: `sudo -u postgres psql -c "ALTER ROLE claude_ctx WITH LOGIN PASSWORD '<새 비밀번호>'"` (이미 설정했다면 생략)
-2. 클라이언트: `~/.config/claude-ctx/dsn` (권한 600) 에 `postgresql://claude_ctx:<비밀번호>@beelink-ser7-co:5432/claude_ctx`
-3. `donghans ctx ingest --days 30` 으로 첫 적재. 머신 이름은 hostname (`CLAUDE_CTX_HOST` 로 덮어쓸 수 있음)
+## 새 머신 연결
+nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
+1. 서버 머신(beelink-ser7-co)은 unix 소켓 peer 인증이라 아무 설정이 없다.
+2. 원격 머신(노트북 등): `mods/sys/services/claude-ctx.nix` 의 `allowedClients` 에 그 기기의 tailnet IP 를 넣고 서버를 `nixup`, 클라이언트 머신은 `nixup`. 클라이언트는 MagicDNS 이름 `beelink-ser7-co:5432` 로 붙고, 서버가 출발지 IP 로 허용 여부를 판단한다(trust).
+3. **과거 대화를 일괄 이전하지 않는다.** 지금부터 쌓이는 대화만 올라가고(훅 + 10분 타이머, 최근 2일 활동 파일), 옛 세션은 `claude --resume` 으로 들어가 그 세션에서 handoff(→ 그 세션의 대화가 그때 적재됨)하는 방식으로 필요한 것만 끌어온다. 전체 백필이 필요하면 `donghans ctx ingest --days N` 을 명시적으로 실행.
+- 신뢰 모델: tailnet 출발지 IP(WireGuard 인증) + 방화벽의 tailscale0 외 차단. 남는 위험은 허용된 기기 안의 다른 프로그램. 이를 받아들이지 않으면 pg_hba 의 `trust` 를 `scram-sha-256` 으로 바꾸고 비밀번호를 설정해야 한다(그때는 비밀 파일이 생긴다).
 
 ## 다른 서버로 이관 (클라우드·온프레미스)
-`pg_dump claude_ctx` → 새 서버에 `psql` 복원 → 각 머신의 dsn 파일만 교체. 서버 호스트의 `claude-ctx` 모드(toml)를 끄면 된다.
+`pg_dump claude_ctx` → 새 서버에 `psql` 복원 → 클라이언트의 서버 이름(`CLAUDE_CTX_SERVER`, 기본 beelink-ser7-co)만 교체. 서버 호스트의 `claude-ctx` 모드(toml)를 끄면 된다.
 
 ## 멱등성 (여러 머신이 올려도 안 깨지는 이유)
 - 자연키 `ON CONFLICT DO NOTHING`: 메시지 uuid · 사용 요청 request_id · 훅 (host,session,event,payload md5).
@@ -28,7 +29,7 @@
 - 한계: 같은 한도 샘플(`limit_samples`)은 머신별 행이라 계정 공통 값이 머신마다 따로 쌓인다(의도). 머신 시계가 어긋나면 ts 비교가 어긋난다.
 
 ## 접속 허용 목록 · 백업 · 초안
-- **허용 목록:** `claude-ctx.nix` 의 `allowedClients` (tailnet IP) + scram 비밀번호. 새 기기는 IP 를 추가한다. headscale 이 IP 를 재할당하면 그 기기는 접속이 막힌다(fail-closed).
+- **허용 목록:** `claude-ctx.nix` 의 `allowedClients` (tailnet IP, trust). 새 기기는 IP 를 추가한다. headscale 이 IP 를 재할당하면 그 기기는 접속이 막힌다(fail-closed).
 - **백업:** 매일 03:30 `pg_dump`(zstd) → `/var/backup/postgresql/claude_ctx.sql.zstd` (최신 1개만, 같은 디스크). Claude Code 가 오래된 로컬 트랜스크립트를 정리하면 이 DB 가 옛 대화의 유일한 사본이 된다.
 - **초안:** `donghans handoff draft --session <ID> [--focus "…"] [--model haiku] [--dry-run]` — DB 의 사용자 발언·최근 응답만 작은 모델이 읽고 `.claude/handoffs/DRAFT-<ID>.md` 를 만든다(예: 사용자 발언 6개·약 3천 토큰 입력, 74초). 검증 전 자료이므로 본 세션이 사실 칸을 확인하고 보강한다.
 

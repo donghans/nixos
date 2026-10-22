@@ -10,7 +10,7 @@
   sql "<SELECT ...>"   읽기 전용 질의
   handoff-put/handoff-get   인수인계 문서를 DB 에 올리고 받는다(머신이 달라도 resume)
 
-접속: 환경변수 CLAUDE_CTX_DSN > 서버 머신이면 unix 소켓(peer, 파일 불필요) > ~/.config/claude-ctx/dsn (원격 머신용, 권한 600). 머신 식별: CLAUDE_CTX_HOST 또는 hostname.
+접속: 환경변수 CLAUDE_CTX_DSN > 서버 머신이면 unix 소켓(peer) > 서버 tailnet 이름(허용 IP, trust). 비밀번호·설정 파일 없음. 머신 식별: CLAUDE_CTX_HOST 또는 hostname.
 멱등: 모든 쓰기는 자연키 ON CONFLICT, 파일 수집은 (host,path) 어드바이저리 락 + 오프셋 갱신을 같은 트랜잭션에서.
 """
 import argparse, glob, hashlib, json, os, re, socket, subprocess, sys, time
@@ -38,13 +38,13 @@ MAX_TEXT = 20_000      # 검색용 평문 상한
 
 
 def dsn():
+    """접속 우선순위: 환경변수 > 서버 머신의 unix 소켓(peer) > 서버 tailnet 이름(허용 목록 IP 로 trust). 비밀번호·파일 없음."""
     d = os.environ.get("CLAUDE_CTX_DSN")
     if d:
         return d
-    if os.path.exists("/run/postgresql/.s.PGSQL.5432"):  # 서버 머신: unix 소켓 peer 인증(비밀번호·파일 불필요)
+    if os.path.exists("/run/postgresql/.s.PGSQL.5432"):
         return "host=/run/postgresql dbname=claude_ctx user=claude_ctx"
-    p = os.path.join(HOME, ".config/claude-ctx/dsn")
-    return open(p).read().strip() if os.path.isfile(p) else sys.exit("DSN 없음: ~/.config/claude-ctx/dsn 또는 CLAUDE_CTX_DSN")
+    return f"host={os.environ.get('CLAUDE_CTX_SERVER', 'beelink-ser7-co')} port=5432 dbname=claude_ctx user=claude_ctx"
 
 
 def connect(timeout=5, readonly=False):
@@ -540,7 +540,7 @@ def main():
     top = ap.add_subparsers(dest="group", required=True)
     ctx = top.add_parser("ctx", help="대화·사용량 공유 저장소").add_subparsers(dest="cmd", required=True)
     p = ctx.add_parser("hook"); p.add_argument("event"); p.set_defaults(f=cmd_hook)
-    p = ctx.add_parser("ingest"); p.add_argument("--days", type=int, default=30); p.add_argument("--all", action="store_true"); p.add_argument("--no-otel", action="store_true"); p.set_defaults(f=cmd_ingest)
+    p = ctx.add_parser("ingest"); p.add_argument("--days", type=int, default=2); p.add_argument("--all", action="store_true"); p.add_argument("--no-otel", action="store_true"); p.set_defaults(f=cmd_ingest)
     p = ctx.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.set_defaults(f=cmd_search)
     p = ctx.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.set_defaults(f=cmd_recent)
     p = ctx.add_parser("session"); p.add_argument("sid"); p.add_argument("--n", type=int); p.add_argument("--full", action="store_true"); p.add_argument("--from", dest="from_uuid"); p.add_argument("--to", dest="to_uuid"); p.set_defaults(f=cmd_session)

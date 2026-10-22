@@ -1,8 +1,7 @@
 # Claude 공유 컨텍스트 저장소(Postgres) — 여러 머신·프로젝트의 Claude Code 대화·사용량을 한곳에 모아 조회한다.
 #  - 서버 역할 호스트에서만 켠다(현재 beelink-ser7-co). 클라이언트(훅·수집기·조회)는 mods.devel 의 llm-cli 가 모든 호스트에 설치한다.
 #  - 접속: localhost 와 허용 목록의 tailnet 기기(MagicDNS `<호스트>:5432`)만. 방화벽은 열지 않는다(tailscale0 는 trustedInterfaces, 그 밖의 인터페이스는 기본 drop).
-#    tailnet 에는 다른 사용자 기기도 있어서 신뢰하지 않고 **반드시 scram 비밀번호**를 요구한다(pg_hba).
-#  - 비밀번호는 nix 에 두지 않는다(스토어에 평문이 남음). 최초 1회 수동: docs 의 `claude-ctx` 절차 → ~/.config/claude-ctx/dsn (권한 600).
+#    tailnet 에는 다른 사용자 기기도 있어서 허용 목록(IP)에 있는 기기만 받는다. **비밀번호·dsn 파일 없음** — 전부 이 파일(nix)로만 관리된다.
 #  - 나중에 클라우드/온프레미스로 옮기면: pg_dump → 새 서버 → 각 머신의 dsn 파일만 교체. 이 모듈은 서버 호스트에서만 끄면 된다.
 #  - pgvector 는 설치만 해 둔다(벡터 검색은 필요가 확인될 때). 스키마는 mods/_data/claude-ctx/schema.sql (멱등, 서비스 시작마다 적용).
 {mkMod, ...}:
@@ -15,8 +14,8 @@ mkMod __curPos "Claude 공유 컨텍스트 저장소 (Postgres)" ({
 }: let
   # 접속을 허용할 tailnet 기기(허용 목록 — 비밀번호와 별개의 2중 장치). 새 기기를 쓰려면 여기에 tailnet IP 를 추가한다.
   # headscale 이 IP 를 재할당하면(재등록 시) 그 기기는 접속이 막힌다 — 조용히 실패하지 않고 인증 거부로 보인다(fail-closed).
-  #   100.64.0.1 beelink-ser7-co (이 서버 자신) · 100.64.0.4 msi-summit-me (확인: 2026-10-22 tailscale status)
-  allowedClients = ["100.64.0.1" "100.64.0.4"];
+  #   100.64.0.4 msi-summit-me (확인: 2026-10-22 tailscale status)
+  allowedClients = ["100.64.0.4"]; # 서버 자신(100.64.0.1)은 소켓을 쓰므로 TCP 허용이 없다 — 컨테이너·VM 의 NAT 출구가 이 주소로 보여도 못 들어온다
 in {
   os = lib.mkIf cfg.enable {
     services.postgresql = {
@@ -33,14 +32,14 @@ in {
       ];
       identMap = "ctx ${config.workspace.username} claude_ctx";
       authentication = lib.mkForce ''
-        # 소켓: 서버 관리용(postgres 시스템 사용자)은 peer, claude_ctx 는 사용자 계정(ident map 'ctx')이 비밀번호 없이 peer 로
-        # (이 서버 머신의 클라이언트는 비밀번호·dsn 파일이 필요 없다 — 같은 머신의 다른 사용자·컨테이너는 이 소켓으로 못 들어온다)
+        # 서버 관리용(postgres 시스템 사용자)은 소켓 peer
         local all postgres peer
+        # 이 서버 머신의 사용자 계정은 소켓 peer 로 비밀번호 없이(ident map 'ctx') — 같은 머신의 다른 사용자·컨테이너는 소켓에 못 들어온다
         local claude_ctx claude_ctx peer map=ctx
-        # claude_ctx 는 비밀번호로만, localhost 와 허용 목록의 tailnet 기기에서
-        host claude_ctx claude_ctx 127.0.0.1/32 scram-sha-256
-        host claude_ctx claude_ctx ::1/128 scram-sha-256
-        ${lib.concatMapStringsSep "\n" (ip: "host claude_ctx claude_ctx ${ip}/32 scram-sha-256") allowedClients}
+        # 원격 머신은 **허용 목록의 tailnet 출발지 IP 로만**, 비밀번호 없이(trust). 신뢰 근거: (1) 출발지 IP 는 WireGuard 로 인증된 tailnet 주소이고
+        # (2) 방화벽(tailscale 모듈)이 tailscale0 밖에서 온 100.64.0.0/10 출발지를 버리며 (3) 이 포트는 tailscale0 밖으로 열려 있지 않다.
+        # 남는 위험: 허용된 그 기기 안의 다른 프로그램이 접속할 수 있다(단일 사용자 노트북 전제). 비밀번호·dsn 파일이 없어 유실될 비밀이 없다.
+        ${lib.concatMapStringsSep "\n" (ip: "host claude_ctx claude_ctx ${ip}/32 trust") allowedClients}
       '';
       settings = {
         password_encryption = "scram-sha-256";
