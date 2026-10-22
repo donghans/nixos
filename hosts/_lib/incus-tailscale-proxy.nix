@@ -29,6 +29,15 @@
     if internalSubnet != null
     then "-s ${internalSubnet} -o eth0 -j MASQUERADE"
     else "-d ${vmIp} -o eth0 -j MASQUERADE";
+  # internal bridge 모드: VM → tailnet(100.64.0.0/10) 아웃바운드. tailscale0 로 나가는 패킷은
+  # 출발지가 VM 사설 IP(내부 서브넷)라 masquerade 가 없으면 상대 노드가 응답을 돌려보낼 수 없다.
+  # (eth0 용 masquerade 만 있어서 VM 이 tailnet 의 다른 노드로 못 나가던 문제 — 2026-10-22.)
+  # setup 스크립트 초반의 "이미 Running 이면 exit" 분기 전에도 실행되도록 idempotent 로 쓴다.
+  egressRule = "-s ${toString internalSubnet} -o tailscale0 -j MASQUERADE";
+  egressEnsure = lib.optionalString (internalSubnet != null) ''
+    incus exec ${lxcName} -- sh -c 'iptables -t nat -C POSTROUTING ${egressRule} 2>/dev/null || iptables -t nat -A POSTROUTING ${egressRule}'
+    incus exec ${lxcName} -- sh -c 'grep -qF "o tailscale0" /etc/local.d/proxy.start 2>/dev/null || echo "iptables -t nat -A POSTROUTING ${egressRule} 2>/dev/null || true" >> /etc/local.d/proxy.start'
+  '';
 in {
   config = lib.mkMerge [
     {
@@ -134,6 +143,7 @@ in {
         script = ''
           if incus exec ${lxcName} -- tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'; then
             incus exec ${lxcName} -- tailscale set --hostname="${vmName}" 2>/dev/null || true
+            ${egressEnsure}
             exit 0
           fi
 
@@ -195,6 +205,7 @@ in {
           incus exec ${lxcName} -- sh -c 'echo "iptables -A FORWARD -s ${vmIp} -j ACCEPT 2>/dev/null || true" >> /etc/local.d/proxy.start'
           incus exec ${lxcName} -- sh -c 'echo "iptables -t nat -A POSTROUTING ${masqueradeRule} 2>/dev/null || true" >> /etc/local.d/proxy.start'
           incus exec ${lxcName} -- chmod +x /etc/local.d/proxy.start
+          ${egressEnsure}
           incus exec ${lxcName} -- rc-update add local default
 
           # tailscale 활성화

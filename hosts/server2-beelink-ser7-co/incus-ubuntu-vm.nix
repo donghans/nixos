@@ -3,67 +3,6 @@
   lib,
   ...
 }: let
-  backupScript = pkgs.writeShellScript "ubuntu-2404-backup" ''
-    set -euo pipefail
-    INSTANCE="ubuntu-2404"
-    SNAP_PREFIX="daily-"
-    # 2026-09-04: 7→1 — 로컬 스냅샷은 오늘치 1개만 둔다(빠른 롤백용). 이력은 로컬에 쌓지 않고
-    # mac-studio restic 저장소(30일 보관, 아래)가 전담한다. 원인: btrfs 쿼터(256GiB)가 매일
-    # 스냅샷 7개 누적으로 꽉 차 ubuntu-2404 VM 파일시스템이 I/O 에러로 죽는 사고가 있었다 —
-    # 로컬 스냅샷이 원본과 같은 쿼터를 그대로 물려받아 실사용량을 배로 불렸다.
-    SNAP_LOCAL_KEEP=1
-    SNAP_NAME="$SNAP_PREFIX$(date +%Y-%m-%d)"
-    SNAP_PATH="/var/lib/incus/storage-pools/default/virtual-machines-snapshots/$INSTANCE"
-    SSH_KEY="/var/lib/nix-secrets/backup/ssh-key"
-    RESTIC_REPO="sftp:bitstep@mac-studio:/Users/bitstep/backups/ubuntu-2404"
-
-    if ! ${pkgs.incus}/bin/incus info "$INSTANCE" &>/dev/null; then
-      echo "ubuntu-2404-backup: $INSTANCE 없음, 건너뜀"
-      exit 0
-    fi
-
-    # 로컬 btrfs 스냅샷 (빠른 복구용, 7일 롤링)
-    if ! ${pkgs.incus}/bin/incus snapshot list "$INSTANCE" --format csv \
-        | cut -d, -f1 | grep -qx "$SNAP_NAME"; then
-      # 2026-09-28: 스냅샷 뜨기 전에 fstrim으로 게스트가 이미 지운 블록을 먼저 반환한다.
-      # 게스트 fstrim.timer는 주 1회뿐이라, 트림 안 된 블록까지 매일 스냅샷에 같이 얼어붙어
-      # 실사용량은 안 느는데도 btrfs 쿼터만 계속 누적되다 400GiB를 채워 VM이 I/O 에러로
-      # 죽는 사고가 있었다 (root.img 335G→fstrim 후 182G로 실측 확인).
-      ${pkgs.incus}/bin/incus exec "$INSTANCE" -- fstrim -av || echo "ubuntu-2404-backup: fstrim 실패, 계속 진행"
-      echo "ubuntu-2404-backup: 스냅샷 생성 → $SNAP_NAME"
-      ${pkgs.incus}/bin/incus snapshot create "$INSTANCE" "$SNAP_NAME"
-    fi
-    SNAPS=$(${pkgs.incus}/bin/incus snapshot list "$INSTANCE" --format csv \
-      | cut -d, -f1 | grep "^$SNAP_PREFIX" | sort)
-    COUNT=$(echo "$SNAPS" | grep -c . || true)
-    if [ "$COUNT" -gt "$SNAP_LOCAL_KEEP" ]; then
-      echo "$SNAPS" | head -n $(( COUNT - SNAP_LOCAL_KEEP )) | while read -r snap; do
-        echo "ubuntu-2404-backup: 로컬 스냅샷 삭제 → $snap"
-        ${pkgs.incus}/bin/incus snapshot delete "$INSTANCE" "$snap"
-      done
-    fi
-
-    # restic: 오늘 스냅샷의 btrfs 서브볼륨을 직접 백업 (VM 실행 중에도 일관성 보장)
-    export RESTIC_REPOSITORY="$RESTIC_REPO"
-    export RESTIC_PASSWORD_FILE="/var/lib/nix-secrets/backup/restic-password"
-    SSH_ARGS="-i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-
-    restic() {
-      ${pkgs.restic}/bin/restic \
-        -o "sftp.args=$SSH_ARGS" \
-        "$@"
-    }
-
-    restic snapshots &>/dev/null || restic init
-
-    echo "ubuntu-2404-backup: mac-studio로 백업 중..."
-    restic backup "$SNAP_PATH/$SNAP_NAME"
-
-    # 30일 초과 원격 백업 정리
-    restic forget --keep-daily 30 --prune --quiet
-
-    echo "ubuntu-2404-backup: 완료"
-  '';
   mkTailscaleProxy = import ../_lib/incus-tailscale-proxy.nix {inherit lib pkgs;};
 in {
   imports = [
@@ -223,27 +162,95 @@ in {
       UNIT
             incus exec ubuntu-2404 -- systemctl daemon-reload
             incus exec ubuntu-2404 -- systemctl enable --now docker-prune.timer
+
+            # 게스트 fstrim 매일 실행 — 2026-10-21: 기본 fstrim.timer(주 1회)로는 게스트가 지운
+            # 블록이 호스트 root.img에 계속 남아 btrfs 쿼터(root 크기와 동일)를 채우고, 게스트
+            # ext4가 EDQUOT→I/O 에러로 read-only가 되어 ssh까지 죽는 사고가 반복됐다.
+            # (스냅샷/restic 백업은 같은 날 제거 — 스냅샷이 쿼터를 이중으로 물려받아 사고를 키웠고,
+            # 이 VM은 스냅샷 보관이 중요하지 않다고 판단했다.)
+            incus exec ubuntu-2404 -- mkdir -p /etc/systemd/system/fstrim.timer.d
+            incus exec ubuntu-2404 -- bash -c "cat > /etc/systemd/system/fstrim.timer.d/daily.conf" <<'UNIT'
+      [Timer]
+      OnCalendar=
+      OnCalendar=daily
+      RandomizedDelaySec=30min
+      UNIT
+            incus exec ubuntu-2404 -- systemctl daemon-reload
+            incus exec ubuntu-2404 -- systemctl enable --now fstrim.timer
+
+            # 게스트 → mac-studio 직접 백업 (2026-10-22). 호스트(server2) 스냅샷/중간 저장 없이
+            # 게스트 안의 restic 이 tailnet 으로 바로 보낸다. 변경분만 전송(dedup)하고 저장소엔
+            # 최신 1개만 남긴다. 호스트→tailnet 경로는 ubuntu-2404-proxy LXC 의 masquerade
+            # (hosts/_lib/incus-tailscale-proxy.nix egressEnsure)가 열어 준다.
+            # 대상 제외: docker 이미지/빌드캐시/컨테이너 로그, node_modules, 앱이 매일 만드는 DB 덤프
+            # 중 최신 1개를 뺀 나머지(/srv/b2g24/backup 에 15일치 ~170GiB).
+            if ! incus exec ubuntu-2404 -- which restic &>/dev/null; then
+              incus exec ubuntu-2404 -- apt-get install -y restic
+            fi
+            for f in ssh-key restic-password; do
+              if [ -f "/var/lib/nix-secrets/backup/$f" ]; then
+                incus file push "/var/lib/nix-secrets/backup/$f" "ubuntu-2404/root/.backup/$f" \
+                  --create-dirs --uid 0 --gid 0 --mode 0600
+              fi
+            done
+            incus exec ubuntu-2404 -- bash -c "cat > /usr/local/sbin/backup-to-macstudio && chmod 755 /usr/local/sbin/backup-to-macstudio" <<'SCRIPT'
+      #!/bin/bash
+      set -euo pipefail
+      # mac-studio 는 게스트 DNS(1.1.1.1)로 MagicDNS 이름을 못 풀어서 tailnet IP 를 쓴다.
+      export RESTIC_REPOSITORY="sftp:bitstep@100.64.0.15:/Users/bitstep/backups/ubuntu-2404-guest"
+      export RESTIC_PASSWORD_FILE=/root/.backup/restic-password
+      # systemd 서비스에는 HOME 이 없어 restic 캐시를 못 열고 매번 느려진다.
+      export XDG_CACHE_HOME=/var/cache
+      SSH_ARGS="-i /root/.backup/ssh-key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+      restic() { /usr/bin/restic -o "sftp.args=$SSH_ARGS" "$@"; }
+
+      DUMP_DIR=/srv/b2g24/backup
+      EXCL=$(mktemp)
+      trap 'rm -f "$EXCL"' EXIT
+      # 30분 이내에 수정된 덤프는 쓰는 중일 수 있어 완성본으로 안 친다.
+      # LATEST 가 비어 있으면 *.archive.gz 가 전부 제외되도록 -name 으로 한정한다(전체 15일치 방지).
+      LATEST=$(find "$DUMP_DIR" -maxdepth 1 -name 'jodal_insight-*.archive.gz' -mmin +30 -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
+      find "$DUMP_DIR" -maxdepth 1 -type f -name '*.archive.gz' ! -path "$LATEST" > "$EXCL"
+
+      restic snapshots &>/dev/null || restic init
+
+      # 종료코드 3 = 일부 파일을 못 읽음(실행 중 사라진 파일 등) → 스냅샷은 만들어졌으니 경고로만 취급
+      rc=0
+      restic backup --one-file-system --exclude-file "$EXCL" \
+        --exclude node_modules --exclude /root/.backup \
+        /home /root /etc /srv /var/lib/docker/volumes || rc=$?
+      if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then exit "$rc"; fi
+
+      # 최신 1개만 보관. 경로 집합이 같아 한 그룹이지만 만일을 위해 host 기준으로 묶는다.
+      restic forget --keep-last 1 --group-by host --prune --quiet
+      SCRIPT
+            incus exec ubuntu-2404 -- bash -c "cat > /etc/systemd/system/backup-to-macstudio.service" <<'UNIT'
+      [Unit]
+      Description=Back up this VM directly to mac-studio (restic, keep latest 1)
+      After=network-online.target docker.service
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/backup-to-macstudio
+      Nice=10
+      IOSchedulingClass=idle
+      UNIT
+            incus exec ubuntu-2404 -- bash -c "cat > /etc/systemd/system/backup-to-macstudio.timer" <<'UNIT'
+      [Unit]
+      Description=Daily backup to mac-studio
+
+      [Timer]
+      # 게스트 시간대는 UTC. 앱 DB 덤프(04:00 시작, ~30분 소요) 이후로 잡는다.
+      OnCalendar=*-*-* 06:00:00
+      Persistent=true
+      RandomizedDelaySec=15min
+
+      [Install]
+      WantedBy=timers.target
+      UNIT
+            incus exec ubuntu-2404 -- systemctl daemon-reload
+            incus exec ubuntu-2404 -- systemctl enable --now backup-to-macstudio.timer
     '';
-  };
-
-  systemd.services.ubuntu-2404-backup = {
-    description = "ubuntu-2404 incremental backup to mac-studio";
-    after = ["incus-startup.service" "network-online.target"];
-    wants = ["network-online.target"];
-    path = [pkgs.incus pkgs.restic pkgs.openssh pkgs.coreutils pkgs.gnugrep];
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = "${backupScript}";
-    };
-  };
-
-  systemd.timers.ubuntu-2404-backup = {
-    description = "ubuntu-2404 backup timer";
-    wantedBy = ["timers.target"];
-    timerConfig = {
-      OnCalendar = "daily";
-      Persistent = true;
-      RandomizedDelaySec = "30min";
-    };
   };
 }
