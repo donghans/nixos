@@ -89,7 +89,7 @@ nixos/
 │   ├── _preset.*.toml  # 프리셋 정의 (workstation/server/iso)
 │   ├── <hostname>.toml # 호스트 메타데이터 (type, preset, mods 오버라이드)
 │   ├── <hostname>.nix  # 호스트 전용 NixOS + Home Manager 설정
-│   └── deploy/         # 원격 호스트 전용 (pub 키, hardware.nix)
+│   └── _deploy/        # 호스트별 부속 자료 (pub 키, hardware.nix, secrets). 여기 있다고 rnixup 대상은 아님 — 판별은 호스트 toml 의 [deploy] 섹션 (CLAUDE.md 참고)
 ├── .locks/             # Flake lock 파일 (Rolling/Stable 전략)
 ├── _docs/              # 문서 인프라
 │   ├── content/        # Markdown 소스 (Diátaxis 구조)
