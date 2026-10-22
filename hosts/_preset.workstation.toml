@@ -26,7 +26,7 @@ print-co           = true
 tailpass           = false
 netdata            = false
 claude-ctx         = false
-observe            = false
+observe            = true
 
 [mods.gui]
 enable = true
