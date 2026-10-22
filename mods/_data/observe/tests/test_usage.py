@@ -3,6 +3,7 @@
 import asyncio, os, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 TMP = tempfile.mkdtemp(prefix="usageui-test-")
+os.environ["OBSERVE_USAGE_PROFILE"] = "laptop"   # 기존 시험은 노트북형 화면 기준(호스트의 실제 센서와 무관하게). 데스크톱형은 아래에서 따로
 os.environ["OBSERVE_DATA_DIR"] = os.path.join(TMP, "var"); os.environ["OBSERVE_STATE_DIR"] = os.path.join(TMP, "state")
 sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "_testkit")); sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "_uikit"))
 import observe_core as core, usagedata as ud, usageview as uv
@@ -136,4 +137,50 @@ async def narrow():
         check("앱: 폭 150칸이면 2열", not app.query_one("#dash").has_class("narrow"))
 asyncio.run(drive())
 asyncio.run(narrow())
+
+# --- 데스크톱형(배터리·psys 센서 없음): 센서 유무로 화면이 갈린다
+os.environ["OBSERVE_USAGE_PROFILE"] = "desktop"
+check("host_profile: 강제 desktop 이면 배터리·psys 없음, laptop 이면 둘 다 있음", ud.host_profile() == {"battery": False, "psys": False} and ud.is_desktop())
+os.environ["OBSERVE_USAGE_PROFILE"] = "laptop"
+check("host_profile: laptop 강제", ud.host_profile() == {"battery": True, "psys": True} and not ud.is_desktop())
+os.environ["OBSERVE_USAGE_PROFILE"] = "desktop"
+import shutil
+shutil.rmtree(core.SAMPLE_DIR); os.makedirs(core.SAMPLE_DIR)
+def dsample(t, cpu=12.0, ctx=50000, pkg=25.0, apps=None):
+    return {"t": t, "dt": 30, "v": 4, "state": "unknown", "pw": {"psys_w": None, "pkg_w": pkg, "batt_vi_w": None, "ac": 0},
+            "cs": {"mhz": 3400}, "irq": {"cpu_all_pct": cpu, "ctxt_s": ctx, "intr_s": 30000, "load1": 1.5}, "dev": {"vt": "tty1", "boot": "abc"},
+            "apps": apps or [{"app": "node", "n": 5, "cpu_core_pct": 40.0, "ctxsw_vol_s": 900.0, "rss_mb": 800.0}, {"app": "vivaldi", "n": 20, "cpu_core_pct": 20.0, "ctxsw_vol_s": 500.0, "rss_mb": 3000.0}], "proc": []}
+for i in range(120):          # 최근 1시간: 기준(그 앞 1시간)보다 node 가 더 바쁨
+    s = dsample(now - 3600 + i * 30); core.append_jsonl(core.SAMPLE_DIR, "samples", s, t=s["t"])
+for i in range(120):
+    s = dsample(now - 7200 + i * 30, cpu=5.0, ctx=20000, pkg=15.0, apps=[{"app": "node", "n": 5, "cpu_core_pct": 10.0, "ctxsw_vol_s": 200.0, "rss_mb": 800.0}]); core.append_jsonl(core.SAMPLE_DIR, "samples", s, t=s["t"])
+dv = ud.load(ud.preset("1시간", now), "prev", now=now)
+check("데스크톱 load: 프로파일에 배터리·psys 없음", dv["profile"] == {"battery": False, "psys": False}, str(dv["profile"]))
+DS = dv["summary"]
+check("데스크톱 요약: 평균 패키지 전력 25 W·전력량 약 25 Wh·평균 CPU 12%·문맥 전환 5만/s", abs(DS["avg_pkg_w"] - 25.0) < 0.1 and abs(DS["pkg_wh"] - 25.0) < 0.8 and abs(DS["avg_cpu_pct"] - 12.0) < 0.1 and abs(DS["avg_ctxsw"] - 50000) < 1, str(DS))
+dt_ = uv.summary_power(dv).plain
+check("데스크톱 summary_power: psys·배터리 문구 없이 패키지 전력·CPU, '전체 소비 아님' 명시", "패키지" in dt_ and "평균 CPU" in dt_ and "psys" not in dt_ and "배터리" not in dt_ and "전체 소비 아님" in dt_, dt_)
+share = 40.0 / 60.0
+check("데스크톱 앱 표: 전력량 추정은 패키지 전력량 × 점유율(node 67%)", uv.apps_rows(dv)[0][0] == "node" and abs(float(uv.apps_rows(dv)[0][6]) - DS["pkg_wh"] * share) < 0.02, str(uv.apps_rows(dv)[0]))
+cmpd = uv.desktop_compare(dv)
+check("데스크톱 비교: 지금 vs 기준 — CPU 12 vs 5, 앱별 변화는 node(+30)가 가장 큼", cmpd and abs(cmpd["metrics"][0][1] - 12.0) < 0.1 and abs(cmpd["metrics"][0][2] - 5.0) < 0.1 and cmpd["apps"][0][0] == "node" and abs(cmpd["apps"][0][3] - 30.0) < 0.1, str(cmpd))
+check("데스크톱 비교 문구: 차이와 앱 변화 표시, 기준이 없으면 안내", "+7.0%" in uv.desktop_cause_head(dv).plain and "node" in uv.desktop_cause_changes(dv).plain and "부족" in uv.desktop_cause_head(ud.load(ud.preset("1시간", now), "none", now=now)).plain)
+check("데스크톱 Netdata 차트·신호: psys·V×I 항목은 제외", all(c[0] != "psys_w" for c in uv.nd_charts(dv["profile"])) and "RAPL psys" not in dict((a, b) for a, b, _ in uv.nd_signal_rows({"snap": {"signals": {"psys_w": 5.0, "batt_vi_w": 2.0, "pkg_w": 20.0}}}, dv)) and "배터리 V×I" not in dict((a, b) for a, b, _ in uv.nd_signal_rows({"snap": {"signals": {"psys_w": 5.0, "batt_vi_w": 2.0, "pkg_w": 20.0}}}, dv)))
+check("데스크톱 기기 상태: 덮개·PSR·pc8 없이 CPU 주파수·부하", "덮개" not in uv.device_text(dv).plain and "PSR" not in uv.device_text(dv).plain and "부하" in uv.device_text(dv).plain)
+check("데스크톱 작업 구간 표: 전력량 열 없음(2열)", all(len(r) == 2 for r in uv.span_rows(dv)))
+
+async def desk():
+    app = usageui.UsageUI(ud.preset("1시간", now))
+    async with app.run_test(size=(140, 45)) as pilot:
+        await pilot.pause(1.0)
+        check("데스크톱 앱: 기본 첫 탭이 앱·프로세스", app.desktop and app.query_one("#tabs", TabbedContent).active == "apps")
+        check("데스크톱 앱: 배터리·psys 박스 없음(dbatt·dhab·dbands·pwr0 부재), 패키지·CPU·문맥 전환 차트", not app.query("#dbatt") and not app.query("#dhab") and not app.query("#dbands") and not app.query("#pwr0") and len(app.query("#pwr1")) == 1 and len(app.query("#pwr4")) == 1 and len(app.query("#pwr5")) == 1)
+        t = app.query_one("#tapps", DataTable)
+        check("데스크톱 앱: 앱 표 첫 행 node, 전력량 열 이름에 'CPU+GPU'", str(t.get_row_at(0)[0]) == "node" and "CPU+GPU" in str(list(t.columns.values())[6].label))
+        await pilot.press("3"); await pilot.pause(1.0)
+        check("데스크톱 앱: 원인 탭에 CPU 비교와 앱 변화(node)", "전체 CPU" in str(app.query_one("#causehead").render()) and "node" in str(app.query_one("#causechg").render()), str(app.query_one("#causehead").render()))
+        await pilot.press("4"); await pilot.pause(1.0)
+        check("데스크톱 앱: 시스템 탭 Netdata 차트에 psys 없음(4개)", len(app.query("Panel")) > 0 and not app.query("#nd4"))
+asyncio.run(desk())
+os.environ["OBSERVE_USAGE_PROFILE"] = "laptop"
 finish("usageui")

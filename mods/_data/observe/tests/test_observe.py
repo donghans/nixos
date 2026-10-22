@@ -148,12 +148,14 @@ col.process_requests()
 check("요청 id 의 경로 탈출 문자는 제거", os.path.exists(os.path.join(core.RES_DIR, "etcx.json")) and not os.path.exists(os.path.join(TMP, "etc")))
 
 # --- 표본 스모크(실제 /proc, /sys)
+import glob
+has_battery = any(open(d + "/type").read().strip() == "Battery" for d in glob.glob("/sys/class/power_supply/*") if os.path.exists(d + "/type"))   # 배터리 없는 호스트(데스크톱)는 batt_vi_w 가 없다
 s = col.Sampler("L1")
 time.sleep(1.2)
 smp = s.sample()
 check("스모크: 표본 필수 키", all(k in smp for k in ("t", "dt", "pw", "cs", "irq", "proc", "dev", "state", "thr", "io")), str(list(smp)))
 check("스모크: dt 가 대기 시간과 비슷", 1.0 < smp["dt"] < 2.5, str(smp["dt"]))
-check("스모크: 표본 형식이 최신(v3)이고 옛 필드 이름이 없음", smp["v"] == core.SCHEMA and "batt_vi_w" in smp["pw"] and "batt_w" not in smp["pw"] and "cpu_all_pct" in smp["irq"] and "cpu_busy_pct" not in smp["irq"], str(smp["pw"]))
+check("스모크: 표본 형식이 최신(v3)이고 옛 필드 이름이 없음", smp["v"] == core.SCHEMA and ("batt_vi_w" in smp["pw"] or not has_battery) and "batt_w" not in smp["pw"] and "cpu_all_pct" in smp["irq"] and "cpu_busy_pct" not in smp["irq"], str(smp["pw"]))
 check("스모크: 프로세스 합산 항목 구조", all({"comm", "exe", "n", "cpu_core_pct", "ctxsw_vol_s", "rss_mb"} <= set(p) and not ({"cpu", "wake"} & set(p)) for p in smp["proc"]))
 json.dumps(smp)
 # --- 옛 형식(v1) 표본 읽기 호환: 값은 그대로, 이름만 v2 로, legacy 표시

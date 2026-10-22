@@ -63,6 +63,13 @@ def summary_power(view):
     if not s["n"]:
         t.append(" 이 범위에는 표본이 없습니다 — `observectl on` 으로 수집을 켜고 시간이 지나야 합니다.\n", style="grey70")
         return t
+    if not view["profile"]["battery"]:
+        # 데스크톱형: 배터리·psys 가 없으니 패키지 전력과 CPU·문맥 전환으로 요약한다
+        _line(t, "평균 패키지 전력", _f(s["avg_pkg_w"], 1, " W"), "측정 · RAPL, CPU+GPU 만(전체 소비 아님)", lw=18, vw=10)
+        _line(t, "패키지 전력량", _f(s["pkg_wh"], 2, " Wh"), "측정 · 적분", lw=18, vw=10)
+        _line(t, "평균 CPU", _f(s["avg_cpu_pct"], 1, "%"), "측정 · 전체 CPU 대비", lw=18, vw=10)
+        _line(t, "평균 문맥 전환", _f(s["avg_ctxsw"], 0, "/s"), "측정 · 시스템 전체", lw=18, vw=10)
+        return t
     _line(t, "평균 전력", _f(s["avg_psys_w"], 2, " W"), "측정 · psys", lw=14, vw=14)
     _line(t, "쓴 전력량", _f(s["psys_wh"], 2, " Wh"), "측정 · 적분", lw=14, vw=14)
     c = s["coulomb"]
@@ -148,7 +155,8 @@ def apps_rows(view):
         return []
     table, _ = got
     tot_cpu = sum(v["cpu"] for v in table.values()) or 1.0
-    psys_wh = view["summary"]["psys_wh"]
+    # 앱별 전력량 추정의 기준: psys 가 있으면 psys, 없으면(데스크톱) 패키지(CPU+GPU) 전력량
+    psys_wh = view["summary"]["psys_wh"] if view["profile"]["psys"] else view["summary"]["pkg_wh"]
     rows = []
     for k, v in sorted(table.items(), key=lambda kv: -kv[1]["cpu"])[:20]:
         share = v["cpu"] / tot_cpu
@@ -179,7 +187,8 @@ def ebpf_rows(view):
 def span_rows(view):
     out = []
     for name, sec, en in view["span_rows"]:
-        out.append((name, tr_dur(sec), "-" if not en else f"{en['psys_wh']:.2f} Wh"))
+        row = (name, tr_dur(sec))
+        out.append(row + (("-" if not en else f"{en['psys_wh']:.2f} Wh"),) if view["profile"]["psys"] else row)   # psys 가 없으면 전력량 열이 없다
     return out
 
 
@@ -194,6 +203,8 @@ POWER_SERIES = [  # (제목, 필드, 단위, 색, 하한, 상한, 형식, 그라
     ("패키지 — CPU+GPU 전력(측정)", "pkg", "W", "magenta", 0.0, None, "{:.1f}", False),
     ("배터리 소비 — 순간 V×I, 방전 중에만(측정, 노이즈 큼)", "batt_vi", "W", "dark_orange", 0.0, None, "{:.1f}", True),
     ("배터리 잔량", "pct", "%", "green", 0.0, 100.0, "{:.0f}", False),
+    ("전체 CPU(전체 대비 %, 측정)", "cpu_all", "%", "green", 0.0, 100.0, "{:.0f}", False),
+    ("시스템 전체 문맥 전환(측정)", "ctxsw_all", "/s", "cyan", 0.0, None, "{:.0f}", False),
 ]
 
 
@@ -215,6 +226,11 @@ ND_CHARTS = [("psys_w", "Netdata · psys 1초 평균", "W", "cyan"), ("cpu_all_p
              ("nvme_temp_c", "Netdata · NVMe 온도", "°C", "dark_orange")]
 
 
+def nd_charts(profile):
+    """이 호스트에 있는 센서의 Netdata 차트만(psys 가 없으면 psys 차트 제외)."""
+    return [c for c in ND_CHARTS if profile["psys"] or c[0] != "psys_w"]
+
+
 def nd_chart(sysdata, key, rng, w, h):
     pts = (sysdata or {}).get("series", {}).get(key)
     if not pts:
@@ -232,8 +248,11 @@ def nd_signal_rows(sysdata, view=None):
     import observe_netdata as nd
     sig = sysdata["snap"]["signals"]
     mixed = bool(view) and any(r["status"] != "Discharging" for r in view["recs"])
+    prof = (view or {}).get("profile") or {"battery": True, "psys": True}
     rows = []
     for k, v in sig.items():
+        if (k == "psys_w" and not prof["psys"]) or (k == "batt_vi_w" and not prof["battery"]):
+            continue                         # 이 호스트에 없는 센서의 신호는 보이지 않는다(항상 '관측 공백'이라 혼란만 줌)
         if k == "batt_vi_w" and mixed:
             rows.append((nd.SIGNALS[k][0], "비교 불가", "구간에 충전·AC 시간이 섞여 방전 전력이 아님"))
         else:
@@ -273,6 +292,14 @@ def device_text(view):
     psr = dev.get("psr") or {}
     wifi = dev.get("wifi") or {}
     _line(t, "마지막 표본", time.strftime("%H:%M:%S", time.localtime(r["t"])))
+    if not view["profile"]["battery"]:
+        # 데스크톱형: 덮개·PSR·밝기·패키지 C-state 는 해당 없음 — 프로세스 관리에 쓸 값만
+        irq = r.get("irq") or {}
+        _line(t, "CPU 주파수", _f(cs.get("mhz"), 0, " MHz"))
+        _line(t, "부하(load1)", _f(irq.get("load1"), 2), f"전체 CPU {_f(irq.get('cpu_all_pct'), 0, '%')}")
+        _line(t, "문맥 전환·인터럽트", f"{_f(irq.get('ctxt_s'), 0, '/s')} · {_f(irq.get('intr_s'), 0, '/s')}")
+        _line(t, "부팅", str(dev.get("boot", "-")))
+        return t
     _line(t, "덮개·화면", f"덮개 {dev.get('lid', '-')} · 화면 {dev.get('vt', '-')}", f"밝기 {dev.get('bl', '-')}")
     _line(t, "PSR(화면 절전)", str(psr.get("mode") or "-"), f"싱크 {psr.get('sink', '-')}")
     _line(t, "CPU 주파수", _f(cs.get("mhz"), 0, " MHz"), f"pc8 {_f(cs.get('pc8'), 0, '%')} · pc10 {_f(cs.get('pc10'), 0, '%')}")
@@ -397,4 +424,58 @@ def cause_changes(res):
         t.append(f"{rel}\n", style=st)
     t.append("\n ▲ 늘어남(빨강) ▼ 줄어듦(초록). 코어% = 코어 1개를 100% 로 본 CPU 시간. 순서는 상대 변화가 큰 순.", style="grey50")
     t.append("\n 이 표는 '같이 달라진 것'이지 원인이 아닙니다 — 원인을 확인하려면 의심 가는 것 하나만 바꿔 번갈아 재는 ABAB 측정(observectl ab)이 필요합니다.", style="grey50")
+    return t
+
+
+# ------------------------------------------------------------------ 데스크톱형 '원인' 탭: 전력 대신 CPU·앱 변화로 구간 비교
+def _avg(rows, f):
+    v = [f(r) for r in rows]
+    v = [x for x in v if isinstance(x, (int, float))]
+    return sum(v) / len(v) if v else None
+
+
+def desktop_compare(view):
+    """이 구간과 기준 구간의 전체 CPU·문맥 전환·패키지 전력 평균과, 앱별 CPU 변화(큰 순). 기준 구간이 없거나 표본이 없으면 None.
+    반환 {"metrics": [(이름, 지금, 기준, 단위)], "apps": [(앱, 지금 CPU, 기준 CPU, 차이)]}. CPU 는 앱 표는 코어 1개=100%, 전체 CPU 는 전체 대비 %."""
+    rows, base = view["rows"], view["base_rows"]
+    if not rows or not base:
+        return None
+    pk = lambda r: (r.get("pw") or {}).get("pkg_w")
+    irq = lambda k: (lambda r: (r.get("irq") or {}).get(k))
+    metrics = [("전체 CPU", _avg(rows, irq("cpu_all_pct")), _avg(base, irq("cpu_all_pct")), "%"),
+               ("문맥 전환", _avg(rows, irq("ctxt_s")), _avg(base, irq("ctxt_s")), "/s"),
+               ("패키지 전력", _avg(rows, pk), _avg(base, pk), "W")]
+    cur, old = ex.apps_table(rows), ex.apps_table(base)
+    apps = []
+    if cur:
+        c, o = cur[0], (old[0] if old else {})
+        for k in set(c) | set(o):
+            a, b = c.get(k, {"cpu": 0.0})["cpu"], o.get(k, {"cpu": 0.0})["cpu"]
+            apps.append((k, a, b, a - b))
+        apps.sort(key=lambda x: -abs(x[3]))
+    return {"metrics": metrics, "apps": apps[:12]}
+
+
+def desktop_cause_head(view):
+    cmp = desktop_compare(view)
+    t = Text()
+    if cmp is None:
+        t.append(" 비교할 표본이 부족합니다 — 이 구간과 기준 구간(v 로 바꿈) 모두에 수집된 표본이 있어야 합니다.", style="grey50")
+        return t
+    for name, a, b, unit in cmp["metrics"]:
+        d = None if a is None or b is None else a - b
+        _line(t, name, _f(a, 1, unit), f"기준 {_f(b, 1, unit)}" + ("" if d is None else f" · 차이 {d:+.1f}{unit}"), lw=14, vw=12)
+    return t
+
+
+def desktop_cause_changes(view):
+    cmp = desktop_compare(view)
+    t = Text()
+    if not cmp or not cmp["apps"]:
+        return t
+    t.append(" 앱별 CPU 변화(코어 1개=100%, 차이가 큰 순) — 상관일 뿐 원인이라는 뜻은 아님\n", style="grey50")
+    for name, a, b, d in cmp["apps"]:
+        t.append(" " + pad(name[:20], 21), style="white")
+        t.append(f"{a:>6.1f}% ← {b:>6.1f}%  ", style="grey70")
+        t.append(f"{d:+.1f}\n", style="dark_orange" if d > 0 else "green")
     return t

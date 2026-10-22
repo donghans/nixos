@@ -21,6 +21,27 @@ PRESETS = ["1시간", "6시간", "오늘", "어제", "3일"]
 STALE_S = 300                    # 데이터 기준 시각이 이보다 오래되면 화면에 '오래됨' 표시
 
 
+def host_profile():
+    """이 호스트에 어떤 센서가 있나 — 화면을 노트북형(전력·배터리 중심)과 데스크톱형(프로세스·CPU 중심)으로 가르는 기준.
+    호스트 이름이나 nix 의 호스트 종류가 아니라 **센서 유무**로 가른다(배터리 없는 다른 호스트도 같은 화면이 된다).
+    OBSERVE_USAGE_PROFILE=laptop|desktop 으로 강제할 수 있다(시험용). 반환 {"battery": bool, "psys": bool}."""
+    forced = os.environ.get("OBSERVE_USAGE_PROFILE")
+    if forced in ("laptop", "desktop"):
+        return {"battery": forced == "laptop", "psys": forced == "laptop"}
+    battery = False
+    for d in glob.glob("/sys/class/power_supply/*"):
+        try:
+            if open(d + "/type").read().strip() == "Battery":
+                battery = True
+        except OSError:
+            pass
+    return {"battery": battery, "psys": os.path.exists("/sys/class/powercap/intel-rapl:1")}
+
+
+def is_desktop(profile=None):
+    return not (profile or host_profile())["battery"]
+
+
 class Range:
     """[t0, t1] 조회 범위. follows_now=True 면 끝이 '지금'(새로고침 때마다 지금으로 이동)."""
 
@@ -236,6 +257,22 @@ def time_shares(recs):
             "low": frac(lambda r: r["state"] == "low"), "ac": frac(lambda r: r["ac"]), "discharging": frac(lambda r: r["status"] == "Discharging")}
 
 
+def pkg_energy(rows, t0, t1):
+    """구간 [t0, t1] 의 패키지(CPU+GPU) 전력량. 표본 하나는 (t-dt, t] 를 대표하므로 겹친 시간만큼 가중해 적분한다(observe_trace.energy 와 같은 방식).
+    psys 가 없는 호스트(데스크톱)에서 앱별 에너지 추정의 기준으로 쓴다. 반환 (Wh, 평균 W) 또는 (None, None)."""
+    wh = cover = 0.0
+    for r in rows:
+        w = (r.get("pw") or {}).get("pkg_w")
+        t, dt = r.get("t"), r.get("dt") or 30.0
+        if not isinstance(w, (int, float)) or t is None or t < t0 or t - dt > t1:
+            continue
+        ov = min(t, t1) - max(t - dt, t0)
+        if ov > 0:
+            wh += w * ov / 3600
+            cover += ov
+    return (wh, wh * 3600 / cover) if cover > 0 else (None, None)
+
+
 def summarize(rows, recs, spans, rng, now=None):
     """요약 탭이 쓰는 값. 각 값은 (값, 라벨) 이 아니라 평평한 dict — 라벨은 LABELS 에 한 곳으로 모았다."""
     now = now if now is not None else time.time()
@@ -251,7 +288,9 @@ def summarize(rows, recs, spans, rng, now=None):
         tot = sum(v["cpu"] for v in table.values()) or 1.0
         top_apps = sorted(((k, v["cpu"], v["cpu"] * 100 / tot, v["ctxsw"]) for k, v in table.items()), key=lambda x: -x[1])[:5]
     est = battery_estimate(recs) if recs and now - recs[-1]["t"] <= 600 and rng.t1 >= now - 600 else None
+    pkg_wh, avg_pkg_w = pkg_energy(rows, rng.t0, rng.t1)
     return {
+        "pkg_wh": pkg_wh, "avg_pkg_w": avg_pkg_w, "avg_cpu_pct": _mean([r["cpu_all"] for r in recs]), "avg_ctxsw": _mean([r["ctxsw_all"] for r in recs]),
         "range": rng.text(), "n": len(rows), "hours": sh["hours"], "gap_s": max(0.0, rng.secs - sh["hours"] * 3600),
         "avg_psys_w": en["avg_psys_w"] if en else None, "psys_wh": en["psys_wh"] if en else None,
         "coulomb": dc, "pct_first": first_pct, "pct_last": last_pct, "charges": charge_events(recs),
@@ -336,7 +375,9 @@ def load(rng, baseline="prev", now=None):
     base_rows = [r for r in all_rows if base and base[0] <= r["t"] < base[1]]
     spans = tr.build_spans(list(core.iter_jsonl(core.state_dir(), "events", lo - 3600, rng.t1 + 120)))
     recs = [compact(r) for r in rows]
-    return {"range": rng, "baseline": base, "baseline_kind": baseline, "loaded_at": now, "rows": rows, "base_rows": base_rows,
+    prof = host_profile()
+    prof = {"battery": prof["battery"] or any(r["pct"] is not None for r in recs), "psys": prof["psys"] or any(r["psys"] is not None for r in recs)}
+    return {"profile": prof, "range": rng, "baseline": base, "baseline_kind": baseline, "loaded_at": now, "rows": rows, "base_rows": base_rows,
             "all_rows": all_rows, "recs": recs, "spans": spans, "summary": summarize(rows, recs, spans, rng, now),
             "apps": ex.apps_table(rows), "procs": ex.proc_table(rows), "ebpf": ex.ebpf_table(rows),
             "span_rows": ex.span_table(spans, rows, rng.t0, rng.t1)}

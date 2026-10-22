@@ -93,6 +93,20 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 - **화면 확인은 실제 터미널로**: 헤드리스 `cage` 안에서 `kitty` 로 띄워 `grim` 으로 촬영한다(Textual 의 SVG 내보내기는 한글 칸 폭을 실제와 다르게 그려 정렬 문제를 놓친다).
 - 수집기가 기록하는 필드: `dev.psr`(`mode`, `sink`), `pw.full_uah`, `apps`(v4).
 
+### 호스트별 화면 분기(센서 유무, 2026-10-22)
+
+`usageui` 는 호스트 이름이나 nix 호스트 종류가 아니라 **센서 유무**(`usagedata.host_profile()`: `/sys/class/power_supply` 에 Battery, `/sys/class/powercap/intel-rapl:1`(psys))로 화면을 가른다. 시험용으로 `OBSERVE_USAGE_PROFILE=laptop|desktop` 으로 강제할 수 있다. 목표가 다르다 — 노트북은 **전력→배터리 사용량 관리·개선**, 데스크톱은 **비효율 프로세스 관리·집중할 곳에 자원 쓰기**.
+
+| | 노트북형(배터리 있음) | 데스크톱형(배터리 없음) |
+|---|---|---|
+| 첫 탭 | 1 대시보드 | **2 앱·프로세스** |
+| 대시보드 | psys·패키지·배터리 V×I·상태/PSR·배터리·시간 배분 | 패키지 전력·전체 CPU·문맥 전환 추이 + 구간 요약 + 앱 요약(배터리·psys·덮개·PSR 박스 없음) |
+| 앱별 "전력량 추정" | 구간 **psys** 전력량 × CPU 점유율 | 구간 **패키지(CPU+GPU)** 전력량 × CPU 점유율 — 전체 소비 전력이 아니다(열 이름·부제에 명시) |
+| 3 원인 | 전력 변화 결론 + 상세 접이식 | 전체 CPU·문맥 전환·패키지 전력의 지금/기준 비교 + 앱별 CPU 변화 순위 |
+| 4 시스템·기기 | 덮개·PSR·pc8/pc10·Wi-Fi 절전 | CPU 주파수·부하·문맥 전환/인터럽트. Netdata 의 psys·V×I 신호·차트는 숨김 |
+
+수집 기본값도 호스트 종류로 갈린다: 노트북은 기본 꺼짐(측정 위생), 그 밖은 기본 켜짐(`/etc/observe/default-enabled`, `observectl on|off` 가 항상 우선). Netdata 도 같다(노트북 꺼짐, 데스크톱·서버 켜짐).
+
 ### Netdata 로의 미러링
 
 수집기는 표본마다 숫자 일부를 Netdata statsd(`127.0.0.1:8125`)에 게이지로도 보낸다(`observe.*`: psys/pkg/core/uncore W, 방전·충전 전력, 잔량 %, state_low, psr_on, psr_sink_active, **ctxsw_top_all_threads_per_s(상위 프로세스의 모든 스레드 자발 전환 합)·ctxsw_all_per_s(시스템 전체 문맥 전환)**, **cpu_all_pct(전체 CPU 대비)**, 패키지 C-state pc2~pc10, s0ix. 2026-10-21 이전에 보낸 `wake_per_s`·`cpu_busy_pct`·`ctxsw_vol_top_per_s`(메인 스레드만) 차트는 이름이 달라 새 차트와 이어지지 않으며 7일 보관이 끝나면 사라진다. Netdata 에서는 `statsd_observe.<이름>_gauge` 차트로 보인다. **원본은 observectl(JSONL)** 이고 이쪽은 한쪽 방향 복사다 — 문자열·이벤트·표지·프로세스 상세·A/B 통계는 observectl 에만 있다. Netdata 쪽 이점은 시스템 지표(CPU·PSI·네트워크·디스크·온도)와 같은 시간축·같은 API 로 겹쳐 볼 수 있다는 것.
