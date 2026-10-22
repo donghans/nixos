@@ -212,3 +212,12 @@ Thunar 의 "Open in swayimg" 는 폴더에 쓸 수 있지만 loupe 는 폴더를
 - NoDisplay 인 imv/mpv 가 Thunar "Open With" 하위 메뉴에 보이는지(`gio mime` 목록에는 등록 앱으로 나옴). 화면 시험 중 사용자의 다른 창으로 포커스가 넘어가서 중단함.
 - imv 의 HEIC/AVIF/JXL/SVG 실제 표시, 마우스 휠 확대·드래그 이동(키보드 확대는 설명서로만 확인).
 - 이미지 3종(PNG만 아닌 다른 형식)·영상 기본 연결이 실제 더블클릭으로 열리는지(`xdg-mime query default` 로는 모두 연결 확인).
+
+### ONLYOFFICE 커서 2배 — 커서 환경변수가 앱에 안 닿음 (2026-10-22)
+- 증상: beelink-ser7-co 에서 Thunar·Super+Space 로 연 ONLYOFFICE(XWayland) 위에서만 마우스 커서가 2배.
+- 원인: `home.sessionVariables`(XCURSOR_SIZE/THEME)는 `~/.zshenv` 의 hm-session-vars 로만 읽혀 zsh 셸에만 있었음. uwsm 로그인에는 `~/.profile`·`uwsm/env` 가 없어 systemd 사용자 환경과 Hyprland 환경에는 변수가 없었음.
+  앱이 뜨는 경로가 둘: `thunar.service`(서비스 → systemd 관리자 환경 상속), `uwsm app` scope(Super+Space 런처 → **호출한 Hyprland 의 환경** 상속).
+  예전 `hyprland.conf` 의 `env = XCURSOR_SIZE,24` 가 Lua 이전 때 빠져 있었음.
+- 확인: `systemctl --user set-environment` 로 임시 주입 후 Thunar 경로는 정상, Super+Space 경로(ONLYOFFICE 프로세스 environ 에 변수 없음)는 여전히 2배.
+- 조치: `core.ui.cursor.nix` 에서 `systemd.user.sessionVariables` + `hl.env(...)` 추가. **다음 로그인부터 적용**(실행 중인 세션은 그대로).
+- 진단: `tr '\0' '\n' < /proc/<PID>/environ | grep XCURSOR` — 서비스 경로와 scope 경로의 상속 환경이 다름에 주의.
