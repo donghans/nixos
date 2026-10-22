@@ -71,6 +71,10 @@ if rec:
             if br and d.get('worktree') != repo and subprocess.run(['git', 'merge-base', '--is-ancestor', br, 'HEAD'], cwd=repo).returncode != 0:
                 un.append(f"- {br} ({len(sh('git','log','--oneline','HEAD..'+br,cwd=repo).splitlines())}커밋 앞) {d.get('worktree')}")
         print('미병합 워크트리 브랜치:', '(없음)' if not un else ''); [print(x) for x in un]
+    for nm, why in (('donghans-instructions.md', '추가 지침 — 기본 절차에 더해 적용'), ('donghans-override.md', '오버라이드 — 충돌하는 기본 절차보다 우선')):
+        pf = os.path.join(repo, '.claude', nm)
+        if os.path.isfile(pf):
+            print(f'\n## 프로젝트 지침: .claude/{nm} ({why})'); print(open(pf, errors="ignore").read().strip())
     ex = os.path.join(repo, '.claude', 'resume-extra')
     if os.path.isfile(ex) and os.access(ex, os.X_OK):
         print('\n## 프로젝트 추가 사실 (.claude/resume-extra)'); print(sh(ex, cwd=repo))

@@ -7,8 +7,12 @@ description: 어느 저장소에서든 세션을 닫거나 /clear 하기 전에,
 
 **원칙: 다음 세션이 사용자에게 되묻지 않고 이어갈 수 있을 만큼의 확실한 정보만, 오해 없는 표현으로.** 사실(코드·git 으로 확인) / 추정 / 사용자 발언 / 에이전트 보고를 섞지 않는다.
 
+
+## 프로젝트별 지침 (선택, 보통 `.git/info/exclude` 로 추적 제외)
+저장소 루트의 `.claude/donghans-instructions.md`(기본 절차에 **추가 적용**)와 `.claude/donghans-override.md`(기본 절차와 **충돌하면 이쪽이 우선**)가 있으면 따른다. **절차 시작 전에 두 파일이 있으면 읽는다**(`cat <저장소>/.claude/donghans-{instructions,override}.md`). 문서 형식·커밋 규약·갱신할 상태 파일 등 저장소 고유 규칙은 여기에 있다. resume 쪽도 같은 파일을 읽으므로 인수인계에 적을 때 그 전제를 두어도 된다.
+
 ## 절차
-1. **지금의 사실을 먼저 얻는다(기억으로 쓰지 않는다):** `git status --short`, `git log -1`, `git worktree list`, 미병합 브랜치(`git log --oneline HEAD..<br>`), 진행 중 백그라운드 작업. 저장소에 프로젝트 전용 handoff 스킬(예: `handoff-tot`)이 있으면 그 절차가 우선이고 이 스킬은 4~5단계(등록·안내)만 쓴다.
+1. **지금의 사실을 먼저 얻는다(기억으로 쓰지 않는다):** `git status --short`, `git log -1`, `git worktree list`, 미병합 브랜치(`git log --oneline HEAD..<br>`), 진행 중 백그라운드 작업. 
 2. **상시 지시를 모은다:** 이 대화에서 사용자가 준 방침·금지·선호를 원문에 가깝게. 직전 HANDOFF 문서의 상시 지시 중 아직 유효한 것은 유지. 사용자의 환경 규칙은 `~/.claude/CLAUDE.md` 가 이미 로드되므로 반복하지 않는다.
 3. **문서를 쓴다:** 저장소의 기존 HANDOFF 위치 관례를 따르고(`docs/HANDOFF-*.md` 등), 없으면 `docs/HANDOFF-<YYYY-MM-DD>.md`(docs/ 가 없으면 루트). 같은 날짜 파일이 있으면 갱신하고 `supersedes` 에 적는다. **최대 약 120줄.**
    - frontmatter: `version`, `updated`, `status`, `handoff_id: $CLAUDE_CODE_SESSION_ID`(`echo $CLAUDE_CODE_SESSION_ID`), `branch/HEAD(푸시 여부)`, `supersedes`
