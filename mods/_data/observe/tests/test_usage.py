@@ -166,6 +166,10 @@ check("데스크톱 앱 표: 전력량 추정은 패키지 전력량 × 점유�
 cmpd = uv.desktop_compare(dv)
 check("데스크톱 비교: 지금 vs 기준 — CPU 12 vs 5, 앱별 변화는 node(+30)가 가장 큼", cmpd and abs(cmpd["metrics"][0][1] - 12.0) < 0.1 and abs(cmpd["metrics"][0][2] - 5.0) < 0.1 and cmpd["apps"][0][0] == "node" and abs(cmpd["apps"][0][3] - 30.0) < 0.1, str(cmpd))
 check("데스크톱 비교 문구: 차이와 앱 변화 표시, 기준이 없으면 안내", "+7.0%" in uv.desktop_cause_head(dv).plain and "node" in uv.desktop_cause_changes(dv).plain and "부족" in uv.desktop_cause_head(ud.load(ud.preset("1시간", now), "none", now=now)).plain)
+hl = uv.desktop_headline(dv).plain
+check("데스크톱 headline: 전력·CPU 차이와 많이 달라진 앱(node)", "패키지" in hl and "전체 CPU" in hl and "node" in hl, hl)
+check("데스크톱 headline: 기준이 없으면 비교 불가 안내 + 지금 가장 쓰는 앱", "비교하지 못합니다" in uv.desktop_headline(ud.load(ud.preset("1시간", now), "none", now=now)).plain)
+check("데스크톱 깨움 상위: 앱·/s 표시", "/s" in uv.desktop_ctxsw(dv, 80).plain and "node" in uv.desktop_ctxsw(dv, 80).plain, uv.desktop_ctxsw(dv, 80).plain)
 check("데스크톱 Netdata 차트·신호: psys·V×I 항목은 제외", all(c[0] != "psys_w" for c in uv.nd_charts(dv["profile"])) and "RAPL psys" not in dict((a, b) for a, b, _ in uv.nd_signal_rows({"snap": {"signals": {"psys_w": 5.0, "batt_vi_w": 2.0, "pkg_w": 20.0}}}, dv)) and "배터리 V×I" not in dict((a, b) for a, b, _ in uv.nd_signal_rows({"snap": {"signals": {"psys_w": 5.0, "batt_vi_w": 2.0, "pkg_w": 20.0}}}, dv)))
 check("데스크톱 기기 상태: 덮개·PSR·pc8 없이 CPU 주파수·부하", "덮개" not in uv.device_text(dv).plain and "PSR" not in uv.device_text(dv).plain and "부하" in uv.device_text(dv).plain)
 check("데스크톱 작업 구간 표: 전력량 열 없음(2열)", all(len(r) == 2 for r in uv.span_rows(dv)))
@@ -174,7 +178,8 @@ async def desk():
     app = usageui.UsageUI(ud.preset("1시간", now))
     async with app.run_test(size=(140, 45)) as pilot:
         await pilot.pause(1.0)
-        check("데스크톱 앱: 기본 첫 탭이 앱·프로세스", app.desktop and app.query_one("#tabs", TabbedContent).active == "apps")
+        check("데스크톱 앱: 기본 첫 탭이 대시보드", app.desktop and app.query_one("#tabs", TabbedContent).active == "dashboard")
+        check("데스크톱 대시보드: '지금 어떤가'·깨움 상위 박스", len(app.query("#dnow")) == 1 and len(app.query("#dctx")) == 1)
         check("데스크톱 앱: 배터리·psys 박스 없음(dbatt·dhab·dbands·pwr0 부재), 패키지·CPU·문맥 전환 차트", not app.query("#dbatt") and not app.query("#dhab") and not app.query("#dbands") and not app.query("#pwr0") and len(app.query("#pwr1")) == 1 and len(app.query("#pwr4")) == 1 and len(app.query("#pwr5")) == 1)
         t = app.query_one("#tapps", DataTable)
         check("데스크톱 앱: 앱 표 첫 행 node, 전력량 열 이름에 'CPU+GPU'", str(t.get_row_at(0)[0]) == "node" and "CPU+GPU" in str(list(t.columns.values())[6].label))

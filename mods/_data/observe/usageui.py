@@ -82,6 +82,9 @@ class UsageUI(uikit.HelpMixin, App):
     #dash { height: 1fr; min-height: 46; }
     #dleft { width: 3fr; height: 1fr; }
     #dright { width: 2fr; min-width: 52; height: 1fr; }
+    #dright > #dnow { height: 6; }
+    #dright > #dsum { height: 9; }
+    #dright > #dctx { height: 9; }
     #dash.narrow { layout: vertical; height: auto; }
     #dash.narrow #dleft, #dash.narrow #dright { width: 100%; height: auto; }
     #dash.narrow .box { height: 12; }
@@ -116,7 +119,7 @@ class UsageUI(uikit.HelpMixin, App):
         self.prof = ud.host_profile()
         self.desktop = not self.prof["battery"]
         if tab is None:
-            tab = "apps" if self.desktop else "dashboard"        # 데스크톱은 '어느 프로세스가 쓰나'가 첫 화면
+            tab = "dashboard"        # 노트북·데스크톱 모두 대시보드가 첫 화면(데스크톱 대시보드에 '지금 어떤가'·깨움 상위·앱 요약을 모음)
         self.expand = expand
         self.rng = rng or ud.preset("1시간", time.time())
         self.baseline = baseline
@@ -200,7 +203,9 @@ class UsageUI(uikit.HelpMixin, App):
                 yield uikit.box(Panel(lambda w, h: self._chart(4, w, h), id="pwr4"), "전체 CPU · 전체 대비 %")
                 yield uikit.box(Panel(lambda w, h: self._chart(5, w, h), id="pwr5"), "시스템 전체 문맥 전환/s")
         with Vertical(id="dright"):
+            yield uikit.box(Panel(lambda w, h: self._v(uv.desktop_headline), id="dnow"), "지금 어떤가 — 기준 구간 대비")
             yield uikit.box(Panel(lambda w, h: self._v(self._sumtext), id="dsum"), "구간 · 요약")
+            yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.desktop_ctxsw(v, w)), id="dctx"), "깨움(문맥 전환) 상위 앱")
             yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.summary_apps(v, w)), id="dapps"), "앱 — CPU 점유 · 오래 본 앱")
 
     def _sumtext(self, v):

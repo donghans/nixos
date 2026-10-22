@@ -460,6 +460,69 @@ def desktop_compare(view):
     return {"metrics": metrics, "apps": apps[:12]}
 
 
+HEADLINE_MIN_W = 1.5        # 패키지 전력이 이만큼(W) 이상 달라져야 '올랐다/내렸다'
+HEADLINE_MIN_APP = 3.0      # 앱 CPU(코어 1개=100%)가 이만큼 이상 달라져야 거론
+
+
+def desktop_headline(view):
+    """데스크톱 대시보드 맨 위: 지금 구간이 기준 구간과 어떻게 다른지 한눈에(상관일 뿐 원인 단정 아님)."""
+    t = Text()
+    if not view["rows"]:
+        t.append(" 이 범위에는 표본이 없습니다.", style="grey50")
+        return t
+    cmp = desktop_compare(view)
+    if cmp is None:
+        t.append(" 기준 구간 표본이 없어 비교하지 못합니다 — 수집이 쌓이거나 v 로 기준을 바꾸면 보입니다.\n", style="grey50")
+        apps = view["summary"]["top_apps"]
+        if apps:
+            t.append(f" 지금 CPU 를 가장 쓰는 앱: {apps[0][0]} {apps[0][1]:.0f}%(코어 1개=100%)", style="white")
+        return t
+    m = {name: (a, b) for name, a, b, _ in cmp["metrics"]}
+    pa, pb = m["패키지 전력"]
+    ca, cb = m["전체 CPU"]
+    if pa is None or pb is None:
+        t.append(" 패키지 전력을 읽지 못해 비교하지 못했습니다.\n", style="grey50")
+    elif abs(pa - pb) < HEADLINE_MIN_W:
+        t.append(" 기준과 비슷합니다 ", style="bold green")
+        t.append(f"패키지 {pa:.1f} W (기준 {pb:.1f} W)\n", style="grey70")
+    else:
+        up = pa > pb
+        t.append(" 전력이 올랐습니다 " if up else " 전력이 내렸습니다 ", style="bold dark_orange" if up else "bold green")
+        t.append(f"패키지 {pa:.1f} W ← {pb:.1f} W ({pa - pb:+.1f})\n", style="grey70")
+    if ca is not None and cb is not None:
+        t.append(f" 전체 CPU {ca:.1f}% ← {cb:.1f}% ({ca - cb:+.1f})\n", style="grey70")
+    movers = [x for x in cmp["apps"] if abs(x[3]) >= HEADLINE_MIN_APP][:3]
+    if movers:
+        t.append(" 많이 달라진 앱(상관일 뿐): ", style="grey50")
+        for i, (name, a, b, d) in enumerate(movers):
+            t.append(("" if i == 0 else " · ") + f"{name} {d:+.0f}%", style="dark_orange" if d > 0 else "green")
+    else:
+        t.append(" 눈에 띄게 달라진 앱은 없습니다.", style="grey50")
+    return t
+
+
+def desktop_ctxsw(view, w, n=6):
+    """문맥 전환(깨움)이 많은 앱 — 데스크톱에서는 CPU% 보다 먼저 비효율을 드러낼 때가 많다. 앱 단위 합(자발적 전환/s)."""
+    t = Text()
+    got = view["apps"]
+    if not got:
+        t.append(" 앱 단위 표본(v4)이 아직 없습니다.\n", style="grey50")
+        return t
+    table, _ = got
+    rows = sorted(((k, v["ctxsw"]) for k, v in table.items() if v.get("ctxsw")), key=lambda kv: -kv[1])[:n]
+    if not rows:
+        t.append(" 문맥 전환 기록이 없습니다.\n", style="grey50")
+        return t
+    top = rows[0][1] or 1.0
+    bw = max(4, min(24, w - 36))
+    t.append(" 자발적 문맥 전환/s (모든 스레드 합)\n", style="bold")
+    for name, c in rows:
+        t.append(" " + pad(name[:16], 17) + f"{c:>8.0f}/s  ", style="white")
+        t.append(pg.hbar(c / top, bw), style="yellow")
+        t.append("\n")
+    return t
+
+
 def desktop_cause_head(view):
     cmp = desktop_compare(view)
     t = Text()
