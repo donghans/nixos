@@ -179,7 +179,9 @@ Thunar 의 "Open in swayimg" 는 폴더에 쓸 수 있지만 loupe 는 폴더를
 - **글꼴이 뻣뻣한 원인**: 시스템 fontconfig/FreeType 이 아니라 ONLYOFFICE 자체 엔진(FreeType 이 `fonts.wasm` 에 내장, 시스템 것을 안 씀)의 힌팅.
   시스템 설정은 NixOS 기본(`hintstyle slight`, 회색조, 서브픽셀 없음)인데 ONLYOFFICE 는 pango 의 medium/full 힌팅과 비슷한 수치(회색 22%/진한 검정 64% vs 20%/68%; slight 는 36%/33%)였음.
   세 개 중 선택지: `as Windows`(기본) / `as OS X` / `Native`. **`as OS X` 로 바꾸니 획이 부드러워지고 간격이 자연스러워짐**(사용자도 확인). `Native` 는 시험하지 않음.
-- **설정 위치**: 문서를 연 뒤 `File` → 왼쪽 패널 **맨 아래** `Advanced Settings` → `Font hinting` → 선택 후 **`Apply`**. 이 값은 앱 내부 저장소에 들어가고 설정 파일(`DesktopEditors.conf`)에는 없어서 **선언적으로 관리하지 못함**(새 홈에서는 다시 설정해야 함).
+- **설정 위치**: 문서를 연 뒤 `File` → 왼쪽 패널 **맨 아래** `Advanced Settings` → `Font hinting` → 선택 후 **`Apply`**. 이 값은 설정 파일(`DesktopEditors.conf`)이 아니라 앱 내부 저장소(Chromium localStorage, LevelDB: `Local Storage/leveldb`)의 편집기별 키 `<de|pe|sse|pdfe>-settings-fontrender` 에 들어감. 값은 `0`=as Windows / `1`=as OS X / `2`=Native(앱 `code.js` 로 확인). 키 `_file://\0\x01<이름>`, 값 `\x01<문자열>`.
+  → `office.nix` 의 `onlyofficeFontHinting` 활성화가 plyvel 로 네 키를 `1` 로 맞춤(2026-10-22). 앱이 떠 있으면 DB 잠금으로 건너뛰고, DB 가 아직 없는 새 홈은 앱을 한 번 실행한 뒤부터 적용.
+  검증은 복사본 DB 에 쓰고 읽어 형식을 확인한 것까지이고, 활성화 시점에는 이미 값이 `1` 이라 실제로 바뀌는 경로는 확인하지 못함.
   (자동 조작 시 주의: 드롭다운 항목은 커서를 순간이동만 시키면 호버가 없어 안 눌리므로 실제 이동 이벤트를 준 뒤 클릭해야 함.)
 - **인터페이스 언어**: `DesktopEditors.conf` 의 `locale=ko` 로 한국어가 됨(실제 확인: 메뉴·설정·저장 확인창 모두 한국어). `office.nix` 의 활성화 스크립트가 이 키를 맞춤.
   처음에 "설정 파일로는 안 된다"고 한 것은 확인 없이 한 말이라 틀렸음. Region/Formula language 는 Advanced Settings 쪽이라 별개(현재 English).

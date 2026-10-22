@@ -115,6 +115,23 @@ in {
       fi
     '';
 
+    # 글꼴 힌팅(Advanced Settings > Font hinting)은 설정 파일이 아니라 앱 내부 저장소(Chromium localStorage = LevelDB)에
+    # 편집기별 키 `<de|pe|sse|pdfe>-settings-fontrender` 로 들어 있음. 값: 0=as Windows(기본) / 1=as OS X / 2=Native (앱 코드로 확인).
+    # 키 형식은 실제 DB 를 읽어 확인: 키 `_file://\0\x01<이름>`, 값 `\x01<문자열>`(latin1).
+    # 앱이 떠 있으면 DB 가 잠겨 있어 건너뜀(다음 활성화 때 적용). DB 가 아직 없으면(새 홈) 앱을 한 번 실행한 뒤부터 적용.
+    home.activation.onlyofficeFontHinting = lib.hm.dag.entryAfter ["writeBoundary"] ''
+      db="$HOME/.local/share/onlyoffice/desktopeditors/data/cache/Local Storage/leveldb"
+      if [ -z "''${DRY_RUN:-}" ] && [ -d "$db" ]; then
+        ${pkgs.python3.withPackages (p: [p.plyvel])}/bin/python3 - "$db" 1 <<'PY' || echo "onlyoffice 글꼴 힌팅: 앱이 실행 중이라 건너뜀(종료 후 다시 활성화)"
+      import sys, plyvel
+      db = plyvel.DB(sys.argv[1])
+      for ed in ("de", "pe", "sse", "pdfe"):
+          db.put(("_file://\0\x01%s-settings-fontrender" % ed).encode("latin1"), b"\x01" + sys.argv[2].encode())
+      db.close()
+      PY
+      fi
+    '';
+
     home.activation.onlyofficeFonts = lib.hm.dag.entryAfter ["writeBoundary"] ''
       if [ -z "''${DRY_RUN:-}" ]; then
         mkdir -p "$HOME/.local/share/fonts"
