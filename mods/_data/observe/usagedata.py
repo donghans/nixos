@@ -14,10 +14,11 @@ from datetime import datetime, timedelta
 import observe_core as core
 import observe_explain as ex
 import observe_trace as tr
+import usagespikes as sp
 
 BUSY = {"nix-daemon", "nix", "nixos-rebuild", "nixup", ".nixup-wrapped", "cc1", "ld", "rustc"}   # 빌드 중인 표본은 '한가한 기준'에서 뺀다(clean=False)
 MAX_GAP = 90                     # 표본 사이가 이보다 벌어지면 수집 공백(시간 합산에서 제외)
-PRESETS = ["1시간", "6시간", "오늘", "어제", "3일"]
+PRESETS = ["1시간", "6시간", "오늘", "어제", "3일", "7일"]
 STALE_S = 300                    # 데이터 기준 시각이 이보다 오래되면 화면에 '오래됨' 표시
 
 
@@ -63,6 +64,8 @@ def preset(name, now):
         return Range(now - 6 * 3600, now, name, True)
     if name == "3일":
         return Range(now - 3 * 86400, now, name, True)
+    if name == "7일":
+        return Range(now - 7 * 86400, now, name, True)
     if name == "오늘":
         return Range(_midnight(now).timestamp(), now, name, True)
     if name == "어제":
@@ -368,7 +371,8 @@ def load(rng, baseline="prev", now=None):
     return {"profile": prof, "range": rng, "baseline": base, "baseline_kind": baseline, "loaded_at": now, "rows": rows, "base_rows": base_rows,
             "all_rows": all_rows, "recs": recs, "spans": spans, "summary": summarize(rows, recs, spans, rng, now),
             "apps": ex.apps_table(rows), "procs": ex.proc_table(rows), "ebpf": ex.ebpf_table(rows),
-            "span_rows": ex.span_table(spans, rows, rng.t0, rng.t1)}
+            "span_rows": ex.span_table(spans, rows, rng.t0, rng.t1),
+            "spikes": sp.find_spikes(rows, spans, prof["psys"], all_rows=all_rows)}
 
 
 def stale(view, now=None):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """usageui — 전력·자원 사용 습관 TUI (Textual). observectl 이 쌓은 표본을 '시간 범위' 기준으로 조회해 보여 준다.
 
-원칙: ① 조회는 범위 기준(기본 = 지금까지 최근 1시간) ② **갱신은 수동만**(타이머 없음 — r/F5) ③ 값마다 '측정/추정' 표시
+원칙: ① 조회는 범위 기준(기본 = 지금까지 최근 7일) ② **갱신은 수동만**(타이머 없음 — r/F5) ③ 값마다 '측정/추정' 표시
 ④ 프로세스 *관리*(종료·nice)는 btop(b 키), 프로세스 *지표*(누가 얼마나 쓰나)는 여기.
 탭: 1 대시보드(전력·배터리·습관·앱) / 2 앱·프로세스 / 3 원인 / 4 시스템·기기(Netdata·수집 상태) / 5 용어
 측정 중에는 열어 두지 마세요(화면 갱신은 없지만 조회 순간 CPU 를 씁니다)."""
@@ -67,6 +67,36 @@ class RangeScreen(ModalScreen):
         self.dismiss(None)
 
 
+class SpikesScreen(ModalScreen):
+    """튀었던 순간 전체 순위. Enter 로 그 시각(앞뒤 30분)으로 범위를 옮긴다, Esc 닫기."""
+    BINDINGS = [Binding("escape", "cancel", "닫기")]
+
+    def __init__(self, view):
+        super().__init__()
+        self.view = view
+
+    def compose(self):
+        with Vertical(id="dialog", classes="wide"):
+            yield Static(f"튀었던 순간 순위 — 5분 평균 {uv.spike_basis(self.view)} 전력, 평소(중앙값)보다 더 쓴 에너지 순", id="dialog-title")
+            yield DataTable(id="spk", cursor_type="row", zebra_stripes=True)
+            yield Static("Enter 그 시각으로 이동(앞뒤 30분) · Esc 닫기 · 상관일 뿐 원인 아님", id="dialog-hint")
+
+    def on_mount(self):
+        t = self.query_one("#spk", DataTable)
+        t.add_columns("순위", "시각", "길이", "평균 W", "평소 대비", "초과 Wh", "앞 W", "뒤 W", "다른 날 W", "CPU", "그때 앱·포커스")
+        for r in uv.spike_rows(self.view):
+            t.add_row(*r, key=r[0])
+        t.focus()
+
+    def on_data_table_row_selected(self, ev):
+        rank = int(str(ev.row_key.value))
+        s = next(x for x in self.view["spikes"] if x["rank"] == rank)
+        self.dismiss(ud.Range(s["t0"] - 1800, s["t1"] + 1800, "직접", False))
+
+    def action_cancel(self):
+        self.dismiss(None)
+
+
 class UsageUI(uikit.HelpMixin, App):
     TITLE = "usageui"
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
@@ -82,13 +112,16 @@ class UsageUI(uikit.HelpMixin, App):
     #dash { height: 1fr; min-height: 46; }
     #dleft { width: 3fr; height: 1fr; }
     #dright { width: 2fr; min-width: 52; height: 1fr; }
-    #dright > #dnow { height: 6; }
+    #dright > #dnow { height: 9; }
+    #dright > #dcpu { height: 8; }
+    #dash.desk #dright > #dapps { min-height: 8; }
     #dright > #dsum { height: 9; }
-    #dright > #dctx { height: 9; }
+    #dright > #dctx { height: 8; }
     #dash.narrow { layout: vertical; height: auto; }
     #dash.narrow #dleft, #dash.narrow #dright { width: 100%; height: auto; }
     #dash.narrow .box { height: 12; }
-    #dpower { height: 1fr; min-height: 22; }
+    #dpower { height: 1fr; min-height: 20; }
+    #dleft > #dspk { height: 13; }
     #dbatt { height: 12; }
     #dbatt Horizontal { height: 1fr; }
     #dbatt #pwr3 { width: 3fr; }
@@ -103,12 +136,14 @@ class UsageUI(uikit.HelpMixin, App):
     Collapsible > Contents { height: auto; padding: 0; }
     DataTable { height: 1fr; background: #000000; }
     #range-err { height: auto; }
+    #dialog.wide { width: 96%; max-width: 220; }
+    #dialog.wide DataTable { height: auto; max-height: 14; }
     """
     BINDINGS = [
         Binding("q", "quit", "종료"),
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('apps')", "앱"), Binding("3", "tab('cause')", "원인"),
         Binding("4", "tab('system')", "시스템"), Binding("5", "tab('help')", "용어"),
-        Binding("t", "set_range", "범위"), Binding("v", "cycle_baseline", "비교 기준"),
+        Binding("t", "set_range", "범위"), Binding("s", "spikes", "튄 순간"), Binding("v", "cycle_baseline", "비교 기준"),
         Binding("r,f5", "reload", "새로고침"), Binding("b", "btop", "btop"), Binding("e", "export", "저장"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
@@ -121,7 +156,7 @@ class UsageUI(uikit.HelpMixin, App):
         if tab is None:
             tab = "dashboard"        # 노트북·데스크톱 모두 대시보드가 첫 화면(데스크톱 대시보드에 '지금 어떤가'·깨움 상위·앱 요약을 모음)
         self.expand = expand
-        self.rng = rng or ud.preset("1시간", time.time())
+        self.rng = rng or ud.preset("7일", time.time())
         self.baseline = baseline
         self.start_tab = tab
         self.view = None
@@ -189,6 +224,7 @@ class UsageUI(uikit.HelpMixin, App):
                 with Horizontal():
                     yield uikit.box(Panel(lambda w, h: self._chart(3, w, h), id="pwr3"), "잔량 %")
                     yield uikit.box(Panel(lambda w, h: self._health(), id="dhealth"), "건강 · 예상 사용 시간(추정)")
+            yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.spikes_text(v, 3, w)), id="dspk"), "튀었던 순간 TOP 3 — 평소·이웃과 비교")
         with Vertical(id="dright"):
             yield uikit.box(Panel(lambda w, h: self._v(self._sumtext), id="dsum"), "구간 · 전력 요약")
             yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.summary_habit(v, w)), id="dhab"), "시간 배분 — 어떻게 썼나")
@@ -202,9 +238,11 @@ class UsageUI(uikit.HelpMixin, App):
                 yield uikit.box(Panel(lambda w, h: self._chart(1, w, h), id="pwr1"), "패키지 · CPU+GPU(전체 소비 전력이 아님)")
                 yield uikit.box(Panel(lambda w, h: self._chart(4, w, h), id="pwr4"), "전체 CPU · 전체 대비 %")
                 yield uikit.box(Panel(lambda w, h: self._chart(5, w, h), id="pwr5"), "시스템 전체 문맥 전환/s")
+            yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.spikes_text(v, 3, w)), id="dspk"), "튀었던 순간 TOP 3 — 평소·이웃과 비교")
         with Vertical(id="dright"):
             yield uikit.box(Panel(lambda w, h: self._v(uv.desktop_headline), id="dnow"), "지금 어떤가 — 기준 구간 대비")
             yield uikit.box(Panel(lambda w, h: self._v(self._sumtext), id="dsum"), "구간 · 요약")
+            yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.desktop_cpu_top(v, w)), id="dcpu"), "CPU 상위 앱 — 연산 부하")
             yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.desktop_ctxsw(v, w)), id="dctx"), "깨움(문맥 전환) 상위 앱")
             yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.summary_apps(v, w)), id="dapps"), "앱 — CPU 점유 · 오래 본 앱")
 
@@ -229,6 +267,7 @@ class UsageUI(uikit.HelpMixin, App):
         self._fit()
 
     def on_mount(self):
+        self.query_one("#dash").set_class(self.desktop, "desk")
         self._fit()
         self.reload()
 
@@ -256,7 +295,7 @@ class UsageUI(uikit.HelpMixin, App):
         for k, d in uv.GLOSSARY:
             t.append(f" {k:<14}", style="#33ccff")
             t.append(d + "\n")
-        t.append("\n 키: 1~5 탭 · t 범위 · v 비교 기준 · r/F5 새로고침 · b btop · e 내보내기 · ? 키 목록 · q 종료", style="grey50")
+        t.append("\n 키: 1~5 탭 · t 범위 · s 튄 순간 순위 · v 비교 기준 · r/F5 새로고침 · b btop · e 내보내기 · ? 키 목록 · q 종료", style="grey50")
         return t
 
     # --- 데이터: 수동 갱신만(타이머 없음)
@@ -383,6 +422,15 @@ class UsageUI(uikit.HelpMixin, App):
                 self.reload()
         self.push_screen(RangeScreen(self.rng), done)
 
+    def action_spikes(self):
+        if not self.view:
+            return
+        def done(rng):
+            if rng is not None:
+                self.rng = rng
+                self.reload()
+        self.push_screen(SpikesScreen(self.view), done)
+
     def action_cycle_baseline(self):
         kinds = [k for k, _ in BASELINES]
         self.baseline = kinds[(kinds.index(self.baseline) + 1) % len(kinds)]
@@ -434,13 +482,13 @@ class TableBox(Vertical):
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog="usageui", description="전력·자원 사용 습관 TUI")
-    p.add_argument("--range", default="1시간", help="처음 범위: 1시간·6시간·오늘·어제·3일 · -30m · 10:00..11:30")
+    p.add_argument("--range", default=None, help="처음 범위(기본: 7일): 1시간·6시간·오늘·어제·3일·7일 · -30m · 10:00..11:30")
     p.add_argument("--tab", default=None, help="처음 탭(기본: 배터리 있으면 dashboard, 없으면 apps)", choices=["dashboard", "apps", "cause", "system", "help"])
     p.add_argument("--expand", action="store_true", help="원인 탭의 상세 표를 처음부터 펼침")
     p.add_argument("--baseline", default="prev", choices=[k for k, _ in BASELINES])
     a = p.parse_args(argv)
     try:
-        rng = ud.parse_range(a.range)
+        rng = ud.parse_range(a.range or "7일")
     except ValueError as e:
         sys.exit(str(e))
     UsageUI(rng, a.baseline, a.tab, a.expand).run()

@@ -464,6 +464,27 @@ HEADLINE_MIN_W = 1.5        # 패키지 전력이 이만큼(W) 이상 달라져�
 HEADLINE_MIN_APP = 3.0      # 앱 CPU(코어 1개=100%)가 이만큼 이상 달라져야 거론
 
 
+RECENT_S = 900              # '지금' 으로 보는 최근 구간(초) — 긴 범위 평균에 급등이 묻히지 않게 따로 본다
+RECENT_MIN_CPU = 15.0       # 최근 전체 CPU 가 범위 평균보다 이만큼(%p) 높으면 '지금 높음'
+
+
+def desktop_recent(view):
+    """범위가 '지금까지'이고 최근 15분보다 충분히 길 때, 최근 15분의 전체 CPU·패키지 전력·앱별 CPU. 아니면 None.
+    반환 {"cpu", "pkg", "apps": [(앱, CPU)]큰 순, "n"}. 범위 평균(cpu_avg·pkg_avg)도 같이 돌려준다."""
+    rows, rng = view["rows"], view["range"]
+    if not rows or not rng.follows_now or rng.secs < 2 * RECENT_S:
+        return None
+    cut = rows[-1]["t"] - RECENT_S
+    rec = [r for r in rows if r["t"] >= cut]
+    if len(rec) < 3:
+        return None
+    irq = lambda r: (r.get("irq") or {}).get("cpu_all_pct")
+    pk = lambda r: (r.get("pw") or {}).get("pkg_w")
+    got = ex.apps_table(rec)
+    apps = sorted(((k, v["cpu"]) for k, v in got[0].items()), key=lambda kv: -kv[1]) if got else []
+    return {"cpu": _avg(rec, irq), "pkg": _avg(rec, pk), "cpu_avg": _avg(rows, irq), "pkg_avg": _avg(rows, pk), "apps": apps, "n": len(rec)}
+
+
 def desktop_headline(view):
     """데스크톱 대시보드 맨 위: 지금 구간이 기준 구간과 어떻게 다른지 한눈에(상관일 뿐 원인 단정 아님)."""
     t = Text()
@@ -498,10 +519,43 @@ def desktop_headline(view):
             t.append(("" if i == 0 else " · ") + f"{name} {d:+.0f}%", style="dark_orange" if d > 0 else "green")
     else:
         t.append(" 눈에 띄게 달라진 앱은 없습니다.", style="grey50")
+    rec = desktop_recent(view)
+    if rec and rec["cpu"] is not None and rec["cpu_avg"] is not None:
+        hot = rec["cpu"] - rec["cpu_avg"] >= RECENT_MIN_CPU
+        t.append("\n" + (" ⚠ 지금(최근 15분) 높음 " if hot else " 지금(최근 15분) "), style="bold dark_orange" if hot else "bold green")
+        t.append(f"CPU {rec['cpu']:.0f}% (범위 평균 {rec['cpu_avg']:.0f}%)", style="grey70")
+        if rec["pkg"] is not None:
+            t.append(f" · 패키지 {rec['pkg']:.0f} W", style="grey70")
+        if hot and rec["apps"]:
+            t.append("\n 지금 CPU 상위: " + " · ".join(f"{n} {c:.0f}%" for n, c in rec["apps"][:3]), style="dark_orange")
     return t
 
 
-def desktop_ctxsw(view, w, n=6):
+def desktop_cpu_top(view, w, n=5):
+    """CPU 를 가장 쓰는 앱 — 범위가 지금까지면 최근 15분, 아니면 범위 전체(코어 1개=100%). 문맥 전환 박스가 못 잡는 연산 부하용."""
+    t = Text()
+    rec = desktop_recent(view)
+    if rec:
+        apps, label = rec["apps"], "최근 15분"
+    else:
+        got = view["apps"]
+        apps = sorted(((k, v["cpu"]) for k, v in got[0].items()), key=lambda kv: -kv[1]) if got else []
+        label = "이 범위 평균"
+    apps = [x for x in apps if x[1] >= 0.5][:n]
+    if not apps:
+        t.append(" 앱 단위 CPU 기록이 없습니다.\n", style="grey50")
+        return t
+    top = apps[0][1] or 1.0
+    bw = max(4, min(24, w - 36))
+    t.append(f" CPU 점유 ({label}, 코어 1개=100%)\n", style="bold")
+    for name, c in apps:
+        t.append(" " + pad(name[:16], 17) + f"{c:>8.0f}%   ", style="white")
+        t.append(pg.hbar(c / top, bw), style="cyan")
+        t.append("\n")
+    return t
+
+
+def desktop_ctxsw(view, w, n=5):
     """문맥 전환(깨움)이 많은 앱 — 데스크톱에서는 CPU% 보다 먼저 비효율을 드러낼 때가 많다. 앱 단위 합(자발적 전환/s)."""
     t = Text()
     got = view["apps"]
@@ -546,3 +600,59 @@ def desktop_cause_changes(view):
         t.append(f"{a:>6.1f}% ← {b:>6.1f}%  ", style="grey70")
         t.append(f"{d:+.1f}\n", style="dark_orange" if d > 0 else "green")
     return t
+
+
+# ------------------------------------------------------------------ 튀었던 순간 순위(노트북·데스크톱 공용; 신호만 센서로 갈림)
+def _dur(sec):
+    return f"{sec / 3600:.1f}시간" if sec >= 5400 else f"{max(1, round(sec / 60))}분"
+
+
+def _w(x):
+    return "-" if x is None else f"{x:.0f}"
+
+
+def spike_basis(view):
+    return "psys" if view["profile"]["psys"] else "패키지(CPU+GPU, 전체 소비 아님)"
+
+
+def spikes_text(view, n=3, w=80):
+    """대시보드 박스: 상위 n 개 사건을 3줄씩. 숫자는 5분 창 평균 전력(W)."""
+    t = Text()
+    sk = view.get("spikes") or []
+    if not view["rows"]:
+        t.append(" 이 범위에는 표본이 없습니다.\n", style="grey50")
+        return t
+    if not sk:
+        t.append(" 평소보다 눈에 띄게 튄 순간이 없습니다(5분 평균이 중앙값보다 크게 높은 구간 없음).\n", style="grey50")
+        return t
+    for s in sk[:n]:
+        ts = time.strftime("%m-%d %H:%M", time.localtime(s["t0"]))
+        t.append(f" {s['rank']} ", style="bold dark_orange")
+        t.append(f"{ts}  {_dur(s['dur_s'])}  ", style="white")
+        t.append(f"{s['power']:.0f} W", style="bold")
+        t.append(f" (평소 {s['median']:.0f} → +{s['power'] - s['median']:.0f})  ≈ +{s['excess_wh']:.2f} Wh", style="dark_orange")
+        if s.get("ac") is not None:
+            t.append("  AC" if s["ac"] else "  배터리", style="grey50")
+        t.append("\n")
+        t.append(f"   앞 {_w(s['before'])} · 뒤 {_w(s['after'])} W", style="grey70")
+        if s["other_days"] is not None:
+            t.append(f" · 다른 날 같은 시각 {s['other_days']:.0f} W({s['other_n']}일)", style="grey70")
+        if s["cpu"] is not None:
+            t.append(f" · CPU {s['cpu']:.0f}%", style="grey70")
+        t.append("\n")
+        bits = [f"{a} {c:.0f}%" for a, c in s["apps"]] + ([f"포커스 {s['focus']}"] if s["focus"] else [])
+        t.append("   " + (" · ".join(bits) if bits else "앱 기록 없음"), style="grey50")
+        t.append("\n")
+    t.append(" s 전체 순위·이동 · 기준: 평소(중앙값)보다 더 쓴 Wh · 상관일 뿐", style="grey50")
+    return t
+
+
+def spike_rows(view):
+    """전체 순위 표(키 = 순위 번호 문자열). [(순위, 시각, 길이, 평균 W, 평소 대비, 초과 Wh, 앞, 뒤, 다른 날, CPU, 앱·포커스)]"""
+    rows = []
+    for s in view.get("spikes") or []:
+        bits = [f"{a} {c:.0f}%" for a, c in s["apps"]] + ([f"포커스 {s['focus']}"] if s["focus"] else [])
+        rows.append((str(s["rank"]), time.strftime("%m-%d %H:%M", time.localtime(s["t0"])), _dur(s["dur_s"]), f"{s['power']:.1f}",
+                     f"+{s['power'] - s['median']:.1f}", f"{s['excess_wh']:.2f}", _w(s["before"]), _w(s["after"]), _w(s["other_days"]),
+                     "-" if s["cpu"] is None else f"{s['cpu']:.0f}%", " · ".join(bits)))
+    return rows
