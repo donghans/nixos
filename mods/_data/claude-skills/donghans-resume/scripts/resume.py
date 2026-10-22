@@ -75,9 +75,31 @@ if rec:
         pf = os.path.join(repo, '.claude', nm)
         if os.path.isfile(pf):
             print(f'\n## 프로젝트 지침: .claude/{nm} ({why})'); print(open(pf, errors="ignore").read().strip())
+    dd = os.path.splitext(rec['doc'])[0].replace('HANDOFF-', '')  # 상세 문서 디렉터리: <doc 디렉터리>/<세션ID>/
+    dd = os.path.join(os.path.dirname(rec['doc']), rec.get('id') or os.path.basename(dd))
+    if os.path.isdir(dd):
+        print(f'\n## 상세 문서 ({dd}) — 인덱스 표의 「언제 읽나」에 맞춰 필요한 것만 열 것')
+        for fn in sorted(os.listdir(dd)): print(f'- {fn} ({os.path.getsize(os.path.join(dd, fn))}B)')
     ex = os.path.join(repo, '.claude', 'resume-extra')
     if os.path.isfile(ex) and os.access(ex, os.X_OK):
         print('\n## 프로젝트 추가 사실 (.claude/resume-extra)'); print(sh(ex, cwd=repo))
+
+
+# 계정 전체 사용량 스냅샷 — 5h/7d 한도는 계정 공통이지만 각 세션의 상태 표시줄이 그릴 때만 기록된다.
+# 그러니 세션별 값이 아니라 *전체에서 가장 최근* 기록을 보이고, 나이를 같이 적는다(다른 세션이 올린 만큼은 아직 반영 전일 수 있다).
+lp = os.path.expanduser('~/.local/share/claude-otel/limits.jsonl')
+if os.path.isfile(lp):
+    last = None
+    for l in open(lp, errors='ignore'):
+        try: d = json.loads(l)
+        except Exception: continue
+        if (d.get('five_hour') or {}).get('used_percentage') is not None: last = d
+    if last:
+        try: age = int(time.time() - time.mktime(time.strptime(last['ts'][:19], '%Y-%m-%dT%H:%M:%S')))
+        except Exception: age = -1
+        print('\n## 사용량 스냅샷 (계정 전체, 가장 최근 기록)')
+        print(f"5h {last['five_hour']['used_percentage']}% · 7d {(last.get('seven_day') or {}).get('used_percentage')}% · 기록 {last['ts'][11:19]} ({age // 60}분 {age % 60}초 전) · 기록한 세션 {str(last.get('session_id'))[:8]}")
+        print('※ 스냅샷이다 — 기록은 어느 세션이든 상태 표시줄이 갱신될 때만 남고, 동시에 도는 다른 세션이 올린 만큼은 다음 갱신 전까지 안 보인다. 사용자에게는 「약 N% 이상(스냅샷 기준)」으로 말하고, 한도 판단은 감시기(claude-limit-watch, 전 세션 기록 기준)와 사용자가 보는 /usage 를 우선한다.')
 
 # 트랜스크립트의 사용자 메시지
 sid = (rec or {}).get('id') or a.id or ''

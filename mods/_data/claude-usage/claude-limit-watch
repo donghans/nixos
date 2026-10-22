@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # limits.jsonl 을 지켜보다가 사용량이 튀면 한 줄을 출력한다(Monitor 용). 출력이 곧 알림이다.
-# 사용: claude-limit-watch <세션ID접두> [--spike 5 --window 10 --levels 50,70,80,90 --file PATH] 
+# 사용: claude-limit-watch <세션ID접두> [--spike 5 --window 10 --levels 50,70,80,90 --file PATH --own]
+# 5h/7d 한도는 계정 전체 값이라 기본은 모든 세션의 기록을 본다(다른 세션이 올린 것도 잡는다). --own 이면 접두 세션의 기록만.
 import sys, json, time, os, argparse
 ap = argparse.ArgumentParser()
 ap.add_argument('sid'); ap.add_argument('--spike', type=float, default=5)   # 윈도 안에서 5h% 가 이만큼 오르면 알림
 ap.add_argument('--window', type=float, default=10)                          # 분
 ap.add_argument('--levels', default='50,70,80,90')                           # 5h% 절대 수준
 ap.add_argument('--file', default=os.path.expanduser('~/.local/share/claude-otel/limits.jsonl'))
-ap.add_argument('--poll', type=float, default=5); ap.add_argument('--once', action='store_true')
+ap.add_argument('--own', action='store_true'); ap.add_argument('--poll', type=float, default=5); ap.add_argument('--once', action='store_true')
 a = ap.parse_args()
 levels = sorted(float(x) for x in a.levels.split(','))
 hist = []; fired = set(); pos = 0; base7 = None
@@ -25,14 +26,14 @@ while True:
         for line in chunk.splitlines():
             try: d = json.loads(line)
             except Exception: continue
-            if not str(d.get('session_id', '')).startswith(a.sid): continue
+            if a.own and not str(d.get('session_id', '')).startswith(a.sid): continue
             f5, s7 = pct(d, 'five_hour'), pct(d, 'seven_day')
             now = time.time()
             if f5 is not None:
                 hist.append((now, f5)); hist = [(t, v) for t, v in hist if now - t <= a.window * 60]
                 lo = min(v for _, v in hist)
                 if f5 - lo >= a.spike:
-                    print(f"[watch] 5h 급증: {lo:.0f}% → {f5:.0f}% ({a.window:.0f}분 내) cost=${d.get('cost_usd'):.2f} ctx={d.get('context_used_pct')}%", flush=True)
+                    print(f"[watch] 5h 급증: {lo:.0f}% → {f5:.0f}% ({a.window:.0f}분 내) 기록 세션={str(d.get('session_id'))[:8]} cost=${(d.get('cost_usd') or 0):.2f}", flush=True)
                     hist = [(now, f5)]
                 for lv in levels:
                     if f5 >= lv and lv not in fired:
