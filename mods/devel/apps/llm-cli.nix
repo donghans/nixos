@@ -89,7 +89,18 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
     doCheck = false;
   } (builtins.readFile ../../_data/claude-ctx/claude_ctx.py);
   # 훅은 비동기(입력을 막지 않음)이고 실패해도 조용히 끝난다. 놓친 것은 ingest 타이머가 따라잡는다.
-  ctxHook = event: [{hooks = [{type = "command"; command = "${claudeCtx}/bin/donghans ctx hook ${event}"; async = true; timeout = 30;}];}];
+  ctxHook = event: [
+    {
+      hooks = [
+        {
+          type = "command";
+          command = "${claudeCtx}/bin/donghans ctx hook ${event}";
+          async = true;
+          timeout = 30;
+        }
+      ];
+    }
+  ];
   hooksSettings = {
     hooks = lib.genAttrs ["UserPromptSubmit" "Stop" "SubagentStop" "SessionStart" "SessionEnd" "PreCompact"] ctxHook;
   };
@@ -129,7 +140,11 @@ in {
     };
     systemd.user.timers.claude-ctx-ingest = {
       Unit.Description = "claude-ctx 백필 주기";
-      Timer = {OnBootSec = "2min"; OnUnitActiveSec = "10min"; Persistent = true;};
+      Timer = {
+        OnBootSec = "2min";
+        OnUnitActiveSec = "10min";
+        Persistent = true;
+      };
       Install.WantedBy = ["timers.target"];
     };
 
