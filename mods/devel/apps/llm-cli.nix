@@ -50,10 +50,61 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # 빌드돼 있어, 이 변수를 물려받는 glibc 2.42 프로그램(ONLYOFFICE 등)이 `GLIBC_2.43 not found` 로 죽음.
   # → alsa-lib 만 stable 것으로 교체. 새 glibc 는 옛 glibc 로 빌드된 라이브러리를 그대로 로드할 수 있어 양쪽 모두 안전함
   #   (claude 바이너리는 libc/libm/libpthread/librt 를 미리 로드하고 stable libasound 의 의존도 같은 목록).
-  claude = unstable.claude-code.override {inherit (pkgs) alsa-lib;};
+  claudeBase = unstable.claude-code.override {inherit (pkgs) alsa-lib;};
+
+  # (목적: /usage 와 같은 사용량(토큰·비용·하위 에이전트 구분)을 로컬 파일로 남겨 대조·분석)
+  # claude 가 OTLP 로 보내는 메트릭·이벤트를 아래 user 서비스(로컬 수집기)가 받아 ~/.local/share/claude-otel/*.jsonl 에 저장한다.
+  # 외부로 전송하지 않는다(127.0.0.1 만). 프롬프트 내용은 수집하지 않는다(OTEL_LOG_USER_PROMPTS 미설정).
+  # 끄려면: 셸에서 CLAUDE_CODE_ENABLE_TELEMETRY=0 claude  (set-default 라서 덮어쓸 수 있다)
+  # 주의: 메트릭 속성에 user.email·account id 가 포함된다 — 파일을 외부에 공유하지 말 것.
+  claude = pkgs.symlinkJoin {
+    name = "claude-code-otel";
+    paths = [claudeBase];
+    nativeBuildInputs = [pkgs.makeWrapper];
+    postBuild = ''
+      wrapProgram $out/bin/claude \
+        --set-default CLAUDE_CODE_ENABLE_TELEMETRY 1 \
+        --set-default OTEL_METRICS_EXPORTER otlp \
+        --set-default OTEL_LOGS_EXPORTER otlp \
+        --set-default OTEL_EXPORTER_OTLP_PROTOCOL grpc \
+        --set-default OTEL_EXPORTER_OTLP_ENDPOINT http://127.0.0.1:4317
+    '';
+    inherit (claudeBase) meta;
+  };
+
+  otelCollectorConfig = pkgs.writeText "claude-otel-collector.yaml" ''
+    receivers:
+      otlp:
+        protocols:
+          grpc: { endpoint: 127.0.0.1:4317 }
+          http: { endpoint: 127.0.0.1:4318 }
+    exporters:
+      file/metrics:
+        path: ''${env:HOME}/.local/share/claude-otel/metrics.jsonl
+        rotation: { max_megabytes: 50, max_backups: 5 }
+      file/logs:
+        path: ''${env:HOME}/.local/share/claude-otel/events.jsonl
+        rotation: { max_megabytes: 100, max_backups: 5 }
+    service:
+      telemetry: { metrics: { level: none } }
+      pipelines:
+        metrics: { receivers: [otlp], exporters: [file/metrics] }
+        logs: { receivers: [otlp], exporters: [file/logs] }
+  '';
 in {
   hm = {
     home.packages = [claude unstable.antigravity-cli];
+
+    systemd.user.services.claude-otel-collector = {
+      Unit.Description = "Claude Code 사용량(OTLP) 로컬 수집기 — 파일로만 저장";
+      Service = {
+        ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p %h/.local/share/claude-otel";
+        ExecStart = "${pkgs.opentelemetry-collector-contrib}/bin/otelcol-contrib --config ${otelCollectorConfig}";
+        Restart = "on-failure";
+        RestartSec = 5;
+      };
+      Install.WantedBy = ["default.target"];
+    };
 
     # Gemini CLI 지침 (기존 메모리 동기화 및 전역 원칙 강제)
     # home.file.".gemini/GEMINI.md" = {
@@ -89,8 +140,42 @@ in {
         - 진행한 작업, 원인 파악 결과, 삽질 기록 등 project/domain 성격의 정보는
           Claude Code의 자동 메모리 시스템(`~/.claude/projects/.../memory/`)에 남기지 마세요.
           대신 작업 중인 프로젝트 저장소 내 git 추적 가능한 문서(`_docs/`, README 등)로 남기세요.
+
+        # 세션 사용량
+        - 하위 에이전트(Agent)를 띄우거나 큰 작업을 시작하기 전에 예상 비용(에이전트 수·모델)을 먼저 말하세요.
+          에이전트당 시작 비용이 큽니다(컨텍스트 3~4만 토큰). 합칠 수 있으면 합치고,
+          정답이 명확한 읽기·치환은 `model: 'haiku'`, 판단이 중요한 구현·검증은 sonnet 으로 지정하세요.
+        - 기본 모델을 바꾸기 전에는 반드시 먼저 알리세요.
+        - 큰 작업 직전에 한도 감시를 거세요: `echo $CLAUDE_CODE_SESSION_ID` 의 앞 8자로
+          `claude-limit-watch <접두>` 를 Monitor 로 실행합니다(5시간 한도가 10분 내 +5포인트 오르거나 50/70/80/90% 도달 시 알림).
+          알림이 오면 하던 일을 멈추고 사용자에게 알리세요. 70% 이상에서는 새 작업을 시작하지 말고 묻습니다.
+        - 세션을 닫거나 `/clear` 하기 전에는 `/donghans-handoff`, 새 세션에서는 `/donghans-resume <고유번호>` 로 이어갑니다.
       '';
       force = true; # 기존 파일이 있더라도 Nix 관리 하에 둠 (읽기 전용 심볼릭링크)
+    };
+
+    # 범용 인수인계/복원 스킬 (어느 저장소에서든 /donghans-handoff, /donghans-resume <고유번호>)
+    # 소스: mods/_data/claude-skills/ — 고유번호 = 인수인계한 세션 ID, 기록은 ~/.claude/handoffs/<ID>.json
+    home.file.".claude/skills/donghans-handoff" = {
+      source = ../../_data/claude-skills/donghans-handoff;
+      force = true;
+    };
+    home.file.".claude/skills/donghans-resume" = {
+      source = ../../_data/claude-skills/donghans-resume;
+      force = true;
+    };
+
+    # 사용량 도구: 상태 표시줄 기록기 + 한도 감시기(Monitor 용).
+    # 상태 표시줄 연결은 ~/.claude/settings.json 의 statusLine.command = ~/.local/bin/claude-usage-statusline (수동 설정, nix 관리 아님)
+    home.file.".local/bin/claude-usage-statusline" = {
+      source = ../../_data/claude-usage/claude-usage-statusline;
+      executable = true;
+      force = true;
+    };
+    home.file.".local/bin/claude-limit-watch" = {
+      source = ../../_data/claude-usage/claude-limit-watch;
+      executable = true;
+      force = true;
     };
 
     # claude 실행 전 sudo 인증을 미리 받아두고, 백그라운드에서 60초마다 타임스탬프를 갱신.

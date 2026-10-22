@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""세션 복원 수집기(읽기 전용). 사용: resume.py [ID또는접두] [--n 15] [--no-git] [--list]
+ - ID 있음: ~/.claude/handoffs/<ID>.json 으로 저장소·문서를 찾는다(접두 일치 허용). 기록이 없으면 트랜스크립트만으로 사용자 메시지를 복원한다.
+ - ID 없음: 현재 저장소에 등록된 가장 최근 인수인계, 없으면 저장소의 최신 HANDOFF-*.md.
+ - --list: 등록된 인수인계 목록.
+ 저장소에 실행 파일 `.claude/resume-extra` 가 있으면 저장소 루트에서 실행해 그 출력을 덧붙인다(프로젝트 전용 사실 수집)."""
+import argparse, glob, json, os, subprocess, sys, time
+
+ap = argparse.ArgumentParser()
+ap.add_argument('id', nargs='?'); ap.add_argument('--n', type=int, default=15)
+ap.add_argument('--no-git', action='store_true'); ap.add_argument('--list', action='store_true')
+a = ap.parse_args()
+HD = os.path.expanduser('~/.claude/handoffs')
+
+def sh(*cmd, cwd=None):
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+    return (r.stdout + r.stderr).strip()
+
+def load_all():
+    out = []
+    for p in glob.glob(HD + '/*.json'):
+        try: out.append(json.load(open(p)))
+        except Exception: pass
+    return sorted(out, key=lambda r: r.get('created', ''), reverse=True)
+
+recs = load_all()
+if a.list:
+    for r in recs: print(f"{r['id']}  {r['created'][:16]}  {r['repo']}  {r.get('note','')}")
+    sys.exit(0 if recs else 1)
+
+rec = None
+if a.id:
+    m = [r for r in recs if r['id'].startswith(a.id)]
+    if len(m) > 1: sys.exit('접두가 여러 기록과 일치: ' + ', '.join(r['id'] for r in m))
+    rec = m[0] if m else None
+else:
+    top = sh('git', 'rev-parse', '--show-toplevel') or os.getcwd()
+    rec = next((r for r in recs if r['repo'] == top), None)
+    if not rec:
+        hs = sorted(glob.glob(top + '/**/HANDOFF-*.md', recursive=True), key=os.path.getmtime)
+        if hs: rec = {'id': '', 'repo': top, 'doc': hs[-1], 'created': '', 'note': '(등록 기록 없음 — 최신 HANDOFF 파일로 대체)'}
+if not rec:
+    print('## 인수인계 기록 없음' + (f' (ID {a.id})' if a.id else ''))
+    print('등록 목록: resume.py --list. 기록이 없어도 트랜스크립트가 있으면 사용자 메시지만 복원한다.')
+
+if rec:
+    repo = rec['repo']
+    print('## 인수인계 기록')
+    for k in ('id', 'created', 'repo', 'doc', 'branch', 'head', 'note'):
+        if rec.get(k): print(f'{k:8}: {rec[k]}')
+    if not os.path.isdir(repo): print('!! 저장소 경로가 없다 — 다른 머신이거나 이동됨')
+    elif not os.path.isfile(rec['doc']): print('!! 문서 파일이 없다 — 삭제/이동됨 (git log 로 추적)')
+    else:
+        print(f"문서 수정: {time.strftime('%m-%d %H:%M', time.localtime(os.path.getmtime(rec['doc'])))}")
+    if os.path.isdir(repo) and not a.no_git:
+        print('\n## git (지금 상태)')
+        print('HEAD  :', sh('git', 'log', '-1', '--format=%h %s', cwd=repo))
+        print('브랜치:', sh('git', 'branch', '--show-current', cwd=repo) or '(detached HEAD)')
+        st = sh('git', 'status', '--short', cwd=repo).splitlines()
+        print('미커밋:', len(st), '건'); [print('  ', l) for l in st[:10]]
+        if rec.get('head'):
+            n = sh('git', 'rev-list', '--count', f"{rec['head']}..HEAD", cwd=repo)
+            print(f"인수인계 시점({rec['head']}) 이후 커밋:", n if n.isdigit() else '? (SHA 없음)')
+        for ref in sh('git', 'for-each-ref', '--format=%(upstream:short)', 'HEAD', cwd=repo).splitlines()[:1]:
+            if ref: print(f'{ref} 대비 앞선 커밋:', sh('git', 'rev-list', '--count', f'{ref}..HEAD', cwd=repo), '(푸시는 사용자 허가 필요)')
+        wt = sh('git', 'worktree', 'list', '--porcelain', cwd=repo)
+        un = []
+        for blk in wt.split('\n\n'):
+            d = dict(l.split(' ', 1) for l in blk.splitlines() if ' ' in l)
+            br = d.get('branch', '').replace('refs/heads/', '')
+            if br and d.get('worktree') != repo and subprocess.run(['git', 'merge-base', '--is-ancestor', br, 'HEAD'], cwd=repo).returncode != 0:
+                un.append(f"- {br} ({len(sh('git','log','--oneline','HEAD..'+br,cwd=repo).splitlines())}커밋 앞) {d.get('worktree')}")
+        print('미병합 워크트리 브랜치:', '(없음)' if not un else ''); [print(x) for x in un]
+    ex = os.path.join(repo, '.claude', 'resume-extra')
+    if os.path.isfile(ex) and os.access(ex, os.X_OK):
+        print('\n## 프로젝트 추가 사실 (.claude/resume-extra)'); print(sh(ex, cwd=repo))
+
+# 트랜스크립트의 사용자 메시지
+sid = (rec or {}).get('id') or a.id or ''
+SKIP = ('<system-reminder', '<task-notification', '<command-name>', '<local-command', '[SYSTEM NOTIFICATION', '<cross-session-message', 'This session is being continued')
+if sid:
+    fs = glob.glob(os.path.expanduser(f'~/.claude/projects/*/{sid}*.jsonl'))
+    print('\n## 그 세션에서 사용자가 직접 보낸 메시지 (마지막 %d개)' % a.n)
+    if not fs: print('(트랜스크립트 없음 — 다른 머신이거나 정리됨)')
+    for f in fs[:1]:
+        msgs = []
+        for l in open(f, errors='ignore'):
+            try: d = json.loads(l)
+            except Exception: continue
+            if d.get('type') != 'user' or d.get('isMeta') or d.get('isSidechain'): continue
+            c = (d.get('message') or {}).get('content')
+            t = (c if isinstance(c, str) else ' '.join(x.get('text', '') for x in c if isinstance(x, dict) and x.get('type') == 'text')).strip()
+            if t and not any(t.startswith(s) for s in SKIP): msgs.append(((d.get('timestamp') or '')[:16], t))
+        print(f'(전체 {len(msgs)}개 중 — 트랜스크립트 {os.path.basename(f)})')
+        for ts, t in msgs[-a.n:]: print(f'- [{ts}] {t[:500]}')
+print('\n※ 위는 사실 수집이다. 문서(doc)는 그 시점의 관찰이므로 git 상태와 어긋나면 어긋남을 보고하라.')

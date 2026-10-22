@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+# Claude Code 상태 표시줄: 세션(5시간)·주간 한도 %를 보여주고, 값이 바뀔 때마다 limits.jsonl 에 한 줄 남긴다.
+# 입력은 stdin JSON(statusLine 규약). 외부 전송 없음.
+import json, sys, os, time
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("usage: ?"); sys.exit(0)
+rl = d.get("rate_limits") or {}
+f = rl.get("five_hour") or {}
+w = rl.get("seven_day") or {}
+cost = (d.get("cost") or {}).get("total_cost_usd")
+cw = d.get("context_window") or {}
+fp, wp = f.get("used_percentage"), w.get("used_percentage")
+def fmt(x): return "?" if x is None else (f"{x:.0f}" if isinstance(x, (int, float)) else str(x))
+print(f"5h {fmt(fp)}% · 7d {fmt(wp)}% · ctx {fmt(cw.get('used_percentage'))}% · ${cost if cost is None else round(cost,2)}")
+try:
+    base = os.path.expanduser("~/.local/share/claude-otel")
+    os.makedirs(base, exist_ok=True)
+    state = os.path.join(base, ".limits.last")
+    key = json.dumps([fp, wp, None if cost is None else round(cost, 1), d.get("session_id")])
+    last = open(state).read() if os.path.exists(state) else ""
+    if key != last:
+        open(state, "w").write(key)
+        rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "session_id": d.get("session_id"),
+               "five_hour": f, "seven_day": w, "cost_usd": cost,
+               "model": (d.get("model") or {}).get("id") or (d.get("model") or {}).get("display_name"),
+               "context_used_pct": cw.get("used_percentage")}
+        open(os.path.join(base, "limits.jsonl"), "a").write(json.dumps(rec, ensure_ascii=False) + "\n")
+except Exception:
+    pass
