@@ -82,14 +82,14 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   };
 
   # (목적: 여러 머신·프로젝트의 대화·사용량을 공유 저장소(Postgres, mods.sys.services.claude-ctx)에 이벤트 시점에 적재)
-  # 클라이언트 CLI `claude-ctx`: 훅 적재 / 백필(ingest) / search·recent·session·usage·sql 조회 / handoff 업로드.
+  # 클라이언트 CLI `donghans`: `donghans ctx hook|ingest|search|recent|session|usage|sql` / `donghans handoff put|get`.
   # 접속 문자열은 ~/.config/claude-ctx/dsn (nix 밖, 권한 600 — 비밀번호가 스토어에 남지 않게). 서버 위치는 거기서만 바꾼다.
-  claudeCtx = pkgs.writers.writePython3Bin "claude-ctx" {
+  claudeCtx = pkgs.writers.writePython3Bin "donghans" {
     libraries = [pkgs.python3Packages.psycopg];
     doCheck = false;
   } (builtins.readFile ../../_data/claude-ctx/claude_ctx.py);
   # 훅은 비동기(입력을 막지 않음)이고 실패해도 조용히 끝난다. 놓친 것은 ingest 타이머가 따라잡는다.
-  ctxHook = event: [{hooks = [{type = "command"; command = "${claudeCtx}/bin/claude-ctx hook ${event}"; async = true; timeout = 30;}];}];
+  ctxHook = event: [{hooks = [{type = "command"; command = "${claudeCtx}/bin/donghans ctx hook ${event}"; async = true; timeout = 30;}];}];
   hooksSettings = {
     hooks = lib.genAttrs ["UserPromptSubmit" "Stop" "SubagentStop" "SessionStart" "SessionEnd" "PreCompact"] ctxHook;
   };
@@ -124,7 +124,7 @@ in {
       Unit.Description = "claude-ctx 백필(최근 2일)";
       Service = {
         Type = "oneshot";
-        ExecStart = "${claudeCtx}/bin/claude-ctx ingest --days 2";
+        ExecStart = "${claudeCtx}/bin/donghans ctx ingest --days 2";
       };
     };
     systemd.user.timers.claude-ctx-ingest = {
@@ -188,11 +188,11 @@ in {
           `claude-limit-watch <접두>` 를 Monitor 로 실행합니다(5시간 한도가 10분 내 +5포인트 오르거나 50/70/80/90% 도달 시 알림).
           알림이 오면 하던 일을 멈추고 사용자에게 알리세요. 70% 이상에서는 새 작업을 시작하지 말고 묻습니다.
         - 세션을 닫거나 `/clear` 하기 전에는 `/donghans-handoff`, 새 세션에서는 `/donghans-resume <고유번호>` 로 이어갑니다.
-        # 공유 컨텍스트 (여러 머신·프로젝트의 대화/사용량 저장소 — Postgres, `claude-ctx` 명령)
+        # 공유 컨텍스트 (여러 머신·프로젝트의 대화/사용량 저장소 — Postgres, `donghans ctx` 명령)
         - 「이전 세션에서 뭘 했는지 모르겠다」「그때 사용자가 뭐라고 했나」「다른 머신에서 하던 작업」처럼 **지난 대화·결정의 근거**가 필요하면,
-          추측하거나 사용자에게 되묻기 전에 먼저 조회하세요: `claude-ctx search "<키워드>" --here`(현재 저장소 한정, `--role user` 로 사용자 발언만),
-          `claude-ctx recent --here`(최근 세션), `claude-ctx session <세션ID접두> [--n 20]`(한 세션의 대화), `claude-ctx usage`(모델·일별 토큰/비용),
-          `claude-ctx sql "<SELECT …>"`(읽기 전용; 테이블: sessions·messages·usage_events·hook_events·handoffs). 각 행에 작업 머신(host)·작업 디렉터리(cwd)·
+          추측하거나 사용자에게 되묻기 전에 먼저 조회하세요: `donghans ctx search "<키워드>" --here`(현재 저장소 한정, `--role user` 로 사용자 발언만),
+          `donghans ctx recent --here`(최근 세션), `donghans ctx session <세션ID접두> [--n 20]`(한 세션의 대화), `donghans ctx usage`(모델·일별 토큰/비용),
+          `donghans ctx sql "<SELECT …>"`(읽기 전용; 테이블: sessions·messages·usage_events·hook_events·handoffs). 각 행에 작업 머신(host)·작업 디렉터리(cwd)·
           저장소(repo_url)·브랜치가 있으니 **다른 프로젝트의 기록이 섞이지 않았는지 repo_url 로 확인**하고 인용하세요.
         - 조회 결과는 그 시점의 기록이다(코드의 현재 상태가 아님). 결함·완료 주장은 다시 실행해 확인하세요. 접속 실패 시(서버 `beelink-ser7-co` 꺼짐 등)
           조용히 넘어가지 말고 사용자에게 알리세요. 기록에는 고객사 데이터·시크릿이 섞여 있을 수 있으니 원문을 외부로 보내지 마세요.

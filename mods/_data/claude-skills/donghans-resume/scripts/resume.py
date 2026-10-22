@@ -25,9 +25,9 @@ def load_all():
 
 
 def from_db(prefix):
-    """로컬 기록이 없으면 공유 저장소(claude-ctx → Postgres)에서 인수인계를 받아 캐시에 푼다(다른 머신에서 만든 인수인계)."""
+    """로컬 기록이 없으면 공유 저장소(donghans → Postgres)에서 인수인계를 받아 캐시에 푼다(다른 머신에서 만든 인수인계)."""
     cache = os.path.expanduser('~/.claude/handoffs-cache')
-    out = sh('claude-ctx', 'handoff-get', prefix, '--out', cache)
+    out = sh('donghans', 'handoff', 'get', prefix, '--out', cache)
     first = out.splitlines()[0] if out else ''
     try: d = json.loads(first)
     except Exception: return None
@@ -124,7 +124,7 @@ if sid:
     if not fs:
         print('(로컬 트랜스크립트 없음 — 공유 저장소에서 조회)')
         if re.fullmatch(r'[0-9a-f-]{6,36}', sid):
-            print(sh('claude-ctx', 'sql', f"select to_char(ts,'MM-DD HH24:MI') ts, left(text,500) prompt from messages where session_id like '{sid}%' and kind='prompt' and text not like '<%' order by ts desc limit {a.n}"))
+            print(sh('donghans', 'ctx', 'sql', f"select to_char(ts,'MM-DD HH24:MI') ts, left(text,500) prompt from messages where session_id like '{sid}%' and kind='prompt' and text not like '<%' order by ts desc limit {a.n}"))
     for f in fs[:1]:
         msgs = []
         for l in open(f, errors='ignore'):

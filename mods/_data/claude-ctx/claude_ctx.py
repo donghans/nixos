@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""claude-ctx — Claude Code 대화·사용량 공유 저장소(Postgres) 클라이언트.
+"""donghans — Claude Code 대화·사용량 공유 저장소(Postgres) 클라이언트.
 
-  hook <이벤트>        훅에서 호출(stdin = 훅 JSON). 실패해도 조용히 끝난다(Claude 입력을 막지 않는다).
+  donghans ctx hook <이벤트>        훅에서 호출(stdin = 훅 JSON). 실패해도 조용히 끝난다(Claude 입력을 막지 않는다).
   ingest [--days N|--all] [--no-otel]   트랜스크립트·OTel·한도 기록을 따라잡는다(오프셋 기반, 여러 번 돌려도 안전).
   search <검색어> [--repo URL|--here] [--role user|assistant] [--days N] [--limit N]
   recent [--repo URL|--here] [--limit N]   최근 세션 목록
@@ -19,6 +19,18 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 HOST = os.environ.get("CLAUDE_CTX_HOST") or socket.gethostname()
+
+
+def _machine_tag():
+    """같은 hostname 의 서로 다른 물리 머신이 오프셋(경로 문자열이 같다)을 공유해 데이터를 건너뛰는 것을 막는 식별자.
+    /etc/machine-id 해시 앞 6자. OS 재설치로 바뀌면 처음부터 다시 읽을 뿐이고 uuid 중복 방지로 안전하다."""
+    try:
+        return hashlib.sha1(open("/etc/machine-id").read().strip().encode()).hexdigest()[:6]
+    except Exception:
+        return "nomid"
+
+
+INGEST_HOST = f"{HOST}#{_machine_tag()}"  # ingest_state 의 host 칸과 락 키에만 쓴다(표시용 host 는 HOST 그대로)
 HOME = os.path.expanduser("~")
 OTEL = os.path.join(HOME, ".local/share/claude-otel")
 MAX_RAW = 100_000      # 원본 한 줄이 이보다 크면 잘라서 보관(정본은 트랜스크립트)
@@ -162,12 +174,12 @@ ON CONFLICT (uuid) DO NOTHING
 
 
 def lock_key(path):
-    return int.from_bytes(hashlib.sha1(f"{HOST}:{path}".encode()).digest()[:8], "big", signed=True)
+    return int.from_bytes(hashlib.sha1(f"{INGEST_HOST}:{path}".encode()).digest()[:8], "big", signed=True)
 
 
 def read_new(cur, path):
     """(host,path) 오프셋 이후의 '완전한 줄'만 읽는다. 파일이 줄었으면 처음부터."""
-    cur.execute("SELECT byte_offset FROM ingest_state WHERE host=%s AND path=%s", (HOST, path))
+    cur.execute("SELECT byte_offset FROM ingest_state WHERE host=%s AND path=%s", (INGEST_HOST, path))
     row = cur.fetchone()
     off = row[0] if row else 0
     size = os.path.getsize(path)
@@ -213,7 +225,7 @@ def ingest_transcript(conn, path):
         if rows:
             cur.executemany(INSERT_MSG, rows)
         cur.execute("""INSERT INTO ingest_state (host, path, byte_offset) VALUES (%s,%s,%s)
-                       ON CONFLICT (host, path) DO UPDATE SET byte_offset=excluded.byte_offset, updated_at=now()""", (HOST, path, new))
+                       ON CONFLICT (host, path) DO UPDATE SET byte_offset=excluded.byte_offset, updated_at=now()""", (INGEST_HOST, path, new))
         return len(rows)
 
 
@@ -259,7 +271,7 @@ def ingest_otel(conn):
                         VALUES (%(rid)s,%(host)s,%(ts)s,%(sid)s,%(pid)s,%(model)s,%(it)s,%(ot)s,%(cr)s,%(cc)s,%(cost)s,%(dur)s,%(qs)s,%(eff)s,%(spd)s)
                         ON CONFLICT (request_id) DO NOTHING""", rows)
                 cur.execute("""INSERT INTO ingest_state (host, path, byte_offset) VALUES (%s,%s,%s)
-                               ON CONFLICT (host, path) DO UPDATE SET byte_offset=excluded.byte_offset, updated_at=now()""", (HOST, p, new))
+                               ON CONFLICT (host, path) DO UPDATE SET byte_offset=excluded.byte_offset, updated_at=now()""", (INGEST_HOST, p, new))
                 n += len(rows)
     p = os.path.join(OTEL, "limits.jsonl")
     if os.path.isfile(p):
@@ -280,7 +292,7 @@ def ingest_otel(conn):
                     cur.executemany("""INSERT INTO limit_samples (host, ts, session_id, five_hour_pct, seven_day_pct, cost_usd, model, ctx_pct)
                         VALUES (%(host)s,%(ts)s,%(sid)s,%(f)s,%(w)s,%(cost)s,%(model)s,%(ctx)s) ON CONFLICT DO NOTHING""", rows)
                 cur.execute("""INSERT INTO ingest_state (host, path, byte_offset) VALUES (%s,%s,%s)
-                               ON CONFLICT (host, path) DO UPDATE SET byte_offset=excluded.byte_offset, updated_at=now()""", (HOST, p, new))
+                               ON CONFLICT (host, path) DO UPDATE SET byte_offset=excluded.byte_offset, updated_at=now()""", (INGEST_HOST, p, new))
     return n
 
 
@@ -388,11 +400,15 @@ def cmd_session(a):
         sid, host, hosts, cwd, rurl, br, f, l = r[0]
         print(f"# {sid}  @{','.join(hosts or [host])}  {rurl or '-'}#{br or '-'}  {cwd}\n# {f} ~ {l}")
         kinds = "('prompt','response','tool_use')" if a.full else "('prompt','response')"
-        rows = c.execute(f"SELECT ts, role, kind, is_sidechain, text FROM messages WHERE session_id=%s AND kind IN {kinds} ORDER BY ts", (sid,)).fetchall()
+        q, args = f"SELECT ts, role, kind, is_sidechain, text, uuid FROM messages WHERE session_id=%s AND kind IN {kinds}", [sid]
+        for opt, op in ((a.from_uuid, ">="), (a.to_uuid, "<=")):  # 인수인계 인덱스에 적은 근거 범위(uuid 접두)만 읽는다
+            if opt:
+                q += f" AND ts {op} (SELECT ts FROM messages WHERE session_id=%s AND uuid LIKE %s ORDER BY ts LIMIT 1)"; args += [sid, opt + "%"]
+        rows = c.execute(q + " ORDER BY ts", args).fetchall()
         if a.n:
             rows = rows[-a.n:]
-        for ts, role, kind, side, text in rows:
-            print(f"\n[{ts:%m-%d %H:%M}] {role}{'(sub)' if side else ''}: {(text or '').strip()[: (None if a.full else 1500)]}")
+        for ts, role, kind, side, text, uid in rows:
+            print(f"\n[{ts:%m-%d %H:%M}] {uid[:8]} {role}{'(sub)' if side else ''}: {(text or '').strip()[: (None if a.full else 1500)]}")
     return 0
 
 
@@ -462,17 +478,19 @@ def cmd_handoff_get(a):
 
 
 def main():
-    ap = argparse.ArgumentParser(prog="claude-ctx")
-    sp = ap.add_subparsers(dest="cmd", required=True)
-    p = sp.add_parser("hook"); p.add_argument("event"); p.set_defaults(f=cmd_hook)
-    p = sp.add_parser("ingest"); p.add_argument("--days", type=int, default=30); p.add_argument("--all", action="store_true"); p.add_argument("--no-otel", action="store_true"); p.set_defaults(f=cmd_ingest)
-    p = sp.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.set_defaults(f=cmd_search)
-    p = sp.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.set_defaults(f=cmd_recent)
-    p = sp.add_parser("session"); p.add_argument("sid"); p.add_argument("--n", type=int); p.add_argument("--full", action="store_true"); p.set_defaults(f=cmd_session)
-    p = sp.add_parser("usage"); p.add_argument("--days", type=int, default=7); p.set_defaults(f=cmd_usage)
-    p = sp.add_parser("sql"); p.add_argument("query"); p.add_argument("--limit", type=int, default=50); p.set_defaults(f=cmd_sql)
-    p = sp.add_parser("handoff-put"); p.add_argument("--session", required=True); p.add_argument("--doc", required=True); p.add_argument("--note", default=""); p.set_defaults(f=cmd_handoff_put)
-    p = sp.add_parser("handoff-get"); p.add_argument("session", nargs="?"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--out"); p.set_defaults(f=cmd_handoff_get)
+    ap = argparse.ArgumentParser(prog="donghans", description="donghans 도구 모음 — ctx(공유 컨텍스트 저장소)·handoff(인수인계 업/다운)")
+    top = ap.add_subparsers(dest="group", required=True)
+    ctx = top.add_parser("ctx", help="대화·사용량 공유 저장소").add_subparsers(dest="cmd", required=True)
+    p = ctx.add_parser("hook"); p.add_argument("event"); p.set_defaults(f=cmd_hook)
+    p = ctx.add_parser("ingest"); p.add_argument("--days", type=int, default=30); p.add_argument("--all", action="store_true"); p.add_argument("--no-otel", action="store_true"); p.set_defaults(f=cmd_ingest)
+    p = ctx.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.set_defaults(f=cmd_search)
+    p = ctx.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.set_defaults(f=cmd_recent)
+    p = ctx.add_parser("session"); p.add_argument("sid"); p.add_argument("--n", type=int); p.add_argument("--full", action="store_true"); p.add_argument("--from", dest="from_uuid"); p.add_argument("--to", dest="to_uuid"); p.set_defaults(f=cmd_session)
+    p = ctx.add_parser("usage"); p.add_argument("--days", type=int, default=7); p.set_defaults(f=cmd_usage)
+    p = ctx.add_parser("sql"); p.add_argument("query"); p.add_argument("--limit", type=int, default=50); p.set_defaults(f=cmd_sql)
+    ho = top.add_parser("handoff", help="인수인계 문서 업/다운").add_subparsers(dest="cmd", required=True)
+    p = ho.add_parser("put"); p.add_argument("--session", required=True); p.add_argument("--doc", required=True); p.add_argument("--note", default=""); p.set_defaults(f=cmd_handoff_put)
+    p = ho.add_parser("get"); p.add_argument("session", nargs="?"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--out"); p.set_defaults(f=cmd_handoff_get)
     a = ap.parse_args()
     sys.exit(a.f(a) or 0)
 
