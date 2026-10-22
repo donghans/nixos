@@ -4,7 +4,7 @@
 #  - 전원 정책(노트북): AC 연결 시 1초 간격, 배터리일 땐 10초 간격으로 수집(완전히 끄지 않는 이유: 배터리에서 TLP 상한으로
 #    느려진 때의 기록이 오히려 쓸모 있음). 수집 주기는 서비스 시작 때 정해지므로 전원 상태가 바뀌면 udev 가 서비스를 재시작함(몇 초 공백).
 #  - 익명 통계 전송은 모듈 기본값으로 꺼져 있고(DO_NOT_TRACK, .opt-out-from-anonymous-statistics), 클라우드 연결(claim)은 안 함.
-#  - **기본은 꺼짐(2026-10-21)**: 부팅 때 시작하지 않는다. 켤 때만 `netdata-on`, 끌 때 `netdata-off`. 이유: Netdata 가 배터리·hwmon·thermal·AC 센서를 읽을 때마다
+#  - **노트북은 기본 꺼짐(2026-10-21)**(데스크톱·서버는 부팅 때 켬 — 아래 분기): 부팅 때 시작하지 않는다. 켤 때만 `netdata-on`, 끌 때 `netdata-off`. 이유: Netdata 가 배터리·hwmon·thermal·AC 센서를 읽을 때마다
 #    ACPI 임베디드 컨트롤러(EC)에 트랜잭션이 생겨 EC 이벤트(GPE 6E)가 초당 20~50회 올라가고(끄면 약 9회), 켠 채로 쉬는 전력이 배터리 기준 약 0.5~0.6 W(psys 약 1 W) 높았다
 #    (장부 #62, 켬/끔 ABAB 4쌍). (키보드 키 소실(#18)은 UEFI 에서도 재현돼 Netdata 와 무관한 하드웨어 문제로 보인다 — 이 이유로 끈 것이 아님.) observectl 은 Netdata 없이도 동작하고, 켜져 있을 때만 1초 지표를 병기한다.
 #  - 부하를 줄이려고 머신러닝(이상 탐지), 알람(health), freeipmi 플러그인(서버용 센서, 노트북엔 대상 없음)은 끔. 보존: 초 단위 7일(최대 1GiB), 더 거친 단계(분/시간 단위)는 기본값.
@@ -16,6 +16,7 @@ mkMod __curPos "Netdata (시스템 지표 기록: AC 1초 / 배터리 10초)" ({
   ...
 }: let
   nd = config.services.netdata;
+  isLaptop = config.workspace.type == "laptop";
   acEvery = 1;
   batteryEvery = 10;
 
@@ -96,8 +97,9 @@ in {
 
     environment.systemPackages = [netdataOn netdataOff];
 
-    # 기본 꺼짐: 부팅 때 시작하지 않는다(netdata-on 으로만). 전원 상태 기록기(아래)도 같이.
-    systemd.services.netdata.wantedBy = lib.mkForce [];
+    # 호스트 종류별 분기: 노트북은 기본 꺼짐(위 머리말의 EC 이벤트·전력 이유; netdata-on 으로만, 전원 상태 기록기(아래)도 같이).
+    # 데스크톱·서버는 배터리·ACPI EC 문제가 없어 부팅 때 켜 둔다(observectl 이 1초 지표를 병기). 전원 상태 기록기는 배터리가 있는 노트북만 의미가 있다.
+    systemd.services.netdata.wantedBy = lib.mkIf isLaptop (lib.mkForce []);
 
     systemd.services.netdata.serviceConfig = {
       ExecStartPre = "${genConf}";
@@ -108,7 +110,7 @@ in {
       # (부팅 콘솔(가상 콘솔)은 한글 글리프가 없어 네모로 보이므로 시스템 유닛 Description 은 영어로: 전원 상태(AC/충전/TLP 모드)를 Netdata 에 기록)
       description = "Record power state (AC/charging/TLP mode) for Netdata";
       after = ["netdata.service"];
-      wantedBy = ["multi-user.target"]; # 위에서 mkForce [] 로 비움(기본 꺼짐)
+      wantedBy = lib.mkForce []; # 부팅 때 시작 안 함: 노트북은 기본 꺼짐(netdata-on 으로만), 그 밖은 배터리가 없어 쓸모 없음
       serviceConfig = {
         ExecStart = "${powerState}";
         DynamicUser = true;

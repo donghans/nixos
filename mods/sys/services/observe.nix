@@ -7,6 +7,7 @@
 #  - Netdata(1초/10초 간격 시스템 지표, 7일)는 그대로 둔다. observectl 는 Netdata 가 못 보는 것(스레드·깨움 원인·패키지 C-state·유틸리티 이벤트·실험 표지)을 맡는다.
 {mkMod, ...}:
 mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파일/타임라인/A-B CLI)" ({
+  config,
   lib,
   pkgs,
   ...
@@ -71,6 +72,11 @@ in {
 
     # MSR(패키지 C-state 잔여율)을 읽으려면 msr 모듈이 필요(root 만 접근). 수집기가 없을 때 modprobe 도 시도하지만 부팅 때 올려 둔다.
     boot.kernelModules = ["msr"];
+
+    # 호스트 종류별 수집 기본값(분기): 노트북은 목표가 배터리 사용량 관리·개선이라 측정에 변수를 섞지 않도록 **기본 꺼짐**(`observectl on` 으로 필요할 때만),
+    # 그 밖(데스크톱·서버)은 목표가 비효율 프로세스 관리·집중할 곳에 자원 쓰기라 나중에 "아까 왜 느렸나"를 보려면 쌓여 있어야 하므로 **기본 켜짐**.
+    # 사용자가 `observectl on|off` 로 control.json 에 쓴 값은 이 기본값보다 항상 우선한다(observe_core.DEFAULT_ENABLED_FLAG).
+    environment.etc."observe/default-enabled" = lib.mkIf (config.workspace.type != "laptop") {text = "";};
 
     systemd.tmpfiles.rules = [
       "d /var/lib/observe 0775 root users -"

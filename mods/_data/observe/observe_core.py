@@ -15,6 +15,9 @@ CONTROL = os.path.join(DATA_DIR, "control.json")
 REQ_DIR = os.path.join(DATA_DIR, "requests")
 RES_DIR = os.path.join(DATA_DIR, "results")
 SAMPLE_DIR = os.path.join(DATA_DIR, "data")
+# 호스트 종류별 기본값: 이 파일이 있으면(nix 가 데스크톱·서버 등 비노트북에만 만든다) 수집이 기본으로 켜진다.
+# 노트북은 측정 위생 때문에 기본 꺼짐(`observectl on` 으로만). 사용자가 `observectl on|off` 로 control.json 에 쓴 값은 항상 이 기본값보다 우선한다.
+DEFAULT_ENABLED_FLAG = os.environ.get("OBSERVE_DEFAULT_ENABLED_FLAG", "/etc/observe/default-enabled")
 
 
 def state_dir():
@@ -24,7 +27,7 @@ def state_dir():
 LEVELS = {"trace": 0, "debug": 1, "info": 2, "warn": 3, "error": 4}
 
 DEFAULT_CONTROL = {
-    "enabled": False,                      # 수집기 표본 기록
+    "enabled": os.path.exists(DEFAULT_ENABLED_FLAG),   # 수집기 표본 기록(기본: 위 플래그 파일이 있으면 켬, 없으면 끔)
     "level": "L0",                         # L0: 가볍게(30초) / L1: 프로파일(5초, 스레드·IO)
     "interval_s": {"L0": 30, "L1": 5},
     "components": {"*": "info", "displayui": "debug", "dispctl": "debug"},   # 이벤트 로그 수준(컴포넌트별, "*"=기본)

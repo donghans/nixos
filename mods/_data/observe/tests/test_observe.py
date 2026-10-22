@@ -3,6 +3,7 @@
 import json, os, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 TMP = tempfile.mkdtemp(prefix="observectl-test-")
+os.environ["OBSERVE_DEFAULT_ENABLED_FLAG"] = os.path.join(TMP, "default-enabled")   # 시험은 호스트의 /etc 플래그와 무관하게 "없음"에서 시작
 os.environ["OBSERVE_DATA_DIR"] = os.path.join(TMP, "var"); os.environ["OBSERVE_STATE_DIR"] = os.path.join(TMP, "state")
 sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "_testkit"))
 import observe_core as core, observe_events, observe_stats as stats, observe_collector as col, observe_cli
@@ -17,6 +18,12 @@ ctl = core.write_control({"enabled": True, "level": "L1", "components": {"postur
 check("write_control 이 합쳐 쓴다(기본 컴포넌트 설정 유지)", ctl["enabled"] and ctl["level"] == "L1" and ctl["components"]["posture"] == "trace" and ctl["components"]["displayui"] == "debug", str(ctl))
 core.write_control({"mark": {"cond": "A", "t": 1.0}})
 check("제어 파일은 같은 inode 에 제자리로 쓴다(path 유닛 감지용)", os.stat(core.CONTROL).st_ino == os.stat(core.CONTROL).st_ino and json.load(open(core.CONTROL))["enabled"] is True)
+open(core.DEFAULT_ENABLED_FLAG, "w").close()
+import importlib; importlib.reload(core)
+check("기본 켜짐 플래그 파일이 있으면 제어 파일이 없을 때 기본이 켜짐(데스크톱·서버)", core.read_control(os.path.join(TMP, "없음.json"))["enabled"] is True)
+check("사용자가 쓴 enabled=false 는 플래그보다 우선", core.read_control(core.CONTROL)["enabled"] is True and json.load(open(core.CONTROL))["enabled"] is True)
+core.write_control({"enabled": False}); check("명시적 off 가 플래그 기본(켜짐)을 이김", core.read_control()["enabled"] is False)
+os.remove(core.DEFAULT_ENABLED_FLAG); importlib.reload(core)
 open(core.CONTROL, "w").write("{깨진")
 check("깨진 제어 파일은 기본값으로", core.read_control()["enabled"] is False)
 core.write_control({"enabled": False, "components": {"*": "info", "displayui": "debug"}})
