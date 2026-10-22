@@ -214,6 +214,8 @@ in {
           - playwright/puppeteer 등 브라우저 자동화·E2E 테스트는 호스트에서 설치·실행하지 말고 Docker 컨테이너 안에서 실행하세요
             (예: `mcr.microsoft.com/playwright` 이미지). 호스트에는 브라우저 바이너리를 받지 않도록
             `PUPPETEER_SKIP_DOWNLOAD`/`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`가 설정되어 있으니 해제하지 마세요.
+          - `/tmp` 는 tmpfs 라 재부팅하면 지워집니다. 나중에 필요한 데이터(측정 결과, 작업 중간 산출물 등)는
+            재부팅이 필요한 작업(`nixup` 의 재부팅, `reboot` 등)을 사용자에게 요청하기 전에 먼저 디스크(저장소 문서나 `~/` 아래)로 백업해 두세요.
 
           # 기록 원칙
           - 진행한 작업, 원인 파악 결과, 삽질 기록 등 project/domain 성격의 정보는
