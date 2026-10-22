@@ -69,6 +69,8 @@ def group_key(s, by):
     if by == "lid":
         return get(s, "dev.lid") or "?"
     if by == "ac":
+        if not core.host_profile()["battery"]:
+            return "상시 전원"
         return "AC" if get(s, "pw.ac") else "배터리"
     if by == "mark":
         return (s.get("mark") or {}).get("cond") or "-"
@@ -85,6 +87,19 @@ def group_key(s, by):
     return "전체"
 
 
+def _status_tail(last):
+    """status 한 줄 끝: 센서가 있는 값만 보인다(데스크톱은 깊은 절전 상태·psys 가 없다 — 'unknown'·'NoneW' 로 쓰지 않음)."""
+    prof = core.host_profile()
+    parts = []
+    if prof["battery"] or last.get("state") not in (None, "unknown"):
+        parts.append(f"상태={last.get('state')}")
+    if prof["psys"] and get(last, "pw.psys_w") is not None:
+        parts.append(f"psys={get(last, 'pw.psys_w')}W")
+    if get(last, "pw.pkg_w") is not None:
+        parts.append(f"패키지={get(last, 'pw.pkg_w')}W")
+    return " " + " ".join(parts) if parts else ""
+
+
 def cmd_status(a):
     ctl = core.read_control()
     active = subprocess.run(["systemctl", "is-active", "observe-collector"], capture_output=True, text=True).stdout.strip()
@@ -93,7 +108,7 @@ def cmd_status(a):
     print(f"이벤트 수준: {ctl['components']}")
     n = len(rows)
     last = rows[-1] if rows else None
-    print(f"최근 24시간 표본 {n}개" + (f" · 마지막 {core.hms(last['t'])} ({time.time() - last['t']:.0f}초 전) 상태={last.get('state')} psys={get(last, 'pw.psys_w')}W" if last else ""))
+    print(f"최근 24시간 표본 {n}개" + (f" · 마지막 {core.hms(last['t'])} ({time.time() - last['t']:.0f}초 전){_status_tail(last)}" if last else ""))
     size = sum(os.path.getsize(os.path.join(core.SAMPLE_DIR, f)) for f in os.listdir(core.SAMPLE_DIR)) if os.path.isdir(core.SAMPLE_DIR) else 0
     ev = sum(1 for _ in core.iter_jsonl(core.state_dir(), "events", time.time() - 86400))
     print(f"표본 파일 {size / 1048576:.1f} MiB · 최근 24시간 이벤트 {ev}개 ({core.state_dir()})")
@@ -149,6 +164,8 @@ def energy_by_group(rows, by, max_gap=90):
 
 
 def cmd_energy(a):
+    if not core.host_profile()["battery"]:
+        sys.exit("배터리가 없는 호스트라 해당 없음(누적 계량·V×I 는 배터리 방전 중에만 있음). 전력은 `observectl query pkg --since 1h --step 10m`")
     rows = samples(core.parse_when(a.since), core.parse_when(a.until) if a.until else None)
     if a.clean:
         rows = [r for r in rows if is_clean(r)]
@@ -170,6 +187,8 @@ def cmd_window(a):
         print(f"(--clean: 내 세션 활동·빌드 표본 {n0 - len(rows)}개 제외, {len(rows)}개 사용)")
     if not rows:
         sys.exit("표본이 없습니다(observectl on 으로 켠 뒤 시간이 지나야 함)")
+    desk = not core.host_profile()["battery"]   # 데스크톱: V×I·psys·core·pc8/pc10 은 센서가 없어 열을 뺀다
+    a.by = a.by or ("none" if desk else "state")   # 데스크톱은 상태가 늘 unknown 이라 기본 그룹을 나누지 않는다
     groups = collections.defaultdict(list)
     for r in rows:
         groups[group_key(r, a.by)].append(r)
@@ -177,10 +196,17 @@ def cmd_window(a):
     legacy = sum(1 for r in rows if r.get("legacy"))
     if legacy:
         print(f"(옛 형식 표본 {legacy}개 포함 — 이름만 바뀐 값은 같게 읽음. 단 옛 표본의 프로세스별 자발적 전환은 메인 스레드만이라 멀티스레드 프로세스를 크게 과소 집계해서 '상위전환/s' 열에서 제외함. 용어는 power-evidence.md 정정표)")
-    print("(V×I 열은 방전 중인 표본만 평균: 충전 중의 전류는 방전 전력이 아님 · 상위전환/s 는 저장된 상위 프로세스(최대 16행)의 모든 스레드 자발적 문맥 전환 합으로 시스템 전체가 아님 · 전체CPU% 는 전체 CPU 대비(코어 1개=100% 가 아님))")
-    print(f"{'그룹':<18}{'n':>4}{'V×I':>7}{'psys':>7}{'pkg':>6}{'core':>6}{'pc8%':>6}{'pc10%':>6}{'상위전환/s':>11}{'전체CPU%':>9}")
+    print("(상위전환/s 는 저장된 상위 프로세스(최대 16행)의 모든 스레드 자발적 문맥 전환 합으로 시스템 전체가 아님 · 전체CPU% 는 전체 CPU 대비(코어 1개=100% 가 아님) · pkg 는 CPU+GPU 패키지 전력)" if desk else "(V×I 열은 방전 중인 표본만 평균: 충전 중의 전류는 방전 전력이 아님 · 상위전환/s 는 저장된 상위 프로세스(최대 16행)의 모든 스레드 자발적 문맥 전환 합으로 시스템 전체가 아님 · 전체CPU% 는 전체 CPU 대비(코어 1개=100% 가 아님))")
+    desk = not core.host_profile()["battery"]   # 데스크톱: V×I·psys·core·pc8/pc10 은 센서가 없어 열을 뺀다
+    if desk:
+        print(f"{'그룹':<18}{'n':>4}{'pkg':>6}{'상위전환/s':>11}{'전체CPU%':>9}")
+    else:
+        print(f"{'그룹':<18}{'n':>4}{'V×I':>7}{'psys':>7}{'pkg':>6}{'core':>6}{'pc8%':>6}{'pc10%':>6}{'상위전환/s':>11}{'전체CPU%':>9}")
     for k, g in sorted(groups.items(), key=lambda kv: -len(kv[1])):
         ctxsw_top = mean_of(g, lambda r: None if r.get("legacy") and any("ctxsw_vol_leader_s" in p for p in r.get("proc", [])) else sum(p.get("ctxsw_vol_s", 0) for p in r.get("proc", [])))
+        if desk:
+            print(f"{str(k)[:17]:<18}{len(g):>4}{fmt(mean_of(g, lambda r: get(r, 'pw.pkg_w')))}{fmt(ctxsw_top, 11, 0)}{fmt(mean_of(g, lambda r: get(r, 'irq.cpu_all_pct')), 9, 1)}")
+            continue
         print(f"{str(k)[:17]:<18}{len(g):>4}{fmt(mean_of(g, lambda r: get(r, 'pw.batt_vi_w') if get(r, 'pw.status') == 'Discharging' else None), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.psys_w')), 7)}{fmt(mean_of(g, lambda r: get(r, 'pw.pkg_w')))}"
               f"{fmt(mean_of(g, lambda r: get(r, 'pw.core_w')))}{fmt(mean_of(g, lambda r: get(r, 'cs.pc8')), 6, 1)}{fmt(mean_of(g, lambda r: get(r, 'cs.pc10')), 6, 1)}{fmt(ctxsw_top, 11, 0)}{fmt(mean_of(g, lambda r: get(r, 'irq.cpu_all_pct')), 9, 1)}")
     if not a.no_netdata and nd.available():
@@ -274,8 +300,13 @@ def cmd_states(a):
             segs.append((cur, start["t"], r["t"]))
             start, cur = r, r.get("state")
     segs.append((cur, start["t"], rows[-1]["t"]))
+    if not core.host_profile()["battery"] and len(segs) == 1:
+        print("(이 호스트는 깊은 절전 상태·덮개를 측정할 수 없어 구간이 하나뿐입니다 — 시간대별 변화는 `observectl query pkg cpu_all --since 1h --step 10m`)")
     for st, t0, t1 in segs:
         g = [r for r in rows if t0 <= r["t"] <= t1]
+        if not core.host_profile()["battery"]:
+            print(f"{core.hms(t0)}~{core.hms(t1)} ({(t1 - t0) / 60:5.1f}분) 패키지 {fmt(mean_of(g, lambda r: get(r, 'pw.pkg_w')))} W · VT {get(g[0], 'dev.vt')}")
+            continue
         print(f"{core.hms(t0)}~{core.hms(t1)} ({(t1 - t0) / 60:5.1f}분) {st:<7} psys {fmt(mean_of(g, lambda r: get(r, 'pw.psys_w')))} W · VT {get(g[0], 'dev.vt')} · lid {get(g[0], 'dev.lid')} · {get(g[0], 'dev.wifi.ssid') or '-'}")
 
 
@@ -468,6 +499,11 @@ def cmd_ebpf(a):
         print(f"⚠ 스스로 멈춤({core.hms(stopped[-1]['t'])}): {stopped[-1]['ebpf_stopped']}")
 
 
+def _has_sensor(signal):
+    prof = core.host_profile()
+    return not ((signal == "psys_w" and not prof["psys"]) or (signal == "batt_vi_w" and not prof["battery"]))
+
+
 def cmd_nd(a):
     if a.what == "charts":
         if not nd.available(ttl=0):
@@ -511,6 +547,8 @@ def cmd_nd(a):
         print(f"Netdata {core.hms(t0)} ~ {core.hms(t1)} · 이 구간 데이터 {snap['coverage'] * 100:.0f}%")
         for k, v in snap["signals"].items():
             label, unit, _ = nd.SIGNALS[k]
+            if v is None and not _has_sensor(k):
+                continue    # 이 호스트에 센서가 없는 신호는 '관측 공백'(고장)이 아니라 해당 없음 — 숨긴다
             print(f"  {label:<20}{'관측 공백' if v is None else f'{v:.2f}':>12} {unit}")
     else:
         print(f"Netdata 앱 그룹 CPU(코어 1개=100%) {core.hms(t0)} ~ {core.hms(t1)}")
@@ -645,9 +683,12 @@ def cmd_drmdebug(a):
 
 
 def cmd_display(a):
-    print("주의: 읽는 순간 디스플레이가 깨어나 낮은 절전 상태가 깨질 수 있음", file=sys.stderr)
+    if core.host_profile()["battery"]:
+        print("주의: 읽는 순간 디스플레이가 깨어나 낮은 절전 상태가 깨질 수 있음", file=sys.stderr)
     r = request("display", {}, 30)
     d = r.get("data") or {}
+    if not any(d.get(k) for k in ("package_cstate", "display_info", "power_domains")):
+        sys.exit("이 호스트에서는 읽을 수 있는 디스플레이·C-state 항목이 없습니다(Intel i915/MSR 전용 — 해당 없음)")
     for k in ("package_cstate", "display_info", "power_domains"):
         print(f"== {k}\n{d.get(k, '')[:3000]}")
 
@@ -920,7 +961,7 @@ def main(argv=None):
     sub.add_parser("off").set_defaults(f=cmd_off)
     s = sub.add_parser("level"); s.add_argument("component"); s.add_argument("level"); s.set_defaults(f=cmd_level)
     s = sub.add_parser("mark"); s.add_argument("cond", nargs="?", default=""); s.add_argument("note", nargs="*"); s.add_argument("--clear", action="store_true"); s.set_defaults(f=cmd_mark)
-    s = sub.add_parser("window"); s.add_argument("--no-netdata", action="store_true", help="Netdata 병기 표를 뺀다"); s.add_argument("--clean", action="store_true", help="내 세션 활동·빌드가 섞인 표본 제외"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.set_defaults(f=cmd_window)
+    s = sub.add_parser("window"); s.add_argument("--no-netdata", action="store_true", help="Netdata 병기 표를 뺀다"); s.add_argument("--clean", action="store_true", help="내 세션 활동·빌드가 섞인 표본 제외"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--by", default=None, choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.set_defaults(f=cmd_window)
     s = sub.add_parser("energy"); s.add_argument("--clean", action="store_true", help="내 세션 활동·빌드가 섞인 표본 제외"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--by", default="state", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.set_defaults(f=cmd_energy)
     s = sub.add_parser("states"); s.add_argument("--since", default="-2h"); s.set_defaults(f=cmd_states)
     s = sub.add_parser("top"); s.add_argument("--since", default="-30m"); s.add_argument("--by", default="ctxsw", choices=["cpu", "ctxsw", "wake", "thr", "io", "app"], help="ctxsw=자발적 문맥 전환/s, cpu=코어 1개 기준 CPU%%. wake 는 ctxsw 의 옛 이름"); s.add_argument("-n", type=int, default=12); s.set_defaults(f=cmd_top)

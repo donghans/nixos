@@ -3,6 +3,7 @@
 import contextlib, io, json, os, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 TMP = tempfile.mkdtemp(prefix="observe-explain-test-")
+os.environ["OBSERVE_USAGE_PROFILE"] = "laptop"   # 기존 시험은 노트북형(센서 있음) 기준 — 호스트에 따라 달라지지 않게 고정
 os.environ["OBSERVE_DATA_DIR"] = os.path.join(TMP, "var"); os.environ["OBSERVE_STATE_DIR"] = os.path.join(TMP, "state")
 sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "_testkit"))
 import observe_core as core, observe_explain as ex, observe_trace as tr, observe_cli
@@ -127,4 +128,19 @@ try:
     check("잘못된 --baseline 은 안내 후 종료", False)
 except SystemExit as e:
     check("잘못된 --baseline 은 안내 후 종료", "--baseline" in str(e))
+
+# ---- 데스크톱 분기(센서 없음): 0 이 아니라 '해당 없음'으로
+os.environ["OBSERVE_USAGE_PROFILE"] = "desktop"
+check("host_profile: 시험용 강제 desktop → 배터리·psys 없음", core.host_profile() == {"battery": False, "psys": False})
+check("_power_rows: 데스크톱은 패키지 전력만", [k for k, _, _ in ex._power_rows()] == ["pkg_w"])
+check("state_summary: 데스크톱은 전원을 '배터리'가 아니라 상시 전원으로", ex.state_summary([row(T, None, ac=0)])["ac"] == {"상시 전원": 1})
+check("group_key ac: 데스크톱은 상시 전원", observe_cli.group_key(row(T, None, ac=0), "ac") == "상시 전원")
+check("_status_tail: 'unknown'·'NoneW' 를 쓰지 않음", "unknown" not in observe_cli._status_tail(row(T, None, state="unknown")) and "None" not in observe_cli._status_tail(row(T, None, state="unknown")))
+try:
+    observe_cli.cmd_energy(type("A", (), {"since": "1h", "until": None, "clean": False, "by": "state"})())
+    check("energy: 데스크톱은 해당 없음 안내", False)
+except SystemExit as e:
+    check("energy: 데스크톱은 해당 없음 안내", "해당 없음" in str(e))
+os.environ["OBSERVE_USAGE_PROFILE"] = "laptop"
+check("_power_rows: 노트북은 4지표", len(ex._power_rows()) == 4)
 finish("explain")

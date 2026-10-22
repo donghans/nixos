@@ -105,6 +105,8 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 | 3 원인 | 전력 변화 결론 + 상세 접이식 | 전체 CPU·문맥 전환·패키지 전력의 지금/기준 비교 + 앱별 CPU 변화 순위 |
 | 4 시스템·기기 | 덮개·PSR·pc8/pc10·Wi-Fi 절전 | CPU 주파수·부하·문맥 전환/인터럽트. Netdata 의 psys·V×I 신호·차트는 숨김 |
 
+`observectl` CLI 도 같은 기준(`observe_core.host_profile()`, usageui 와 공용)으로 갈린다. 데스크톱형은 센서가 없는 값을 0·`unknown`·`None W` 로 쓰지 않고 **빼거나 "해당 없음"으로** 적는다: `status`(패키지 전력만), `window`(V×I·psys·core·pc8/pc10 열 제거, 기본 그룹 없음), `explain`(패키지 전력 행만, 덮개·PSR·깊은 절전 생략, 전원은 "상시 전원"), `energy`(해당 없음 안내), `states`(패키지 전력), `display`(읽을 항목 없음 안내), `nd stats`(psys·V×I 숨김). 노트북형 출력은 그대로다.
+
 수집 기본값도 호스트 종류로 갈린다: 노트북은 기본 꺼짐(측정 위생), 그 밖은 기본 켜짐(`/etc/observe/default-enabled`, `observectl on|off` 가 항상 우선). Netdata 도 같다(노트북 꺼짐, 데스크톱·서버 켜짐).
 
 ### Netdata 로의 미러링

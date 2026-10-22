@@ -22,20 +22,8 @@ STALE_S = 300                    # 데이터 기준 시각이 이보다 오래�
 
 
 def host_profile():
-    """이 호스트에 어떤 센서가 있나 — 화면을 노트북형(전력·배터리 중심)과 데스크톱형(프로세스·CPU 중심)으로 가르는 기준.
-    호스트 이름이나 nix 의 호스트 종류가 아니라 **센서 유무**로 가른다(배터리 없는 다른 호스트도 같은 화면이 된다).
-    OBSERVE_USAGE_PROFILE=laptop|desktop 으로 강제할 수 있다(시험용). 반환 {"battery": bool, "psys": bool}."""
-    forced = os.environ.get("OBSERVE_USAGE_PROFILE")
-    if forced in ("laptop", "desktop"):
-        return {"battery": forced == "laptop", "psys": forced == "laptop"}
-    battery = False
-    for d in glob.glob("/sys/class/power_supply/*"):
-        try:
-            if open(d + "/type").read().strip() == "Battery":
-                battery = True
-        except OSError:
-            pass
-    return {"battery": battery, "psys": os.path.exists("/sys/class/powercap/intel-rapl:1")}
+    """센서 유무 판정은 observe_core.host_profile(CLI 와 공용)."""
+    return core.host_profile()
 
 
 def is_desktop(profile=None):

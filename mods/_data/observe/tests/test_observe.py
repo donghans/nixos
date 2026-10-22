@@ -4,6 +4,7 @@ import json, os, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 TMP = tempfile.mkdtemp(prefix="observectl-test-")
 os.environ["OBSERVE_DEFAULT_ENABLED_FLAG"] = os.path.join(TMP, "default-enabled")   # 시험은 호스트의 /etc 플래그와 무관하게 "없음"에서 시작
+os.environ["OBSERVE_USAGE_PROFILE"] = "laptop"   # 센서 있는 호스트 기준으로 고정(호스트에 따라 달라지지 않게)
 os.environ["OBSERVE_DATA_DIR"] = os.path.join(TMP, "var"); os.environ["OBSERVE_STATE_DIR"] = os.path.join(TMP, "state")
 sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "_testkit"))
 import observe_core as core, observe_events, observe_stats as stats, observe_collector as col, observe_cli

@@ -9,6 +9,7 @@ import collections
 import unicodedata
 import statistics
 
+import observe_core as core
 import observe_tiers as tiers
 import observe_trace as tr
 
@@ -60,7 +61,7 @@ def state_summary(g):
         return {}
     pct = lambda f: round(sum(1 for r in g if f(r)) * 100 / n)
     return {"n": n, "low_pct": pct(lambda r: r.get("state") == "low"), "psr_pct": pct(lambda r: "enabled" in str((_get(r, ("dev", "psr")) or {}).get("mode") or "")),
-            "lid": dict(collections.Counter(str(_get(r, ("dev", "lid"))) for r in g)), "ac": dict(collections.Counter("AC" if _get(r, ("pw", "ac")) else "배터리" for r in g)),
+            "lid": dict(collections.Counter(str(_get(r, ("dev", "lid"))) for r in g)), "ac": dict(collections.Counter(("AC" if _get(r, ("pw", "ac")) else "배터리") if core.host_profile()["battery"] else "상시 전원" for r in g)),
             "vt": dict(collections.Counter(str(_get(r, ("dev", "vt"))) for r in g))}
 
 
@@ -223,6 +224,12 @@ def build(rows, spans, t0, t1, base=None, nd=None, threshold=0.3):
     return res
 
 
+def _power_rows():
+    """보여줄 전력 지표: 배터리·psys 센서가 없는 호스트(데스크톱)는 패키지 전력만."""
+    prof = core.host_profile()
+    return [x for x in POWER if x[0] == "pkg_w" or (prof["psys"] if x[0] == "psys_w" else prof["battery"])]
+
+
 def rank_changes(res):
     """기준 대비 달라진 것의 순위(상대 변화 큰 순). 항목: 전력(신뢰 가능한 것만), 시스템 활동, 프로세스 CPU. **상관일 뿐 인과가 아니다.**"""
     out = []
@@ -286,10 +293,13 @@ def sections(res, hms):
     st, sb = res["state"], res["state_base"]
     if st:
         fmt = lambda d: " ".join(f"{k} {v}개" for k, v in sorted(d.items(), key=lambda kv: -kv[1]))
-        head.append(f"상태: low {st['low_pct']}%(깊은 절전 진입) · PSR 켬 {st['psr_pct']}% · 덮개 [{fmt(st['lid'])}] · 전원 [{fmt(st['ac'])}] · 화면 [{fmt(st['vt'])}]" + (f"   | 기준: low {sb['low_pct']}% · PSR {sb['psr_pct']}%" if sb else ""))
+        if not core.host_profile()["battery"]:   # 데스크톱: 덮개·PSR·깊은 절전(low/high)·배터리 전원은 측정할 수 없다(0 이 아니라 없음)
+            head.append(f"화면 [{fmt(st['vt'])}] · 전원 상시(배터리 없음) · 덮개·PSR·깊은 절전 상태는 이 호스트에 센서가 없어 생략")
+        else:
+            head.append(f"상태: low {st['low_pct']}%(깊은 절전 진입) · PSR 켬 {st['psr_pct']}% · 덮개 [{fmt(st['lid'])}] · 전원 [{fmt(st['ac'])}] · 화면 [{fmt(st['vt'])}]" + (f"   | 기준: low {sb['low_pct']}% · PSR {sb['psr_pct']}%" if sb else ""))
     S.append(("요약", head))
     P = [_l("", 26) + _r("이 구간", 8) + _r("기준", 8) + _r("변화", 9) + _r("Netdata(1초)", 14) + "   신뢰"]
-    for key, label, unit in POWER:
+    for key, label, unit in _power_rows():
         p = res["power"].get(key) or {}
         v, b = p.get("value"), p.get("base")
         d = f"{v - b:+.2f}" if v is not None and b is not None else "-"
