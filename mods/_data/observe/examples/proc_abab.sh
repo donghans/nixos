@@ -3,17 +3,21 @@
 # A = 기본, B = 변형. 끝나면(신호·실패 포함) 반드시 A 로 복구한다(SIGSTOP 을 남기지 않는다). 사용: VARIANT=slack proc_abab.sh   (덮개 닫고, Vivaldi 가 떠 있는 상태)
 . "$(dirname "$0")/abab_lib.sh"
 VARIANT=${VARIANT:?VARIANT=stop|slack|pin|vt}; PROC=${PROC:-vivaldi-bin}
-_pids() { for d in /proc/[0-9]*; do [ "$(cat $d/comm 2>/dev/null)" = "$PROC" ] && echo "${d#/proc/}"; done; }
+_pids() { pgrep -u "$(id -u)" -x "$PROC"; }      # comm 이 정확히 일치하는 내 프로세스(느린 /proc 순회 대신)
 _ncpu=$(nproc); _all="0-$((_ncpu - 1))"
 case "$VARIANT" in
   stop)  abab_set_a()    { for p in $(_pids); do kill -CONT "$p" 2>/dev/null; done; }
          abab_set_b()    { for p in $(_pids); do kill -STOP "$p" 2>/dev/null; done; }
          abab_verify_a() { for p in $(_pids); do case "$(awk '{print $3}' /proc/$p/stat 2>/dev/null)" in T|t) return 1 ;; esac; done; return 0; }
          abab_verify_b() { n=0; for p in $(_pids); do [ "$(awk '{print $3}' /proc/$p/stat 2>/dev/null)" = T ] && n=$((n+1)); done; [ "$n" -ge 1 ]; } ;;
-  slack) abab_set_a()    { for p in $(_pids); do sudo -n sh -c "echo 50000 > /proc/$p/timerslack_ns" 2>/dev/null; done; }
-         abab_set_b()    { for p in $(_pids); do sudo -n sh -c "echo 50000000 > /proc/$p/timerslack_ns" || return 1; done; }
-         abab_verify_a() { for p in $(_pids); do [ "$(sudo -n cat /proc/$p/timerslack_ns)" = 50000 ] || return 1; done; }
-         abab_verify_b() { for p in $(_pids); do [ "$(sudo -n cat /proc/$p/timerslack_ns)" = 50000000 ] || return 1; done; } ;;
+  slack) # timerslack_ns 는 스레드마다 따로다(/proc/<pid>/ 는 리더 스레드만) — 모든 tid 에 쓴다. 읽기·쓰기는 root 필요라 sudo 한 번에 묶는다. 0 을 쓰면 기본값으로 복귀.
+         _tids() { for p in $(_pids); do ls /proc/$p/task 2>/dev/null; done; }
+         _slack_set() { v=$1; sudo -n sh -c 'v=$1; shift; for t in "$@"; do echo $v > /proc/$t/timerslack_ns 2>/dev/null; done; exit 0' _ "$v" $(_tids); }
+         _slack_frac() { v=$1; sudo -n sh -c 'for t in "$@"; do cat /proc/$t/timerslack_ns 2>/dev/null; done' _ $(_tids) | awk -v v="$v" '{n++; if ($1==v) k++} END{ if (n) printf "%d", 100*k/n; else print 0 }'; }
+         abab_set_a()    { _slack_set 0; }
+         abab_set_b()    { _slack_set 50000000; }
+         abab_verify_a() { [ "$(_slack_frac 50000000)" -le 5 ]; }
+         abab_verify_b() { [ "$(_slack_frac 50000000)" -ge 80 ]; } ;;
   pin)   abab_set_a()    { for p in $(_pids); do taskset -a -c -p "$_all" "$p" >/dev/null 2>&1; done; }
          abab_set_b()    { for p in $(_pids); do taskset -a -c -p 0 "$p" >/dev/null 2>&1 || return 1; done; }
          abab_verify_a() { for p in $(_pids); do [ "$(taskset -c -p $p | awk '{print $NF}')" = "$_all" ] || return 1; done; }
