@@ -77,6 +77,10 @@ in {
       # pkgs.libreoffice-fresh # (필요하면 주석 해제: fontconfig 를 그대로 써서 폰트 문제는 없지만 OOXML 재현은 ONLYOFFICE 가 나음)
     ];
 
+    # PDF 를 ONLYOFFICE 로 연다(래퍼의 .desktop 이라 --force-scale 이 적용됨). mimeapps.list 가 home-manager 소유라
+    # Thunar 의 "기본 앱으로 설정"은 저장되지 않으므로 여기서 선언해야 한다.
+    xdg.mimeApps.defaultApplications."application/pdf" = "onlyoffice-desktopeditors.desktop";
+
     # ONLYOFFICE 의 보조 창(닫을 때 "변경 사항을 저장하시겠습니까?" 확인창, 파일 열기/저장 창 등)은 본 창(class ONLYOFFICE)과
     # 다른 class `DesktopEditors` 의 XWayland 창이고 제목이 없음. 전역 규칙(core.ux.nix)이 모든 창을 플로팅으로 만드는데
     # 위치 지정이 없어 화면 왼쪽 위 (0,0) 에 붙었음(hyprctl clients 로 확인: at=[0,0] size=[391,112]) → 가운데로.
