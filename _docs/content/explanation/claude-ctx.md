@@ -26,6 +26,11 @@
 - **토큰·비용 합계는 `usage_events`(요청 단위)로만** 센다. `messages` 의 토큰을 합치면 resume/fork 로 복사된 만큼 이중 계산된다.
 - 한계: 같은 한도 샘플(`limit_samples`)은 머신별 행이라 계정 공통 값이 머신마다 따로 쌓인다(의도). 머신 시계가 어긋나면 ts 비교가 어긋난다.
 
+## 접속 허용 목록 · 백업 · 초안
+- **허용 목록:** `claude-ctx.nix` 의 `allowedClients` (tailnet IP) + scram 비밀번호. 새 기기는 IP 를 추가한다. headscale 이 IP 를 재할당하면 그 기기는 접속이 막힌다(fail-closed).
+- **백업:** 매일 03:30 `pg_dump`(zstd) → `/var/backup/postgresql/claude_ctx.sql.zstd` (최신 1개만, 같은 디스크). Claude Code 가 오래된 로컬 트랜스크립트를 정리하면 이 DB 가 옛 대화의 유일한 사본이 된다.
+- **초안:** `donghans handoff draft --session <ID> [--focus "…"] [--model haiku] [--dry-run]` — DB 의 사용자 발언·최근 응답만 작은 모델이 읽고 `.claude/handoffs/DRAFT-<ID>.md` 를 만든다(예: 사용자 발언 6개·약 3천 토큰 입력, 74초). 검증 전 자료이므로 본 세션이 사실 칸을 확인하고 보강한다.
+
 ## 머신이 바뀔 때 (SSD 교체·노트북 추가·재설치)
 - 수집 위치는 `(hostname#machine-id 해시, 파일 경로)` 로 관리한다. 같은 hostname 의 다른 물리 머신이 오프셋을 공유해 데이터를 건너뛰는 것을 막기 위함. OS 재설치로 machine-id 가 바뀌면 처음부터 다시 읽지만 uuid/request_id 중복 방지로 행이 늘지 않는다.
 - 세션·메시지 ID 는 전역 고유라 머신 간 충돌이 없다. `~/.claude` 를 복원·복사해도 같은 uuid 는 건너뛴다.

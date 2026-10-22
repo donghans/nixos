@@ -477,6 +477,62 @@ def cmd_handoff_get(a):
     return 0
 
 
+DRAFT_PROMPT = """당신은 Claude Code 세션의 인수인계 초안 작성기다. 아래 [자료]만 근거로 한국어 인수인계 초안을 쓴다. 규칙:
+- 자료에 없는 것은 쓰지 않는다. 확신이 없으면 「추정」 표시. 새로 지어내지 않는다.
+- 사용자 발언(user)과 에이전트 발언(assistant)을 섞지 않는다. 에이전트의 제안·해석을 사용자 결정처럼 쓰지 않는다.
+- 상시 지시는 표(지시 | 출처(날짜·메시지ID8자) | 확인[사용자 원문 / 에이전트 해석])로, 사용자 발언 원문에 근거가 있는 것만 「사용자 원문」으로 표시한다.
+- 섹션: 0 상시 지시 · 1 현재 상태 · 2 미완 작업 · 3 다음 할 일 · 4 열린 결정(추천 답 포함) · 5 함정 · 6 확인하지 못한 것. 각 섹션 끝에 근거 대화 범위를 `<시작ID8>~<끝ID8>` 로 적는다.
+- git 상태·파일 존재 같은 현재 사실은 이 자료로 알 수 없으므로 「확인 필요」로 남긴다(검증은 사람이 한다).
+{focus}
+[자료: 세션 {sid} · 저장소 {repo} · {n_user} 개 사용자 발언 중 최근 {n_user_used} 개, 에이전트 응답 최근 {n_resp} 개]
+{body}
+"""
+
+
+def cmd_handoff_draft(a):
+    """작은 모델이 DB 슬라이스만 읽고 초안을 쓴다 — 큰 세션 컨텍스트를 다시 읽지 않게 하려는 것. 본문 세션은 이 초안을 검증·보강한다."""
+    sid = a.session or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if not sid:
+        sys.exit("세션 ID 가 필요하다(--session 또는 CLAUDE_CODE_SESSION_ID)")
+    conn = connect(timeout=10)
+    for f in glob.glob(os.path.join(HOME, f".claude/projects/*/{sid}.jsonl")):  # 가장 최근 대화까지 반영
+        for g in transcript_family(f):
+            ingest_transcript(conn, g)
+    conn.commit()
+    sess = conn.execute("SELECT session_id, repo_url, cwd FROM sessions WHERE session_id LIKE %s", (sid + "%",)).fetchall()
+    if len(sess) != 1:
+        sys.exit(f"세션 일치 {len(sess)}건")
+    sid, repo, cwd = sess[0]
+    users = conn.execute("""SELECT ts, left(uuid,8), text FROM messages WHERE session_id=%s AND kind='prompt' AND NOT is_sidechain
+                            AND text NOT LIKE '<%%' AND text NOT LIKE '[Request interrupted%%' ORDER BY ts""", (sid,)).fetchall()
+    resps = conn.execute("""SELECT ts, left(uuid,8), text FROM messages WHERE session_id=%s AND kind='response' AND NOT is_sidechain
+                            ORDER BY ts DESC LIMIT %s""", (sid, a.responses)).fetchall()[::-1]
+    budget, parts, used_u = a.max_chars, [], 0
+    lines_u = [f"[user {t:%m-%d %H:%M} {u}] {x.strip()[:a.prompt_chars]}" for t, u, x in users]
+    lines_r = [f"[assistant {t:%m-%d %H:%M} {u}] {x.strip()[:a.resp_chars]}" for t, u, x in resps]
+    r_len = sum(len(x) for x in lines_r)
+    keep = []
+    for l in reversed(lines_u):             # 최근 발언부터 예산 안에서
+        if sum(len(x) for x in keep) + len(l) + r_len > budget:
+            break
+        keep.append(l)
+    keep = keep[::-1]
+    body = "\n".join(keep) + "\n--- 에이전트 응답(최근) ---\n" + "\n".join(lines_r)
+    focus = f"- 추가 지시(중점): {a.focus}" if a.focus else ""
+    prompt = DRAFT_PROMPT.format(focus=focus, sid=sid, repo=repo or "-", n_user=len(users), n_user_used=len(keep), n_resp=len(lines_r), body=body)
+    print(f"[draft] 모델 {a.model} · 입력 약 {len(prompt)}자(≈{len(prompt) // 3} 토큰) · 사용자 발언 {len(keep)}/{len(users)}", file=sys.stderr)
+    if a.dry_run:
+        print(prompt); return 0
+    r = subprocess.run(["claude", "-p", "--model", a.model, "--no-session-persistence"], input=prompt, capture_output=True, text=True, timeout=600)
+    if r.returncode != 0 or not r.stdout.strip():
+        sys.exit(f"초안 생성 실패: {r.stderr.strip()[:300]}")
+    out = a.out or os.path.join(cwd or ".", ".claude/handoffs", f"DRAFT-{sid}.md")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    open(out, "w").write(r.stdout)
+    print(out)
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(prog="donghans", description="donghans 도구 모음 — ctx(공유 컨텍스트 저장소)·handoff(인수인계 업/다운)")
     top = ap.add_subparsers(dest="group", required=True)
@@ -490,6 +546,8 @@ def main():
     p = ctx.add_parser("sql"); p.add_argument("query"); p.add_argument("--limit", type=int, default=50); p.set_defaults(f=cmd_sql)
     ho = top.add_parser("handoff", help="인수인계 문서 업/다운").add_subparsers(dest="cmd", required=True)
     p = ho.add_parser("put"); p.add_argument("--session", required=True); p.add_argument("--doc", required=True); p.add_argument("--note", default=""); p.set_defaults(f=cmd_handoff_put)
+    p = ho.add_parser("draft"); p.add_argument("--session"); p.add_argument("--focus"); p.add_argument("--model", default="haiku"); p.add_argument("--out"); p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--max-chars", type=int, default=60000); p.add_argument("--prompt-chars", type=int, default=700); p.add_argument("--resp-chars", type=int, default=900); p.add_argument("--responses", type=int, default=25); p.set_defaults(f=cmd_handoff_draft)
     p = ho.add_parser("get"); p.add_argument("session", nargs="?"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--out"); p.set_defaults(f=cmd_handoff_get)
     a = ap.parse_args()
     sys.exit(a.f(a) or 0)

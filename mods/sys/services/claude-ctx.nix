@@ -1,6 +1,6 @@
 # Claude 공유 컨텍스트 저장소(Postgres) — 여러 머신·프로젝트의 Claude Code 대화·사용량을 한곳에 모아 조회한다.
 #  - 서버 역할 호스트에서만 켠다(현재 beelink-ser7-co). 클라이언트(훅·수집기·조회)는 mods.devel 의 llm-cli 가 모든 호스트에 설치한다.
-#  - 접속: tailnet(MagicDNS `<호스트>:5432`)과 localhost 만. 방화벽은 열지 않는다(tailscale0 는 trustedInterfaces, 그 밖의 인터페이스는 기본 drop).
+#  - 접속: localhost 와 허용 목록의 tailnet 기기(MagicDNS `<호스트>:5432`)만. 방화벽은 열지 않는다(tailscale0 는 trustedInterfaces, 그 밖의 인터페이스는 기본 drop).
 #    tailnet 에는 다른 사용자 기기도 있어서 신뢰하지 않고 **반드시 scram 비밀번호**를 요구한다(pg_hba).
 #  - 비밀번호는 nix 에 두지 않는다(스토어에 평문이 남음). 최초 1회 수동: docs 의 `claude-ctx` 절차 → ~/.config/claude-ctx/dsn (권한 600).
 #  - 나중에 클라우드/온프레미스로 옮기면: pg_dump → 새 서버 → 각 머신의 dsn 파일만 교체. 이 모듈은 서버 호스트에서만 끄면 된다.
@@ -12,7 +12,12 @@ mkMod __curPos "Claude 공유 컨텍스트 저장소 (Postgres)" ({
   pkgs,
   lib,
   ...
-}: {
+}: let
+  # 접속을 허용할 tailnet 기기(허용 목록 — 비밀번호와 별개의 2중 장치). 새 기기를 쓰려면 여기에 tailnet IP 를 추가한다.
+  # headscale 이 IP 를 재할당하면(재등록 시) 그 기기는 접속이 막힌다 — 조용히 실패하지 않고 인증 거부로 보인다(fail-closed).
+  #   100.64.0.1 beelink-ser7-co (이 서버 자신) · 100.64.0.4 msi-summit-me (확인: 2026-10-22 tailscale status)
+  allowedClients = ["100.64.0.1" "100.64.0.4"];
+in {
   os = lib.mkIf cfg.enable {
     services.postgresql = {
       enable = true;
@@ -29,15 +34,24 @@ mkMod __curPos "Claude 공유 컨텍스트 저장소 (Postgres)" ({
       authentication = lib.mkForce ''
         # 소켓: 서버 관리용(postgres 시스템 사용자)만 peer
         local all postgres peer
-        # claude_ctx 는 비밀번호로만, localhost 와 tailnet(CGNAT 100.64.0.0/10)에서
+        # claude_ctx 는 비밀번호로만, localhost 와 허용 목록의 tailnet 기기에서
         host claude_ctx claude_ctx 127.0.0.1/32 scram-sha-256
         host claude_ctx claude_ctx ::1/128 scram-sha-256
-        host claude_ctx claude_ctx 100.64.0.0/10 scram-sha-256
+        ${lib.concatMapStringsSep "\n" (ip: "host claude_ctx claude_ctx ${ip}/32 scram-sha-256") allowedClients}
       '';
       settings = {
         password_encryption = "scram-sha-256";
         shared_buffers = "256MB";
       };
+    };
+
+    # 매일 03:30 덤프(최신 1개만 유지 — 덤프 파일이 같은 디스크에 있으므로 디스크 고장은 못 막는다. 원본은 각 머신의 트랜스크립트이기도 함).
+    # 필요성: Claude Code 는 오래된 로컬 트랜스크립트를 정리하므로, 시간이 지나면 이 DB 가 옛 대화의 유일한 사본이 된다.
+    services.postgresqlBackup = {
+      enable = true;
+      databases = ["claude_ctx"];
+      startAt = "*-*-* 03:30:00";
+      compression = "zstd";
     };
 
     # 스키마 적용(멱등): DB/역할이 만들어진 뒤 postgres 사용자로 실행
