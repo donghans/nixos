@@ -12,8 +12,8 @@ case "$VARIANT" in
          abab_verify_b() { n=0; for p in $(_pids); do [ "$(awk '{print $3}' /proc/$p/stat 2>/dev/null)" = T ] && n=$((n+1)); done; [ "$n" -ge 1 ]; } ;;
   slack) abab_set_a()    { for p in $(_pids); do sudo -n sh -c "echo 50000 > /proc/$p/timerslack_ns" 2>/dev/null; done; }
          abab_set_b()    { for p in $(_pids); do sudo -n sh -c "echo 50000000 > /proc/$p/timerslack_ns" || return 1; done; }
-         abab_verify_a() { for p in $(_pids); do [ "$(cat /proc/$p/timerslack_ns)" = 50000 ] || return 1; done; }
-         abab_verify_b() { for p in $(_pids); do [ "$(cat /proc/$p/timerslack_ns)" = 50000000 ] || return 1; done; } ;;
+         abab_verify_a() { for p in $(_pids); do [ "$(sudo -n cat /proc/$p/timerslack_ns)" = 50000 ] || return 1; done; }
+         abab_verify_b() { for p in $(_pids); do [ "$(sudo -n cat /proc/$p/timerslack_ns)" = 50000000 ] || return 1; done; } ;;
   pin)   abab_set_a()    { for p in $(_pids); do taskset -a -c -p "$_all" "$p" >/dev/null 2>&1; done; }
          abab_set_b()    { for p in $(_pids); do taskset -a -c -p 0 "$p" >/dev/null 2>&1 || return 1; done; }
          abab_verify_a() { for p in $(_pids); do [ "$(taskset -c -p $p | awk '{print $NF}')" = "$_all" ] || return 1; done; }
