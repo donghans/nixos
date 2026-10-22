@@ -20,7 +20,11 @@ def pad(s, n):
 
 
 def _f(x, p=2, unit=""):
-    return "-" if x is None or x != x else f"{x:.{p}f}{unit}"
+    try:
+        x = float(x)   # /proc 에서 읽은 값(load1 등)은 문자열로 들어올 수 있다
+    except (TypeError, ValueError):
+        return "-"
+    return "-" if x != x else f"{x:.{p}f}{unit}"
 
 
 def _line(t, label, value, note="", vstyle="bold", lw=16, vw=22):

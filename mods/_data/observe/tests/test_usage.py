@@ -75,6 +75,7 @@ check("summary_power: 표본이 없으면 안내", "표본이 없습니다" in u
 check("summary_estimate: '추정' 표시", "추정" in uv.summary_estimate(v).plain)
 check("summary_apps: 앱 점유율 막대와 '전력 점유율 아님' 안내", "CPU 점유" in uv.summary_apps(v, 100).plain and "claude" in uv.summary_apps(v, 100).plain)
 check("apps_rows: 전력량 추정은 psys 전력량 × 점유율(claude 75%)", uv.apps_rows(v)[0][0] == "claude" and abs(float(uv.apps_rows(v)[0][6]) - S["psys_wh"] * 0.75) < 0.01)
+check("_f: 문자열 숫자(/proc load1 '2.33')도 포맷, 변환 불가는 -", uv._f("2.33", 2) == "2.33" and uv._f("x") == "-" and uv._f(None) == "-")
 check("pad: 한글 칸 폭 기준", uv.pad("가나", 6) == "가나  " and uv.pad("ab", 4) == "ab  ")
 fresh = uv.freshness(v, now + 900)
 check("freshness: 15분 지난 지금까지 범위는 경고, 신선하면 새로고침 안내만", "⚠" in fresh and "⚠" not in uv.freshness(v, now + 5) and "r 새로고침" in uv.freshness(v, now + 5))
