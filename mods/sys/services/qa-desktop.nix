@@ -27,6 +27,7 @@ mkMod __curPos "QA 데스크톱 VM(incus) 선언·생성·사용 지침" ({
     # 프로젝트별 창 배치 규칙: Chromium `--class=<이름>-qa` 로 띄운 창이 가상 데스크톱 <번호> 로 자동 이동(GNOME Auto Move Windows). 규칙이 없는 프로젝트는 지금 보는 데스크톱에 뜬다.
     projects = {
       genple = 2;
+      tot = 3;
     };
     ssh_key = "~/.ssh/qa_desktop_ed25519"; # 호스트 쪽 개인키(없으면 ensure 가 만든다). 공개키가 VM 의 qa 계정에 들어간다
   };
