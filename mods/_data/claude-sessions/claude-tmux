@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# claude-tmux — claude 를 전용 tmux 세션(`tmux -L claude`) 안에서 실행해, ssh·다른 kitty 에서 `claude-sessions` 로 이어 붙을 수 있게 한다.
+#   claude-tmux [claude 인자…]           새 세션을 만들고 붙는다(분리하면 세션은 계속 돈다, claude 를 끝내면 세션도 끝난다)
+#   claude-tmux --wants [claude 인자…]   tmux 로 감싸야 하는 호출이면 종료 코드 0, 아니면 1 (셸 함수 claude 가 먼저 묻는다)
+# 감싸지 않는 경우: CLAUDE_TMUX=0 · 이미 tmux 안 · 터미널이 아님 · -p/--print/--help/--version 등 비대화형 · 서브커맨드(mcp, config, update …)
+# kitty 창이 닫혀 이 프로세스가 끊기면: 다른 곳에서 그 세션에 붙어 있지 않을 때만 세션을 끝낸다(붙어 있으면 그쪽이 이어 쓰게 둔다).
+# 환경 변수는 tmuxsess.py 머리말 참고(CLAUDE_TMUX_BIN · CLAUDE_TMUX_SOCKET · CLAUDE_TMUX_CONF · CLAUDE_RUN_BIN).
+set -u
+HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+TMUX_BIN=${CLAUDE_TMUX_BIN:-tmux}
+SOCKET=${CLAUDE_TMUX_SOCKET:-claude}
+CONF=${CLAUDE_TMUX_CONF:-$HERE/claude-tmux.conf}
+RUN=${CLAUDE_RUN_BIN:-claude-run}
+HINT="분리: F12 또는 Ctrl+] d  ·  종료: claude 를 끝내면 세션도 끝남"
+
+wants() {
+  [ "${CLAUDE_TMUX:-1}" = 0 ] && return 1
+  [ -n "${TMUX:-}" ] && return 1
+  [ -t 0 ] && [ -t 1 ] || return 1
+  if [ $# -gt 0 ] && [[ "$1" =~ ^[a-z][a-z-]*$ ]]; then return 1; fi   # 서브커맨드(한 단어)
+  local a
+  for a in "$@"; do
+    case "$a" in -p | --print | -h | --help | -v | --version | --output-format | --output-format=* | --input-format | --input-format=*) return 1 ;; esac
+  done
+  return 0
+}
+
+if [ "${1:-}" = --wants ]; then shift; wants "$@"; exit $?; fi
+
+T=("$TMUX_BIN" -L "$SOCKET" -f "$CONF")
+base=$(basename "$PWD" | tr -c 'A-Za-z0-9_\n-' '-' | sed 's/^-*//; s/-*$//' | cut -c1-30)
+name="claude-${base:-work}-$(date +%Y%m%d-%H%M%S)"
+i=2; while "${T[@]}" has-session -t "=$name" 2>/dev/null; do name="${name%-[0-9]}-$i"; i=$((i + 1)); done
+
+"${T[@]}" new-session -d -s "$name" -c "$PWD" -- "$RUN" "$@" || { echo "claude-tmux: 세션을 만들지 못했습니다" >&2; exit 1; }
+
+hung=0
+trap 'hung=1' HUP TERM
+"${T[@]}" attach-session -t "=$name" \; display-message -d 3000 "$HINT"
+rc=$?
+trap - HUP TERM
+
+# 터미널이 사라졌으면(kitty 닫힘) 다른 접속이 없을 때 세션을 정리한다. 정상 분리(F12 등)에서는 터미널이 살아 있어 아무것도 하지 않는다.
+if [ "$hung" = 1 ] || ! { : >/dev/tty; } 2>/dev/null; then
+  sleep 0.5
+  n=$("${T[@]}" display-message -p -t "=$name:" '#{session_attached}' 2>/dev/null)
+  if [ -n "$n" ] && [ "$n" -eq 0 ]; then "${T[@]}" kill-session -t "=$name" 2>/dev/null; fi
+fi
+exit $rc

@@ -119,6 +119,32 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   claudeCtx = pkgs.writeShellScriptBin "donghans" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg])}/bin/python3 ${ctxSrc}/claude_ctx.py "$@"'';
   # ctx 관리 TUI(Textual): 저장소별 용량·검색·발언 대조·비밀 등록표·후보 탐지. 사람이 터미널에서 쓰는 도구(`ctxui`).
   ctxui = pkgs.writeShellScriptBin "ctxui" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg ps.textual])}/bin/python3 ${ctxSrc}/ctxui.py "$@"'';
+
+  # (목적: ssh 와 kitty 에서 같은 claude 세션을 이어 쓰기) claude 를 전용 tmux 서버(`tmux -L claude`, 일반 tmux 와 분리) 안에서 돌리고,
+  # `claude-sessions`(목록 UI)로 어디서든 붙는다. 한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다(tmux 기본 동작).
+  # 대화형 `claude` 셸 함수만 이 경로를 타고(아래 initContent), `claude -p`·서브커맨드·스크립트가 부르는 claude 는 그대로다. 끄기: CLAUDE_TMUX=0 claude.
+  # 설계·시험 기록: _docs/content/explanation/claude-sessions.md
+  sessionsSrc = pkgs.runCommand "claude-sessions-src" {} ''
+    mkdir -p $out
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/claude-sessions + "/${f}"} $out/${f}") ["claude_sessions.py" "tmuxsess.py" "claude-tmux" "claude-tmux.conf"]}
+    chmod +x $out/claude-tmux
+    cp ${../../_data/_uikit/uikit.py} $out/uikit.py
+  '';
+  tmuxEnv = ''
+    export CLAUDE_TMUX_BIN=${pkgs.tmux}/bin/tmux CLAUDE_TMUX_CONF=${sessionsSrc}/claude-tmux.conf CLAUDE_RUN_BIN=${claudeRun}
+  '';
+  # tmux 안에서 실제로 claude 를 실행하는 쪽. sudo 인증 캐시는 tty 별이라(셸 함수의 `sudo -v` 는 pane 의 tty 에 효과가 없다) 여기서 다시 받고,
+  # 이 프로세스(=claude 부모)가 살아 있는 동안만 60초마다 갱신한다. exec 하지 않는 이유: 끝난 뒤 갱신 루프도 같이 끝나게 하려고.
+  claudeRun = pkgs.writeShellScript "claude-run" ''
+    if [ -t 0 ]; then
+      sudo -v || exit 1
+      ( while sudo -n true 2>/dev/null; do sleep 60; kill -0 "$$" 2>/dev/null || exit; done & ) 2>/dev/null
+    fi
+    ${settingsSnippet}
+    ${claude}/bin/claude "$@"
+  '';
+  claudeTmux = pkgs.writeShellScriptBin "claude-tmux" ''${tmuxEnv}exec ${pkgs.bash}/bin/bash ${sessionsSrc}/claude-tmux "$@"'';
+  claudeSessions = pkgs.writeShellScriptBin "claude-sessions" ''${tmuxEnv}exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${sessionsSrc}/claude_sessions.py "$@"'';
   # 훅은 비동기(입력을 막지 않음)이고 실패해도 조용히 끝난다. 놓친 것은 ingest 타이머가 따라잡는다.
   ctxHook = event: [
     {
@@ -164,7 +190,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   '';
 in {
   hm = {
-    home.packages = [claude unstable.antigravity-cli claudeCtx ctxui];
+    home.packages = [claude unstable.antigravity-cli claudeCtx ctxui claudeTmux claudeSessions];
 
     # 앱 런처(SUPER+Space)에서도 열리도록 등록(터미널 앱이라 uwsm 이 xdg-terminal-exec 로 kitty 에 띄움; usageui 와 같은 방식).
     # (런처에 보이는 이름은 다른 앱들처럼 영어로 통일)
@@ -173,6 +199,16 @@ in {
       genericName = "LLM conversation store";
       comment = "Storage per project, search, cross-check what I said, manage protected secrets — from the shared ctx database";
       exec = "${ctxui}/bin/ctxui";
+      terminal = true;
+      categories = ["Utility"];
+      icon = "utilities-terminal";
+    };
+
+    xdg.desktopEntries.claude-sessions = {
+      name = "Claude Sessions";
+      genericName = "claude tmux sessions";
+      comment = "List claude sessions running in tmux, attach from this terminal, or start a new one";
+      exec = "${claudeSessions}/bin/claude-sessions";
       terminal = true;
       categories = ["Utility"];
       icon = "utilities-terminal";
@@ -334,6 +370,11 @@ in {
     # -> sudoers를 NOPASSWD로 여는 대신, 최초 1회 인증 후 셸이 살아있는 동안만 캐시를 유지하는 방식.
     programs.zsh.initContent = ''
       claude() {
+        # 대화형 호출은 전용 tmux 세션 안에서 실행한다(ssh·다른 kitty 에서 claude-sessions 로 이어 붙기). sudo 인증은 세션 안(claude-run)에서 받는다.
+        if claude-tmux --wants "$@"; then
+          claude-tmux "$@"
+          return
+        fi
         sudo -v || return 1
         ( while sudo -n true 2>/dev/null; do sleep 60; kill -0 "$$" 2>/dev/null || exit; done & ) 2>/dev/null
         ${settingsSnippet}
