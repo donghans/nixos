@@ -21,8 +21,8 @@ NAMES = ("donghans-instructions.md", "donghans-override.md", "qa-extra")
 EXCLUDE_LINES = [f".claude/{n}" for n in NAMES]
 WHY = {"donghans-instructions.md": "추가 지침 — 기본 원칙에 더해 적용", "donghans-override.md": "오버라이드 — 충돌하는 기본 원칙보다 우선"}
 
-TEMPLATE = """# {proj} 추가 지침 (donghans 스킬에 더해 적용 — 이 머신 전용, 추적 제외)
-<!-- 이 파일은 git 에 올리지 않는다(.git/info/exclude). 다른 머신·다른 사람에게는 보이지 않는다 — 공유해야 하는 프로젝트 사실은 추적되는 문서에 쓴다. -->
+TEMPLATE = """# {proj} 추가 지침 (donghans 스킬에 더해 적용 — 추적 제외, 정본은 공유 저장소)
+<!-- 이 파일은 git 에 올리지 않는다(.git/info/exclude). 정본은 공유 저장소(ctx DB)라 고친 뒤 `donghans instr push` 로 올린다. 다른 사람에게는 보이지 않으니 공유해야 하는 프로젝트 사실은 추적되는 문서에 쓴다. -->
 <!-- 아는 것만 쓰고, 모르는 칸은 「미확인」이라고 적는다(지어내지 않는다). 확인한 날짜를 붙이면 낡았는지 판단하기 쉽다. -->
 
 ## QA 할 때 (donghans-qa · donghans-qa-desktop 에 더해)

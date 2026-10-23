@@ -5,7 +5,7 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 
 # donghans-qa-desktop — 화면 확인용 QA 데스크톱 (incus VM)
 
-> 이 스킬은 사용자의 워크스테이션 전용이다(저장소에 추적되지 않음). 스킬 형식(SKILL.md)과 경로(`~/.claude/skills/`)는 Claude Code 기준이고 본문은 에이전트에 중립적으로 썼다(세션 간 메시지 도구처럼 에이전트 전용인 부분은 괄호로 표시하고 기본 수단을 따로 둔다). 설명·측정 근거·되돌리는 법은 `~/nixos/_docs/content/explanation/qa-desktop.md`.
+> 이 스킬은 사용자의 워크스테이션 전용이다(프로젝트 저장소에는 없고 `~/nixos` 에서 배포). 스킬 형식(SKILL.md)과 경로(`~/.claude/skills/`)는 Claude Code 기준이고 본문은 에이전트에 중립적으로 썼다(세션 간 메시지 도구처럼 에이전트 전용인 부분은 괄호로 표시하고 기본 수단을 따로 둔다). 설명·측정 근거·되돌리는 법은 `~/nixos/_docs/content/explanation/qa-desktop.md`.
 
 ## 언제 쓰나
 - **쓴다**: 사용자와 같이 화면을 보는 headed 브라우저 확인, Flutter 웹처럼 접근성 트리가 필요한 확인.
@@ -53,7 +53,7 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 - **동시성(같은 대상에 N 개 동시 요청)은 UI 가 아니라 호스트에서 API 로 돌린다**(`donghans-qa` §동시성·레인 규칙). VM 의 브라우저는 UI 가 꼭 필요한 시험에만 쓴다 — 기존 QA 기록도 동시성은 전부 호스트 API 병렬이었고 UI 다계정은 한 스크립트 안에서 계정마다 `newContext` 를 순차로 만든 것뿐이었다(동시에 여러 창을 열어 둔 사례는 없음, 2026-10-23 확인).
 - **UI 에서 여러 계정이 필요하면 브라우저 한 개 + 계정마다 `browser.newContext()`**: 쿠키·스토리지가 컨텍스트별로 격리되어 계정 간 섞이지 않고, 프로필 디렉터리·chrome 프로세스를 늘리지 않아 4CPU/8GiB VM 에 가장 가볍다. 계정마다 chrome 을 따로 띄우거나 `--user-data-dir` 을 나누는 것은 로그인 상태 파일 시험처럼 꼭 필요할 때만.
 - **창 구분**: Auto Move 규칙은 `--class=<프로젝트>-qa` 하나라 한 프로젝트의 창은 모두 같은 전용 데스크톱에 뜬다. 사람이 볼 필요가 없으면 `headless: true`(점유도 `--shared`), 사람이 같이 봐야 하면 보여줄 계정 1~2개만 headed 로 하고 나머지는 headless 로 둔다. 창이 겹치면 `viewport`·창 위치 인자(`--window-position`)로 나눈다.
-- **UI 동시 로그인 시험이 필요하면**: 서로 다른 계정이 같은 자원(기사 수·같은 운행 등)을 건드리므로 `donghans-qa` 규칙대로 계정·대상을 레인 전용으로 먼저 확보하고, 컨텍스트를 `Promise.all` 로 같이 움직이되 입력은 클릭 없는 경로(`focus`·`dispatchEvent`·`keyboard.type`)를 우선한다. 컨텍스트 수 상한은 아직 측정한 적이 없다 — 처음엔 2~3개로 시작해 CPU(`top`)와 응답 시간을 기록하고 이 절에 실측값을 추가한다.
+- **UI 동시 로그인 시험이 필요하면**: 서로 다른 계정이 같은 자원(기사 수·같은 운행 등)을 건드리므로 `donghans-qa` 규칙대로 계정·대상을 레인 전용으로 먼저 확보하고, 컨텍스트를 `Promise.all` 로 같이 움직이되 입력은 클릭 없는 경로(`focus`·`dispatchEvent`·`keyboard.type`)를 우선한다. 컨텍스트 수 상한은 아직 측정한 적이 없다 — 처음엔 2~3개로 시작해 CPU(`top`)와 응답 시간을 기록하고, 실측값은 사용자에게 「이 절에 추가하자」고 제안한다(스킬 수정은 QA 세션이 직접 하지 않는다).
 
 ## 공유 규칙 (여러 QA 세션이 VM 하나를 쓴다)
 - **누가 무엇을 하나**: 프로젝트마다 QA 세션이 있고, 그 프로젝트의 수정(개발) 세션은 자기 QA 세션에 요청만 한다. **QA 세션끼리의 조정은 개발 세션·사람 중재 없이 이 절의 규칙(점유 알림·전용 데스크톱)만으로 끝나야 한다.** 개발 세션이 다른 프로젝트 QA 세션을 직접 지휘하지 않는다. 도구·환경 자체(VM 선언·스킬·`occupy.py`)를 바꾸는 것은 워크스테이션(~/nixos) 세션의 일이다.
@@ -66,6 +66,6 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 
 ## 사용자 승인이 필요한 것 (승인 없이 하지 않는다)
 VM 설정·`gsettings` 변경, apt 설치·업그레이드, 재로그인·재부팅, 스냅샷 복원, 확장 설치·변경.
-- **화면 잠금은 항상 유지**: `lock-enabled false`, `idle-delay 0`(계정에 비밀번호가 없어 잠기면 GUI 로 못 푼다). 풀렸다면 `loginctl unlock-session 1` + dbus `org.gnome.ScreenSaver.SetActive false`.
+- **화면 잠금은 꺼진 상태를 항상 유지**: `lock-enabled false`, `idle-delay 0`(계정에 비밀번호가 없어 잠기면 GUI 로 못 푼다). 이미 잠겼다면 ssh 로 `loginctl unlock-session 1` + dbus `org.gnome.ScreenSaver.SetActive false`.
 - 위험한 변경 직전: `incus snapshot create qa-desktop <이름>`(기존: `genie-test-base`, `pre-2604`, `pre-apt-20261022`, `pre-automove-20261023`). 변경 전 값과 **되돌리는 명령**을 `~/<프로젝트>-qa-state/` 에 남기고, 변경 후 상대 QA 세션에 smoke 를 요청한다.
 - **재로그인**(`gnome-session-quit --logout --no-prompt`) 뒤에는 자동 로그인이 적용되지 않아 greeter 에서 멈춘다 → ssh 로 `sudo systemctl restart gdm3`. 그다음 `lock-enabled`·`run.sh` 의 Xwayland 인증 파일·자동 로그인을 확인한다. 자동 로그인은 부팅 직후에만 적용된다.

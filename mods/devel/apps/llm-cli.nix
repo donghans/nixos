@@ -35,7 +35,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
 
     # 화면 확인용 QA 데스크톱 (incus VM `qa-desktop`)
     - 사용자와 같이 화면을 보는 headed 브라우저 확인이나 접근성 트리가 필요한 확인은 `donghans-qa-desktop` 스킬(접속·실행·창 배치·도구·공유 규칙·복구)을 먼저 읽고 따르세요. 위 playwright 「Docker 에서만」 규칙은 headless 자동 E2E 에 그대로 적용됩니다.
-    - 사용자 승인 없이 하지 마세요: VM 생성·재프로비저닝(`qa-desktop-ctl ensure`·`provision`)·삭제, VM 설정·gsettings·확장 변경, apt 설치·업그레이드, 재로그인·재부팅, 스냅샷 복원. 화면 잠금(`lock-enabled false`, `idle-delay 0`)은 계정에 비밀번호가 없어 잠기면 풀 수 없으니 항상 유지하세요.
+    - 사용자 승인 없이 하지 마세요: VM 생성·재프로비저닝(`qa-desktop-ctl ensure`·`provision`)·삭제, VM 설정·gsettings·확장 변경, apt 설치·업그레이드, 재로그인·재부팅, 스냅샷 복원. 화면 잠금은 **꺼진 상태**(`lock-enabled false`, `idle-delay 0`)를 항상 유지하세요. 계정에 비밀번호가 없어 GUI 로는 풀 수 없습니다(잠겼다면 스킬의 `loginctl` 복구 절차).
     - QA 세션 역할(코드를 고치지 않고 측정·보고)이면 먼저 `donghans-qa` 스킬(범용 원칙 + 프로젝트별 추가 지침 읽는 법)을 읽으세요.
     - 다른 프로젝트 QA 세션의 파일(`~/qa-playwright` 의 다른 디렉터리·package.json)은 건드리지 말고, 쓰기 전에 상대 QA 세션에 시작과 예상 시간을 알리세요.
     - 사용자에게 현재 가상 데스크톱 번호를 묻지 마세요(화면에 안 보입니다). 스킬의 도구로 직접 확인합니다.
@@ -263,8 +263,11 @@ in {
           - 큰 작업 직전에 한도 감시를 거세요: `echo $CLAUDE_CODE_SESSION_ID` 의 앞 8자로
             `claude-limit-watch <접두>` 를 Monitor 로 실행합니다(5시간 한도가 10분 내 +5포인트 오르거나 50/70/80/90% 도달 시 알림).
             알림이 오면 하던 일을 멈추고 사용자에게 알리세요. 70% 이상에서는 새 작업을 시작하지 말고 묻습니다.
+
+          # 세션 이어가기·지침 동기화
           - 프로젝트별 지침(`.claude/donghans-instructions.md`·`donghans-override.md`)은 공유 저장소가 정본이고 세션 시작 때 자동으로 맞춰집니다. 이 파일을 고쳤다면 `donghans instr push` 로 올려야 다른 기기에 반영됩니다(`donghans instr diff` 로 차이 확인).
           - 세션을 닫거나 `/clear` 하기 전에는 `/donghans-handoff`, 새 세션에서는 `/donghans-resume <고유번호>` 로 이어갑니다.
+
           # 공유 컨텍스트 (여러 머신·프로젝트의 대화/사용량 저장소 — Postgres, `donghans ctx` 명령)
           - 「이전 세션에서 뭘 했는지 모르겠다」「그때 사용자가 뭐라고 했나」「다른 머신에서 하던 작업」처럼 **지난 대화·결정의 근거**가 필요하면,
             추측하거나 사용자에게 되묻기 전에 `donghans-ctx` 스킬(조회 명령·테이블)을 읽고 먼저 조회하세요.
