@@ -77,3 +77,10 @@ sudo apt-get remove -y gnome-shell-extension-auto-move-windows gnome-shell-exten
 2. `gsettings get org.gnome.shell.extensions.auto-move-windows application-list` 로 현재 목록을 읽고 **기존 항목을 유지한 채** `<프로젝트>-qa.desktop:<번호>` 추가.
 3. 스크립트는 `~/qa-playwright/flow_<프로젝트>/`, 창은 `--class=<프로젝트>-qa`. 변경 전 값은 `~/<프로젝트>-qa-state/` 에 남긴다. 확장은 이미 켜져 있어 재로그인은 필요 없다(새 `.desktop` 은 즉시 인식되는지 확인).
 4. 이 문서의 「화면 분리」 표와 스킬의 「현재 규칙」을 갱신한다.
+
+## 동시 실행 자체 검증 (2026-10-23, 사용자 확인 없이 VM 에서 재현)
+genple·ToT QA 가 `--shared` 로 겹쳐 돌 때 남은 의심(상대 창 종료·창 위치·화면 끌림)을 합성 시험으로 확인했다. 두 headed Chromium(`--class=genple-qa`·`--class=tot-qa`)을 띄우고 매 단계 `snap.py` 로 캡처해 직접 보았다.
+- **일괄 종료는 상대를 죽인다(구조적으로 확정)**: `pkill -x chrome` 한 번에 A·B 둘 다 종료. 반면 A 가 `browser.close()` 하거나 `pkill -f '[-]-class=genple-qa'` 로 좁히면 B 는 3회 모두 생존. → 종료는 자기 핸들·PID·`--class` 로만(스킬에 규칙 반영). 실제 두 세션의 07:10 사건은 genple-39 의 `pkill -x chrome` 이 원인 후보였으나 시각이 정확히 겹치지는 않아 확정은 못 한다.
+- **창 위치**: 데스크톱 1 은 비고, 2 에 GENPLE, 3 에 TOT 창이 따로 뜬다(전용 데스크톱 규칙 동작). 숨겨진 창도 500ms 하트비트가 끊김 없이 계속(genple 119회·tot 82회, 최대 간격 515ms, 오류 0).
+- **화면 끌림은 재현됨**: 사용자 화면이 데스크톱 1 일 때 새 창(첫 창이든 다른 창이 이미 있든)을 띄우면 보던 화면이 그 창의 데스크톱으로 바뀐다(2회, 둘 다 재현). 창이 이미 떠 있는 동안은 바뀌지 않는다. 완화는 창을 시험 시작 때 한 번만 띄우는 것이고, 근본 해소(Auto Move 이동 시 활성화 억제 등)는 VM 설정 변경이라 승인 사안.
+- **남은 한계**: 합성 페이지 시험이라 실제 앱 부하에서의 속도 저하는 두 QA 의 응답 시간 기록(단독과 비슷)으로만 본다.
