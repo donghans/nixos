@@ -221,3 +221,7 @@ Thunar 의 "Open in swayimg" 는 폴더에 쓸 수 있지만 loupe 는 폴더를
 - 확인: `systemctl --user set-environment` 로 임시 주입 후 Thunar 경로는 정상, Super+Space 경로(ONLYOFFICE 프로세스 environ 에 변수 없음)는 여전히 2배.
 - 조치: `core.ui.cursor.nix` 에서 `systemd.user.sessionVariables` + `hl.env(...)` 추가. **다음 로그인부터 적용**(실행 중인 세션은 그대로).
 - 진단: `tr '\0' '\n' < /proc/<PID>/environ | grep XCURSOR` — 서비스 경로와 scope 경로의 상속 환경이 다름에 주의.
+- **왜 랩탑(msi-summit-me)에서는 눈에 띄지 않았나 (2026-10-22, 실측)**: 랩탑도 Hyprland·systemd 사용자 환경에 `XCURSOR_SIZE/THEME` 이 없는 같은 상태였음(`/proc/<Hyprland>/environ`, `systemctl --user show-environment` 로 확인).
+  변수가 없으면 libXcursor 는 `Xft.dpi` 도 없을 때 **화면의 짧은 변 픽셀 수 ÷ 48** 을 커서 크기로 씀(`XcursorGetDefaultSize` 를 두 머신에서 직접 호출: 랩탑 2560x1600 → **33**, beelink 3840x2560 → **53**; 24 대비 1.4배 vs 2.2배).
+  XWayland 의 DPI 는 두 머신 모두 96 고정이라 DPI 경로는 안 탐. 즉 같은 결함이 해상도에 따라 beelink 에서만 "2배"로 두드러진 것.
+  - 미확인: 랩탑에서 ONLYOFFICE 위 커서의 실제 크기는 ≈22px(다른 창 22px 과 같음)이라 33 이 그대로 나타나지는 않았음(커서 테마가 Bibata 가 아닌 대체 테마로 떨어진 영향으로 추정, 시험하지 않음). 공식 자체와 두 머신의 값(33/53)은 확인했으나 랩탑 쪽 화면 크기가 작게 보인 이유는 확정하지 못함.
