@@ -32,7 +32,7 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 ## 사람 없이 확인하기 (사용자에게 데스크톱 번호를 묻지 않는다)
 데스크톱 번호는 화면에 안 보인다. 아래 도구로 직접 확인한다. 도구는 이 스킬의 `scripts/` 에 있다(VM 에는 없으므로 필요하면 scp 로 `/tmp/<프로젝트>-qa/` 에 복사). ssh 로 실행할 때는 `XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus` 가 필요하다.
 - `ws.py right|left|home|escape` — 데스크톱 전환(Mutter RemoteDesktop 가상 키 입력). `home` = 데스크톱 1 로 강제(← 를 8번) → 「현재 데스크톱=1」이 확정되므로 「창이 보이면 1 에 있다」로 판정할 수 있다. `escape` = 열려 있는 GNOME 개요(Activities) 닫기.
-  **Super 키를 쓰지 않는다**: Super+Home 은 Super 를 뗄 때 GNOME 이 「개요 열기」로 받아들여 이후 캡처가 실제 데스크톱이 아니라 개요(검색창·썸네일) 화면이 된다(2026-10-23 genple QA 시험에서 발견·수정). 캡처가 개요 모양이면 `ws.py escape` 후 다시 찍는다.
+  **Super 키를 쓰지 않는다**: Super+Home 으로 보냈을 때 캡처가 실제 데스크톱이 아니라 개요(검색창·썸네일) 화면이던 적이 있다(2026-10-23, genple QA 시험 2회·직접 재현 1회; ToT 시험·추가 재현 4회는 정상이라 **조건 미확정인 간헐 현상**). Super 를 쓰지 않으면 가능성 자체가 없어서 `home` 을 ← 반복으로 바꿨다. 캡처가 개요 모양이면 `ws.py escape` 후 다시 찍는다.
 - 가상 데스크톱은 **동적**이다: 창이 있는 데스크톱 + 끝에 빈 하나만 존재한다(창이 없을 땐 2개, genple-qa 창이 2번에 있으면 3개; 설정값 `num-workspaces=4` 와 다르게 동작함을 측정으로 확인). 맨 끝에서 `right` 를 더 눌러도 늘거나 순환하지 않는다.
 - `snap.py <출력.png>` — 현재 **보이는** 데스크톱 전체 캡처(ScreenCast+PipeWire+GStreamer). 찍는 동안 상단바에 화면 공유 표시가 잠깐 뜬다. `org.gnome.Shell.Screenshot`·`GetWindows` 는 막혀 있어 못 쓴다.
 - 비가시 데스크톱 렌더링은 DOM 기준으로 정상(프레임·스크린샷·클릭, 픽셀 최신성까지 확인). **WebGL·CanvasKit 은 미검증**.

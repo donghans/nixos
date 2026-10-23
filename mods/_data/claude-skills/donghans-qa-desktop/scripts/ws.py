@@ -3,8 +3,9 @@
 
 사용: ws.py right|left|home|escape   (right/left = 옆 데스크톱, home = 데스크톱 1 로 강제, escape = 열려 있는 GNOME 개요(Activities) 닫기)
 - 사람 대신 데스크톱을 바꿔서 창이 안 보이는 상태를 재현하거나(렌더링·스크린샷 시험), 현재 데스크톱을 알려진 값(1)으로 맞춘다.
-- home 은 Super+Home 이 아니라 Ctrl+Alt+← 를 여러 번 보낸다: Super 키를 눌렀다 떼면 GNOME 이 「개요 열기」로 받아들여, 이후 캡처가 실제 데스크톱이 아니라 개요 화면이 된다
-  (2026-10-23 genple QA 시험에서 발견). 개요가 이미 열려 있으면 먼저 `ws.py escape`.
+- home 은 Super+Home 이 아니라 Ctrl+Alt+← 를 여러 번 보낸다: Super+Home 으로 보냈을 때 이후 캡처가 실제 데스크톱이 아니라 GNOME 개요(Activities) 화면이던 적이 있다
+  (2026-10-23: genple QA 시험, 직접 재현 1회. 다른 시험 4회는 재현되지 않아 **조건 미확정인 간헐 현상** — Super 키를 떼는 동작이 GNOME 의 「개요 열기」와 겹치는 것으로 추정).
+  Super 를 쓰지 않으면 그 가능성이 없다. 개요가 이미 열려 있으면 먼저 `ws.py escape`.
 - 설치할 것이 없다(VM 의 python3 + gi). VM 의 GNOME 세션에서 실행해야 한다
   (ssh 로 들어왔다면 XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus 필요).
 - 단축키는 GNOME 기본값(switch-to-workspace-right/left = Ctrl+Alt+→/←) 기준이다. 가상 데스크톱은 맨 끝에서 더 가도 순환하지 않는다(그래서 home = ← 를 충분히 반복).
