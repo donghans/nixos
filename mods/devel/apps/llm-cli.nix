@@ -165,6 +165,18 @@ in {
   hm = {
     home.packages = [claude unstable.antigravity-cli claudeCtx ctxui];
 
+    # 앱 런처(SUPER+Space)에서도 열리도록 등록(터미널 앱이라 uwsm 이 xdg-terminal-exec 로 kitty 에 띄움; usageui 와 같은 방식).
+    # (런처에 보이는 이름은 다른 앱들처럼 영어로 통일)
+    xdg.desktopEntries.ctxui = {
+      name = "LLM Context Manager";
+      genericName = "LLM conversation store";
+      comment = "Storage per project, search, cross-check what I said, manage protected secrets — from the shared ctx database";
+      exec = "${ctxui}/bin/ctxui";
+      terminal = true;
+      categories = ["Utility"];
+      icon = "utilities-terminal";
+    };
+
     # 훅이 놓친 대화·사용량을 따라잡는 안전망(오프셋 기반, 여러 번 돌아도 안전). 서버에 못 붙으면 다음 주기에 재시도.
     systemd.user.services.claude-ctx-ingest = {
       Unit.Description = "claude-ctx 백필(최근 2일)";
