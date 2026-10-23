@@ -10,6 +10,12 @@ mkModOf "mods.gui" __curPos "Incus VM" ({
     entries=$(${pkgs.incus}/bin/incus list --format=json 2>/dev/null \
       | ${pkgs.jq}/bin/jq -r '.[] | select((.type | ascii_downcase) == "virtual-machine") | "\(.name) (\(.status))"')
 
+    # 다른 머신의 VM 을 SSH 터널로 보는 항목(mods.gui.apps.qa-desktop-view 를 켠 호스트에만 명령이 있다)
+    remote_label="qa-desktop 원격 (뷰어)"
+    if command -v qa-desktop-view >/dev/null 2>&1; then
+      entries=$(printf '%s\n%s' "$entries" "$remote_label" | sed '/^$/d')
+    fi
+
     if [ -z "$entries" ]; then
       ${pkgs.libnotify}/bin/notify-send "Incus" "등록된 VM이 없습니다"
       exit 1
@@ -19,6 +25,10 @@ mkModOf "mods.gui" __curPos "Incus VM" ({
     selected=$(printf '%s\n' "$entries" \
       | ${pkgs.wofi}/bin/wofi --dmenu --cache-file /dev/null --prompt="VM 검색")
     [ -z "$selected" ] && exit
+
+    if [ "$selected" = "$remote_label" ]; then
+      exec qa-desktop-view
+    fi
 
     vm_name=$(echo "$selected" | awk '{print $1}')
     vm_status=$(echo "$selected" | grep -oP '\(\K[^)]+')
