@@ -19,6 +19,7 @@
 #
 # 주의: root 명령은 setuid 래퍼(/run/wrappers/bin/sudo)여야 한다(PATH 앞에 /run/current-system/sw/bin 을 두면 안 됨).
 export PATH=/run/wrappers/bin:/run/current-system/sw/bin:$PATH
+# ABAB_ALT=1 이면 짝수 쌍을 B 먼저 돌린다(A B | B A …) — A→B 전환이 늘 같은 방향이라 생기는 순서 편향 확인용.
 SEG=${SEG:-300}; PAIRS=${PAIRS:-3}; SETTLE=${SETTLE:-40}; OBS=${OBS:-observectl}
 _ABAB_DONE=0; _ABAB_SLP=""; _ABAB_RC=0; _ABAB_TLP=0
 _ABAB_FINISHED=0; _NPAIR_OK=0; _T_PAIR_END=""; _ABAB_REC=""
@@ -76,7 +77,6 @@ _abab_step() {   # $1=A|B  $2=표지 설명
     _abab_sleep $((SEG - _ss)); _r2=$(_abab_rapl)
     printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$_r0" "$_r1" "$_r2" >> "$_ABAB_REC.rapl"
     _abab_guard "$1" "$2" "$_seg0"
-    if [ "$1" = B ]; then _NPAIR_OK=$((_NPAIR_OK + 1)); _T_PAIR_END=$(date +%s); fi
 }
 
 abab_run() {
@@ -97,8 +97,12 @@ abab_run() {
     echo "T0=$T0 · 구간 ${SEG}초 × $((PAIRS * 2)) · 덮개 $_LID0 · AC $_AC0 · 구간 기록 $_ABAB_REC"
     _pair=1       # 훅 함수(abab_set_* 등)가 같은 이름을 쓰지 못하게 앞에 밑줄(POSIX sh 는 변수가 전역 — 2026-10-21 T20 에서 훅의 i 가 쌍 카운터를 덮어 무한 반복했음)
     while [ "$_pair" -le "$PAIRS" ]; do
-        _abab_step A "A #$_pair"
-        _abab_step B "B #$_pair"
+        if [ "${ABAB_ALT:-0}" = 1 ] && [ $((_pair % 2)) = 0 ]; then   # 순서 편향 대응: 짝수 쌍은 B 먼저(A B | B A | A B …). 쌍 짝짓기는 조건별 i번째끼리라 그대로 맞는다
+            _abab_step B "B #$_pair"; _abab_step A "A #$_pair"
+        else
+            _abab_step A "A #$_pair"; _abab_step B "B #$_pair"
+        fi
+        _NPAIR_OK=$((_NPAIR_OK + 1)); _T_PAIR_END=$(date +%s)
         _pair=$((_pair + 1))
     done
     _ABAB_FINISHED=1

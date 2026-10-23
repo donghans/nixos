@@ -144,6 +144,13 @@ setup()
 p = run(); out, _ = p.communicate(timeout=30)
 check("정상 종료: 구간 기록 4줄 + 결과 파일", p.returncode == 0 and len(recs()) == 1 and os.path.exists(recs()[0] + ".result"), out)
 
+# 순서 교대(ABAB_ALT=1): 짝수 쌍은 B 먼저 → 표지 A B B A, 끝낸 쌍 2개
+shutil.rmtree(os.path.join(T, "out"), ignore_errors=True)
+setup()
+p = run(env_extra={"ABAB_ALT": "1"}); out, _ = p.communicate(timeout=30)
+mk = [x.split()[1] + x.split()[-1] for x in calls() if x.startswith("mark A") or x.startswith("mark B")][-4:]
+check("순서 교대: 표지 A#1 B#1 B#2 A#2 순서", p.returncode == 0 and mk == ["A#1", "B#1", "B#2", "A#2"], f"{mk}\n{out}")
+
 # --- RAPL 구간 경계 직접 읽기: 가짜 카운터(구간마다 일정 증가)로 .rapl 기록과 쌍별 계산 확인
 RAPLSTUB = os.path.join(T, "rapl")
 open(RAPLSTUB, "w").write('#!/bin/sh\nn=$(cat %s.n 2>/dev/null || echo 0); echo $((n+1)) > %s.n\necho $((n*2000000))\necho $((n*1000000))\n' % (RAPLSTUB, RAPLSTUB))
