@@ -29,8 +29,14 @@
 
 ## 사람 없이 화면 확인하기
 - `snap.py <png>`: 화면 캡처. GNOME 의 `org.gnome.Shell.Screenshot` 은 AccessDenied 라 **Mutter ScreenCast + PipeWire + GStreamer** 로 찍는다. 호스트의 QEMU 모니터 소켓(`/run/incus/qa-desktop/`)은 권한이 막혀 있어 쓰지 않는다.
-- `ws.py right|left|home`: 데스크톱 전환. `org.gnome.Shell` 의 Eval·GetWindows 가 막혀 있어 Mutter RemoteDesktop 가상 키 입력(Ctrl+Alt+→/←, Super+Home)으로 한다. 창이 어느 데스크톱에 있는지 직접 조회할 수 없으므로 「데스크톱 1 로 강제 → 창이 보이는가」「snap.py 로 확인」으로 판정한다.
+- `ws.py right|left|home|escape`: 데스크톱 전환(`home` 은 ← 를 8번, `escape` 는 GNOME 개요 닫기). `org.gnome.Shell` 의 Eval·GetWindows 가 막혀 있어 Mutter RemoteDesktop 가상 키 입력(Ctrl+Alt+→/←, Esc; Super 키는 개요를 열어 쓰지 않는다)으로 한다. 창이 어느 데스크톱에 있는지 직접 조회할 수 없으므로 「데스크톱 1 로 강제 → 창이 보이는가」「snap.py 로 확인」으로 판정한다.
 - 둘 다 VM 안에서 실행하며 VM 에 설치할 것이 없다(python3 gi, gst-launch-1.0, pipewire 가 기본 설치돼 있음).
+
+## 시험에서 발견·수정한 것 (2026-10-23)
+- **`ws.py home` 이 GNOME 개요(Activities)를 열었다.** 처음엔 Super+Home 을 보냈는데, Super 를 뗄 때 GNOME 이 「개요 열기」로 받아들여 이후 캡처가 실제 데스크톱이 아니라 개요 화면이었다(genple QA 세션이 먼저 지적, 직접 재현). 판정(창이 어느 데스크톱인지)은 개요 썸네일로도 맞았지만 도구로서는 결함이라 `home` 을 Ctrl+Alt+← 8번으로 바꾸고 `escape` 를 추가했다. 검증: escape → right → home → left 를 캡처해 작업 공간 표시 위치로 판정(맨 끝에서 순환 없음 확인), home 캡처는 개요가 아닌 실제 바탕화면.
+- **가상 데스크톱은 동적이다.** `gsettings` 는 `dynamic-workspaces=false`, `num-workspaces=4` 인데 실제로는 창이 있는 데스크톱 + 끝의 빈 하나만 존재한다(창 없을 때 2개). 규칙 `genple-qa.desktop:2` 가 동작하는 이유(2번은 항상 있다)이기도 하다. 사용자가 처음 본 「3개」는 genple-qa 창이 2번에 있을 때의 모습.
+- 실사용 시험 결과: ToT QA 세션(file:// 페이지, `--class` 없음) — 창이 데스크톱 1 에 보이고 2 에 없음. genple QA 세션(`--class=genple-qa`, genple 첫 화면 `http://10.100.0.1/` → 302 → `/welcome`) — 데스크톱 1 에 없고 2 에 보임. 알림 규칙(시작·완료)이 두 세션 사이에 실제로 오갔다. 새로 띄운 genple 세션은 반영 전에 시작해 전역 CLAUDE.md 절은 없었지만 스킬은 자동으로 목록에 보였다.
+- 로그인 smoke 는 어느 쪽도 하지 않았다(미검증).
 
 ## 운영 사실 (VM)
 - 접속은 SSH 키만(`~/.ssh/qa_desktop_ed25519`, 계정 `qa`, 비밀번호 없음). `incus exec` 는 VM 에이전트가 없어 안 된다.

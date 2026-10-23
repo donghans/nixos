@@ -9,14 +9,18 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 
 ## 언제 쓰나
 - **쓴다**: 사용자와 같이 화면을 보는 headed 브라우저 확인, Flutter 웹처럼 접근성 트리가 필요한 확인.
-- **안 쓴다**: headless 자동 E2E(이건 전역 규칙대로 Docker). 이 VM 은 호스트에 브라우저를 설치하지 않으므로 그 규칙의 취지와 충돌하지 않는다.
+- **안 쓴다**: headless 자동 E2E(전역 규칙은 호스트에 브라우저를 설치·실행하지 않고 Docker 에서 하는 것). 이 VM 은 호스트에 브라우저를 설치하지 않으므로 그 규칙의 취지와 충돌하지 않는다. 프로젝트가 headless 스크립트를 이 VM 에서 돌리는지는 그 프로젝트 QA 문서를 따른다(ToT 최근 라운드는 `headless:true` 이고 실행 위치는 이 스킬이 확정하지 않는다).
 
 ## 접속·실행
 - 접속: `ssh -i ~/.ssh/qa_desktop_ed25519 qa@10.100.0.84`(비밀번호 없음). 살아 있는지: `timeout 6 ssh … echo alive`.
 - RUNNING 인데 ssh 가 `No route to host` → VM 크래시(원인 미확정, 조건은 `qa-desktop.md`). VM 안에서 `journalctl -b -1` 로 직전 로그를 본 뒤 호스트에서 `incus restart qa-desktop --force`. **`incus exec` 는 VM 에이전트가 없어 안 된다.**
 - 실행: `~/qa-playwright/run.sh <스크립트.js>` — GUI 환경변수(Xwayland 인증 파일 등)를 매번 동적으로 잡는다. Playwright 1.63·node 22 를 **모든 프로젝트가 공유**한다.
-- 이름 규칙: 스크립트 `~/qa-playwright/flow_<프로젝트>/`, 산출물 `~/qa-shots/<프로젝트>/`, 임시 `/tmp/<프로젝트>-*`, 변경 전 값 기록 `~/<프로젝트>-qa-state/`. 로그인 헬퍼 `~/qa-playwright/login.js` 는 ToT 전용이니 가져다 쓰지 말고 프로젝트별로 만든다.
+- 이름 규칙: 스크립트 `~/qa-playwright/flow_<프로젝트>/`, 산출물 `~/qa-shots/<프로젝트>/`, 임시 `/tmp/<프로젝트>-*`, 변경 전 값 기록 `~/<프로젝트>-qa-state/`. VM 안에서 띄우는 정적 서버 포트도 프로젝트별로 나눈다(ToT 는 9873 을 쓴다 — 겹치지 않게 다른 번호를 고른다). 로그인 헬퍼 `~/qa-playwright/login.js` 는 ToT 전용이니 가져다 쓰지 말고 프로젝트별로 만든다.
 - 다른 프로젝트의 디렉터리·`package.json`·`node_modules` 는 고치지 않는다. apt·npm 업그레이드 금지(필요하면 사용자와 상대 QA 세션 합의 후).
+- **ssh 로 백그라운드 프로세스를 띄울 땐** `(cd <디렉터리>; setsid nohup <명령> > log 2>&1 < /dev/null &)` 형태로 한다. 표준 입출력을 물고 있으면 ssh 연결이 안 닫혀 명령이 멈춘다.
+  흔한 실수: `cd … && setsid nohup … &` 는 `&&` 체인 전체가 백그라운드 서브셸이 되어 출력을 잡고 있으니 쓰지 않는다. 끝날 때까지 기다릴 땐 같은 ssh 안에서 `until grep -q DONE log; do sleep 2; done`.
+- **창 유지 시간**: 창을 띄워 두고 `ws.py`·`snap.py` 로 위치까지 확인하려면 60초는 빠듯하다(ssh 왕복·scp 에 시간이 든다). 스크립트의 유지 시간을 환경변수(`HOLD_SEC`, 기본 120 권장)로 받게 만든다.
+- 호스트 쉘이 zsh 면 scp 대상은 `${H}:경로` 로 쓴다(`$H:경로` 는 `:경로` 가 zsh 수식어로 해석돼 깨진다).
 - 스크린샷은 **페이지 단위** `page.screenshot` 을 쓴다. WebGL 캔버스를 `locator.screenshot()` 으로 찍으면 이후 캔버스가 비는 현상을 봤다(원인 미확인).
 
 ## 화면 분리 (가상 데스크톱 + 창 자동 배치)
@@ -27,7 +31,9 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 
 ## 사람 없이 확인하기 (사용자에게 데스크톱 번호를 묻지 않는다)
 데스크톱 번호는 화면에 안 보인다. 아래 도구로 직접 확인한다. 도구는 이 스킬의 `scripts/` 에 있다(VM 에는 없으므로 필요하면 scp 로 `/tmp/<프로젝트>-qa/` 에 복사). ssh 로 실행할 때는 `XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus` 가 필요하다.
-- `ws.py right|left|home` — 데스크톱 전환(Mutter RemoteDesktop 가상 키 입력). `home` = 데스크톱 1 로 강제 → 「현재 데스크톱=1」이 확정되므로 「창이 보이면 1 에 있다」로 판정할 수 있다.
+- `ws.py right|left|home|escape` — 데스크톱 전환(Mutter RemoteDesktop 가상 키 입력). `home` = 데스크톱 1 로 강제(← 를 8번) → 「현재 데스크톱=1」이 확정되므로 「창이 보이면 1 에 있다」로 판정할 수 있다. `escape` = 열려 있는 GNOME 개요(Activities) 닫기.
+  **Super 키를 쓰지 않는다**: Super+Home 은 Super 를 뗄 때 GNOME 이 「개요 열기」로 받아들여 이후 캡처가 실제 데스크톱이 아니라 개요(검색창·썸네일) 화면이 된다(2026-10-23 genple QA 시험에서 발견·수정). 캡처가 개요 모양이면 `ws.py escape` 후 다시 찍는다.
+- 가상 데스크톱은 **동적**이다: 창이 있는 데스크톱 + 끝에 빈 하나만 존재한다(창이 없을 땐 2개, genple-qa 창이 2번에 있으면 3개; 설정값 `num-workspaces=4` 와 다르게 동작함을 측정으로 확인). 맨 끝에서 `right` 를 더 눌러도 늘거나 순환하지 않는다.
 - `snap.py <출력.png>` — 현재 **보이는** 데스크톱 전체 캡처(ScreenCast+PipeWire+GStreamer). 찍는 동안 상단바에 화면 공유 표시가 잠깐 뜬다. `org.gnome.Shell.Screenshot`·`GetWindows` 는 막혀 있어 못 쓴다.
 - 비가시 데스크톱 렌더링은 DOM 기준으로 정상(프레임·스크린샷·클릭, 픽셀 최신성까지 확인). **WebGL·CanvasKit 은 미검증**.
 
