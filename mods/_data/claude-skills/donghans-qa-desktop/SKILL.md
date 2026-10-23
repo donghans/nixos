@@ -5,11 +5,19 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 
 # donghans-qa-desktop — 화면 확인용 QA 데스크톱 (incus VM)
 
-> 이 스킬은 사용자의 워크스테이션 전용이다(저장소에 추적되지 않음). 설명·측정 근거·되돌리는 법은 `~/nixos/_docs/content/explanation/qa-desktop.md`.
+> 이 스킬은 사용자의 워크스테이션 전용이다(저장소에 추적되지 않음). 스킬 형식(SKILL.md)과 경로(`~/.claude/skills/`)는 Claude Code 기준이고 본문은 에이전트에 중립적으로 썼다(세션 간 메시지 도구처럼 에이전트 전용인 부분은 괄호로 표시하고 기본 수단을 따로 둔다). 설명·측정 근거·되돌리는 법은 `~/nixos/_docs/content/explanation/qa-desktop.md`.
 
 ## 언제 쓰나
 - **쓴다**: 사용자와 같이 화면을 보는 headed 브라우저 확인, Flutter 웹처럼 접근성 트리가 필요한 확인.
 - **안 쓴다**: headless 자동 E2E(전역 규칙은 호스트에 브라우저를 설치·실행하지 않고 Docker 에서 하는 것). 이 VM 은 호스트에 브라우저를 설치하지 않으므로 그 규칙의 취지와 충돌하지 않는다. 프로젝트가 headless 스크립트를 이 VM 에서 돌리는지는 그 프로젝트 QA 문서를 따른다(ToT 최근 라운드는 `headless:true` 이고 실행 위치는 이 스킬이 확정하지 않는다).
+
+## 사전 점검 — 처음 쓰는 세션·호스트라면 접속 전에
+이 스킬은 **이 워크스테이션에 qa-desktop VM 이 이미 있다**는 전제다. 아래를 순서대로 확인하고, **하나라도 어긋나면 임의로 만들거나 고치지 말고 사용자에게 알린다**(VM 생성·패키지·설정은 승인 필요 작업).
+1. 호스트에 incus 가 있고 VM 이 있는가: `incus list qa-desktop` — 없으면 이 호스트는 대상이 아니다(호스트 설정 `qa-desktop` 스위치가 꺼져 있다).
+2. 접속 키가 있는가: `ls ~/.ssh/qa_desktop_ed25519` — 없으면 사용자에게 키 위치를 묻는다(공개키는 VM 의 `qa` 계정 `authorized_keys` 에 있어야 한다).
+3. VM 이 살아 있는가: `timeout 6 ssh -i ~/.ssh/qa_desktop_ed25519 qa@10.100.0.84 echo alive` — 상태가 RUNNING 인데 접속이 안 되면 아래 「복구」.
+4. 내 프로젝트의 규칙이 있는가: 프로젝트의 `.claude/donghans-instructions.md` 「QA 할 때」 절에 창 이름(`<프로젝트>-qa`)·데스크톱 번호가 있는지. **없는 새 프로젝트면** 창 자동 배치 규칙이 없어 창이 지금 보고 있는 데스크톱에 뜬다(문제는 아님 — 규칙 추가는 아래 「화면 분리」의 절차를 사용자 승인 후).
+5. 지금 다른 프로젝트가 쓰고 있는가: `python3 ~/.claude/skills/donghans-qa-desktop/scripts/occupy.py list`(스킬 폴더의 `scripts/`; 아래 「공유 규칙」).
 
 ## 접속·실행
 - 접속: `ssh -i ~/.ssh/qa_desktop_ed25519 qa@10.100.0.84`(비밀번호 없음). 살아 있는지: `timeout 6 ssh … echo alive`.
@@ -38,7 +46,8 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 - 비가시 데스크톱 렌더링은 DOM 기준으로 정상(프레임·스크린샷·클릭, 픽셀 최신성까지 확인). **WebGL·CanvasKit 은 미검증**.
 
 ## 공유 규칙 (여러 QA 세션이 VM 하나를 쓴다)
-- 쓰기 전에 상대 QA 세션에 `SendMessage` 로 시작과 **예상 시간**을 알린다(세션은 `ListAgents`). 응답이 없고 오래 걸리면 `pgrep chrome` 으로 사용 중인지 본 뒤 진행한다. 락 파일은 두지 않는다.
+- **점유 알림(에이전트 종류와 무관한 기본 수단)**: 쓰기 전에 `occupy.py list`(위 경로의 같은 폴더) 로 확인하고 `occupy.py start <프로젝트> <예상분> [메모]` 로 시작을 적고, 끝나면 `occupy.py end <프로젝트>`. VM 안의 작은 파일(`/tmp/qa-desktop-occupancy/`)이라 메시지 도구가 없는 에이전트도 같은 정보를 읽고 쓴다. 락이 아니라 **알림**이다(강제하지 않는다) — 다른 프로젝트가 점유 중이거나 chrome 이 떠 있으면 경고하고 종료 코드 1 을 낸다.
+- **세션 간 메시지 도구가 있으면 같이 쓴다**(Claude Code: 세션은 `ListAgents`, 알림은 `SendMessage`): 상대 QA 세션에 시작과 **예상 시간**을 직접 알리면 더 빠르다. 응답이 없고 오래 걸리면 `pgrep chrome` 으로 사용 중인지 본 뒤 진행한다. 락 파일은 두지 않는다.
 - 끝나면 chrome 이 남지 않았는지 확인한다. VM 은 4CPU/8GiB, 호스트 여유 메모리가 작아 다른 VM 과 동시에 무겁게 돌리지 않는다.
 - 상대 세션의 사전 수락 범위는 그 세션 사용자의 것이다 — 약속은 시작 알림까지만 하고 점유 일정을 대신 약속하지 않는다.
 

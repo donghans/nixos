@@ -361,15 +361,24 @@ def cmd_ingest(a):
 
 def _masker(a, c):
     """출력 치환기. 등록된 비밀을 [protected] 로 바꾼다(DB 원문은 그대로). --raw 는 사람이 TTY 에서 직접 실행할 때만 풀린다 —
-    Claude 의 Bash 도구는 TTY 가 아니고 CLAUDECODE 환경변수가 있어 풀 수 없다."""
+    에이전트의 셸 도구는 TTY 가 아니고(Claude Code 는 CLAUDECODE 환경변수도 설정) 풀 수 없다."""
     if getattr(a, "raw", False):
         _human_only("--raw(치환 해제)")
         return cs.IDENTITY
     return cs.load_masker(c)
 
 
+AGENT_ENV_MARKERS = ("CLAUDECODE", "GEMINI_CLI", "DONGHANS_AGENT")   # 에이전트 셸 도구가 설정하는 환경변수(보조 표식)
+
+
+def is_agent_session():
+    return any(os.environ.get(k) for k in AGENT_ENV_MARKERS)
+
+
 def _human_only(what):
-    if not (sys.stdin.isatty() and sys.stdout.isatty()) or os.environ.get("CLAUDECODE"):
+    """TTY 검사가 본체다: 에이전트의 셸 도구는 TTY 가 아니다. 환경변수 표식은 TTY 를 흉내 낸 실행(script·pty)까지 막는 보조 장치이고,
+    다른 에이전트를 쓰게 되면 그 에이전트의 표식을 AGENT_ENV_MARKERS 에 추가하거나 래퍼에서 DONGHANS_AGENT=1 을 설정한다."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()) or is_agent_session():
         sys.exit(f"{what} 은(는) 사람이 터미널에서 직접 실행할 때만 쓸 수 있다")
 
 

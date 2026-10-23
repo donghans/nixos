@@ -112,6 +112,38 @@ try:
     r = cli("secret", "show", "NAS_PW")
     check("secret show 는 사람(TTY)만", r.returncode != 0 and PW not in r.stdout + r.stderr)
 
+    # --- 사람(진짜 TTY)은 되고, 에이전트 표식이 있으면 TTY 여도 거부된다(가상 터미널로 확인)
+    import pty, select
+    def run_pty(args, extra_env=None):
+        e = {k: v for k, v in env.items() if k not in ("CLAUDECODE", "GEMINI_CLI", "DONGHANS_AGENT")}
+        e.update({"PYTHONPATH": ROOT, **(extra_env or {})})
+        master, slave = pty.openpty()
+        p = subprocess.Popen([sys.executable, os.path.join(ROOT, "claude_ctx.py"), *args], stdin=slave, stdout=slave, stderr=slave, env=e, close_fds=True)
+        os.close(slave)
+        out = b""
+        while True:
+            r_, _, _ = select.select([master], [], [], 20)
+            if not r_:
+                break
+            try:
+                chunk = os.read(master, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            out += chunk
+        p.wait(timeout=20); os.close(master)
+        return p.returncode, out.decode("utf-8", "replace")
+    rc, o = run_pty(["secret", "show", "NAS_PW"])
+    check("사람(진짜 TTY, 에이전트 표식 없음): secret show 가 값을 보여 줌", rc == 0 and PW in o, o[:120])
+    rc, o = run_pty(["ctx", "search", "NAS", "--raw"])
+    check("사람(TTY): --raw 로 치환이 풀려 원문이 보임", rc == 0 and PW in o and "[protected]" not in o, o[:160])
+    for marker in ("CLAUDECODE", "GEMINI_CLI", "DONGHANS_AGENT"):
+        rc, o = run_pty(["secret", "show", "NAS_PW"], {marker: "1"})
+        check(f"에이전트 표식 {marker}=1 이면 TTY 여도 거부", rc != 0 and PW not in o and "사람이" in o, o[:140])
+    rc, o = run_pty(["ctx", "search", "NAS"])
+    check("TTY 에서도 기본(--raw 없음)은 치환된다", rc == 0 and PW not in o and "[protected]" in o)
+
     # 치환 후 자름: 스니펫 경계에서 비밀이 잘려도 조각이 남지 않음
     long = "가" * 55 + PW + "나" * 400
     conn.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES (%s,%s,'testhost',now(),'user','prompt',%s,'{}')", ("u9999999-0000-0000-0000-000000000000", SID, long)); conn.commit()

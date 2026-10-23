@@ -482,7 +482,7 @@ class CtxUI(uikit.HelpMixin, App):
 
 
 def main():
-    if not (sys.stdin.isatty() and sys.stdout.isatty()) or os.environ.get("CLAUDECODE"):
+    if not (sys.stdin.isatty() and sys.stdout.isatty()) or cc.is_agent_session():
         sys.exit("ctxui 는 사람이 터미널에서 직접 실행하는 도구입니다")
     CtxUI().run()
 

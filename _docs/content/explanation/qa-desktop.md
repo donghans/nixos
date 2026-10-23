@@ -38,6 +38,11 @@
 - 실사용 시험 결과: ToT QA 세션(file:// 페이지, `--class` 없음) — 창이 데스크톱 1 에 보이고 2 에 없음. genple QA 세션(`--class=genple-qa`, genple 첫 화면 `http://10.100.0.1/` → 302 → `/welcome`) — 데스크톱 1 에 없고 2 에 보임. 알림 규칙(시작·완료)이 두 세션 사이에 실제로 오갔다. 새로 띄운 genple 세션은 반영 전에 시작해 전역 CLAUDE.md 절은 없었지만 스킬은 자동으로 목록에 보였다.
 - 로그인 smoke 는 어느 쪽도 하지 않았다(미검증).
 
+## 처음 보는 세션·프로젝트가 막히지 않게 (2026-10-23 감사)
+- 스킬 `donghans-qa-desktop` 에 **사전 점검**(VM·키·접속·프로젝트 규칙·점유 확인)을 넣었다. 어긋나면 임의로 만들거나 고치지 않고 사용자에게 알린다(VM 생성·설정은 승인 필요 작업).
+- **점유 알림은 `scripts/occupy.py`(VM 안의 `/tmp/qa-desktop-occupancy/`)가 기본 수단**이다: 세션 간 메시지 도구가 없는 에이전트도 같은 정보를 읽고 쓴다. 락이 아니라 알림이고, 다른 프로젝트 점유·chrome 이 떠 있으면 경고(종료 코드 1). 메시지 도구는 가속 수단.
+- 프로젝트 지침 파일 규약·`context.py --init`·worktree 처리는 스킬 `donghans-qa` §0-A, 에이전트 결합 분석은 `llm-tooling-portability.md`.
+
 ## 운영 사실 (VM)
 - 접속은 SSH 키만(`~/.ssh/qa_desktop_ed25519`, 계정 `qa`, 비밀번호 없음). `incus exec` 는 VM 에이전트가 없어 안 된다.
 - 화면 잠금 해제·절전 끔(`lock-enabled false`, `idle-delay 0`)이 전제다. 계정에 비밀번호가 없어 잠기면 GUI 로 못 푼다.

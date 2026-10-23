@@ -4,7 +4,7 @@
 설계(사용자 결정):
   - 등록표(secrets 표)는 ctx DB 에 **평문**으로 둔다(ctx DB 는 허용된 tailnet 기기만 접속하는 설계). 원문(messages/hook_events)도 DB 에 그대로 보존한다.
   - 치환은 **내보낼 때만** 한다: `donghans ctx search|recent|session|sql|handoff` 출력과 `donghans secret run` 하위 프로세스의 출력.
-    DB 원문은 바꾸지 않는다. 사람이 TTY 에서 `--raw` 를 줄 때만 풀린다(Claude 의 Bash 도구는 TTY 가 아니라 못 푼다).
+    DB 원문은 바꾸지 않는다. 사람이 TTY 에서 `--raw` 를 줄 때만 풀린다(에이전트의 셸 도구는 TTY 가 아니라 못 푼다).
   - 이미 DB 에 적재된 로컬 사본(~/.claude/projects/**/*.jsonl)은 `scrub` 으로 [protected] 로 바꿀 수 있다(원문은 DB 에 있다).
   - 비밀번호를 대화에 남기지 않는 길: `donghans secret run -- cmd {{secret:이름}}` — 값은 실행 직전에만 끼워 넣고, 출력은 다시 치환한다.
 이 모듈은 DB 없이도 시험할 수 있게 치환·탐지·파일 치환 핵심을 순수 함수로 둔다(DB 를 쓰는 부분은 conn 을 받는다).
