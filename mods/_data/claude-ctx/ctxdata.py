@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 
+import ctx_instr as ci
 import ctx_secrets as cs
 
 
@@ -373,3 +374,32 @@ def ignore_fp(conn, fp, pattern=None, note=None):
 
 def adopt(conn, value, label, pattern=None, note=None, force=False):
     cs.add_secret(conn, label, "literal", value, note or (f"ctxui 후보 승인({pattern})" if pattern else "ctxui 후보 승인"), False, force)
+
+
+# ---------------------------------------------------------------- 프로젝트 지침(ctx_instr) — ctxui 「지침」 탭
+def instr_rows(conn):
+    """공유 정본의 모든 저장소 지침 목록(저장소·이름 순). 로컬 캐시와 무관하게 DB 만 본다."""
+    rows = conn.execute("SELECT repo_url, name, rev, updated_host, updated_at, length(body) FROM project_instructions ORDER BY repo_url, name").fetchall()
+    return [dict(repo=r[0], name=r[1], rev=r[2], host=r[3], at=r[4], length=r[5]) for r in rows]
+
+
+def instr_body(conn, repo, name, masker=cs.IDENTITY):
+    """(rev, 본문) — 본문은 masker 로 치환한 화면용. 없으면 None. 편집용 원문은 instr_raw 를 쓴다(치환한 글자가 저장되면 안 된다)."""
+    row = conn.execute("SELECT rev, body FROM project_instructions WHERE repo_url = %s AND name = %s", (repo, name)).fetchone()
+    return None if not row else (row[0], masker.text(row[1]))
+
+
+def instr_raw(conn, repo, name):
+    """(rev, 원문 본문) — 편집기에 넘길 값. 없으면 None."""
+    row = conn.execute("SELECT rev, body FROM project_instructions WHERE repo_url = %s AND name = %s", (repo, name)).fetchone()
+    return None if not row else (row[0], row[1])
+
+
+def instr_sections(body):
+    """본문의 `## ` 절 제목 목록(머리말 길이 포함 안 함) — 화면 위쪽 요약용."""
+    return [s.split("\n", 1)[0][3:].strip() for s in ci.split_sections(body)[1]]
+
+
+def instr_save(conn, repo, name, body, host, expect_rev, masker=None):
+    """편집 결과를 DB 에만 쓴다(로컬 캐시·상태는 건드리지 않음) — (결과코드, 메시지). 낡은 rev·비밀·빈 본문은 ci.set_body 가 거부한다."""
+    return ci.set_body(conn, repo, None, name, body, host, masker=masker, expect_rev=expect_rev)

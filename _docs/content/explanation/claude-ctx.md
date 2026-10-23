@@ -70,6 +70,8 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 |---|---|---|
 | 읽기 | `donghans instr show [이름] [--section 절]` | **먼저 sync(최신화)** 한 뒤 출력. DB 접속 실패면 캐시를 「⚠ 낡았을 수 있음」 표시와 함께 출력(읽히긴 한다). `instructions` 는 머리말 + 제목에 `--section` 말이 든 절만, 나머지는 「생략된 절」로 안내; `override` 는 늘 전체 |
 | 쓰기(사람) | `donghans instr edit <이름>` | 최신본을 `$VISUAL`·`$EDITOR`·vi 로 열고, 바뀌었으면 **읽은 rev 기준**으로 DB 에 먼저 올리고 캐시를 맞춘다(TTY 가 아니면 거부) |
+| 읽기·쓰기(cwd 무관) | `donghans instr show\|set\|edit … --repo <URL>` | 로컬 캐시 없이 **공유 정본(DB)만** 대상 — git 저장소 밖에서도, 다른 저장소의 지침도 다룬다(`ci.set_body(main=None)`: 캐시·상태를 건드리지 않고 낙관적 잠금·비밀·빈 본문 거부는 그대로; 캐시는 다음 `instr show`·세션 시작 동기화가 맞춘다). `push`/`pull`/`sync`/`diff` 는 로컬 파일이 필요해 `--repo` 가 없다 |
+| 쓰기(사람, 화면) | `ctxui` 7 지침 탭 | 모든 저장소의 지침 목록(저장소·이름·rev·수정 머신·길이) → Enter 본문(`## ` 절 목록, 비밀 치환 `m`) → `e` 로 편집기(`$VISUAL`·`$EDITOR`·vi, 임시 파일 0600)를 열고 바뀌었으면 **연 시점의 rev 기준**으로 DB 에 저장. 낡은 rev·비밀·빈 본문은 사유를 알리고 저장하지 않는다. 지침 행 삭제·새 저장소 만들기·캐시와의 diff 는 없다 |
 | 쓰기(에이전트) | `donghans instr get <이름>` → 고침 → `donghans instr set <이름> --file F [--expect-rev N]` | DB 에 낙관적 잠금으로 먼저 쓰고 캐시·상태를 맞춘다. `--expect-rev` 가 낡았으면 거부(최신본에서 다시 고친다). 비밀 값·빈 본문은 거부 |
 
 **캐시 잠금**: 동기화·`set`·`push` 로 DB 와 같아진 파일은 `chmod 0444`(읽기 전용). **강제가 아니라 보조 장치**다 — 사용자가 `chmod u+w` 하거나 `sed -i`(임시 파일 교체) 같은 우회로 고치면 막지 못하고, 그때는 기존 판정표가 `ahead`/`conflict` 로 잡아 덮지 않는다(그래서 `plan`·`push`·`pull` 은 안전망으로 남긴다). 읽기 쪽도 파일을 직접 `cat` 하면 최신화되지 않는다 — 스킬과 스크립트가 `instr show` 를 부르도록 해 두었다.
@@ -78,7 +80,7 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 
 **왜 handoff 에 따로 sync 를 넣지 않았나**: handoff 는 세션을 닫는 시점의 작업이라 지침이 중간에 바뀌면 오히려 혼란스럽다. 대신 읽기를 `show` 로 통일해 읽는 순간에 최신이 되게 했다.
 
-**시험**: `test_instr.py` 55건 — 절 나누기·고르기(순수), 캐시 잠금, `set` 의 낙관적 잠금·거부 3종(낡은 rev·비밀·빈 본문), 다른 기기가 올린 최신본이 잠긴 캐시에도 반영, 우회 편집이 앞섬으로 잡힘, CLI `set`/`show`/접속 실패 `show`/비대화 `edit` 거부. 잠금 코드를 끄면 3건이 실패함을 확인했다(변이 검사). **미검증**: 실제 에디터를 띄우는 `edit` 의 대화형 경로(시험은 비대화 거부만), Claude Code 의 Edit 도구가 0444 파일에 쓰려 할 때의 실제 오류 문구.
+**시험**: `test_instr.py` 55건 — 절 나누기·고르기(순수), 캐시 잠금, `set` 의 낙관적 잠금·거부 3종(낡은 rev·비밀·빈 본문), 다른 기기가 올린 최신본이 잠긴 캐시에도 반영, 우회 편집이 앞섬으로 잡힘, CLI `set`/`show`/접속 실패 `show`/비대화 `edit` 거부. 잠금 코드를 끄면 3건이 실패함을 확인했다(변이 검사). **ctxui 지침 탭·`--repo`**: `test_instr` 72건(`main=None` 4종 거부·캐시 불변, CLI `--repo` 를 git 밖에서), `test_ctxdata` 질의 함수, `test_ctxui` 화면 시나리오(가짜 편집기 실행 파일로 저장·무변경·낡은 rev·비밀·빈 본문·임시 파일 0600). 변이 검사로 낙관적 잠금 제거(여러 시험 실패)·ctxui 가 `expect_rev` 를 안 넘김(화면 시험 실패)·치환기 무시(시험 2곳 실패)를 확인했다. **미검증**: 실제 에디터(vi 등)를 `App.suspend()` 로 띄우는 실사용(시험은 `suspend` 를 빈 컨텍스트로 대체). **미검증(이전)**: 실제 에디터를 띄우는 `edit` 의 대화형 경로(시험은 비대화 거부만), Claude Code 의 Edit 도구가 0444 파일에 쓰려 할 때의 실제 오류 문구.
 **주의(운영)**: 작업 트리를 여러 세션이 공유하면 한 세션의 `nixup` 이 다른 세션의 미커밋 변경까지 배포한다(이 변경도 개발 중에 다른 세션의 `nixup` 으로 먼저 배포됐다). 이 저장소의 CLAUDE.md 「배포 방식」은 이를 전제하지 않는다.
 
 ## 비밀번호 관리 (2026-10-23) — 등록표 · 출력 치환 · 주입 래퍼 · 후보 탐지 · 로컬 치환 · ctxui
@@ -91,7 +93,7 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 | 명령 | `claude_ctx.py` 의 `donghans secret …` | `add`(숨겨 입력, `--stdin`) · `list` · `rm/enable/disable` · `show`(TTY) · `run` · `scan` · `adopt` · `ignore` · `scrub` |
 | 치환 지점 | `ctx search/recent/session/sql` · `handoff get/draft` | 출력 직전에 치환. `--raw` 는 TTY + `CLAUDECODE` 없음일 때만 |
 | 조회 계층 | `ctxdata.py` | 개요 집계 · 검색 · 저장소별 발언 대조 · 세션 맥락 · 비밀·후보 관리(화면과 분리) |
-| 화면 | `ctxui.py` (`ctxui` 명령, Textual) | 1 개요(저장소별 개수·용량·DB 크기) · 2 검색(키워드/정규식·저장소·기간·역할) · 3 대조(같은 문구를 저장소별로 묶어 「내가 그렇게 말했나」) · 4 비밀(추가·끄기·삭제·값 보기) · 5 후보(승인·무시) · 6 통계(아래 「ctxui 통계·대화 보기」) |
+| 화면 | `ctxui.py` (`ctxui` 명령, Textual) | 1 개요(저장소별 개수·용량·DB 크기) · 2 검색(키워드/정규식·저장소·기간·역할) · 3 대조(같은 문구를 저장소별로 묶어 「내가 그렇게 말했나」) · 4 비밀(추가·끄기·삭제·값 보기) · 5 후보(승인·무시) · 6 통계(아래 「ctxui 통계·대화 보기」) · 7 지침(아래 「명령 경유」) |
 | 스키마 | `schema.sql` 의 `secrets` · `secret_ignores` (v2) | `ctx_secrets.SCHEMA_STATEMENTS` 와 같은 DDL(시험이 확인). 클라이언트도 쓰기 전에 `CREATE TABLE IF NOT EXISTS` 로 보장 |
 | 자동화 | `claude-ctx-ingest` 서비스의 `ExecStartPost` | 10분마다 `secret scrub --apply --quiet --idle-min 180`. 등록표가 비면 아무 일도 안 한다 |
 | 시험 | `claude-ctx/tests/` (`mods/_data/run-tests.sh` 에 등록) | `test_secrets`(순수) · `test_ctx_db`(임시 Postgres 통합) · `test_ctxdata` · `test_ctxui`(Pilot) |

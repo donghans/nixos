@@ -303,6 +303,96 @@ async def run():
         check("F4: 도구 메시지 포함하면 찾아짐(종류가 역할 칸에 표시)", rows(app, "#results") == 1 and app.query_one("#results").get_row_at(0)[1] == "tool_use" and "도구 메시지: 포함" in txt(app.query_one("#sstate")))
         await pilot.press("f4")
 
+        # --- 지침 탭(공유 정본 · DB 만 · 사람 전용 편집)
+        import contextlib, stat
+        with cc.connect() as c:
+            for repo, nm, body, host in [(A, "instructions", "# 알파 지침\n\n## QA 할 때\nqa 본문\n\n## 배포\n배포 본문\n", "h1"), (A, "override", "알파 오버라이드\n", "h2"), (B, "instructions", f"베타 지침 비번은 {PW}\n", "h2")]:
+                c.execute("INSERT INTO project_instructions (repo_url, name, body, rev, updated_host) VALUES (%s,%s,%s,1,%s)", (repo, nm, body, host))
+        with cc.connect() as c:
+            cs.add_secret(c, "INSTR_PW", "literal", PW)          # 앞선 비밀 탭 시험이 등록표를 비웠으므로 이 구간용으로 다시 등록
+        fake = os.path.join(os.environ["XDG_RUNTIME_DIR"] if os.environ.get("XDG_RUNTIME_DIR") else tempfile.gettempdir(), "fake-editor-%d.sh" % os.getpid())
+        EDITLOG = fake + ".log"
+        def make_editor(script_body):
+            open(fake, "w").write("#!/bin/sh\n" + script_body); os.chmod(fake, 0o755); os.environ["EDITOR"] = fake; os.environ.pop("VISUAL", None)
+        await pilot.press("7"); await settle(pilot, lambda: rows(app, "#instr-table") == 3)
+        it = app.query_one("#instr-table")
+        check("지침: 7 키로 이동, 모든 저장소의 지침이 목록에(저장소·이름·rev·수정 머신·길이)", app.current_tab() == "instr" and rows(app, "#instr-table") == 3 and it.get_row_at(0)[1] == "instructions" and it.get_row_at(0)[2] == 1 and it.get_row_at(0)[3] == "h1", str(it.get_row_at(0)))
+        it.focus(); it.move_cursor(row=0); await pilot.pause(0.3); await pilot.press("enter"); await pilot.pause(0.8)
+        check("지침 Enter: 본문 보기 화면이 열림", isinstance(app.screen, ctxui.InstrScreen))
+        body = txt(app.screen.query_one("#instr-body"))
+        check("지침 본문: 저장소·이름·rev·절 목록과 본문", "알파 지침" in body and "rev 1" in body and "절 2개: QA 할 때 · 배포" in body and "qa 본문" in body, body[:200])
+        await pilot.press("escape"); await pilot.pause(0.3)
+        it.move_cursor(row=2); await pilot.pause(0.3); await pilot.press("enter"); await pilot.pause(0.8)
+        shown = txt(app.screen.query_one("#instr-body"))
+        check("지침 본문: 등록된 비밀은 [protected] 로 치환해 보인다", PW not in shown and "[protected]" in shown, shown[:160])
+        await pilot.press("m"); await pilot.pause(0.6)
+        check("지침 본문 m: 치환을 끄면 원문(경고 표시)", PW in txt(app.screen.query_one("#instr-body")) and "꺼짐" in txt(app.screen.query_one("#instr-body")))
+        await pilot.press("m"); await pilot.pause(0.4); await pilot.press("escape"); await pilot.pause(0.3)
+        check("m 으로 다시 켬", app.mask)
+
+        # 편집: 가짜 편집기(실행 파일)로 대체 — suspend 는 헤드리스에서 못 쓰므로 빈 컨텍스트로 바꾼다
+        app.suspend = lambda: contextlib.nullcontext()
+        cache_marker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "no-such-cache")      # 캐시 파일 경로를 쓰지 않는다는 것을 아래에서 확인
+        make_editor(f'cp "$1" {EDITLOG}.mode_probe 2>/dev/null; stat -c %a "$1" > {EDITLOG}.perm; printf "\\n## 추가 절\\n새 내용\\n" >> "$1"\n')
+        it.move_cursor(row=0); await pilot.pause(0.3)
+        await pilot.press("e"); await settle(pilot, lambda: it.get_row_at(0)[2] == 2)
+        with cc.connect(readonly=True) as c:
+            raw = cd.instr_raw(c, A, "instructions")
+        check("지침 e: 편집기로 고치면 DB 에 올라가고 rev 가 오른다", raw[0] == 2 and "## 추가 절" in raw[1] and "새 내용" in raw[1] and it.get_row_at(0)[2] == 2, str(raw))
+        check("지침 e: 임시 파일은 0600 이었고 편집 뒤 지워진다", open(EDITLOG + ".perm").read().strip() == "600" and not any(f.startswith("instr-") for f in os.listdir(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir())))
+        with cc.connect(readonly=True) as c:
+            row = next(r for r in cd.instr_rows(c) if (r["repo"], r["name"]) == (A, "instructions"))
+        check("지침 e: 수정 머신은 이 기기(CLAUDE_CTX_HOST)로 기록", row["host"] == "testhost", str(row))
+        # 변경 없음
+        make_editor("exit 0\n")
+        it.move_cursor(row=1); await pilot.pause(0.3); await pilot.press("e"); await pilot.pause(0.8)
+        with cc.connect(readonly=True) as c:
+            check("지침 e: 바꾸지 않으면 저장하지 않는다(rev 그대로)", cd.instr_raw(c, A, "override")[0] == 1)
+        # 낡은 rev: 편집기가 도는 사이 다른 기기가 먼저 고침
+        make_editor(f'python3 -c "import sys; open(sys.argv[1],\'a\').write(\'\\n내 편집\\n\')" "$1"\n')
+        orig_edit = app.edit_instr
+        def race(repo, name):
+            if (repo, name) == (A, "override"):
+                with cc.connect() as c:
+                    c.execute("UPDATE project_instructions SET body='다른 기기가 먼저 씀\n', rev=rev+1, updated_host='other' WHERE repo_url=%s AND name='override'", (repo,))
+            return orig_edit(repo, name)
+        # 편집기가 뜨기 직전(읽은 뒤)에 끼어들도록 subprocess.run 을 감싼다
+        import subprocess as _sp
+        real_run = _sp.run
+        def run_with_race(cmd, *a, **k):
+            with cc.connect() as c:
+                c.execute("UPDATE project_instructions SET body='다른 기기가 먼저 씀\n', rev=rev+1, updated_host='other' WHERE repo_url=%s AND name='override'", (A,))
+            return real_run(cmd, *a, **k)
+        ctxui.subprocess.run = run_with_race
+        it.move_cursor(row=1); await pilot.pause(0.3); await pilot.press("e"); await pilot.pause(1.0)
+        ctxui.subprocess.run = real_run
+        with cc.connect(readonly=True) as c:
+            raw = cd.instr_raw(c, A, "override")
+        check("지침 e: 편집 중 다른 기기가 먼저 고쳤으면(낡은 rev) 거부하고 상대 본문을 덮지 않는다", raw == (2, "다른 기기가 먼저 씀\n"), str(raw))
+        # 비밀이 든 본문
+        make_editor(f'printf "비번 {PW}\\n" >> "$1"\n')
+        it.move_cursor(row=0); await pilot.pause(0.3); await pilot.press("e"); await pilot.pause(1.0)
+        with cc.connect(readonly=True) as c:
+            raw = cd.instr_raw(c, A, "instructions")
+        check("지침 e: 등록된 비밀이 든 본문은 거부(저장 안 됨)", PW not in raw[1] and raw[0] == 2, str(raw[0]))
+        # 빈 본문
+        make_editor(': > "$1"\n')
+        it.move_cursor(row=0); await pilot.pause(0.3); await pilot.press("e"); await pilot.pause(1.0)
+        with cc.connect(readonly=True) as c:
+            check("지침 e: 빈 본문은 거부(저장 안 됨)", cd.instr_raw(c, A, "instructions")[0] == 2 and cd.instr_raw(c, A, "instructions")[1].strip() != "")
+        # 본문 보기 화면 안에서 편집하면 화면이 새 내용으로 갱신된다
+        make_editor('printf "\\n## 화면 안에서 추가\\n" >> "$1"\n')
+        it.move_cursor(row=0); await pilot.pause(0.3); await pilot.press("enter"); await pilot.pause(0.8)
+        await pilot.press("e"); await settle(pilot, lambda: "화면 안에서 추가" in txt(app.screen.query_one("#instr-body")))
+        check("지침 본문 e: 보기 화면에서 고치면 화면이 새 rev·내용으로 바뀜", "rev 3" in txt(app.screen.query_one("#instr-body")) and "화면 안에서 추가" in txt(app.screen.query_one("#instr-body")))
+        await pilot.press("escape"); await pilot.pause(0.3)
+        # 목록 새로고침·에이전트용 경로는 그대로(사람 전용 화면이 DB 를 지우지 않는다)
+        await pilot.press("r"); await pilot.pause(0.6)
+        check("지침: r 새로고침, 행 삭제 기능은 없다(범위 밖)", rows(app, "#instr-table") == 3 and not any(b.key == "d" and "지침" in str(b.description) for b in app.BINDINGS))
+        for f in (fake, EDITLOG + ".perm", EDITLOG + ".mode_probe"):
+            try: os.unlink(f)
+            except OSError: pass
+
         # --- 도움말·종료
         await pilot.press("f1"); await pilot.pause(0.3)
         check("F1: 도움말", app.screen.__class__.__name__ == "HelpScreen"); await pilot.press("escape"); await pilot.pause(0.2)

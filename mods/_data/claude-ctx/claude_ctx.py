@@ -539,11 +539,14 @@ def cmd_handoff_get(a):
 def _instr_target(a, need_local=True):
     cwd = os.getcwd()
     g, r = git_meta(cwd), ci.roots(cwd)
-    repo = norm_repo(getattr(a, "repo", None)) or g.get("repo_url")
+    explicit = norm_repo(getattr(a, "repo", None))
+    if explicit:      # --repo 를 주면 cwd 와 무관하게 그 저장소의 공유 정본(DB)만 대상 — 로컬 캐시는 건드리지 않는다
+        return explicit, None, None
+    repo = g.get("repo_url")
     if not repo:
-        sys.exit("저장소를 알 수 없다 — git 저장소 안에서 실행하거나 --repo 를 준다")
+        sys.exit("저장소를 알 수 없다 — git 저장소 안에서 실행하거나 --repo URL 을 준다(show·set·edit 은 --repo 로 DB 만 대상으로 할 수 있다)")
     if need_local and not r:
-        sys.exit("git 저장소 안에서 실행해야 한다(로컬 파일 위치를 알아야 한다)")
+        sys.exit("git 저장소 안에서 실행해야 한다(로컬 파일 위치를 알아야 한다) — show·set·edit 은 --repo URL 로 DB 만 대상으로 할 수 있다")
     return repo, (r[0] if r else None), (r[1] if r else None)
 
 
@@ -590,6 +593,17 @@ def cmd_instr_sync(a):
 def cmd_instr_show(a):
     """읽기 경로 — 먼저 동기화해 최신본으로 만든 뒤 보인다. 접속이 안 되면 로컬 캐시를 「낡았을 수 있음」으로 표시해 보인다."""
     repo, main, common = _instr_target(a)
+    if main is None:          # --repo: 로컬 캐시 없이 공유 정본(DB)의 본문을 보인다
+        try:
+            with connect(timeout=3, readonly=True) as c:
+                rows, masker = ci.db_rows(c, repo), cs.load_masker(c)
+        except Exception as e:
+            sys.exit(f"공유 저장소 접속 실패: {e}")
+        out = "".join(x for x in (ci.render(None, n, a.section, f"공유 저장소(DB) · {repo}", db=rows.get(n)) for n in _instr_names(a)) if x)
+        if not out:
+            print("(공유 저장소에 지침 없음)", file=sys.stderr); return 0
+        print(masker.text(out), end="")
+        return 0
     status, masker = "최신", None
     try:
         with connect(timeout=3) as c:
@@ -616,7 +630,8 @@ def cmd_instr_set(a):
     body = sys.stdin.read() if a.stdin else open(a.file, errors="ignore").read()
     with connect() as c:
         code, msg = ci.set_body(c, repo, main, a.name, body, HOST, masker=cs.load_masker(c), expect_rev=a.expect_rev)
-        ci.ensure_excluded(common)
+        if common:
+            ci.ensure_excluded(common)
     print(msg)
     return code
 
@@ -627,9 +642,10 @@ def cmd_instr_edit(a):
         sys.exit("대화형 터미널에서만 쓴다 — 에이전트·스크립트는 `donghans instr set --file` 을 쓴다")
     repo, main, common = _instr_target(a)
     with connect() as c:
-        ci.sync(c, repo, main, common, HOST)
+        if main is not None:
+            ci.sync(c, repo, main, common, HOST)
         db = ci.db_rows(c, repo).get(a.name)
-    base = db["body"] if db else (ci.read_local(main, a.name) or "")
+    base = db["body"] if db else (ci.read_local(main, a.name) or "" if main is not None else "")
     fd, tmp = tempfile.mkstemp(prefix="instr-", suffix=".md", dir=os.environ.get("XDG_RUNTIME_DIR") or None)
     try:
         with os.fdopen(fd, "w") as f:
@@ -642,7 +658,8 @@ def cmd_instr_edit(a):
         print("변경 없음"); return 0
     with connect() as c:
         code, msg = ci.set_body(c, repo, main, a.name, new, HOST, masker=cs.load_masker(c), expect_rev=db["rev"] if db else None)
-        ci.ensure_excluded(common)
+        if common:
+            ci.ensure_excluded(common)
     print(msg)
     return code
 
@@ -941,9 +958,9 @@ def main():
     ins = top.add_parser("instr", help="프로젝트별 지침(.claude/donghans-*.md)의 공유 정본").add_subparsers(dest="cmd", required=True)
     p = ins.add_parser("list"); p.add_argument("--repo"); p.set_defaults(f=cmd_instr_list)
     p = ins.add_parser("get"); p.add_argument("name", choices=list(ci.NAMES)); p.add_argument("--repo"); p.add_argument("--raw", action="store_true"); p.set_defaults(f=cmd_instr_get)
-    p = ins.add_parser("show", help="최신화한 뒤 지침을 보인다(읽기 경로)"); p.add_argument("name", nargs="?", choices=list(ci.NAMES)); p.add_argument("--section", action="append", default=[], help="제목에 이 말이 든 절만(여러 번 가능; 머리말은 늘 포함, override 는 늘 전체)"); p.set_defaults(f=cmd_instr_show)
-    p = ins.add_parser("set", help="새 본문을 DB 에 먼저 쓰고 캐시를 맞춘다(쓰기 경로, 비대화)"); p.add_argument("name", choices=list(ci.NAMES)); p.add_argument("--file"); p.add_argument("--stdin", action="store_true"); p.add_argument("--expect-rev", type=int, help="DB 가 이 rev 일 때만 쓴다(읽은 뒤 바뀌었으면 거부)"); p.set_defaults(f=cmd_instr_set)
-    p = ins.add_parser("edit", help="최신본을 편집기로 열어 고치고 DB 에 올린다(쓰기 경로, 대화형)"); p.add_argument("name", choices=list(ci.NAMES)); p.set_defaults(f=cmd_instr_edit)
+    p = ins.add_parser("show", help="최신화한 뒤 지침을 보인다(읽기 경로)"); p.add_argument("name", nargs="?", choices=list(ci.NAMES)); p.add_argument("--repo", help="저장소 URL — 로컬 캐시 없이 공유 저장소(DB)의 본문만 보인다(cwd 무관)"); p.add_argument("--section", action="append", default=[], help="제목에 이 말이 든 절만(여러 번 가능; 머리말은 늘 포함, override 는 늘 전체)"); p.set_defaults(f=cmd_instr_show)
+    p = ins.add_parser("set", help="새 본문을 DB 에 먼저 쓰고 캐시를 맞춘다(쓰기 경로, 비대화)"); p.add_argument("name", choices=list(ci.NAMES)); p.add_argument("--file"); p.add_argument("--stdin", action="store_true"); p.add_argument("--expect-rev", type=int, help="DB 가 이 rev 일 때만 쓴다(읽은 뒤 바뀌었으면 거부)"); p.add_argument("--repo", help="저장소 URL — 로컬 캐시 없이 DB 에만 쓴다(cwd 무관)"); p.set_defaults(f=cmd_instr_set)
+    p = ins.add_parser("edit", help="최신본을 편집기로 열어 고치고 DB 에 올린다(쓰기 경로, 대화형)"); p.add_argument("name", choices=list(ci.NAMES)); p.add_argument("--repo", help="저장소 URL — 로컬 캐시 없이 DB 본문을 편집한다(cwd 무관)"); p.set_defaults(f=cmd_instr_edit)
     p = ins.add_parser("sync", help="로컬 파일을 공유 정본에 맞춘다(훅이 부른다)"); p.add_argument("--quiet", action="store_true"); p.set_defaults(f=cmd_instr_sync)
     p = ins.add_parser("push", help="로컬 파일을 공유 정본으로 올린다"); p.add_argument("name", nargs="?", choices=list(ci.NAMES)); p.add_argument("--force", action="store_true"); p.set_defaults(f=cmd_instr_push)
     p = ins.add_parser("pull", help="공유 정본으로 로컬 파일을 덮는다"); p.add_argument("name", nargs="?", choices=list(ci.NAMES)); p.add_argument("--force", action="store_true"); p.set_defaults(f=cmd_instr_pull)

@@ -165,13 +165,19 @@ def select_sections(body, wanted):
     return "".join(keep), omitted
 
 
-def render(main, name, wanted, status):
-    """`instr show` 가 보이는 한 파일 분량. 파일이 없으면 None. override 는 짧고 우선하므로 절을 고르지 않고 전체를 보인다."""
-    local = read_local(main, name)
-    if local is None:
-        return None
+def render(main, name, wanted, status, db=None):
+    """`instr show` 가 보이는 한 파일 분량. 파일이 없으면 None. override 는 짧고 우선하므로 절을 고르지 않고 전체를 보인다.
+    main 이 None 이면 로컬 캐시 없이 `db`({"rev", "body"} — `db_rows` 의 값)를 보인다(`--repo` 경로)."""
+    if main is None:
+        if db is None:
+            return None
+        local, rev = db["body"], db["rev"]
+    else:
+        local = read_local(main, name)
+        if local is None:
+            return None
+        rev = (load_state(main).get(name) or {}).get("rev", "?")
     body, omitted = select_sections(local, wanted) if name == "instructions" else (local, [])
-    rev = (load_state(main).get(name) or {}).get("rev", "?")
     out = f"## 프로젝트 지침: .claude/{NAMES[name]} ({ROLE[name]} · rev {rev} · {status})\n{body.rstrip(chr(10))}\n"
     if omitted:
         out += f"(생략된 절 {len(omitted)}개: " + " · ".join(omitted) + " — 전체는 `donghans instr show`)\n"
@@ -251,7 +257,7 @@ def push(conn, repo_url, main, name, host, force=False, masker=None):
 
 
 def set_body(conn, repo_url, main, name, body, host, masker=None, expect_rev=None):
-    """새 본문을 DB 에 먼저 쓰고(낙관적 잠금) 캐시를 맞춘다 — `instr edit|set` 의 본체. (결과코드, 메시지).
+    """새 본문을 DB 에 먼저 쓰고(낙관적 잠금) 캐시를 맞춘다 — `instr edit|set` 의 본체. (결과코드, 메시지). main=None 이면 DB 만 쓴다(캐시·상태 건너뜀).
     expect_rev 를 주면 DB 가 그 rev 일 때만 쓴다(읽은 뒤 다른 기기가 바꿨으면 거부). 주지 않으면 지금 DB 의 rev 기준(마지막에 쓴 쪽이 이긴다)."""
     if not body.strip():
         return 1, f"{name}: 빈 본문은 올리지 않는다"
@@ -271,8 +277,9 @@ def set_body(conn, repo_url, main, name, body, host, masker=None, expect_rev=Non
         rev = _update(conn, repo_url, name, body, host, db["rev"])
         if rev is None:
             return 1, f"{name}: 올리는 사이에 다른 기기가 먼저 바꿨다 — 다시 시도"
-    write_local(main, name, body)
-    state = load_state(main); state[name] = {"rev": rev, "sha": sha(body)}; save_state(main, state)
+    if main is not None:      # main=None 이면 로컬 캐시·상태는 건드리지 않는다(ctxui·`--repo` 경로 — 다음 `instr show`·세션 시작 동기화가 캐시를 맞춘다)
+        write_local(main, name, body)
+        state = load_state(main); state[name] = {"rev": rev, "sha": sha(body)}; save_state(main, state)
     return 0, f"{name}: 공유 저장소에 올렸다(rev {rev})" + ("" if db is None or sha(body) != sha(db["body"]) else " — 이미 같은 내용")
 
 

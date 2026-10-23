@@ -7,6 +7,7 @@
   4 비밀   등록된 비밀(출력 시 [protected] 로 치환) 관리: 추가·끄기·삭제
   5 후보   키·비밀번호처럼 보이는 문자열 자동 탐지 → 승인(등록)·무시
   6 통계   기간별 토큰·비용 추이(분류별 포함)와 세션 통계(시간대·요일 분포, 세션 표). 저장소·머신·모델·기간 필터   (Enter: 그 세션 대화)
+  7 지침   프로젝트별 지침(공유 정본 project_instructions)을 모든 저장소에 대해 보고 고친다 — 로컬 캐시 없이 DB 만 대상   (Enter: 본문 · e: 편집기)
 
 원문(DB)은 바꾸지 않는다. 화면의 치환(m)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. 사람이 터미널에서 직접 쓰는 도구라 TTY 가 아니면 실행하지 않는다.
 등록한 비밀은 `donghans ctx …` 출력과 `donghans secret run` 출력에서 치환되고, 로컬 트랜스크립트는 `donghans secret scrub` 으로 바꾼다.
@@ -14,7 +15,9 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
+import tempfile
 
 from rich.text import Text
 from textual import events, work
@@ -34,7 +37,7 @@ import claude_ctx as cc
 import ctx_secrets as cs
 import ctxdata as cd
 
-TABS = [("overview", "개요"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("stats", "통계")]
+TABS = [("overview", "개요"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("stats", "통계"), ("instr", "지침")]
 
 
 def short_repo(url: str | None) -> str:
@@ -365,6 +368,50 @@ class SessionScreen(ModalScreen):
         self.load()
 
 
+class InstrScreen(ModalScreen):
+    """지침 한 건의 본문(공유 정본 그대로 — 로컬 캐시 아님). `## ` 절 목록을 위에, 본문을 아래에 보인다. e 편집 · m 치환 켬/끔."""
+    BINDINGS = [Binding("escape,q", "close", "닫기"), Binding("e", "edit", "편집기로 고치기"), Binding("m", "toggle_mask", "치환 켬/끔")]
+
+    def __init__(self, app_ref, repo: str, name: str):
+        super().__init__()
+        self.ctx_app, self.repo, self.iname = app_ref, repo, name
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="stats-box"):
+            yield Static("", id="instr-body")
+
+    def on_mount(self):
+        self.render_body()
+
+    def action_close(self):
+        self.dismiss()
+
+    def action_toggle_mask(self):
+        self.ctx_app.action_toggle_mask()
+        self.render_body()
+
+    def action_edit(self):
+        if self.ctx_app.edit_instr(self.repo, self.iname):
+            self.render_body()
+
+    def render_body(self):
+        with cc.connect(readonly=True) as c:
+            got = cd.instr_body(c, self.repo, self.iname, self.ctx_app.masker())
+            meta = next((r for r in cd.instr_rows(c) if r["repo"] == self.repo and r["name"] == self.iname), None)
+        t = Text()
+        if not got or not meta:
+            t.append("지침을 찾지 못했다(다른 기기가 지웠을 수 있다)")
+        else:
+            rev, body = got
+            t.append(f"{short_repo(self.repo)}  ·  {self.iname}  ·  rev {rev}\n", style="bold #33ccff")
+            t.append(f"{meta['host']} 가 {fmt_ts(meta['at'])} 에 마지막으로 고침  ·  {meta['length']:,}자  ·  치환 {'켜짐' if self.ctx_app.mask else '꺼짐(원문 표시 중)'}  ·  e: 편집기로 고치기\n", style="#9a9a9a")
+            secs = cd.instr_sections(body)
+            t.append(f"절 {len(secs)}개: " + (" · ".join(secs) if secs else "(없음)") + "\n\n", style="#b8a46a")
+            for line in body.splitlines():
+                t.append(line + "\n", style="bold #33ccff" if line.startswith("## ") else "#cfcfcf")
+        self.query_one("#instr-body", Static).update(t)
+
+
 # ---------------------------------------------------------------- 앱
 class CtxUI(uikit.HelpMixin, App):
     TITLE = "ctxui — 공유 컨텍스트 관리"
@@ -396,7 +443,7 @@ class CtxUI(uikit.HelpMixin, App):
     BINDINGS = [
         Binding("q", "quit", "종료"),
         Binding("1", "tab('overview')", "개요"), Binding("2", "tab('search')", "검색"), Binding("3", "tab('verify')", "대조"),
-        Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"), Binding("6", "tab('stats')", "통계"),
+        Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"), Binding("6", "tab('stats')", "통계"), Binding("7", "tab('instr')", "지침"),
         Binding("p", "stat_period", "기간", show=False), Binding("b", "stat_bucket", "단위", show=False), Binding("g", "stat_by", "분류", show=False),
         Binding("o", "stat_order", "정렬", show=False), Binding("c", "stat_clear", "필터 지움", show=False),
         Binding("escape", "focus_table", "목록으로", show=False),
@@ -456,6 +503,8 @@ class CtxUI(uikit.HelpMixin, App):
                     with Horizontal():
                         yield uikit.box(VerticalScroll(Static("", id="stat-summary"), id="stat-summary-box"), "세션 통계")
                         yield uikit.box(DataTable(id="stat-sessions", cursor_type="row"), "세션 — Enter: 대화 보기")
+            with TabPane("7 지침", id="instr"):
+                yield uikit.box(DataTable(id="instr-table", cursor_type="row"), "프로젝트 지침(공유 정본) — Enter: 본문 · e: 편집기로 고치기")
         yield Footer()
 
     def on_mount(self):
@@ -468,6 +517,7 @@ class CtxUI(uikit.HelpMixin, App):
         self.query_one("#stat-trend", DataTable).add_columns("구간", "요청", "비용", "", "입력", "출력", "캐시읽기")
         self.query_one("#stat-break", DataTable).add_columns("분류", "요청", "비용", "비중", "출력")
         self.query_one("#stat-sessions", DataTable).add_columns("최근", "머신", "저장소", "프롬프트", "도구", "턴시간", "비용", "모델", "첫 프롬프트")
+        self.query_one("#instr-table", DataTable).add_columns("저장소", "이름", "rev", "수정 머신", "수정 시각", "길이")
         self.update_state()
         self.reload_overview()
 
@@ -504,6 +554,8 @@ class CtxUI(uikit.HelpMixin, App):
             self.reload_overview()
         elif name == "stats" and not self._stat_loaded:
             self.reload_stats()
+        elif name == "instr":
+            self.reload_instr()
 
     def action_focus_table(self):
         ids = {"overview": "#projects", "search": "#results", "verify": "#vrepos", "secrets": "#secrets-table", "cands": "#cands-table"}
@@ -520,7 +572,7 @@ class CtxUI(uikit.HelpMixin, App):
 
     def action_reload(self):
         t = self.current_tab()
-        {"overview": self.reload_overview, "search": self.run_search, "verify": self.run_verify, "secrets": self.reload_secrets, "cands": self.scan_candidates, "stats": self.reload_stats}[t]()
+        {"overview": self.reload_overview, "search": self.run_search, "verify": self.run_verify, "secrets": self.reload_secrets, "cands": self.scan_candidates, "stats": self.reload_stats, "instr": self.reload_instr}[t]()
 
     def update_state(self):
         self.query_one("#sstate", Static).update(
@@ -572,6 +624,9 @@ class CtxUI(uikit.HelpMixin, App):
             self.query_one("#vhits", DataTable).focus()
         elif tid == "cands-table":
             self.adopt_selected()
+        elif tid == "instr-table" and key:
+            repo, _, name = key.rpartition("|")
+            self.push_screen(InstrScreen(self, repo, name))
         elif tid == "stat-sessions" and key:
             self.push_screen(SessionScreen(self, key, None))
 
@@ -752,6 +807,49 @@ class CtxUI(uikit.HelpMixin, App):
                 self.query_one(i, Input).value = ""
             self.reload_stats()
 
+    # --- 지침(프로젝트별 공유 정본) — 사람 전용 편집 경로. 로컬 캐시 파일은 건드리지 않는다(다음 `instr show`·세션 시작 동기화가 맞춘다)
+    def reload_instr(self):
+        try:
+            with cc.connect(readonly=True) as c:
+                rows = cd.instr_rows(c)
+        except Exception as e:
+            self.flash(f"DB 조회 실패: {e}", "error"); return
+        tb = self.query_one("#instr-table", DataTable)
+        keep = self.selected_key("#instr-table")
+        tb.clear()
+        for r in rows:
+            tb.add_row(short_repo(r["repo"]), r["name"], r["rev"], r["host"], fmt_ts(r["at"]), f"{r['length']:,}", key=f"{r['repo']}|{r['name']}")
+        keys = [f"{r['repo']}|{r['name']}" for r in rows]
+        if keep in keys:
+            tb.move_cursor(row=keys.index(keep))
+        self.query_one("#instr-table").border_title = f"프로젝트 지침 {len(rows)}건(공유 정본) — Enter: 본문 · e: 편집기로 고치기"
+
+    def edit_instr(self, repo: str, name: str) -> bool:
+        """편집기($VISUAL·$EDITOR·vi)로 원문을 열고, 바뀌었으면 연 시점의 rev 를 기대값으로 DB 에 올린다. 거부(낡은 rev·비밀·빈 본문)는 사유를 알리고 저장하지 않는다. 저장되면 True."""
+        with cc.connect(readonly=True) as c:
+            got = cd.instr_raw(c, repo, name)
+        if not got:
+            self.flash("지침을 찾지 못했다(다른 기기가 지웠을 수 있다)", "error"); self.reload_instr(); return False
+        rev, base = got
+        fd, tmp = tempfile.mkstemp(prefix="instr-", suffix=".md", dir=os.environ.get("XDG_RUNTIME_DIR") or None)   # 0600
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(base)
+            editor = (os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi").split()
+            with self.suspend():
+                subprocess.run([*editor, tmp])
+            new = open(tmp, errors="ignore").read()
+        finally:
+            os.unlink(tmp)
+        if new == base:
+            self.flash("변경 없음"); return False
+        with cc.connect() as c:
+            code, msg = cd.instr_save(c, repo, name, new, cc.HOST, rev, masker=cs.load_masker(c))
+        self.flash(msg, "information" if code == 0 else "error")
+        if code == 0:
+            self.reload_instr()
+        return code == 0
+
     # --- 비밀 등록표
     def reload_secrets(self):
         tb = self.query_one("#secrets-table", DataTable)
@@ -809,6 +907,12 @@ class CtxUI(uikit.HelpMixin, App):
         self.push_screen(ConfirmScreen(f"'{key}' 을(를) 등록표에서 삭제할까요? (DB 원문은 그대로)"), done)
 
     def action_secret_toggle(self):
+        if self.current_tab() == "instr" and len(self.screen_stack) == 1:
+            key = self.selected_key("#instr-table")
+            if key:
+                repo, _, name = key.rpartition("|")
+                self.edit_instr(repo, name)
+            return
         key = self.selected_key("#secrets-table") if self.current_tab() == "secrets" else None
         if not key:
             return

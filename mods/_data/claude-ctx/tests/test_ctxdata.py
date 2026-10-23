@@ -203,6 +203,31 @@ try:
     check("session_links: 앞 세션(parents)", [p["session_id"] for p in cd.session_links(conn, "ffff0001")["parents"]] == ["aaaa0001"] and cd.session_links(conn, "ffff0001")["children"] == [])
     check("session_links: 이어짐 없는 세션은 둘 다 빈 목록", cd.session_links(conn, "bbbb0001") == dict(parents=[], children=[]))
 
+    # --- 지침(ctxui 「지침」 탭 질의): 모든 저장소 목록 · 본문(치환) · 원문 · 절 목록 · DB 만 저장
+    conn.commit()
+    for repo, nm, body, host in [(A, "instructions", "# 알파 지침\n\n## QA 할 때\nqa 본문\n\n## 배포\n배포 본문 hunter2-pass 포함\n", "h1"), (A, "override", "알파 오버라이드\n", "h2"), (B, "instructions", "베타 지침\n", "h2")]:
+        conn.execute("INSERT INTO project_instructions (repo_url, name, body, rev, updated_host) VALUES (%s,%s,%s,1,%s)", (repo, nm, body, host))
+    conn.commit()
+    ir = cd.instr_rows(conn)
+    check("instr_rows: 모든 저장소의 지침(저장소·이름 순)·rev·수정 머신·길이", [(r["repo"], r["name"]) for r in ir] == [(A, "instructions"), (A, "override"), (B, "instructions")] and ir[0]["rev"] == 1 and ir[0]["host"] == "h1" and ir[2]["length"] == len("베타 지침\n"), str(ir))
+    rev, body = cd.instr_body(conn, A, "instructions")
+    check("instr_body: (rev, 본문) — 치환기를 안 주면 원문", rev == 1 and "hunter2-pass" in body)
+    rev, body = cd.instr_body(conn, A, "instructions", cs.load_masker(conn))
+    check("instr_body: 치환기를 주면 화면용으로 [protected]", "hunter2-pass" not in body and "[protected]" in body and "## QA 할 때" in body, body)
+    check("instr_body: 없는 항목은 None", cd.instr_body(conn, A, "nope") is None and cd.instr_body(conn, "x", "override") is None)
+    check("instr_raw: 편집용은 치환 없이 원문", cd.instr_raw(conn, A, "instructions")[1].count("hunter2-pass") == 1 and cd.instr_raw(conn, A, "nope") is None)
+    check("instr_sections: `## ` 절 제목 목록(### 와 머리말 제외)", cd.instr_sections("# 제목\n\n## QA 할 때\nx\n### 하위\ny\n## 배포\nz\n") == ["QA 할 때", "배포"] and cd.instr_sections("절 없음\n") == [])
+    code, msg = cd.instr_save(conn, A, "override", "알파 오버라이드 v2\n", "h9", 1, masker=cs.load_masker(conn))
+    row = next(r for r in cd.instr_rows(conn) if (r["repo"], r["name"]) == (A, "override"))
+    check("instr_save: DB 에만 쓰고 rev·수정 머신이 바뀐다", code == 0 and row["rev"] == 2 and row["host"] == "h9" and cd.instr_raw(conn, A, "override") == (2, "알파 오버라이드 v2\n"), msg)
+    code, msg = cd.instr_save(conn, A, "override", "낡은 기대값\n", "h9", 1, masker=cs.load_masker(conn))
+    check("instr_save: 낡은 rev 는 거부하고 본문을 바꾸지 않는다(낙관적 잠금)", code == 1 and cd.instr_raw(conn, A, "override") == (2, "알파 오버라이드 v2\n"), msg)
+    code, msg = cd.instr_save(conn, A, "override", "비번은 hunter2-pass\n", "h9", 2, masker=cs.load_masker(conn))
+    check("instr_save: 등록된 비밀이 든 본문은 거부", code == 1 and "비밀" in msg and cd.instr_raw(conn, A, "override")[0] == 2, msg)
+    code, msg = cd.instr_save(conn, A, "override", "  \n", "h9", 2, masker=cs.load_masker(conn))
+    check("instr_save: 빈 본문은 거부", code == 1 and cd.instr_raw(conn, A, "override")[0] == 2, msg)
+    conn.commit()
+
     check("delete_secret", cd.delete_secret(conn, "ANTHROPIC_KEY") == 1 and cd.delete_secret(conn, "ANTHROPIC_KEY") == 0)
     conn.close()
 finally:
