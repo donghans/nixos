@@ -40,7 +40,7 @@ _abab_cleanup() {
     return 0
 }
 
-_abab_rapl_report() { python3 "$(dirname "${ABAB_LIB_PATH:-$0}")/abab_rapl.py" "$_ABAB_REC.rapl" 2>&1 | tee -a "$_ABAB_REC.result"; }
+_abab_rapl_report() { [ -n "$_ABAB_REC" ] && [ -s "$_ABAB_REC.rapl" ] || return 0; python3 "$(dirname "${ABAB_LIB_PATH:-$0}")/abab_rapl.py" "$_ABAB_REC.rapl" 2>&1 | tee -a "$_ABAB_REC.result"; }
 
 _abab_partial() {   # 도중에 끝났을 때: 조건이 유지된 채 끝낸 쌍(A+B)까지만 분석한다. `observectl ab` 는 구간이 4개(2쌍) 이상이어야 하므로 그보다 적으면 기록만 남는다(표본은 수집기에 저장돼 있음).
     [ "$_NPAIR_OK" -ge 2 ] || { echo "중단됨 — 끝낸 쌍이 ${_NPAIR_OK}개라 분석하지 않습니다(2쌍 이상 필요). 표본은 저장돼 있고 구간 기록: $_ABAB_REC"; return 0; }

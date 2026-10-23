@@ -30,7 +30,7 @@ abab_run
 
 def run(cfg=CFG, env_extra=None, wait=True, timeout=20, **kw):
     script = os.path.join(T, "run.sh"); open(script, "w").write(cfg)
-    env = {**os.environ, "ABAB_LID_FILE": LID, "ABAB_AC_FILE": AC, "SEG": "1", "PAIRS": "2", "SETTLE": "0", "ABAB_OUT_DIR": os.path.join(T, "out"), "RAPL_CMD": "true", **(env_extra or {})}
+    env = {**os.environ, "ABAB_LID_FILE": LID, "ABAB_AC_FILE": AC, "SEG": "1", "PAIRS": "2", "SETTLE": "0", "ABAB_OUT_DIR": os.path.join(T, "out"), "RAPL_CMD": "true", "ABAB_LIB_PATH": LIB, **(env_extra or {})}
     p = subprocess.Popen(["sh", script], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kw)
     return p
 
