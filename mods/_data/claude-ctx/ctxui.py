@@ -6,6 +6,7 @@
   3 대조   같은 문구를 저장소별로 묶어 「내가 그렇게 말했나」 교차검증      (사용자 발언 기준)
   4 비밀   등록된 비밀(출력 시 [protected] 로 치환) 관리: 추가·끄기·삭제
   5 후보   키·비밀번호처럼 보이는 문자열 자동 탐지 → 승인(등록)·무시
+  6 통계   기간별 토큰·비용 추이(분류별 포함)와 세션 통계(시간대·요일 분포, 세션 표). 저장소·머신·모델·기간 필터   (Enter: 그 세션 대화)
 
 원문(DB)은 바꾸지 않는다. 화면의 치환(m)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. 사람이 터미널에서 직접 쓰는 도구라 TTY 가 아니면 실행하지 않는다.
 등록한 비밀은 `donghans ctx …` 출력과 `donghans secret run` 출력에서 치환되고, 로컬 트랜스크립트는 `donghans secret scrub` 으로 바꾼다.
@@ -33,7 +34,7 @@ import claude_ctx as cc
 import ctx_secrets as cs
 import ctxdata as cd
 
-TABS = [("overview", "개요"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보")]
+TABS = [("overview", "개요"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("stats", "통계")]
 
 
 def short_repo(url: str | None) -> str:
@@ -44,6 +45,45 @@ def short_repo(url: str | None) -> str:
 
 def fmt_ts(ts) -> str:
     return ts.astimezone().strftime("%m-%d %H:%M") if ts else "-"
+
+
+def fmt_num(n) -> str:
+    """토큰 수 등 큰 수를 K/M/B 로 줄여 쓴다."""
+    n = float(n or 0)
+    for unit, div in (("B", 1e9), ("M", 1e6), ("K", 1e3)):
+        if abs(n) >= div:
+            return f"{n / div:.1f}{unit}"
+    return f"{n:.0f}"
+
+
+def fmt_dur(sec) -> str:
+    sec = float(sec or 0)
+    if sec < 90:
+        return f"{sec:.0f}초"
+    if sec < 5400:
+        return f"{sec / 60:.0f}분"
+    if sec < 86400 * 2:
+        return f"{sec / 3600:.1f}시간"
+    return f"{sec / 86400:.1f}일"
+
+
+def bar(v, vmax, width=20) -> str:
+    """가로 막대(1/8 칸 단위). vmax 가 0 이면 빈 문자열."""
+    if not vmax or v <= 0:
+        return ""
+    eighths = max(1, round(width * 8 * v / vmax))
+    return "█" * (eighths // 8) + (" ▏▎▍▌▋▊▉"[eighths % 8] if eighths % 8 else "")
+
+
+def spark(values) -> str:
+    """한 줄 스파크라인(▁~█)."""
+    m = max(values) if values else 0
+    return "".join(" " if not m or v <= 0 else "▁▂▃▄▅▆▇█"[min(7, int(v / m * 7.999))] for v in values)
+
+
+STAT_PERIODS = [(None, "전체"), (1, "1일"), (7, "7일"), (30, "30일")]
+STAT_ORDERS = [("cost", "비용"), ("last", "최근"), ("prompts", "프롬프트"), ("tools", "도구"), ("duration", "기간")]
+WEEKDAYS = "월화수목금토일"
 
 
 # ---------------------------------------------------------------- 대화상자
@@ -89,42 +129,240 @@ class ConfirmScreen(ModalScreen):
         self.dismiss(False)
 
 
-class SessionScreen(ModalScreen):
-    """한 메시지 앞뒤의 대화. m 으로 치환 켬/끔."""
-    BINDINGS = [Binding("escape,q", "close", "닫기"), Binding("m", "toggle_mask", "치환 켬/끔")]
+MSG_PREVIEW = 700      # 접힌 메시지에 보이는 글자 수(Enter 로 펼치면 전체)
+MSG_MAX = 600          # 한 번에 그리는 메시지 수 상한(도구 호출까지 켜면 수천 개라 느려진다 — a 로 전부 불러옴)
+ROLE_LABEL = {"user": "나", "assistant": "Claude", "system": "시스템"}
 
-    def __init__(self, app_ref, session_id: str, uuid: str | None):
+
+class MsgView(Static):
+    """대화 한 메시지. 선택되면 왼쪽 테두리가 하늘색이 된다."""
+
+
+class SessionScreen(ModalScreen):
+    """한 세션의 대화. ↑↓ 로 메시지 이동 · Enter 펼침 · f 전체 펼침 · t 도구 · s 서브에이전트 · n/N 검색어 이동 · y 복사 · [ ] 이어진 세션 · m 치환 켬/끔."""
+    BINDINGS = [
+        Binding("escape,q", "close", "닫기"),
+        Binding("up,k", "move(-1)", "이전 메시지", show=False), Binding("down,j", "move(1)", "다음 메시지", show=False),
+        Binding("pageup", "move(-8)", "8개 앞", show=False), Binding("pagedown", "move(8)", "8개 뒤", show=False),
+        Binding("home", "jump(0)", "처음", show=False), Binding("end", "jump(-1)", "끝", show=False),
+        Binding("enter,space", "toggle_one", "펼침/접음"), Binding("f", "toggle_all", "전체 펼침/접음"),
+        Binding("t", "toggle_tools", "도구 호출·결과 보기"), Binding("s", "toggle_side", "서브에이전트 보기"),
+        Binding("n", "hit(1)", "다음 검색어"), Binding("N", "hit(-1)", "이전 검색어", show=False),
+        Binding("y", "copy", "복사"), Binding("m", "toggle_mask", "치환 켬/끔"),
+        Binding("left_square_bracket", "link('parents')", "앞 세션", show=False), Binding("right_square_bracket", "link('children')", "뒤 세션", show=False),
+        Binding("a", "load_all", "전부 불러오기", show=False),
+    ]
+
+    def __init__(self, app_ref, session_id: str, uuid: str | None, needle: str = "", regex: bool = False):
         super().__init__()
         self.ctx_app, self.session_id, self.uuid = app_ref, session_id, uuid
+        self.needle, self.regex = needle, regex
+        self.tools = self.side = False
+        self.limit = MSG_MAX
+        self.expanded: set[str] = set()
+        self.all_open = False
+        self.msgs: list[dict] = []
+        self.sel = 0
+        self.info: dict = {}
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(id="stats-box"):
-            yield Static("", id="session-body")
+        with Vertical(id="stats-box"):
+            yield Static("", id="sess-head")
+            yield VerticalScroll(id="msgs")
+            yield Static("", id="sess-state", classes="state")
+            yield Static("↑↓ 이동 · Enter 펼침 · f 전체 펼침 · n/N 검색어 · y 복사 · t 도구 · s 서브에이전트 · [ ] 이어진 세션 · m 치환 · Esc 닫기", id="sess-keys", classes="state")
 
     def on_mount(self):
-        self.render_body()
+        self.load(focus_uuid=self.uuid)
+
+    # --- 불러오기
+    def hit_re(self):
+        if not self.needle:
+            return None
+        import re
+        try:
+            return re.compile(self.needle if self.regex else re.escape(self.needle), re.I)
+        except re.error:
+            return None
+
+    def load(self, focus_uuid=None):
+        kinds = ("prompt", "response") + (("tool_use", "tool_result") if self.tools else ())
+        with cc.connect(readonly=True) as c:
+            masker = self.ctx_app.masker()
+            s, msgs = cd.session_context(c, self.session_id, None, 0, kinds=kinds, masker=masker)
+            stats = cd.session_stats(c, session_id=self.session_id, masker=masker, limit=1)
+            self.info = dict(s=s, stats=stats[0] if stats else None, tools=cd.session_tools(c, self.session_id), links=cd.session_links(c, self.session_id, masker))
+        if focus_uuid and any(m["uuid"] == focus_uuid and m["side"] for m in msgs):
+            self.side = True                      # 서브에이전트 쪽 메시지가 찾은 대상이면 자동으로 보여 준다
+        self.all_msgs = msgs
+        self.rebuild(focus_uuid)
+
+    def visible(self):
+        return [m for m in self.all_msgs if self.side or not m["side"]]
+
+    def rebuild(self, focus_uuid=None):
+        vis = self.visible()
+        idx = next((i for i, m in enumerate(vis) if m["uuid"] == focus_uuid), None)
+        self.hidden_before = 0
+        self.hidden_after = 0
+        if len(vis) > self.limit:
+            center = idx if idx is not None else len(vis) - 1
+            lo = min(max(center - self.limit // 2, 0), len(vis) - self.limit)
+            self.hidden_before, self.hidden_after = lo, len(vis) - lo - self.limit
+            vis = vis[lo: lo + self.limit]
+            idx = None if idx is None else idx - lo
+        self.msgs = vis
+        if focus_uuid and idx is not None:
+            self.expanded.add(focus_uuid)
+        self.sel = idx if idx is not None else 0
+        box = self.query_one("#msgs", VerticalScroll)
+        box.remove_children()
+        self.views = [MsgView(self.render_msg(m), classes="msg") for m in vis]
+        if self.views:
+            box.mount(*self.views)
+        self.render_head()
+        self.select(self.sel, scroll=True)
+
+    # --- 그리기
+    def render_msg(self, m) -> Text:
+        t = Text()
+        tag = {"tool_use": " · 도구 호출", "tool_result": " · 도구 결과"}.get(m["kind"], "")
+        t.append(f"[{fmt_ts(m['ts'])}] {ROLE_LABEL.get(m['role'], m['role'])}{tag}{' (서브에이전트)' if m['side'] else ''}\n",
+                 style="bold #b8a46a" if m["role"] == "user" and m["kind"] == "prompt" else "#7a7a7a")
+        body = (m["text"] or "").strip() or "(빈 내용)"
+        open_ = self.all_open or m["uuid"] in self.expanded
+        limit = MSG_PREVIEW if m["kind"] in ("prompt", "response") else 300
+        if not open_ and len(body) > limit:
+            body = body[:limit].rstrip() + f"\n… (+{len(body) - limit:,}자 더 — Enter: 펼치기)"
+        style = "#ffffff" if m["kind"] == "prompt" else ("#7a7a7a" if m["kind"] in ("tool_use", "tool_result") else "#cfcfcf")
+        t.append(body, style=style)
+        rx = self.hit_re()
+        if rx:
+            t.highlight_regex(rx, style="bold #000000 on #b8a46a")
+        return t
+
+    def render_head(self):
+        s, st, links = self.info["s"], self.info["stats"], self.info["links"]
+        t = Text()
+        if not s:
+            t.append("세션을 찾지 못했다")
+            self.query_one("#sess-head", Static).update(t)
+            return
+        t.append(((st or {}).get("title") or "(제목 없음)")[:110] + "\n", style="bold #33ccff")
+        t.append(f"{s['session_id']}  @{s['host']}  {short_repo(s['repo'])}#{s['branch'] or '-'}  {s['cwd'] or ''}\n", style="#9a9a9a")
+        if st:
+            t.append(f"{fmt_ts(st['first'])} ~ {fmt_ts(st['last'])} ({fmt_dur(st['duration_s'])})  프롬프트 {st['prompts']} · 응답 {st['responses']} · 도구 {st['tools']} · 서브에이전트 메시지 {st['subagent_msgs']}"
+                     f" · 턴시간 {fmt_dur(st['turn_ms'] / 1000)}" + (f" · compact {st['compacts']}회" if st["compacts"] else "") + "\n", style="#9a9a9a")
+            models = ", ".join(m.replace("claude-", "") for m in st["models"]) or "-"
+            t.append(f"비용 {'$%.2f' % st['cost'] if st['cost'] is not None else '-'} · 요청 {st['requests']:,} · 모델 {models}", style="#9a9a9a")
+            if self.info["tools"]:
+                t.append("  ·  도구: " + ", ".join(f"{n} {c}" for n, c in self.info["tools"]), style="#9a9a9a")
+            t.append("\n")
+        for key, mark, label in (("parents", "[", "이전 세션"), ("children", "]", "다음 세션")):
+            ls = links[key]
+            if ls:
+                x = ls[-1] if key == "parents" else ls[0]
+                t.append(f"{mark} {label}: {x['session_id'][:8]} ({fmt_ts(x['first'])}) {x['title'][:60]}" + (f" 외 {len(ls) - 1}개" if len(ls) > 1 else "") + "\n", style="#b8a46a")
+        self.query_one("#sess-head", Static).update(t)
+        self.update_state()
+
+    def update_state(self):
+        n = len(self.msgs)
+        bits = [f"메시지 {self.sel + 1 if n else 0}/{n}" + (f" (앞 {self.hidden_before} · 뒤 {self.hidden_after} 생략 — a: 전부)" if self.hidden_before or self.hidden_after else ""),
+                "도구 " + ("보임" if self.tools else "숨김") + " (t)", "서브에이전트 " + ("보임" if self.side else "숨김") + " (s)",
+                "치환 " + ("켜짐" if self.ctx_app.mask else "꺼짐 — 원문 표시 중") + " (m)"]
+        if self.needle:
+            bits.append(f"검색어 '{self.needle}' (n/N 이동)")
+        self.query_one("#sess-state", Static).update("   ·   ".join(bits))
+
+    # --- 동작
+    def select(self, i, scroll=True):
+        if not self.views:
+            return
+        if self.sel < len(self.views):
+            self.views[self.sel].remove_class("msg-sel")
+        self.sel = max(0, min(i, len(self.views) - 1))
+        v = self.views[self.sel]
+        v.add_class("msg-sel")
+        if scroll:
+            self.call_after_refresh(lambda: v.scroll_visible(animate=False, top=False))
+        self.update_state()
+
+    def refresh_msg(self, i):
+        self.views[i].update(self.render_msg(self.msgs[i]))
 
     def action_close(self):
         self.dismiss()
 
+    def action_move(self, d: int):
+        self.select(self.sel + d)
+
+    def action_jump(self, i: int):
+        self.select(i if i >= 0 else len(self.views) - 1)
+
+    def action_toggle_one(self):
+        if not self.msgs:
+            return
+        u = self.msgs[self.sel]["uuid"]
+        self.expanded.symmetric_difference_update({u})
+        self.refresh_msg(self.sel)
+
+    def action_toggle_all(self):
+        self.all_open = not self.all_open
+        for i in range(len(self.msgs)):
+            self.refresh_msg(i)
+        self.ctx_app.flash("모든 메시지 " + ("펼침" if self.all_open else "접음"))
+
+    def keep_focus(self):
+        return self.msgs[self.sel]["uuid"] if self.msgs else None
+
+    def action_toggle_tools(self):
+        self.tools = not self.tools
+        self.load(focus_uuid=self.keep_focus())
+
+    def action_toggle_side(self):
+        self.side = not self.side
+        self.rebuild(self.keep_focus())
+
+    def action_load_all(self):
+        self.limit = 10 ** 9
+        self.rebuild(self.keep_focus())
+        self.ctx_app.flash("전부 불러왔습니다")
+
+    def action_hit(self, d: int):
+        rx = self.hit_re()
+        if not rx or not self.msgs:
+            return
+        idx = [i for i, m in enumerate(self.msgs) if rx.search(m["text"] or "")]
+        if not idx:
+            self.ctx_app.flash("이 화면에 검색어가 있는 메시지가 없습니다", "warning"); return
+        after = [i for i in idx if (i > self.sel if d > 0 else i < self.sel)]
+        target = (after[0] if d > 0 else after[-1]) if after else (idx[0] if d > 0 else idx[-1])
+        m = self.msgs[target]
+        limit = MSG_PREVIEW if m["kind"] in ("prompt", "response") else 300
+        if rx.search(m["text"] or "").start() > limit and m["uuid"] not in self.expanded:
+            self.expanded.add(m["uuid"])             # 검색어가 접힌 부분에 있으면 펼쳐서 보여 준다
+            self.refresh_msg(target)
+        self.select(target)
+
+    def action_copy(self):
+        if self.msgs:
+            text = self.msgs[self.sel]["text"] or ""
+            self.ctx_app.copy_to_clipboard(text)
+            self.ctx_app.flash(f"복사했습니다 ({len(text):,}자" + ("" if self.ctx_app.mask else ", 원문") + ")")
+
     def action_toggle_mask(self):
         self.ctx_app.action_toggle_mask()
-        self.render_body()
+        self.load(focus_uuid=self.keep_focus())
 
-    def render_body(self):
-        with cc.connect(readonly=True) as c:
-            s, msgs = cd.session_context(c, self.session_id, self.uuid, 12, masker=self.ctx_app.masker())
-        t = Text()
-        if not s:
-            t.append("세션을 찾지 못했다")
-        else:
-            t.append(f"{s['session_id']}  @{s['host']}  {short_repo(s['repo'])}#{s['branch'] or '-'}\n", style="bold #33ccff")
-            t.append(f"{s['cwd'] or ''}   {fmt_ts(s['first'])} ~ {fmt_ts(s['last'])}   치환 {'켜짐' if self.ctx_app.mask else '꺼짐(원문 표시 중)'}\n\n", style="#9a9a9a")
-            for m in msgs:
-                hit = m["uuid"] == self.uuid
-                t.append(f"{'▶ ' if hit else '  '}[{fmt_ts(m['ts'])}] {m['role']}{'(sub)' if m['side'] else ''}\n", style="bold #b8a46a" if hit else "#7a7a7a")
-                t.append((m["text"].strip()[:1800] or "(빈 내용)") + "\n\n", style="#ffffff" if hit else "#cfcfcf")
-        self.query_one("#session-body", Static).update(t)
+    def action_link(self, key: str):
+        ls = self.info["links"][key]
+        if not ls:
+            self.ctx_app.flash("이어진 세션이 없습니다", "warning"); return
+        self.session_id = (ls[-1] if key == "parents" else ls[0])["session_id"]
+        self.expanded.clear()
+        self.limit = MSG_MAX
+        self.load()
 
 
 # ---------------------------------------------------------------- 앱
@@ -143,14 +381,27 @@ class CtxUI(uikit.HelpMixin, App):
     #verify-tables { height: 1fr; }
     #verify-tables DataTable { width: 1fr; }
     #sdetail, #cdetail { height: auto; max-height: 4; padding: 0 1; color: #b8a46a; }
+    #stat-grid { height: 1fr; }
+    #stat-grid > Horizontal { height: 1fr; }
+    #stats-box { layout: vertical; padding: 0 1; }
+    #sess-head { height: auto; max-height: 9; padding: 0 1; }
+    #msgs { height: 1fr; }
+    .msg { height: auto; padding: 0 1; margin-bottom: 1; border-left: tall #3a3a3a; }
+    .msg-sel { border-left: tall #33ccff; background: #101010; }
+    #sess-state, #sess-keys { height: auto; }
+    #stat-summary { padding: 0 1; }
+    #stat-trend, #stat-sessions { width: 3fr; }
+    #stat-break, #stat-summary-box { width: 2fr; }
     """
     BINDINGS = [
         Binding("q", "quit", "종료"),
         Binding("1", "tab('overview')", "개요"), Binding("2", "tab('search')", "검색"), Binding("3", "tab('verify')", "대조"),
-        Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"),
+        Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"), Binding("6", "tab('stats')", "통계"),
+        Binding("p", "stat_period", "기간", show=False), Binding("b", "stat_bucket", "단위", show=False), Binding("g", "stat_by", "분류", show=False),
+        Binding("o", "stat_order", "정렬", show=False), Binding("c", "stat_clear", "필터 지움", show=False),
         Binding("escape", "focus_table", "목록으로", show=False),
         Binding("m", "toggle_mask", "치환 켬/끔"), Binding("r,f5", "reload", "새로고침"),
-        Binding("f2", "toggle_role", "역할(사용자만)", show=False), Binding("f3", "toggle_regex", "정규식", show=False),
+        Binding("f2", "toggle_role", "역할(사용자만)", show=False), Binding("f3", "toggle_regex", "정규식", show=False), Binding("f4", "toggle_tools", "도구 메시지 포함", show=False),
         Binding("a", "secret_add", "비밀 추가", show=False), Binding("d", "secret_delete", "삭제", show=False), Binding("e", "secret_toggle", "켬/끔", show=False),
         Binding("v", "reveal", "값 보기", show=False), Binding("i", "cand_ignore", "무시", show=False),
         *uikit.HelpMixin.HELP_BINDINGS,
@@ -161,9 +412,12 @@ class CtxUI(uikit.HelpMixin, App):
         self.mask = True
         self.only_user = False
         self.regex = False
+        self.with_tools = False
         self.cand_rows: dict[str, dict] = {}
         self.sec_rows: dict[str, dict] = {}
         self._reveal = False
+        self.stat_period, self.stat_bucket, self.stat_by, self.stat_order = 3, "day", "model", "cost"   # 기본: 30일 · 일 단위 · 모델별 · 비용순
+        self._stat_loaded = False
 
     # --- 구성
     def compose(self) -> ComposeResult:
@@ -189,15 +443,31 @@ class CtxUI(uikit.HelpMixin, App):
             with TabPane("5 후보", id="cands"):
                 yield uikit.box(DataTable(id="cands-table", cursor_type="row"), "자동 탐지 후보 — Enter 승인(등록) · i 무시 · v 값 보기 · r 다시 탐지")
                 yield Static("", id="cdetail")
+            with TabPane("6 통계", id="stats"):
+                with Horizontal(classes="filters"):
+                    yield uikit.box(Input(placeholder="저장소 일부", id="f-repo"), "저장소")
+                    yield uikit.box(Input(placeholder="머신 일부", id="f-host"), "머신")
+                    yield uikit.box(Input(placeholder="모델 일부 (예: sonnet)", id="f-model"), "모델")
+                yield Static("", id="stat-state", classes="state")
+                with Vertical(id="stat-grid"):
+                    with Horizontal():
+                        yield uikit.box(DataTable(id="stat-trend", cursor_type="row"), "토큰·비용 추이")
+                        yield uikit.box(DataTable(id="stat-break", cursor_type="row"), "분류별")
+                    with Horizontal():
+                        yield uikit.box(VerticalScroll(Static("", id="stat-summary"), id="stat-summary-box"), "세션 통계")
+                        yield uikit.box(DataTable(id="stat-sessions", cursor_type="row"), "세션 — Enter: 대화 보기")
         yield Footer()
 
     def on_mount(self):
         self.query_one("#projects", DataTable).add_columns("저장소", "세션", "메시지", "프롬프트", "텍스트", "저장 용량", "마지막", "머신")
-        self.query_one("#results", DataTable).add_columns("시각", "역할", "저장소", "세션", "내용")
+        self.query_one("#results", DataTable).add_columns("시각", "역할", "저장소", "세션", "제목", "내용")
         self.query_one("#vrepos", DataTable).add_columns("저장소", "건수", "세션", "최근", "대표 인용")
         self.query_one("#vhits", DataTable).add_columns("시각", "세션", "내용")
         self.query_one("#secrets-table", DataTable).add_columns("이름", "종류", "상태", "길이", "fp", "원문 포함 메시지")
         self.query_one("#cands-table", DataTable).add_columns("fp", "종류", "미리보기", "횟수", "세션", "저장소", "최근")
+        self.query_one("#stat-trend", DataTable).add_columns("구간", "요청", "비용", "", "입력", "출력", "캐시읽기")
+        self.query_one("#stat-break", DataTable).add_columns("분류", "요청", "비용", "비중", "출력")
+        self.query_one("#stat-sessions", DataTable).add_columns("최근", "머신", "저장소", "프롬프트", "도구", "턴시간", "비용", "모델", "첫 프롬프트")
         self.update_state()
         self.reload_overview()
 
@@ -232,6 +502,8 @@ class CtxUI(uikit.HelpMixin, App):
             self.scan_candidates()
         elif name == "overview":
             self.reload_overview()
+        elif name == "stats" and not self._stat_loaded:
+            self.reload_stats()
 
     def action_focus_table(self):
         ids = {"overview": "#projects", "search": "#results", "verify": "#vrepos", "secrets": "#secrets-table", "cands": "#cands-table"}
@@ -248,11 +520,11 @@ class CtxUI(uikit.HelpMixin, App):
 
     def action_reload(self):
         t = self.current_tab()
-        {"overview": self.reload_overview, "search": self.run_search, "verify": self.run_verify, "secrets": self.reload_secrets, "cands": self.scan_candidates}[t]()
+        {"overview": self.reload_overview, "search": self.run_search, "verify": self.run_verify, "secrets": self.reload_secrets, "cands": self.scan_candidates, "stats": self.reload_stats}[t]()
 
     def update_state(self):
         self.query_one("#sstate", Static).update(
-            f"역할: {'사용자만' if self.only_user else '전체'} (F2)   ·   정규식: {'켜짐' if self.regex else '꺼짐'} (F3)   ·   치환: {'켜짐' if self.mask else '꺼짐'} (m)")
+            f"역할: {'사용자만' if self.only_user else '전체'} (F2)   ·   정규식: {'켜짐' if self.regex else '꺼짐'} (F3)   ·   도구 메시지: {'포함' if self.with_tools else '제외'} (F4)   ·   치환: {'켜짐' if self.mask else '꺼짐'} (m)")
 
     def action_toggle_role(self):
         self.only_user = not self.only_user
@@ -260,6 +532,10 @@ class CtxUI(uikit.HelpMixin, App):
 
     def action_toggle_regex(self):
         self.regex = not self.regex
+        self.update_state()
+
+    def action_toggle_tools(self):
+        self.with_tools = not self.with_tools
         self.update_state()
 
     # --- 개요
@@ -290,11 +566,14 @@ class CtxUI(uikit.HelpMixin, App):
         elif tid in ("results", "vhits"):
             sid, _, uid = (key or "").partition("|")
             if sid:
-                self.push_screen(SessionScreen(self, sid, uid or None))
+                q = self.query_one("#q" if tid == "results" else "#phrase", Input).value.strip()
+                self.push_screen(SessionScreen(self, sid, uid or None, q, self.regex))
         elif tid == "vrepos":
             self.query_one("#vhits", DataTable).focus()
         elif tid == "cands-table":
             self.adopt_selected()
+        elif tid == "stat-sessions" and key:
+            self.push_screen(SessionScreen(self, key, None))
 
     # --- 검색
     def on_input_submitted(self, ev: Input.Submitted):
@@ -302,6 +581,20 @@ class CtxUI(uikit.HelpMixin, App):
             self.run_search()
         elif ev.input.id == "phrase":
             self.run_verify()
+        elif ev.input.id in ("f-repo", "f-host", "f-model"):
+            self.reload_stats()
+            self.query_one("#stat-trend").focus()
+
+    def highlight(self, text: str, query: str) -> Text:
+        """표 칸 안에서 검색어(정규식이면 그 패턴)를 강조한다. 잘못된 정규식은 강조 없이 그대로."""
+        t = Text(text)
+        if query:
+            import re
+            try:
+                t.highlight_regex(re.compile(query if self.regex else re.escape(query), re.I), style="bold #000000 on #b8a46a")
+            except re.error:
+                pass
+        return t
 
     def run_search(self):
         q = self.query_one("#q", Input).value.strip()
@@ -311,12 +604,14 @@ class CtxUI(uikit.HelpMixin, App):
         tb = self.query_one("#results", DataTable)
         try:
             with cc.connect(readonly=True) as c:
-                rows = cd.search(c, q, regex=self.regex, repo=repo, role="user" if self.only_user else None, days=days, limit=300, masker=self.masker())
+                rows = cd.search(c, q, regex=self.regex, repo=repo, role="user" if self.only_user else None, days=days, limit=300, masker=self.masker(),
+                                 kinds=("prompt", "response", "tool_use", "tool_result") if self.with_tools else ("prompt", "response"))
         except ValueError as e:
             self.flash(str(e), "error"); return   # 잘못된 입력이면 이전 결과를 지우지 않는다
         tb.clear()
         for r in rows:
-            tb.add_row(fmt_ts(r["ts"]), r["role"], short_repo(r["repo"]), r["session_id"][:8], r["snippet"][:160], key=f"{r['session_id']}|{r['uuid']}")
+            tb.add_row(fmt_ts(r["ts"]), r["role"] if r["kind"] in ("prompt", "response") else r["kind"], short_repo(r["repo"]), r["session_id"][:8], (r["title"] or "")[:24],
+                       self.highlight(r["snippet"][:160], q), key=f"{r['session_id']}|{r['uuid']}")
         self.query_one("#results").border_title = f"결과 {len(rows)}건" + (" (최대 300)" if len(rows) >= 300 else "") + " — Enter: 앞뒤 대화"
         if rows:
             tb.focus()
@@ -353,6 +648,109 @@ class CtxUI(uikit.HelpMixin, App):
         elif ev.data_table.id in ("secrets-table", "cands-table"):
             self._reveal = False
             self.query_one("#sdetail" if ev.data_table.id == "secrets-table" else "#cdetail", Static).update("")
+
+    # --- 통계
+    def stat_filters(self) -> dict:
+        q = lambda i: self.query_one(i, Input).value.strip() or None
+        return dict(days=STAT_PERIODS[self.stat_period][0], repo=q("#f-repo"), host=q("#f-host"), model=q("#f-model"))
+
+    def update_stat_state(self, cov=None):
+        f = self.stat_filters()
+        txt = (f"기간: {STAT_PERIODS[self.stat_period][1]} (p)   ·   단위: {cd.BUCKETS[self.stat_bucket]} (b)   ·   분류: {cd.BREAKDOWNS[self.stat_by]} (g)   ·   "
+               f"세션 정렬: {dict(STAT_ORDERS)[self.stat_order]} (o)   ·   필터 지움 (c)")
+        if cov and cov.get("usage_first"):
+            txt += f"   ·   비용은 {cov['usage_first'].astimezone():%m-%d} 이후만 수집됨"
+        self.query_one("#stat-state", Static).update(txt)
+        return f
+
+    @work(thread=True, exclusive=True, group="stats")
+    def reload_stats(self):
+        f = self.stat_filters()
+        try:
+            with cc.connect(readonly=True) as c:
+                cov = cd.coverage(c)
+                trend = cd.usage_trend(c, bucket=self.stat_bucket, **f)
+                brk, tot = cd.usage_breakdown(c, self.stat_by, **f)
+                summ = cd.session_summary(c, **f)
+                sess = cd.session_stats(c, order=self.stat_order, limit=300, masker=self.masker(), **f)
+        except Exception as e:
+            self.call_from_thread(self.flash, f"통계 조회 실패: {e}", "error"); return
+        self.call_from_thread(self.show_stats, cov, trend, brk, tot, summ, sess)
+
+    def show_stats(self, cov, trend, brk, tot, summ, sess):
+        self._stat_loaded = True
+        self.update_stat_state(cov)
+        fmt_b = lambda b: {"hour": b.strftime("%m-%d %H시"), "day": f"{b:%m-%d} ({WEEKDAYS[b.weekday()]})", "week": b.strftime("%m-%d 주"), "month": b.strftime("%Y-%m")}[self.stat_bucket]
+        tt = self.query_one("#stat-trend", DataTable)
+        tt.clear()
+        cmax = max((r["cost"] for r in trend), default=0)
+        for r in reversed(trend):    # 최근이 위
+            tt.add_row(fmt_b(r["bucket"]), f"{r['requests']:,}", f"${r['cost']:,.2f}", Text(bar(r["cost"], cmax, 18), style="#33ccff"),
+                       fmt_num(r["input"] + r["cache_create"]), fmt_num(r["output"]), fmt_num(r["cache_read"]))
+        self.query_one("#stat-trend").border_title = f"토큰·비용 추이 — {cd.BUCKETS[self.stat_bucket]} 단위 · 합계 ${tot['cost']:,.2f} · 요청 {tot['requests']:,} · 출력 {fmt_num(tot['output'])}"
+        tb = self.query_one("#stat-break", DataTable)
+        tb.clear()
+        for r in brk:
+            share = r["cost"] / tot["cost"] if tot["cost"] else 0
+            tb.add_row(short_repo(r["key"]) if self.stat_by == "repo" else r["key"], f"{r['requests']:,}", f"${r['cost']:,.2f}", f"{share:6.1%}", fmt_num(r["output"]))
+        self.query_one("#stat-break").border_title = f"{cd.BREAKDOWNS[self.stat_by]}별 — {len(brk)}개 (g: 분류 바꾸기)"
+        t = Text()
+        t.append(f"세션 {summ['sessions']:,}개 · 프롬프트 {int(summ['prompts']):,} · 도구 호출 {int(summ['tools']):,} · 비용 ${summ['cost']:,.2f}\n", style="bold")
+        n = max(summ["sessions"], 1)
+        t.append(f"세션당  프롬프트 {summ['prompts'] / n:.1f} (중앙값 {summ['median_prompts']:.0f}) · 비용 ${summ['cost'] / n:.2f}\n", style="#cfcfcf")
+        t.append(f"세션 길이  중앙값 {fmt_dur(summ['median_duration_s'])} · 평균 {fmt_dur(summ['avg_duration_s'])}", style="#cfcfcf")
+        t.append("   (resume 으로 이어진 세션이 평균을 끌어올림)\n\n", style="#7a7a7a")
+        t.append("시간대별 프롬프트(0~23시)\n", style="#9a9a9a")
+        t.append(spark(summ["by_hour"]) + "\n", style="#33ccff")
+        axis = [" "] * 24
+        for h in (0, 6, 12, 18):
+            axis[h:h + len(str(h))] = str(h)
+        axis[22:24] = "23"
+        t.append("".join(axis) + "\n", style="#7a7a7a")
+        top = sorted(range(24), key=lambda h: -summ["by_hour"][h])[:3]
+        t.append("가장 많은 시간: " + ", ".join(f"{h}시({summ['by_hour'][h]})" for h in top if summ["by_hour"][h]) + "\n\n", style="#cfcfcf")
+        t.append("요일별 프롬프트\n", style="#9a9a9a")
+        wmax = max(summ["by_weekday"])
+        for i, v in enumerate(summ["by_weekday"]):
+            t.append(f"{WEEKDAYS[i]} {v:>5,} ", style="#cfcfcf")
+            t.append(bar(v, wmax, 24) + "\n", style="#33ccff")
+        self.query_one("#stat-summary", Static).update(t)
+        ts = self.query_one("#stat-sessions", DataTable)
+        ts.clear()
+        for r in sess:
+            models = ",".join(sorted({m.split("-")[1] if m.startswith("claude-") and "-" in m[7:] else m for m in r["models"]}))   # claude-sonnet-5-5 → sonnet
+            ts.add_row(fmt_ts(r["last"]), r["host"], short_repo(r["repo"]), r["prompts"], r["tools"], fmt_dur(r["turn_ms"] / 1000),
+                       f"${r['cost']:,.2f}" if r["cost"] is not None else "-", models[:20], (r["title"] or "")[:60], key=r["session_id"])
+        self.query_one("#stat-sessions").border_title = f"세션 {len(sess)}개{' (최대 300)' if len(sess) >= 300 else ''} — {dict(STAT_ORDERS)[self.stat_order]}순 (o) · Enter: 대화 보기"
+
+    def action_stat_period(self):
+        if self.current_tab() == "stats" and len(self.screen_stack) == 1:
+            self.stat_period = (self.stat_period + 1) % len(STAT_PERIODS)
+            self.reload_stats()
+
+    def action_stat_bucket(self):
+        if self.current_tab() == "stats" and len(self.screen_stack) == 1:
+            keys = list(cd.BUCKETS)
+            self.stat_bucket = keys[(keys.index(self.stat_bucket) + 1) % len(keys)]
+            self.reload_stats()
+
+    def action_stat_by(self):
+        if self.current_tab() == "stats" and len(self.screen_stack) == 1:
+            keys = list(cd.BREAKDOWNS)
+            self.stat_by = keys[(keys.index(self.stat_by) + 1) % len(keys)]
+            self.reload_stats()
+
+    def action_stat_order(self):
+        if self.current_tab() == "stats" and len(self.screen_stack) == 1:
+            keys = [k for k, _ in STAT_ORDERS]
+            self.stat_order = keys[(keys.index(self.stat_order) + 1) % len(keys)]
+            self.reload_stats()
+
+    def action_stat_clear(self):
+        if self.current_tab() == "stats" and len(self.screen_stack) == 1:
+            for i in ("#f-repo", "#f-host", "#f-model"):
+                self.query_one(i, Input).value = ""
+            self.reload_stats()
 
     # --- 비밀 등록표
     def reload_secrets(self):

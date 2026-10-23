@@ -43,6 +43,185 @@ def overview(conn):
     )
 
 
+# ---------------------------------------------------------------- 통계
+# 합계가 필요한 토큰·비용은 요청 단위인 usage_events 로만 센다(messages 의 usage 는 resume/fork 로 이중 계산되므로 쓰지 않는다 — schema.sql 참고).
+# 한계: usage_events 는 OTel 수집을 켠 시점부터만 있다(coverage() 로 시작 시각을 화면에 보인다).
+BUCKETS = {"hour": "시간", "day": "일", "week": "주", "month": "월"}
+BREAKDOWNS = {"model": "모델", "repo": "저장소", "host": "머신", "source": "출처", "effort": "effort"}
+_BREAK_SQL = {"model": "coalesce(u.model, '(모름)')", "repo": "coalesce(s.repo_url, '(저장소 없음)')", "host": "u.host",
+              "source": "coalesce(u.query_source, '(모름)')", "effort": "coalesce(u.effort, '(모름)')"}
+
+
+def local_tz() -> str:
+    """로컬 시간대 이름(IANA). 못 구하면 UTC — 일·시간 묶음이 사용자의 하루 경계와 맞도록 DB 쪽에서 이 값으로 자른다."""
+    import os
+    p = os.path.realpath("/etc/localtime")
+    return p.split("/zoneinfo/", 1)[1] if "/zoneinfo/" in p else "UTC"
+
+
+def _usage_where(days, repo, host, model):
+    where, args = [], []
+    if days:
+        where.append("u.ts > now() - make_interval(days => %s)"); args.append(days)
+    if repo:
+        where.append("s.repo_url ILIKE %s"); args.append(_like(repo))
+    if host:
+        where.append("u.host ILIKE %s"); args.append(_like(host))
+    if model:
+        where.append("u.model ILIKE %s"); args.append(_like(model))
+    return (" WHERE " + " AND ".join(where)) if where else "", args
+
+
+_USAGE_COLS = """count(*) AS requests, coalesce(sum(u.cost_usd), 0) AS cost, coalesce(sum(u.input_tokens), 0) AS input,
+                 coalesce(sum(u.output_tokens), 0) AS output, coalesce(sum(u.cache_read_tokens), 0) AS cache_read,
+                 coalesce(sum(u.cache_create_tokens), 0) AS cache_create"""
+_USAGE_KEYS = ("requests", "cost", "input", "output", "cache_read", "cache_create")
+
+
+def coverage(conn):
+    """(usage_events 첫·마지막 시각, 세션 첫 시각) — 비용 통계가 어디부터 있는지 화면에 알린다."""
+    u = conn.execute("SELECT min(ts), max(ts) FROM usage_events").fetchone()
+    s = conn.execute("SELECT min(first_ts) FROM sessions").fetchone()
+    return dict(usage_first=u[0], usage_last=u[1], sessions_first=s[0])
+
+
+def usage_trend(conn, *, days=None, bucket="day", repo=None, host=None, model=None, tz=None):
+    """기간별 토큰·비용 추이(오래된 것부터). bucket: hour|day|week|month. 필터는 부분 일치, days=None 이면 전체 기간."""
+    if bucket not in BUCKETS:
+        raise ValueError(f"bucket 은 {'|'.join(BUCKETS)} 중 하나")
+    where, args = _usage_where(days, repo, host, model)
+    where += (" AND " if where else " WHERE ") + "u.ts IS NOT NULL"
+    sql = f"""SELECT date_trunc('{bucket}', u.ts AT TIME ZONE %s) AS b, {_USAGE_COLS}
+              FROM usage_events u LEFT JOIN sessions s USING (session_id){where} GROUP BY 1 ORDER BY 1"""
+    return [dict(bucket=r[0], **dict(zip(_USAGE_KEYS, r[1:]))) for r in conn.execute(sql, [tz or local_tz(), *args]).fetchall()]
+
+
+def usage_breakdown(conn, by="model", *, days=None, repo=None, host=None, model=None):
+    """분류(모델·저장소·머신·출처·effort)별 합계(비용 큰 순)와 전체 합계. 반환: (행 목록, 합계 dict)."""
+    if by not in _BREAK_SQL:
+        raise ValueError(f"by 는 {'|'.join(_BREAK_SQL)} 중 하나")
+    where, args = _usage_where(days, repo, host, model)
+    rows = conn.execute(f"""SELECT {_BREAK_SQL[by]} AS k, {_USAGE_COLS} FROM usage_events u LEFT JOIN sessions s USING (session_id){where}
+                            GROUP BY 1 ORDER BY 3 DESC, 2 DESC""", args).fetchall()
+    out = [dict(key=r[0], **dict(zip(_USAGE_KEYS, r[1:]))) for r in rows]
+    tot = {k: sum(r[k] for r in out) for k in _USAGE_KEYS}
+    return out, tot
+
+
+def _session_filters(days, repo, host, model, session_id=None):
+    """세션 통계 공통 필터. days 는 「그 기간에 활동(메시지·요청)이 있는 세션」, model 은 그 모델 요청이 있는 세션."""
+    where, args = [], []
+    if session_id:
+        where.append("s.session_id = %s"); args.append(session_id)
+    if repo:
+        where.append("s.repo_url ILIKE %s"); args.append(_like(repo))
+    if host:
+        where.append("(s.host ILIKE %s OR EXISTS (SELECT 1 FROM unnest(s.hosts) h WHERE h ILIKE %s))"); args += [_like(host)] * 2
+    if model:
+        where.append("EXISTS (SELECT 1 FROM usage_events x WHERE x.session_id = s.session_id AND x.model ILIKE %s)"); args.append(_like(model))
+    if days:
+        where.append("s.last_ts > now() - make_interval(days => %s)"); args.append(days)
+    return (" WHERE " + " AND ".join(where)) if where else "", args
+
+
+def session_stats(conn, *, days=None, repo=None, host=None, model=None, session_id=None, order="cost", limit=300, masker=cs.IDENTITY):
+    """세션별 통계 표. order: cost|last|prompts|tools|duration. title 은 그 세션 첫 사용자 프롬프트(앞부분).
+    prompts/tools 는 서브에이전트(sidechain) 제외, subagent_msgs 는 서브에이전트 쪽 메시지 수, turn_ms 는 턴 소요 시간 합(turn_duration)."""
+    orders = {"cost": "cost DESC NULLS LAST", "last": "s.last_ts DESC NULLS LAST", "prompts": "prompts DESC", "tools": "tools DESC", "duration": "duration_s DESC NULLS LAST"}
+    if order not in orders:
+        raise ValueError(f"order 는 {'|'.join(orders)} 중 하나")
+    where, args = _session_filters(days, repo, host, model, session_id)
+    sql = f"""
+      WITH m AS (
+        SELECT session_id,
+               count(*) FILTER (WHERE kind = 'prompt' AND NOT is_sidechain) AS prompts,
+               count(*) FILTER (WHERE kind = 'response' AND NOT is_sidechain) AS responses,
+               count(*) FILTER (WHERE kind = 'tool_use' AND NOT is_sidechain) AS tools,
+               count(*) FILTER (WHERE is_sidechain) AS subagent_msgs,
+               coalesce(sum((raw->>'durationMs')::bigint) FILTER (WHERE raw->>'subtype' = 'turn_duration' AND NOT is_sidechain), 0) AS turn_ms,
+               count(*) FILTER (WHERE raw->>'subtype' = 'compact_boundary') AS compacts
+        FROM messages GROUP BY session_id),
+      u AS (
+        SELECT session_id, count(*) AS requests, sum(cost_usd) AS cost, sum(input_tokens + cache_read_tokens + cache_create_tokens) AS input,
+               sum(output_tokens) AS output, array_agg(DISTINCT model) FILTER (WHERE model IS NOT NULL) AS models
+        FROM usage_events GROUP BY session_id),
+      t AS (
+        SELECT DISTINCT ON (session_id) session_id, text FROM messages WHERE kind = 'prompt' AND NOT is_sidechain AND coalesce(text, '') <> ''
+        ORDER BY session_id, ts)
+      SELECT s.session_id, s.repo_url, s.host, s.branch, s.cwd, s.first_ts, s.last_ts, extract(epoch FROM s.last_ts - s.first_ts) AS duration_s,
+             coalesce(m.prompts, 0) AS prompts, coalesce(m.responses, 0), coalesce(m.tools, 0) AS tools, coalesce(m.subagent_msgs, 0), coalesce(m.turn_ms, 0), coalesce(m.compacts, 0),
+             coalesce(u.requests, 0), u.cost, coalesce(u.input, 0), coalesce(u.output, 0), coalesce(u.models, '{{}}'), left(t.text, 200)
+      FROM sessions s LEFT JOIN m USING (session_id) LEFT JOIN u USING (session_id) LEFT JOIN t USING (session_id){where}
+      ORDER BY {orders[order]} LIMIT %s"""
+    keys = ("session_id", "repo", "host", "branch", "cwd", "first", "last", "duration_s", "prompts", "responses", "tools", "subagent_msgs",
+            "turn_ms", "compacts", "requests", "cost", "input", "output", "models", "title")
+    out = []
+    for r in conn.execute(sql, [*args, limit]).fetchall():
+        d = dict(zip(keys, r))
+        d["title"] = masker.text((d["title"] or "").replace("\n", " ").strip())
+        out.append(d)
+    return out
+
+
+def session_summary(conn, *, days=None, repo=None, host=None, model=None, tz=None):
+    """세션 통계 요약: 개수·세션당 평균·중앙값, 시간대별(0~23시)·요일별(월~일) 사용자 프롬프트 수. 필터는 session_stats 와 같다."""
+    where, args = _session_filters(days, repo, host, model)
+    tz = tz or local_tz()
+    row = conn.execute(f"""
+      WITH base AS (SELECT s.session_id, s.first_ts, s.last_ts FROM sessions s{where}),
+           m AS (SELECT session_id, count(*) FILTER (WHERE kind = 'prompt' AND NOT is_sidechain) AS prompts,
+                        count(*) FILTER (WHERE kind = 'tool_use' AND NOT is_sidechain) AS tools FROM messages WHERE session_id IN (SELECT session_id FROM base) GROUP BY 1),
+           u AS (SELECT session_id, sum(cost_usd) AS cost FROM usage_events WHERE session_id IN (SELECT session_id FROM base) GROUP BY 1)
+      SELECT count(*), coalesce(sum(m.prompts), 0), coalesce(sum(m.tools), 0), coalesce(sum(u.cost), 0),
+             coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM b.last_ts - b.first_ts)), 0),
+             coalesce(avg(extract(epoch FROM b.last_ts - b.first_ts)), 0), coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY m.prompts), 0)
+      FROM base b LEFT JOIN m USING (session_id) LEFT JOIN u USING (session_id)""", args).fetchone()
+    mwhere = ["m.kind = 'prompt'", "NOT m.is_sidechain", "m.ts IS NOT NULL", "m.session_id IN (SELECT session_id FROM sessions s" + where + ")"]
+    margs = list(args)
+    if days:
+        mwhere.append("m.ts > now() - make_interval(days => %s)"); margs.append(days)
+    hours, wdays = [0] * 24, [0] * 7
+    for h, wd, n in conn.execute(f"""SELECT extract(hour FROM m.ts AT TIME ZONE %s)::int, extract(isodow FROM m.ts AT TIME ZONE %s)::int, count(*)
+                                     FROM messages m WHERE {' AND '.join(mwhere)} GROUP BY 1, 2""", [tz, tz, *margs]).fetchall():
+        hours[h] += n
+        wdays[wd - 1] += n
+    return dict(sessions=row[0], prompts=row[1], tools=row[2], cost=float(row[3]), median_duration_s=float(row[4]), avg_duration_s=float(row[5]),
+                median_prompts=float(row[6]), by_hour=hours, by_weekday=wdays)
+
+
+def session_tools(conn, session_id, top=6):
+    """그 세션에서 많이 쓴 도구 [(이름, 횟수)] — tool_use 텍스트 앞머리 `[tool_use 이름]` 에서 읽는다(서브에이전트 제외)."""
+    rows = conn.execute("""SELECT substring(text FROM '^\\[tool_use (\\S+)\\]') AS tool, count(*) FROM messages
+                           WHERE session_id = %s AND kind = 'tool_use' AND NOT is_sidechain GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT %s""", (session_id, top)).fetchall()
+    return [(r[0] or "(모름)", r[1]) for r in rows]
+
+
+def session_links(conn, session_id, masker=cs.IDENTITY):
+    """resume/fork 로 이어진 세션. 새 트랜스크립트는 옛 메시지를 같은 uuid 로 복사하므로, 이 세션 메시지의 parent_uuid 가 다른 세션의 메시지를 가리키면 그 세션이 앞(parents),
+    다른 세션 메시지의 parent_uuid 가 이 세션을 가리키면 뒤(children)다. 각 항목: session_id·first·last·title(첫 프롬프트), 오래된 순."""
+    def titled(rows):
+        out = []
+        for sid, first, last in rows:
+            t = conn.execute("""SELECT left(text, 120) FROM messages WHERE session_id = %s AND kind = 'prompt' AND NOT is_sidechain AND coalesce(text, '') <> ''
+                                ORDER BY ts LIMIT 1""", (sid,)).fetchone()
+            out.append(dict(session_id=sid, first=first, last=last, title=masker.text(((t[0] if t else "") or "").replace("\n", " ").strip())))
+        return out
+    parents = conn.execute("""SELECT s.session_id, s.first_ts, s.last_ts FROM sessions s WHERE s.session_id IN
+                                (SELECT DISTINCT p.session_id FROM messages m JOIN messages p ON p.uuid = m.parent_uuid WHERE m.session_id = %s AND p.session_id <> %s)
+                              ORDER BY s.first_ts""", (session_id, session_id)).fetchall()
+    children = conn.execute("""SELECT s.session_id, s.first_ts, s.last_ts FROM sessions s WHERE s.session_id IN
+                                 (SELECT DISTINCT m.session_id FROM messages m JOIN messages p ON p.uuid = m.parent_uuid WHERE p.session_id = %s AND m.session_id <> %s)
+                               ORDER BY s.first_ts""", (session_id, session_id)).fetchall()
+    return dict(parents=titled(parents), children=titled(children))
+
+
+def filter_choices(conn):
+    """필터 입력 힌트용: 머신·모델 목록."""
+    hosts = [r[0] for r in conn.execute("SELECT DISTINCT host FROM sessions ORDER BY 1").fetchall()]
+    models = [r[0] for r in conn.execute("SELECT DISTINCT model FROM usage_events WHERE model IS NOT NULL ORDER BY 1").fetchall()]
+    return dict(hosts=hosts, models=models)
+
+
 # ---------------------------------------------------------------- 검색 · 대조
 def snippet(text: str, query: str, regex=False, width=240) -> str:
     if not text:
@@ -83,7 +262,20 @@ def search(conn, query="", *, regex=False, repo=None, role=None, kinds=("prompt"
     for ts, sid, uid, rl, kd, rurl, host, br, text in conn.execute(sql, args).fetchall():
         out.append(dict(ts=ts, session_id=sid, uuid=uid, role=rl, kind=kd, repo=rurl, host=host, branch=br,
                         snippet=snippet(masker.text(text or ""), query, regex), full=masker.text(text or "")))
+    titles = session_titles(conn, {h["session_id"] for h in out}, masker)
+    for h in out:
+        h["title"] = titles.get(h["session_id"], "")
     return out
+
+
+def session_titles(conn, session_ids, masker=cs.IDENTITY, width=120):
+    """{세션 ID: 첫 사용자 프롬프트 앞부분} — 세션 목록·검색 결과에서 어느 대화인지 알아보는 제목으로 쓴다."""
+    ids = sorted(session_ids)
+    if not ids:
+        return {}
+    rows = conn.execute("""SELECT DISTINCT ON (session_id) session_id, left(text, %s) FROM messages
+                           WHERE session_id = ANY(%s) AND kind = 'prompt' AND NOT is_sidechain AND coalesce(text, '') <> '' ORDER BY session_id, ts""", (width, ids)).fetchall()
+    return {sid: masker.text((t or "").replace("\n", " ").strip()) for sid, t in rows}
 
 
 def group_hits(hits):

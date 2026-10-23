@@ -91,7 +91,7 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 | 명령 | `claude_ctx.py` 의 `donghans secret …` | `add`(숨겨 입력, `--stdin`) · `list` · `rm/enable/disable` · `show`(TTY) · `run` · `scan` · `adopt` · `ignore` · `scrub` |
 | 치환 지점 | `ctx search/recent/session/sql` · `handoff get/draft` | 출력 직전에 치환. `--raw` 는 TTY + `CLAUDECODE` 없음일 때만 |
 | 조회 계층 | `ctxdata.py` | 개요 집계 · 검색 · 저장소별 발언 대조 · 세션 맥락 · 비밀·후보 관리(화면과 분리) |
-| 화면 | `ctxui.py` (`ctxui` 명령, Textual) | 1 개요(저장소별 개수·용량·DB 크기) · 2 검색(키워드/정규식·저장소·기간·역할) · 3 대조(같은 문구를 저장소별로 묶어 「내가 그렇게 말했나」) · 4 비밀(추가·끄기·삭제·값 보기) · 5 후보(승인·무시) |
+| 화면 | `ctxui.py` (`ctxui` 명령, Textual) | 1 개요(저장소별 개수·용량·DB 크기) · 2 검색(키워드/정규식·저장소·기간·역할) · 3 대조(같은 문구를 저장소별로 묶어 「내가 그렇게 말했나」) · 4 비밀(추가·끄기·삭제·값 보기) · 5 후보(승인·무시) · 6 통계(아래 「ctxui 통계·대화 보기」) |
 | 스키마 | `schema.sql` 의 `secrets` · `secret_ignores` (v2) | `ctx_secrets.SCHEMA_STATEMENTS` 와 같은 DDL(시험이 확인). 클라이언트도 쓰기 전에 `CREATE TABLE IF NOT EXISTS` 로 보장 |
 | 자동화 | `claude-ctx-ingest` 서비스의 `ExecStartPost` | 10분마다 `secret scrub --apply --quiet --idle-min 180`. 등록표가 비면 아무 일도 안 한다 |
 | 시험 | `claude-ctx/tests/` (`mods/_data/run-tests.sh` 에 등록) | `test_secrets`(순수) · `test_ctx_db`(임시 Postgres 통합) · `test_ctxdata` · `test_ctxui`(Pilot) |
@@ -123,6 +123,14 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 - 등록표가 평문이라 `pg_dump` 에 비밀이 그대로 들어간다(이관·백업 시 주의).
 - 후보 탐지는 휴리스틱이다(놓침과 오탐 모두 있다). 문장 중간의 평범한 비밀번호(`제 비번은 abc 입니다`)는 못 잡는다.
 
+### ctxui 통계·대화 보기 (2026-10-23)
+- **6 통계 탭**: 위 두 칸은 기간별 토큰·비용 추이(단위 시간/일/주/월)와 분류별 합계(모델·저장소·머신·출처·effort), 아래 두 칸은 세션 통계(세션·프롬프트·도구 수, 세션당 평균·**중앙값**, 시간대·요일 분포)와 세션 표. 저장소·머신·모델은 부분 일치 입력, 기간은 `p`(전체/1/7/30일), 단위 `b`, 분류 `g`, 세션 정렬 `o`, 필터 지움 `c`. 필터는 네 칸에 함께 걸린다.
+- **비용은 `usage_events` 로만 센다**(messages 의 usage 는 resume/fork 로 이중 계산 — schema.sql 주석). `usage_events` 는 OTel 수집을 켠 시점(2026-10-22)부터만 있어서 그 이전 세션은 비용이 `-` 이다. 상태줄에 「비용은 MM-DD 이후만 수집됨」을 표시한다. 일·시간 경계는 DB 쪽에서 로컬 시간대(`/etc/localtime`)로 자른다.
+- **세션 길이는 평균과 중앙값이 크게 다르다**(실측: 중앙값 약 5분, 평균 약 10시간 — resume 으로 이어진 세션이 평균을 끌어올림). 화면에 둘 다 보인다. 세션 78개 중 39개는 프롬프트가 1개뿐이다.
+- **대화 보기(SessionScreen)를 다시 만든 이유**(실측): 이전엔 한 메시지를 1800자에서 잘라 프롬프트 16%(264/1630)·응답 약 7%를 끝까지 읽을 수 없었고, 검색어 강조·세션 제목·이어진 세션 이동이 없었다. 지금은 메시지 단위 이동(↑↓)·펼침(Enter, `f` 전체)·검색어 강조와 `n/N` 이동(접힌 뒷부분에 있으면 자동 펼침)·`y` 복사·`t` 도구 호출/결과·`s` 서브에이전트(기본 숨김, 찾은 대상이 서브에이전트면 자동 표시)·`[`/`]` resume 으로 이어진 앞/뒤 세션. 한 번에 그리는 메시지는 600개까지(`a` 로 전부).
+- **추가 메타데이터는 스키마를 바꾸지 않고 질의로 만든다**: 세션 제목 = 첫 사용자 프롬프트(`slug` 는 6개 세션에만 있고 무작위 이름이라 제목으로 부적합), 세션 연결 = 메시지 `parent_uuid` 가 다른 세션의 메시지를 가리키는지(실측 9개 세션이 연결됨), 턴 소요 시간 = `raw->>'durationMs'`(`turn_duration`), compact 횟수 = `compact_boundary`, 도구 사용 = tool_use 텍스트 앞머리 `[tool_use 이름]`. 공유 DB 의 ALTER 는 하지 않았다 — 느려지면(현재 전체 집계 0.3초) `sessions` 에 title·parent 열을 두는 것을 검토.
+- **시험은 합성 데이터로만**: `ctxui` 는 에이전트 세션·비-TTY 에서 실행을 거부한다(원문 대화가 화면에 나오므로). 화면 시험(`test_ctxui` Pilot)은 임시 Postgres 에 합성 대화를 넣어 클래스를 직접 띄운다. 실제 DB 로는 `donghans ctx sql` 집계(원문 제외)만 확인했다.
+
 ### 쓰는 법
 ```bash
 donghans secret add NAS_PW            # 터미널에서 숨겨 입력(평문 저장, 대화에 안 남음)
@@ -130,5 +138,5 @@ donghans secret list                  # 이름·길이·fp 만(값 없음)
 donghans secret scan                  # 후보(흐린 미리보기) → adopt <fp> <이름> / ignore <fp>
 donghans secret run -- curl -u me:{{secret:NAS_PW}} https://nas.local   # 값은 실행 직전에만, 출력은 치환
 donghans secret scrub                 # 로컬 트랜스크립트 점검(dry-run) → --apply
-ctxui                                 # 개요·검색·대조·비밀·후보 화면(사람 전용)
+ctxui                                 # 개요·검색·대조·비밀·후보·통계 화면(사람 전용)
 ```

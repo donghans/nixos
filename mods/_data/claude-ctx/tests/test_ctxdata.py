@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """ctxdata 시험(임시 Postgres): 개요 집계 · 검색 · 저장소별 발언 대조 · 세션 맥락 · 비밀 관리 · 후보 승인."""
 import os, sys, json
+from datetime import timezone
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "_testkit"))
 from harness import checker
@@ -99,6 +100,109 @@ try:
     cd.ignore_fp(conn, other["fp"], other["pattern"])
     check("ignore 한 후보는 목록에서 빠짐", all(x["fp"] != other["fp"] for x in cd.scan_candidates(conn)) and other["fp"] in cd.ignored_fps(conn))
     check("scan_candidates: min_count 필터", cd.scan_candidates(conn, min_count=99) == [])
+    # --- 통계(usage_events 기준): 시간대 경계 · 필터 · 분류 · 세션 통계/요약
+    seed("eeee0001", A, "h1", [("user", "prompt", "2026-10-07T01:00:00Z", "비번 hunter2-pass 로 정리해줘"), ("assistant", "response", "2026-10-07T01:00:05Z", "네")])
+    def usage(rid, sid, host, ts, model, cost, src="repl_main_thread", effort="medium"):
+        conn.execute("""INSERT INTO usage_events (request_id, host, ts, session_id, model, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, cost_usd, query_source, effort)
+                        VALUES (%s,%s,%s,%s,%s,100,10,1000,50,%s,%s,%s)""", (rid, host, ts, sid, model, cost, src, effort))
+    usage("u1", "aaaa0001", "h1", "2026-10-01T01:00:00Z", "claude-sonnet-5-5", 1.0)
+    usage("u2", "aaaa0001", "h1", "2026-10-01T15:30:00Z", "claude-haiku-5-5", 0.5, "agent_summary", "low")   # UTC 로는 10-01, KST 로는 10-02 00:30
+    usage("u3", "bbbb0001", "h2", "2026-10-03T01:00:00Z", "claude-sonnet-5-5", 2.0)
+    usage("u4", "zzzz9999", "h2", "2026-10-03T02:00:00Z", "claude-sonnet-5-5", 4.0)                         # sessions 에 없는 세션
+    conn.execute("""INSERT INTO usage_events (request_id, host, ts, session_id, model, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens)
+                    VALUES ('u5', 'h1', now() - interval '1 hour', 'cccc0001', 'claude-sonnet-5-5', 0.25, 1, 1, 0, 0)""")
+    for i, (kind, side, raw, text) in enumerate([("tool_use", False, {}, "[tool_use Bash] a"), ("tool_use", False, {}, "[tool_use Bash] b"), ("tool_use", False, {}, "[tool_use Read] c"),
+                                                 ("tool_use", True, {}, "[tool_use Grep] x"), ("tool_result", True, {}, "ok"),
+                                                 ("other", False, {"subtype": "turn_duration", "durationMs": 5000}, ""), ("other", False, {"subtype": "compact_boundary"}, "")]):
+        conn.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, is_sidechain, text, raw) VALUES (%s,'aaaa0001','h1','2026-10-02T02:00:00Z','assistant',%s,%s,%s,%s)",
+                     (f"aaaa-x{i:03d}", kind, side, text, json.dumps(raw)))
+    conn.commit()
+
+    check("local_tz: IANA 이름 또는 UTC", isinstance(cd.local_tz(), str) and cd.local_tz())
+    cov = cd.coverage(conn)
+    check("coverage: usage 첫 시각 = 가장 오래된 요청", cov["usage_first"].astimezone(timezone.utc).isoformat().startswith("2026-10-01T01:00") and cov["usage_last"] > cov["usage_first"])
+    tr = cd.usage_trend(conn, bucket="day", tz="UTC")
+    check("usage_trend(일, UTC): 구간·비용 합계(10-01=1.5, 10-03=6.0, 오늘=0.25)", [round(r["cost"], 2) for r in tr] == [1.5, 6.0, 0.25] and tr[0]["requests"] == 2, str([(str(r["bucket"]), r["cost"]) for r in tr]))
+    check("usage_trend: 오래된 것부터", [r["bucket"] for r in tr] == sorted(r["bucket"] for r in tr))
+    tk = cd.usage_trend(conn, bucket="day", tz="Asia/Seoul")
+    check("usage_trend: 시간대에 따라 하루 경계가 달라짐(KST 는 10-02 가 따로 생김)", [round(r["cost"], 2) for r in tk][:3] == [1.0, 0.5, 6.0], str([(str(r["bucket"]), r["cost"]) for r in tk]))
+    check("usage_trend: 토큰 합(입력 100·출력 10·캐시읽기 1000·캐시생성 50)", (tr[0]["input"], tr[0]["output"], tr[0]["cache_read"], tr[0]["cache_create"]) == (200, 20, 2000, 100))
+    check("usage_trend(월): 10월 한 구간(오늘 것 포함)", len(cd.usage_trend(conn, bucket="month", tz="UTC")) == 1)
+    check("usage_trend: 저장소 필터(부분 일치)", round(sum(r["cost"] for r in cd.usage_trend(conn, repo="alpha")), 2) == 1.5)
+    check("usage_trend: 머신 필터", round(sum(r["cost"] for r in cd.usage_trend(conn, host="h2")), 2) == 6.0)
+    check("usage_trend: 모델 필터", round(sum(r["cost"] for r in cd.usage_trend(conn, model="haiku")), 2) == 0.5)
+    check("usage_trend: 필터 조합(머신 h1 + 모델 sonnet)", round(sum(r["cost"] for r in cd.usage_trend(conn, host="h1", model="sonnet")), 2) == 1.25)
+    check("usage_trend: 기간 필터(최근 1일은 u5 만)", [round(r["cost"], 2) for r in cd.usage_trend(conn, days=1)] == [0.25])
+    check("usage_trend: 일치 없음은 빈 목록", cd.usage_trend(conn, repo="없는저장소") == [])
+    try: cd.usage_trend(conn, bucket="year"); check("usage_trend: 잘못된 단위는 ValueError", False)
+    except ValueError: check("usage_trend: 잘못된 단위는 ValueError", True)
+    try: cd.usage_trend(conn, bucket="day; DROP TABLE messages"); check("usage_trend: 단위에 SQL 주입 불가", False)
+    except ValueError: check("usage_trend: 단위에 SQL 주입 불가", True)
+    check("usage_trend: 필터 값의 LIKE/따옴표 안전", cd.usage_trend(conn, repo="%") == [] and cd.usage_trend(conn, model="'; --") == [])
+
+    rows_m, tot = cd.usage_breakdown(conn, "model")
+    check("usage_breakdown(모델): 비용 큰 순·합계", [(r["key"], round(r["cost"], 2)) for r in rows_m] == [("claude-sonnet-5-5", 7.25), ("claude-haiku-5-5", 0.5)] and round(tot["cost"], 2) == 7.75 and tot["requests"] == 5)
+    rows_r, _ = cd.usage_breakdown(conn, "repo")
+    check("usage_breakdown(저장소): 세션 없는 요청은 (저장소 없음)", {r["key"]: round(r["cost"], 2) for r in rows_r} == {A: 1.5, B: 2.0, "(저장소 없음)": 4.25})
+    check("usage_breakdown(머신·출처·effort)", {r["key"] for r in cd.usage_breakdown(conn, "host")[0]} == {"h1", "h2"} and {r["key"] for r in cd.usage_breakdown(conn, "source")[0]} == {"repl_main_thread", "agent_summary", "(모름)"}
+          and {r["key"] for r in cd.usage_breakdown(conn, "effort")[0]} == {"medium", "low", "(모름)"})
+    check("usage_breakdown: 필터 적용", [r["key"] for r in cd.usage_breakdown(conn, "model", host="h2")[0]] == ["claude-sonnet-5-5"])
+    try: cd.usage_breakdown(conn, "x"); check("usage_breakdown: 잘못된 분류는 ValueError", False)
+    except ValueError: check("usage_breakdown: 잘못된 분류는 ValueError", True)
+
+    ss = cd.session_stats(conn)
+    by = {x["session_id"]: x for x in ss}
+    a = by["aaaa0001"]
+    check("session_stats: 프롬프트·도구(서브에이전트 제외)·서브에이전트 메시지·턴시간·compact", (a["prompts"], a["tools"], a["subagent_msgs"], a["turn_ms"], a["compacts"]) == (2, 3, 2, 5000, 1), str(a))
+    check("session_stats: 비용·요청·모델·토큰", round(a["cost"], 2) == 1.5 and a["requests"] == 2 and a["models"] == ["claude-haiku-5-5", "claude-sonnet-5-5"] and a["input"] == 2 * 1150 and a["output"] == 20)
+    check("session_stats: 제목은 첫 사용자 프롬프트", a["title"].startswith("alpha 배포는") and by["bbbb0001"]["title"].startswith("beta 는"))
+    check("session_stats: 사용 기록 없는 세션은 비용 None·요청 0", by["dddd0001"]["cost"] is None and by["dddd0001"]["requests"] == 0)
+    check("session_stats: 기본은 비용 큰 순(없는 세션은 뒤)", [x["session_id"] for x in ss][:3] == ["bbbb0001", "aaaa0001", "cccc0001"], str([x["session_id"] for x in ss]))
+    check("session_stats: 최근순(마지막 활동이 늦은 세션이 먼저)", [x["last"] for x in cd.session_stats(conn, order="last")] == sorted((x["last"] for x in ss), reverse=True))
+    check("session_stats: 프롬프트순", cd.session_stats(conn, order="prompts")[0]["prompts"] >= cd.session_stats(conn, order="prompts")[-1]["prompts"])
+    check("session_stats: 저장소 필터", {x["repo"] for x in cd.session_stats(conn, repo="alpha")} == {A})
+    check("session_stats: 머신 필터", {x["host"] for x in cd.session_stats(conn, host="h2")} == {"h2"})
+    check("session_stats: 모델 필터(그 모델 요청이 있는 세션만)", {x["session_id"] for x in cd.session_stats(conn, model="haiku")} == {"aaaa0001"})
+    check("session_stats: 기간 필터(오래된 세션 제외)", {x["session_id"] for x in cd.session_stats(conn, days=1)} == set())
+    check("session_stats: limit", len(cd.session_stats(conn, limit=2)) == 2)
+    masked = {x["session_id"]: x for x in cd.session_stats(conn, masker=cs.load_masker(conn))}
+    check("session_stats: 제목도 치환(등록된 비밀은 [protected])", "hunter2-pass" not in masked["eeee0001"]["title"] and "protected" in masked["eeee0001"]["title"], masked["eeee0001"]["title"])
+    check("session_stats: 치환 안 하면 원문", "hunter2-pass" in by["eeee0001"]["title"])
+    try: cd.session_stats(conn, order="x"); check("session_stats: 잘못된 정렬은 ValueError", False)
+    except ValueError: check("session_stats: 잘못된 정렬은 ValueError", True)
+
+    sm = cd.session_summary(conn, repo="alpha", tz="UTC")
+    check("session_summary: 세션·프롬프트·도구·비용", (sm["sessions"], int(sm["prompts"]), int(sm["tools"]), round(sm["cost"], 2)) == (3, 4, 3, 1.5), str(sm))
+    check("session_summary: 시간대·요일 분포 합 = 프롬프트 수", sum(sm["by_hour"]) == 4 and sum(sm["by_weekday"]) == 4 and len(sm["by_hour"]) == 24 and len(sm["by_weekday"]) == 7)
+    check("session_summary: 프롬프트 01시 UTC 4건(10-01 목·10-02 금·10-06 화·10-07 수)", sm["by_hour"][1] == 4 and sm["by_weekday"][3] == 1 and sm["by_weekday"][4] == 1 and sm["by_weekday"][1] == 1 and sm["by_weekday"][2] == 1, str(sm["by_hour"]))
+    sk = cd.session_summary(conn, repo="alpha", tz="Asia/Seoul")
+    check("session_summary: 시간대 적용(KST 는 10시)", sk["by_hour"][10] == 4 and sk["by_hour"][1] == 0)
+    check("session_summary: 중앙값·평균 길이는 0 이상", sm["median_duration_s"] >= 0 and sm["avg_duration_s"] >= 0)
+    check("session_summary: 일치 없음", cd.session_summary(conn, repo="없는저장소")["sessions"] == 0 and sum(cd.session_summary(conn, repo="없는저장소")["by_hour"]) == 0)
+    fc = cd.filter_choices(conn)
+    check("filter_choices: 머신·모델 목록", fc["hosts"] == ["h1", "h2"] and "claude-haiku-5-5" in fc["models"])
+
+    one = cd.session_stats(conn, session_id="aaaa0001")
+    check("session_stats: session_id 로 한 세션만", len(one) == 1 and one[0]["session_id"] == "aaaa0001" and one[0]["prompts"] == 2)
+    check("session_stats: 없는 session_id 는 빈 목록", cd.session_stats(conn, session_id="nope") == [])
+    check("session_tools: 도구별 횟수(서브에이전트 제외, 많은 순)", cd.session_tools(conn, "aaaa0001") == [("Bash", 2), ("Read", 1)], str(cd.session_tools(conn, "aaaa0001")))
+    check("session_tools: top 제한", cd.session_tools(conn, "aaaa0001", top=1) == [("Bash", 2)] and cd.session_tools(conn, "cccc0001") == [])
+    st = cd.session_titles(conn, ["aaaa0001", "bbbb0001", "nope"])
+    check("session_titles: 첫 사용자 프롬프트 앞부분, 없는 ID 는 생략", set(st) == {"aaaa0001", "bbbb0001"} and st["aaaa0001"].startswith("alpha 배포는"))
+    check("session_titles: 빈 입력", cd.session_titles(conn, []) == {})
+    check("session_titles: 치환 적용", "hunter2-pass" not in cd.session_titles(conn, ["eeee0001"], cs.load_masker(conn))["eeee0001"])
+    hits = cd.search(conn, "배포")
+    check("search: 결과마다 세션 제목", all(h["title"] for h in hits) and {h["title"][:7] for h in hits if h["session_id"] == "aaaa0001"} == {"alpha 배포는"[:7]}, str([h["title"] for h in hits][:2]))
+    check("search: 일치 없으면 빈 목록(제목 조회도 안전)", cd.search(conn, "일치하는것없음zzz") == [])
+
+    conn.execute("INSERT INTO sessions (session_id, host, hosts, repo_url, first_ts, last_ts) VALUES ('ffff0001','h1','{h1}',%s,'2026-10-08T01:00:00Z','2026-10-08T02:00:00Z')", (A,))
+    conn.execute("INSERT INTO messages (uuid, session_id, host, parent_uuid, ts, role, kind, text, raw) VALUES ('ffff-0000','ffff0001','h1','aaaa-0001','2026-10-08T01:00:00Z','user','prompt','이어서 하자','{}')")
+    conn.commit()
+    lk = cd.session_links(conn, "aaaa0001")
+    check("session_links: 뒤로 이어진 세션(children)", [c["session_id"] for c in lk["children"]] == ["ffff0001"] and lk["children"][0]["title"] == "이어서 하자" and lk["parents"] == [], str(lk))
+    check("session_links: 앞 세션(parents)", [p["session_id"] for p in cd.session_links(conn, "ffff0001")["parents"]] == ["aaaa0001"] and cd.session_links(conn, "ffff0001")["children"] == [])
+    check("session_links: 이어짐 없는 세션은 둘 다 빈 목록", cd.session_links(conn, "bbbb0001") == dict(parents=[], children=[]))
+
     check("delete_secret", cd.delete_secret(conn, "ANTHROPIC_KEY") == 1 and cd.delete_secret(conn, "ANTHROPIC_KEY") == 0)
     conn.close()
 finally:
