@@ -31,6 +31,7 @@ tailpass                = false
 netdata                 = false
 claude-ctx               = false
 observe                 = false
+qa-desktop             = false   # 화면 확인용 QA VM(incus) — 워크스테이션 전용
 
 [mods.gui]
 enable = false

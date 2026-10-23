@@ -13,8 +13,8 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 
 ## 사전 점검 — 처음 쓰는 세션·호스트라면 접속 전에
 이 스킬은 **이 워크스테이션에 qa-desktop VM 이 이미 있다**는 전제다. 아래를 순서대로 확인하고, **하나라도 어긋나면 임의로 만들거나 고치지 말고 사용자에게 알린다**(VM 생성·패키지·설정은 승인 필요 작업).
-1. 호스트에 incus 가 있고 VM 이 있는가: `incus list qa-desktop` — 없으면 이 호스트는 대상이 아니다(호스트 설정 `qa-desktop` 스위치가 꺼져 있다).
-2. 접속 키가 있는가: `ls ~/.ssh/qa_desktop_ed25519` — 없으면 사용자에게 키 위치를 묻는다(공개키는 VM 의 `qa` 계정 `authorized_keys` 에 있어야 한다).
+1. 호스트에 incus 가 있고 VM 이 있는가: `incus list ^qa-desktop$`(**`^…$` 로 정확 일치** — 이름만 쓰면 `qa-desktop-test` 같은 접두 일치 VM 까지 나온다) — `qa-desktop-ctl status` 가 있으면 그것을 쓴다. 없으면: 호스트 스위치가 꺼져 있으면(`qa-desktop` 도구가 없다) 이 호스트는 대상이 아니고, 스위치가 켜져 있는데 VM 이 없으면 사용자에게 알리고 **승인 후** `qa-desktop-ctl ensure`(없을 때만 만든다; 약 4~5분, 이미지 1.4GB).
+2. 접속 키가 있는가: `ls ~/.ssh/qa_desktop_ed25519` — 없으면 사용자에게 키 위치를 묻는다(공개키는 VM 의 `qa` 계정 `authorized_keys` 에 있어야 한다. `ensure` 로 새로 만든 VM 은 키를 직접 만들어 넣는다).
 3. VM 이 살아 있는가: `timeout 6 ssh -i ~/.ssh/qa_desktop_ed25519 qa@10.100.0.84 echo alive` — 상태가 RUNNING 인데 접속이 안 되면 아래 「복구」.
 4. 내 프로젝트의 규칙이 있는가: 프로젝트의 `.claude/donghans-instructions.md` 「QA 할 때」 절에 창 이름(`<프로젝트>-qa`)·데스크톱 번호가 있는지. **없는 새 프로젝트면** 창 자동 배치 규칙이 없어 창이 지금 보고 있는 데스크톱에 뜬다(문제는 아님 — 규칙 추가는 아래 「화면 분리」의 절차를 사용자 승인 후).
 5. 지금 다른 프로젝트가 쓰고 있는가: `python3 ~/.claude/skills/donghans-qa-desktop/scripts/occupy.py list`(스킬 폴더의 `scripts/`; 아래 「공유 규칙」).
@@ -38,7 +38,7 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 - 이 확장은 Wayland 라서 **로그아웃·재로그인 후에야** 새로 인식된다.
 
 ## 사람 없이 확인하기 (사용자에게 데스크톱 번호를 묻지 않는다)
-데스크톱 번호는 화면에 안 보인다. 아래 도구로 직접 확인한다. 도구는 이 스킬의 `scripts/` 에 있다(VM 에는 없으므로 필요하면 scp 로 `/tmp/<프로젝트>-qa/` 에 복사). ssh 로 실행할 때는 `XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus` 가 필요하다.
+데스크톱 번호는 화면에 안 보인다. 아래 도구로 직접 확인한다. 도구는 이 스킬의 `scripts/` 에 있다. **`qa-desktop-ctl` 로 새로 만든 VM 에는 이미 `~/qa-tools/ws.py`·`snap.py` 가 있다**(직접 만든 기존 VM 은 scp 로 `/tmp/<프로젝트>-qa/` 에 복사). ssh 로 실행할 때는 `XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus` 가 필요하다.
 - `ws.py right|left|home|escape` — 데스크톱 전환(Mutter RemoteDesktop 가상 키 입력). `home` = 데스크톱 1 로 강제(← 를 8번) → 「현재 데스크톱=1」이 확정되므로 「창이 보이면 1 에 있다」로 판정할 수 있다. `escape` = 열려 있는 GNOME 개요(Activities) 닫기.
   **Super 키를 쓰지 않는다**: Super+Home 으로 보냈을 때 캡처가 실제 데스크톱이 아니라 개요(검색창·썸네일) 화면이던 적이 있다(2026-10-23, genple QA 시험 2회·직접 재현 1회; ToT 시험·추가 재현 4회는 정상이라 **조건 미확정인 간헐 현상**). Super 를 쓰지 않으면 가능성 자체가 없어서 `home` 을 ← 반복으로 바꿨다. 캡처가 개요 모양이면 `ws.py escape` 후 다시 찍는다.
 - 가상 데스크톱은 **동적**이다: 창이 있는 데스크톱 + 끝에 빈 하나만 존재한다(창이 없을 땐 2개, genple-qa 창이 2번에 있으면 3개; 설정값 `num-workspaces=4` 와 다르게 동작함을 측정으로 확인). 맨 끝에서 `right` 를 더 눌러도 늘거나 순환하지 않는다.

@@ -9,7 +9,7 @@
 | 스위치 | `mods/sys/services/qa-desktop.nix` (호스트 toml `qa-desktop = true`, 프리셋 기본 꺼짐) | 켠 호스트의 `~/.claude/CLAUDE.md` 에 지침을 넣고 스킬을 등록. 설치·설정은 하지 않는다 |
 | 지침 | `mods/devel/apps/llm-cli.nix` 의 `qaDesktopInstructions` | 호출 조건 + 승인 필요 작업 + 데스크톱 번호 묻지 않기 |
 | 스킬 | `mods/_data/claude-skills/donghans-qa-desktop/` | 접속·실행·창 배치·공유 규칙·복구 본문 + `scripts/ws.py`·`snap.py` |
-| VM | incus `qa-desktop` (nix 선언 없음, 즉석 생성) | 선언 대상 후보: `mods/sys/services/incus.nix` 옆 |
+| VM 선언·생성 | `mods/sys/services/qa-desktop.nix` 의 `decl`(크기·이미지·프로젝트 규칙) + `qa-desktop-ctl`(`mods/_data/qa-desktop/qa_desktop_ctl.py`) + `provision.sh` | 사용자 서비스 `qa-desktop-ensure` 가 로그인 때 `ensure`: **없으면 만들고, 있으면 건드리지 않는다**(2026-10-23) |
 | 프로젝트 쪽 | VM 안 `~/qa-playwright/`(ToT 소유, 공유 Playwright 1.63·node 22), `flow_<프로젝트>/` | 스크립트는 프로젝트별 디렉터리 |
 
 ## 왜 이렇게 만들었나
@@ -37,6 +37,16 @@
 - **가상 데스크톱은 동적이다.** `gsettings` 는 `dynamic-workspaces=false`, `num-workspaces=4` 인데 실제로는 창이 있는 데스크톱 + 끝의 빈 하나만 존재한다(창 없을 때 2개). 규칙 `genple-qa.desktop:2` 가 동작하는 이유(2번은 항상 있다)이기도 하다. 사용자가 처음 본 「3개」는 genple-qa 창이 2번에 있을 때의 모습.
 - 실사용 시험 결과: ToT QA 세션(file:// 페이지, `--class` 없음) — 창이 데스크톱 1 에 보이고 2 에 없음. genple QA 세션(`--class=genple-qa`, genple 첫 화면 `http://10.100.0.1/` → 302 → `/welcome`) — 데스크톱 1 에 없고 2 에 보임. 알림 규칙(시작·완료)이 두 세션 사이에 실제로 오갔다. 새로 띄운 genple 세션은 반영 전에 시작해 전역 CLAUDE.md 절은 없었지만 스킬은 자동으로 목록에 보였다.
 - 로그인 smoke 는 어느 쪽도 하지 않았다(미검증).
+
+## VM 선언·자동 생성 (2026-10-23)
+**전에는** VM 이 incus 에 직접 만든 것(Ubuntu 설치 ISO + 자동설치 시드 볼륨)이라 새 호스트에서는 재현할 수 없었다. **지금은** 호스트 스위치 `qa-desktop = true` 만 켜면 `qa-desktop-ctl` 이 설치되고 로그인 때 서비스가 VM 을 보장한다(`nixup home` 만으로 배포 — OS 재빌드·sudo 불필요).
+- **`ensure`**: VM 이 없으면 `images:ubuntu/26.04/desktop`(GNOME 50 Wayland, 1.4GB)으로 만들고 프로비저닝한다. **이미 있는 VM 은 건드리지 않는다** — 이 도구가 만든 표식(`user.qa-desktop.*`)이 없는 VM 은 「채택」만 한다(운영 VM 이 그렇다; `provision` 도 `--yes` 없이는 거부). 생성 도중 멈춘 VM(`state=creating`)은 이어서 프로비저닝한다.
+- **프로비저닝(`provision.sh`, 멱등)**: 이미지의 `ubuntu`(uid 1000)를 `qa` 로 이름 변경 · 호스트 키만 받는 ssh · GDM 자동 로그인 · 화면 잠금·절전 끔(시스템 dconf) · Auto Move Windows 켬 + 프로젝트별 규칙 · Playwright(`~1.63.0`)+Chromium · `run.sh`·`~/qa-tools/{ws,snap}.py` · 프로젝트별 `.desktop`·디렉터리.
+- **선언 변경 감지**: 선언(스크립트·도구·규칙·버전)의 지문을 VM 에 기록해 두고, 바뀌면 `ensure` 가 알린다(자동 재실행은 안 함 → `qa-desktop-ctl provision`). 새 프로젝트의 창 배치 규칙은 `decl.projects` 에 「이름 = 데스크톱 번호」 추가 → `nixup home` → `provision`.
+- **`incus-win11` 과의 차이**: win11 은 프로필·설치 ISO(autounattend 포함)만 선언하고 **인스턴스는 사람이 만든다**(Windows ISO·라이선스를 선언할 수 없어 자동 생성 불가). qa-desktop 은 서버의 `incus-*-lxc.nix` 관례(「없으면 만든다」)를 따른다.
+- **측정(이 호스트, 이미지 캐시됨)**: 없는 상태에서 `ensure` 235초(생성 12초 + 프로비저닝 약 4분) · 재프로비저닝 11~120초(Playwright 재설치 여부에 따라) · 멈춘 VM 복구 · 선언 변경 감지 · `status`. 검증은 임시 VM(`qa-desktop-test`, 3GiB)로 했고 운영 VM 은 변하지 않음(설정 해시 동일).
+- **시험이 잡아낸 것**: ① 완료 파일(`gnome-initial-setup-done`)이 오히려 **업그레이드 마법사**를 켠다(조건: done 이 있고 `upgrade-<버전>-done` 이 없을 때) → 사용자 유닛을 마스크 ② 세션을 강제 종료하며 생긴 gnome-shell 크래시 보고가 새 세션에 apport 대화상자로 뜸 → 보고 삭제 + apport 끔 ③ `incus list <이름>` 은 접두 일치라 `qa-desktop-test` 가 `qa-desktop` 을 오염 → `^이름$` 정확 일치 ④ **실행 중인 VM 의 스냅샷이 프로비저닝 직후 수 분 막힘**(수동 재시도는 0.2초; 원인 미확정) → 최초 생성 때만 껐다(1초)·오프라인 스냅샷(0초)·켜기(10초) ⑤ Playwright `^1.63.0` 이 1.64 로 올라감 → `~1.63.0`.
+- **한계**: 새 VM 은 기존 운영 VM 과 **완전히 같지는 않다**(기존은 설치 ISO 로 설치, 새것은 이미지 기반; 한 세대 차이 — Playwright Chromium 리비전·패키지 버전). 운영 VM 에는 `incus-agent` 가 없어 `incus exec` 프로비저닝이 불가해서 **채택만** 하고, 갈아타려면 새 VM 을 만들어 옮긴다(사용자 결정). 다른 호스트(노트북)에서의 서비스 동작은 이 호스트의 임시 VM 으로만 검증했다(같은 프리셋).
 
 ## 처음 보는 세션·프로젝트가 막히지 않게 (2026-10-23 감사)
 - 스킬 `donghans-qa-desktop` 에 **사전 점검**(VM·키·접속·프로젝트 규칙·점유 확인)을 넣었다. 어긋나면 임의로 만들거나 고치지 않고 사용자에게 알린다(VM 생성·설정은 승인 필요 작업).
