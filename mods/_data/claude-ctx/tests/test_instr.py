@@ -9,6 +9,13 @@ from harness import checker
 check, finish = checker()
 import ctx_instr as ci
 
+
+def edit(path, text):
+    """캐시는 읽기 전용이라 시험이 「사람이 우회해서 직접 고친」 상황을 만들 때 쓴다(chmod u+w 후 쓰기)."""
+    if os.path.exists(path):
+        os.chmod(path, 0o644)
+    open(path, "w").write(text)
+
 # ---------------------------------------------------------------- 1부: 판정표
 S = ci.sha
 db = lambda rev, body: {"rev": rev, "body": body}
@@ -25,6 +32,19 @@ cases = [
 ]
 for name, args, want in cases:
     check(f"plan: {name}", ci.plan(*args) == want, f"{ci.plan(*args)} != {want}")
+
+# ---------------------------------------------------------------- 절 고르기(순수)
+DOC = "# 제목\n머리말\n\n## QA 할 때 (원칙)\nqa 본문\n### 하위\n하위 본문\n\n## resume 할 때\nre 본문\n\n## 수정 세션\nfix 본문\n"
+pre, secs = ci.split_sections(DOC)
+check("절 나누기: 머리말 + 3개(### 은 절이 아니다)", pre == "# 제목\n머리말\n\n" and len(secs) == 3 and "하위 본문" in secs[0], str(secs))
+sel, om = ci.select_sections(DOC, ["QA 할 때"])
+check("절 고르기: 제목에 말이 든 절만 + 머리말, 나머지는 생략 목록", "qa 본문" in sel and "하위 본문" in sel and "머리말" in sel and "re 본문" not in sel and om == ["resume 할 때", "수정 세션"], f"{sel!r} {om}")
+sel, om = ci.select_sections(DOC, [])
+check("절 고르기: 조건이 없으면 전체", sel == DOC and om == [])
+sel, om = ci.select_sections(DOC, ["resume 할 때", "수정 세션"])
+check("절 고르기: 여러 개", "re 본문" in sel and "fix 본문" in sel and "qa 본문" not in sel and om == ["QA 할 때 (원칙)"])
+sel, om = ci.select_sections(DOC, ["없는 절"])
+check("절 고르기: 일치가 없어도 머리말은 남고 전부 생략으로 알린다", sel == "# 제목\n머리말\n\n" and len(om) == 3)
 
 # ---------------------------------------------------------------- git 픽스처
 TMP = tempfile.mkdtemp(prefix="instr-test-")
@@ -65,7 +85,7 @@ try:
     m2 = mkrepo("m2")     # 같은 저장소 URL 의 다른 체크아웃(= 다른 기기)
     r1, r2 = ci.roots(m1), ci.roots(m2)
     F1 = lambda n: ci.local_path(m1, n); F2 = lambda n: ci.local_path(m2, n)
-    os.makedirs(os.path.join(m1, ".claude")); open(F1("instructions"), "w").write("v1\n")
+    os.makedirs(os.path.join(m1, ".claude")); edit(F1("instructions"), "v1\n")
 
     n = ci.sync(conn, URL, r1[0], r1[1], "hostA")
     check("A: DB 가 비었고 로컬이 있으면 첫 채택(rev 1)", [k for _, k, _ in n] == ["adopted"] and ci.db_rows(conn, URL)["instructions"]["rev"] == 1, str(n))
@@ -74,19 +94,19 @@ try:
     check("B: .git/info/exclude 도 맞춘다", all(l in open(os.path.join(r2[1], "info", "exclude")).read() for l in ci.EXCLUDE))
     check("B: 두 번째 sync 는 알릴 것이 없다", ci.sync(conn, URL, r2[0], r2[1], "hostB") == [])
 
-    open(F1("instructions"), "w").write("v2\n")
+    edit(F1("instructions"), "v2\n")
     code, msg = ci.push(conn, URL, r1[0], "instructions", "hostA", masker=Mask())
     check("A: 고쳐서 올리면 rev 2", code == 0 and ci.db_rows(conn, URL)["instructions"]["rev"] == 2, msg)
     n = ci.sync(conn, URL, r2[0], r2[1], "hostB")
     check("B: 손대지 않았으면 다음 세션에 rev 2 로 갱신", open(F2("instructions")).read() == "v2\n" and [k for _, k, _ in n] == ["updated"], str(n))
 
-    open(F2("instructions"), "w").write("v3-local-B\n")
+    edit(F2("instructions"), "v3-local-B\n")
     n = ci.sync(conn, URL, r2[0], r2[1], "hostB")
     check("B: 로컬만 고치면 앞섬 — 파일도 DB 도 그대로", [k for _, k, _ in n] == ["ahead"] and open(F2("instructions")).read() == "v3-local-B\n" and ci.db_rows(conn, URL)["instructions"]["body"] == "v2\n", str(n))
     code, msg = ci.push(conn, URL, r2[0], "instructions", "hostB", masker=Mask())
     check("B: 명시적 push 로 rev 3", code == 0 and ci.db_rows(conn, URL)["instructions"]["rev"] == 3, msg)
 
-    open(F1("instructions"), "w").write("v4-local-A\n")      # A 는 rev 2 를 본 상태에서 고친다 — B 가 rev 3 을 올린 뒤
+    edit(F1("instructions"), "v4-local-A\n")      # A 는 rev 2 를 본 상태에서 고친다 — B 가 rev 3 을 올린 뒤
     n = ci.sync(conn, URL, r1[0], r1[1], "hostA")
     check("A: 양쪽이 바뀌면 충돌 — 어느 쪽도 안 덮는다", [k for _, k, _ in n] == ["conflict"] and open(F1("instructions")).read() == "v4-local-A\n" and ci.db_rows(conn, URL)["instructions"]["body"] == "v3-local-B\n", str(n))
     code, msg = ci.push(conn, URL, r1[0], "instructions", "hostA", masker=Mask())
@@ -100,7 +120,7 @@ try:
     code, msg = ci.pull(conn, URL, r2[0], "instructions", force=True)
     check("B: pull --force 는 DB 본문으로 덮는다", code == 0 and open(F2("instructions")).read() == "v4-local-A\n", msg)
 
-    open(F1("override"), "w").write("key=hunter2\n")
+    edit(F1("override"), "key=hunter2\n")
     code, msg = ci.push(conn, URL, r1[0], "override", "hostA", masker=Mask())
     check("등록된 비밀이 든 본문은 올리지 않는다", code == 1 and "override" not in ci.db_rows(conn, URL), msg)
 
@@ -123,6 +143,50 @@ try:
     check("훅: git 저장소가 아닌 cwd 는 조용히 통과", p.returncode == 0 and p.stdout.strip() == "", p.stdout + p.stderr)
     p = subprocess.run([sys.executable, os.path.join(ROOT, "claude_ctx.py"), "instr", "list"], capture_output=True, text=True, cwd=m3, env=pg.env())
     check("CLI instr list", "instructions: rev 4" in p.stdout, p.stdout + p.stderr)
+
+    # ------------------------------------------------ 명령 경유(읽기 최신화 · 쓰기 DB 먼저 · 캐시 읽기 전용)
+    writable = lambda path: bool(os.stat(path).st_mode & 0o222)
+    check("동기화로 받아 쓴 캐시는 읽기 전용", not writable(F2("instructions")) and not writable(ci.local_path(m3, "instructions")))
+    check("첫 채택·push 뒤의 캐시도 읽기 전용", not writable(F1("instructions")))
+    code, msg = ci.set_body(conn, URL, r1[0], "instructions", "v5-set\n", "hostA", masker=Mask(), expect_rev=4)
+    st = ci.load_state(r1[0])["instructions"]
+    check("set: 기대 rev 가 맞으면 DB 먼저 rev 5, 캐시·상태도 맞고 읽기 전용",
+          code == 0 and ci.db_rows(conn, URL)["instructions"]["rev"] == 5 and open(F1("instructions")).read() == "v5-set\n" and st["rev"] == 5 and not writable(F1("instructions")), msg)
+    code, msg = ci.set_body(conn, URL, r2[0], "instructions", "v5-stale\n", "hostB", masker=Mask(), expect_rev=4)
+    check("set: 읽은 뒤 바뀌었으면(낡은 rev) 거부하고 DB·캐시를 건드리지 않는다",
+          code == 1 and ci.db_rows(conn, URL)["instructions"]["body"] == "v5-set\n" and open(F2("instructions")).read() == "v4-local-A\n", msg)
+    n = ci.sync(conn, URL, r2[0], r2[1], "hostB")
+    check("읽기 전 동기화: 다른 기기가 올린 최신본이 (잠긴 캐시에도) 반영된다", open(F2("instructions")).read() == "v5-set\n" and [k for _, k, _ in n] == ["updated"] and not writable(F2("instructions")), str(n))
+    code, msg = ci.set_body(conn, URL, r1[0], "instructions", "key=hunter2\n", "hostA", masker=Mask())
+    check("set: 등록된 비밀이 든 본문은 거부", code == 1 and ci.db_rows(conn, URL)["instructions"]["body"] == "v5-set\n", msg)
+    code, msg = ci.set_body(conn, URL, r1[0], "instructions", "  \n", "hostA", masker=Mask())
+    check("set: 빈 본문은 거부", code == 1, msg)
+    code, msg = ci.set_body(conn, URL, r1[0], "instructions", "v5-set\n", "hostA", masker=Mask())
+    check("set: 같은 내용이면 rev 를 올리지 않는다", code == 0 and ci.db_rows(conn, URL)["instructions"]["rev"] == 5, msg)
+    code, msg = ci.set_body(conn, URL, r1[0], "override", "ov-new\n", "hostA", masker=Mask())
+    check("set: 아직 없는 이름은 rev 1 로 만든다", code == 0 and ci.db_rows(conn, URL)["override"]["rev"] == 1 and open(F1("override")).read() == "ov-new\n", msg)
+    edit(F2("instructions"), "v6-direct\n")
+    n = ci.sync(conn, URL, r2[0], r2[1], "hostB")
+    check("캐시를 직접 고쳐 우회해도 앞섬으로 잡힌다(DB 는 그대로)", [k for nm, k, _ in n if nm == "instructions"] == ["ahead"] and ci.db_rows(conn, URL)["instructions"]["rev"] == 5, str(n))
+    code, msg = ci.push(conn, URL, r2[0], "instructions", "hostB", masker=Mask())
+    check("우회한 편집도 push 로 정리되면 다시 잠긴다", code == 0 and not writable(F2("instructions")), msg)
+
+    conn.commit()   # 아래 CLI 는 별도 프로세스(다른 연결) — 이 연결의 열린 트랜잭션이 행 잠금을 쥐고 있으면 기다리다 멈춘다
+    # CLI: set → show(절 고르기·생략 안내) → show(접속 실패) → edit(비대화 거부)
+    CLI = lambda *args, **kw: subprocess.run([sys.executable, os.path.join(ROOT, "claude_ctx.py"), "instr", *args], capture_output=True, text=True, cwd=m3, env=kw.pop("env", pg.env()), **kw)
+    DOC2 = "# 프로젝트 지침 제목\n\n## QA 할 때\nqa-안내\n\n## resume 할 때\nresume-안내\n"
+    p = CLI("set", "instructions", "--stdin", input=DOC2)
+    check("CLI set --stdin", p.returncode == 0 and "rev 7" in p.stdout, p.stdout + p.stderr)
+    p = CLI("show", "--section", "QA 할 때")
+    check("CLI show: 고른 절 + 머리말, 생략한 절을 알린다", p.returncode == 0 and "qa-안내" in p.stdout and "프로젝트 지침 제목" in p.stdout and "resume-안내" not in p.stdout
+          and "생략된 절 1개: resume 할 때" in p.stdout and "· 최신)" in p.stdout, p.stdout + p.stderr)
+    p = CLI("show", "override")
+    check("CLI show override: 절 고르기 없이 전체", p.returncode == 0 and "ov-new" in p.stdout and "생략" not in p.stdout, p.stdout + p.stderr)
+    bad = dict(pg.env()); bad["CLAUDE_CTX_DSN"] = "postgresql://nobody@127.0.0.1:1/none"
+    p = CLI("show", "--section", "resume 할 때", env=bad)
+    check("CLI show: 접속 실패면 캐시를 「낡았을 수 있음」으로 보인다(그래도 읽힌다)", p.returncode == 0 and "resume-안내" in p.stdout and "접속 실패" in p.stdout and "낡았을 수 있음" in p.stdout, p.stdout + p.stderr)
+    p = CLI("edit", "instructions", stdin=subprocess.DEVNULL)
+    check("CLI edit: 대화형이 아니면 거부(에이전트는 set 을 쓴다)", p.returncode != 0 and "대화형" in (p.stdout + p.stderr), p.stdout + p.stderr)
 finally:
     pg.stop()
     import shutil; shutil.rmtree(TMP, ignore_errors=True)

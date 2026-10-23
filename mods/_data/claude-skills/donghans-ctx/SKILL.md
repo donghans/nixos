@@ -23,7 +23,7 @@ description: 여러 머신·프로젝트의 지난 에이전트(현재는 Claude
 - 구조·이관·멱등성 설명은 `~/nixos/_docs/content/explanation/claude-ctx.md`.
 
 ## 프로젝트별 지침 (`donghans instr`)
-`.claude/donghans-instructions.md`·`donghans-override.md` 의 공유 정본. SessionStart 훅이 자동 동기화하므로 보통 손댈 일이 없고, **고친 뒤에만** `donghans instr push [instructions|override]`. 그 밖: `list`(저장소의 정본 목록) · `get <이름>` · `diff` · `pull [--force]` · `sync`. 앞섬(로컬이 새로움)·충돌(양쪽 변경)은 덮지 않고 알림만 한다 — `diff` 로 보고 `push --force`/`pull --force`. 본문에 비밀 값을 적지 않는다(올릴 때 거부). 실행 파일 `qa-extra`·`resume-extra` 는 동기화 대상이 아니다. 설계 → `~/nixos/_docs/content/explanation/claude-ctx.md` 「프로젝트별 지침」.
+`.claude/donghans-instructions.md`·`donghans-override.md` 의 공유 정본(로컬 파일은 읽기 전용 캐시). **읽기·쓰기는 명령으로 한다**: `show [이름] [--section 절]`(먼저 최신화한 뒤 출력 — 접속 실패면 「낡았을 수 있음」 표시; override 는 늘 전체, instructions 는 머리말 + 고른 절 + 생략한 절 안내) · `edit <이름>`(편집기, 사람용) · `set <이름> --file F|--stdin [--expect-rev N]`(에이전트용 — DB 에 먼저 쓰고 캐시를 맞춘다; 최신 본문은 `get <이름>`, rev 는 `list`; 읽은 뒤 바뀌었으면 거부) · `list` · `diff` · `sync`(SessionStart 훅이 부른다). 캐시를 우회해 직접 고쳤다면 앞섬(로컬이 새로움)·충돌(양쪽 변경)로 잡혀 덮지 않고 알림만 한다 — `diff` 로 보고 `push`/`pull --force`(예전 방식, 복구용). 본문에 비밀 값을 적지 않는다(올릴 때 거부). 실행 파일 `qa-extra`·`resume-extra` 는 동기화 대상이 아니다. 설계 → `~/nixos/_docs/content/explanation/claude-ctx.md` 「프로젝트별 지침」.
 
 ## 비밀번호·토큰 (등록표 · 출력 치환 · 주입 래퍼)
 사용자는 비밀번호·토큰·API 키를 **등록표**에 평문으로 등록해 둔다(ctx DB 의 `secrets` 표; 등록·관리는 사람이 `donghans secret add` 또는 `ctxui` 로 한다).

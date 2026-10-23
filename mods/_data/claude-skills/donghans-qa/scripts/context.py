@@ -22,7 +22,7 @@ EXCLUDE_LINES = [f".claude/{n}" for n in NAMES]
 WHY = {"donghans-instructions.md": "추가 지침 — 기본 원칙에 더해 적용", "donghans-override.md": "오버라이드 — 충돌하는 기본 원칙보다 우선"}
 
 TEMPLATE = """# {proj} 추가 지침 (donghans 스킬에 더해 적용 — 추적 제외, 정본은 공유 저장소)
-<!-- 이 파일은 git 에 올리지 않는다(.git/info/exclude). 정본은 공유 저장소(ctx DB)라 고친 뒤 `donghans instr push` 로 올린다. 다른 사람에게는 보이지 않으니 공유해야 하는 프로젝트 사실은 추적되는 문서에 쓴다. -->
+<!-- 이 파일은 git 에 올리지 않는다(.git/info/exclude). 처음 한 번만 이 파일을 채운 뒤 `donghans instr set instructions --file .claude/donghans-instructions.md` 로 올린다 — 그 뒤 이 파일은 공유 저장소(ctx DB)의 읽기 전용 캐시이고 고칠 때는 `donghans instr edit instructions` 를 쓴다. 다른 사람에게는 보이지 않으니 공유해야 하는 프로젝트 사실은 추적되는 문서에 쓴다. -->
 <!-- 아는 것만 쓰고, 모르는 칸은 「미확인」이라고 적는다(지어내지 않는다). 확인한 날짜를 붙이면 낡았는지 판단하기 쉽다. -->
 
 ## QA 할 때 (donghans-qa · donghans-qa-desktop 에 더해)
@@ -96,13 +96,14 @@ def do_init(top, main):
     print("확인: `git status --short` 에 .claude/donghans-* 가 나타나면 안 된다.")
 
 
-def sync_instructions(cwd):
-    """프로젝트 지침을 공유 저장소(ctx)와 맞춘다 — SessionStart 훅이 못 돌았을 때(래퍼 없이 시작한 세션 등)를 위한 보강. 접속 실패는 조용히 로컬 파일을 쓴다."""
+def show_instructions(cwd, sections):
+    """프로젝트 지침을 `donghans instr show` 로 읽는다 — 먼저 공유 저장소와 맞춘(최신화) 뒤 해당 절만 보인다(접속 실패면 캐시를 「낡았을 수 있음」으로 표시).
+    명령을 못 쓰면 None(→ 아래에서 파일을 직접 읽는다)."""
     try:
-        r = subprocess.run(['donghans', 'instr', 'sync', '--quiet'], cwd=cwd, capture_output=True, text=True, timeout=8)
-        return r.stdout.strip() if r.returncode == 0 else '(공유 저장소 접속 실패 — 로컬 파일을 그대로 쓴다)'
+        r = subprocess.run(['donghans', 'instr', 'show', *[x for s in sections for x in ('--section', s)]], cwd=cwd, capture_output=True, text=True, timeout=15)
+        return r.stdout if r.returncode == 0 else None
     except Exception:
-        return ''
+        return None
 
 
 def main_():
@@ -123,24 +124,25 @@ def main_():
     print("\n## git worktree")
     print(sh("git", "worktree", "list", cwd=top)[0])
 
-    _sy = sync_instructions(main)
-    if _sy:
-        print("\n## 프로젝트 지침 동기화(공유 저장소)"); print(_sy)
+    shown = show_instructions(main, ["QA 할 때"])   # 읽기는 명령 경유 — 최신화 후 「QA 할 때」 절만(생략한 절은 안내됨)
+    if shown:
+        print("\n" + shown.rstrip())
     found = False
     for nm in NAMES[:2]:
         pf, base = find_file(nm, top, main)
         if not pf:
             continue
         found = True
-        where = "" if base == top else f" — 메인 체크아웃에서 읽음: {pf}"
-        print(f"\n## 프로젝트 지침: .claude/{nm} ({WHY[nm]}){where}")
-        print(open(pf, errors="ignore").read().strip())
+        if shown is None:   # donghans 명령을 못 쓰면 파일을 그대로 읽는다(낡았을 수 있음)
+            where = "" if base == top else f" — 메인 체크아웃에서 읽음: {pf}"
+            print(f"\n## 프로젝트 지침: .claude/{nm} ({WHY[nm]}){where} — ⚠ donghans 명령을 못 써서 로컬 파일을 직접 읽음, 낡았을 수 있음")
+            print(open(pf, errors="ignore").read().strip())
         if not is_ignored(pf, base):
             print(f"\n! 경고: {pf} 가 추적 제외로 인식되지 않는다 — 실수로 커밋될 수 있다. `context.py --init` 이 추적 제외 항목을 추가한다.")
     if not found:
         print("\n(프로젝트 지침 파일 없음 — 처음 보는 프로젝트이거나 이 머신에 아직 안 만들었다. "
               "`python3 <이 스킬>/scripts/context.py --init` 으로 틀과 추적 제외 설정을 만들 수 있다. "
-              "다른 머신에서 만든 지침은 이 머신에 없다 — 파일은 머신마다 따로다.)")
+              "공유 저장소(ctx)에도 이 저장소의 지침이 없었다.)")
 
     ex, base = find_file("qa-extra", top, main)
     if ex and os.access(ex, os.X_OK):

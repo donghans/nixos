@@ -19,9 +19,9 @@ description: 어느 저장소에서든 세션을 닫거나 /clear 하기 전에,
 (아직 없음)
 
 ## 프로젝트별 지침 (선택, 보통 `.git/info/exclude` 로 추적 제외)
-저장소 루트의 `.claude/donghans-instructions.md`(기본 절차에 **추가 적용**)와 `.claude/donghans-override.md`(기본 절차와 **충돌하면 이쪽이 우선**)가 있으면 따른다. **절차 시작 전에 두 파일이 있으면 읽는다**(`cat <저장소>/.claude/donghans-{instructions,override}.md`). 문서 형식·커밋 규약·갱신할 상태 파일 등 저장소 고유 규칙은 여기에 있다. resume 쪽도 같은 파일을 읽으므로 인수인계에 적을 때 그 전제를 두어도 된다.
+저장소 루트의 `.claude/donghans-instructions.md`(기본 절차에 **추가 적용**)와 `.claude/donghans-override.md`(기본 절차와 **충돌하면 이쪽이 우선**)가 있으면 따른다. **절차 시작 전에 `donghans instr show --section "handoff 할 때"` 로 읽는다**(먼저 공유 저장소와 맞춘 뒤 해당 절만 보인다 — 「생략된 절」 안내가 나오면 필요한 만큼 `donghans instr show`; 명령을 못 쓰면 `cat <저장소>/.claude/donghans-{instructions,override}.md`). 문서 형식·커밋 규약·갱신할 상태 파일 등 저장소 고유 규칙은 여기에 있다. resume 쪽도 같은 파일을 읽으므로 인수인계에 적을 때 그 전제를 두어도 된다.
 
-> **공유 정본(2026-10-23)**: 이 두 파일의 정본은 공유 저장소(ctx DB)이고 로컬 파일은 캐시다. `claude` 래퍼의 SessionStart 훅이 세션 시작 때 자동으로 맞춘다(없으면 만들고, DB 가 더 새로우면 갱신, `.git/info/exclude` 도 보정). **고쳤다면 `donghans instr push` 로 올려야 다른 기기에 반영된다.** 앞섬·충돌은 알림만 하고 덮지 않는다(`donghans instr diff`). 본문에 비밀 값을 적지 말 것(올릴 때 등록표로 검사해 거부).
+> **공유 정본(2026-10-23)**: 이 두 파일의 정본은 공유 저장소(ctx DB)이고 로컬 파일은 읽기 전용 캐시다. 읽기는 `donghans instr show`(최신화 후 출력), 고치기는 `donghans instr edit|set`(DB 먼저). `claude` 래퍼의 SessionStart 훅도 세션 시작 때 맞춘다(없으면 만들고, DB 가 더 새로우면 갱신, `.git/info/exclude` 도 보정). 캐시를 우회해 직접 고친 앞섬·충돌은 알림만 하고 덮지 않는다(`donghans instr diff`). 본문에 비밀 값을 적지 말 것(올릴 때 등록표로 검사해 거부).
 
 ## 절차
 1. **지금의 사실을 먼저 얻는다(기억으로 쓰지 않는다):** `git status --short`, `git log -1`, `git worktree list`, 미병합 브랜치(`git log --oneline HEAD..<br>`), 진행 중 백그라운드 작업. 

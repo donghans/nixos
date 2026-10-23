@@ -11,12 +11,12 @@ description: QA 세션(코드·스펙을 고치지 않고 측정해서 보고하
 ## 0. 시작할 때
 ### 0-A. 프로젝트 지침 파일 규약 (먼저 이해할 것)
 - 프로젝트 고유 QA 지침(계정 정책·포트·스택 기동·결함 모양·커밋 규칙)은 **그 저장소의 `.claude/donghans-instructions.md`**(이 스킬에 **추가 적용**)와 `.claude/donghans-override.md`(**충돌하면 이쪽이 우선**)에 둔다. 실행 파일 `.claude/qa-extra` 는 선택이고, 있으면 그 출력(쓰는 스택·포트·열린 요청 등)이 시작 점검에 붙는다. 파일 안에서는 `## QA 할 때`·`## resume 할 때`·`## handoff 할 때` 처럼 **절 제목으로 용도를 나눈다**(이 스킬은 「QA 할 때」 절을 읽는다).
-- 이 파일들은 **git 에 올리지 않는다.** `.git/info/exclude`(저장소 로컬 설정 — `.gitignore` 와 달리 커밋되지 않아 다른 개발자에게 영향이 없다)에 등록한다. **정본은 공유 저장소(ctx DB)이고 로컬 파일은 캐시다**: SessionStart 훅과 `context.py` 가 시작 때 맞추므로 다른 머신에서 쓴 내용도 보인다(DB 접속 실패 때만 로컬 파일 그대로). 고쳤다면 `donghans instr push` 로 올려야 다른 기기에 반영된다(앞섬·충돌은 덮지 않고 알림만, `donghans instr diff`). 팀원·다른 사람의 클론에는 보이지 않는다. git worktree(예: QA 전용 작업 트리)에서는 메인 체크아웃의 파일을 읽는다(`context.py` 가 처리).
+- 이 파일들은 **git 에 올리지 않는다.** `.git/info/exclude`(저장소 로컬 설정 — `.gitignore` 와 달리 커밋되지 않아 다른 개발자에게 영향이 없다)에 등록한다. **정본은 공유 저장소(ctx DB)이고 로컬 파일은 읽기 전용 캐시다**: 읽을 때는 `donghans instr show`(먼저 최신화한 뒤 출력 — `context.py` 가 이것을 부르므로 다른 머신에서 쓴 내용도 보인다; DB 접속 실패 때만 「낡았을 수 있음」 표시와 함께 캐시를 보인다), 고칠 때는 `donghans instr edit <instructions|override>`(사람) 또는 `donghans instr get` → 고침 → `donghans instr set <이름> --file … --expect-rev N`(에이전트; DB 에 먼저 쓰고 캐시를 맞춘다). 캐시를 직접 고치려 하면 막히고, 우회해도 앞섬·충돌로 잡혀 덮지 않는다(`donghans instr diff`; 예전 방식 `push`·`pull` 은 복구용). 팀원·다른 사람의 클론에는 보이지 않는다. git worktree(예: QA 전용 작업 트리)에서는 메인 체크아웃의 파일을 읽는다(`context.py` 가 처리).
 - **경계**: 제품·명세·결함·결정 같은 **프로젝트 사실은 여전히 추적되는 저장소 문서**에 쓴다(전역 원칙). 추적 제외 파일에는 **이 워크스테이션에서 도구를 쓰는 법과 개인 지침**, 그리고 어느 문서가 어디에 있는지 가리키는 색인만 둔다. 팀이 알아야 하는 것은 여기에 숨기지 않는다.
 - 처음 보는 프로젝트이거나 파일이 없으면 `context.py --init` — 틀(`## QA 할 때`)을 만들고 추적 제외를 설정한다(멱등, 이미 있는 파일은 덮어쓰지 않고 아무것도 커밋하지 않는다). 아는 사실만 채우고 모르는 칸은 **「미확인」**으로 둔다(지어내지 않는다). 이미 git 에 추적 중인 파일에는 exclude 가 적용되지 않으므로(`context.py` 가 경고) 사용자와 상의한다.
 
 ### 0-B. 절차
-1. 이 스킬의 `scripts/context.py` 를 실행한다(Claude Code 에서는 `python3 ~/.claude/skills/donghans-qa/scripts/context.py`) — 저장소·브랜치·HEAD·QA 작업 트리를 보이고, 위 프로젝트 지침 파일과 `qa-extra` 출력을 덧붙인다. 출력된 프로젝트 지침의 「QA 할 때」 절을 이 문서보다 먼저 따른다. 지침 파일이 추적 제외가 안 돼 있다는 경고가 나오면 `--init` 으로 고친다.
+1. 이 스킬의 `scripts/context.py` 를 실행한다(Claude Code 에서는 `python3 ~/.claude/skills/donghans-qa/scripts/context.py`) — 저장소·브랜치·HEAD·QA 작업 트리를 보이고, 위 프로젝트 지침 파일과 `qa-extra` 출력을 덧붙인다. 출력된 프로젝트 지침의 「QA 할 때」 절을 이 문서보다 먼저 따른다(`context.py` 는 지침의 머리말과 「QA 할 때」 절만 보인다 — 「생략된 절」 안내가 나오면 필요한 만큼 `donghans instr show` 로 전체를 본다; override 는 늘 전체). 지침 파일이 추적 제외가 안 돼 있다는 경고가 나오면 `--init` 으로 고친다.
 2. 화면을 사람과 같이 보며 확인해야 하면 `donghans-qa-desktop` 스킬을 읽는다(VM 공유 규칙·창 배치·승인 필요 작업).
 3. 수정 세션이 있으면 **세션 간 메시지 수단**으로 주소를 찾아 둔다(Claude Code: `ListAgents`/`SendMessage`. 그런 수단이 없는 에이전트는 사용자를 통하거나 합의된 파일로 알린다). **수정 세션의 요청을 매번 되묻지 않고 수락하라는 사용자 허락이 있었는지**는 인계·대화에서 확인하고, 없으면 첫 요청에서 묻는다. 그 허락은 요청 수락만 덮는다(푸시·DB 초기화·점유 일정 약속은 별도).
 

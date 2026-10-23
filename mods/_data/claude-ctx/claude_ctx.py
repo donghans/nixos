@@ -9,14 +9,14 @@
   usage [--days N]     모델·일별 토큰/비용(요청 단위 usage_events 기준)
   sql "<SELECT ...>"   읽기 전용 질의
   handoff-put/handoff-get   인수인계 문서를 DB 에 올리고 받는다(머신이 달라도 resume)
-  instr list|get|sync|push|pull|diff   프로젝트별 지침(.claude/donghans-*.md)의 공유 정본 — SessionStart 훅이 sync 를 돌려 로컬 파일을 맞춘다(ctx_instr.py)
+  instr show|get|edit|set|list|sync|diff|push|pull   프로젝트별 지침(.claude/donghans-*.md)의 공유 정본(ctx_instr.py) — 읽기는 show(최신화 후 출력), 쓰기는 edit|set(DB 먼저); 로컬 파일은 읽기 전용 캐시
   secret add|list|rm|enable|disable|show|run|scan|adopt|ignore|scrub   비밀번호 등록표 · 출력 치환 · 주입 래퍼 · 후보 탐지 · 로컬 트랜스크립트 치환(ctx_secrets.py)
   (search|recent|session|sql|handoff get 의 출력은 등록된 비밀을 [protected] 로 바꾼다. --raw 는 사람이 TTY 에서만)
 
 접속: 환경변수 CLAUDE_CTX_DSN > 서버 머신이면 unix 소켓(peer) > 서버 tailnet 이름(허용 IP, trust). 비밀번호·설정 파일 없음. 머신 식별: CLAUDE_CTX_HOST 또는 hostname.
 멱등: 모든 쓰기는 자연키 ON CONFLICT, 파일 수집은 (host,path) 어드바이저리 락 + 오프셋 갱신을 같은 트랜잭션에서.
 """
-import argparse, glob, hashlib, json, os, re, socket, subprocess, sys, time
+import argparse, glob, hashlib, json, os, re, socket, subprocess, sys, tempfile, time
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -587,6 +587,66 @@ def cmd_instr_sync(a):
     return 0
 
 
+def cmd_instr_show(a):
+    """읽기 경로 — 먼저 동기화해 최신본으로 만든 뒤 보인다. 접속이 안 되면 로컬 캐시를 「낡았을 수 있음」으로 표시해 보인다."""
+    repo, main, common = _instr_target(a)
+    status, masker = "최신", None
+    try:
+        with connect(timeout=3) as c:
+            notices = ci.sync(c, repo, main, common, HOST)
+            masker = cs.load_masker(c)
+        for _, kind, msg in notices:
+            print(("⚠ " if kind in ("ahead", "conflict") else "") + msg)
+    except Exception:
+        status = "⚠ 공유 저장소 접속 실패 — 로컬 캐시, 낡았을 수 있음"
+    parts = [ci.render(main, n, a.section, status) for n in _instr_names(a)]
+    out = "".join(x for x in parts if x)
+    if not out:
+        print("(프로젝트 지침 없음)", file=sys.stderr)
+        return 0
+    print((masker.text(out) if masker else out), end="")
+    return 0
+
+
+def cmd_instr_set(a):
+    """쓰기 경로(비대화) — 파일/표준입력의 새 본문을 DB 에 먼저 쓰고 캐시를 맞춘다. 에이전트용."""
+    repo, main, common = _instr_target(a)
+    if bool(a.file) == bool(a.stdin):
+        sys.exit("--file <경로> 또는 --stdin 중 하나를 준다")
+    body = sys.stdin.read() if a.stdin else open(a.file, errors="ignore").read()
+    with connect() as c:
+        code, msg = ci.set_body(c, repo, main, a.name, body, HOST, masker=cs.load_masker(c), expect_rev=a.expect_rev)
+        ci.ensure_excluded(common)
+    print(msg)
+    return code
+
+
+def cmd_instr_edit(a):
+    """쓰기 경로(대화) — 최신본을 편집기($VISUAL·$EDITOR·vi)로 열고, 바뀌었으면 읽은 rev 기준으로 DB 에 올린다. 사람용."""
+    if not sys.stdin.isatty():
+        sys.exit("대화형 터미널에서만 쓴다 — 에이전트·스크립트는 `donghans instr set --file` 을 쓴다")
+    repo, main, common = _instr_target(a)
+    with connect() as c:
+        ci.sync(c, repo, main, common, HOST)
+        db = ci.db_rows(c, repo).get(a.name)
+    base = db["body"] if db else (ci.read_local(main, a.name) or "")
+    fd, tmp = tempfile.mkstemp(prefix="instr-", suffix=".md", dir=os.environ.get("XDG_RUNTIME_DIR") or None)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(base)
+        subprocess.run([*(os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi").split(), tmp])
+        new = open(tmp, errors="ignore").read()
+    finally:
+        os.unlink(tmp)
+    if new == base:
+        print("변경 없음"); return 0
+    with connect() as c:
+        code, msg = ci.set_body(c, repo, main, a.name, new, HOST, masker=cs.load_masker(c), expect_rev=db["rev"] if db else None)
+        ci.ensure_excluded(common)
+    print(msg)
+    return code
+
+
 def cmd_instr_push(a):
     repo, main, common = _instr_target(a)
     rc = 0
@@ -881,6 +941,9 @@ def main():
     ins = top.add_parser("instr", help="프로젝트별 지침(.claude/donghans-*.md)의 공유 정본").add_subparsers(dest="cmd", required=True)
     p = ins.add_parser("list"); p.add_argument("--repo"); p.set_defaults(f=cmd_instr_list)
     p = ins.add_parser("get"); p.add_argument("name", choices=list(ci.NAMES)); p.add_argument("--repo"); p.add_argument("--raw", action="store_true"); p.set_defaults(f=cmd_instr_get)
+    p = ins.add_parser("show", help="최신화한 뒤 지침을 보인다(읽기 경로)"); p.add_argument("name", nargs="?", choices=list(ci.NAMES)); p.add_argument("--section", action="append", default=[], help="제목에 이 말이 든 절만(여러 번 가능; 머리말은 늘 포함, override 는 늘 전체)"); p.set_defaults(f=cmd_instr_show)
+    p = ins.add_parser("set", help="새 본문을 DB 에 먼저 쓰고 캐시를 맞춘다(쓰기 경로, 비대화)"); p.add_argument("name", choices=list(ci.NAMES)); p.add_argument("--file"); p.add_argument("--stdin", action="store_true"); p.add_argument("--expect-rev", type=int, help="DB 가 이 rev 일 때만 쓴다(읽은 뒤 바뀌었으면 거부)"); p.set_defaults(f=cmd_instr_set)
+    p = ins.add_parser("edit", help="최신본을 편집기로 열어 고치고 DB 에 올린다(쓰기 경로, 대화형)"); p.add_argument("name", choices=list(ci.NAMES)); p.set_defaults(f=cmd_instr_edit)
     p = ins.add_parser("sync", help="로컬 파일을 공유 정본에 맞춘다(훅이 부른다)"); p.add_argument("--quiet", action="store_true"); p.set_defaults(f=cmd_instr_sync)
     p = ins.add_parser("push", help="로컬 파일을 공유 정본으로 올린다"); p.add_argument("name", nargs="?", choices=list(ci.NAMES)); p.add_argument("--force", action="store_true"); p.set_defaults(f=cmd_instr_push)
     p = ins.add_parser("pull", help="공유 정본으로 로컬 파일을 덮는다"); p.add_argument("name", nargs="?", choices=list(ci.NAMES)); p.add_argument("--force", action="store_true"); p.set_defaults(f=cmd_instr_pull)

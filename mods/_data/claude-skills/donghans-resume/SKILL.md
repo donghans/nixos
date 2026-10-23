@@ -21,9 +21,9 @@ description: 새(또는 /clear 한) 세션에서 `/donghans-resume <고유번호
 `resume.py` 는 로컬에 인수인계 기록이 없으면 공유 저장소(Postgres)에서 받아 온다(다른 머신에서 만든 인수인계). 더 파고들 때는 추측하기 전에 `donghans ctx search "<키워드>" --here --role user`, `donghans ctx session <세션ID> --from <uuid8> --to <uuid8>` (인수인계 인덱스의 「근거 대화 범위」) 로 *필요한 구간만* 조회한다. 결과의 `repo_url` 이 현재 저장소와 같은지 확인한다. 접속 실패는 조용히 넘기지 말고 보고한다.
 
 ## 프로젝트별 지침 (선택, 보통 `.git/info/exclude` 로 추적 제외)
-저장소 루트의 `.claude/donghans-instructions.md`(기본 절차에 **추가 적용**)와 `.claude/donghans-override.md`(기본 절차와 **충돌하면 이쪽이 우선**)가 있으면 따른다. `resume.py` 가 두 파일의 내용을 출력하므로 따로 읽을 필요 없다(출력에 없으면 해당 파일이 없는 것). 사실 수집 스크립트를 더하고 싶으면 실행 파일 `.claude/resume-extra`.
+저장소 루트의 `.claude/donghans-instructions.md`(기본 절차에 **추가 적용**)와 `.claude/donghans-override.md`(기본 절차와 **충돌하면 이쪽이 우선**)가 있으면 따른다. `resume.py` 가 `donghans instr show --section "resume 할 때"` 로 최신화한 뒤 해당 절을 보이므로 따로 읽을 필요 없다(출력에 지침이 없으면 지침이 없는 것). 「생략된 절」 안내(예: 수정 세션용 절)가 나오고 그 내용이 필요하면 `donghans instr show` 로 전체를 본다. 사실 수집 스크립트를 더하고 싶으면 실행 파일 `.claude/resume-extra`.
 
-> **공유 정본(2026-10-23)**: 이 두 파일의 정본은 공유 저장소(ctx DB)이고 로컬 파일은 캐시다. `claude` 래퍼의 SessionStart 훅이 세션 시작 때 자동으로 맞춘다(없으면 만들고, DB 가 더 새로우면 갱신, `.git/info/exclude` 도 보정). **고쳤다면 `donghans instr push` 로 올려야 다른 기기에 반영된다.** 앞섬·충돌은 알림만 하고 덮지 않는다(`donghans instr diff`). 본문에 비밀 값을 적지 말 것(올릴 때 등록표로 검사해 거부).
+> **공유 정본(2026-10-23)**: 이 두 파일의 정본은 공유 저장소(ctx DB)이고 로컬 파일은 읽기 전용 캐시다. 읽기는 `donghans instr show`(최신화 후 출력), 고치기는 `donghans instr edit|set`(DB 먼저). `claude` 래퍼의 SessionStart 훅도 세션 시작 때 맞춘다(없으면 만들고, DB 가 더 새로우면 갱신, `.git/info/exclude` 도 보정). 캐시를 우회해 직접 고친 앞섬·충돌은 알림만 하고 덮지 않는다(`donghans instr diff`). 본문에 비밀 값을 적지 말 것(올릴 때 등록표로 검사해 거부).
 
 ## 지켜야 할 것
 - **사용량 수치는 스냅샷이다.** 5h/7d 한도는 계정 공통인데 기록은 상태 표시줄이 그릴 때만 남는다. 동시에 도는 다른 세션이 올린 만큼은 늦게 반영되므로 `resume.py` 의 「사용량 스냅샷」(기록 시각 포함)을 「약 N% 이상」으로 전하고, 한도 판단은 `claude-limit-watch`(전 세션 기록 기준)나 사용자가 보는 `/usage` 를 우선한다.

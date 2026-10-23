@@ -265,7 +265,7 @@ in {
             알림이 오면 하던 일을 멈추고 사용자에게 알리세요. 70% 이상에서는 새 작업을 시작하지 말고 묻습니다.
 
           # 세션 이어가기·지침 동기화
-          - 프로젝트별 지침(`.claude/donghans-instructions.md`·`donghans-override.md`)은 공유 저장소가 정본이고 세션 시작 때 자동으로 맞춰집니다. 이 파일을 고쳤다면 `donghans instr push` 로 올려야 다른 기기에 반영됩니다(`donghans instr diff` 로 차이 확인).
+          - 프로젝트별 지침(`.claude/donghans-instructions.md`·`donghans-override.md`)은 공유 저장소가 정본이고 로컬 파일은 읽기 전용 캐시입니다. 읽을 때는 `donghans instr show`(최신화 후 출력), 고칠 때는 `donghans instr set <이름> --file …`(사람은 `edit`)로 하세요 — 파일을 직접 고치지 마세요.
           - 세션을 닫거나 `/clear` 하기 전에는 `/donghans-handoff`, 새 세션에서는 `/donghans-resume <고유번호>` 로 이어갑니다.
 
           # 공유 컨텍스트 (여러 머신·프로젝트의 대화/사용량 저장소 — Postgres, `donghans ctx` 명령)

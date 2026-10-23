@@ -13,6 +13,11 @@
   - 올릴 때 본문에 **등록된 비밀 값**이 들어 있으면 거부한다.
   - 실행 파일(`qa-extra`·`resume-extra`)은 동기화하지 않는다 — DB 에서 받은 코드를 실행하는 구조가 되기 때문이다.
 순수 판정(`plan`)은 DB 없이 시험한다.
+
+명령 경유(사용자 결정 2026-10-23 — 읽을 때도 최신본이어야 해서 파일 직접 읽기·쓰기를 줄인다):
+  - **읽기**는 `donghans instr show [--section 절]` — 먼저 동기화(최신화)하고 보여 준다. 접속 실패면 로컬 캐시를 「낡았을 수 있음」 표시와 함께 보인다.
+  - **쓰기**는 `donghans instr edit|set` — DB 에 낙관적 잠금(rev)으로 먼저 쓰고 캐시를 맞춘다. 캐시 파일은 읽기 전용(0444)이라 직접 고치면 막힌다
+    (우회하면 위의 `ahead`·`conflict` 로 잡힌다 — 그 판정표는 안전망으로 남는다. `push`/`pull` 도 이전 방식·복구용으로 남긴다).
 """
 from __future__ import annotations
 
@@ -109,12 +114,68 @@ def read_local(main, name):
 
 
 def write_local(main, name, text):
+    """캐시를 쓴다(읽기 전용으로 — 직접 편집 대신 `donghans instr edit|set`). 기존 읽기 전용 파일도 교체된다."""
     p = local_path(main, name)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     tmp = p + ".tmp"
     with open(tmp, "w") as f:
         f.write(text)
+    os.chmod(tmp, 0o444)
     os.replace(tmp, p)
+
+
+def lock_local(main, name):
+    """DB 와 같아진 캐시 파일을 읽기 전용으로 잠근다(이미 잠겼으면 아무것도 안 한다)."""
+    p = local_path(main, name)
+    try:
+        if os.path.isfile(p) and os.stat(p).st_mode & 0o222:
+            os.chmod(p, 0o444)
+    except OSError:
+        pass
+
+
+ROLE = {"instructions": "추가 지침 — 기본 절차에 더해 적용", "override": "오버라이드 — 충돌하는 기본 절차보다 우선"}
+
+
+def split_sections(body):
+    """본문을 (머리말, [절 본문…]) 으로 나눈다. 절 = `## ` 로 시작하는 줄부터 다음 `## ` 앞까지(`###` 은 절이 아님)."""
+    pre, secs = [], []
+    for line in body.splitlines(keepends=True):
+        if line.startswith("## "):
+            secs.append([line])
+        elif secs:
+            secs[-1].append(line)
+        else:
+            pre.append(line)
+    return "".join(pre), ["".join(s) for s in secs]
+
+
+def select_sections(body, wanted):
+    """제목에 wanted 중 하나가 들어간 절만 고른다(머리말은 늘 포함, wanted 가 비면 전체). (본문, 생략한 절 제목 목록)"""
+    if not wanted:
+        return body, []
+    pre, secs = split_sections(body)
+    keep, omitted = [pre], []
+    for s in secs:
+        title = s.split("\n", 1)[0][3:].strip()
+        if any(w in title for w in wanted):
+            keep.append(s)
+        else:
+            omitted.append(title)
+    return "".join(keep), omitted
+
+
+def render(main, name, wanted, status):
+    """`instr show` 가 보이는 한 파일 분량. 파일이 없으면 None. override 는 짧고 우선하므로 절을 고르지 않고 전체를 보인다."""
+    local = read_local(main, name)
+    if local is None:
+        return None
+    body, omitted = select_sections(local, wanted) if name == "instructions" else (local, [])
+    rev = (load_state(main).get(name) or {}).get("rev", "?")
+    out = f"## 프로젝트 지침: .claude/{NAMES[name]} ({ROLE[name]} · rev {rev} · {status})\n{body.rstrip(chr(10))}\n"
+    if omitted:
+        out += f"(생략된 절 {len(omitted)}개: " + " · ".join(omitted) + " — 전체는 `donghans instr show`)\n"
+    return out
 
 
 def db_rows(conn, repo_url) -> dict:
@@ -143,13 +204,15 @@ def sync(conn, repo_url, main, common, host, adopt=True):
     for name in NAMES:
         local, st, db = read_local(main, name), state.get(name), rows.get(name)
         act = plan(local, st, db)
+        if act == "noop" and local is not None and db is not None:
+            lock_local(main, name)
         if act == "write":
             write_local(main, name, db["body"]); state[name] = {"rev": db["rev"], "sha": sha(db["body"])}; touched = True
             notices.append((name, "updated", f"{NAMES[name]} 를 공유 저장소 rev {db['rev']} 로 갱신했다"))
         elif act == "record":
-            state[name] = {"rev": db["rev"], "sha": sha(local)}; touched = True
+            state[name] = {"rev": db["rev"], "sha": sha(local)}; touched = True; lock_local(main, name)
         elif act == "adopt" and adopt:
-            _insert(conn, repo_url, name, local, host); state[name] = {"rev": 1, "sha": sha(local)}; touched = True
+            _insert(conn, repo_url, name, local, host); state[name] = {"rev": 1, "sha": sha(local)}; touched = True; lock_local(main, name)
             notices.append((name, "adopted", f"{NAMES[name]} 를 공유 저장소에 처음 올렸다(rev 1)"))
         elif act == "ahead":
             notices.append((name, "ahead", f"{NAMES[name]} 가 공유 저장소보다 새롭다 — `donghans instr push {name}` 로 올려야 다른 기기에 반영된다"))
@@ -174,7 +237,7 @@ def push(conn, repo_url, main, name, host, force=False, masker=None):
     if db is None:
         rev = _insert(conn, repo_url, name, local, host)
     elif sha(local) == sha(db["body"]):
-        state[name] = {"rev": db["rev"], "sha": sha(local)}; save_state(main, state)
+        state[name] = {"rev": db["rev"], "sha": sha(local)}; save_state(main, state); lock_local(main, name)
         return 0, f"{name}: 이미 공유 저장소와 같다(rev {db['rev']})"
     else:
         st = state.get(name)
@@ -183,8 +246,34 @@ def push(conn, repo_url, main, name, host, force=False, masker=None):
         rev = _update(conn, repo_url, name, local, host, db["rev"])
         if rev is None:
             return 1, f"{name}: 올리는 사이에 다른 기기가 먼저 바꿨다 — 다시 시도"
-    state[name] = {"rev": rev, "sha": sha(local)}; save_state(main, state)
+    state[name] = {"rev": rev, "sha": sha(local)}; save_state(main, state); lock_local(main, name)
     return 0, f"{name}: 공유 저장소에 올렸다(rev {rev})"
+
+
+def set_body(conn, repo_url, main, name, body, host, masker=None, expect_rev=None):
+    """새 본문을 DB 에 먼저 쓰고(낙관적 잠금) 캐시를 맞춘다 — `instr edit|set` 의 본체. (결과코드, 메시지).
+    expect_rev 를 주면 DB 가 그 rev 일 때만 쓴다(읽은 뒤 다른 기기가 바꿨으면 거부). 주지 않으면 지금 DB 의 rev 기준(마지막에 쓴 쪽이 이긴다)."""
+    if not body.strip():
+        return 1, f"{name}: 빈 본문은 올리지 않는다"
+    if masker is not None and masker.text(body) != body:
+        return 1, "본문에 등록된 비밀 값이 들어 있어 올리지 않는다 — 비밀은 `donghans secret` 으로 두고 지침에는 이름만 적는다"
+    db = db_rows(conn, repo_url).get(name)
+    if db is not None and expect_rev is not None and db["rev"] != expect_rev:
+        return 1, f"{name}: 읽은 뒤 공유 저장소가 rev {db['rev']} 로 바뀌었다(기대 rev {expect_rev}) — 최신본(`donghans instr get {name}`)에서 다시 고친다"
+    if db is None:
+        try:
+            rev = _insert(conn, repo_url, name, body, host)
+        except Exception:
+            return 1, f"{name}: 올리는 사이에 다른 기기가 먼저 만들었다 — 다시 시도"
+    elif sha(body) == sha(db["body"]):
+        rev = db["rev"]
+    else:
+        rev = _update(conn, repo_url, name, body, host, db["rev"])
+        if rev is None:
+            return 1, f"{name}: 올리는 사이에 다른 기기가 먼저 바꿨다 — 다시 시도"
+    write_local(main, name, body)
+    state = load_state(main); state[name] = {"rev": rev, "sha": sha(body)}; save_state(main, state)
+    return 0, f"{name}: 공유 저장소에 올렸다(rev {rev})" + ("" if db is None or sha(body) != sha(db["body"]) else " — 이미 같은 내용")
 
 
 def pull(conn, repo_url, main, name, force=False):

@@ -57,13 +57,14 @@ if not rec:
     print('## 인수인계 기록 없음' + (f' (ID {a.id})' if a.id else ''))
     print('등록 목록: resume.py --list. 기록이 없어도 트랜스크립트가 있으면 사용자 메시지만 복원한다.')
 
-def sync_instructions(cwd):
-    """프로젝트 지침을 공유 저장소(ctx)와 맞춘다 — SessionStart 훅이 못 돌았을 때(래퍼 없이 시작한 세션 등)를 위한 보강. 접속 실패는 조용히 로컬 파일을 쓴다."""
+def show_instructions(cwd, sections):
+    """프로젝트 지침을 `donghans instr show` 로 읽는다 — 먼저 공유 저장소와 맞춘(최신화) 뒤 해당 절만 보인다(접속 실패면 캐시를 「낡았을 수 있음」으로 표시).
+    명령을 못 쓰면 None(→ 아래에서 파일을 직접 읽는다)."""
     try:
-        r = subprocess.run(['donghans', 'instr', 'sync', '--quiet'], cwd=cwd, capture_output=True, text=True, timeout=8)
-        return r.stdout.strip() if r.returncode == 0 else '(공유 저장소 접속 실패 — 로컬 파일을 그대로 쓴다)'
+        r = subprocess.run(['donghans', 'instr', 'show', *[x for s in sections for x in ('--section', s)]], cwd=cwd, capture_output=True, text=True, timeout=15)
+        return r.stdout if r.returncode == 0 else None
     except Exception:
-        return ''
+        return None
 
 
 if rec:
@@ -94,12 +95,14 @@ if rec:
             if br and d.get('worktree') != repo and subprocess.run(['git', 'merge-base', '--is-ancestor', br, 'HEAD'], cwd=repo).returncode != 0:
                 un.append(f"- {br} ({len(sh('git','log','--oneline','HEAD..'+br,cwd=repo).splitlines())}커밋 앞) {d.get('worktree')}")
         print('미병합 워크트리 브랜치:', '(없음)' if not un else ''); [print(x) for x in un]
-    _sy = sync_instructions(repo) if os.path.isdir(repo) else ''
-    if _sy: print('\n## 프로젝트 지침 동기화(공유 저장소)'); print(_sy)
-    for nm, why in (('donghans-instructions.md', '추가 지침 — 기본 절차에 더해 적용'), ('donghans-override.md', '오버라이드 — 충돌하는 기본 절차보다 우선')):
-        pf = os.path.join(repo, '.claude', nm)
-        if os.path.isfile(pf):
-            print(f'\n## 프로젝트 지침: .claude/{nm} ({why})'); print(open(pf, errors="ignore").read().strip())
+    shown = show_instructions(repo, ['resume 할 때']) if os.path.isdir(repo) else None   # 읽기는 명령 경유 — 최신화 후 「resume 할 때」 절만(생략한 절은 안내됨)
+    if shown:
+        print('\n' + shown.rstrip())
+    elif shown is None:   # donghans 명령을 못 쓰면 파일을 그대로 읽는다(낡았을 수 있음)
+        for nm, why in (('donghans-instructions.md', '추가 지침 — 기본 절차에 더해 적용'), ('donghans-override.md', '오버라이드 — 충돌하는 기본 절차보다 우선')):
+            pf = os.path.join(repo, '.claude', nm)
+            if os.path.isfile(pf):
+                print(f'\n## 프로젝트 지침: .claude/{nm} ({why}) — ⚠ donghans 명령을 못 써서 로컬 파일을 직접 읽음, 낡았을 수 있음'); print(open(pf, errors="ignore").read().strip())
     dd = os.path.splitext(rec['doc'])[0].replace('HANDOFF-', '')  # 상세 문서 디렉터리: <doc 디렉터리>/<세션ID>/
     dd = os.path.join(os.path.dirname(rec['doc']), rec.get('id') or os.path.basename(dd))
     if os.path.isdir(dd):
