@@ -96,6 +96,15 @@ def do_init(top, main):
     print("확인: `git status --short` 에 .claude/donghans-* 가 나타나면 안 된다.")
 
 
+def sync_instructions(cwd):
+    """프로젝트 지침을 공유 저장소(ctx)와 맞춘다 — SessionStart 훅이 못 돌았을 때(래퍼 없이 시작한 세션 등)를 위한 보강. 접속 실패는 조용히 로컬 파일을 쓴다."""
+    try:
+        r = subprocess.run(['donghans', 'instr', 'sync', '--quiet'], cwd=cwd, capture_output=True, text=True, timeout=8)
+        return r.stdout.strip() if r.returncode == 0 else '(공유 저장소 접속 실패 — 로컬 파일을 그대로 쓴다)'
+    except Exception:
+        return ''
+
+
 def main_():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     init = "--init" in sys.argv[1:]
@@ -114,6 +123,9 @@ def main_():
     print("\n## git worktree")
     print(sh("git", "worktree", "list", cwd=top)[0])
 
+    _sy = sync_instructions(main)
+    if _sy:
+        print("\n## 프로젝트 지침 동기화(공유 저장소)"); print(_sy)
     found = False
     for nm in NAMES[:2]:
         pf, base = find_file(nm, top, main)

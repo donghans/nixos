@@ -42,6 +42,26 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 - 원본 한 줄이 100KB 를 넘으면 `raw` 는 잘려 저장된다(`raw->>'truncated'`); 정본은 각 머신의 트랜스크립트.
 - 훅은 `claude` 셸 래퍼로 띄운 세션에만 걸린다(VSCode 확장 등은 타이머 백필만). `claude -p` 에서는 Stop 훅이 기록되지 않았다(SessionEnd 로 보충됨).
 
+## 프로젝트별 지침 공유 (2026-10-23) — `donghans instr`
+
+**동기**: 프로젝트별 지침(`.claude/donghans-instructions.md`·`donghans-override.md`, `.git/info/exclude` 로 추적 제외)이 그 컴퓨터 디스크에만 있어 다른 기기·재설치 후에는 사라졌다.
+
+**구조**: 정본 = DB 표 `project_instructions(repo_url, name, body, rev, updated_host, updated_at)`(PK `repo_url+name`, `repo_url` 은 `norm_repo` 정규화 — 워크트리·다른 기기가 같은 키). 로컬 파일은 **캐시**다. `claude` 래퍼가 `--settings` 로 주입하는 훅 중 `SessionStart` 가 `donghans ctx hook SessionStart` → `ctx_instr.sync` 를 돌려 파일을 맞춘다 — 그래서 읽는 쪽(`donghans-resume`·`donghans-qa`)은 같은 경로의 파일을 읽는 그대로이고, 훅이 못 돈 세션(래퍼 없이 시작)을 위해 두 스크립트도 시작 때 `donghans instr sync --quiet` 를 한 번 부른다(접속 실패는 조용히 로컬 파일 사용).
+
+**동기화 규칙**(`ctx_instr.plan` 판정표 · 마지막 동기화 상태 rev·sha 는 `.claude/.donghans-instr-state.json`):
+
+| 로컬 | DB | 결과 |
+|---|---|---|
+| 없음 | 있음 | DB 본문으로 파일 생성 + `.git/info/exclude` 보정 |
+| 있음 | 없음 | **첫 채택** — DB 에 올림(rev 1). 덮을 것이 없다 |
+| 손대지 않음(상태 sha 일치) | 더 새로움 | DB 로 갱신 |
+| 고침 | 그대로(rev 일치) | **앞섬** — 알림만. 훅은 절대 올리지 않는다(`donghans instr push` 로 명시) |
+| 고침 | 바뀜 · 또는 상태 기록 없는 기존 파일이 DB 와 다름 | **충돌** — 어느 쪽도 안 덮는다. `diff` 후 `push --force`/`pull --force` |
+
+**안전장치**: 올릴 때 본문에 등록된 비밀 값이 있으면 거부(`secrets` 등록표) · 올리기는 `WHERE rev = 읽은 값` 낙관적 잠금(다른 기기가 먼저 바꿨으면 거부) · 실행 파일(`qa-extra`·`resume-extra`)은 동기화하지 않는다(DB 에서 받은 코드를 실행하게 되므로) · 훅은 프롬프트에 **본문을 주입하지 않고**, 파일이 바뀌었거나 앞섬·충돌일 때만 한 줄 알림을 `additionalContext` 로 낸다 · 훅 실패는 입력을 막지 않는다(기존 규칙).
+
+**시험**: `claude-ctx/tests/test_instr.py` — 판정표 9행 · 워크트리 루트 · exclude 멱등 · 두 기기 시나리오(채택→갱신→앞섬→충돌→강제) · 비밀 거부 · 낙관적 잠금 · 훅 end-to-end. 변이(앞섬을 덮어쓰기로 / 비밀 검사 제거)로 시험이 실제로 실패함을 확인했다. **한계**: 실제 `beelink-ser7-co` DB 에서의 실행은 스키마 적용(`nixup`) 뒤 한 번 확인해야 한다.
+
 ## 비밀번호 관리 (2026-10-23) — 등록표 · 출력 치환 · 주입 래퍼 · 후보 탐지 · 로컬 치환 · ctxui
 **목적**: Claude 등이 ctx 를 불러갈 때 비밀번호·토큰·키가 대화에 실려 나가지 않게 하고(출력 치환), 비밀이 필요한 명령은 값을 대화에 적지 않고 실행하게 한다(주입 래퍼).
 **사용자 결정**: ① 등록표는 ctx DB(Postgres)에 **평문 저장** — DB 는 허용된 tailnet 기기만 접속하는 설계이고, 분산된 비밀 키 관리의 복잡도를 늘리지 않는다. ② DB 원문(messages·hook_events)은 **바꾸지 않는다**. ③ 이미 DB 에 적재된 **로컬** 트랜스크립트 사본만 치환한다. ④ 기존 데이터 일괄 치환은 별도 명령(`scrub`).

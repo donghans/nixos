@@ -23,6 +23,8 @@ description: 새(또는 /clear 한) 세션에서 `/donghans-resume <고유번호
 ## 프로젝트별 지침 (선택, 보통 `.git/info/exclude` 로 추적 제외)
 저장소 루트의 `.claude/donghans-instructions.md`(기본 절차에 **추가 적용**)와 `.claude/donghans-override.md`(기본 절차와 **충돌하면 이쪽이 우선**)가 있으면 따른다. `resume.py` 가 두 파일의 내용을 출력하므로 따로 읽을 필요 없다(출력에 없으면 해당 파일이 없는 것). 사실 수집 스크립트를 더하고 싶으면 실행 파일 `.claude/resume-extra`.
 
+> **공유 정본(2026-10-23)**: 이 두 파일의 정본은 공유 저장소(ctx DB)이고 로컬 파일은 캐시다. `claude` 래퍼의 SessionStart 훅이 세션 시작 때 자동으로 맞춘다(없으면 만들고, DB 가 더 새로우면 갱신, `.git/info/exclude` 도 보정). **고쳤다면 `donghans instr push` 로 올려야 다른 기기에 반영된다.** 앞섬·충돌은 알림만 하고 덮지 않는다(`donghans instr diff`). 본문에 비밀 값을 적지 말 것(올릴 때 등록표로 검사해 거부).
+
 ## 지켜야 할 것
 - **사용량 수치는 스냅샷이다.** 5h/7d 한도는 계정 공통인데 기록은 상태 표시줄이 그릴 때만 남는다. 동시에 도는 다른 세션이 올린 만큼은 늦게 반영되므로 `resume.py` 의 「사용량 스냅샷」(기록 시각 포함)을 「약 N% 이상」으로 전하고, 한도 판단은 `claude-limit-watch`(전 세션 기록 기준)나 사용자가 보는 `/usage` 를 우선한다.
 - 푸시·DB 초기화·백필 등 되돌리기 어려운 일은 사용자 허가 전에 하지 않는다.

@@ -109,11 +109,11 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # (목적: 여러 머신·프로젝트의 대화·사용량을 공유 저장소(Postgres, mods.sys.services.claude-ctx)에 이벤트 시점에 적재)
   # 클라이언트 CLI `donghans`: `donghans ctx hook|ingest|search|recent|session|usage|sql` / `donghans handoff put|get`.
   # 접속 문자열은 ~/.config/claude-ctx/dsn (nix 밖, 권한 600 — 비밀번호가 스토어에 남지 않게). 서버 위치는 거기서만 바꾼다.
-  # 여러 파일(claude_ctx: 명령, ctx_secrets: 비밀 등록표·치환·주입·후보 탐지·로컬 치환, ctxdata/ctxui: 관리 TUI, uikit: TUI 공통 틀)을 한 디렉터리에 모아 실행한다
+  # 여러 파일(claude_ctx: 명령, ctx_secrets: 비밀 등록표·치환·주입·후보 탐지·로컬 치환, ctx_instr: 프로젝트별 지침 공유 동기화, ctxdata/ctxui: 관리 TUI, uikit: TUI 공통 틀)을 한 디렉터리에 모아 실행한다
   # (observe 의 usageui 와 같은 방식). 훅·타이머·사용자가 부르는 `donghans` 는 모두 이 래퍼다.
   ctxSrc = pkgs.runCommand "claude-ctx-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/claude-ctx + "/${f}"} $out/${f}") ["claude_ctx.py" "ctx_secrets.py" "ctxdata.py" "ctxui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/claude-ctx + "/${f}"} $out/${f}") ["claude_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctxdata.py" "ctxui.py"]}
     cp ${../../_data/_uikit/uikit.py} $out/uikit.py
   '';
   claudeCtx = pkgs.writeShellScriptBin "donghans" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg])}/bin/python3 ${ctxSrc}/claude_ctx.py "$@"'';
@@ -263,6 +263,7 @@ in {
           - 큰 작업 직전에 한도 감시를 거세요: `echo $CLAUDE_CODE_SESSION_ID` 의 앞 8자로
             `claude-limit-watch <접두>` 를 Monitor 로 실행합니다(5시간 한도가 10분 내 +5포인트 오르거나 50/70/80/90% 도달 시 알림).
             알림이 오면 하던 일을 멈추고 사용자에게 알리세요. 70% 이상에서는 새 작업을 시작하지 말고 묻습니다.
+          - 프로젝트별 지침(`.claude/donghans-instructions.md`·`donghans-override.md`)은 공유 저장소가 정본이고 세션 시작 때 자동으로 맞춰집니다. 이 파일을 고쳤다면 `donghans instr push` 로 올려야 다른 기기에 반영됩니다(`donghans instr diff` 로 차이 확인).
           - 세션을 닫거나 `/clear` 하기 전에는 `/donghans-handoff`, 새 세션에서는 `/donghans-resume <고유번호>` 로 이어갑니다.
           # 공유 컨텍스트 (여러 머신·프로젝트의 대화/사용량 저장소 — Postgres, `donghans ctx` 명령)
           - 「이전 세션에서 뭘 했는지 모르겠다」「그때 사용자가 뭐라고 했나」「다른 머신에서 하던 작업」처럼 **지난 대화·결정의 근거**가 필요하면,

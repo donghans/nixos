@@ -22,6 +22,9 @@ description: 여러 머신·프로젝트의 지난 에이전트(현재는 Claude
 - 기록에는 고객사 데이터·시크릿이 섞여 있을 수 있으니 **원문을 외부로 보내지 않는다.**
 - 구조·이관·멱등성 설명은 `~/nixos/_docs/content/explanation/claude-ctx.md`.
 
+## 프로젝트별 지침 (`donghans instr`)
+`.claude/donghans-instructions.md`·`donghans-override.md` 의 공유 정본. SessionStart 훅이 자동 동기화하므로 보통 손댈 일이 없고, **고친 뒤에만** `donghans instr push [instructions|override]`. 그 밖: `list`(저장소의 정본 목록) · `get <이름>` · `diff` · `pull [--force]` · `sync`. 앞섬(로컬이 새로움)·충돌(양쪽 변경)은 덮지 않고 알림만 한다 — `diff` 로 보고 `push --force`/`pull --force`. 본문에 비밀 값을 적지 않는다(올릴 때 거부). 실행 파일 `qa-extra`·`resume-extra` 는 동기화 대상이 아니다. 설계 → `~/nixos/_docs/content/explanation/claude-ctx.md` 「프로젝트별 지침」.
+
 ## 비밀번호·토큰 (등록표 · 출력 치환 · 주입 래퍼)
 사용자는 비밀번호·토큰·API 키를 **등록표**에 평문으로 등록해 둔다(ctx DB 의 `secrets` 표; 등록·관리는 사람이 `donghans secret add` 또는 `ctxui` 로 한다).
 - **출력 치환**: 등록된 값은 `donghans ctx search|recent|session|sql|handoff` 출력과 `donghans secret run` 의 하위 프로세스 출력에서 `[protected]` 로 바뀐다. DB 원문은 그대로다. 등록된 비밀이 들어 있는 검색어는 거부된다(존재 여부가 드러나므로).

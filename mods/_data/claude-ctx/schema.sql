@@ -137,3 +137,15 @@ CREATE TABLE IF NOT EXISTS secret_ignores (
 CREATE TABLE IF NOT EXISTS schema_version (v int PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());
 INSERT INTO schema_version (v) VALUES (1) ON CONFLICT DO NOTHING;
 INSERT INTO schema_version (v) VALUES (2) ON CONFLICT DO NOTHING;  -- 2: secrets, secret_ignores
+
+-- 프로젝트별 지침(`.claude/donghans-instructions.md`·`donghans-override.md`)의 공유 정본 — 로컬 파일은 SessionStart 훅이 만드는 캐시(ctx_instr.py).
+-- rev 는 낙관적 잠금: 올릴 때 `WHERE rev = 읽은 값` 이 아니면 거부한다(다른 기기가 먼저 바꾼 것을 덮지 않는다). 본문에 비밀 값을 두지 않는다(올릴 때 등록표로 검사).
+CREATE TABLE IF NOT EXISTS project_instructions (
+  repo_url     text NOT NULL,
+  name         text NOT NULL CHECK (name IN ('instructions', 'override')),
+  body         text NOT NULL,
+  rev          integer NOT NULL DEFAULT 1,
+  updated_host text NOT NULL,
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (repo_url, name)
+);

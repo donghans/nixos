@@ -57,6 +57,15 @@ if not rec:
     print('## 인수인계 기록 없음' + (f' (ID {a.id})' if a.id else ''))
     print('등록 목록: resume.py --list. 기록이 없어도 트랜스크립트가 있으면 사용자 메시지만 복원한다.')
 
+def sync_instructions(cwd):
+    """프로젝트 지침을 공유 저장소(ctx)와 맞춘다 — SessionStart 훅이 못 돌았을 때(래퍼 없이 시작한 세션 등)를 위한 보강. 접속 실패는 조용히 로컬 파일을 쓴다."""
+    try:
+        r = subprocess.run(['donghans', 'instr', 'sync', '--quiet'], cwd=cwd, capture_output=True, text=True, timeout=8)
+        return r.stdout.strip() if r.returncode == 0 else '(공유 저장소 접속 실패 — 로컬 파일을 그대로 쓴다)'
+    except Exception:
+        return ''
+
+
 if rec:
     repo = rec['repo']
     print('## 인수인계 기록')
@@ -85,6 +94,8 @@ if rec:
             if br and d.get('worktree') != repo and subprocess.run(['git', 'merge-base', '--is-ancestor', br, 'HEAD'], cwd=repo).returncode != 0:
                 un.append(f"- {br} ({len(sh('git','log','--oneline','HEAD..'+br,cwd=repo).splitlines())}커밋 앞) {d.get('worktree')}")
         print('미병합 워크트리 브랜치:', '(없음)' if not un else ''); [print(x) for x in un]
+    _sy = sync_instructions(repo) if os.path.isdir(repo) else ''
+    if _sy: print('\n## 프로젝트 지침 동기화(공유 저장소)'); print(_sy)
     for nm, why in (('donghans-instructions.md', '추가 지침 — 기본 절차에 더해 적용'), ('donghans-override.md', '오버라이드 — 충돌하는 기본 절차보다 우선')):
         pf = os.path.join(repo, '.claude', nm)
         if os.path.isfile(pf):

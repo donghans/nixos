@@ -9,6 +9,7 @@
   usage [--days N]     모델·일별 토큰/비용(요청 단위 usage_events 기준)
   sql "<SELECT ...>"   읽기 전용 질의
   handoff-put/handoff-get   인수인계 문서를 DB 에 올리고 받는다(머신이 달라도 resume)
+  instr list|get|sync|push|pull|diff   프로젝트별 지침(.claude/donghans-*.md)의 공유 정본 — SessionStart 훅이 sync 를 돌려 로컬 파일을 맞춘다(ctx_instr.py)
   secret add|list|rm|enable|disable|show|run|scan|adopt|ignore|scrub   비밀번호 등록표 · 출력 치환 · 주입 래퍼 · 후보 탐지 · 로컬 트랜스크립트 치환(ctx_secrets.py)
   (search|recent|session|sql|handoff get 의 출력은 등록된 비밀을 [protected] 로 바꾼다. --raw 는 사람이 TTY 에서만)
 
@@ -20,6 +21,7 @@ import argparse, glob, hashlib, json, os, re, socket, subprocess, sys, time
 import psycopg
 from psycopg.types.json import Jsonb
 
+import ctx_instr as ci
 import ctx_secrets as cs
 
 HOST = os.environ.get("CLAUDE_CTX_HOST") or socket.gethostname()
@@ -303,6 +305,15 @@ def ingest_otel(conn):
 
 
 # ---------------------------------------------------------------- 명령
+def _instr_hook(conn, cwd):
+    """SessionStart: 프로젝트 지침 파일을 공유 정본과 맞춘다(ctx_instr). 알릴 것이 없으면 None. 실패는 훅 전체의 실패 기록으로 흘러간다."""
+    g, r = git_meta(cwd), ci.roots(cwd)
+    if not g.get("repo_url") or not r:
+        return None
+    notices = ci.sync(conn, g["repo_url"], r[0], r[1], HOST)
+    return ("프로젝트 지침 동기화: " + "; ".join(m for _, _, m in notices)) if notices else None
+
+
 def cmd_hook(a):
     raw = sys.stdin.read()
     try:
@@ -321,6 +332,10 @@ def cmd_hook(a):
                             (HOST, sid, a.event, p.get("prompt_id"), cwd, Jsonb(p), hashlib.md5(body.encode()).hexdigest()))
                 if sid:
                     upsert_session(cur, sid, cwd, p.get("transcript_path"))
+            if a.event == "SessionStart":
+                msg = _instr_hook(conn, p.get("cwd"))
+                if msg:  # 파일이 바뀌었거나 사람이 볼 것이 있을 때만 짧게 알린다 — 지침 본문을 프롬프트에 주입하지 않는다
+                    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": msg}}, ensure_ascii=False))
             tp = p.get("transcript_path")
             if tp and os.path.isfile(tp) and a.event in ("Stop", "SubagentStop", "SessionEnd", "PreCompact", "UserPromptSubmit"):
                 for f in transcript_family(tp):
@@ -517,6 +532,92 @@ def cmd_handoff_get(a):
     print(json.dumps(dict(id=sid, host=host, repo_url=rurl, repo_root=root, head=head, branch=br, note=note, doc=name, created=str(created), details=list((details or {}).keys())), ensure_ascii=False))
     if not out:
         print(text)
+    return 0
+
+
+# ---------------------------------------------------------------- 프로젝트별 지침(ctx_instr)
+def _instr_target(a, need_local=True):
+    cwd = os.getcwd()
+    g, r = git_meta(cwd), ci.roots(cwd)
+    repo = norm_repo(getattr(a, "repo", None)) or g.get("repo_url")
+    if not repo:
+        sys.exit("저장소를 알 수 없다 — git 저장소 안에서 실행하거나 --repo 를 준다")
+    if need_local and not r:
+        sys.exit("git 저장소 안에서 실행해야 한다(로컬 파일 위치를 알아야 한다)")
+    return repo, (r[0] if r else None), (r[1] if r else None)
+
+
+def _instr_names(a):
+    n = getattr(a, "name", None)
+    if n and n not in ci.NAMES:
+        sys.exit(f"이름은 {' | '.join(ci.NAMES)} 중 하나")
+    return [n] if n else list(ci.NAMES)
+
+
+def cmd_instr_list(a):
+    repo, _, _ = _instr_target(a, need_local=False)
+    with connect(readonly=True) as c:
+        rows = c.execute("SELECT name, rev, updated_host, updated_at, length(body) FROM project_instructions WHERE repo_url=%s ORDER BY name", (repo,)).fetchall()
+    print(f"저장소 {repo}")
+    for n, rev, host, at, ln in rows:
+        print(f"- {n}: rev {rev} · {ln}자 · {host} · {at:%F %T}")
+    if not rows:
+        print("(공유 저장소에 지침 없음 — 로컬 파일이 있으면 `donghans instr push` 또는 다음 세션 시작 때 자동 채택)")
+    return 0
+
+
+def cmd_instr_get(a):
+    repo, _, _ = _instr_target(a, need_local=False)
+    with connect(readonly=True) as c:
+        row = c.execute("SELECT body FROM project_instructions WHERE repo_url=%s AND name=%s", (repo, a.name)).fetchone()
+        if not row:
+            print("없음"); return 1
+        print(_masker(a, c).text(row[0]), end="")
+    return 0
+
+
+def cmd_instr_sync(a):
+    repo, main, common = _instr_target(a)
+    with connect() as c:
+        notices = ci.sync(c, repo, main, common, HOST)
+    for _, kind, msg in notices:
+        print(("⚠ " if kind in ("ahead", "conflict") else "") + msg)
+    if not notices and not a.quiet:
+        print("지침: 변경 없음(공유 저장소와 일치)")
+    return 0
+
+
+def cmd_instr_push(a):
+    repo, main, common = _instr_target(a)
+    rc = 0
+    with connect() as c:
+        mk = cs.load_masker(c)
+        for n in _instr_names(a):
+            if ci.read_local(main, n) is None and not getattr(a, "name", None):
+                continue
+            code, msg = ci.push(c, repo, main, n, HOST, force=a.force, masker=mk)
+            print(msg); rc = rc or code
+        ci.ensure_excluded(common)
+    return rc
+
+
+def cmd_instr_pull(a):
+    repo, main, common = _instr_target(a)
+    rc = 0
+    with connect() as c:
+        for n in _instr_names(a):
+            if n not in ci.db_rows(c, repo):
+                continue
+            code, msg = ci.pull(c, repo, main, n, force=a.force)
+            print(msg); rc = rc or code
+    return rc
+
+
+def cmd_instr_diff(a):
+    repo, main, _ = _instr_target(a)
+    with connect(readonly=True) as c:
+        out = "".join(ci.diff_text(c, repo, main, n) for n in _instr_names(a))
+        print(_masker(a, c).text(out) if out else "차이 없음", end="" if out else "\n")
     return 0
 
 
@@ -777,6 +878,13 @@ def main():
     p = ho.add_parser("draft"); p.add_argument("--session"); p.add_argument("--focus"); p.add_argument("--model", default="haiku"); p.add_argument("--out"); p.add_argument("--dry-run", action="store_true")
     p.add_argument("--max-chars", type=int, default=60000); p.add_argument("--prompt-chars", type=int, default=700); p.add_argument("--resp-chars", type=int, default=900); p.add_argument("--responses", type=int, default=25); p.set_defaults(f=cmd_handoff_draft)
     p = ho.add_parser("get"); p.add_argument("session", nargs="?"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--out"); p.add_argument("--raw", action="store_true"); p.set_defaults(f=cmd_handoff_get)
+    ins = top.add_parser("instr", help="프로젝트별 지침(.claude/donghans-*.md)의 공유 정본").add_subparsers(dest="cmd", required=True)
+    p = ins.add_parser("list"); p.add_argument("--repo"); p.set_defaults(f=cmd_instr_list)
+    p = ins.add_parser("get"); p.add_argument("name", choices=list(ci.NAMES)); p.add_argument("--repo"); p.add_argument("--raw", action="store_true"); p.set_defaults(f=cmd_instr_get)
+    p = ins.add_parser("sync", help="로컬 파일을 공유 정본에 맞춘다(훅이 부른다)"); p.add_argument("--quiet", action="store_true"); p.set_defaults(f=cmd_instr_sync)
+    p = ins.add_parser("push", help="로컬 파일을 공유 정본으로 올린다"); p.add_argument("name", nargs="?", choices=list(ci.NAMES)); p.add_argument("--force", action="store_true"); p.set_defaults(f=cmd_instr_push)
+    p = ins.add_parser("pull", help="공유 정본으로 로컬 파일을 덮는다"); p.add_argument("name", nargs="?", choices=list(ci.NAMES)); p.add_argument("--force", action="store_true"); p.set_defaults(f=cmd_instr_pull)
+    p = ins.add_parser("diff"); p.add_argument("name", nargs="?", choices=list(ci.NAMES)); p.add_argument("--raw", action="store_true"); p.set_defaults(f=cmd_instr_diff)
     se = top.add_parser("secret", help="비밀번호 등록표 · 주입 래퍼 · 후보 탐지 · 로컬 치환").add_subparsers(dest="cmd", required=True)
     p = se.add_parser("add"); p.add_argument("label"); p.add_argument("--regex", action="store_true"); p.add_argument("--note"); p.add_argument("--replace", action="store_true")
     p.add_argument("--force", action="store_true"); p.add_argument("--stdin", action="store_true", help="값을 표준입력에서 읽는다(기본은 터미널에서 숨겨 입력)"); p.set_defaults(f=cmd_secret_add)
