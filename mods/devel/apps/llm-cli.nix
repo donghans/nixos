@@ -247,6 +247,8 @@ in {
           - 진행한 작업, 원인 파악 결과, 삽질 기록 등 project/domain 성격의 정보는
             Claude Code의 자동 메모리 시스템(`~/.claude/projects/.../memory/`)에 남기지 마세요.
             대신 작업 중인 프로젝트 저장소 내 git 추적 가능한 문서(`_docs/`, README 등)로 남기세요.
+          - 긴 조사·논의 끝에 나온 의도·이력·근거를 다음 세션·팀원도 읽을 문서로 남겨야 할 때는
+            임의로 쓰지 말고 `donghans-doc-rigor` 스킬을 호출하세요(작성 시 고려사항·무맥락 검증 절차가 그 안에 있습니다).
 
           # 세션 사용량
           - 하위 에이전트(Agent)를 띄우거나 큰 작업을 시작하기 전에 예상 비용(에이전트 수·모델)을 먼저 말하세요.
@@ -295,6 +297,10 @@ in {
     };
     home.file.".claude/skills/donghans-qa" = {
       source = ../../_data/claude-skills/donghans-qa;
+      force = true;
+    };
+    home.file.".claude/skills/donghans-doc-rigor" = {
+      source = ../../_data/claude-skills/donghans-doc-rigor;
       force = true;
     };
     home.file.".claude/skills/donghans-observe" = lib.mkIf config.mods.sys.services.observe.enable {
