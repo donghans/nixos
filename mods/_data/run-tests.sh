@@ -2,7 +2,7 @@
 # 모든 도구의 자동 시험을 한 번에 실행한다. 사용: mods/_data/run-tests.sh   (실패한 묶음이 있으면 종료 코드 1)
 # displayui(Textual) 시험은 textual 이 있는 파이썬이 필요: PYTHON=<그 python> 로 지정(없으면 설치된 displayui 가 쓰는 파이썬을 찾아 씀).
 D=$(cd "$(dirname "$0")" && pwd); rc=0
-for t in "vkb:vkb/tests/test_vkb.py" "vkb-cli:vkb/tests/test_vkb_cli.py" "posture:posture/tests/test_posture.py" "doctor:posture/tests/test_doctor.py" "touch-trace:touch-trace/tests/test_touch_trace.py" "notif:notif/tests/test_notif.py" "power-ab:power-ab/tests/test_power_ab.py" "devwatch:notif/tests/test_devwatch.py" "key_probe:input-debug/tests/test_key_probe.py" "observe:observe/tests/test_observe.py" "trace:observe/tests/test_trace.py" "bpf:observe/tests/test_bpf.py" "focus:observe/tests/test_focus.py" "abab:observe/tests/test_abab_lib.py" "netdata:observe/tests/test_netdata.py" "explain:observe/tests/test_explain.py" "tiers:observe/tests/test_tiers.py" "apps:observe/tests/test_apps.py" "query:observe/tests/test_query.py" "browser:observe/tests/test_browser.py" "usagegraph:observe/tests/test_usagegraph.py"; do
+for t in "ctx-secrets:claude-ctx/tests/test_secrets.py" "vkb:vkb/tests/test_vkb.py" "vkb-cli:vkb/tests/test_vkb_cli.py" "posture:posture/tests/test_posture.py" "doctor:posture/tests/test_doctor.py" "touch-trace:touch-trace/tests/test_touch_trace.py" "notif:notif/tests/test_notif.py" "power-ab:power-ab/tests/test_power_ab.py" "devwatch:notif/tests/test_devwatch.py" "key_probe:input-debug/tests/test_key_probe.py" "observe:observe/tests/test_observe.py" "trace:observe/tests/test_trace.py" "bpf:observe/tests/test_bpf.py" "focus:observe/tests/test_focus.py" "abab:observe/tests/test_abab_lib.py" "netdata:observe/tests/test_netdata.py" "explain:observe/tests/test_explain.py" "tiers:observe/tests/test_tiers.py" "apps:observe/tests/test_apps.py" "query:observe/tests/test_query.py" "browser:observe/tests/test_browser.py" "usagegraph:observe/tests/test_usagegraph.py"; do
   name=${t%%:*}; f=${t#*:}; out=$(cd "$D/$(dirname "$(dirname "$f")")" && timeout 300 python3 -I "tests/$(basename "$f")" 2>&1); r=$?
   printf '%-9s %s\n' "$name" "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }
 done
@@ -13,5 +13,11 @@ PY=${PYTHON:-$(grep -o '/nix/store/[^ "]*python3[^ "]*/bin/python3[^ "]*' "$(com
 [ -n "$PY" ] && { out=$(cd "$D/_uikit" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$PY" tests/test_uikit.py 2>&1); r=$?; printf '%-9s %s\n' uikit "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
 out=$(cd "$D/display" && PYTHON=${PY:-python3} sh tests/run.sh 2>&1); r=$?
 printf '%-9s %s\n' display "$(echo "$out" | grep -E '코어|TUI' | tr '\n' ' ')"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep -E "FAIL|Traceback"; }
+# ctx(DB 통합·화면): psycopg + textual 이 모두 있는 python 이 필요하다 — CTX_PYTHON 으로 지정하거나(없으면 nix 로 한 번 만든다), postgres 17 이 없으면 시험 파일이 알아서 건너뛴다.
+CTXPY=${CTX_PYTHON:-$(nix build --no-link --print-out-paths --impure --expr '(builtins.getFlake "nixpkgs").legacyPackages.x86_64-linux.python3.withPackages (ps: [ps.psycopg ps.textual])' 2>/dev/null | tail -1)/bin/python3}
+for t in "ctx-db:test_ctx_db.py" "ctxdata:test_ctxdata.py" "ctxui:test_ctxui.py"; do
+  name=${t%%:*}; f=${t#*:}
+  [ -x "$CTXPY" ] && { out=$(cd "$D/claude-ctx" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$CTXPY" -I "tests/$f" 2>&1); r=$?; printf '%-9s %s\n' "$name" "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
+done
 find "$D" -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null
 exit $rc

@@ -115,6 +115,25 @@ CREATE TABLE IF NOT EXISTS ingest_state (
   PRIMARY KEY (host, path)
 );
 
+-- 비밀 등록표(설계: 평문 저장 — ctx DB 는 허용된 tailnet 기기만 접속). 출력 치환·주입 래퍼·후보 탐지에 쓴다. ctx_secrets.py 의 SCHEMA_STATEMENTS 와 같아야 한다(시험이 확인).
+CREATE TABLE IF NOT EXISTS secrets (
+  id         bigserial PRIMARY KEY,
+  label      text NOT NULL UNIQUE,
+  kind       text NOT NULL DEFAULT 'literal' CHECK (kind IN ('literal','regex')),
+  value      text NOT NULL,
+  enabled    boolean NOT NULL DEFAULT true,
+  note       text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS secret_ignores (
+  fp         text PRIMARY KEY,
+  pattern    text,
+  note       text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
 -- 스키마 버전(점진 마이그레이션용: 새 변경은 ALTER ... IF NOT EXISTS 로 추가하고 버전을 올린다)
 CREATE TABLE IF NOT EXISTS schema_version (v int PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());
 INSERT INTO schema_version (v) VALUES (1) ON CONFLICT DO NOTHING;
+INSERT INTO schema_version (v) VALUES (2) ON CONFLICT DO NOTHING;  -- 2: secrets, secret_ignores

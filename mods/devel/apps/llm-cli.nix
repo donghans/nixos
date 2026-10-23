@@ -16,24 +16,28 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # 모션 감소는 효과 측정 결과와 무관하게 유지한다(사용자 결정). `CLAUDE_MOTION=normal claude` 로 끌 수 있다.
   reduceMotion = config.workspace.type == "laptop";
 
-  # observectl(관측 시스템)이 설치된 호스트에서만 지침에 넣는다(호스트 toml 의 observe = true; workstation 프리셋은 기본 켬).
+  # 상세 절차는 CLAUDE.md 를 비대하게 만들지 않도록 스킬(mods/_data/claude-skills/)로 두고, 여기에는 「언제 그 스킬을 읽나」와 어겨선 안 되는 안전 규칙만 남긴다.
+  # 스킬 설명이 색인 역할을 한다(설명은 항상 보이고 본문은 불렀을 때만 읽힌다).
+  #
+  # observectl(관측 시스템)이 설치된 호스트에서만 지침에 넣는다(호스트 toml 의 observe = true; workstation 프리셋은 기본 켬). 조회 방법 본문: donghans-observe 스킬.
   # 호스트 종류별 목표가 다르다: 노트북 = 배터리 사용량 관리·개선, 데스크톱 = 비효율 프로세스 관리·집중할 곳에 자원 쓰기.
   observeInstructions = lib.optionalString config.mods.sys.services.observe.enable ''
 
     # 관측(observectl) — 성능·자원·전력 문제는 추측하지 말고 기록으로 확인
-    - 「느리다」「CPU/메모리를 많이 쓴다」「누가 깨우나」「어느 앱에 시간을 썼나」「배터리가 빨리 닳는다」 같은 질문은 추측하기 전에 먼저 `observectl status` 로 수집이 켜져 있는지 보고 조회하세요.
-      수집 기본값: **노트북은 꺼짐**(전력 측정에 변수를 섞지 않으려고; 켜기 `observectl on`, 끄기 `observectl off`), 그 밖(데스크톱·서버)은 켜짐. 노트북에서 켜거나 수준(L1)·eBPF 를 올릴 때는 측정에 영향을 주니 먼저 사용자에게 말하세요.
-    - 이 호스트의 방향: 노트북은 **전력→배터리 사용량 관리·개선**, 데스크톱은 **비효율 프로세스 관리와 집중할 곳에 자원 쓰기**(배터리·psys·Intel C-state 지표는 없거나 비어 있을 수 있음 — 값이 `None`/없음이면 없는 것이지 0 이 아님).
-    - 자주 쓰는 조회(sudo 불필요, 개별 조건은 `observectl <명령> --help`):
-      - 상위 프로세스: `observectl top --by cpu|ctxsw|app --since 1h -n 15`(cpu 는 코어 1개=100%, ctxsw 는 자발적 문맥 전환/s)
-      - 시간대별·그룹별 집계: `observectl query app:<앱>.cpu proc:<comm>.cpu --since 6h --step 10m --agg mean`(신호 별칭은 `observectl query --help`)
-      - 누가 CPU 를 깨우나: `observectl wakers 10`  · 그 순간 무슨 일이: `observectl timeline --at 12:09:37 --span 60`
-      - 한 구간을 포커스·프로세스·스팬으로 묶어 기준 구간과 비교: `observectl explain …`  · 구간(스팬) 폭포: `observectl trace --since 1h`(nixup·덮개 정책 등)
-      - 브라우저 탭·확장별 CPU: `observectl browser top` / 폭주 기록 `observectl browser bursts`(Vivaldi 디버깅 포트 127.0.0.1:9222 필요)
-      - 실험 전후 비교는 `observectl mark` 로 조건 표지를 붙이고 `observectl window --by mark`.
-    - 정밀 도구(`observectl bpf <프리셋>`, `observectl ebpf on …`)는 요청할 때만 N초 실행되고 시간이 제한됩니다. 오래 켜 두지 마세요. `observectl display` 는 읽는 것이 디스플레이를 깨울 수 있어 노트북 전력 측정 중에는 쓰지 마세요.
+    - 「느리다」「CPU/메모리를 많이 쓴다」「누가 깨우나」「어느 앱에 시간을 썼나」「배터리가 빨리 닳는다」 같은 질문은 추측하기 전에 `donghans-observe` 스킬(조회 명령·수집 기본값)을 읽고 `observectl status` 부터 확인하세요.
+    - 노트북은 수집이 기본 꺼짐입니다(전력 측정에 변수를 섞지 않으려고). 노트북에서 수집을 켜거나 수준(L1)·eBPF 를 올릴 때는 측정에 영향을 주니 먼저 사용자에게 말하세요. `observectl bpf`·`ebpf` 는 요청할 때만 N초 실행하세요.
     - 개인정보: 프로세스는 comm·exe 이름만, 창 제목·URL·명령 인자·입력 내용은 기록하지 않습니다. 조회 결과를 외부로 보낼 때도 이 원칙을 지키세요.
-    - 앱별 전력량 추정(Wh)은 psys 센서가 있는 호스트에서만 의미가 있습니다. 자세한 설명·한계는 `~/nixos/_docs/content/explanation/observe.md`.
+  '';
+
+  # incus VM `qa-desktop`(화면 확인용 QA 데스크톱)이 있는 호스트에서만 지침에 넣는다(호스트 toml 의 qa-desktop = true; 프리셋 기본 꺼짐).
+  # 여러 프로젝트의 QA 세션이 VM 하나를 공유한다. 절차 본문: donghans-qa-desktop 스킬, 설명·검증 기록: _docs/content/explanation/qa-desktop.md.
+  qaDesktopInstructions = lib.optionalString config.mods.sys.services.qa-desktop.enable ''
+
+    # 화면 확인용 QA 데스크톱 (incus VM `qa-desktop`)
+    - 사용자와 같이 화면을 보는 headed 브라우저 확인이나 접근성 트리가 필요한 확인은 `donghans-qa-desktop` 스킬(접속·실행·창 배치·도구·공유 규칙·복구)을 먼저 읽고 따르세요. 위 playwright 「Docker 에서만」 규칙은 headless 자동 E2E 에 그대로 적용됩니다.
+    - 사용자 승인 없이 하지 마세요: VM 설정·gsettings·확장 변경, apt 설치·업그레이드, 재로그인·재부팅, 스냅샷 복원. 화면 잠금(`lock-enabled false`, `idle-delay 0`)은 계정에 비밀번호가 없어 잠기면 풀 수 없으니 항상 유지하세요.
+    - 다른 프로젝트 QA 세션의 파일(`~/qa-playwright` 의 다른 디렉터리·package.json)은 건드리지 말고, 쓰기 전에 상대 QA 세션에 시작과 예상 시간을 알리세요.
+    - 사용자에게 현재 가상 데스크톱 번호를 묻지 마세요(화면에 안 보입니다). 스킬의 도구로 직접 확인합니다.
   '';
   # 훅(claude-ctx)은 항상 --settings 로 주입한다 — ~/.claude/settings.json 은 Claude 가 직접 쓰는 가변 파일이라 nix 로 소유하지 않는다.
   # --settings 를 두 번 주면 어떻게 합쳐지는지 확인하지 않아서(미확인) 모션 감소 키는 같은 파일에 넣어 한 번만 준다.
@@ -104,10 +108,16 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # (목적: 여러 머신·프로젝트의 대화·사용량을 공유 저장소(Postgres, mods.sys.services.claude-ctx)에 이벤트 시점에 적재)
   # 클라이언트 CLI `donghans`: `donghans ctx hook|ingest|search|recent|session|usage|sql` / `donghans handoff put|get`.
   # 접속 문자열은 ~/.config/claude-ctx/dsn (nix 밖, 권한 600 — 비밀번호가 스토어에 남지 않게). 서버 위치는 거기서만 바꾼다.
-  claudeCtx = pkgs.writers.writePython3Bin "donghans" {
-    libraries = [pkgs.python3Packages.psycopg];
-    doCheck = false;
-  } (builtins.readFile ../../_data/claude-ctx/claude_ctx.py);
+  # 여러 파일(claude_ctx: 명령, ctx_secrets: 비밀 등록표·치환·주입·후보 탐지·로컬 치환, ctxdata/ctxui: 관리 TUI, uikit: TUI 공통 틀)을 한 디렉터리에 모아 실행한다
+  # (observe 의 usageui 와 같은 방식). 훅·타이머·사용자가 부르는 `donghans` 는 모두 이 래퍼다.
+  ctxSrc = pkgs.runCommand "claude-ctx-src" {} ''
+    mkdir -p $out
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/claude-ctx + "/${f}"} $out/${f}") ["claude_ctx.py" "ctx_secrets.py" "ctxdata.py" "ctxui.py"]}
+    cp ${../../_data/_uikit/uikit.py} $out/uikit.py
+  '';
+  claudeCtx = pkgs.writeShellScriptBin "donghans" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg])}/bin/python3 ${ctxSrc}/claude_ctx.py "$@"'';
+  # ctx 관리 TUI(Textual): 저장소별 용량·검색·발언 대조·비밀 등록표·후보 탐지. 사람이 터미널에서 쓰는 도구(`ctxui`).
+  ctxui = pkgs.writeShellScriptBin "ctxui" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg ps.textual])}/bin/python3 ${ctxSrc}/ctxui.py "$@"'';
   # 훅은 비동기(입력을 막지 않음)이고 실패해도 조용히 끝난다. 놓친 것은 ingest 타이머가 따라잡는다.
   ctxHook = event: [
     {
@@ -153,7 +163,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   '';
 in {
   hm = {
-    home.packages = [claude unstable.antigravity-cli claudeCtx];
+    home.packages = [claude unstable.antigravity-cli claudeCtx ctxui];
 
     # 훅이 놓친 대화·사용량을 따라잡는 안전망(오프셋 기반, 여러 번 돌아도 안전). 서버에 못 붙으면 다음 주기에 재시도.
     systemd.user.services.claude-ctx-ingest = {
@@ -161,6 +171,9 @@ in {
       Service = {
         Type = "oneshot";
         ExecStart = "${claudeCtx}/bin/donghans ctx ingest --days 2";
+        # 등록된 비밀(`donghans secret add`)이 있으면, 3시간 넘게 한가한 로컬 트랜스크립트에서 그 값을 [protected] 로 바꾼다(원문은 DB 에 보존, 적재가 끝난 파일만,
+        # 바뀐 것이 없으면 조용함, 안 바뀐 파일은 캐시로 건너뜀). 등록표가 비어 있으면 아무 일도 하지 않는다. 끄려면 이 줄을 지운다. 앞의 `-` 는 실패해도 유닛을 실패로 보지 않는다는 뜻.
+        ExecStartPost = "-${claudeCtx}/bin/donghans secret scrub --apply --quiet --idle-min 180";
       };
     };
     systemd.user.timers.claude-ctx-ingest = {
@@ -238,14 +251,15 @@ in {
           - 세션을 닫거나 `/clear` 하기 전에는 `/donghans-handoff`, 새 세션에서는 `/donghans-resume <고유번호>` 로 이어갑니다.
           # 공유 컨텍스트 (여러 머신·프로젝트의 대화/사용량 저장소 — Postgres, `donghans ctx` 명령)
           - 「이전 세션에서 뭘 했는지 모르겠다」「그때 사용자가 뭐라고 했나」「다른 머신에서 하던 작업」처럼 **지난 대화·결정의 근거**가 필요하면,
-            추측하거나 사용자에게 되묻기 전에 먼저 조회하세요: `donghans ctx search "<키워드>" --here`(현재 저장소 한정, `--role user` 로 사용자 발언만),
-            `donghans ctx recent --here`(최근 세션), `donghans ctx session <세션ID접두> [--n 20]`(한 세션의 대화), `donghans ctx usage`(모델·일별 토큰/비용),
-            `donghans ctx sql "<SELECT …>"`(읽기 전용; 테이블: sessions·messages·usage_events·hook_events·handoffs). 각 행에 작업 머신(host)·작업 디렉터리(cwd)·
-            저장소(repo_url)·브랜치가 있으니 **다른 프로젝트의 기록이 섞이지 않았는지 repo_url 로 확인**하고 인용하세요.
-          - 조회 결과는 그 시점의 기록이다(코드의 현재 상태가 아님). 결함·완료 주장은 다시 실행해 확인하세요. 접속 실패 시(서버 `beelink-ser7-co` 꺼짐 등)
-            조용히 넘어가지 말고 사용자에게 알리세요. 기록에는 고객사 데이터·시크릿이 섞여 있을 수 있으니 원문을 외부로 보내지 마세요.
+            추측하거나 사용자에게 되묻기 전에 `donghans-ctx` 스킬(조회 명령·테이블)을 읽고 먼저 조회하세요.
+          - 조회 결과는 그 시점의 기록이다(코드의 현재 상태가 아님). 다른 프로젝트 기록이 섞이지 않았는지 `repo_url` 로 확인하고, 접속 실패 시 조용히 넘어가지 말고 알리세요.
+            기록에는 고객사 데이터·시크릿이 섞여 있을 수 있으니 원문을 외부로 보내지 마세요.
+          - 비밀번호·토큰·API 키가 필요한 명령은 값을 묻거나 대화에 적지 말고 `donghans-ctx` 스킬의 「비밀번호」 절에 따라 `donghans secret list` 로 등록된 이름을 확인한 뒤
+            `donghans secret run -- <명령 … {{secret:이름}}>` 로 실행하세요(출력의 값은 [protected] 로 바뀝니다). 이름이 없으면 사용자에게 `donghans secret add <이름>` 을 부탁하세요.
+            출력에 `[protected]` 가 보이면 등록된 비밀이 가려진 것입니다 — 원문을 알아내려는 우회(`--raw`, DB 직접 조회, 트랜스크립트 파일 읽기)를 하지 마세요.
         ''
-        + observeInstructions;
+        + observeInstructions
+        + qaDesktopInstructions;
       force = true; # 기존 파일이 있더라도 Nix 관리 하에 둠 (읽기 전용 심볼릭링크)
     };
 
@@ -257,6 +271,21 @@ in {
     };
     home.file.".claude/skills/donghans-resume" = {
       source = ../../_data/claude-skills/donghans-resume;
+      force = true;
+    };
+
+    # 상세 절차 스킬 — CLAUDE.md 에는 호출 조건과 안전 규칙만 두고 본문은 불렀을 때만 읽히게 한다(위 observeInstructions·qaDesktopInstructions 참고).
+    # donghans-ctx 는 항상, observe·qa-desktop 은 해당 기능이 켜진 호스트에서만 등록한다.
+    home.file.".claude/skills/donghans-ctx" = {
+      source = ../../_data/claude-skills/donghans-ctx;
+      force = true;
+    };
+    home.file.".claude/skills/donghans-observe" = lib.mkIf config.mods.sys.services.observe.enable {
+      source = ../../_data/claude-skills/donghans-observe;
+      force = true;
+    };
+    home.file.".claude/skills/donghans-qa-desktop" = lib.mkIf config.mods.sys.services.qa-desktop.enable {
+      source = ../../_data/claude-skills/donghans-qa-desktop;
       force = true;
     };
 

@@ -9,6 +9,8 @@
   usage [--days N]     모델·일별 토큰/비용(요청 단위 usage_events 기준)
   sql "<SELECT ...>"   읽기 전용 질의
   handoff-put/handoff-get   인수인계 문서를 DB 에 올리고 받는다(머신이 달라도 resume)
+  secret add|list|rm|enable|disable|show|run|scan|adopt|ignore|scrub   비밀번호 등록표 · 출력 치환 · 주입 래퍼 · 후보 탐지 · 로컬 트랜스크립트 치환(ctx_secrets.py)
+  (search|recent|session|sql|handoff get 의 출력은 등록된 비밀을 [protected] 로 바꾼다. --raw 는 사람이 TTY 에서만)
 
 접속: 환경변수 CLAUDE_CTX_DSN > 서버 머신이면 unix 소켓(peer) > 서버 tailnet 이름(허용 IP, trust). 비밀번호·설정 파일 없음. 머신 식별: CLAUDE_CTX_HOST 또는 hostname.
 멱등: 모든 쓰기는 자연키 ON CONFLICT, 파일 수집은 (host,path) 어드바이저리 락 + 오프셋 갱신을 같은 트랜잭션에서.
@@ -17,6 +19,8 @@ import argparse, glob, hashlib, json, os, re, socket, subprocess, sys, time
 
 import psycopg
 from psycopg.types.json import Jsonb
+
+import ctx_secrets as cs
 
 HOST = os.environ.get("CLAUDE_CTX_HOST") or socket.gethostname()
 
@@ -355,6 +359,20 @@ def cmd_ingest(a):
     return 0
 
 
+def _masker(a, c):
+    """출력 치환기. 등록된 비밀을 [protected] 로 바꾼다(DB 원문은 그대로). --raw 는 사람이 TTY 에서 직접 실행할 때만 풀린다 —
+    Claude 의 Bash 도구는 TTY 가 아니고 CLAUDECODE 환경변수가 있어 풀 수 없다."""
+    if getattr(a, "raw", False):
+        _human_only("--raw(치환 해제)")
+        return cs.IDENTITY
+    return cs.load_masker(c)
+
+
+def _human_only(what):
+    if not (sys.stdin.isatty() and sys.stdout.isatty()) or os.environ.get("CLAUDECODE"):
+        sys.exit(f"{what} 은(는) 사람이 터미널에서 직접 실행할 때만 쓸 수 있다")
+
+
 def _repo_filter(a):
     if getattr(a, "here", False):
         return git_meta(os.getcwd()).get("repo_url")
@@ -364,11 +382,10 @@ def _repo_filter(a):
 def cmd_search(a):
     repo = _repo_filter(a)
     q = " ".join(a.query)
-    sql = """SELECT m.ts, m.session_id, m.role, m.kind, s.host, s.repo_url, s.branch,
-                    substring(m.text from greatest(position(lower(%s) in lower(m.text)) - 60, 1) for 240) AS snip
+    sql = """SELECT m.ts, m.session_id, m.role, m.kind, s.host, s.repo_url, s.branch, m.text
              FROM messages m JOIN sessions s USING (session_id)
              WHERE m.text ILIKE %s AND m.kind IN ('prompt','response')"""
-    args = [q, f"%{q}%"]
+    args = [f"%{q}%"]
     if repo:
         sql += " AND s.repo_url = %s"; args.append(repo)
     if a.role:
@@ -377,8 +394,14 @@ def cmd_search(a):
         sql += " AND m.ts > now() - make_interval(days => %s)"; args.append(a.days)
     sql += " ORDER BY m.ts DESC LIMIT %s"; args.append(a.limit)
     with connect(readonly=True) as c:
-        for ts, sid, role, kind, host, rurl, br, snip in c.execute(sql, args):
-            print(f"[{ts:%Y-%m-%d %H:%M}] {sid[:8]} {role}/{kind} @{host} {rurl or '-'}#{br or '-'}\n  {snip.strip()!r}")
+        mk = _masker(a, c)
+        if mk.hits(q):
+            sys.exit("검색어에 등록된 비밀이 들어 있어 검색하지 않는다(존재 여부가 드러나므로)")
+        for ts, sid, role, kind, host, rurl, br, text in c.execute(sql, args):
+            t = mk.text(text or "")                         # 치환을 먼저 하고 자른다(경계에서 잘린 비밀 조각이 남지 않게)
+            i = t.lower().find(q.lower())
+            st = max((i if i >= 0 else 0) - 60, 0)
+            print(mk.text(f"[{ts:%Y-%m-%d %H:%M}] {sid[:8]} {role}/{kind} @{host} {rurl or '-'}#{br or '-'}") + f"\n  {t[st:st + 240].strip()!r}")
     return 0
 
 
@@ -389,8 +412,9 @@ def cmd_recent(a):
              FROM sessions s LEFT JOIN messages m USING (session_id) WHERE (%s::text IS NULL OR s.repo_url = %s)
              GROUP BY s.session_id ORDER BY s.last_ts DESC NULLS LAST LIMIT %s"""
     with connect(readonly=True) as c:
+        mk = _masker(a, c)
         for sid, last, host, cwd, rurl, br, n, fp in c.execute(sql, (repo, repo, a.limit)):
-            print(f"{sid}  {last:%m-%d %H:%M}  @{host}  {rurl or '-'}#{br or '-'}  {cwd}  프롬프트 {n}\n    첫 프롬프트: {(fp or '').strip()[:120]!r}")
+            print(mk.text(f"{sid}  {last:%m-%d %H:%M}  @{host}  {rurl or '-'}#{br or '-'}  {cwd}  프롬프트 {n}\n    첫 프롬프트: {mk.text((fp or '')).strip()[:120]!r}"))
     return 0
 
 
@@ -400,7 +424,8 @@ def cmd_session(a):
         if len(r) != 1:
             print("일치하는 세션:", len(r), [x[0] for x in r]); return 1
         sid, host, hosts, cwd, rurl, br, f, l = r[0]
-        print(f"# {sid}  @{','.join(hosts or [host])}  {rurl or '-'}#{br or '-'}  {cwd}\n# {f} ~ {l}")
+        mk = _masker(a, c)
+        print(mk.text(f"# {sid}  @{','.join(hosts or [host])}  {rurl or '-'}#{br or '-'}  {cwd}\n# {f} ~ {l}"))
         kinds = "('prompt','response','tool_use')" if a.full else "('prompt','response')"
         q, args = f"SELECT ts, role, kind, is_sidechain, text, uuid FROM messages WHERE session_id=%s AND kind IN {kinds}", [sid]
         for opt, op in ((a.from_uuid, ">="), (a.to_uuid, "<=")):  # 인수인계 인덱스에 적은 근거 범위(uuid 접두)만 읽는다
@@ -410,7 +435,7 @@ def cmd_session(a):
         if a.n:
             rows = rows[-a.n:]
         for ts, role, kind, side, text, uid in rows:
-            print(f"\n[{ts:%m-%d %H:%M}] {uid[:8]} {role}{'(sub)' if side else ''}: {(text or '').strip()[: (None if a.full else 1500)]}")
+            print(f"\n[{ts:%m-%d %H:%M}] {uid[:8]} {role}{'(sub)' if side else ''}: {mk.text(text or '').strip()[: (None if a.full else 1500)]}")
     return 0
 
 
@@ -424,11 +449,14 @@ def cmd_usage(a):
 
 
 def cmd_sql(a):
+    if re.search(r"(?:\bfrom|\bjoin|\bupdate|\binto|\btable|,|\()\s*(?:public\s*\.\s*)?\"?secrets\"?\b|\bsecret_ignores\b", a.query, re.I):
+        _human_only("비밀 등록표(secrets) 조회")   # 값이 치환되더라도 substring 등으로 조각이 새므로 막는다(`donghans secret list` 로 이름·길이를 본다)
     with connect(readonly=True) as c:
+        mk = _masker(a, c)
         cur = c.execute(a.query)
         print("\t".join(d.name for d in cur.description))
         for row in cur.fetchmany(a.limit):
-            print("\t".join("" if v is None else str(v)[:300] for v in row))
+            print("\t".join("" if v is None else mk.text(str(v))[:300] for v in row))   # 치환 후 자름
     return 0
 
 
@@ -467,6 +495,10 @@ def cmd_handoff_get(a):
     if len(rows) != 1:
         print("handoff 일치:", len(rows)); return 1
     sid, host, rurl, root, head, br, note, name, text, details, created = rows[0]
+    with connect(readonly=True) as c:
+        mk = _masker(a, c)
+    text, note = mk.text(text), mk.text(note)
+    details = mk.obj(details)
     out = a.out
     if out:
         os.makedirs(os.path.join(out, sid), exist_ok=True)
@@ -505,13 +537,14 @@ def cmd_handoff_draft(a):
     if len(sess) != 1:
         sys.exit(f"세션 일치 {len(sess)}건")
     sid, repo, cwd = sess[0]
+    mk = _masker(a, conn)   # 초안 작성 모델에게 비밀이 가지 않게 한다
     users = conn.execute("""SELECT ts, left(uuid,8), text FROM messages WHERE session_id=%s AND kind='prompt' AND NOT is_sidechain
                             AND text NOT LIKE '<%%' AND text NOT LIKE '[Request interrupted%%' ORDER BY ts""", (sid,)).fetchall()
     resps = conn.execute("""SELECT ts, left(uuid,8), text FROM messages WHERE session_id=%s AND kind='response' AND NOT is_sidechain
                             ORDER BY ts DESC LIMIT %s""", (sid, a.responses)).fetchall()[::-1]
     budget, parts, used_u = a.max_chars, [], 0
-    lines_u = [f"[user {t:%m-%d %H:%M} {u}] {x.strip()[:a.prompt_chars]}" for t, u, x in users]
-    lines_r = [f"[assistant {t:%m-%d %H:%M} {u}] {x.strip()[:a.resp_chars]}" for t, u, x in resps]
+    lines_u = [f"[user {t:%m-%d %H:%M} {u}] {mk.text(x).strip()[:a.prompt_chars]}" for t, u, x in users]
+    lines_r = [f"[assistant {t:%m-%d %H:%M} {u}] {mk.text(x).strip()[:a.resp_chars]}" for t, u, x in resps]
     r_len = sum(len(x) for x in lines_r)
     keep = []
     for l in reversed(lines_u):             # 최근 발언부터 예산 안에서
@@ -535,6 +568,190 @@ def cmd_handoff_draft(a):
     return 0
 
 
+# ---------------------------------------------------------------- secret: 비밀번호 등록표 · 주입 래퍼 · 후보 탐지 · 로컬 치환
+def _read_secret_value(a):
+    if a.stdin:
+        v = sys.stdin.read()
+        return v[:-1] if v.endswith("\n") else v
+    _human_only("비밀 등록(값을 대화에 남기지 않으려고 터미널에서 직접 입력해야 한다)")
+    import getpass
+    v = getpass.getpass(f"{a.label} 값(화면에 표시되지 않음): ")
+    if getpass.getpass("한 번 더: ") != v:
+        sys.exit("두 번 입력한 값이 다르다")
+    return v
+
+
+def cmd_secret_add(a):
+    value = _read_secret_value(a)
+    try:
+        with connect() as c:
+            cs.add_secret(c, a.label, "regex" if a.regex else "literal", value, a.note, a.replace, a.force)
+    except ValueError as e:
+        sys.exit(str(e))
+    print(f"등록: {a.label} ({'regex' if a.regex else 'literal'}, {len(value)}자, fp {cs.fingerprint(value)}) — 이제 ctx 출력·주입 래퍼 출력에서 [protected] 로 바뀐다")
+    return 0
+
+
+def cmd_secret_list(a):
+    with connect(readonly=True) as c:
+        rows = cs.load_secrets(c, only_enabled=False)
+    if not rows:
+        print("등록된 비밀이 없다 (`donghans secret add <이름>` 또는 `donghans secret scan`)"); return 0
+    for r in rows:
+        shown = f"패턴 {r['value']}" if r["kind"] == "regex" else f"{len(r['value'])}자 fp {cs.fingerprint(r['value'])}"
+        print(f"{r['label']:<24} {r['kind']:<7} {'켜짐' if r['enabled'] else '꺼짐':<3} {shown}")
+    return 0
+
+
+def cmd_secret_set(a):
+    with connect() as c:
+        cs.ensure_schema(c)
+        if a.what == "rm":
+            n = c.execute("DELETE FROM secrets WHERE label=%s", (a.label,)).rowcount
+        else:
+            n = c.execute("UPDATE secrets SET enabled=%s, updated_at=now() WHERE label=%s", (a.what == "enable", a.label)).rowcount
+        c.commit()
+    if not n:
+        sys.exit(f"'{a.label}' 이(가) 없다")
+    print({"rm": "삭제", "enable": "켬", "disable": "끔"}[a.what] + f": {a.label}")
+    return 0
+
+
+def cmd_secret_show(a):
+    _human_only("비밀 값 보기")
+    with connect(readonly=True) as c:
+        r = [x for x in cs.load_secrets(c, only_enabled=False) if x["label"] == a.label]
+    if not r:
+        sys.exit(f"'{a.label}' 이(가) 없다")
+    print(r[0]["value"])
+    return 0
+
+
+def cmd_secret_run(a):
+    argv = a.argv[1:] if a.argv and a.argv[0] == "--" else a.argv
+    if not argv:
+        sys.exit("사용: donghans secret run [--env 이름,이름] -- 명령 인자...   (인자의 {{secret:이름}} 은 실행 직전에 값으로, {{secret-file:이름}} 은 0600 임시 파일 경로로 바뀐다)")
+    with connect(readonly=True) as c:
+        secrets = cs.load_secrets(c)
+    try:
+        return cs.run_masked(argv, secrets, [x for x in a.env.split(",") if x])
+    except KeyError as e:
+        sys.exit(str(e.args[0]))
+
+
+def _scan_rows(c, days=None):
+    q = "SELECT m.session_id, s.repo_url, m.ts, m.text FROM messages m LEFT JOIN sessions s USING (session_id) WHERE m.text IS NOT NULL"
+    args = []
+    if days:
+        q += " AND m.ts > now() - make_interval(days => %s)"; args.append(days)
+    with c.cursor(name="ctx_scan") as cur:
+        cur.itersize = 2000
+        cur.execute(q, args)
+        yield from cur
+
+
+def _ignored(c):
+    import psycopg.errors as pe
+    try:
+        return {r[0] for r in c.execute("SELECT fp FROM secret_ignores").fetchall()}
+    except pe.UndefinedTable:
+        c.rollback()
+        return set()
+
+
+def cmd_secret_scan(a):
+    with connect(readonly=True) as c:
+        found = cs.scan_messages(_scan_rows(c, a.days), cs.load_masker(c), _ignored(c))
+    rows = sorted((d for d in found.values() if d["count"] >= a.min_count), key=lambda d: (-d["count"], d["fp"]))[: a.limit]
+    if not rows:
+        print("새 후보가 없다"); return 0
+    reveal = False
+    if a.reveal:
+        _human_only("--reveal(후보 값 보기)"); reveal = True
+    for d in rows:
+        shown = d["value"] if reveal else cs.preview(d["value"])
+        repos = ",".join(sorted(d["repos"]))[:60] or "-"
+        print(f"{d['fp']}  {d['pattern']:<18} {shown:<28} ×{d['count']:<4} 세션 {len(d['sessions']):<3} {repos}  ~{d['last']:%Y-%m-%d}" if d["last"] else f"{d['fp']}  {d['pattern']:<18} {shown}")
+    print(f"\n후보 {len(found)}개 중 {len(rows)}개 표시. 승인: donghans secret adopt <fp> <이름>   ·   오탐 숨기기: donghans secret ignore <fp>")
+    return 0
+
+
+def _find_by_fp(c, fp):
+    for sid, repo, ts, text in _scan_rows(c):
+        for name, val in cs.find_candidates(text):
+            if cs.fingerprint(val) == fp:
+                return name, val
+    return None
+
+
+def cmd_secret_adopt(a):
+    with connect(readonly=True) as c:
+        hit = _find_by_fp(c, a.fp)
+    if not hit:
+        sys.exit(f"fp {a.fp} 후보를 찾지 못했다(이미 등록됐거나 스캔 결과가 달라졌을 수 있다: donghans secret scan)")
+    name, val = hit
+    try:
+        with connect() as c:
+            cs.add_secret(c, a.label, "literal", val, a.note or f"scan 에서 승인({name})", False, a.force)
+    except ValueError as e:
+        sys.exit(str(e))
+    print(f"등록: {a.label} ({len(val)}자, fp {a.fp}) — 값은 화면에 표시하지 않았다")
+    return 0
+
+
+def cmd_secret_ignore(a):
+    with connect() as c:
+        cs.ensure_schema(c)
+        if a.undo:
+            c.execute("DELETE FROM secret_ignores WHERE fp=%s", (a.fp,))
+        else:
+            c.execute("INSERT INTO secret_ignores (fp, note) VALUES (%s,%s) ON CONFLICT DO NOTHING", (a.fp, a.note))
+        c.commit()
+    print(("무시 해제: " if a.undo else "무시: ") + a.fp)
+    return 0
+
+
+SCRUB_STATE = os.path.join(HOME, ".local/state/claude-ctx/scrub-state.json")
+
+
+def cmd_secret_scrub(a):
+    """DB 에 적재된 로컬 트랜스크립트의 비밀을 [protected] 로 바꾼다(기본은 점검만; 원문은 DB 에 그대로 있다)."""
+    conn = connect(timeout=10)
+    secrets = cs.load_secrets(conn)
+    if not secrets:
+        if not a.quiet:
+            print("등록된 비밀이 없다")
+        return 0
+    files = cs.transcript_files(HOME)
+    state = {}
+    if not a.no_cache:
+        try:
+            state = json.load(open(SCRUB_STATE))
+        except Exception:
+            state = {}
+    state = {p: v for p, v in state.items() if os.path.exists(p)}   # 사라진 파일은 정리
+    say = (lambda *x: None) if a.quiet else print
+    say(f"{'적용' if a.apply else '점검(dry-run)'}: 트랜스크립트 {len(files)}개, 비밀 {len(secrets)}개, {a.idle_min}분 안에 수정된 파일은 진행 중으로 보고 건너뜀")
+    sm = cs.scrub_local(sys.modules[__name__], conn, files, secrets, apply=a.apply, idle_secs=a.idle_min * 60, log=say, state=state)
+    try:
+        os.makedirs(os.path.dirname(SCRUB_STATE), exist_ok=True)
+        tmp = SCRUB_STATE + ".tmp"
+        json.dump(state, open(tmp, "w"))
+        os.replace(tmp, SCRUB_STATE)
+    except OSError:
+        pass
+    if a.quiet and not sm["changed"]:
+        conn.commit(); return 0
+    print(f"\n파일 {sm['files']}개(점검 생략 {sm['cached']}) 중 비밀 포함 {sm['hit_files']}개 · 치환 {sm['changed']} · 진행 중 건너뜀 {sm['skipped_active']} · "
+          f"미적재 건너뜀 {sm['skipped_unsynced']} · 읽는 사이 변경 {sm['skipped_changed']} · JSON 이 깨져 못 바꾼 줄 {sm['skipped_lines']}")
+    if sm["hits"]:
+        print("이름별 횟수: " + ", ".join(f"{k}×{v}" for k, v in sorted(sm["hits"].items())))
+    if not a.apply and sm["hit_files"]:
+        print("적용하려면 --apply (원문은 DB 에 있고, 적용 전에 그 파일을 먼저 적재한다)")
+    conn.commit()
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(prog="donghans", description="donghans 도구 모음 — ctx(공유 컨텍스트 저장소)·handoff(인수인계 업/다운)")
     top = ap.add_subparsers(dest="group", required=True)
@@ -550,7 +767,22 @@ def main():
     p = ho.add_parser("put"); p.add_argument("--session", required=True); p.add_argument("--doc", required=True); p.add_argument("--note", default=""); p.set_defaults(f=cmd_handoff_put)
     p = ho.add_parser("draft"); p.add_argument("--session"); p.add_argument("--focus"); p.add_argument("--model", default="haiku"); p.add_argument("--out"); p.add_argument("--dry-run", action="store_true")
     p.add_argument("--max-chars", type=int, default=60000); p.add_argument("--prompt-chars", type=int, default=700); p.add_argument("--resp-chars", type=int, default=900); p.add_argument("--responses", type=int, default=25); p.set_defaults(f=cmd_handoff_draft)
-    p = ho.add_parser("get"); p.add_argument("session", nargs="?"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--out"); p.set_defaults(f=cmd_handoff_get)
+    p = ho.add_parser("get"); p.add_argument("session", nargs="?"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--out"); p.add_argument("--raw", action="store_true"); p.set_defaults(f=cmd_handoff_get)
+    se = top.add_parser("secret", help="비밀번호 등록표 · 주입 래퍼 · 후보 탐지 · 로컬 치환").add_subparsers(dest="cmd", required=True)
+    p = se.add_parser("add"); p.add_argument("label"); p.add_argument("--regex", action="store_true"); p.add_argument("--note"); p.add_argument("--replace", action="store_true")
+    p.add_argument("--force", action="store_true"); p.add_argument("--stdin", action="store_true", help="값을 표준입력에서 읽는다(기본은 터미널에서 숨겨 입력)"); p.set_defaults(f=cmd_secret_add)
+    p = se.add_parser("list"); p.set_defaults(f=cmd_secret_list)
+    for w in ("rm", "enable", "disable"):
+        p = se.add_parser(w); p.add_argument("label"); p.set_defaults(f=cmd_secret_set, what=w)
+    p = se.add_parser("show"); p.add_argument("label"); p.set_defaults(f=cmd_secret_show)
+    p = se.add_parser("run", help="비밀을 끼워 명령을 실행하고 출력은 치환한다"); p.add_argument("--env", default=""); p.add_argument("argv", nargs=argparse.REMAINDER); p.set_defaults(f=cmd_secret_run)
+    p = se.add_parser("scan"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=30); p.add_argument("--min-count", type=int, default=1); p.add_argument("--reveal", action="store_true"); p.set_defaults(f=cmd_secret_scan)
+    p = se.add_parser("adopt"); p.add_argument("fp"); p.add_argument("label"); p.add_argument("--note"); p.add_argument("--force", action="store_true"); p.set_defaults(f=cmd_secret_adopt)
+    p = se.add_parser("ignore"); p.add_argument("fp"); p.add_argument("--note"); p.add_argument("--undo", action="store_true"); p.set_defaults(f=cmd_secret_ignore)
+    p = se.add_parser("scrub"); p.add_argument("--apply", action="store_true"); p.add_argument("--idle-min", type=int, default=60)
+    p.add_argument("--quiet", action="store_true", help="바꾼 것이 없으면 아무것도 출력하지 않는다(타이머용)"); p.add_argument("--no-cache", action="store_true", help="점검 캐시를 쓰지 않고 모든 파일을 다시 읽는다"); p.set_defaults(f=cmd_secret_scrub)
+    for name in ("search", "recent", "session", "sql"):   # 사람이 TTY 에서만 쓸 수 있는 치환 해제
+        ctx.choices[name].add_argument("--raw", action="store_true", help="치환 해제(사람이 터미널에서만)")
     a = ap.parse_args()
     sys.exit(a.f(a) or 0)
 
