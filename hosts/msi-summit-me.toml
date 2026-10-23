@@ -7,3 +7,6 @@ cpuCount   = 16
 [mods.sys.services]
 tailpass = true
 netdata  = true
+
+[mods.gui.apps]
+qa-desktop-view = true   # 데스크톱(beelink-ser7-co)의 incus VM qa-desktop 화면을 SSH 터널로 본다

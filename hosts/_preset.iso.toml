@@ -43,6 +43,7 @@ obs-studio    = false
 drawing       = false
 incus-vm      = false
 hop           = false
+qa-desktop-view = false   # 랩탑(msi-summit-me)만 호스트 toml 에서 true — 데스크톱의 incus VM qa-desktop 화면 보기
 
 [mods.gui.utils]
 notify-logger   = true
