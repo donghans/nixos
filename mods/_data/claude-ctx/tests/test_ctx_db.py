@@ -217,6 +217,21 @@ try:
     check("등록표가 바뀌면 캐시가 무효 — 새 비밀로 다시 점검해 치환(--quiet 도 바뀐 것은 보고)", "치환 1" in r.stdout and "기억하겠습니다" not in open(tpath).read(), r.stdout)
     check("scrub --no-cache 도 동작", cli("secret", "scrub", "--no-cache").returncode == 0)
 
+    # --- 한도 샘플: 계정·리셋 시각 적재와 계정별 창별 최고값(ctx limits)
+    od = os.path.join(HOME, ".local/share/claude-otel"); os.makedirs(od, exist_ok=True)
+    def lim(ts, acct, f, w, fr=1792771800, wr=1793282400):
+        return json.dumps({"ts": ts, "session_id": f"s-{acct}-{f}", "five_hour": {"used_percentage": f, "resets_at": fr}, "seven_day": {"used_percentage": w, "resets_at": wr},
+                           "cost_usd": 1.0, "model": "m", "context_used_pct": 5, "account_id": acct, "account_email": f"{acct}@x.test" if acct else None})
+    now = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime())
+    open(os.path.join(od, "limits.jsonl"), "w").write("\n".join([lim(now, "A", 10, 20), lim(now, "A", 40, 25),
+                                                              lim(now, "B", 70, 80), lim(now, None, 5, 6)]) + "\n")
+    cc.ingest_otel(conn); conn.commit()
+    rows = dict(conn.execute("SELECT coalesce(account_id,'?'), max(five_hour_pct) FROM limit_samples GROUP BY 1").fetchall())
+    check("한도 샘플에 계정이 적재되고 계정별로 갈린다", rows.get("A") == 40 and rows.get("B") == 70 and rows.get("?") == 5, str(rows))
+    check("리셋 시각이 timestamptz 로 적재", conn.execute("SELECT count(*) FROM limit_samples WHERE five_hour_resets_at IS NOT NULL AND seven_day_resets_at IS NOT NULL").fetchone()[0] == 4)
+    r = cli("ctx", "limits", "--days", "3650")
+    check("ctx limits: 계정별 5h 창 최고값 출력", "A@x.test" in r.stdout and "40.0%" in r.stdout and "B@x.test" in r.stdout and "70.0%" in r.stdout, r.stdout + r.stderr)
+
     # --- 표가 없는 옛 DB 에서도 조회 명령은 동작(마이그레이션 전 호환)
     conn.execute("DROP TABLE secrets"); conn.execute("DROP TABLE secret_ignores"); conn.commit()
     r = cli("ctx", "session", SID[:8])

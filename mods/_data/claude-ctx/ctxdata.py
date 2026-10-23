@@ -97,6 +97,29 @@ def usage_trend(conn, *, days=None, bucket="day", repo=None, host=None, model=No
     return [dict(bucket=r[0], **dict(zip(_USAGE_KEYS, r[1:]))) for r in conn.execute(sql, [tz or local_tz(), *args]).fetchall()]
 
 
+def limit_windows(conn, *, days=None, host=None, last=48):
+    """계정별 한도 창(5h·7d)마다 찍은 최고 %. {kind: [{account, label, plan, windows:[(리셋시각, 최고%)…오래된 것부터 last 개]}…]}.
+    계정은 account_id(없으면 '?'), 창은 리셋 시각으로 가른다. 라벨은 이메일."""
+    out = {}
+    for kind, pct, rs in (("5h", "five_hour_pct", "five_hour_resets_at"), ("7d", "seven_day_pct", "seven_day_resets_at")):
+        where, args = f"{pct} IS NOT NULL AND {rs} IS NOT NULL", []
+        if days:
+            where += " AND ts > now() - make_interval(days => %s)"; args.append(days)
+        if host:
+            where += " AND host ILIKE %s"; args.append(_like(host))
+        rows = conn.execute(f"""SELECT coalesce(account_id, '?'), max(account_email), max(account_plan), {rs}, max({pct})
+                  FROM limit_samples WHERE {where} GROUP BY 1, {rs} ORDER BY 1, {rs}""", args).fetchall()
+        accts = {}
+        for aid, email, plan, r, mx in rows:
+            a = accts.setdefault(aid, dict(account=aid, label=email or ("계정 불명" if aid == "?" else aid[:8]), plan=plan, windows=[]))
+            a["plan"] = a["plan"] or plan
+            a["windows"].append((r, float(mx)))
+        for a in accts.values():
+            a["windows"] = a["windows"][-last:]
+        out[kind] = sorted(accts.values(), key=lambda a: a["account"])
+    return out
+
+
 def usage_breakdown(conn, by="model", *, days=None, repo=None, host=None, model=None):
     """분류(모델·저장소·머신·출처·effort)별 합계(비용 큰 순)와 전체 합계. 반환: (행 목록, 합계 dict)."""
     if by not in _BREAK_SQL:

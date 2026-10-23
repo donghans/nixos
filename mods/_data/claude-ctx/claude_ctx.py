@@ -16,6 +16,7 @@
 접속: 환경변수 CLAUDE_CTX_DSN > 서버 머신이면 unix 소켓(peer) > 서버 tailnet 이름(허용 IP, trust). 비밀번호·설정 파일 없음. 머신 식별: CLAUDE_CTX_HOST 또는 hostname.
 멱등: 모든 쓰기는 자연키 ON CONFLICT, 파일 수집은 (host,path) 어드바이저리 락 + 오프셋 갱신을 같은 트랜잭션에서.
 """
+from datetime import datetime, timezone
 import argparse, glob, hashlib, json, os, re, socket, subprocess, sys, tempfile, time
 
 import psycopg
@@ -295,10 +296,14 @@ def ingest_otel(conn):
                     except Exception:
                         continue
                     rows.append(dict(host=HOST, ts=d.get("ts"), sid=d.get("session_id") or "", f=(d.get("five_hour") or {}).get("used_percentage"),
-                                     w=(d.get("seven_day") or {}).get("used_percentage"), cost=d.get("cost_usd"), model=d.get("model"), ctx=d.get("context_used_pct")))
+                                     w=(d.get("seven_day") or {}).get("used_percentage"), cost=d.get("cost_usd"), model=d.get("model"), ctx=d.get("context_used_pct"),
+                                     acct=d.get("account_id"), email=d.get("account_email"), plan=d.get("account_plan"),
+                                     fr=_epoch((d.get("five_hour") or {}).get("resets_at")), wr=_epoch((d.get("seven_day") or {}).get("resets_at"))))
                 if rows:
-                    cur.executemany("""INSERT INTO limit_samples (host, ts, session_id, five_hour_pct, seven_day_pct, cost_usd, model, ctx_pct)
-                        VALUES (%(host)s,%(ts)s,%(sid)s,%(f)s,%(w)s,%(cost)s,%(model)s,%(ctx)s) ON CONFLICT DO NOTHING""", rows)
+                    cur.executemany("""INSERT INTO limit_samples (host, ts, session_id, five_hour_pct, seven_day_pct, cost_usd, model, ctx_pct,
+                        account_id, account_email, account_plan, five_hour_resets_at, seven_day_resets_at)
+                        VALUES (%(host)s,%(ts)s,%(sid)s,%(f)s,%(w)s,%(cost)s,%(model)s,%(ctx)s,%(acct)s,%(email)s,%(plan)s,%(fr)s,%(wr)s)
+                        ON CONFLICT DO NOTHING""", rows)
                 cur.execute("""INSERT INTO ingest_state (host, path, byte_offset) VALUES (%s,%s,%s)
                                ON CONFLICT (host, path) DO UPDATE SET byte_offset=excluded.byte_offset, updated_at=now()""", (INGEST_HOST, p, new))
     return n
@@ -460,6 +465,30 @@ def cmd_session(a):
             rows = rows[-a.n:]
         for ts, role, kind, side, text, uid in rows:
             print(f"\n[{ts:%m-%d %H:%M}] {uid[:8]} {role}{'(sub)' if side else ''}: {mk.text(text or '').strip()[: (None if a.full else 1500)]}")
+    return 0
+
+
+def _epoch(v):
+    """한도 창 리셋 시각(epoch 초) → aware datetime. 없거나 이상하면 None."""
+    try:
+        return datetime.fromtimestamp(float(v), timezone.utc) if v is not None else None
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def cmd_limits(a):
+    """계정별 한도 사용률의 창별 최고값(5시간 창·주간 창마다 어디까지 찍었나)."""
+    with connect(readonly=True) as c:
+        for kind, pct, rs in (("5h", "five_hour_pct", "five_hour_resets_at"), ("7d", "seven_day_pct", "seven_day_resets_at")):
+            print(f"[{kind} 창별 최고 %]  (최근 {a.days}일, 계정 불명은 '?')")
+            rows = c.execute(f"""SELECT coalesce(max(account_email), max(account_id), '?') || coalesce(' [' || max(account_plan) || ']', '') acct, {rs}, max({pct}), min(ts), max(ts), count(DISTINCT host)
+                  FROM limit_samples WHERE ts > now() - make_interval(days => %s) AND {pct} IS NOT NULL AND {rs} IS NOT NULL
+                  GROUP BY coalesce(account_id, '?'), {rs} ORDER BY {rs} DESC LIMIT %s""", (a.days, a.limit)).fetchall()
+            for acct, r, mx, t0, t1, nh in rows:
+                r, t0, t1 = r.astimezone(), t0.astimezone(), t1.astimezone()
+                print(f"  {acct:42} 리셋 {r:%m-%d %H:%M}  최고 {mx:5.1f}%  샘플 {t0:%m-%d %H:%M}~{t1:%H:%M}  머신 {nh}")
+            if not rows:
+                print("  (리셋 시각이 있는 샘플 없음 — 계정·리셋 수집은 이 변경 이후부터)")
     return 0
 
 
@@ -949,6 +978,7 @@ def main():
     p = ctx.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.set_defaults(f=cmd_recent)
     p = ctx.add_parser("session"); p.add_argument("sid"); p.add_argument("--n", type=int); p.add_argument("--full", action="store_true"); p.add_argument("--from", dest="from_uuid"); p.add_argument("--to", dest="to_uuid"); p.set_defaults(f=cmd_session)
     p = ctx.add_parser("usage"); p.add_argument("--days", type=int, default=7); p.set_defaults(f=cmd_usage)
+    p = ctx.add_parser("limits", help="계정별 한도(5h/7d) 창별 최고 사용률"); p.add_argument("--days", type=int, default=14); p.add_argument("--limit", type=int, default=20); p.set_defaults(f=cmd_limits)
     p = ctx.add_parser("sql"); p.add_argument("query"); p.add_argument("--limit", type=int, default=50); p.set_defaults(f=cmd_sql)
     ho = top.add_parser("handoff", help="인수인계 문서 업/다운").add_subparsers(dest="cmd", required=True)
     p = ho.add_parser("put"); p.add_argument("--session", required=True); p.add_argument("--doc", required=True); p.add_argument("--note", default=""); p.set_defaults(f=cmd_handoff_put)

@@ -27,6 +27,7 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 - 세션은 `hosts[]` 에 관측 머신을 누적, first/last 는 least/greatest. `claude --resume` 이 옛 메시지를 같은 uuid 로 복사해도 중복 행이 안 생긴다.
 - **토큰·비용 합계는 `usage_events`(요청 단위)로만** 센다. `messages` 의 토큰을 합치면 resume/fork 로 복사된 만큼 이중 계산된다.
 - 한계: 같은 한도 샘플(`limit_samples`)은 머신별 행이라 계정 공통 값이 머신마다 따로 쌓인다(의도). 머신 시계가 어긋나면 ts 비교가 어긋난다.
+- **계정별 한도(2026-10-23~)**: 한도 %는 계정 단위인데 상태줄 입력에 계정이 없어, 상태줄 스크립트(`claude-usage-statusline`)가 `~/.claude.json`(`CLAUDE_CONFIG_DIR` 우선)의 `oauthAccount` 에서 `accountUuid`·이메일·플랜(`userRateLimitTier`, 없으면 `seatTier`)을 읽어 `limit_samples`(`account_id`·`account_email`·`account_plan`)에 같이 남긴다. 5h·7d 창의 리셋 시각(`*_resets_at`)도 저장해 창마다 최고 %를 낸다(`donghans ctx limits`, ctxui 통계 탭 상단 그래프 — 색 = 계정). **그 이전 행은 계정·리셋 시각이 NULL** 이라 집계에서 빠진다(계정을 사후에 알 수 없음). 계정 전환 직후 상태줄이 갱신되기 전 샘플은 이전 계정으로 찍힐 수 있다.
 
 ## 접속 허용 목록 · 백업 · 초안
 - **허용 목록:** `claude-ctx.nix` 의 `allowedClients` (tailnet IP, trust). 새 기기는 IP 를 추가한다. headscale 이 IP 를 재할당하면 그 기기는 접속이 막힌다(fail-closed).

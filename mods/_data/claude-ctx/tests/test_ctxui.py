@@ -36,6 +36,10 @@ def seed():
                                             ("u3", "bbbb0001", "h2", "2026-10-03T01:00:00Z", "claude-sonnet-5-5", 2.0)]:
         conn.execute("INSERT INTO usage_events (request_id, host, ts, session_id, model, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens) VALUES (%s,%s,%s,%s,%s,%s,100,10,1000,50)",
                      (rid, host, ts, sid, model, cost))
+    for n, (acct, email, plan, f, w) in enumerate([("A", "a@x.test", "max_5x", 30, 10), ("A", "a@x.test", "max_5x", 60, 12), ("B", "b@x.test", "pro", 90, 70)]):
+        conn.execute("INSERT INTO limit_samples (host, ts, session_id, five_hour_pct, seven_day_pct, account_id, account_email, account_plan, five_hour_resets_at, seven_day_resets_at)"
+                     " VALUES ('h1', now() - make_interval(mins => %s), %s, %s, %s, %s, %s, %s, now() + make_interval(hours => %s), now() + interval '3 days')",
+                     (n, f"ls{n}", f, w, acct, email, plan, 5 * (n + 1)))
     conn.commit(); conn.close()
 
 
@@ -201,6 +205,8 @@ async def run():
         # --- 통계
         await pilot.press("6"); await settle(pilot, lambda: rows(app, "#stat-sessions") == 3)
         check("통계: 6 키로 이동", app.current_tab() == "stats")
+        lt = txt(app.query_one("#stat-limits"))
+        check("통계: 계정별 한도 그래프에 계정·플랜·최고 %가 계정마다 따로 나온다", all(k in lt for k in ("a@x.test", "max_5x", "b@x.test", "pro", "최고 60%", "최고 90%")), lt)
         st = txt(app.query_one("#stat-state"))
         check("통계: 상태줄에 기간·단위·분류·정렬과 비용 수집 시작일", all(k in st for k in ("기간: 30일", "단위: 일", "분류: 모델", "정렬: 비용", "10-01 이후")), st)
         check("통계: 기본 30일 필터(합성 데이터는 2026-10 초라 오늘 기준으로는 이미 밖일 수 있음)", "기간: 30일" in st)

@@ -92,6 +92,14 @@ CREATE TABLE IF NOT EXISTS limit_samples (
   five_hour_pct real, seven_day_pct real, cost_usd double precision, model text, ctx_pct real,
   PRIMARY KEY (host, ts, session_id)
 );
+-- 3: 계정별 최고 사용률 집계용 — 한도 %는 계정 단위라 계정(account_id=accountUuid)과 한도 창 리셋 시각이 있어야 창별 최고값을 낼 수 있다.
+--    이전 행은 NULL(계정을 알 수 없음).
+ALTER TABLE limit_samples ADD COLUMN IF NOT EXISTS account_id text;
+ALTER TABLE limit_samples ADD COLUMN IF NOT EXISTS account_email text;
+ALTER TABLE limit_samples ADD COLUMN IF NOT EXISTS account_plan text;   -- 계정마다 플랜(한도 크기)이 달라 같은 %도 의미가 다르다
+ALTER TABLE limit_samples ADD COLUMN IF NOT EXISTS five_hour_resets_at timestamptz;
+ALTER TABLE limit_samples ADD COLUMN IF NOT EXISTS seven_day_resets_at timestamptz;
+CREATE INDEX IF NOT EXISTS limit_samples_acct ON limit_samples (account_id, ts DESC);
 
 -- 인수인계: 머신이 달라도 resume 할 수 있게 문서를 DB 에도 둔다(저장소는 repo_url 로 식별)
 CREATE TABLE IF NOT EXISTS handoffs (
@@ -137,6 +145,7 @@ CREATE TABLE IF NOT EXISTS secret_ignores (
 CREATE TABLE IF NOT EXISTS schema_version (v int PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());
 INSERT INTO schema_version (v) VALUES (1) ON CONFLICT DO NOTHING;
 INSERT INTO schema_version (v) VALUES (2) ON CONFLICT DO NOTHING;  -- 2: secrets, secret_ignores
+INSERT INTO schema_version (v) VALUES (3) ON CONFLICT DO NOTHING;  -- 3: limit_samples 계정·리셋 시각
 
 -- 프로젝트별 지침(`.claude/donghans-instructions.md`·`donghans-override.md`)의 공유 정본 — 로컬 파일은 SessionStart 훅이 만드는 캐시(ctx_instr.py).
 -- rev 는 낙관적 잠금: 올릴 때 `WHERE rev = 읽은 값` 이 아니면 거부한다(다른 기기가 먼저 바꾼 것을 덮지 않는다). 본문에 비밀 값을 두지 않는다(올릴 때 등록표로 검사).

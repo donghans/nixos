@@ -14,6 +14,18 @@ cw = d.get("context_window") or {}
 fp, wp = f.get("used_percentage"), w.get("used_percentage")
 def fmt(x): return "?" if x is None else (f"{x:.0f}" if isinstance(x, (int, float)) else str(x))
 print(f"5h {fmt(fp)}% · 7d {fmt(wp)}% · ctx {fmt(cw.get('used_percentage'))}% · ${cost if cost is None else round(cost,2)}")
+def account():
+    # 한도 %는 계정 단위인데 statusLine 입력에는 계정이 없어 ~/.claude.json(CLAUDE_CONFIG_DIR 가 있으면 그 안)의 oauthAccount 에서 읽는다.
+    for p in (os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", ""), ".claude.json"), os.path.expanduser("~/.claude.json")):
+        try:
+            a = json.load(open(p)).get("oauthAccount") or {}
+            if a.get("accountUuid"):
+                # 플랜: userRateLimitTier(default_claude_max_5x → max_5x), 없으면 seatTier
+                plan = (a.get("userRateLimitTier") or a.get("seatTier") or "").replace("default_claude_", "").replace("default_", "") or None
+                return a["accountUuid"], a.get("emailAddress"), plan
+        except Exception:
+            pass
+    return None, None, None
 try:
     base = os.path.expanduser("~/.local/share/claude-otel")
     os.makedirs(base, exist_ok=True)
@@ -26,6 +38,7 @@ try:
                "five_hour": f, "seven_day": w, "cost_usd": cost,
                "model": (d.get("model") or {}).get("id") or (d.get("model") or {}).get("display_name"),
                "context_used_pct": cw.get("used_percentage")}
+        rec["account_id"], rec["account_email"], rec["account_plan"] = account()
         open(os.path.join(base, "limits.jsonl"), "a").write(json.dumps(rec, ensure_ascii=False) + "\n")
 except Exception:
     pass

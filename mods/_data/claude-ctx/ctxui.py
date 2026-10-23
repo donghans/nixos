@@ -84,6 +84,37 @@ def spark(values) -> str:
     return "".join(" " if not m or v <= 0 else "▁▂▃▄▅▆▇█"[min(7, int(v / m * 7.999))] for v in values)
 
 
+ACCT_COLORS = ["#33ccff", "#ffb347", "#b4e04e", "#ff6f91", "#c792ea", "#ffd166"]   # 계정마다 고정 색(계정 ID 순)
+
+
+def spark100(values) -> str:
+    """0~100 % 절대 눈금 스파크라인(창끼리 높이를 비교할 수 있게 최대값으로 늘리지 않는다)."""
+    return "".join("▁▂▃▄▅▆▇█"[max(0, min(7, int(v / 100 * 7.999)))] for v in values)
+
+
+def limits_text(win) -> Text:
+    """계정별 한도 창 그래프 — 한 계정 = 한 색, 줄마다 5h/7d 창이 지날 때마다 그 창에서 찍은 최고 %."""
+    t = Text()
+    ids = sorted({a["account"] for k in win.values() for a in k})
+    if not ids:
+        t.append("한도 샘플 없음 — 계정·리셋 시각 수집은 상태줄 갱신 이후부터", style="#7a7a7a")
+        return t
+    color = {i: ACCT_COLORS[n % len(ACCT_COLORS)] for n, i in enumerate(ids)}
+    for i in ids:
+        row = {k: next((a for a in win[k] if a["account"] == i), None) for k in win}
+        ref = row["5h"] or row["7d"]
+        t.append("● ", style=color[i]); t.append(ref["label"], style=f"bold {color[i]}")
+        t.append(f"  {ref['plan'] or '플랜 불명'}\n", style="#9a9a9a")
+        for k in ("5h", "7d"):
+            a = row[k]
+            if not a or not a["windows"]:
+                continue
+            vals = [v for _, v in a["windows"]]
+            t.append(f"  {k} ", style="#9a9a9a"); t.append(spark100(vals), style=color[i])
+            t.append(f"  지금 {vals[-1]:.0f}% · 최고 {max(vals):.0f}% · {len(vals)}창\n", style="#cfcfcf")
+    return t
+
+
 STAT_PERIODS = [(None, "전체"), (1, "1일"), (7, "7일"), (30, "30일")]
 STAT_ORDERS = [("cost", "비용"), ("last", "최근"), ("prompts", "프롬프트"), ("tools", "도구"), ("duration", "기간")]
 WEEKDAYS = "월화수목금토일"
@@ -436,6 +467,8 @@ class CtxUI(uikit.HelpMixin, App):
     .msg { height: auto; padding: 0 1; margin-bottom: 1; border-left: tall #3a3a3a; }
     .msg-sel { border-left: tall #33ccff; background: #101010; }
     #sess-state, #sess-keys { height: auto; }
+    #stat-limits-box { height: auto; max-height: 12; }
+    #stat-limits { padding: 0 1; }
     #stat-summary { padding: 0 1; }
     #stat-trend, #stat-sessions { width: 3fr; }
     #stat-break, #stat-summary-box { width: 2fr; }
@@ -497,6 +530,7 @@ class CtxUI(uikit.HelpMixin, App):
                     yield uikit.box(Input(placeholder="모델 일부 (예: sonnet)", id="f-model"), "모델")
                 yield Static("", id="stat-state", classes="state")
                 with Vertical(id="stat-grid"):
+                    yield uikit.box(VerticalScroll(Static("", id="stat-limits"), id="stat-limits-box"), "계정별 한도 사용률 — 창마다 찍은 최고 % (색 = 계정)")
                     with Horizontal():
                         yield uikit.box(DataTable(id="stat-trend", cursor_type="row"), "토큰·비용 추이")
                         yield uikit.box(DataTable(id="stat-break", cursor_type="row"), "분류별")
@@ -728,12 +762,14 @@ class CtxUI(uikit.HelpMixin, App):
                 brk, tot = cd.usage_breakdown(c, self.stat_by, **f)
                 summ = cd.session_summary(c, **f)
                 sess = cd.session_stats(c, order=self.stat_order, limit=300, masker=self.masker(), **f)
+                lim = cd.limit_windows(c, days=f.get("days"), host=f.get("host"))
         except Exception as e:
             self.call_from_thread(self.flash, f"통계 조회 실패: {e}", "error"); return
-        self.call_from_thread(self.show_stats, cov, trend, brk, tot, summ, sess)
+        self.call_from_thread(self.show_stats, cov, trend, brk, tot, summ, sess, lim)
 
-    def show_stats(self, cov, trend, brk, tot, summ, sess):
+    def show_stats(self, cov, trend, brk, tot, summ, sess, lim):
         self._stat_loaded = True
+        self.query_one("#stat-limits", Static).update(limits_text(lim))
         self.update_stat_state(cov)
         fmt_b = lambda b: {"hour": b.strftime("%m-%d %H시"), "day": f"{b:%m-%d} ({WEEKDAYS[b.weekday()]})", "week": b.strftime("%m-%d 주"), "month": b.strftime("%Y-%m")}[self.stat_bucket]
         tt = self.query_one("#stat-trend", DataTable)
