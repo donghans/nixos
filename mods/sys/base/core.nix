@@ -138,7 +138,11 @@ mkPartOf "mods.sys.base" ({
           show_io_stat = false;
           io_mode = false;
           # 같은 btrfs 풀의 서브볼륨(/home, /nix, /var/log, incus 마운트 등)은 용량이 같으니 대표로 / 만, 별도 파티션인 /boot 는 따로 표시
-          disks_filter = "/ /boot";
+          # tmpfs 는 기본값(use_fstab=true: /etc/fstab 에 적힌 것만, only_physical=true: 물리 디스크만)으로는 목록에서 빠지므로 둘 다 끄고,
+          # 필터로 필요한 것만 남김 (/tmp 는 재부팅 시 지워지는 tmpfs 라 용량을 봐 둠)
+          use_fstab = false;
+          only_physical = false;
+          disks_filter = "/ /boot /tmp";
           proc_sorting = "cpu lazy";
         };
         themes.lazygit = ''
