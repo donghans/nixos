@@ -30,6 +30,23 @@ in {
     # llm-utils-project 관련 테스트를 위해 임시로 열어둔 포트
     networking.firewall.allowedTCPPorts = [7681];
 
+    # == SSH (beelink-ser7-co 한 대만) ==
+    # (목적: 데스크톱에서 이 노트북을 원격 조작/시험. 다른 tailnet 사용자·기기에는 열지 않는다)
+    # 접근 경계 3중: ① 22번 포트를 방화벽에 열지 않음(openFirewall=false) — tailscale 은 trustedInterfaces=["tailscale0"] 로만 닿는다
+    #   ② 접속 출발지 IP 화이트리스트(AllowUsers, headscale 고정 IP) ③ 공개키는 beelink-ser7-co 것 하나, 비밀번호 인증 금지.
+    services.openssh = {
+      enable = true;
+      openFirewall = false;
+      settings = {
+        PasswordAuthentication = false;
+        KbdInteractiveAuthentication = false;
+        AllowUsers = ["donghans@100.64.0.1"]; # beelink-ser7-co
+      };
+    };
+    users.users.donghans.openssh.authorizedKeys.keys = [
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFfJ+1WOERxR/hBFrcgD2qGpNYXiU//1T4s6VRYkTRd1" # beelink-ser7-co
+    ];
+
     # == Clock ==
     # (목적: 듀얼부팅 시 윈도우 시간 깨짐 방지)
     # Linux는 기본적으로 하드웨어 클럭을 UTC로 다루지만, Windows는 로컬 시간으로 읽음.
