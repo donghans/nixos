@@ -41,6 +41,7 @@ gimp          = false
 obs-studio    = false
 drawing       = false
 incus-vm      = false
+hop           = false
 
 [mods.gui.utils]
 notify-logger   = true
