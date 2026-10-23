@@ -54,7 +54,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 - **스크립트의 sudo 경로**: PATH 앞에 `/run/current-system/sw/bin` 을 두면 setuid 가 아닌 `sudo` 가 잡혀 조건이 안 바뀐다 → `/run/wrappers/bin` 을 앞에 둘 것. 그래서 `ab --expect-a/--expect-b` 로 실제 조건을 검증한다.
 
 ## 예제 스크립트 (`mods/_data/observe/examples/`)
-- `abab_lib.sh` — **번갈아(ABAB) 측정 틀**(신호 처리·덮개/AC 변화 자동 중단·적용 확인·복구 한 번·`ab` 자동 검증). 새 시험은 이 틀에 조건 적용 함수만 채워서 만든다. `netdata_abab.sh` 가 사용 예.
+- `abab_lib.sh` — **번갈아(ABAB) 측정 틀**(신호 처리·덮개/AC 변화 자동 중단·적용 확인·복구 한 번·`ab` 자동 검증). 구간마다 `~/.local/state/observe/ab-runs/<T0>-<스크립트>.tsv` 에 한 줄(조건·시작·끝·덮개·AC·유효 여부)을 남기고, 도중에 중단돼도(덮개 열림·신호 등) **조건이 유지된 채 끝낸 쌍까지** 자동으로 분석한다(`ab` 가 2쌍 이상을 요구해 2쌍 미만이면 기록만 남음). 결과는 `<…>.tsv.result` 로도 저장. 새 시험은 이 틀에 조건 적용 함수만 채워서 만든다. `netdata_abab.sh` 가 사용 예.
 - `wifi_abab.sh` — 검증형 Wi-Fi 절전 A/B(바꾼 직후 실제 값 확인, `--expect-*` 로 판정 검증). 틀 도입 이전 스크립트.
 - `wifi_switch.sh` — Wi-Fi 프로필 전환 + 게이트웨이 핑 실패 시 자동 복귀(원격 세션 보호).
 

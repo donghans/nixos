@@ -30,7 +30,7 @@ abab_run
 
 def run(cfg=CFG, env_extra=None, wait=True, timeout=20, **kw):
     script = os.path.join(T, "run.sh"); open(script, "w").write(cfg)
-    env = {**os.environ, "ABAB_LID_FILE": LID, "ABAB_AC_FILE": AC, "SEG": "1", "PAIRS": "2", "SETTLE": "0", **(env_extra or {})}
+    env = {**os.environ, "ABAB_LID_FILE": LID, "ABAB_AC_FILE": AC, "SEG": "1", "PAIRS": "2", "SETTLE": "0", "ABAB_OUT_DIR": os.path.join(T, "out"), "RAPL_CMD": "true", **(env_extra or {})}
     p = subprocess.Popen(["sh", script], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kw)
     return p
 
@@ -114,6 +114,55 @@ check("AC 모드: tlp bat 으로 시작하고 끝에 tlp start 로 복구, AC=1 
 setup(ac="0\n")
 p = run(env_extra={"ABAB_AC_MODE": "1", "TLP_CMD": tlp_stub()}); out, _ = p.communicate(timeout=30)
 check("AC 모드: AC 가 빠져 있으면 거부(종료 코드 4)하고 tlp 를 건드리지 않음", p.returncode == 4 and not os.path.exists(TLPLOG), out)
+
+# --- 구간 기록과 부분 분석: 쌍을 하나 끝낸 뒤 덮개가 열리면 그 쌍까지만 분석(--until), 기록에는 무효 구간이 남음
+import glob, shutil
+def recs():
+    return sorted(glob.glob(os.path.join(T, "out", "*.tsv")))
+shutil.rmtree(os.path.join(T, "out"), ignore_errors=True)
+setup()
+p = run(env_extra={"SEG": "3", "PAIRS": "4"})
+time.sleep(28.5)                                           # 2쌍(구간마다 SEG 3초 + 조건 적용 후 대기 3초 → 쌍당 약 13초)이 끝난 뒤, 세 번째 쌍 A 도중에 덮개를 연다
+open(LID, "w").write("state:      open\n")
+out, _ = p.communicate(timeout=30)
+c = calls(); abs_ = [x for x in c if x.startswith("ab ")]
+check("부분 분석: 끝낸 2쌍까지만 ab 를 호출(--until)하고 안내 출력", p.returncode == 4 and len(abs_) == 1 and "--until " in abs_[0] and "끝낸 2쌍" in out, f"rc={p.returncode}\n{out}\n{abs_}")
+rec = open(recs()[0]).read().strip().split("\n") if recs() else []
+check("구간 기록: 유효 4줄(A·B ×2쌍) 뒤에 무효 1줄(A #3)", len(rec) == 6 and all(r.split("\t")[-1] == "valid" for r in rec[1:5]) and rec[5].split("\t")[-1] == "INVALID", str(rec))
+check("부분 분석: 복구는 한 번", open(RESTORED).read().count("x") == 1)
+# 쌍이 2개 미만이면 분석하지 않음(앞의 '덮개 변경' 시험과 같은 상황) — 기록만 남는다
+shutil.rmtree(os.path.join(T, "out"), ignore_errors=True)
+setup()
+p = run(env_extra={"SEG": "3"})
+time.sleep(1.5)
+open(LID, "w").write("state:      open\n")
+out, _ = p.communicate(timeout=20)
+check("쌍 2개 미만 중단: 분석 안 함·안내", "2쌍 이상 필요" in out and not any(x.startswith("ab ") for x in calls()), out)
+# 정상 종료는 결과 파일(.result)도 남김
+shutil.rmtree(os.path.join(T, "out"), ignore_errors=True)
+setup()
+p = run(); out, _ = p.communicate(timeout=30)
+check("정상 종료: 구간 기록 4줄 + 결과 파일", p.returncode == 0 and len(recs()) == 1 and os.path.exists(recs()[0] + ".result"), out)
+
+# --- RAPL 구간 경계 직접 읽기: 가짜 카운터(구간마다 일정 증가)로 .rapl 기록과 쌍별 계산 확인
+RAPLSTUB = os.path.join(T, "rapl")
+open(RAPLSTUB, "w").write('#!/bin/sh\nn=$(cat %s.n 2>/dev/null || echo 0); echo $((n+1)) > %s.n\necho $((n*2000000))\necho $((n*1000000))\n' % (RAPLSTUB, RAPLSTUB))
+os.chmod(RAPLSTUB, 0o755)
+if os.path.exists(RAPLSTUB + ".n"): os.unlink(RAPLSTUB + ".n")
+shutil.rmtree(os.path.join(T, "out"), ignore_errors=True)
+setup()
+p = run(env_extra={"RAPL_CMD": RAPLSTUB, "SETTLE": "1", "ABAB_LIB_PATH": LIB}); out, _ = p.communicate(timeout=40)
+rp = recs()[0] + ".rapl" if recs() else "/nonexistent"
+rl = [l for l in open(rp).read().split("\n") if l] if os.path.exists(rp) else []
+check("RAPL: 구간마다 한 줄(4구간)·열 5개·시각/psys/pkg 3벌", len(rl) == 4 and all(len(l.split("\t")) == 5 and all(len(c.split()) == 3 for c in l.split("\t")[2:]) for l in rl), str(rl))
+check("RAPL: 결과 파일에 직접 읽기 보고(psys A−B)가 붙음", "RAPL 직접 읽기" in open(recs()[0] + ".result").read() and "psys A−B" in open(recs()[0] + ".result").read(), out)
+sys.path.insert(0, os.path.join(ROOT, "examples"))
+import abab_rapl
+seg = abab_rapl.parse("A\tA #1\t0 0 0\t10000000000 0 0\t20000000000 20000000 5000000\n")
+check("RAPL 계산: 10초에 20 J → 2 W, 패키지 0.5 W", abs(seg[0]["psys"] - 2.0) < 1e-9 and abs(seg[0]["pkg"] - 0.5) < 1e-9, str(seg))
+seg = abab_rapl.parse("A\tx\t0 262143328000 0\t1000000000 262143328000 0\t2000000000 1000 0\n")
+check("RAPL 계산: 카운터 한 바퀴 돌아도 양수", abs(seg[0]["psys"] - 1850e-6) < 1e-6 and seg[0]["psys"] > 0, str(seg))
+check("RAPL 계산: 읽기 실패(빈 값) 줄은 건너뜀", abab_rapl.parse("A\tx\t1 \t2 \t3 \n") == [], "")
 
 # --- 예제 스크립트가 문법·함수 계약을 지킴
 r = subprocess.run(["sh", "-n", os.path.join(ROOT, "examples", "netdata_abab.sh")])
