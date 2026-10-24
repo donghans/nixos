@@ -29,4 +29,4 @@ try:
     shared = (r.stdout.strip() or r.stderr.strip()).splitlines()[-1:] or ['(출력 없음)']
 except Exception as e:
     shared = [f'공유 저장소 업로드 건너뜀: {type(e).__name__}']
-print(f'등록됨: {sid}\n  저장소: {repo}\n  문서  : {doc}\n\n공유 저장소: {shared[0]}\n\n새 세션에서 이렇게 입력하세요:\n  /donghans-resume {sid}')
+print(f'등록됨: {sid}\n  저장소: {repo}\n  문서  : {doc}\n\n공유 저장소: {shared[0]}\n\n새 세션에서 아래 명령을 입력하세요 (답변에 전달할 때는 펜스 코드블록으로):\n  /donghans-resume {sid}')
