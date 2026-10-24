@@ -1,11 +1,15 @@
-// 부재·미동작 주장용 다중 로케이터 탐침 (Playwright). donghans-qa §1 항목 3(부재 주장은 서로 다른 로케이터 3가지 이상 + 직접 지표)의 선택 도구.
+// 부재·미동작 주장용 다중 로케이터 탐침 (Playwright). donghans-qa §1 항목 3-1(부재 주장은 서로 다른 로케이터 3가지 이상 + 직접 지표)의 선택 도구.
 // 사용: const { probe, probeAbsent, toMarkdown } = require('./probe.js');
-//   const r = await probe(page, { name: '저장' }, { reset: async () => {...} });
+//   const r = await probe(page, { name: '저장' }, { reset: async () => {...}, net: responseLogArray });
 //   console.log(toMarkdown(r));   // 보고서에 그대로 붙인다
-// 판정: r.verdict ∈ 'EFFECT'(어느 방식이든 직접 지표가 변함) | 'NO_EFFECT'(서로 다른 로케이터 3개 이상 닿았으나 변화 없음) | 'ABSENT'(전 방식 0건) | 'INCONCLUSIVE'(로케이터 3개 미만만 닿음 — 「못 쟀음/관찰」)
+// 옵션: reset(효과가 난 뒤 상태 복원) · net(응답 로그 배열 — 주면 네트워크 응답 수 변화도 직접 지표에 포함, 안 주면 주소·제목·노드 집합 3개 지표만)
+//       dryRun:true(쓰기 버튼용 — 누르지 않고 로케이터가 대상에 닿는지(count)만 확인한다. 이 경우 판정은 REACHED(종류 3개 이상 닿음)/INCONCLUSIVE/ABSENT 만 나온다)
+// 판정: r.verdict ∈ 'EFFECT'(어느 방식이든 직접 지표가 변함) | 'NO_EFFECT'(서로 다른 **종류**의 로케이터 3개 이상 — 역할·텍스트·aria-label·조상 — 이 닿았으나 변화 없음)
+//        | 'ABSENT'(전 방식 0건) | 'INCONCLUSIVE'(로케이터 종류 3개 미만만 닿음 — 확정 못 함: 사용자를 막는 것으로 보이면 결함 후보(미확정)로 올리고, 아니면 관찰로 둔다. 심각도는 낮추지 않는다)
 // 직접 지표: 주소·제목·의미 노드(텍스트) 집합·네트워크 응답 수 — 「특정 텍스트 유무」 하나로 판정하지 않는다.
 const STRATEGIES = ['role', 'textExact', 'textPartial', 'ariaLabel', 'ancestor', 'boxCenter', 'keyboard'];
 const LOCATOR_NAMES = ['role', 'textExact', 'textPartial', 'ariaLabel', 'ancestor']; // 로케이터(동작 변형 boxCenter·keyboard 제외)
+const KIND = { role: 'role', textExact: 'text', textPartial: 'text', ariaLabel: 'aria', ancestor: 'ancestor' }; // 텍스트 정확/부분은 한 종류로 센다(문서의 4종 정의와 일치)
 
 const esc = (s) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
 // XPath 문자열 리터럴 — 작은따옴표가 있으면 concat() 으로 이어 붙인다(백슬래시 이스케이프는 XPath 에서 무효)
@@ -68,6 +72,10 @@ async function probe(page, spec, opts = {}) {
     }
     const n = loc ? await loc.count().catch(() => 0) : 0;
     if (n === 0) { rows.push({ strategy: s, matches: 0, outcome: 'miss' }); continue; }
+    if (opts.dryRun) {
+      if (LOCATOR_NAMES.includes(s)) rows.push({ strategy: s, matches: n, how: 'dryRun(누르지 않음)', outcome: 'reached' });
+      continue;
+    }
     const nodeKey = await loc.first().evaluate((e) => (e.tagName + '|' + (e.getAttribute('aria-label') || e.innerText || '').trim().slice(0, 40)), null, { timeout: 1500 }).catch(() => '?');
     const before = await snapshot(page, opts.net);
     let how = 'click';
@@ -98,8 +106,9 @@ async function probe(page, spec, opts = {}) {
   }
   // 「닿았다」 는 **서로 다른 로케이터** 기준이다 — boxCenter·keyboard 는 textPartial 과 같은 대상을 다른 동작으로 누를 뿐이라 센다
   const reached = rows.filter((r) => LOCATOR_NAMES.includes(r.strategy) && r.matches > 0 && r.outcome !== 'error');
+  const reachedKinds = new Set(reached.map((r) => KIND[r.strategy]));
   const effect = rows.some((r) => r.outcome === 'effect');
-  const verdict = effect ? 'EFFECT' : rows.every((r) => r.matches === 0) ? 'ABSENT' : reached.length >= 3 ? 'NO_EFFECT' : 'INCONCLUSIVE';
+  const verdict = effect ? 'EFFECT' : rows.every((r) => r.matches === 0) ? 'ABSENT' : opts.dryRun ? (reachedKinds.size >= 3 ? 'REACHED' : 'INCONCLUSIVE') : reachedKinds.size >= 3 ? 'NO_EFFECT' : 'INCONCLUSIVE';
   return { spec, verdict, rows };
 }
 
