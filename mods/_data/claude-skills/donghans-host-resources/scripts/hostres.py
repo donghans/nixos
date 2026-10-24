@@ -167,7 +167,10 @@ def verdict(s):
         level = max(level, 1); why.append(f"메모리 PSI some {some:.1f}% (경합)")
     r = s["rates"]
     if r["pswpin"] is not None and r["pswpin"] >= 1000:  # 4KiB 페이지 → 약 4MiB/s 이상 되읽음
-        level = max(level, 2); why.append(f"스왑 되읽기 {r['pswpin']:.0f} pages/s (스래싱 징후)")
+        if (full or 0) >= 0.5 or (some or 0) >= 3:  # 대기 시간(PSI)이 실제로 늘 때만 압박으로 본다
+            level = max(level, 2); why.append(f"스왑 되읽기 {r['pswpin']:.0f} pages/s + PSI 상승 (스래싱)")
+        else:
+            level = max(level, 1); why.append(f"스왑 되읽기 {r['pswpin']:.0f} pages/s 이나 PSI 는 낮음(대기 영향 아직 작음)")
     floor = s["mem"]["reclaimable_floor"]
     if floor < 2 * GIB:
         level = max(level, 1); why.append(f"보수적 가용 {floor / GIB:.1f}GiB (<2GiB)")
@@ -215,7 +218,7 @@ def render(s, top):
     cons = cgroup_consumers(top)
     if cons:
         L.append(f"- 소비자 상위 {len(cons)} (cgroup 의 anon+shmem, 자기 몫):")
-        L += [f"  - {g(b)}  {p}" for p, b in cons]
+        L += [f"  - {g(b)}  {friendly(p)}  ({'/'.join(p.split('/')[-2:])[:70]})" for p, b in cons]
     return "\n".join(L)
 
 
@@ -336,6 +339,7 @@ def history(hist_s, points=36):
 
 
 # ---------- LLM 세션별 현재 사용량 ----------
+HELPERS = []  # 세션이 아닌 claude 프로세스(Vivaldi 의 Claude-in-Chrome 네이티브 호스트 등)
 SESSION_COMMS = {".claude-wrapped", "claude", "codex", "gemini", "opencode"}
 
 
@@ -510,7 +514,10 @@ def sessions_begin():
 def sessions_end(begin, measured):
     """LLM CLI 세션(프로세스 + 자식 트리)별 PSS·CPU(begin 이후 구간). PSS 는 공유 페이지를 나눠 계산해 합계가 겹치지 않는다."""
     ppid, comm, t0, t_start = begin
-    roots = [p for p, c in comm.items() if c in SESSION_COMMS]
+    roots, HELPERS[:] = [], []
+    for p, c in comm.items():
+        if c in SESSION_COMMS:
+            (HELPERS if "--chrome-native-host" in (read(f"/proc/{p}/cmdline") or "") else roots).append(p)
     _, _, t1 = proc_table()
     dt = max(time.monotonic() - t_start, 1e-6)
     secs = 1 if measured else 0
@@ -558,7 +565,83 @@ def render_sessions(rows):
         note = " [ctx 보충]" if m.get("src") == "transcript+ctx" else (f" [못 쟀음: ctx 접속 실패 — {m['ctx_err']}]" if m.get("ctx_err") else "")
         L.append(f"    마지막 사용자 입력 {ago(m['last_user'])} · 마지막 응답 {ago(m['last_asst'])}{note} · 서브에이전트 {subs}")
         L.append(f"    {res}")
+    if HELPERS:
+        L.append(f"- (세션 아님) Claude-in-Chrome 네이티브 호스트 {len(HELPERS)}개 · PSS {sum(pss_kib(p) for p in HELPERS) / 1024:.0f}MiB — 브라우저가 띄운 보조 프로세스")
     return "\n".join(L)
+
+# ---------- 호스트 맥락·요약·읽는 법 ----------
+def sh(cmd, t=4):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=t)
+        return r.stdout if r.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def host_context(s):
+    host = socket.gethostname()
+    cpu = next((l.split(":", 1)[1].strip() for l in (read("/proc/cpuinfo") or "").splitlines() if l.startswith("model name")), "?")
+    osr = dict(l.split("=", 1) for l in (read("/etc/os-release") or "").splitlines() if "=" in l)
+    up = float((read("/proc/uptime") or "0").split()[0]) / 3600
+    sw = ", ".join(f"{d['kind']} {g(d['size'])}" for d in s["swap"]["devices"]) or "없음"
+    L = [f"- 호스트 **{host}**: {cpu} · {s['cpu']['count']}스레드 · RAM {g(s['mem']['total'])} · 스왑 {sw}(zram 이 우선순위 높음)",
+         f"- OS {osr.get('PRETTY_NAME', '?').strip(chr(34))} · 커널 {os.uname().release} · 가동 {up / 24:.1f}일"
+         f" · 하드웨어·설정 정본은 `~/nixos/hosts/{host}.nix|.toml` (추측 말고 거기서 읽을 것)"]
+    vms = sh(["incus", "list", "-f", "csv", "-c", "nsm"])
+    if vms is not None:
+        run = [x.split(",") for x in vms.strip().splitlines() if ",RUNNING," in x]
+        L.append("- 실행 중 incus VM: " + (", ".join(f"{c[0]}(게스트 메모리 {c[2] or '?'})" for c in run) or "없음")
+                 + " — 이 VM 들의 RAM 이 호스트에서는 shmem/incus.service 로 보인다")
+    else:
+        L.append("- incus VM: 못 쟀음(조회 실패)")
+    dk = sh(["docker", "ps", "--format", "{{.Names}}"])
+    if dk is not None:
+        names = dk.split()
+        L.append(f"- 실행 중 Docker 컨테이너 {len(names)}개: " + ", ".join(names[:6]) + (" …" if len(names) > 6 else ""))
+    else:
+        L.append("- Docker: 못 쟀음(조회 실패)")
+    return "\n".join(L)
+
+
+def friendly(path):
+    last = path.rsplit("/", 1)[-1].replace("\\x2d", "-")
+    if last == "incus.service":
+        return "incus VM 들"
+    if last == "docker.service":
+        return "Docker 컨테이너(rootless)"
+    if last.startswith("tmux-spawn"):
+        return "tmux 창 하나(안의 claude 세션·셸 포함)"
+    for pre in ("app-Hyprland-", "app-", ):
+        if last.startswith(pre):
+            last = last[len(pre):]
+    return last.rsplit(".", 1)[0].rsplit("-", 1)[0] if last.endswith(".scope") else last
+
+
+def summary(s, sess, cons):
+    lv, why = verdict(s)
+    m = s["mem"]
+    top = ", ".join(f"{friendly(p)} {g(b)}" for p, b in cons[:3])
+    busy = sum(1 for r in sess if r[7] and r[7]["status"] == "busy")
+    sub = sum(len(r[7]["sub"]["running"]) for r in sess if r[7])
+    sw = s["swap"]
+    return "\n".join([
+        f"## 요약 ({datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 측정, 이 호스트 한 대 기준)",
+        f"- 판정 **{lv}**" + (f" — {why[0]}" if why else " — 압박 징후 없음"),
+        f"- 바로 쓸 수 있는 메모리 약 {g(m['reclaimable_floor'])}(보수적) / 커널 낙관값 {g(m['available_raw'])}; "
+        f"스왑 {g(sw['used'])}/{g(sw['total'])} 사용 중이라 여유 폭이 얇다" if sw["total"] and sw["used"] / sw["total"] > 0.5 else
+        f"- 바로 쓸 수 있는 메모리 약 {g(m['reclaimable_floor'])}(보수적) / 커널 낙관값 {g(m['available_raw'])}",
+        f"- 큰 메모리 소비자: {top or '없음'}",
+        f"- LLM 세션 {len(sess)}개 중 작동중 {busy}개, 실행 중 서브에이전트 {sub}개 — 작동중인 만큼 지금 값은 평소보다 클 수 있다",
+    ])
+
+
+GUIDE = """## 읽는 법
+1. 「압박」은 **PSI(작업이 메모리를 기다린 시간 비율)** 와 스왑 되읽기로만 판정한다. 남은 메모리 숫자나 스왑 사용량만으로 추측하지 말 것.
+2. **보수적** 값은 지금 바로 쓸 수 있는 하한, **MemAvailable** 은 회수 비용이 드는 낙관값이다. 동시 스택·VM 수 같은 계획은 보수적 값 기준.
+3. shmem·tmpfs(`/tmp`)·VM RAM 은 buff/cache 처럼 보여도 캐시가 아니다 — 비우면 되는 메모리로 세지 말 것.
+4. 스파크라인은 왼쪽=과거 → 오른쪽=지금. 한 시점 값이 낮아도 직전 스파이크가 있었는지 여기서 본다.
+5. 세션 표의 「작동중」과 서브에이전트는 자원을 지금 쓰는 주체다. 측정이 흔들리면 먼저 이들의 시작·종료와 겹쳤는지 본다(`못 쟀음` 항목은 그대로 보고)."""
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -566,6 +649,7 @@ def main():
     ap.add_argument("--top", type=int, default=8)
     ap.add_argument("--hist", default="3h")
     ap.add_argument("--no-sessions", action="store_true")
+    ap.add_argument("--no-guide", action="store_true", help="읽는 법 블록 생략(반복 실행 시)")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     sb = None if a.no_sessions else sessions_begin()
@@ -577,7 +661,11 @@ def main():
         s["sessions"] = [dict(pss_mib=r[0], pid=r[1], cwd=r[2], procs=r[3], age_h=r[5], kind=r[6], meta=r[7]) for r in sess]
         print(json.dumps(s, ensure_ascii=False, indent=1))
     else:
-        out = [render(s, a.top)]
+        cons = cgroup_consumers(a.top)
+        out = [summary(s, sess, cons), "## 이 호스트\n" + host_context(s)]
+        if not a.no_guide:
+            out.append(GUIDE)
+        out.append(render(s, a.top))
         h = parse_dur(a.hist)
         if h:
             out.append(history(h))
