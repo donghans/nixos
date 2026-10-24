@@ -29,4 +29,4 @@ description: 새(또는 /clear 한) 세션에서 `/donghans-resume <고유번호
 - **사용량 수치는 스냅샷이다.** 5h/7d 한도는 계정 공통인데 기록은 상태 표시줄이 그릴 때만 남는다. 동시에 도는 다른 세션이 올린 만큼은 늦게 반영되므로 `resume.py` 의 「사용량 스냅샷」(기록 시각 포함)을 「약 N% 이상」으로 전하고, 한도 판단은 `claude-limit-watch`(전 세션 기록 기준)나 사용자가 보는 `/usage` 를 우선한다.
 - 푸시·DB 초기화·백필 등 되돌리기 어려운 일은 사용자 허가 전에 하지 않는다.
 - 하위 에이전트를 띄우기 전에 비용(에이전트당 시작 비용 큼, 모델 선택)을 먼저 말한다. 사용량 지시는 `~/.claude/CLAUDE.md` 「세션 사용량」을 따른다.
-- 작업 시작 직전에 한도 감시를 건다: `echo $CLAUDE_CODE_SESSION_ID` 의 앞 8자로 `claude-limit-watch <접두>` 를 Monitor 로.
+- 작업 시작 직전에 `donghans-limit-watch` 스킬로 현재 한도를 확인하고(`status`), 오래 걸리면 `watch` 를 Monitor 로 건다.

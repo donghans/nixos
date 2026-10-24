@@ -298,8 +298,8 @@ in {
             설계·구현·검증 판단은 haiku 에 맡기지 말고 직접 하거나 sonnet 으로 하세요. haiku 의 「통과·이상 없음」 보고는
             원자료(출력·값)를 직접 한 번 확인한 뒤에만 채택하세요.
           - 기본 모델을 바꾸기 전에는 반드시 먼저 알리세요.
-          - 큰 작업 직전에 한도 감시를 거세요: `echo $CLAUDE_CODE_SESSION_ID` 의 앞 8자로
-            `claude-limit-watch <접두>` 를 Monitor 로 실행합니다(5시간 한도가 10분 내 +5포인트 오르거나 50/70/80/90% 도달 시 알림).
+          - 큰 작업 직전에는 `donghans-limit-watch` 스킬(5h/7d 한도 현재 상태 + 임계값 감시)을 읽고 `status` 로 현재 값을 확인하세요.
+            오래 걸리는 작업이면 같은 스킬의 `watch` 를 Monitor 로 겁니다(5시간 한도가 10분 내 +5포인트 오르거나 50/70/80/90% 도달 시 알림).
             알림이 오면 하던 일을 멈추고 사용자에게 알리세요. 70% 이상에서는 새 작업을 시작하지 말고 묻습니다.
 
           # 세션 이어가기·지침 동기화
@@ -341,6 +341,10 @@ in {
       source = ../../_data/claude-skills/donghans-qa;
       force = true;
     };
+    home.file.".claude/skills/donghans-limit-watch" = {
+      source = ../../_data/claude-skills/donghans-limit-watch;
+      force = true;
+    };
     home.file.".claude/skills/donghans-host-resources" = {
       source = ../../_data/claude-skills/donghans-host-resources;
       force = true;
@@ -358,15 +362,10 @@ in {
       force = true;
     };
 
-    # 사용량 도구: 상태 표시줄 기록기 + 한도 감시기(Monitor 용).
+    # 사용량 도구: 상태 표시줄 기록기(한도 감시기는 donghans-limit-watch 스킬).
     # 상태 표시줄 연결은 위 hooksSettings.statusLine 이 --settings 로 주입한다(`claude` 셸 함수로 실행할 때). ~/.claude/settings.json 에 같은 항목이 수동으로 있어도 충돌하지 않는다.
     home.file.".local/bin/claude-usage-statusline" = {
       source = ../../_data/claude-usage/claude-usage-statusline;
-      executable = true;
-      force = true;
-    };
-    home.file.".local/bin/claude-limit-watch" = {
-      source = ../../_data/claude-usage/claude-limit-watch;
       executable = true;
       force = true;
     };

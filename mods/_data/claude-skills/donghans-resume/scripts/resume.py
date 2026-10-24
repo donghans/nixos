@@ -127,7 +127,7 @@ if os.path.isfile(lp):
         except Exception: age = -1
         print('\n## 사용량 스냅샷 (계정 전체, 가장 최근 기록)')
         print(f"5h {last['five_hour']['used_percentage']}% · 7d {(last.get('seven_day') or {}).get('used_percentage')}% · 기록 {last['ts'][11:19]} ({age // 60}분 {age % 60}초 전) · 기록한 세션 {str(last.get('session_id'))[:8]}")
-        print('※ 스냅샷이다 — 기록은 어느 세션이든 상태 표시줄이 갱신될 때만 남고, 동시에 도는 다른 세션이 올린 만큼은 다음 갱신 전까지 안 보인다. 사용자에게는 「약 N% 이상(스냅샷 기준)」으로 말하고, 한도 판단은 감시기(claude-limit-watch, 전 세션 기록 기준)와 사용자가 보는 /usage 를 우선한다.')
+        print('※ 스냅샷이다 — 기록은 어느 세션이든 상태 표시줄이 갱신될 때만 남고, 동시에 도는 다른 세션이 올린 만큼은 다음 갱신 전까지 안 보인다. 사용자에게는 「약 N% 이상(스냅샷 기준)」으로 말하고, 한도 판단은 donghans-limit-watch 스킬(전 세션 기록 기준)와 사용자가 보는 /usage 를 우선한다.')
 
 # 트랜스크립트의 사용자 메시지
 sid = (rec or {}).get('id') or a.id or ''
