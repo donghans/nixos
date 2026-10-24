@@ -167,7 +167,11 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
     hooks = lib.genAttrs ["UserPromptSubmit" "Stop" "SubagentStop" "SessionStart" "SessionEnd" "PreCompact"] ctxHook;
   };
   hooksFile = pkgs.writeText "claude-ctx-hooks.json" (builtins.toJSON hooksSettings);
-  hooksReducedFile = pkgs.writeText "claude-ctx-hooks-reduced.json" (builtins.toJSON (hooksSettings // {prefersReducedMotion = true;}));
+  hooksReducedFile = pkgs.writeText "claude-ctx-hooks-reduced.json" (builtins.toJSON (hooksSettings // {
+    prefersReducedMotion = true;
+    # 창 제목 갱신(스피너)도 끈다 — 화면 갱신 3→2/s·PSR 유지 57→69%·psys 약 −0.5 W(power-evidence.md #101). 제목 정보는 쓰지 않는다(사용자 결정 2026-10-25). `CLAUDE_MOTION=normal claude` 로 함께 풀린다.
+    env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE = "1";
+  }));
 
   otelCollectorConfig = pkgs.writeText "claude-otel-collector.yaml" ''
     receivers:
