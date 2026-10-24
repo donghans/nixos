@@ -275,58 +275,6 @@ in {
       ]
     '';
 
-    # == 배터리로 바뀌면 slack 종료, AC 로 돌아오면 다시 시작 (사용자 승인 2026-10-24) ==
-    # 근거: 장부 #95·#96·#97(배터리·덮개 닫힘, slack 8개 종료 시 psys −0.31~−0.43 W, 재시작 비용 약 65 J → 닫아 두면 약 2~3분 뒤부터 이득).
-    # 덮개 열림 절감은 측정하지 않았다(정책은 덮개와 무관하게 동작). 사용자가 배터리 중 slack 을 안 쓴다고 함.
-    # 종료는 PID 로만(이름 기반 kill 금지). 정책이 끈 경우에만 AC 에서 다시 켠다(사용자가 직접 끈 것은 켜지 않음).
-    # 시험 중에는 이 유닛을 멈춘다: `systemctl --user stop slack-power-policy` (시험 도구 preflight 가 확인).
-    systemd.user.services.slack-power-policy = {
-      Unit = {
-        Description = "Stop slack on battery, restart it on AC";
-        After = ["graphical-session.target"];
-        PartOf = ["graphical-session.target"];
-      };
-      Service = let
-        script = pkgs.writeShellScript "slack-power-policy" ''
-          export PATH=${lib.makeBinPath [pkgs.coreutils pkgs.procps pkgs.systemd pkgs.libnotify pkgs.gnugrep]}:$PATH
-          flag="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/slack-power-policy.stopped"
-          ac_online() {
-            local d
-            for d in /sys/class/power_supply/*; do
-              [ "$(cat "$d/type" 2>/dev/null)" = Mains ] && [ "$(cat "$d/online" 2>/dev/null)" = 1 ] && return 0
-            done
-            return 1
-          }
-          slack_pids() { pgrep -u "$(id -u)" -x slack; }
-          apply() {
-            if ac_online; then
-              if [ -e "$flag" ]; then
-                rm -f "$flag"
-                slack_pids >/dev/null || systemd-run --user --collect --quiet --unit="slack-policy-$(date +%s)" slack -s
-                notify-send -a slack-power-policy "AC 연결: slack 을 다시 시작합니다"
-              fi
-            elif pids=$(slack_pids); then
-              touch "$flag"
-              kill $pids
-              notify-send -a slack-power-policy "배터리 전환: slack 을 종료했습니다(AC 를 꽂으면 다시 시작)"
-            fi
-          }
-          # 시작 시: 로그인 직후 autostart 가 slack 을 띄울 시간을 준 뒤 한 번 적용
-          sleep 60
-          apply
-          udevadm monitor --udev --subsystem-match=power_supply --property | grep --line-buffered '^POWER_SUPPLY_NAME=ADP' | while read -r _; do
-            sleep 3  # 한 번의 전환에 이벤트가 여러 번 옴
-            apply
-          done
-        '';
-      in {
-        ExecStart = "${script}";
-        Restart = "on-failure";
-        RestartSec = 10;
-      };
-      Install.WantedBy = ["graphical-session.target"];
-    };
-
     # 런처에서 Howdy 설정 GUI(howdy-gtk)는 숨김 — 얼굴 등록/삭제는 CLI(sudo howdy add / clear)로 함
     xdg.desktopEntries.howdy = {
       name = "Howdy";

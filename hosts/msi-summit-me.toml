@@ -9,4 +9,5 @@ tailpass = true
 netdata  = true
 
 [mods.gui.apps]
+slack           = false  # 노트북에서는 쓰지 않음(데스크톱을 못 볼 때는 모바일 앱) — 장부 #95~#97: 실행 중 slack 이 배터리 약 0.3~0.4 W
 qa-desktop-view = true   # 데스크톱(beelink-ser7-co)의 incus VM qa-desktop 화면을 SSH 터널로 본다
