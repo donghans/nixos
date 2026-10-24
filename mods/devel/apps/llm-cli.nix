@@ -266,6 +266,8 @@ in {
           # 환경 정보
           - 이 시스템은 NixOS이며, 스왑 영역의 일부는 ZRAM으로 구성되어 있을 수 있습니다.
             메모리/스왑 관련 작업(OOM 대응, 스왑 크기 조정 등) 전에 실제 스왑이 디스크인지 ZRAM인지 먼저 확인하세요.
+          - 「메모리 압박」「여유 부족」「더 띄워도 되나」를 판단하기 전, 그리고 VM·컨테이너 스택·병렬 시험을 새로 띄우기 전에는
+            `free` 의 available·buff/cache 로 추측하지 말고 `donghans-host-resources` 스킬(가용 자원 스냅샷·최근 이력·LLM 세션별 사용량)을 읽고 실행하세요.
           - 하드웨어/OS 상세 스펙(디스크, 파일시스템, 부트로더, 커널 파라미터 등)은 추측하지 말고
             `~/nixos/hosts/(현재 호스트명).nix`, `~/nixos/hosts/(현재 호스트명).toml`, 있다면 `~/nixos/hosts/(현재 호스트명)/` 디렉토리를 직접 읽어 확인하세요.
             현재 호스트명은 `hostname` 명령으로 확인합니다.
@@ -337,6 +339,10 @@ in {
     };
     home.file.".claude/skills/donghans-qa" = {
       source = ../../_data/claude-skills/donghans-qa;
+      force = true;
+    };
+    home.file.".claude/skills/donghans-host-resources" = {
+      source = ../../_data/claude-skills/donghans-host-resources;
       force = true;
     };
     home.file.".claude/skills/donghans-doc-rigor" = {
