@@ -3,8 +3,8 @@
 
 사용: hostres.py [--secs N] [--top N] [--hist 3h] [--json]
   --secs  PSI·vmstat·CPU 변화율을 재는 구간(기본 5초, 0 이면 구간 없이 순간값만)
-  --hist  최근 이력 그래프 구간(기본 3h, 0 이면 생략). 호스트 PSI·가용메모리·스왑은 Netdata(127.0.0.1:19999),
-          LLM CLI 앱(claude 등)의 RSS·CPU 는 observe 표본(/var/lib/observe/data)에서 읽는다 — 없으면 그 줄만 생략.
+  --hist  최근 이력 그래프 구간(기본 3h, 0 이면 생략). 호스트 PSI·가용메모리·스왑은 Netdata(127.0.0.1:19999)에서 읽는다.
+          (observe 표본 안 쓴다 — 세션별 값은 아래 LLM 세션 표에서 본다)
 표준 라이브러리만 쓴다. 읽기 전용(캐시 비우기·프로세스 종료 같은 변경 없음).
 """
 import argparse, datetime, glob, json, os, socket, subprocess, time, urllib.request
@@ -224,7 +224,6 @@ def render(s, top):
 
 # ---------- 이력(최근 구간) ----------
 BARS = "▁▂▃▄▅▆▇█"
-LLM_APPS = ("claude", "codex", "gemini", "opencode")  # observe 의 앱 이름(= 정리한 프로세스 이름)
 
 
 def parse_dur(t):
@@ -257,46 +256,6 @@ def netdata(chart, secs, points, group, col=1):
     return [row[col] for row in reversed(rows)]
 
 
-def observe_apps(secs, points):
-    """observe 표본에서 LLM CLI 앱별 {app: ([rss_mb max/칸], [cpu_core_pct mean/칸], [프로세스 수 max/칸])}."""
-    now = time.time()
-    t_from = now - secs
-    files = sorted(glob.glob("/var/lib/observe/data/samples-*.jsonl"))[-2:]
-    width = secs / points
-    acc = {}
-    for fp in files:
-        try:
-            if os.path.getmtime(fp) < t_from:
-                continue
-            fh = open(fp)
-        except OSError:
-            continue
-        with fh:
-            for line in fh:
-                if '"apps"' not in line:
-                    continue
-                try:
-                    d = json.loads(line)
-                except ValueError:
-                    continue
-                t = d.get("t", 0)
-                if t < t_from:
-                    continue
-                b = min(int((t - t_from) / width), points - 1)
-                for a in d.get("apps") or []:
-                    if a["app"] in LLM_APPS:
-                        r = acc.setdefault(a["app"], [dict(), dict(), dict()])
-                        r[0][b] = max(r[0].get(b, 0), a["rss_mb"])
-                        r[1].setdefault(b, []).append(a["cpu_core_pct"])
-                        r[2][b] = max(r[2].get(b, 0), a["n"])
-    out = {}
-    for app, (rss, cpu, n) in acc.items():
-        out[app] = ([rss.get(i) for i in range(points)],
-                    [sum(cpu[i]) / len(cpu[i]) if i in cpu else None for i in range(points)],
-                    [n.get(i) for i in range(points)])
-    return out
-
-
 def history(hist_s, points=36):
     L = []
     step = hist_s / points
@@ -325,16 +284,6 @@ def history(hist_s, points=36):
         L.append(f"- {'스왑 사용(칸 최대)':<20} {spark(swap, lo=min(swap))}  최대 {max(swap) / 1024:.1f}GiB · 지금 {swap[-1] / 1024:.1f}GiB")
     if not got:
         L.append("- Netdata 이력을 못 읽음(127.0.0.1:19999) — 호스트 PSI·가용 이력 생략")
-    llm = observe_apps(hist_s, points)
-    if llm:
-        L.append("- LLM CLI 앱 전체 합계(observe 표본 30초 간격; 세션별 이력은 기록되지 않음):")
-        for app, (rss, cpu, n) in sorted(llm.items()):
-            r = [x for x in rss if x is not None]
-            c = [x for x in cpu if x is not None]
-            L.append(f"  - {app} RSS   {spark(rss)}  최대 {max(r) / 1024:.1f}GiB · 지금 {r[-1] / 1024:.1f}GiB · 프로세스 최대 {max(x for x in n if x)}개")
-            L.append(f"  - {app} CPU   {spark(cpu)}  최대 {max(c):.0f}% · 평균 {sum(c) / len(c):.0f}% (코어 1개=100%)")
-    else:
-        L.append("- observe 표본에서 LLM CLI 앱 기록을 못 찾음(수집이 꺼졌거나 구간 밖)")
     return "\n".join(L)
 
 
@@ -506,6 +455,18 @@ def session_meta():
     return out
 
 
+def proc_age_s(pid, hz, boot):
+    st = read(f"/proc/{pid}/stat") or ""
+    try:
+        return boot - int(st[st.rindex(")") + 2:].split()[19]) / hz
+    except (ValueError, IndexError):
+        return None
+
+
+def fmt_dur(sec):
+    return f"{sec:.0f}초" if sec < 90 else f"{sec / 60:.0f}분" if sec < 5400 else f"{sec / 3600:.1f}시간"
+
+
 def sessions_begin():
     ppid, comm, t0 = proc_table()
     return ppid, comm, t0, time.monotonic()
@@ -538,7 +499,15 @@ def sessions_end(begin, measured):
             age = (boot - int(st[st.rindex(")") + 2:].split()[19]) / hz) / 3600
         except (ValueError, IndexError):
             age = None
-        rows.append((pss, r, cwd, len(tree), cpu, age, comm[r].lstrip(".").replace("-wrapped", ""), meta.get(r)))
+        kids = {}
+        for p in tree:
+            if p == r:
+                continue
+            c = comm.get(p, "?")
+            e = proc_age_s(p, hz, boot)
+            k = kids.setdefault(c, [0, 0.0, 0.0])  # 개수, PSS(MiB), 최장 가동(초)
+            k[0] += 1; k[1] += pss_kib(p) / 1024; k[2] = max(k[2], e or 0)
+        rows.append((pss, r, cwd, len(tree), cpu, age, comm[r].lstrip(".").replace("-wrapped", ""), meta.get(r), kids))
     return sorted(rows, reverse=True)
 
 
@@ -548,7 +517,7 @@ def render_sessions(rows):
     tot = sum(r[0] for r in rows)
     busy = sum(1 for r in rows if r[7] and r[7]["status"] == "busy")
     L = [f"## LLM 세션 — {len(rows)}개(작동중 {busy} · 대기 {len(rows) - busy}), PSS 합 {tot / 1024:.1f}GiB (자식 프로세스 포함, 구간 CPU)"]
-    for pss, pid, cwd, n, cpu, age, kind, m in rows:
+    for pss, pid, cwd, n, cpu, age, kind, m, kids in rows:
         head = f"- {m['name'] if m else kind} [{m['sid'] if m else '?'}] pid {pid} · {cwd}"
         res = f"PSS {pss:.0f}MiB · 프로세스 {n}개 · CPU {'-' if cpu is None else f'{cpu:.0f}%'} · 가동 {'-' if age is None else f'{age:.0f}h'}"
         if not m:
@@ -564,6 +533,10 @@ def render_sessions(rows):
         L.append(f"{head} · **{st}** {ago(m['since'])}부터")
         note = " [ctx 보충]" if m.get("src") == "transcript+ctx" else (f" [못 쟀음: ctx 접속 실패 — {m['ctx_err']}]" if m.get("ctx_err") else "")
         L.append(f"    마지막 사용자 입력 {ago(m['last_user'])} · 마지막 응답 {ago(m['last_asst'])}{note} · 서브에이전트 {subs}")
+        # 명령줄은 개인정보 원칙상 읽지 않고 프로세스 이름만 쓴다. 도커·incus 가 띄운 것은 데몬 소속이라 여기 안 잡힌다.
+        run = sorted(kids.items(), key=lambda kv: -kv[1][1])
+        ks = ", ".join(f"{c}×{v[0]}({v[1]:.0f}MiB, 최장 {fmt_dur(v[2])})" for c, v in run[:6]) + (" …" if len(run) > 6 else "")
+        L.append(f"    세션이 띄운 자식 프로세스: {ks or '없음'}")
         L.append(f"    {res}")
     if HELPERS:
         L.append(f"- (세션 아님) Claude-in-Chrome 네이티브 호스트 {len(HELPERS)}개 · PSS {sum(pss_kib(p) for p in HELPERS) / 1024:.0f}MiB — 브라우저가 띄운 보조 프로세스")
@@ -658,7 +631,7 @@ def main():
     if a.json:
         s["verdict"], s["reasons"] = verdict(s)
         s["consumers"] = cgroup_consumers(a.top)
-        s["sessions"] = [dict(pss_mib=r[0], pid=r[1], cwd=r[2], procs=r[3], age_h=r[5], kind=r[6], meta=r[7]) for r in sess]
+        s["sessions"] = [dict(pss_mib=r[0], pid=r[1], cwd=r[2], procs=r[3], age_h=r[5], kind=r[6], meta=r[7], children={c: dict(n=v[0], pss_mib=v[1], max_age_s=v[2]) for c, v in r[8].items()}) for r in sess]
         print(json.dumps(s, ensure_ascii=False, indent=1))
     else:
         cons = cgroup_consumers(a.top)
