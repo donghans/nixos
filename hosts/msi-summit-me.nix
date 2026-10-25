@@ -275,6 +275,12 @@ in {
       ]
     '';
 
+    # 텍스트 입력 커서(캐럿) 깜빡임 끔(2026-10-25). Vivaldi 입력창의 깜빡임이 0.5초마다 화면을 갱신시켜 화면 절전(PSR)을
+    # 약 29% 깨고 있었음(장부 #110: PSR 71%→99.5%, 앱 CPU −62%, psys 약 −1.6 W, 2쌍). GTK·Chromium 앱에 적용(Zed·kitty 는 자체 설정).
+    # 새로 시작하는 앱부터 적용. 되돌리려면 이 두 줄을 지움.
+    gtk.gtk3.extraConfig.gtk-cursor-blink = false;
+    gtk.gtk4.extraConfig.gtk-cursor-blink = false;
+
     # 런처에서 Howdy 설정 GUI(howdy-gtk)는 숨김 — 얼굴 등록/삭제는 CLI(sudo howdy add / clear)로 함
     xdg.desktopEntries.howdy = {
       name = "Howdy";
