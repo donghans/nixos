@@ -281,6 +281,21 @@ in {
     gtk.gtk3.extraConfig.gtk-cursor-blink = false;
     gtk.gtk4.extraConfig.gtk-cursor-blink = false;
 
+    # Zed 편집기 커서 깜빡임 끔(2026-10-25). Zed 는 GTK 설정을 읽지 않고 자체 `cursor_blink` 를 쓴다. 포커스된 편집기·Git 그래프 검색칸의
+    # 캐럿이 0.5초마다 화면을 갱신시켜 PSR 을 깨고 있었음(장부 #114: 갱신 40회/20초→0~1, 실제 프로젝트 PSR 약 67%→). 새로 시작하는 Zed 부터,
+    # 열려 있는 Zed 는 settings.json 변경을 바로 반영. settings.json 은 Zed 가 다시 쓰므로(zed.nix 와 같은 이유) 키 하나만 활성화 때 맞춘다.
+    # 되돌리려면 이 블록을 지우고 settings.json 의 "cursor_blink" 줄을 지움.
+    home.activation.zedCursorBlink = lib.hm.dag.entryAfter ["writeBoundary"] ''
+      conf="$HOME/.config/zed/settings.json"
+      if [ -z "''${DRY_RUN:-}" ] && [ -f "$conf" ]; then
+        if ${pkgs.gnugrep}/bin/grep -q '"cursor_blink"' "$conf"; then
+          ${pkgs.gnused}/bin/sed -i 's|"cursor_blink": *[a-z]*|"cursor_blink": false|' "$conf"
+        else
+          ${pkgs.gnused}/bin/sed -i '0,/^{/s|^{|{\n  "cursor_blink": false,|' "$conf"
+        fi
+      fi
+    '';
+
     # 런처에서 Howdy 설정 GUI(howdy-gtk)는 숨김 — 얼굴 등록/삭제는 CLI(sudo howdy add / clear)로 함
     xdg.desktopEntries.howdy = {
       name = "Howdy";
