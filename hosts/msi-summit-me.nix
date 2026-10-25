@@ -296,6 +296,13 @@ in {
       fi
     '';
 
+    # 실패한 서비스 확인(notif-health)을 1분 → 5분마다로(2026-10-25). 이 노트북에서 주기 타이머 두 개(터치패드 감시 30초 + 이것 60초)를
+    # 끄면 쉬는 전력이 약 −0.26 W(장부 #121, 3쌍). 실패 알림이 최대 5분 늦어질 뿐. 공통 모듈(mods/gui/utils/notify-logger.nix)의 기본값은 그대로.
+    systemd.user.timers.notif-health.Timer = {
+      OnUnitActiveSec = lib.mkForce "300s";
+      AccuracySec = lib.mkForce "60s";
+    };
+
     # 런처에서 Howdy 설정 GUI(howdy-gtk)는 숨김 — 얼굴 등록/삭제는 CLI(sudo howdy add / clear)로 함
     xdg.desktopEntries.howdy = {
       name = "Howdy";

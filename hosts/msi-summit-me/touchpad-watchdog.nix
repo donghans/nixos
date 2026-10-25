@@ -4,7 +4,7 @@
 #   intel-lpss) 경로로 동작하는데, 세션 도중 i2c_designware 컨트롤러가 "controller timed out"
 #   을 매초 쏟아내며 고착되어 터치패드가 죽는 현상이 있음. 자동 복구가 없어 한번 걸리면 재부팅 전까지 먹통.
 #
-# (동작) 30초마다 커널 로그를 점검해 최근 윈도우에 타임아웃이 임계치 이상 쌓이면
+# (동작) 120초마다(2026-10-25: 30초→120초, 장부 #121) 커널 로그를 점검해 최근 윈도우에 타임아웃이 임계치 이상 쌓이면
 #   ① 진단 로그를 /var/log/touchpad-watchdog/ 에 수집하고
 #   ② intel-lpss 드라이버를 언바인드→리바인드 후 power/control=on 강제로 컨트롤러를 리셋.
 #   (수동 복구로 검증된 절차와 동일)
@@ -17,7 +17,7 @@
   powerCtl = "/sys/devices/pci0000:00/0000:00:15.0/power/control";
   runtimeStatus = "/sys/devices/pci0000:00/0000:00:15.0/power/runtime_status";
 
-  threshold = 8; # 직전 점검(~30초 전) 이후 신규 타임아웃이 이만큼 이상이면 '고착' 판정
+  threshold = 8; # 직전 점검(~120초 전) 이후 신규 타임아웃이 이만큼 이상이면 '고착' 판정
   cooldownSec = 180; # 직전 복구 후 이 시간(초) 안에는 재복구 안 함 (settle 대기 + 무한루프 방지)
 
   watchdog = pkgs.writeShellApplication {
@@ -37,7 +37,7 @@
       fi
 
       # 직전 실행 이후 새로 쌓인 커널 메시지만 읽으며 커서를 전진.
-      # storm(초당 수십 회)이면 ~30초 간격에 수백 건이 잡힌다.
+      # storm(초당 수십 회)이면 점검 간격(120초)에 수천 건이 잡힌다.
       count=$(journalctl -k --cursor-file="$CURSOR" --no-pager 2>/dev/null \
                 | grep -c "i2c_designware.0: controller timed out" || true)
       [ "''${count:-0}" -lt ${toString threshold} ] && exit 0 # 정상
@@ -105,12 +105,12 @@ in {
   };
 
   systemd.timers.touchpad-watchdog = {
-    description = "Run touchpad watchdog every 30s";
+    description = "Run touchpad watchdog every 120s";
     wantedBy = ["timers.target"];
     timerConfig = {
       OnBootSec = "60s";
-      OnUnitActiveSec = "30s";
-      AccuracySec = "5s";
+      OnUnitActiveSec = "120s"; # 30초 → 120초: 켜 둔 주기 타이머 2개가 쉬는 전력을 약 +0.26 W 올림(장부 #121). 고착 감지가 최대 약 90초 늦어질 뿐
+      AccuracySec = "30s"; # 다른 깨움과 묶일 여지
     };
   };
 }
