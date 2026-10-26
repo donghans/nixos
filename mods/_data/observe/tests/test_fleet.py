@@ -192,6 +192,17 @@ else:
             with contextlib.redirect_stdout(out):
                 observe_cli.main(sub_)
             check(f"CLI {' '.join(sub_[:2])}: 출력에 「{needle}」", needle in out.getvalue(), out.getvalue()[:300])
+        # 인사이트 표가 없는 서버(아직 nixup 전)에서도 기본 요약은 올라가고 인사이트는 건너뜀
+        c2 = fl.connect()
+        with c2.cursor() as cur:
+            cur.execute("DROP TABLE observe_units"); cur.execute("DROP TABLE observe_focus_hourly")
+        c2.commit()
+        n3 = fl.push(c2, "nb3", [(now_h, "vivaldi-bin", 0.1, 1.0, 10)], [(now_h, 2.0, 1.0, 10)], None, {"focus": [(now_h, "kitty", 1.0)], "units": [("user", "a.service")], "changes": [(now_h - 100, now_h - 50, "nixup", "home", "ok")]})
+        with c2.cursor() as cur:
+            cur.execute("SELECT count(*) FROM observe_app_hourly WHERE host = 'nb3'"); n_app3 = cur.fetchone()[0]
+            cur.execute("SELECT count(*) FROM observe_changes WHERE host = 'nb3'"); n_ch3 = cur.fetchone()[0]
+        c2.close()
+        check("표가 없는 서버: 기본 요약(앱 1행)과 있는 인사이트 표(변경)는 올라가고, 없는 표(포커스·유닛)만 건너뜀", n3[0] == 1 and n_app3 == 1 and n_ch3 == 1 and sorted(fl.LAST_SKIPPED) == ["observe_focus_hourly", "observe_units"], f"{n3} {n_app3} {n_ch3} {fl.LAST_SKIPPED}")
         check("observectl fleet 서브명령이 등록됨", "fleet" in open(os.path.join(ROOT, "observe_cli.py")).read())
     finally:
         pg.stop()
