@@ -202,7 +202,9 @@ class ProcUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         yield Static("", id="head")
         yield uikit.box(Input(value=self.filter_text, placeholder="필터: 이름·app:이름·group:이름·user:me|root·cpu>50·mem>500M·pid:123 (공백=AND)", id="filter"), "필터 ( / 키 )")
         t = DataTable(id="tbl", cursor_type="row", zebra_stripes=True)
-        t.add_columns("", "이름 / 그룹", "앱", "PID", "CPU %", "RSS MiB", "보호")
+        # 폭을 고정한다 — 자동 폭은 첫 표시 때 값 폭으로 굳어 「앱」·「보호」 칸이 잘려 보였다(실제 터미널 촬영에서 확인)
+        for label, w in (("", 3), ("이름 / 그룹", 30), ("앱", 18), ("PID", 8), ("CPU %", 7), ("RSS MiB", 9), ("보호", 34)):
+            t.add_column(label, width=w)
         yield uikit.box(t, "프로세스")
         with Vertical(id="status-row"):
             yield Static("", id="status")
@@ -215,6 +217,7 @@ class ProcUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             self.status("이 환경은 pidfd 를 지원하지 않아 종료 기능이 꺼져 있습니다(보기만 가능)")
         self.query_one("#tbl", DataTable).focus()
         self.rescan()
+        self.set_timer(0.8, self.rescan)       # 첫 스캔은 CPU 를 잴 직전 표본이 없어 0 이므로 잠깐 뒤 한 번 더
 
     def status(self, msg):
         self.query_one("#status", Static).update(" " + msg)

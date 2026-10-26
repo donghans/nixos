@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 
 from rich.text import Text
@@ -109,7 +110,8 @@ def proc_apps(resolver, prev, dt, hz):
 
 
 class LiveSampler:
-    """`sample()` 를 부를 때마다 직전 호출과의 차이로 변화율을 계산한다(첫 호출은 구간 값이 None). 스레드에서 불러도 되지만 한 번에 하나만."""
+    """`sample()` 를 부를 때마다 직전 호출과의 차이로 변화율을 계산한다(첫 호출은 구간 값이 None).
+    이미 재는 중이면 기다리지 않고 None 을 돌려준다 — 느린 첫 표본 중에 타이머가 겹쳐 직전 표본·시각이 뒤섞이는 것을 막는다."""
 
     def __init__(self, slow_every=5.0):
         self.slow_every = slow_every
@@ -123,8 +125,17 @@ class LiveSampler:
         self._apps_t = None
         self.resolver = ap.AppResolver()
         self.hz = os.sysconf("SC_CLK_TCK")
+        self._lock = threading.Lock()
 
     def sample(self):
+        if not self._lock.acquire(blocking=False):
+            return None
+        try:
+            return self._sample()
+        finally:
+            self._lock.release()
+
+    def _sample(self):
         t0 = time.monotonic()
         measured = self._b is not None
         s = hm.end(self._b or hm.begin(), measured)
@@ -282,9 +293,10 @@ def render_top(s, w):
     for p, b in s.get("cons", [])[:6]:
         t.append(f"  {b / GIB:5.1f} GiB  {hm.friendly(p)[:max(10, w - 18)]}\n")
     t.append("\n CPU — 앱 단위(코어 1개=100%)" + ("" if s.get("apps_measured") else " · 첫 표본 후 표시") + "\n", style="bold")
+    nw = max(8, w - 36)       # 이름 칸: 줄이 박스 폭을 넘어 줄바꿈되지 않게 꼬리(프로세스 수·RSS)를 뺀 나머지
     for a in s.get("apps", [])[:6]:
         if s.get("apps_measured"):
-            t.append(f"  {a['cpu']:6.1f}%  {a['app'][:max(10, w - 34)]:<{max(10, w - 34)}} 프로세스 {a['n']:>3} · RSS 합 {a['rss'] / MIB:6.0f} MiB\n")
+            t.append(f"  {a['cpu']:6.1f}%  {a['app'][:nw]:<{nw}} {a['n']:>4}개 {a['rss'] / MIB:7.0f} MiB\n")
     return t
 
 

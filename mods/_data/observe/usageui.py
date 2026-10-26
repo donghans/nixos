@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """usageui — 전력·자원 사용 습관 TUI (Textual). observectl 이 쌓은 표본을 '시간 범위' 기준으로 조회해 보여 준다.
 
-원칙: ① 조회는 범위 기준(기본 = 지금까지 최근 7일) ② **갱신은 수동만**(타이머 없음 — r/F5; 예외: 6 실시간 탭만 그 탭이 보일 때 1초마다 지금 값을 갱신, 이력 저장 없음) ③ 값마다 '측정/추정' 표시
+원칙: ① 조회는 범위 기준(기본 = 지금까지 최근 7일) ② **갱신은 수동만**(타이머 없음 — r/F5; 예외: 1번 탭 안의 실시간 쪽만 그 화면이 보일 때 1초마다 지금 값을 갱신, 이력 저장 없음) ③ 값마다 '측정/추정' 표시
 ④ 프로세스 *관리*(종료·nice)는 btop(b 키), 프로세스 *지표*(누가 얼마나 쓰나)는 여기.
-탭: 1 대시보드(전력·배터리·습관·앱) / 2 앱·프로세스 / 3 원인 / 4 시스템·기기(Netdata·수집 상태) / 5 용어 / 6 실시간(지금 값만)
+탭: 1 대시보드(전력·배터리·습관·앱) / 2 앱·프로세스 / 3 원인 / 4 시스템·기기(Netdata·수집 상태) / 5 용어 (1번 탭 안 Tab: 실시간 — 지금 값만)
 측정 중에는 열어 두지 마세요(화면 갱신은 없지만 조회 순간 CPU 를 씁니다)."""
 from __future__ import annotations
 
@@ -138,14 +138,14 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     Collapsible > Contents { height: auto; padding: 0; }
     DataTable { height: 1fr; background: #000000; }
     #range-err { height: auto; }
-    #livebox { height: 1fr; min-height: 40; }
+    #livebox { height: 34; }
+    #lsess { height: 11; }
     #lleft, #lright { width: 1fr; height: 1fr; }
     #lleft > #lverdict { height: 8; }
     #lleft > #lmem { height: 16; }
-    #lleft > #lpsi { height: 9; }
-    #lright > #lio { height: 22; }
+    #lleft > #lpsi { height: 10; }
+    #lright > #lio { height: 17; }
     #lright > #ltop { height: 17; }
-    #lright > #lsess { height: 12; }
     #livebox.narrow { layout: vertical; height: auto; }
     #livebox.narrow #lleft, #livebox.narrow #lright { width: 100%; height: auto; }
     #livebox.narrow .box { height: 14; }
@@ -155,7 +155,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     BINDINGS = [
         Binding("q", "quit", "종료"),
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('apps')", "앱"), Binding("3", "tab('cause')", "원인"),
-        Binding("4", "tab('system')", "시스템"), Binding("5", "tab('help')", "용어"), Binding("6", "tab('live')", "실시간"),
+        Binding("4", "tab('system')", "시스템"), Binding("5", "tab('help')", "용어"), Binding("6", "tab('live')", "실시간", show=False), Binding("tab", "sub_toggle", "기록↔실시간", priority=True),
         Binding("t", "set_range", "범위"), Binding("s", "spikes", "튄 순간"), Binding("escape", "restore", "원래 범위", show=False), Binding("v", "cycle_baseline", "비교 기준"),
         Binding("r,f5", "reload", "새로고침"), Binding("b", "btop", "btop"), Binding("e", "export", "저장"),
         *uikit.HelpMixin.HELP_BINDINGS,
@@ -171,7 +171,8 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         self.expand = expand
         self.rng = rng or ud.preset("7일", time.time())
         self.baseline = baseline
-        self.start_tab = tab
+        self.start_sub = "live" if tab == "live" else "dash-hist"     # --tab live = 1번 탭의 실시간 쪽
+        self.start_tab = "dashboard" if tab == "live" else tab
         self.view = None
         self.cause = None            # ex.build 결과 | False(표본 없음) | None(아직)
         self.sysdata = None          # {"snap", "series"}
@@ -186,12 +187,26 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     def compose(self) -> ComposeResult:
         with TabbedContent(initial=self.start_tab, id="tabs"):
             with TabPane("대시보드 [1]", id="dashboard"):
-                with VerticalScroll(id="dashscroll"):
-                    with Horizontal(id="dash"):
-                        if self.desktop:
-                            yield from self._compose_dash_desktop()
-                        else:
-                            yield from self._compose_dash_laptop()
+                # 같은 1번 탭 안의 이중 탭: 기록(범위 기준 대시보드) ↔ 실시간(지금 값만). Tab 키로 오간다
+                with TabbedContent(initial=self.start_sub, id="dsub"):
+                    with TabPane("기록", id="dash-hist"):
+                        with VerticalScroll(id="dashscroll"):
+                            with Horizontal(id="dash"):
+                                if self.desktop:
+                                    yield from self._compose_dash_desktop()
+                                else:
+                                    yield from self._compose_dash_laptop()
+                    with TabPane("실시간 — 지금 값", id="live"):
+                        with VerticalScroll():
+                            with Horizontal(id="livebox"):
+                                with Vertical(id="lleft"):
+                                    yield uikit.box(Panel(lambda w, h: self._live(live.render_verdict), id="lverdict"), "판정 — 지금")
+                                    yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_mem(s, w)), id="lmem"), "메모리 구성 — 진짜 여유")
+                                    yield uikit.box(Panel(lambda w, h: self._live(live.render_pressure), id="lpsi"), "압박(PSI) · 스왑 입출력")
+                                with Vertical(id="lright"):
+                                    yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_io(s, w)), id="lio"), "CPU 코어 · 네트워크 · 디스크 — 초당")
+                                    yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_top(s, w)), id="ltop"), "상위 소비자")
+                            yield uikit.box(Panel(lambda w, h: self._live(live.render_sessions), id="lsess"), "LLM 세션")
             with TabPane("앱·프로세스 [2]", id="apps"):
                 with VerticalScroll():
                     yield self._table_box("tapps", "앱(전체 프로세스를 앱으로 묶은 합) — CPU 는 코어 1개=100%", ("앱", "CPU %", "CPU 점유", "전환/s", "메모리 MB", "프로세스", "CPU+GPU 전력량 추정 Wh*" if not self.prof["psys"] else "전력량 추정 Wh*"), "xl")
@@ -225,17 +240,6 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             with TabPane("용어 [5]", id="help"):
                 with VerticalScroll():
                     yield uikit.box(Static(self._help_text(), id="helptext"), "용어 — 값이 무엇을 뜻하나")
-            with TabPane("실시간 [6]", id="live"):
-                with VerticalScroll():
-                    with Horizontal(id="livebox"):
-                        with Vertical(id="lleft"):
-                            yield uikit.box(Panel(lambda w, h: self._live(live.render_verdict), id="lverdict"), "판정 — 지금")
-                            yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_mem(s, w)), id="lmem"), "메모리 구성 — 진짜 여유")
-                            yield uikit.box(Panel(lambda w, h: self._live(live.render_pressure), id="lpsi"), "압박(PSI) · 스왑 입출력")
-                        with Vertical(id="lright"):
-                            yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_io(s, w)), id="lio"), "CPU 코어 · 네트워크 · 디스크 — 초당")
-                            yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_top(s, w)), id="ltop"), "상위 소비자")
-                            yield uikit.box(Panel(lambda w, h: self._live(live.render_sessions), id="lsess"), "LLM 세션")
         with Vertical(id="status-row"):
             yield Static("", id="status")
         yield Footer()
@@ -327,7 +331,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         for k, d in uv.GLOSSARY:
             t.append(f" {k:<14}", style="#33ccff")
             t.append(d + "\n")
-        t.append("\n 키: 1~6 탭 · t 범위 · s 튄 순간 순위 · v 비교 기준 · r/F5 새로고침 · b btop · e 내보내기 · ? 키 목록 · q 종료", style="grey50")
+        t.append("\n 키: 1~5 탭(1번은 Tab 으로 기록↔실시간) · t 범위 · s 튄 순간 순위 · v 비교 기준 · r/F5 새로고침 · b btop · e 내보내기 · ? 키 목록 · q 종료", style="grey50")
         return t
 
     # --- 데이터: 수동 갱신만(타이머 없음)
@@ -437,10 +441,26 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
 
     # --- 동작
     def action_tab(self, name):
+        if name == "live":
+            self.query_one("#tabs", TabbedContent).active = "dashboard"
+            self.query_one("#dsub", TabbedContent).active = "live"
+            return
         self.query_one("#tabs", TabbedContent).active = name
 
+    def action_sub_toggle(self):
+        """Tab: 1번 탭에서는 기록 ↔ 실시간. 다른 탭·대화상자에서는 원래대로 다음 칸으로 포커스."""
+        if len(self.screen_stack) > 1 or self.query_one("#tabs", TabbedContent).active != "dashboard":
+            self.screen.focus_next()
+            return
+        sub = self.query_one("#dsub", TabbedContent)
+        sub.active = "dash-hist" if sub.active == "live" else "live"
+
     def on_tabbed_content_tab_activated(self, ev):
-        if ev.pane.id == "live":
+        try:
+            seen = self.query_one("#tabs", TabbedContent).active == "dashboard" and self.query_one("#dsub", TabbedContent).active == "live"
+        except Exception:
+            seen = False
+        if seen:
             self._live_start()
         else:
             self._live_stop()
@@ -469,14 +489,15 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         if self._timer is not None:
             self._live_tick()
 
-    @work(thread=True, exclusive=True, group="live")
+    @work(thread=True, group="live")        # exclusive 로 하면 느린 표본이 다음 틱에 취소돼 화면이 갱신되지 않는다 — 겹침은 샘플러의 잠금이 버린다
     def _live_tick(self):
         s = self.sampler.sample()
-        self.call_from_thread(self._live_draw, s)
+        if s is not None:                       # None = 이전 표본이 아직 재는 중(겹친 틱은 버린다)
+            self.call_from_thread(self._live_draw, s)
 
     def _live_draw(self, s):
         self.live_sample = s
-        for panel in self.query("#livebox Panel"):
+        for panel in self.query("#live Panel"):
             panel.build()
             panel.refresh()
         # 한 번 재는 데 걸린 시간이 간격의 20% 를 넘으면 간격을 늘려 UI 가 샘플링에 묻히지 않게 한다
