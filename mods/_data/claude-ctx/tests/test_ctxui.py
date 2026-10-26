@@ -19,6 +19,7 @@ import ctx_secrets as cs, ctxdata as cd, claude_ctx as cc, ctxui
 
 A, B = "https://github.com/x/alpha", "https://github.com/x/beta"
 PW, KEY = "hunter2-pass", "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUV"
+KEY2 = "sk-ant-api03-ZYXWVUTSRQPONMLKJIHGFEDCBA9876"          # 제한 모드 시험용: 등록하지 않은 새 키(후보로만 잡히는 것)
 
 
 def seed():
@@ -407,27 +408,61 @@ async def run():
 
 
 async def run_restricted():
-    """제한 모드(LLM 세션): 열람 제한 정보(비밀·후보)는 열리지도 읽히지도 않고 치환이 고정되며 비밀·지침 수정이 막히되, 나머지는 쓸 수 있다."""
+    """제한 모드(LLM 세션): 모든 탭을 볼 수 있되 비밀 값은 추출·조회할 수 없다 — 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열을 [protected] 로 치환(끌 수 없음),
+    값 보기·비밀 추가/삭제/끄기·후보 무시·지침 편집은 막고, 후보 승인은 허용한다."""
+    pass
     with cc.connect() as c:
         cs.add_secret(c, "RESTRICT_PW", "literal", PW, replace=True)
+        c.execute("INSERT INTO sessions (session_id, host, hosts, repo_url, first_ts, last_ts) VALUES (%s,%s,%s,%s,%s,%s)", ("dddd0001", "h1", ["h1"], A, "2026-10-06T01:00:00Z", "2026-10-06T01:00:10Z"))
+        for i, (role, text) in enumerate([("user", f"새 키는 {KEY2} 이고 비밀번호는 Zq9!kd82Lm 이다"), ("assistant", "받았다")]):
+            c.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (f"dddd-{i:04d}", "dddd0001", "h1", f"2026-10-06T01:00:{i * 10:02d}Z", role, "prompt" if role == "user" else "response", text, json.dumps({"i": i})))
         n_secrets = len(cs.load_secrets(c, only_enabled=False))
     app = ctxui.CtxUI(restricted=True)
     async with app.run_test(size=(160, 50)) as pilot:
         await settle(pilot, lambda: rows(app, "#projects") == 3)
         check("제한: 개요는 정상 로드(저장소 3곳)", rows(app, "#projects") == 3 and app.restricted)
-        tabs = [str(app.query_one("#tabs").get_tab(n).label) for n in ("secrets", "cands")]
-        check("제한: 비밀·후보 탭 라벨에 [제한] 표시", all("[제한]" in t for t in tabs), tabs)
         check("제한: 상태줄에 제한 모드 안내", "제한 모드" in txt(app.query_one("#sstate")))
-        check("제한: 막힌 동작(4·5 탭, m, 비밀·후보 관리)은 푸터에서 숨기고 열린 동작(1·2·3·6·7, r)은 보임", all(app.check_action("tab", (t,)) is False for t in ("secrets", "cands")) and all(app.check_action("tab", (t,)) is True for t in ("overview", "search", "verify", "stats", "instr")) and app.check_action("toggle_mask", ()) is False and app.check_action("reload", ()) is True)
-        for key in ("4", "5"):
-            await pilot.press(key); await pilot.pause(0.5)
-            check(f"제한: {key} 키로 비밀·후보 탭을 열 수 없음(개요에 머묾)", app.current_tab() == "overview")
-        app.query_one("#tabs").active = "secrets"; await pilot.pause(0.6)
-        check("제한: 마우스·코드로 비밀 탭을 열어도 개요로 되돌아가고 비밀 표는 비어 있음(데이터를 읽지 않음)", app.current_tab() == "overview" and rows(app, "#secrets-table") == 0)
-        app.query_one("#tabs").active = "cands"; await pilot.pause(0.6)
-        check("제한: 후보 탭도 같고 후보 탐지(스캔)가 돌지 않음", app.current_tab() == "overview" and app.cand_rows == {} and rows(app, "#cands-table") == 0)
+        check("제한: 막힌 동작(m·v·비밀 추가/삭제/끄기·후보 무시)은 푸터에서 숨기고 탭 이동·새로고침은 보임", all(app.check_action(a, ()) is False for a in ("toggle_mask", "reveal", "secret_add", "secret_delete", "secret_toggle", "cand_ignore")) and app.check_action("reload", ()) is True and app.check_action("tab", ("secrets",)) is True)
+        # --- 비밀 탭: 열린다, 값은 어디에도 없다
+        await pilot.press("4"); await settle(pilot, lambda: app.current_tab() == "secrets" and rows(app, "#secrets-table") >= 1)
+        st = app.query_one("#secrets-table")
+        cells = " ".join(str(st.get_row_at(i)) for i in range(st.row_count))
+        check("제한: 비밀 탭이 열리고 등록된 비밀의 이름·종류·길이·fp 는 보이지만 값은 없음", app.current_tab() == "secrets" and "RESTRICT_PW" in cells and PW not in cells, cells[:200])
+        await pilot.press("v"); await pilot.pause(0.3)
+        check("제한: v(값 보기)는 막혀 값이 표시되지 않음", PW not in txt(app.query_one("#sdetail")) and app._reveal is False)
+        # --- 후보 탭: 열린다, 미리보기는 [protected]
+        await pilot.press("5"); await settle(pilot, lambda: app.current_tab() == "cands" and rows(app, "#cands-table") >= 1, timeout=15)
+        ct = app.query_one("#cands-table")
+        ccells = " ".join(str(ct.get_row_at(i)) for i in range(ct.row_count))
+        check("제한: 후보 탭이 열리고 후보가 탐지되며 미리보기는 [protected](N자)이고 값(키)은 어디에도 없음", ct.row_count >= 1 and "[protected] (" in ccells and KEY2 not in ccells and cs.preview(KEY2) not in ccells, ccells[:240])
+        await pilot.press("v"); await pilot.pause(0.3)
+        check("제한: 후보 v(값 보기)도 막혀 값이 표시되지 않음", KEY2 not in txt(app.query_one("#cdetail")))
+        await pilot.press("i"); await pilot.pause(0.3)
+        with cc.connect() as c:
+            ign = len(cd.ignored_fps(c))
+        check("제한: 후보 무시(i)는 막힘(무시 목록 불변)", ign == 0, ign)
+        ct.move_cursor(row=0); await pilot.pause(0.2); await pilot.press("enter"); await pilot.pause(0.5)
+        check("제한: 후보 승인(Enter)은 허용 — 값을 보여 주지 않는 이름 입력 대화상자가 열림", isinstance(app.screen, ctxui.PromptScreen) and KEY2 not in txt(app.screen))
+        await pilot.press("escape"); await pilot.pause(0.3)
+        # --- 치환 고정·후보 패턴 치환
         await pilot.press("m"); await pilot.pause(0.3)
-        check("제한: m 으로 치환을 끌 수 없고 마스커가 여전히 비밀을 가림", app.mask is True and PW not in app.masker().text(f"비번 {PW}") and "[protected]" in app.masker().text(f"비번 {PW}"))
+        mk = app.masker()
+        probe = f"등록한 {PW} 와 미등록 키 {KEY2} 그리고 password=hunter99xyzQ 와 비밀번호는 Zq9!kd82Lm 입니다"
+        out = mk.text(probe)
+        check("제한: m 으로 치환을 끌 수 없고 마스커가 등록한 비밀 + 후보 패턴(키·password=·한글 비밀번호)을 모두 [protected] 로", app.mask is True and all(x not in out for x in (PW, KEY2, "hunter99xyzQ", "Zq9!kd82Lm")) and out.count("[protected]") >= 4, out)
+        # --- 검색·대화 화면에서도
+        await pilot.press("2"); await pilot.pause(0.3)
+        app.query_one("#repo").value = ""; q = app.query_one("#q"); q.value = "새 키는"; q.focus(); await pilot.pause(0.2)
+        await pilot.press("enter"); await settle(pilot, lambda: rows(app, "#results") >= 1)
+        rc = " ".join(str(app.query_one("#results").get_row_at(i)) for i in range(rows(app, "#results")))
+        check("제한: 검색 결과 목록에 후보 패턴의 키가 [protected] 로만 보임", rows(app, "#results") >= 1 and KEY2 not in rc and PW not in rc and "[protected]" in rc, rc[:200])
+        await submit(pilot, app.query_one("#results")); await pilot.pause(0.8)
+        sb = sess_txt(app.screen) if isinstance(app.screen, ctxui.SessionScreen) else ""
+        check("제한: 대화 화면에서도 키·비밀번호는 [protected]", isinstance(app.screen, ctxui.SessionScreen) and KEY2 not in sb and PW not in sb and "[protected]" in sb, sb[:200])
+        await pilot.press("m"); await pilot.pause(0.3)
+        check("제한: 대화 화면에서 m 을 눌러도 원문이 나오지 않음", PW not in sess_txt(app.screen) and KEY2 not in sess_txt(app.screen))
+        await pilot.press("escape"); await pilot.pause(0.3)
+        # --- 막힌 동작
         for fn in ("action_secret_add", "action_secret_delete", "action_secret_toggle", "action_reveal", "action_cand_ignore"):
             getattr(app, fn)(); await pilot.pause(0.15)
         with cc.connect() as c:
@@ -436,17 +471,16 @@ async def run_restricted():
         await pilot.press("6"); await pilot.pause(0.5)
         check("제한: 통계 탭은 그대로 열림", app.current_tab() == "stats")
         await pilot.press("7"); await pilot.pause(0.8)
-        it = app.query_one("#instr-table")
-        check("제한: 지침 탭 보기는 가능(목록이 보임)", app.current_tab() == "instr" and it.row_count >= 1)
-        check("제한: 지침 편집(edit_instr)은 편집기를 열지 않고 False", app.edit_instr("x", "y") is False)
-        await pilot.press("2"); await pilot.pause(0.4)
-        check("제한: 검색 탭은 그대로 열림", app.current_tab() == "search")
-    # 사람(제한 없음)은 이전과 같다 — 비밀 탭이 열림
+        check("제한: 지침 탭 보기는 가능(목록이 보임), 편집(edit_instr)은 편집기를 열지 않고 False", app.current_tab() == "instr" and app.query_one("#instr-table").row_count >= 1 and app.edit_instr("x", "y") is False)
+    # 사람(제한 없음)은 이전과 같다 — 후보 미리보기가 흐린 미리보기, 값 보기 가능
     app2 = ctxui.CtxUI()
     async with app2.run_test(size=(160, 50)) as pilot:
         await settle(pilot, lambda: rows(app2, "#projects") == 3)
-        await pilot.press("4"); await pilot.pause(0.8)
-        check("사람(제한 없음): 4 키로 비밀 탭이 열리고 라벨에 [제한] 없음", app2.current_tab() == "secrets" and "[제한]" not in str(app2.query_one("#tabs").get_tab("secrets").label) and not app2.restricted)
+        await pilot.press("5"); await settle(pilot, lambda: rows(app2, "#cands-table") >= 1, timeout=15)
+        c2 = " ".join(str(app2.query_one("#cands-table").get_row_at(i)) for i in range(rows(app2, "#cands-table")))
+        check("사람(제한 없음): 후보 미리보기는 [protected] 가 아니라 흐린 미리보기", not app2.restricted and "[protected] (" not in c2 and cs.preview(KEY2) in c2, c2[:200])
+        await pilot.press("m"); await pilot.pause(0.3)
+        check("사람(제한 없음): m 으로 치환을 끌 수 있음", app2.mask is False)
 
 
 try:

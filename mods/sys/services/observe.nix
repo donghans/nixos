@@ -15,7 +15,7 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
   py = pkgs.python3;
   dir = pkgs.runCommand "observe-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_tiers.py" "observe_apps.py" "observe_query.py" "observe_focus.py" "observe_browser.py" "usagegraph.py" "usagechart.py" "usagedata.py" "usagespikes.py" "usageview.py" "usagelive.py" "usageui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_tiers.py" "observe_apps.py" "observe_query.py" "observe_focus.py" "observe_browser.py" "observe_fleet.py" "usagegraph.py" "usagechart.py" "usagedata.py" "usagespikes.py" "usageview.py" "usagelive.py" "usageui.py"]}
     # procui(프로세스 관리 TUI) — 같은 디렉터리의 observe_apps·hostmetrics·uikit 을 import 하므로 한 디렉터리에 둔다
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/procui + "/${f}"} $out/${f}") ["procscan.py" "procgroups.py" "procactions.py" "procplan.py" "procui.py" "procctl.py"]}
     cp ${../../_data/observe/examples/power_knobs.py} $out/power_knobs.py
@@ -23,7 +23,9 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
     # 호스트 측정·판정 모듈의 정본은 donghans-host-resources 스킬 폴더(복제본을 따로 두지 않는다). usageui 실시간 탭·procui 가 import 한다
     cp ${../../_data/claude-skills/donghans-host-resources/scripts/hostmetrics.py} $out/hostmetrics.py
   '';
-  observectl = pkgs.writeShellScriptBin "observectl" ''exec ${py}/bin/python3 ${dir}/observe_cli.py "$@"'';
+  # fleet(호스트 간 비교)가 공유 저장소(Postgres)에 붙으므로 psycopg 가 있는 파이썬으로 실행한다(다른 하위 명령은 표준 라이브러리만 쓴다)
+  pyDb = py.withPackages (ps: [ps.psycopg]);
+  observectl = pkgs.writeShellScriptBin "observectl" ''exec ${pyDb}/bin/python3 ${dir}/observe_cli.py "$@"'';
   # 전력·자원 사용 습관 TUI(Textual) — 같은 디렉터리의 observe_core 를 import 하므로 dir 에서 실행한다
   usageui = pkgs.writeShellScriptBin "usageui" ''exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${dir}/usageui.py "$@"'';
   # 프로세스 관리 TUI(Textual) — usageui(읽기 전용 모니터)와 분리한 조치 도구. 그룹·필터·보호·안전한 일괄 종료
@@ -62,6 +64,26 @@ in {
       Nice = 10;
     };
     Install.WantedBy = ["graphical-session.target"];
+  };
+
+  # 호스트 간 비교용 요약 올리기: 6시간마다 `observectl fleet push`(최근 26시간, 멱등) — 시간별 앱 CPU·전력 평균과 브라우저 확장 목록만(원본 표본·창 제목·주소 없음).
+  # 서버(claude-ctx)에 못 붙으면 실패로 남을 뿐 다음 주기에 다시 한다(Persistent). 노트북은 수집이 꺼져 있으면 확장 목록만 올라간다. 데이터 설명은 observe_fleet.py 머리말.
+  hm.systemd.user.services.observe-fleet-push = {
+    Unit.Description = "Push observectl hourly summaries to the shared store (claude_ctx) for cross-host comparison";
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${observectl}/bin/observectl fleet push";
+      Nice = 15;
+    };
+  };
+  hm.systemd.user.timers.observe-fleet-push = {
+    Unit.Description = "Cross-host observe summary push (every 6 hours)";
+    Timer = {
+      OnCalendar = "*-*-* 00/6:17:00";
+      Persistent = true;
+      RandomizedDelaySec = "10m";
+    };
+    Install.WantedBy = ["timers.target"];
   };
 
   # 앱 런처(SUPER+Space)에서도 열리도록 등록(터미널 앱이라 uwsm 이 xdg-terminal-exec 로 kitty 에 띄움)

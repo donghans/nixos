@@ -115,6 +115,22 @@ class Masker:
         return out
 
 
+class StrictMasker(Masker):
+    """제한 모드(LLM 세션) 화면용: 등록한 비밀에 더해 **비밀처럼 보이는 문자열 후보**(find_candidates 의 패턴: 키 형식·password= 값·한글 「비밀번호는 …」 등)도
+    [protected] 로 바꾼다. 아직 등록하지 않은 비밀이 대화 원문에 있어도 화면에 나오지 않게 한다(오탐은 과하게 가리는 쪽)."""
+
+    def text(self, s):
+        s = super().text(s)
+        if not s or not isinstance(s, str):
+            return s
+        for _name, val in find_candidates(s):
+            s = s.replace(val, MASK)
+        return s
+
+    def hits(self, s) -> bool:
+        return bool(s) and self.text(s) != s
+
+
 IDENTITY = Masker()
 
 

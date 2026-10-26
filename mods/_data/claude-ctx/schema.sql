@@ -158,3 +158,33 @@ CREATE TABLE IF NOT EXISTS project_instructions (
   updated_at   timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (repo_url, name)
 );
+
+-- observectl 호스트 간 비교(observe_fleet.py): 시간별 앱 CPU·전력 요약과 브라우저 확장 설치 목록. 원본 표본·창 제목·주소·확장 이름은 올리지 않는다.
+CREATE TABLE IF NOT EXISTS observe_app_hourly (
+  host         text NOT NULL,
+  hour         timestamptz NOT NULL,
+  app          text NOT NULL,
+  cpu_core_pct real NOT NULL,      -- 그 시간 전체 표본 수로 나눈 평균(코어 1개=100%, 안 나온 표본은 0)
+  ctxsw_vol_s  real NOT NULL,
+  samples      integer NOT NULL,   -- 그 시간의 전체 표본 수(가중 평균용)
+  PRIMARY KEY (host, hour, app)
+);
+CREATE INDEX IF NOT EXISTS observe_app_hourly_hour ON observe_app_hourly (hour);
+CREATE TABLE IF NOT EXISTS observe_power_hourly (
+  host    text NOT NULL,
+  hour    timestamptz NOT NULL,
+  psys_w  real,
+  pkg_w   real,
+  samples integer NOT NULL,
+  PRIMARY KEY (host, hour)
+);
+CREATE TABLE IF NOT EXISTS observe_ext_inventory (
+  host    text NOT NULL,
+  browser text NOT NULL,
+  profile text NOT NULL,           -- 프로필 폴더 이름(Default·Profile 1) — 표시 이름 아님
+  ext_id  text NOT NULL,
+  version text NOT NULL,
+  has_sw  boolean NOT NULL,        -- 백그라운드 서비스 워커가 있는 확장(주기 활동 후보)
+  PRIMARY KEY (host, browser, profile, ext_id)
+);
+INSERT INTO schema_version (v) VALUES (4) ON CONFLICT DO NOTHING;  -- 4: observe_* (호스트 간 비교)

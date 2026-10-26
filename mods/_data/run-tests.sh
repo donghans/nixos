@@ -19,6 +19,8 @@ for t in "ctx-db:test_ctx_db.py" "ctx-instr:test_instr.py" "ctxdata:test_ctxdata
   name=${t%%:*}; f=${t#*:}
   [ -x "$CTXPY" ] && { out=$(cd "$D/claude-ctx" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$CTXPY" -I "tests/$f" 2>&1); r=$?; printf '%-9s %s\n' "$name" "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
 done
+# fleet(observe 호스트 간 비교): psycopg 가 있는 python 이면 임시 Postgres 통합까지, 아니면 순수 시험만(위 observe 묶음과 별개)
+[ -x "$CTXPY" ] && { out=$(cd "$D/observe" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$CTXPY" -I tests/test_fleet.py 2>&1); r=$?; printf '%-9s %s\n' fleet "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
 # claude-sessions(실제 tmux·pty·화면): tmux 가 없으면 시험 파일이 알아서 건너뛴다(CLAUDE_TMUX_BIN 으로 지정 가능). UI 부분은 textual 이 있는 python 으로.
 [ -x "$CTXPY" ] && { out=$(cd "$D/claude-sessions" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$CTXPY" -I tests/test_claude_sessions.py 2>&1); r=$?; printf '%-9s %s\n' claude-sessions "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
 find "$D" -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null

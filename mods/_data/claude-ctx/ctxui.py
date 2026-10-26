@@ -10,8 +10,7 @@
   7 지침   프로젝트별 지침(공유 정본 project_instructions)을 모든 저장소에 대해 보고 고친다 — 로컬 캐시 없이 DB 만 대상   (Enter: 본문 · e: 편집기)
 
 원문(DB)은 바꾸지 않는다. 화면의 치환(m)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. TTY 가 없으면 실행하지 않는다.
-**제한 모드**: LLM 세션이 실행한 경우(환경 표식 — claude_ctx.AGENT_ENV_MARKERS) 열람 제한 정보만 뺀다 — 4 비밀·5 후보 탭은 열리지 않고(데이터도 읽지 않음), 치환(m)을 끌 수 없고, 비밀 추가·삭제·끄기·값 보기·후보 무시와 지침 편집은 막힌다. 개요·검색·대조·통계·지침 보기는 `donghans ctx` CLI 와 같은 범위(치환된 출력)라 그대로 쓴다.
-등록한 비밀은 `donghans ctx …` 출력과 `donghans secret run` 출력에서 치환되고, 로컬 트랜스크립트는 `donghans secret scrub` 으로 바꾼다.
+**제한 모드**: LLM 세션이 실행한 경우(환경 표식 — claude_ctx.AGENT_ENV_MARKERS) 모든 탭을 볼 수 있되 비밀 값은 추출·조회할 수 없다 — 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(후보 패턴)을 [protected] 로 치환하고(끌 수 없음), 후보 표의 미리보기도 [protected](길이)로 보이며, 값 보기(v)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용.
 """
 from __future__ import annotations
 
@@ -497,11 +496,9 @@ class CtxUI(uikit.HelpMixin, App):
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
-    RESTRICTED_TABS = ("secrets", "cands")        # 제한 모드(LLM 세션)에서 열 수 없는 탭 — 비밀 목록·키처럼 보이는 문자열 후보
-
     def __init__(self, restricted=False):
-        """restricted=True 는 LLM 세션이 실행한 경우: 열람 제한 정보(비밀·후보)는 보이지도 읽지도 않고, 치환을 끌 수 없고, 비밀·지침을 고치지 못한다.
-        나머지(개요·검색·대조·통계·지침 보기)는 `donghans ctx` CLI 와 같은 범위라 그대로 쓴다."""
+        """restricted=True 는 LLM 세션이 실행한 경우: **모든 탭을 볼 수 있되** 비밀 값은 추출·조회할 수 없다 — 화면의 모든 텍스트는 등록한 비밀 + 비밀처럼 보이는 문자열(후보 패턴)을
+        [protected] 로 치환하고(끌 수 없음), 값 보기(v)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막는다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용한다."""
         super().__init__()
         self.restricted = restricted
         self.mask = True
@@ -567,10 +564,6 @@ class CtxUI(uikit.HelpMixin, App):
         self.query_one("#stat-break", DataTable).add_columns("분류", "요청", "비용", "비중", "출력")
         self.query_one("#stat-sessions", DataTable).add_columns("최근", "머신", "저장소", "프롬프트", "도구", "턴시간", "비용", "모델", "첫 프롬프트")
         self.query_one("#instr-table", DataTable).add_columns("저장소", "이름", "rev", "수정 머신", "수정 시각", "길이")
-        if self.restricted:                                   # 제한 모드: 열 수 없는 탭을 라벨로 알린다
-            tabs = self.query_one("#tabs", TabbedContent)
-            for name, label in (("secrets", "4 비밀 [제한]"), ("cands", "5 후보 [제한]")):
-                tabs.get_tab(name).label = label
         self.update_state()
         self.reload_overview()
 
@@ -580,9 +573,11 @@ class CtxUI(uikit.HelpMixin, App):
             return cs.IDENTITY
         try:
             with cc.connect(readonly=True) as c:
-                return cs.load_masker(c)
+                base = cs.load_masker(c)
         except Exception:
-            return cs.IDENTITY
+            base = cs.Masker() if self.restricted else cs.IDENTITY
+        # 제한 모드는 DB 를 못 읽어도 후보 패턴 치환은 유지한다(치환기를 빈 값으로 폴백하지 않음)
+        return cs.StrictMasker(base.secrets) if self.restricted else base
 
     def current_tab(self) -> str:
         return self.query_one("#tabs", TabbedContent).active
@@ -591,12 +586,9 @@ class CtxUI(uikit.HelpMixin, App):
         self.notify(msg, severity=severity, timeout=5)
 
     def check_action(self, action, parameters):
-        """제한 모드에서는 막힌 동작(비밀·후보 탭, 치환 끄기, 비밀·후보 관리)을 푸터·도움말에서 숨긴다(눌러도 deny 가 막는다)."""
-        if self.restricted:
-            if action == "tab" and parameters and parameters[0] in self.RESTRICTED_TABS:
-                return False
-            if action in ("toggle_mask", "secret_add", "secret_delete", "secret_toggle", "reveal", "cand_ignore"):
-                return False
+        """제한 모드에서는 막힌 동작(치환 끄기·값 보기·비밀 추가/삭제/끄기·후보 무시)을 푸터·도움말에서 숨긴다(눌러도 deny 가 막는다)."""
+        if self.restricted and action in ("toggle_mask", "secret_add", "secret_delete", "secret_toggle", "reveal", "cand_ignore"):
+            return False
         return True
 
     def deny(self, what="이 동작") -> bool:
@@ -606,22 +598,14 @@ class CtxUI(uikit.HelpMixin, App):
         return self.restricted
 
     def action_tab(self, name: str):
-        if name in self.RESTRICTED_TABS and self.deny("비밀·후보 탭"):
-            return
         self.query_one("#tabs", TabbedContent).active = name
         self.call_after_refresh(self.action_focus_table)
         self.on_tab_shown(name)
 
     def on_tabbed_content_tab_activated(self, ev: TabbedContent.TabActivated):
-        if self.restricted and ev.pane.id in self.RESTRICTED_TABS:            # 마우스·방향키로 들어와도 데이터를 읽지 않고 개요로 되돌린다
-            self.deny("비밀·후보 탭")
-            self.query_one("#tabs", TabbedContent).active = "overview"
-            return
         self.on_tab_shown(ev.pane.id)
 
     def on_tab_shown(self, name: str):
-        if self.restricted and name in self.RESTRICTED_TABS:
-            return
         if name == "secrets":
             self.reload_secrets()
         elif name == "cands" and not self.cand_rows:
@@ -654,7 +638,7 @@ class CtxUI(uikit.HelpMixin, App):
 
     def update_state(self):
         self.query_one("#sstate", Static).update(
-            f"역할: {'사용자만' if self.only_user else '전체'} (F2)   ·   정규식: {'켜짐' if self.regex else '꺼짐'} (F3)   ·   도구 메시지: {'포함' if self.with_tools else '제외'} (F4)   ·   치환: {'켜짐' if self.mask else '꺼짐'} (m)" + ("   ·   제한 모드(LLM 세션): 치환 고정 · 비밀/후보 탭 차단 · 비밀·지침 수정 불가" if self.restricted else ""))
+            f"역할: {'사용자만' if self.only_user else '전체'} (F2)   ·   정규식: {'켜짐' if self.regex else '꺼짐'} (F3)   ·   도구 메시지: {'포함' if self.with_tools else '제외'} (F4)   ·   치환: {'켜짐' if self.mask else '꺼짐'} (m)" + ("   ·   제한 모드(LLM 세션): 모든 텍스트 [protected] 치환 고정 · 비밀 값 조회·추가·삭제·끄기·후보 무시·지침 편집 불가" if self.restricted else ""))
 
     def action_toggle_role(self):
         self.only_user = not self.only_user
@@ -955,7 +939,7 @@ class CtxUI(uikit.HelpMixin, App):
             return None
 
     def action_secret_add(self):
-        if self.deny("비밀·후보 관리"):
+        if self.deny("비밀 값 조회·추가·삭제·끄기, 후보 무시"):
             return
         if self.current_tab() != "secrets":
             return
@@ -978,7 +962,7 @@ class CtxUI(uikit.HelpMixin, App):
         self.push_screen(PromptScreen("비밀 이름", "영문·숫자·_ (환경변수 이름이 됨)"), got_label)
 
     def action_secret_delete(self):
-        if self.deny("비밀·후보 관리"):
+        if self.deny("비밀 값 조회·추가·삭제·끄기, 후보 무시"):
             return
         key = self.selected_key("#secrets-table") if self.current_tab() == "secrets" else None
         if not key:
@@ -993,7 +977,7 @@ class CtxUI(uikit.HelpMixin, App):
         self.push_screen(ConfirmScreen(f"'{key}' 을(를) 등록표에서 삭제할까요? (DB 원문은 그대로)"), done)
 
     def action_secret_toggle(self):
-        if self.deny("비밀·후보 관리"):
+        if self.deny("비밀 값 조회·추가·삭제·끄기, 후보 무시"):
             return
         if self.current_tab() == "instr" and len(self.screen_stack) == 1:
             key = self.selected_key("#instr-table")
@@ -1009,7 +993,7 @@ class CtxUI(uikit.HelpMixin, App):
         self.reload_secrets()
 
     def action_reveal(self):
-        if self.deny("비밀·후보 관리"):
+        if self.deny("비밀 값 조회·추가·삭제·끄기, 후보 무시"):
             return
         tab = self.current_tab()
         if tab == "secrets":
@@ -1039,7 +1023,7 @@ class CtxUI(uikit.HelpMixin, App):
         tb.clear()
         self.cand_rows = {d["fp"]: d for d in found}
         for d in found:
-            tb.add_row(d["fp"], d["pattern"], cs.preview(d["value"]), d["count"], len(d["sessions"]), ",".join(sorted(short_repo(r) for r in d["repos"]))[:50] or "-",
+            tb.add_row(d["fp"], d["pattern"], (f"{cs.MASK} ({len(d['value'])}자)" if self.restricted else cs.preview(d["value"])), d["count"], len(d["sessions"]), ",".join(sorted(short_repo(r) for r in d["repos"]))[:50] or "-",
                        fmt_ts(d["last"]), key=d["fp"])
         self.query_one("#cands-table").border_title = f"자동 탐지 후보 {len(found)}개 — Enter 승인 · i 무시 · v 값 보기 · r 다시 탐지"
         self.flash(f"후보 {len(found)}개")
@@ -1063,7 +1047,7 @@ class CtxUI(uikit.HelpMixin, App):
         self.push_screen(PromptScreen(f"이 후보({d['pattern']}, {len(d['value'])}자)의 이름", "영문·숫자·_ — 예: NAS_PW"), got)
 
     def action_cand_ignore(self):
-        if self.deny("비밀·후보 관리"):
+        if self.deny("비밀 값 조회·추가·삭제·끄기, 후보 무시"):
             return
         key = self.selected_key("#cands-table") if self.current_tab() == "cands" else None
         d = self.cand_rows.get(key or "")

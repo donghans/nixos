@@ -319,6 +319,53 @@ def cmd_browser(a):
         print("(읽을 수 있는 탭이 없습니다 — 아직 불러오지 않은 탭은 값이 없음)")
 
 
+def cmd_fleet(a):
+    """여러 호스트 교차 확인(공유 저장소 claude_ctx): push=이 호스트 요약 올리기 · compare=다른 호스트와 비교 · inventory=확장 목록 비교 · hosts=올라온 호스트."""
+    import observe_fleet as fl
+    roots = [("vivaldi", os.path.expanduser("~/.config/vivaldi"))]
+    try:
+        conn = fl.connect()
+    except Exception as e:                       # 조용히 넘기지 않는다 — 서버가 꺼져 있거나 이 기기가 허용 목록에 없을 수 있다
+        sys.exit(f"공유 저장소 접속 실패: {str(e)[:200]} (서버 beelink-ser7-co 가 켜져 있고 이 기기가 claude-ctx allowedClients 에 있어야 합니다)")
+    me = fl.host()
+    if a.what == "push":
+        app_rows, power_rows = fl.hourly(samples(core.parse_when(a.since)))
+        na, npw, ni = fl.push(conn, me, app_rows, power_rows, fl.ext_inventory(roots))
+        print(f"{me}: 앱 {na}행 · 전력 {npw}행 · 확장 {ni}개 올림(최근 {a.since})")
+    elif a.what == "hosts":
+        with conn.cursor() as cur:
+            cur.execute("SELECT host, min(hour), max(hour), sum(samples), round(avg(psys_w)::numeric, 2) FROM observe_power_hourly GROUP BY host ORDER BY host")
+            for h, t0, t1, n, ps in cur.fetchall():
+                print(f"{h:<24}{t0:%m-%d %H:%M} ~ {t1:%m-%d %H:%M}  표본 {n}개  평균 psys {ps if ps is not None else '-'} W")
+    elif a.what == "compare":
+        if not a.other:
+            sys.exit("비교할 다른 호스트 이름이 필요합니다: observectl fleet compare <호스트> [--host 기준호스트] [--days N]")
+        base = a.host or me
+        ma, na = fl.host_means(conn, base, a.days); mb, nb = fl.host_means(conn, a.other, a.days)
+        if not na or not nb:
+            sys.exit(f"표본이 없습니다: {base}={na}개 {a.other}={nb}개 (`observectl fleet push` 를 두 호스트에서 먼저)")
+        rows = fl.compare_means(ma, mb)
+        print(f"{base} 에서 {a.other} 보다 높은 앱(최근 {a.days}일, 코어 1개=100%, 차이 {fl.MIN_DELTA}%p 이상) — 표본 {base} {na}개 · {a.other} {nb}개")
+        print(f"{'앱':<28}{base[:12]:>13}{a.other[:12]:>13}{'ctxsw/s ' + base[:6]:>16}{a.other[:6]:>8}  표시")
+        for app, ac, bc, ax, bx, flag in rows[:a.n]:
+            print(f"{app[:27]:<28}{ac:>13.2f}{bc:>13.2f}{ax:>16.0f}{bx:>8.0f}  {'한쪽에만 있음' if flag == 'a만' else base + ' 에서 ' + str(fl.RATIO) + '배↑'}")
+        if not rows:
+            print("(없음 — 두 호스트의 앱 사용이 비슷합니다)")
+        print("※ 사용 패턴이 다른 호스트라 높다고 바로 문제는 아닙니다. 의심 후보를 가려내는 용도.")
+    elif a.what == "inventory":
+        inv = fl.inventory(conn)
+        if not inv:
+            sys.exit("올라온 확장 목록이 없습니다(`observectl fleet push`)")
+        diff = fl.inventory_diff(inv)
+        print("호스트별 확장 수: " + " · ".join(f"{h} {len(v)}개" for h, v in sorted(inv.items())))
+        print("한 호스트에만 있는 확장(★=백그라운드 서비스 워커 있음 — 주기 활동 후보, 이름은 chrome://extensions 에서 ID 로):")
+        for h, b, e, profs, ver, sw in diff:
+            print(f"  {h:<22}{b:<8}{e}  v{ver}  프로필 {profs} {'★' if sw else ''}")
+        if not diff:
+            print("  (없음)")
+    conn.close()
+
+
 def cmd_states(a):
     rows = samples(core.parse_when(a.since))
     if not rows:
@@ -1017,6 +1064,7 @@ def main(argv=None):
     s = sub.add_parser("ebpf", help="시간 제한형 eBPF 정밀 모드: tiers(단계·비용) | on <sample|counts|full> [--for 10m] | off | status"); s.add_argument("action", choices=["tiers", "on", "off", "status"]); s.add_argument("tier", nargs="?"); s.add_argument("--for", dest="for_", default="10m", help="제한 시간(기본 10m, 최대 60분)"); s.set_defaults(f=cmd_ebpf)
     s = sub.add_parser("query", help="범용 조회: 신호 여러 개를 시간 간격(--step)이나 그룹(--by)으로 묶어 집계(--agg). 신호 = 별칭(psys pkg vi core uncore pc8 pc10 cpu_all) · 표본 경로(pw.psys_w) · app:<앱>.cpu|ctxsw · proc:<comm>.cpu|ctxsw · nd:<Netdata 신호>"); s.add_argument("signal", nargs="+"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--step", help="시간 간격(예: 5m). 없으면 --by 로 묶음"); s.add_argument("--by", default="none", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.add_argument("--agg", default="mean", choices=list(qy.AGGS)); s.add_argument("--digits", type=int, default=2); s.set_defaults(f=cmd_query)
     s = sub.add_parser("browser", help="브라우저(Vivaldi) 탭·확장별 CPU(top) 또는 감시기가 잡은 폭주 기록(bursts)"); s.add_argument("what", nargs="?", default="top", choices=["top", "bursts", "periodic", "sw"], help="top=탭·확장별 CPU · bursts=폭주 기록 · periodic=규칙적 반복 활동 기록 · sw=확장 서비스 워커(스레드 CPU, 포트가 있으면 시작 횟수)"); s.add_argument("--seconds", type=float, default=5.0); s.add_argument("-n", type=int, default=12); s.add_argument("--since", default="24h"); s.set_defaults(f=cmd_browser)
+    s = sub.add_parser("fleet", help="여러 호스트 교차 확인(공유 저장소 claude_ctx): push=이 호스트 요약 올리기 · compare <호스트>=앱 CPU 비교 · inventory=브라우저 확장 목록 비교 · hosts"); s.add_argument("what", choices=["push", "compare", "inventory", "hosts"]); s.add_argument("other", nargs="?", help="compare: 비교할 호스트"); s.add_argument("--host", help="compare: 기준 호스트(기본 이 호스트)"); s.add_argument("--days", type=int, default=3); s.add_argument("--since", default="26h", help="push: 이 기간의 표본을 올림"); s.add_argument("-n", type=int, default=15); s.set_defaults(f=cmd_fleet)
     s = sub.add_parser("nd", help="Netdata 어댑터(있을 때만): defs=신호 정의, stats=구간 평균, apps=앱 그룹 CPU, charts=차트 찾기, get=차트 값"); s.add_argument("what", choices=["defs", "stats", "apps", "charts", "get"]); s.add_argument("chart", nargs="?", help="charts: 이름 조각 · get: 차트 이름"); s.add_argument("--since", default="10m"); s.add_argument("--until"); s.add_argument("-n", type=int, default=10); s.set_defaults(f=cmd_nd)
     s = sub.add_parser("timeline"); s.add_argument("--at", required=True); s.add_argument("--span", type=float, default=60); s.add_argument("--journal", default="all", choices=["all", "warn", "none"]); s.set_defaults(f=cmd_timeline)
     s = sub.add_parser("bpf", help="eBPF(bpftrace) 프리셋을 N초 동안 실행: exec wake profile psr io net"); s.add_argument("preset", choices=["exec", "wake", "profile", "psr", "io", "net"]); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--comm", help="프로세스 이름 필터(영숫자·._- 15자)"); s.add_argument("-n", type=int, default=12, help="표의 상위 행 수"); s.add_argument("--no-spans", action="store_true", help="exec: 프로세스 스팬을 이벤트 로그에 적지 않음"); s.set_defaults(f=cmd_bpf)
