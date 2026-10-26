@@ -29,6 +29,14 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
     - 개인정보: 프로세스는 comm·exe 이름만, 창 제목·URL·명령 인자·입력 내용은 기록하지 않습니다. 조회 결과를 외부로 보낼 때도 이 원칙을 지키세요.
   '';
 
+  # 프로세스 정리: pkill·kill·killall 대신 procctl(plan → 사용자 확인 → apply, 보호 규칙·PID 재사용 방어·기록). observe 모듈이 procctl 을 설치하므로 같은 조건. 절차 본문: donghans-procctl 스킬.
+  procctlInstructions = lib.optionalString config.mods.sys.services.observe.enable ''
+
+    # 프로세스 종료 (procctl)
+    - 프로세스를 종료·정리할 때 `pkill`·`killall`·`kill`(이름·패턴·PID 직접 지정)을 쓰지 말고 `donghans-procctl` 스킬의 `procctl` 을 쓰세요(plan → 사용자 확인 → apply). 자기 세션의 조상·다른 세션·시스템 프로세스를 죽이는 사고와 PID 재사용 오발송을 막고 기록을 남깁니다.
+    - `procctl groups`·`show`·`plan`·`log` 는 읽기 전용이라 바로 실행해도 되지만 `procctl apply`·`escalate` 는 되돌릴 수 없으니 계획 내용(대상·보호로 제외된 것·범위 밖)을 사용자에게 보여 주고 확인받은 뒤에만 실행하세요. 보호를 풀거나 우회하려 하지 마세요(보호 해제는 사람이 `procui` 에서만).
+  '';
+
   # incus VM `qa-desktop`(화면 확인용 QA 데스크톱)이 있는 호스트에서만 지침에 넣는다(호스트 toml 의 qa-desktop = true; 프리셋 기본 꺼짐).
   # 여러 프로젝트의 QA 세션이 VM 하나를 공유한다. 절차 본문: donghans-qa-desktop 스킬, 설명·검증 기록: _docs/content/explanation/qa-desktop.md.
   qaDesktopInstructions = lib.optionalString config.mods.sys.services.qa-desktop.enable ''
@@ -158,20 +166,29 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
       ];
     }
   ];
-  hooksSettings = {
-    # 상태 표시줄(5시간·주간 한도 % 표시 + limits.jsonl 기록)도 훅과 같은 --settings 로 주입해, 이 모듈을 쓰는 모든 호스트에 적용한다(스크립트는 스토어 경로).
-    statusLine = {
-      type = "command";
-      command = "${../../_data/claude-usage/claude-usage-statusline}";
+  hooksSettings =
+    {
+      # 상태 표시줄(5시간·주간 한도 % 표시 + limits.jsonl 기록)도 훅과 같은 --settings 로 주입해, 이 모듈을 쓰는 모든 호스트에 적용한다(스크립트는 스토어 경로).
+      statusLine = {
+        type = "command";
+        command = "${../../_data/claude-usage/claude-usage-statusline}";
+      };
+      hooks = lib.genAttrs ["UserPromptSubmit" "Stop" "SubagentStop" "SessionStart" "SessionEnd" "PreCompact"] ctxHook;
+    }
+    // lib.optionalAttrs config.mods.sys.services.observe.enable {
+      # procctl(observe 모듈이 설치): 조회·계획은 자동 허용, 적용(되돌릴 수 없음)은 항상 사용자 확인 — 하네스가 강제한다. 문법은 Claude Code 권한 규칙(Bash 접두 일치).
+      permissions = {
+        allow = ["Bash(procctl groups:*)" "Bash(procctl show:*)" "Bash(procctl plan:*)" "Bash(procctl log:*)"];
+        ask = ["Bash(procctl apply:*)" "Bash(procctl escalate:*)"];
+      };
     };
-    hooks = lib.genAttrs ["UserPromptSubmit" "Stop" "SubagentStop" "SessionStart" "SessionEnd" "PreCompact"] ctxHook;
-  };
   hooksFile = pkgs.writeText "claude-ctx-hooks.json" (builtins.toJSON hooksSettings);
-  hooksReducedFile = pkgs.writeText "claude-ctx-hooks-reduced.json" (builtins.toJSON (hooksSettings // {
-    prefersReducedMotion = true;
-    # 창 제목 갱신(스피너)도 끈다 — 화면 갱신 3→2/s·PSR 유지 57→69%·psys 약 −0.5 W(power-evidence.md #101). 제목 정보는 쓰지 않는다(사용자 결정 2026-10-25). `CLAUDE_MOTION=normal claude` 로 함께 풀린다.
-    env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE = "1";
-  }));
+  hooksReducedFile = pkgs.writeText "claude-ctx-hooks-reduced.json" (builtins.toJSON (hooksSettings
+    // {
+      prefersReducedMotion = true;
+      # 창 제목 갱신(스피너)도 끈다 — 화면 갱신 3→2/s·PSR 유지 57→69%·psys 약 −0.5 W(power-evidence.md #101). 제목 정보는 쓰지 않는다(사용자 결정 2026-10-25). `CLAUDE_MOTION=normal claude` 로 함께 풀린다.
+      env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE = "1";
+    }));
 
   otelCollectorConfig = pkgs.writeText "claude-otel-collector.yaml" ''
     receivers:
@@ -320,6 +337,7 @@ in {
             출력에 `[protected]` 가 보이면 등록된 비밀이 가려진 것입니다 — 원문을 알아내려는 우회(`--raw`, DB 직접 조회, 트랜스크립트 파일 읽기)를 하지 마세요.
         ''
         + observeInstructions
+        + procctlInstructions
         + qaDesktopInstructions;
       force = true; # 기존 파일이 있더라도 Nix 관리 하에 둠 (읽기 전용 심볼릭링크)
     };
@@ -359,6 +377,10 @@ in {
     };
     home.file.".claude/skills/donghans-observe" = lib.mkIf config.mods.sys.services.observe.enable {
       source = ../../_data/claude-skills/donghans-observe;
+      force = true;
+    };
+    home.file.".claude/skills/donghans-procctl" = lib.mkIf config.mods.sys.services.observe.enable {
+      source = ../../_data/claude-skills/donghans-procctl;
       force = true;
     };
     home.file.".claude/skills/donghans-qa-desktop" = lib.mkIf config.mods.sys.services.qa-desktop.enable {
