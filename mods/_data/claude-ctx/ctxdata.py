@@ -292,6 +292,26 @@ def search(conn, query="", *, regex=False, repo=None, role=None, kinds=("prompt"
     return out
 
 
+def group_sessions(hits, title_query=None, regex=False):
+    """search() 결과(최근순)를 세션 단위로 묶는다 — 세션 기준 검색 목록용. 반환: 가장 최근 일치가 있는 세션이 앞인 리스트
+    [{session_id, repo, host, title, last(가장 최근 일치 시각), count, hits(최근순)}].
+    title_query 가 있으면 제목(첫 프롬프트 앞부분)에 일치하는 세션만 남긴다(「제목만」 보기)."""
+    groups = {}
+    for h in hits:
+        g = groups.setdefault(h["session_id"], dict(session_id=h["session_id"], repo=h["repo"], host=h["host"], title=h.get("title", ""), last=h["ts"], count=0, hits=[]))
+        g["count"] += 1
+        g["hits"].append(h)
+    out = list(groups.values())
+    if title_query:
+        try:
+            rx = re.compile(title_query if regex else re.escape(title_query), re.I)
+        except re.error:
+            rx = None
+        if rx:
+            out = [g for g in out if rx.search(g["title"] or "")]
+    return out
+
+
 def session_titles(conn, session_ids, masker=cs.IDENTITY, width=120):
     """{세션 ID: 첫 사용자 프롬프트 앞부분} — 세션 목록·검색 결과에서 어느 대화인지 알아보는 제목으로 쓴다."""
     ids = sorted(session_ids)

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """ctxui — donghans 공유 컨텍스트(ctx) 관리 TUI.
 
-  1 개요   저장소(프로젝트)별 쌓인 세션·메시지 수와 용량, DB 크기          (Enter: 그 저장소로 검색)
-  2 검색   키워드·정규식 검색, 저장소·기간·역할 필터                       (Enter: 앞뒤 대화 보기)
+  1 대시보드  합계·표별 용량·저장소별 표(Enter: 그 저장소로 검색) + 한도 그래프·토큰/비용 추이·분류별·세션 통계·세션 표(Enter: 그 세션 대화). 저장소·머신·모델·기간 필터는 통계 칸에 적용
+  2 검색   세션 기준 목록(제목·일치 건수·대표 일치) — Enter: 대화 열기, Space: 그 세션의 일치 메시지 펼침, x: 모두 펼침, F6: 제목만. 키워드·정규식, 저장소·기간·역할 필터
   3 대조   같은 문구를 저장소별로 묶어 「내가 그렇게 말했나」 교차검증      (사용자 발언 기준)
   4 비밀   등록된 비밀(출력 시 [protected] 로 치환) 관리: 추가·끄기·삭제
   5 후보   키·비밀번호처럼 보이는 문자열 자동 탐지 → 승인(등록)·무시
-  6 통계   기간별 토큰·비용 추이(분류별 포함)와 세션 통계(시간대·요일 분포, 세션 표). 저장소·머신·모델·기간 필터   (Enter: 그 세션 대화)
-  7 지침   프로젝트별 지침(공유 정본 project_instructions)을 모든 저장소에 대해 보고 고친다 — 로컬 캐시 없이 DB 만 대상   (Enter: 본문 · e: 편집기)
+  6 지침   프로젝트별 지침(공유 정본 project_instructions)을 모든 저장소에 대해 보고 고친다 — 로컬 캐시 없이 DB 만 대상   (Enter: 본문 · e: 편집기)
 
 원문(DB)은 바꾸지 않는다. 화면의 치환(m)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. TTY 가 없으면 실행하지 않는다.
 **제한 모드**: LLM 세션이 실행한 경우(환경 표식 — claude_ctx.AGENT_ENV_MARKERS) 모든 탭을 볼 수 있되 비밀 값은 추출·조회할 수 없다 — 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(후보 패턴)을 [protected] 로 치환하고(끌 수 없음), 후보 표의 미리보기도 [protected](길이)로 보이며, 값 보기(v)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용.
@@ -37,7 +36,7 @@ import claude_ctx as cc
 import ctx_secrets as cs
 import ctxdata as cd
 
-TABS = [("overview", "개요"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("stats", "통계"), ("instr", "지침")]
+TABS = [("dashboard", "대시보드"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("instr", "지침")]
 
 
 def short_repo(url: str | None) -> str:
@@ -164,6 +163,8 @@ class ConfirmScreen(ModalScreen):
 
 
 MSG_PREVIEW = 700      # 접힌 메시지에 보이는 글자 수(Enter 로 펼치면 전체)
+SEARCH_MSG_MAX = 2000     # 검색이 읽어 오는 일치 메시지 수 상한(세션으로 묶기 전)
+SEARCH_SESSION_MAX = 200   # 목록에 보이는 세션 수 상한
 MSG_MAX = 600          # 한 번에 그리는 메시지 수 상한(도구 호출까지 켜면 수천 개라 느려진다 — a 로 전부 불러옴)
 ROLE_LABEL = {"user": "나", "assistant": "Claude", "system": "시스템"}
 
@@ -449,10 +450,11 @@ class InstrScreen(ModalScreen):
 class CtxUI(uikit.HelpMixin, App):
     TITLE = "ctxui — 공유 컨텍스트 관리"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
-        ('탭', '1 개요(저장소별 세션·메시지·용량) · 2 검색 · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 통계(토큰·비용 추이와 세션 통계) · 7 지침(프로젝트별 공유 지침)'),
+        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침)'),
         ('치환(m)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
         ('제한 모드', 'LLM 세션이 실행하면: 모든 탭을 볼 수 있지만 화면의 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(키 형식·password=·한글 비밀번호)이 [protected] 로 치환되고(끌 수 없음), 후보 미리보기도 [protected](N자)로 가려지며, 값 보기(v)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용된다'),
-        ('필터 키', '검색 탭: F2 사용자 발언만 · F3 정규식 · F4 도구 메시지 포함. 통계 탭: p 기간 · b 단위 · g 분류 · o 정렬 · c 필터 지움'),
+        ('필터 키', '검색 탭: F2 사용자 발언만 · F3 정규식 · F4 도구 메시지 포함 · F6 제목만 · Space 세션 펼침 · x 모두 펼침. 대시보드: p 기간 · b 단위 · g 분류 · o 정렬 · c 필터 지움'),
+        ('세션 기준 검색', '검색은 늘 전체 대화를 대상으로 하되 결과를 세션 단위로 묶어 보여 준다(제목·일치 건수·가장 최근 일치). Enter 는 그 세션 대화를 열고, Space 로 펼치면 일치한 메시지들이 아래에 나온다. F6 제목만은 세션 제목(첫 프롬프트)에 일치한 세션만 남긴다'),
     ]
     HELP_NOTES = [
         '종료는 q. Esc 는 목록으로 포커스를 돌린다',
@@ -470,29 +472,34 @@ class CtxUI(uikit.HelpMixin, App):
     #verify-tables { height: 1fr; }
     #verify-tables DataTable { width: 1fr; }
     #sdetail, #cdetail { height: auto; max-height: 4; padding: 0 1; color: #b8a46a; }
-    #stat-grid { height: 1fr; }
-    #stat-grid > Horizontal { height: 1fr; }
+    #dash-scroll { height: 1fr; }
+    #dr1, #dr2 { height: 14; }
+    #dr3 { height: 22; }
     #stats-box { layout: vertical; padding: 0 1; }
     #sess-head { height: auto; max-height: 9; padding: 0 1; }
     #msgs { height: 1fr; }
     .msg { height: auto; padding: 0 1; margin-bottom: 1; border-left: tall #3a3a3a; }
     .msg-sel { border-left: tall #33ccff; background: #101010; }
     #sess-state, #sess-keys { height: auto; }
-    #stat-limits-box { height: auto; max-height: 12; }
+    #stat-limits-box { height: 1fr; }
     #stat-limits { padding: 0 1; }
     #stat-summary { padding: 0 1; }
-    #stat-trend, #stat-sessions { width: 3fr; }
-    #stat-break, #stat-summary-box { width: 2fr; }
+    #projects, #stat-trend { width: 3fr; }
+    #stat-sessions { width: 2fr; }
+    #stat-limits-box, #stat-break { width: 2fr; }
+    #stat-summary-box { width: 1fr; }
+    #ovhead { height: auto; }
     """
     BINDINGS = [
         Binding("q", "quit", "종료"),
-        Binding("1", "tab('overview')", "개요"), Binding("2", "tab('search')", "검색"), Binding("3", "tab('verify')", "대조"),
-        Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"), Binding("6", "tab('stats')", "통계"), Binding("7", "tab('instr')", "지침"),
+        Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('search')", "검색"), Binding("3", "tab('verify')", "대조"),
+        Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"), Binding("6", "tab('instr')", "지침"),
         Binding("p", "stat_period", "기간", show=False), Binding("b", "stat_bucket", "단위", show=False), Binding("g", "stat_by", "분류", show=False),
         Binding("o", "stat_order", "정렬", show=False), Binding("c", "stat_clear", "필터 지움", show=False),
         Binding("escape", "focus_table", "목록으로", show=False),
         Binding("m", "toggle_mask", "치환 켬/끔"), Binding("r,f5", "reload", "새로고침"),
         Binding("f2", "toggle_role", "역할(사용자만)", show=False), Binding("f3", "toggle_regex", "정규식", show=False), Binding("f4", "toggle_tools", "도구 메시지 포함", show=False),
+        Binding("f6", "toggle_title_only", "제목만", show=False), Binding("space", "toggle_expand", "세션 펼침", show=False), Binding("x", "expand_all", "모두 펼침", show=False),
         Binding("a", "secret_add", "비밀 추가", show=False), Binding("d", "secret_delete", "삭제", show=False), Binding("e", "secret_toggle", "켬/끔", show=False),
         Binding("v", "reveal", "값 보기", show=False), Binding("i", "cand_ignore", "무시", show=False),
         *uikit.HelpMixin.HELP_BINDINGS,
@@ -507,6 +514,11 @@ class CtxUI(uikit.HelpMixin, App):
         self.only_user = False
         self.regex = False
         self.with_tools = False
+        self.title_only = False
+        self.expand_all_sess = False
+        self.expanded_sess: set[str] = set()
+        self.groups: list[dict] = []
+        self.search_query, self.search_total = "", 0
         self.cand_rows: dict[str, dict] = {}
         self.sec_rows: dict[str, dict] = {}
         self._reveal = False
@@ -515,17 +527,31 @@ class CtxUI(uikit.HelpMixin, App):
 
     # --- 구성
     def compose(self) -> ComposeResult:
-        with TabbedContent(initial="overview", id="tabs"):
-            with TabPane("1 개요", id="overview"):
-                yield uikit.box(Static("", id="ovhead"), "전체 · 표별 용량")
-                yield uikit.box(DataTable(id="projects", cursor_type="row", zebra_stripes=False), "저장소(프로젝트)별 — Enter: 이 저장소 검색")
+        with TabbedContent(initial="dashboard", id="tabs"):
+            with TabPane("1 대시보드", id="dashboard"):
+                with Horizontal(classes="filters"):
+                    yield uikit.box(Input(placeholder="저장소 일부", id="f-repo"), "저장소(통계)")
+                    yield uikit.box(Input(placeholder="머신 일부", id="f-host"), "머신(통계)")
+                    yield uikit.box(Input(placeholder="모델 일부 (예: sonnet)", id="f-model"), "모델(통계)")
+                yield Static("", id="stat-state", classes="state")
+                with VerticalScroll(id="dash-scroll"):
+                    yield uikit.box(Static("", id="ovhead"), "전체 · 표별 용량")
+                    with Horizontal(id="dr1"):
+                        yield uikit.box(DataTable(id="projects", cursor_type="row", zebra_stripes=False), "저장소(프로젝트)별 — Enter: 이 저장소 검색")
+                        yield uikit.box(VerticalScroll(Static("", id="stat-limits"), id="stat-limits-box"), "계정별 한도 사용률 — 창마다 찍은 최고 % (색 = 계정)")
+                    with Horizontal(id="dr2"):
+                        yield uikit.box(DataTable(id="stat-trend", cursor_type="row"), "토큰·비용 추이")
+                        yield uikit.box(DataTable(id="stat-break", cursor_type="row"), "분류별")
+                    with Horizontal(id="dr3"):
+                        yield uikit.box(VerticalScroll(Static("", id="stat-summary"), id="stat-summary-box"), "세션 통계")
+                        yield uikit.box(DataTable(id="stat-sessions", cursor_type="row"), "세션 — Enter: 대화 보기")
             with TabPane("2 검색", id="search"):
                 with Horizontal(classes="filters"):
                     yield uikit.box(Input(placeholder="검색어 (Enter)", id="q"), "검색어")
                     yield uikit.box(Input(placeholder="저장소 일부", id="repo"), "저장소")
                     yield uikit.box(Input(placeholder="일", id="days"), "기간")
                 yield Static("", id="sstate", classes="state")
-                yield uikit.box(DataTable(id="results", cursor_type="row"), "결과 — Enter: 앞뒤 대화")
+                yield uikit.box(DataTable(id="results", cursor_type="row"), "결과(세션별) — Enter: 대화 · Space: 일치 펼침 · x: 모두 · F6: 제목만")
             with TabPane("3 대조", id="verify"):
                 yield uikit.box(Input(placeholder="사용자가 했던 말(문구) — Enter", id="phrase"), "문구 대조 — 사용자 발언만")
                 with Horizontal(id="verify-tables"):
@@ -537,27 +563,13 @@ class CtxUI(uikit.HelpMixin, App):
             with TabPane("5 후보", id="cands"):
                 yield uikit.box(DataTable(id="cands-table", cursor_type="row"), "자동 탐지 후보 — Enter 승인(등록) · i 무시 · v 값 보기 · r 다시 탐지")
                 yield Static("", id="cdetail")
-            with TabPane("6 통계", id="stats"):
-                with Horizontal(classes="filters"):
-                    yield uikit.box(Input(placeholder="저장소 일부", id="f-repo"), "저장소")
-                    yield uikit.box(Input(placeholder="머신 일부", id="f-host"), "머신")
-                    yield uikit.box(Input(placeholder="모델 일부 (예: sonnet)", id="f-model"), "모델")
-                yield Static("", id="stat-state", classes="state")
-                with Vertical(id="stat-grid"):
-                    yield uikit.box(VerticalScroll(Static("", id="stat-limits"), id="stat-limits-box"), "계정별 한도 사용률 — 창마다 찍은 최고 % (색 = 계정)")
-                    with Horizontal():
-                        yield uikit.box(DataTable(id="stat-trend", cursor_type="row"), "토큰·비용 추이")
-                        yield uikit.box(DataTable(id="stat-break", cursor_type="row"), "분류별")
-                    with Horizontal():
-                        yield uikit.box(VerticalScroll(Static("", id="stat-summary"), id="stat-summary-box"), "세션 통계")
-                        yield uikit.box(DataTable(id="stat-sessions", cursor_type="row"), "세션 — Enter: 대화 보기")
-            with TabPane("7 지침", id="instr"):
+            with TabPane("6 지침", id="instr"):
                 yield uikit.box(DataTable(id="instr-table", cursor_type="row"), "프로젝트 지침(공유 정본) — Enter: 본문 · e: 편집기로 고치기")
         yield Footer()
 
     def on_mount(self):
         self.query_one("#projects", DataTable).add_columns("저장소", "세션", "메시지", "프롬프트", "텍스트", "저장 용량", "마지막", "머신")
-        self.query_one("#results", DataTable).add_columns("시각", "역할", "저장소", "세션", "제목", "내용")
+        self.query_one("#results", DataTable).add_columns("시각", "일치", "저장소", "세션", "제목", "내용")
         self.query_one("#vrepos", DataTable).add_columns("저장소", "건수", "세션", "최근", "대표 인용")
         self.query_one("#vhits", DataTable).add_columns("시각", "세션", "내용")
         self.query_one("#secrets-table", DataTable).add_columns("이름", "종류", "상태", "길이", "fp", "원문 포함 메시지")
@@ -615,16 +627,16 @@ class CtxUI(uikit.HelpMixin, App):
             self.reload_secrets()
         elif name == "cands" and not self.cand_rows:
             self.scan_candidates()
-        elif name == "overview":
+        elif name == "dashboard":
             self.reload_overview()
-        elif name == "stats" and not self._stat_loaded:
-            self.reload_stats()
+            if not self._stat_loaded:
+                self.reload_stats()
         elif name == "instr":
             self.reload_instr()
 
     def action_focus_table(self):
-        ids = {"overview": "#projects", "search": "#results", "verify": "#vrepos", "secrets": "#secrets-table", "cands": "#cands-table",
-               "stats": "#stat-sessions", "instr": "#instr-table"}      # 통계·지침 탭도 표에 포커스 — 없으면 7 키 뒤 Enter·↑↓ 가 아무 일도 안 했다
+        ids = {"dashboard": "#projects", "search": "#results", "verify": "#vrepos", "secrets": "#secrets-table", "cands": "#cands-table",
+               "instr": "#instr-table"}      # 표가 있는 탭은 모두 표에 포커스 — 없으면 탭 키 뒤 Enter·↑↓ 가 아무 일도 안 했다
         try:
             self.query_one(ids[self.current_tab()]).focus()
         except Exception:
@@ -640,11 +652,11 @@ class CtxUI(uikit.HelpMixin, App):
 
     def action_reload(self):
         t = self.current_tab()
-        {"overview": self.reload_overview, "search": self.run_search, "verify": self.run_verify, "secrets": self.reload_secrets, "cands": self.scan_candidates, "stats": self.reload_stats, "instr": self.reload_instr}[t]()
+        {"dashboard": self.reload_dashboard, "search": self.run_search, "verify": self.run_verify, "secrets": self.reload_secrets, "cands": self.scan_candidates, "instr": self.reload_instr}[t]()
 
     def update_state(self):
         self.query_one("#sstate", Static).update(
-            f"역할: {'사용자만' if self.only_user else '전체'} (F2)   ·   정규식: {'켜짐' if self.regex else '꺼짐'} (F3)   ·   도구 메시지: {'포함' if self.with_tools else '제외'} (F4)   ·   치환: {'켜짐' if self.mask else '꺼짐'} (m)" + ("   ·   제한 모드(LLM): 치환 고정·값 조회/수정 불가" if self.restricted else ""))
+            f"역할: {'사용자만' if self.only_user else '전체'} (F2)   ·   정규식: {'켜짐' if self.regex else '꺼짐'} (F3)   ·   도구 메시지: {'포함' if self.with_tools else '제외'} (F4)   ·   제목만: {'켜짐' if self.title_only else '꺼짐'} (F6)   ·   치환: {'켜짐' if self.mask else '꺼짐'} (m)" + ("   ·   제한 모드(LLM): 치환 고정·값 조회/수정 불가" if self.restricted else ""))
 
     def action_toggle_role(self):
         self.only_user = not self.only_user
@@ -658,7 +670,11 @@ class CtxUI(uikit.HelpMixin, App):
         self.with_tools = not self.with_tools
         self.update_state()
 
-    # --- 개요
+    # --- 대시보드(개요 + 통계)
+    def reload_dashboard(self):
+        self.reload_overview()
+        self.reload_stats()
+
     def reload_overview(self):
         try:
             with cc.connect(readonly=True) as c:
@@ -685,6 +701,9 @@ class CtxUI(uikit.HelpMixin, App):
             self.run_search()
         elif tid in ("results", "vhits"):
             sid, _, uid = (key or "").partition("|")
+            if sid and not uid and tid == "results":          # 세션 행 → 그 세션의 가장 최근 일치 메시지에 맞춰 연다
+                g = next((g for g in self.groups if g["session_id"] == sid), None)
+                uid = g["hits"][0]["uuid"] if g else ""
             if sid:
                 q = self.query_one("#q" if tid == "results" else "#phrase", Input).value.strip()
                 self.push_screen(SessionScreen(self, sid, uid or None, q, self.regex))
@@ -724,20 +743,66 @@ class CtxUI(uikit.HelpMixin, App):
         repo = self.query_one("#repo", Input).value.strip() or None
         dv = self.query_one("#days", Input).value.strip()
         days = int(dv) if dv.isdigit() else None
-        tb = self.query_one("#results", DataTable)
         try:
             with cc.connect(readonly=True) as c:
-                rows = cd.search(c, q, regex=self.regex, repo=repo, role="user" if self.only_user else None, days=days, limit=300, masker=self.masker(),
+                rows = cd.search(c, q, regex=self.regex, repo=repo, role="user" if self.only_user else None, days=days, limit=SEARCH_MSG_MAX, masker=self.masker(),
                                  kinds=("prompt", "response", "tool_use", "tool_result") if self.with_tools else ("prompt", "response"))
         except ValueError as e:
             self.flash(str(e), "error"); return   # 잘못된 입력이면 이전 결과를 지우지 않는다
+        self.search_query = q
+        self.search_total = len(rows)
+        self.groups = cd.group_sessions(rows, q if self.title_only else None, self.regex)[:SEARCH_SESSION_MAX]
+        self.expanded_sess = set()
+        self.render_results()
+        if self.groups:
+            self.query_one("#results", DataTable).focus()
+
+    def render_results(self, keep=None):
+        """세션 행(일치 건수·대표 일치) + 펼친 세션의 일치 메시지 행. 행 키: 세션 행은 세션 ID, 메시지 행은 `세션ID|uuid`."""
+        q, tb = self.search_query, self.query_one("#results", DataTable)
+        keys = []
         tb.clear()
-        for r in rows:
-            tb.add_row(fmt_ts(r["ts"]), r["role"] if r["kind"] in ("prompt", "response") else r["kind"], short_repo(r["repo"]), r["session_id"][:8], Text((r["title"] or "")[:24]),
-                       self.highlight(r["snippet"][:160], q), key=f"{r['session_id']}|{r['uuid']}")
-        self.query_one("#results").border_title = f"결과 {len(rows)}건" + (" (최대 300)" if len(rows) >= 300 else "") + " — Enter: 앞뒤 대화"
-        if rows:
-            tb.focus()
+        for g in self.groups:
+            h0, opened = g["hits"][0], g["session_id"] in self.expanded_sess or self.expand_all_sess
+            mark = "▾" if opened else "▸"
+            tb.add_row(fmt_ts(g["last"]), f"{mark} {g['count']}건", short_repo(g["repo"]), g["session_id"][:8], Text((g["title"] or "")[:24]), self.highlight(h0["snippet"][:160], q), key=g["session_id"])
+            keys.append(g["session_id"])
+            if opened:
+                for h in g["hits"]:
+                    k = f"{g['session_id']}|{h['uuid']}"
+                    tb.add_row(Text(fmt_ts(h["ts"]), style="grey62"), Text("  └ " + (h["role"] if h["kind"] in ("prompt", "response") else h["kind"]), style="grey62"), "", "", "", self.highlight(h["snippet"][:160], q), key=k)
+                    keys.append(k)
+        if keep in keys:
+            tb.move_cursor(row=keys.index(keep))
+        n = sum(g["count"] for g in self.groups)
+        self.query_one("#results").border_title = (f"세션 {len(self.groups)}개 · 일치 {n}건" + (" (최대)" if self.search_total >= SEARCH_MSG_MAX or len(self.groups) >= SEARCH_SESSION_MAX else "")
+                                                   + (" · 제목만" if self.title_only else "") + " — Enter: 대화 · Space: 펼침 · x: 모두 · F6: 제목만")
+
+    def current_session_key(self):
+        key = self.selected_key("#results")
+        return key.partition("|")[0] if key else None
+
+    def action_toggle_expand(self):
+        if self.current_tab() != "search" or len(self.screen_stack) != 1 or not isinstance(self.focused, DataTable) or self.focused.id != "results":
+            return
+        sid = self.current_session_key()
+        if not sid:
+            return
+        self.expanded_sess.symmetric_difference_update({sid})
+        self.render_results(keep=sid)           # 접을 때 커서가 그 세션 행에 남는다
+
+    def action_expand_all(self):
+        if self.current_tab() != "search" or len(self.screen_stack) != 1 or isinstance(self.focused, Input):
+            return
+        self.expand_all_sess = not self.expand_all_sess
+        self.expanded_sess = set()
+        self.render_results(keep=self.current_session_key())
+        self.flash("모든 세션 " + ("펼침" if self.expand_all_sess else "접음"))
+
+    def action_toggle_title_only(self):
+        self.title_only = not self.title_only
+        self.update_state()
+        self.run_search()
 
     # --- 대조
     def run_verify(self):
@@ -849,30 +914,30 @@ class CtxUI(uikit.HelpMixin, App):
         self.query_one("#stat-sessions").border_title = f"세션 {len(sess)}개{' (최대 300)' if len(sess) >= 300 else ''} — {dict(STAT_ORDERS)[self.stat_order]}순 (o) · Enter: 대화 보기"
 
     def action_stat_period(self):
-        if self.current_tab() == "stats" and len(self.screen_stack) == 1:
+        if self.current_tab() == "dashboard" and len(self.screen_stack) == 1:
             self.stat_period = (self.stat_period + 1) % len(STAT_PERIODS)
             self.reload_stats()
 
     def action_stat_bucket(self):
-        if self.current_tab() == "stats" and len(self.screen_stack) == 1:
+        if self.current_tab() == "dashboard" and len(self.screen_stack) == 1:
             keys = list(cd.BUCKETS)
             self.stat_bucket = keys[(keys.index(self.stat_bucket) + 1) % len(keys)]
             self.reload_stats()
 
     def action_stat_by(self):
-        if self.current_tab() == "stats" and len(self.screen_stack) == 1:
+        if self.current_tab() == "dashboard" and len(self.screen_stack) == 1:
             keys = list(cd.BREAKDOWNS)
             self.stat_by = keys[(keys.index(self.stat_by) + 1) % len(keys)]
             self.reload_stats()
 
     def action_stat_order(self):
-        if self.current_tab() == "stats" and len(self.screen_stack) == 1:
+        if self.current_tab() == "dashboard" and len(self.screen_stack) == 1:
             keys = [k for k, _ in STAT_ORDERS]
             self.stat_order = keys[(keys.index(self.stat_order) + 1) % len(keys)]
             self.reload_stats()
 
     def action_stat_clear(self):
-        if self.current_tab() == "stats" and len(self.screen_stack) == 1:
+        if self.current_tab() == "dashboard" and len(self.screen_stack) == 1:
             for i in ("#f-repo", "#f-host", "#f-model"):
                 self.query_one(i, Input).value = ""
             self.reload_stats()
@@ -1068,7 +1133,7 @@ class CtxUI(uikit.HelpMixin, App):
 def main():
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         sys.exit("ctxui 는 화면(TTY)이 있는 터미널에서만 실행합니다")
-    # LLM 세션이 실행하면(환경 표식) 제한 모드: 열람 제한 정보(비밀·후보)는 읽지도 보이지도 않고 치환을 끌 수 없다. 개요·검색·대조·통계·지침 보기는 `donghans ctx` CLI 와 같은 범위라 허용
+    # LLM 세션이 실행하면(환경 표식) 제한 모드: 열람 제한 정보(비밀·후보)는 읽지도 보이지도 않고 치환을 끌 수 없다. 대시보드·검색·대조·지침 보기는 `donghans ctx` CLI 와 같은 범위라 허용
     CtxUI(restricted=cc.is_agent_session()).run()
 
 
