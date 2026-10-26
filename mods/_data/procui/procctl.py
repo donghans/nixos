@@ -25,9 +25,10 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-for _p in (HERE, os.path.join(HERE, "..", "observe")):
+for _p in (HERE, os.path.join(HERE, "..", "observe"), os.path.join(HERE, "..", "_ctlkit")):
     if os.path.isdir(_p) and _p not in sys.path:
         sys.path.append(_p)
+import ctlkit
 import procactions as pa
 import procgroups as pg
 import procplan as pp
@@ -68,16 +69,23 @@ def pick_view(views, name):
     return v
 
 
-def die(code, msg, as_json=False):
+CMD = "procctl"      # 봉투의 command — main() 이 하위 명령 이름으로 바꾼다
+
+
+def die(code, msg, as_json=False, data=None):
     if as_json:
-        print(json.dumps(dict(error=msg, code=code), ensure_ascii=False))
+        ctlkit.emit_json(CMD, False, data=data, error=msg, code=code)
     else:
         print(f"procctl: {msg}", file=sys.stderr)
     sys.exit(code)
 
 
-def emit(obj, as_json, text):
-    print(json.dumps(obj, ensure_ascii=False, indent=1) if as_json else text)
+def emit(obj, as_json, text, code=0):
+    """--json 이면 ctlkit 공통 봉투(data=obj), 아니면 text. 종료는 호출한 쪽이 한다."""
+    if as_json:
+        ctlkit.emit_json(CMD, code == 0, data=obj, code=code)
+    else:
+        print(text)
 
 
 def gib(x):
@@ -181,9 +189,10 @@ def cmd_plan(a):
     if not targets:
         code = pp.ALL_PROTECTED if excluded and not out_of_scope else pp.NO_TARGET
         why = "대상이 전부 보호로 제외됐다" if code == pp.ALL_PROTECTED else "대상이 없다(범위 밖이거나 이미 없음)"
-        emit(dict(error=why, code=code, excluded=excluded, out_of_scope=out_of_scope), a.json,
-             f"procctl: {why}\n" + "\n".join(f"  제외 {e['comm']}({e['pid']}): {', '.join(e['reasons'])}" for e in excluded[:10]) +
-             ("\n" + "\n".join(f"  범위 밖 {o['comm']}({o['pid']})" for o in out_of_scope[:10]) if out_of_scope else ""))
+        if a.json:
+            die(code, why, True, data=dict(excluded=excluded, out_of_scope=out_of_scope))
+        print(f"procctl: {why}\n" + "\n".join(f"  제외 {e['comm']}({e['pid']}): {', '.join(e['reasons'])}" for e in excluded[:10]) +
+              ("\n" + "\n".join(f"  범위 밖 {o['comm']}({o['pid']})" for o in out_of_scope[:10]) if out_of_scope else ""))
         sys.exit(code)
     plan = pp.new_plan(targets, excluded, out_of_scope, plan_raw["children_separate"], plan_raw["rss"], plan_raw["pss_kib"], selection, caller, a.ttl)
     pp.save(plan)
@@ -243,11 +252,10 @@ def run_signal(a, stage):
         t.append("살아남은 프로세스: " + ", ".join(f"{x['comm']}({x['pid']})" for x in alive[:10]))
         if stage == "apply":
             t.append(f"강제 종료는 별도로: procctl escalate {plan['id']}")
-    emit(out, a.json, "\n".join(t))
-    if bad and sent + gone == 0:
-        sys.exit(pp.ALL_PROTECTED)
-    if bad:
-        sys.exit(pp.PARTIAL)
+    code = (pp.ALL_PROTECTED if sent + gone == 0 else pp.PARTIAL) if bad else 0
+    emit(out, a.json, "\n".join(t), code)
+    if code:
+        sys.exit(code)
 
 
 def cmd_apply(a):
@@ -288,6 +296,8 @@ def main(argv=None):
     l.add_argument("--tail", type=int, default=20)
     l.set_defaults(fn=cmd_log)
     a = ap.parse_args(argv)
+    global CMD
+    CMD = a.cmd
     a.fn(a)
 
 

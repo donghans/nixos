@@ -383,6 +383,10 @@ in {
       source = ../../_data/claude-skills/donghans-procctl;
       force = true;
     };
+    home.file.".claude/skills/donghans-ctl" = {
+      source = ../../_data/claude-skills/donghans-ctl;
+      force = true;
+    };
     home.file.".claude/skills/donghans-qa-desktop" = lib.mkIf config.mods.sys.services.qa-desktop.enable {
       source = ../../_data/claude-skills/donghans-qa-desktop;
       force = true;

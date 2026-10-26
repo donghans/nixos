@@ -20,7 +20,10 @@
 import argparse, collections, io, json, math, os, re, subprocess, sys, time, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "_ctlkit"))   # 소스 트리(설치본은 같은 디렉터리에 복사됨)
+import ctlkit
 import observe_core as core
+from ctlkit import Out    # 공통 봉투·실행 틀(mods/_data/_ctlkit)
 import observe_stats as stats
 import observe_explain as ex
 import observe_browser as br
@@ -54,49 +57,12 @@ def mean_of(rows, f):
 JSON_STRUCTURED = {"status", "top", "states", "events", "query", "wakers", "energy", "explain"}
 
 
-class Out:
-    """명령이 구조화 데이터를 내놓는 통로. --json 이면 data/notes 를 모아 한 번에 JSON 으로, 아니면 기존처럼 바로 찍는다."""
-
-    def __init__(self, a):
-        self.json = bool(getattr(a, "json", False))
-        self.notes, self.data = [], None
-
-    def note(self, text):
-        if self.json:
-            self.notes.append(text)
-        else:
-            print(text)
-
-    def done(self, data):
-        self.data = data
-
-
 def _out(a):
     return getattr(a, "out", None) or Out(a)
 
 
-def _clean(v):
-    """JSON 은 NaN·Infinity 를 표현하지 못하므로 None 으로(무한대 변화율 등)."""
-    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-        return None
-    if isinstance(v, dict):
-        return {k: _clean(x) for k, x in v.items()}
-    if isinstance(v, (list, tuple)):
-        return [_clean(x) for x in v]
-    return v
-
-
-def emit_json(cmd, ok, *, data=None, text=None, notes=(), error=None, code=0):
-    obj = {"command": cmd, "ok": ok, "structured": data is not None, "exit_code": code}
-    if data is not None:
-        obj["data"] = _clean(data)
-    if text is not None:
-        obj["text"] = text
-    if notes:
-        obj["notes"] = list(notes)
-    if error:
-        obj["error"] = error
-    print(json.dumps(obj, ensure_ascii=False, indent=1, default=str))
+_clean = ctlkit.clean
+emit_json = ctlkit.emit_json
 
 
 def fmt(x, w=6, p=2):
@@ -1278,30 +1244,10 @@ def main(argv=None):
 
 
 def run(a):
-    """--json 이 아니면 그대로 실행. --json 이면 구조화 명령은 data, 나머지는 text 봉투로, 실패(sys.exit(문구))는 error 봉투로 낸다."""
+    """--json 이 아니면 그대로 실행. --json 이면 구조화 명령은 data, 나머지는 text 봉투로, 실패(sys.exit(문구))는 error 봉투로 낸다(ctlkit.run_json)."""
     if not getattr(a, "json", False) or a.cmd == "explain":
         return a.f(a)
-    import contextlib
-    a.out = Out(a)
-    buf = io.StringIO()
-    code, err = 0, None
-    try:
-        with contextlib.redirect_stdout(buf):
-            a.f(a)
-    except SystemExit as e:
-        if e.code in (None, 0):
-            code = 0
-        elif isinstance(e.code, int):
-            code = e.code
-        else:
-            code, err = 1, str(e.code)
-    if err or code:
-        emit_json(a.cmd, False, text=buf.getvalue() or None, notes=a.out.notes, error=err or f"종료 코드 {code}", code=code)
-        sys.exit(code)
-    if a.out.data is not None:
-        emit_json(a.cmd, True, data=a.out.data, notes=a.out.notes)
-    else:
-        emit_json(a.cmd, True, text=buf.getvalue(), notes=a.out.notes)
+    ctlkit.run_json(a, a.cmd, a.f)
 
 
 if __name__ == "__main__":

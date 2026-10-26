@@ -20,6 +20,7 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/procui + "/${f}"} $out/${f}") ["procscan.py" "procgroups.py" "procactions.py" "procplan.py" "procui.py" "procctl.py"]}
     cp ${../../_data/observe/examples/power_knobs.py} $out/power_knobs.py
     cp ${../../_data/_uikit/uikit.py} $out/uikit.py
+    cp ${../../_data/_ctlkit/ctlkit.py} $out/ctlkit.py   # ctl 공통 --json 봉투(observectl·procctl)
     # 호스트 측정·판정 모듈의 정본은 donghans-host-resources 스킬 폴더(복제본을 따로 두지 않는다). usageui 실시간 탭·procui 가 import 한다
     cp ${../../_data/claude-skills/donghans-host-resources/scripts/hostmetrics.py} $out/hostmetrics.py
   '';

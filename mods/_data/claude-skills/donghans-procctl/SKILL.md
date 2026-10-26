@@ -29,7 +29,7 @@ procctl log [--tail N]                                               # 기록 �
 - 계획은 10분 뒤 만료되고, 파일을 고쳐 쓰면 거부된다(sig). 만료·거부되면 새로 plan 한다.
 
 ## 종료 코드와 JSON
-0 성공 · 2 대상 없음/인자 오류/범위 밖·상한 초과 · 3 거부(만료·변조·이미 적용·호출자 권한·없는 계획) · 4 대상이 전부 보호로 제외 · 5 일부 거부·실패. `--json` 이면 같은 내용을 JSON 으로(plan: `targets`·`excluded`·`out_of_scope`·`children_separate`·`pss_kib`, apply: `sent`·`gone`·`refused`·`survivors`·`results`).
+0 성공 · 2 대상 없음/인자 오류/범위 밖·상한 초과 · 3 거부(만료·변조·이미 적용·호출자 권한·없는 계획) · 4 대상이 전부 보호로 제외 · 5 일부 거부·실패. `--json` 이면 공통 봉투(`donghans-ctl` 스킬: `command`·`ok`·`exit_code`·`error`, 결과는 `data` 안)로 — 실패해도 같은 봉투이고 종료 코드가 같다(plan 은 `data` 안에: `targets`·`excluded`·`out_of_scope`·`children_separate`·`pss_kib`, apply: `sent`·`gone`·`refused`·`survivors`·`results`).
 
 ## 자주 쓰는 형태
 - 내가 띄운 시험 서버 정리: `procctl groups --view 세션` 으로 자기 세션 그룹 확인 → `procctl plan --filter 이름 --json` (범위 기본이 자기 세션) → 사용자 확인 → `procctl apply <ID>`.
