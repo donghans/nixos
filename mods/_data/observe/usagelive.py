@@ -59,6 +59,81 @@ def read_disk():
     return out
 
 
+def _num(path):
+    try:
+        return int((hm.read(path) or "").strip())
+    except ValueError:
+        return None
+
+
+def read_power(base=None):
+    """배터리·AC 어댑터 상태 dict(percent, status, now_wh, full_wh, watts, eta_h, ac) 또는 배터리가 없으면 None. watts 는 방전·충전 전력의 크기(부호 없음).
+    sysfs 가 energy_* 를 주면 그대로, charge_*(µAh)만 주면 전압을 곱해 Wh 로 바꾼다. 여러 배터리는 합친다. eta_h 는 방전이면 남은 시간, 충전이면 만충까지(전력이 0.5 W 미만이면 None)."""
+    base = base or os.environ.get("OBSERVE_POWER_SUPPLY_DIR", "/sys/class/power_supply")       # 환경 변수는 시험·화면 촬영용
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return None
+    bats, ac = [], None
+    for n in names:
+        d = f"{base}/{n}"
+        typ = (hm.read(f"{d}/type") or "").strip()
+        if typ == "Mains":
+            ac = ((hm.read(f"{d}/online") or "0").strip() == "1") or bool(ac)
+        elif typ == "Battery":
+            v = _num(f"{d}/voltage_now")
+            en, ef = _num(f"{d}/energy_now"), _num(f"{d}/energy_full")
+            if en is None or ef is None:
+                cn, cf = _num(f"{d}/charge_now"), _num(f"{d}/charge_full")
+                vv = v or _num(f"{d}/voltage_min_design")
+                en, ef = (cn * vv / 1e6, cf * vv / 1e6) if None not in (cn, cf, vv) else (None, None)
+            pw = _num(f"{d}/power_now")
+            if pw is None:
+                cur = _num(f"{d}/current_now")
+                pw = abs(cur) * v / 1e6 if cur is not None and v else None
+            bats.append(dict(cap=_num(f"{d}/capacity"), status=(hm.read(f"{d}/status") or "").strip(), en=en, ef=ef, pw=abs(pw) if pw is not None else None))
+    if not bats:
+        return None
+    en = sum(b["en"] for b in bats if b["en"] is not None) or None
+    ef = sum(b["ef"] for b in bats if b["ef"] is not None) or None
+    pw = sum(b["pw"] for b in bats if b["pw"] is not None) if any(b["pw"] is not None for b in bats) else None
+    st = next((b["status"] for b in bats if b["status"] == "Discharging"), next((b["status"] for b in bats if b["status"] == "Charging"), bats[0]["status"]))
+    pct = en / ef * 100 if en and ef else next((b["cap"] for b in bats if b["cap"] is not None), None)
+    watts = pw / 1e6 if pw is not None else None
+    eta = None
+    if watts and watts >= 0.5 and en and ef:
+        eta = en / 1e6 / watts if st == "Discharging" else ((ef - en) / 1e6 / watts if st == "Charging" else None)
+    return dict(percent=pct, status=st, now_wh=en / 1e6 if en else None, full_wh=ef / 1e6 if ef else None, watts=watts, eta_h=eta, ac=ac)
+
+
+RAPL = {"psys": "/sys/class/powercap/intel-rapl:1", "pkg": "/sys/class/powercap/intel-rapl:0"}
+
+
+def read_rapl():
+    """{이름: (누적 µJ, 감김 한계 µJ)} — RAPL 에너지 카운터(psys = 시스템 전체, pkg = CPU 패키지). 읽을 수 없는 것(권한·미지원)은 뺀다."""
+    out = {}
+    for k, d in RAPL.items():
+        e, m = _num(f"{d}/energy_uj"), _num(f"{d}/max_energy_range_uj")
+        if e is not None:
+            out[k] = (e, m or 0)
+    return out
+
+
+def rapl_watts(cur, prev, dt):
+    """RAPL 두 표본 → {이름: W}. 카운터가 감겼으면 한계를 더해 보정."""
+    if not prev or dt <= 0:
+        return {}
+    out = {}
+    for k, (e, m) in cur.items():
+        if k in prev:
+            d = e - prev[k][0]
+            if d < 0 and m:
+                d += m
+            if d >= 0:
+                out[k] = d / 1e6 / dt
+    return out
+
+
 def on_battery():
     """배터리로 방전 중이면 True(전원 연결·충전 중이거나 배터리가 없는 호스트는 False) — 보이지 않을 때 갱신을 멈출지 정하는 기준."""
     try:
@@ -72,28 +147,27 @@ def on_battery():
 
 
 def phys_links(wifi_rate=None):
-    """{인터페이스: dict(kind, mbps)} — **물리 NIC 만**(브리지·tap·docker·tailscale 제외, 연결된 것). 유선은 sysfs speed(협상 속도), Wi-Fi 는 접속 AP 의 표기 속도(nmcli RATE — 신호에 따라 실제 링크는 이보다 낮다).
-    wifi_rate 는 호출부가 (느리게) 구해 넘긴다 — 프로세스를 띄우는 일이라 매 표본마다 하지 않는다."""
+    """{인터페이스: dict(kind, mbps, up)} — **물리 NIC 만**(브리지·tap·docker·tailscale 제외), 내려가 있는 것도 포함(행 수가 들쭉날쭉하지 않게). mbps 는 연결된 링크의 속도(모르면 None).
+    유선은 sysfs speed(협상 속도), Wi-Fi 는 접속 AP 의 표기 속도(nmcli RATE — 신호에 따라 실제 링크는 이보다 낮다). wifi_rate 는 호출부가 (느리게) 구해 넘긴다 — 프로세스를 띄우는 일이라 매 표본마다 하지 않는다."""
     out = {}
     base = "/sys/class/net"
     try:
-        names = os.listdir(base)
+        names = sorted(os.listdir(base))
     except OSError:
         return out
     for n in names:
         d = os.path.join(base, n)
-        if n == "lo" or not os.path.exists(os.path.join(d, "device")) or (hm.read(f"{d}/operstate") or "").strip() != "up":
+        if n == "lo" or not os.path.exists(os.path.join(d, "device")):
             continue
+        up = (hm.read(f"{d}/operstate") or "").strip() == "up"
         if os.path.isdir(os.path.join(d, "wireless")):
-            if wifi_rate:
-                out[n] = dict(kind="Wi-Fi", mbps=wifi_rate)
+            out[n] = dict(kind="Wi-Fi", mbps=wifi_rate if up else None, up=up)
             continue
         try:
             sp = int((hm.read(f"{d}/speed") or "-1").strip())
         except ValueError:
             sp = -1
-        if sp > 0:
-            out[n] = dict(kind="유선", mbps=sp)
+        out[n] = dict(kind="유선", mbps=sp if up and sp > 0 else None, up=up)
     return out
 
 
@@ -197,11 +271,20 @@ def proc_apps(resolver, prev, dt, hz):
     return sorted(apps.values(), key=lambda r: (-r["cpu"], -r["rss"])), ticks
 
 
+def has_battery():
+    base = "/sys/class/power_supply"
+    try:
+        return any((hm.read(f"{base}/{d}/type") or "").strip() == "Battery" for d in os.listdir(base))
+    except OSError:
+        return False
+
+
 class LiveSampler:
     """`sample()` 를 부를 때마다 직전 호출과의 차이로 변화율을 계산한다(첫 호출은 구간 값이 None).
     이미 재는 중이면 기다리지 않고 None 을 돌려준다 — 느린 첫 표본 중에 타이머가 겹쳐 직전 표본·시각이 뒤섞이는 것을 막는다."""
 
-    def __init__(self, slow_every=5.0):
+    def __init__(self, slow_every=5.0, laptop=None):
+        self.laptop = has_battery() if laptop is None else laptop         # 전력·배터리 표본은 배터리가 있는 호스트에서만
         self.slow_every = self.base_slow_every = slow_every
         self._slow_ms = 0.0
         self._b = None
@@ -213,6 +296,7 @@ class LiveSampler:
         self._ticks = None
         self._apps_t = None
         self._links = {}
+        self._rapl = None
         self._disk_info = disk_info()
         self.resolver = ap.AppResolver()
         self.hz = os.sysconf("SC_CLK_TCK")
@@ -235,6 +319,10 @@ class LiveSampler:
         net, disk = read_net(), read_disk()
         s["net"], s["disk"] = rates(net, self._net, dt), rates(disk, self._disk, dt)
         s["disk_info"] = self._disk_info
+        s["power"] = read_power() if self.laptop else None
+        rp = read_rapl() if self.laptop else {}
+        s["rapl_w"] = rapl_watts(rp, self._rapl, dt)
+        self._rapl = rp
         self._net, self._disk = net, disk
         cores = read_cores()
         s["cores"] = [None if not self._cores or i >= len(self._cores) or c[0] == self._cores[i][0] else (1 - (c[1] - self._cores[i][1]) / (c[0] - self._cores[i][0])) * 100
@@ -294,16 +382,23 @@ def pct_style(v, warn, bad):
     return "red" if v >= bad else "yellow" if v >= warn else "green"
 
 
-TRACK_STYLE = "grey23"      # 안 찬 막대 구간(트랙)의 색 — 어두운 배경에서 짙은 회색으로 보이는 틀
+TRACK_BG = "grey23"         # 안 찬 막대 구간(트랙)의 배경색 — 짙은 회색
+TRACK_STYLE = f"on {TRACK_BG}"
 
 
 def track_bar(frac, width, style):
-    """채운 부분(style)과 **안 찬 부분을 짙은 회색 블록(트랙)** 으로 이은 막대 — 막대가 얼마나 찼는지 한눈에 보인다. 길이는 항상 width 칸."""
-    bar = pg.hbar(frac, width)
-    filled = bar.rstrip(" ")
+    """채운 부분(style)과 **안 찬 부분을 짙은 회색 배경(트랙)** 으로 이은 막대. 길이는 항상 width 칸.
+    1/8 칸 단위의 걸친 칸(▏~▉)은 글자 색 = style, **배경 = 트랙색** 이라 그 칸의 빈 쪽도 검정이 아니라 회색으로 이어진다."""
+    frac = 0.0 if frac != frac else max(0.0, min(1.0, frac))
+    eighths = round(frac * width * 8)
+    full, part = divmod(eighths, 8)
     t = Text()
-    t.append(filled, style=style)
-    t.append("█" * (width - len(filled)), style=TRACK_STYLE)
+    if full:
+        t.append("█" * full, style=style)
+    if part and full < width:
+        t.append(pg.BLOCKS[part], style=f"{style} on {TRACK_BG}")
+        full += 1
+    t.append(" " * (width - full), style=f"on {TRACK_BG}")
     return t
 
 
@@ -413,20 +508,23 @@ def render_io(s, w):
     t.append("\n 네트워크 — 링크 속도 대비(수신↓ 송신↑)")
     links = s.get("links", {})
     net = s["net"]
-    # 링크 속도를 아는 물리 NIC 는 늘 보이고, 속도를 모르는 인터페이스(브리지·tap·내려간 NIC 등)는 지금 트래픽이 있는 것만 상위 2개
-    busy = sorted((k for k in net if k not in links and net[k][0] + net[k][1] >= 1024), key=lambda k: -(net[k][0] + net[k][1]))[:2]
-    shown = sorted((k for k in net if k in links), key=lambda k: -(net[k][0] + net[k][1])) + busy
-    for k in shown:
-        rx, tx = net[k]
-        ln = links.get(k)
-        t.append(f"\n  {k}" + (f"  {ln['kind']} 링크 {ln['mbps']:g} Mbit/s" + ("*" if ln["kind"] == "Wi-Fi" else "") if ln else "  (링크 속도 정보 없음 — 가상·미연결)"), style="bold" if ln else "grey62")
+    for k in sorted(links, key=lambda k: (links[k]["kind"] != "유선", k)):          # 물리 NIC 는 늘 같은 순서·같은 행 수(내려가 있으면 한 줄)
+        ln = links[k]
+        if not ln.get("up", True):
+            t.append(f"\n  {k}  {ln['kind']} — 연결 안 됨", style="grey50")
+            continue
+        rx, tx = net.get(k, (0.0, 0.0))
+        mb = ln.get("mbps")
+        t.append(f"\n  {k}  {ln['kind']} " + (f"링크 {mb:g} Mbit/s" + ("*" if ln["kind"] == "Wi-Fi" else "") if mb else "링크 속도 알 수 없음(% 없음)"), style="bold")
         t.append("\n")
-        cap = ln["mbps"] * 125000 if ln else None            # Mbit/s → 바이트/초
+        cap = mb * 125000 if mb else None            # Mbit/s → 바이트/초
         t.append_text(_rate_pair(("↓", rx, cap), ("↑", tx, cap), w))
-    if any(links.get(k, {}).get("kind") == "Wi-Fi" for k in shown):
+    virt = [v for k, v in net.items() if k not in links]    # 브리지·tap·VPN 등은 한 줄 합계로(생겼다 없어져도 행 수가 안 변함)
+    t.append("\n  가상 인터페이스 합계(브리지·tap·VPN 등)", style="grey62")
+    t.append("\n")
+    t.append_text(_rate_pair(("↓", sum(v[0] for v in virt), None), ("↑", sum(v[1] for v in virt), None), w))
+    if any(ln.get("kind") == "Wi-Fi" and ln.get("up", True) and ln.get("mbps") for ln in links.values()):
         t.append("\n  * Wi-Fi: AP 표기 최대 속도(실제 링크는 신호에 따라 낮음)", style="grey50")
-    if not net:
-        t.append("\n  -", style="grey50")
     t.append("\n 디스크 — 실측(없으면 표기·PCIe 링크 상한) 대비(읽기/쓰기)")
     info = s.get("disk_info", {})
     if s["disk"]:
@@ -476,6 +574,49 @@ def _rate_pair(a, b, w):
             out.append_text(bar)
             out.append(" " * max(half - cell_len(bar.plain), 0))
     return out
+
+
+def _hm(h):
+    """시간(float) → `3시간 22분` / `45분`."""
+    if h is None:
+        return "-"
+    m = round(h * 60)
+    return f"{m // 60}시간 {m % 60:02d}분" if m >= 60 else f"{m}분"
+
+
+def render_power(s, w):
+    """노트북 전용 「전력·배터리」 — 배터리 잔량 막대, 방전·충전 전력과 남은 시간, AC, RAPL(psys 시스템 전체·pkg CPU 패키지, 읽을 수 있을 때만). 지금 값만(이력은 usageui 기록 탭)."""
+    pw = s.get("power")
+    t = Text()
+    if not pw:
+        t.append(" 배터리 정보를 읽지 못함", style="grey50")
+        return t
+    pct = pw["percent"]
+    st = {"Discharging": "방전 중", "Charging": "충전 중", "Full": "완충", "Not charging": "충전 안 함(보호 설정 등)"}.get(pw["status"], pw["status"] or "상태 모름")
+    ac = {True: "AC 연결", False: "AC 없음(배터리 구동)", None: "AC 정보 없음"}[pw["ac"]]
+    t.append(" 배터리 ", style="bold")
+    t.append("-" if pct is None else f"{pct:.0f}%", style=pct_style(100 - (pct or 0), 50, 80) if pct is not None else "grey50")
+    wh = f" ({pw['now_wh']:.1f}/{pw['full_wh']:.1f} Wh)" if pw["now_wh"] and pw["full_wh"] else ""
+    t.append(f"{wh} · {st} · {ac}\n")
+    bw = max(10, w - 6)
+    t.append("  ")
+    t.append_text(track_bar((pct or 0) / 100, bw, "green" if (pct or 0) >= 30 else ("yellow" if (pct or 0) >= 15 else "red")))
+    t.append("\n")
+    if pw["watts"] is not None:
+        if pw["status"] == "Discharging":
+            t.append(f" 방전 {pw['watts']:.1f} W", style="bold")
+            t.append(f" · 이 속도면 약 {_hm(pw['eta_h'])} 남음" if pw["eta_h"] else " · 남은 시간 계산 불가(전력 0.5 W 미만)")
+        elif pw["status"] == "Charging":
+            t.append(f" 충전 +{pw['watts']:.1f} W", style="bold")
+            t.append(f" · 만충까지 약 {_hm(pw['eta_h'])}" if pw["eta_h"] else "")
+        else:
+            t.append(f" 배터리 전력 {pw['watts']:.1f} W")
+    else:
+        t.append(" 배터리 전력을 읽지 못함", style="grey50")
+    rw = s.get("rapl_w") or {}
+    bits = [f"{lab} {rw[k]:.1f} W" for k, lab in (("psys", "시스템 전체(psys)"), ("pkg", "CPU 패키지")) if k in rw]
+    t.append("\n " + (" · ".join(bits) if bits else "RAPL(psys·패키지 전력) 못 읽음 — 권한 또는 미지원") + (" — 최근 표본 간격 평균" if bits else ""), style="grey62")
+    return t
 
 
 def render_top(s, w):

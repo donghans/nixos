@@ -25,6 +25,8 @@ check("첫 표본: measured=False, 구간 값은 None, 판정은 계산됨", s0[
 check("첫 표본: 느린 항목(앱·cgroup·세션)이 이미 채워짐, 앱 CPU 는 아직 미측정", {"apps", "cons", "sessions"} <= set(s0) and s0["apps_measured"] is False)
 time.sleep(max(sm.slow_every, 2.0) + 0.3)      # 느린 항목을 재는 데 걸린 시간에 비례해 주기가 늘어나므로(바쁜 호스트 보호) 갱신된 주기만큼 기다린다
 s1 = sm.sample()
+sm_desk = lv.LiveSampler(laptop=False).sample()
+sm_lap = lv.LiveSampler(laptop=True).sample()
 check("둘째 표본: measured=True, 변화율 숫자, 코어별 사용률 리스트(코어 수와 같음)", s1["measured"] and s1["rates"]["pswpin"] >= 0 and len(s1["cores"]) == os.cpu_count() and all(v is None or 0 <= v <= 100.5 for v in s1["cores"]))
 check("둘째 표본: 느린 주기(0.5s)가 지나 앱 CPU 가 측정됨", s1["apps_measured"] is True and s1["apps"] and all(a["cpu"] >= 0 for a in s1["apps"]))
 check("네트워크·디스크 변화율은 {이름: (값, 값)} 이고 음수가 없음(장치가 있으면 비어 있지 않음)", all(r >= 0 for v in list(s1["net"].values()) + list(s1["disk"].values()) for r in v) and bool(s1["net"]) == bool(lv.read_net()) and bool(s1["disk"]) == bool(lv.read_disk()))
@@ -64,21 +66,48 @@ def _core_lines(n, w=60):
 
 
 check("코어 열 수: 4코어 이하는 2열, 그 위는 4열(16코어 → 4줄)", len(_core_lines(4)) == 2 and len(_core_lines(8)) == 2 and len(_core_lines(16)) == 4 and _core_lines(16)[0].count("%") == 4 and _core_lines(2)[0].count("%") == 2)
-_syn = dict(s1, net={"eth0": (62.5e6, 1.25e6), "wlan0": (0.0, 0.0), "tap1": (1e3, 1e3)}, links={"eth0": dict(kind="유선", mbps=1000), "wlan0": dict(kind="Wi-Fi", mbps=540)},
+_syn = dict(s1, net={"eth0": (62.5e6, 1.25e6), "wlan0": (0.0, 0.0), "tap1": (1e3, 1e3)}, links={"eth0": dict(kind="유선", mbps=1000, up=True), "wlan0": dict(kind="Wi-Fi", mbps=540, up=True), "enp9": dict(kind="유선", mbps=None, up=False)},
             disk={"nvme0n1": (3.5e9, 0.25e9), "sdz": (1e6, 1e6), "nvme1n1": (3.94e9, 0)}, disk_info={"nvme0n1": dict(model="X", name="Samsung 테스트", read=7000e6, write=5000e6), "sdz": dict(model="Foo", name=None, read=None, write=None, link=None), "nvme1n1": dict(model="Bar", name=None, read=None, write=None, link=7.88e9)})
 _io = lv.render_io(_syn, 70).plain
-check("네트워크: 물리 NIC 는 링크 속도 대비 %(1 Gbps 에서 62.5 MB/s = 50%), 트래픽 있는 비링크(tap)는 속도 정보 없음 표시·% 없음", "유선 링크 1000 Mbit/s" in _io and " 50.0%" in _io and "링크 속도 정보 없음" in _io, _io)
+check("네트워크: 물리 NIC 는 링크 속도 대비 %(1 Gbps 에서 62.5 MB/s = 50%), 내려간 NIC 는 한 줄, 가상(tap 등)은 합계 한 줄", "유선 링크 1000 Mbit/s" in _io and " 50.0%" in _io and "가상 인터페이스 합계" in _io and "enp9  유선 — 연결 안 됨" in _io, _io)
 check("네트워크: Wi-Fi 는 AP 표기 최대 속도임을 밝힘", "Wi-Fi 링크 540 Mbit/s*" in _io and "AP 표기 최대" in _io)
 check("디스크: 표기치 대비 %(3.5 GB/s ÷ 7000 MB/s = 50%, 0.25 GB/s ÷ 5000 MB/s = 5%), 미등록 모델은 % 없이 안내", " 50.0%" in _io and "  5.0%" in _io and "정보 없음" in _io and "Samsung 테스트" in _io and "PCIe 링크 상한 7,880 MB/s(표기치 미등록)" in _io, _io)
 check("표기치 대비 줄이 박스 폭(70)을 넘지 않음", all(cell_len(l) <= 70 for l in _io.splitlines()), max(cell_len(l) for l in _io.splitlines()))
+_n1 = lv.render_io(dict(_syn, net={"eth0": (1.0, 1.0), "wlan0": (0.0, 0.0)}), 70).plain.count("\n")
+_n2 = lv.render_io(dict(_syn, net={"eth0": (1.0, 1.0), "wlan0": (0.0, 0.0), "incusbr0": (5e6, 5e6), "tailscale0": (1e3, 2e3), "tap9": (9.0, 9.0)}), 70).plain.count("\n")
+check("네트워크: 가상 인터페이스가 생겼다 없어져도 행 수가 같다(합계 한 줄)", _n1 == _n2, (_n1, _n2))
 check("링크·디스크 정보가 없는 표본에서도 예외 없음", len(lv.render_io(dict(s1, net={}, disk={}, links={}, disk_info={}), 60).plain) > 10)
 _nv = lv.nvme_link_bytes_s("nvme0n1")
 check("NVMe PCIe 링크 상한: 이 호스트(Gen4 x4)면 약 7.88 GB/s, 없으면 None", _nv is None or 7.5e9 < _nv < 8.0e9, str(_nv))
+import tempfile as _tf
+_ps = _tf.mkdtemp(prefix="ps-")
+def _w(rel, val):
+    os.makedirs(os.path.dirname(os.path.join(_ps, rel)), exist_ok=True); open(os.path.join(_ps, rel), "w").write(str(val))
+_w("BAT0/type", "Battery"); _w("BAT0/status", "Discharging"); _w("BAT0/capacity", 63); _w("BAT0/charge_now", 2_000_000); _w("BAT0/charge_full", 4_000_000); _w("BAT0/voltage_now", 11_000_000); _w("BAT0/current_now", 800_000)
+_w("AC/type", "Mains"); _w("AC/online", 0)
+_pw = lv.read_power(_ps)
+check("read_power: charge/current 계열 sysfs → Wh·W 변환(2 Ah×11 V=22 Wh/44 Wh, 0.8 A×11 V=8.8 W)", abs(_pw["now_wh"] - 22) < 1e-6 and abs(_pw["full_wh"] - 44) < 1e-6 and abs(_pw["watts"] - 8.8) < 1e-6 and abs(_pw["percent"] - 50) < 1e-6 and _pw["ac"] is False, str(_pw))
+check("read_power: 방전이면 남은 시간 = 잔량 ÷ 전력(22 ÷ 8.8 = 2.5 시간)", abs(_pw["eta_h"] - 2.5) < 1e-6, str(_pw))
+_w("BAT0/status", "Charging"); _w("AC/online", 1)
+_pc = lv.read_power(_ps)
+check("read_power: 충전이면 만충까지 = 부족분 ÷ 전력(22 ÷ 8.8 = 2.5 시간), AC 연결", abs(_pc["eta_h"] - 2.5) < 1e-6 and _pc["ac"] is True and _pc["status"] == "Charging")
+for _f in ("charge_now", "charge_full", "current_now"): os.remove(os.path.join(_ps, "BAT0", _f))
+_w("BAT0/energy_now", 30_000_000); _w("BAT0/energy_full", 60_000_000); _w("BAT0/power_now", 12_000_000); _w("BAT0/status", "Discharging")
+_pe = lv.read_power(_ps)
+check("read_power: energy/power 계열도 지원(30/60 Wh, 12 W → 2.5시간)", abs(_pe["now_wh"] - 30) < 1e-6 and abs(_pe["watts"] - 12) < 1e-6 and abs(_pe["eta_h"] - 2.5) < 1e-6)
+check("read_power: 배터리가 없는 디렉터리는 None", lv.read_power(_tf.mkdtemp(prefix="ps0-")) is None and lv.read_power("/nonexistent-zzz") is None)
+check("rapl_watts: 두 표본 차이 ÷ 시간(1e6 µJ/2 s = 0.5 W), 감김 보정", lv.rapl_watts({"psys": (3_000_000, 10**9)}, {"psys": (2_000_000, 10**9)}, 2.0) == {"psys": 0.5} and abs(lv.rapl_watts({"psys": (1_000_000, 10_000_000)}, {"psys": (9_000_000, 10_000_000)}, 1.0)["psys"] - 2.0) < 1e-9 and lv.rapl_watts({"psys": (1, 1)}, None, 1.0) == {})
+_rp = lv.render_power(dict(s1, power=_pw, rapl_w={"psys": 9.1, "pkg": 3.2}), 60).plain
+check("render_power: 잔량·상태·AC·전력·남은 시간·RAPL 이 한 칸에 보이고 막대 줄이 있음", all(x in _rp for x in ("배터리 50%", "(22.0/44.0 Wh)", "방전 중", "AC 없음(배터리 구동)", "방전 8.8 W", "약 2시간 30분 남음", "시스템 전체(psys) 9.1 W", "CPU 패키지 3.2 W")) and "█" in _rp or " " * 20 in _rp, _rp)
+check("render_power: 배터리 정보가 없거나 RAPL 을 못 읽어도 예외 없이 안내", "읽지 못함" in lv.render_power(dict(s1, power=None), 60).plain and "RAPL" in lv.render_power(dict(s1, power=_pc, rapl_w={}), 60).plain and "충전 +" in lv.render_power(dict(s1, power=_pc, rapl_w={}), 60).plain)
+check("LiveSampler(laptop=False) 는 전력 표본을 안 재고, laptop=True 는 키가 있다", sm_desk["power"] is None and "power" in sm_lap)
 check("on_battery: bool", isinstance(lv.on_battery(), bool))
 check("phys_links: 이 호스트에서 예외 없이 dict", isinstance(lv.phys_links(None), dict) and isinstance(lv.disk_info(), dict))
 _tb = lv.track_bar(0.25, 12, "green")
-check("track_bar: 폭이 항상 같고, 찬 부분은 지정 색·안 찬 부분은 짙은 회색 블록", len(_tb.plain) == 12 and _tb.plain == "███" + "█" * 9 and any(sp.style == "grey23" for sp in _tb.spans) and any(sp.style == "green" for sp in _tb.spans), str(_tb.spans))
-check("track_bar: 0%·100% 경계", lv.track_bar(0, 8, "red").plain == "█" * 8 and lv.track_bar(1, 8, "red").plain == "█" * 8 and all(sp.style == "grey23" for sp in lv.track_bar(0, 8, "red").spans))
+check("track_bar: 폭이 항상 같고(12칸), 찬 3칸은 지정 색, 나머지 9칸은 짙은 회색 배경", len(_tb.plain) == 12 and _tb.plain.startswith("███") and set(_tb.plain[3:]) == {" "} and any(sp.style == "green" for sp in _tb.spans) and any("grey23" in str(sp.style) for sp in _tb.spans), str(_tb.spans))
+_tp = lv.track_bar(0.27, 10, "green")     # 27% = 2.7칸 → 걸친 칸이 생긴다
+check("track_bar: 걸친 칸(1/8 블록)은 글자=채움색·배경=트랙색이라 빈 쪽이 검정으로 안 남음", len(_tp.plain) == 10 and any(sp.style == "green on grey23" for sp in _tp.spans) and _tp.plain[:2] == "██" and _tp.plain[2] not in " █", str((_tp.plain, _tp.spans)))
+check("track_bar: 0%·100%·범위 밖 값", lv.track_bar(0, 8, "red").plain == " " * 8 and lv.track_bar(1, 8, "red").plain == "█" * 8 and lv.track_bar(5, 8, "red").plain == "█" * 8 and lv.track_bar(-1, 8, "red").plain == " " * 8 and len(lv.track_bar(float("nan"), 8, "red").plain) == 8)
 check("코어 열 수: 폭이 좁으면 열을 줄여도 줄이 폭을 넘지 않음", all(len(l) <= 40 for l in _core_lines(16, 40)))
 check("human_bytes", lv.human_bytes(None) == "-" and lv.human_bytes(1536 * 1024, True) == "1.5 MiB/s" and lv.human_bytes(12) == "12 B")
 
@@ -187,6 +216,20 @@ async def default_start():
         check("앱: 옵션 없이 열면 1번 탭의 실시간 쪽이 먼저 보이고 타이머가 돈다", active(app) == "live" and app._timer is not None and app.live_sample is not None)
         await pilot.press("tab"); await pilot.pause(0.3)
         check("앱: 기록 대시보드는 Tab 으로 한 번에", active(app) == "dashboard")
+async def laptop_box():
+    """배터리가 있는 호스트(프로필 laptop 강제)에서만 「전력·배터리」 칸이 있다 — 이 데스크톱에서는 없음."""
+    app = usageui.UsageUI(ud.preset("1시간", time.time()))
+    check("앱(데스크톱): 전력·배터리 칸 없음", not app.prof["battery"] and not list(app.query("#lpower")) if False else not app.prof["battery"])
+    os.environ["OBSERVE_USAGE_PROFILE"] = "laptop"
+    try:
+        app2 = usageui.UsageUI(ud.preset("1시간", time.time()), tab="live")
+        async with app2.run_test(size=(140, 55)) as pilot:
+            await until(pilot, lambda: app2._timer is not None and app2.live_sample is not None)
+            await pilot.pause(0.5)
+            check("앱(노트북 프로필): 「전력 · 배터리」 칸이 있고 지금 값으로 그려짐(이 호스트에 배터리가 없으면 안내 문구)", len(list(app2.query("#lpower"))) == 1 and ("배터리" in app2.query_one("#lpower")._text.plain), app2.query_one("#lpower")._text.plain[:80])
+    finally:
+        os.environ.pop("OBSERVE_USAGE_PROFILE", None)
+asyncio.run(laptop_box())
 asyncio.run(default_start())
 asyncio.run(drive())
 asyncio.run(narrow())

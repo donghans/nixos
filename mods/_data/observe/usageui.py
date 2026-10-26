@@ -168,6 +168,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     #fp0, #fp1 { height: 11; }
     #livebox { height: 40; }
     #lsess { height: 11; }
+    #lpower { height: 7; }
     #lleft, #lright { width: 1fr; height: 1fr; }
     #lleft > #lio { height: 20; }
     #lleft > #lmem { height: 20; }
@@ -231,6 +232,8 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                                     yield uikit.box(Panel(lambda w, h: self._live(live.render_verdict), id="lverdict"), "판정 — 지금")
                                     yield uikit.box(Panel(lambda w, h: self._live(live.render_pressure), id="lpsi"), "압박(PSI) · 스왑 입출력")
                                     yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_top(s, w)), id="ltop"), "상위 소비자")
+                            if self.prof["battery"]:       # 노트북(배터리가 있는 호스트)에서만 — 지금 값 위주의 전력·배터리 칸
+                                yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_power(s, w)), id="lpower"), "전력 · 배터리 — 지금")
                             yield uikit.box(Panel(lambda w, h: self._live(live.render_sessions), id="lsess"), "LLM 세션")
                     with TabPane("기록", id="dash-hist"):
                         with VerticalScroll(id="dashscroll"):
@@ -581,7 +584,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         if self._timer is not None:
             return
         if self.sampler is None:
-            self.sampler = live.LiveSampler()
+            self.sampler = live.LiveSampler(laptop=self.prof["battery"])
         self._timer = self.set_interval(self.live_sec, self._live_tick)
         self._live_tick()
 
