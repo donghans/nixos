@@ -467,6 +467,22 @@ async def run():
         check("1: 대시보드로 돌아옴", app.current_tab() == "dashboard")
 
 
+async def run_wrap():
+    """대시보드 줄바꿈 → 1열 전환: 폭에 따라 글 칸이 줄바꿈되지 않아야 한다(2열이면 줄바꿈 없음, 아니면 1열)."""
+    for cols in (100, 150, 400):
+        app = ctxui.CtxUI()
+        async with app.run_test(size=(cols, 50)) as pilot:
+            await settle(pilot, lambda: rows(app, "#stat-sessions") >= 1)
+            await pilot.pause(1.5)
+            box = app.query_one("#dash-scroll")
+            narrow = box.has_class("narrow")
+            check(f"대시보드 {cols}칸: 2열이면 글이 줄바꿈되지 않고, 줄바꿈이 생기면 1열", narrow or not app._wrapping(), (narrow, app._wrapping()))
+            if cols == 100:
+                check("대시보드 100칸: 최소 폭 규칙으로 1열", narrow)
+            if cols == 400:
+                check("대시보드 아주 넓은 폭(400칸): 2열 유지", not narrow and not app._wrapping(), (narrow, app._wrapping(), app._wrap_at))
+
+
 async def run_restricted():
     """제한 모드(LLM 세션): 모든 탭을 볼 수 있되 비밀 값은 추출·조회할 수 없다 — 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열을 [protected] 로 치환(끌 수 없음),
     값 보기·비밀 추가/삭제/끄기·후보 무시·지침 편집은 막고, 후보 승인은 허용한다."""
@@ -588,6 +604,7 @@ async def run_restricted():
 try:
     seed()
     asyncio.run(run())
+    asyncio.run(run_wrap())
     asyncio.run(run_restricted())
 finally:
     pg.stop()

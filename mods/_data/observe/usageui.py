@@ -200,6 +200,8 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         self.expand = expand
         self.rng = rng or ud.preset("7일", time.time())
         self.baseline = baseline
+        self._wrap_pending = set()
+        self._wrap_at = {}               # 줄바꿈 때문에 1열로 바꾼 때의 터미널 폭(되돌릴 때 기준)
         self.start_sub = "live" if tab == "live" else "dash-hist"     # --tab live = 1번 탭의 실시간 쪽
         self.start_tab = "dashboard" if tab == "live" else tab
         self.view = None
@@ -369,15 +371,60 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     LIVE_SEC = 1.0                     # 실시간 탭 갱신 간격(초). 한 번 재는 데 걸리는 시간이 간격의 20% 를 넘으면 자동으로 늘린다
     NARROW_COLS = 125                  # 이보다 좁으면 대시보드를 1열로(오른쪽 칸 글이 줄바꿈되기 때문)
 
+    WRAP_RETRY_COLS = 12               # 줄바꿈 때문에 1열이 된 뒤, 터미널이 이만큼 넓어지면 2열을 다시 시도한다
+
     def _fit(self):
+        """2열↔1열. 기본은 최소 폭(NARROW_COLS·LIVE_NARROW_COLS)으로 정하고, 거기에 더해 **칸 안의 글이 줄바꿈될 만큼 좁으면 1열**로 바꾼다(`_check_wrap`)."""
+        w = self.size.width
         try:
-            self.query_one("#dash").set_class(self.size.width < self.NARROW_COLS, "narrow")
-            self.query_one("#livebox").set_class(self.size.width < self.LIVE_NARROW_COLS, "narrow")
+            for sel, floor, key in (("#dash", self.NARROW_COLS, "dash"), ("#livebox", self.LIVE_NARROW_COLS, "live")):
+                box = self.query_one(sel)
+                narrow = w < floor
+                if not narrow and box.has_class("narrow"):
+                    narrow = w < self._wrap_at.get(key, 0) + self.WRAP_RETRY_COLS      # 줄바꿈으로 좁혔던 폭보다 충분히 넓어지기 전엔 1열 유지
+                box.set_class(narrow, "narrow")
+        except Exception:
+            pass
+
+    def _wrapping(self, box):
+        """box 안의 Panel 중 가장 긴 논리 줄이 칸 폭보다 길어 줄바꿈될 것들 [(id, 칸 폭, 필요 폭)] (막대 줄은 폭에 맞춰 만들어 해당 없음)."""
+        from rich.cells import cell_len
+        out = []
+        for p in box.query(Panel):
+            if not p.display or p.region.width == 0:
+                continue
+            p.build()                       # 지금 칸 폭 기준으로 다시 만든 글로 잰다(예전 폭으로 만든 캐시에 속지 않게)
+            avail = p.content_size.width
+            need = max((cell_len(l) for l in p._text.plain.split("\n")), default=0)
+            if avail and need > avail:
+                out.append((p.id, avail, need))
+        return out
+
+    def _wraps(self, box):
+        return bool(self._wrapping(box))
+
+    def _check_wrap(self):
+        """그려진 뒤 2열인데 줄바꿈이 생기면 1열로 바꾼다(1280px 같은 폭에서 문장이 두 줄로 꺾이는 것을 막음). 1열로도 넘치면 어쩔 수 없다."""
+        try:
+            active = self.query_one("#tabs", TabbedContent).active
+            for sel, key, vis in (("#dash", "dash", active == "dashboard" and not self._live_visible()), ("#livebox", "live", self._live_visible())):
+                box = self.query_one(sel)
+                if vis and not box.has_class("narrow") and self._wraps(box):
+                    if key in self._wrap_pending:            # 레이아웃이 자리 잡기 전의 순간 값에 속지 않게 한 번 더 확인한 뒤에만 바꾼다
+                        self._wrap_pending.discard(key)
+                        self._wrap_at[key] = self.size.width
+                        box.add_class("narrow")
+                    else:
+                        self._wrap_pending.add(key)
+                        self.set_timer(0.35, self._check_wrap)
+                else:
+                    self._wrap_pending.discard(key)
         except Exception:
             pass
 
     def on_resize(self, ev):
         self._fit()
+        self.call_after_refresh(self._check_wrap)
 
     def on_mount(self):
         self.query_one("#dash").set_class(self.desktop, "desk")
@@ -490,6 +537,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             self._fill_tables(v)
             self._fill_cause()
             self._status(uv.freshness(v))
+        self.call_after_refresh(self._check_wrap)
 
     def _status(self, msg):
         if self._live_visible() and self.live_sample:       # 실시간 화면에서는 기록 상태줄(데이터 기준·범위·비교 기준)이 맞지 않으니 덮어쓰지 않는다
@@ -615,6 +663,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         for panel in self.query("#live Panel"):
             panel.build()
             panel.refresh()
+        self.call_after_refresh(self._check_wrap)
         if self._live_visible():
             self.query_one("#status", Static).update(
                 f" 실시간 · 표본 {time.strftime('%H:%M:%S', time.localtime(s['t']))} · 갱신 {self.live_sec:.1f}초(이 화면이 보일 때만" + ("" if live.on_battery() else " · 전원 연결 중이라 창 포커스를 잃어도 계속") + f") · 표본 비용 {s['fast_ms']:.0f} ms"

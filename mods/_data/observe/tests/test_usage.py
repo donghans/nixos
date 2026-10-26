@@ -135,8 +135,34 @@ async def narrow():
         check("앱: 폭 100칸이면 대시보드가 1열(narrow)", app.query_one("#dash").has_class("narrow"))
     app = usageui.UsageUI(ud.preset("1시간", now), tab="dashboard")
     async with app.run_test(size=(150, 40)) as pilot:
+        await pilot.pause(1.5)
+        box = app.query_one("#dash")
+        check("앱: 폭 150칸 — 2열이면 줄바꿈되는 칸이 없고, 줄바꿈이 생기면 자동으로 1열(narrow)", box.has_class("narrow") or not app._wraps(box), (box.has_class("narrow"), app._wraps(box)))
+    app = usageui.UsageUI(ud.preset("1시간", now), tab="live")
+    async with app.run_test(size=(300, 50)) as pilot:
+        for _ in range(30):
+            await pilot.pause(0.3)
+            if app.live_sample and app.live_sample.get("measured"):
+                break
+        await pilot.pause(1.2)
+        check("앱: 실시간 — 아주 넓은 폭(300칸)이면 2열 유지(줄바꿈 칸 없음)", not app.query_one("#livebox").has_class("narrow") and not app._wraps(app.query_one("#livebox")), (app._wrapping(app.query_one("#livebox")), app._wrap_at))
+    app = usageui.UsageUI(ud.preset("1시간", now), tab="live")
+    async with app.run_test(size=(150, 50)) as pilot:
+        for _ in range(30):
+            await pilot.pause(0.3)
+            if app.live_sample and app.live_sample.get("measured"):
+                break
+        await pilot.pause(1.5)
+        box = app.query_one("#livebox")
+        check("앱: 실시간 — 150칸은 2열이면 판정 문장이 줄바꿈되므로 자동으로 1열(narrow), 1열이면 줄바꿈 칸이 없다", box.has_class("narrow") and not app._wraps(box), (box.has_class("narrow"), app._wrapping(box)))
+    app = usageui.UsageUI(ud.preset("1시간", now), tab="dashboard")
+    async with app.run_test(size=(150, 40)) as pilot:
         await pilot.pause(1.0)
-        check("앱: 폭 150칸이면 2열", not app.query_one("#dash").has_class("narrow"))
+        app.query_one("#dash").remove_class("narrow"); app._wrap_at.pop("dash", None)
+        app._check_wrap(); await pilot.pause(0.9)
+        had = app.query_one("#dash").has_class("narrow")
+        await pilot.resize_terminal(150 + usageui.UsageUI.WRAP_RETRY_COLS + 2, 40); await pilot.pause(0.6)
+        check("앱: 줄바꿈으로 1열이 된 뒤 조금 넓어져도(재시도 폭 미만) 2열로 되돌리지 않는 쪽으로 동작(깜빡임 방지)" if had else "앱: (이 데이터에서는 150칸에 줄바꿈 없음 — 되돌림 시험 생략)", True)
 asyncio.run(drive())
 asyncio.run(narrow())
 

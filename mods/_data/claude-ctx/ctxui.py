@@ -538,6 +538,7 @@ class CtxUI(uikit.HelpMixin, App):
         self.regex = False
         self.with_tools = False
         self.title_only = False
+        self._wrap_pending, self._wrap_at = False, 0
         self.expand_all_sess = False
         self.expanded_sess: set[str] = set()
         self.groups: list[dict] = []
@@ -605,12 +606,56 @@ class CtxUI(uikit.HelpMixin, App):
         self.reload_overview()
 
     DASH_NARROW_COLS = 110      # 이보다 좁으면 대시보드의 2열 배치를 1열로(좁은 터미널에서 표가 잘리지 않게)
+    WRAP_RETRY_COLS = 12        # 줄바꿈 때문에 1열이 된 뒤, 이만큼 넓어지면 2열을 다시 시도
+    DASH_TEXTS = ("#ovhead", "#stat-limits", "#stat-summary")      # 줄바꿈이 생기는 글 칸(표는 줄바꿈 대신 잘리므로 제외)
+
+    def _wrapping(self):
+        """대시보드의 글 칸 중 가장 긴 논리 줄이 칸 폭보다 길어 줄바꿈될 것들 [(id, 칸 폭, 필요 폭)]."""
+        from rich.cells import cell_len
+        out = []
+        for sel in self.DASH_TEXTS:
+            try:
+                w = self.query_one(sel, Static)
+            except Exception:
+                continue
+            c = getattr(w, "content", None) or getattr(w, "renderable", None)
+            txt = c.plain if hasattr(c, "plain") else str(c or "")
+            need, avail = max((cell_len(l) for l in txt.split("\n")), default=0), w.content_size.width
+            if avail and need > avail:
+                out.append((sel, avail, need))
+        return out
+
+    def _fit_dash(self):
+        try:
+            box = self.query_one("#dash-scroll")
+        except Exception:
+            return
+        w = self.size.width
+        narrow = w < self.DASH_NARROW_COLS
+        if not narrow and box.has_class("narrow"):
+            narrow = w < self._wrap_at + self.WRAP_RETRY_COLS      # 줄바꿈으로 좁혔던 폭보다 충분히 넓어지기 전엔 1열 유지
+        box.set_class(narrow, "narrow")
+
+    def _check_wrap(self):
+        """2열인데 글이 줄바꿈되면(예: 1280px 폭) 1열로 바꾼다. 레이아웃이 자리 잡기 전의 순간 값에 속지 않게 한 번 더 확인한 뒤에만."""
+        try:
+            box = self.query_one("#dash-scroll")
+        except Exception:
+            return
+        if self.current_tab() != "dashboard" or box.has_class("narrow") or not self._wrapping():
+            self._wrap_pending = False
+            return
+        if self._wrap_pending:
+            self._wrap_pending = False
+            self._wrap_at = self.size.width
+            box.add_class("narrow")
+        else:
+            self._wrap_pending = True
+            self.set_timer(0.35, self._check_wrap)
 
     def on_resize(self, event):
-        try:
-            self.query_one("#dash-scroll").set_class(event.size.width < self.DASH_NARROW_COLS, "narrow")
-        except Exception:
-            pass
+        self._fit_dash()
+        self.call_after_refresh(self._check_wrap)
 
     # --- 공통
     def masker(self):
@@ -944,6 +989,7 @@ class CtxUI(uikit.HelpMixin, App):
             ts.add_row(fmt_ts(r["last"]), r["host"], short_repo(r["repo"]), r["prompts"], r["tools"], fmt_dur(r["turn_ms"] / 1000),
                        f"${r['cost']:,.2f}" if r["cost"] is not None else "-", models[:20], Text((r["title"] or "")[:60]), key=r["session_id"])
         self.query_one("#stat-sessions").border_title = f"세션 {len(sess)}개{' (최대 300)' if len(sess) >= 300 else ''} — {dict(STAT_ORDERS)[self.stat_order]}순 (o) · Enter: 대화 보기"
+        self.call_after_refresh(self._check_wrap)
 
     def action_stat_period(self):
         if self.current_tab() == "dashboard" and len(self.screen_stack) == 1:

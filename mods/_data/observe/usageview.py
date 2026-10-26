@@ -530,9 +530,9 @@ def desktop_headline(view):
         t.append(f" 전체 CPU {ca:.1f}% ← {cb:.1f}% ({ca - cb:+.1f})\n", style="grey70")
     movers = [x for x in cmp["apps"] if abs(x[3]) >= HEADLINE_MIN_APP][:3]
     if movers:
-        t.append(" 많이 달라진 앱(상관일 뿐): ", style="grey50")
-        for i, (name, a, b, d) in enumerate(movers):
-            t.append(("" if i == 0 else " · ") + f"{name} {d:+.0f}%", style="dark_orange" if d > 0 else "green")
+        t.append(" 많이 달라진 앱(상관일 뿐):", style="grey50")
+        for name, a, b, d in movers:        # 앱 이름이 길어도 줄바꿈되지 않게 한 줄에 하나씩
+            t.append(f"\n   {name} {d:+.0f}%", style="dark_orange" if d > 0 else "green")
     else:
         t.append(" 눈에 띄게 달라진 앱은 없습니다.", style="grey50")
     rec = desktop_recent(view)
