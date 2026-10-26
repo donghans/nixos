@@ -560,7 +560,7 @@ def _rate_pair(a, b, w):
         bar = Text()
         if cap:
             frac = rate / cap
-            num.append(f"  {frac * 100:4.1f}%" if frac >= 0.001 else "  <.1% ")
+            num.append(f"  {frac * 100:4.1f}%" if frac >= 0.001 else "     0%")      # 0.1% 미만은 「<.1%」 대신 0%
             bar = Text("    ")
             bar.append_text(track_bar(min(frac, 1.0), half - 6, pct_style(frac * 100, 50, 85)))
         cells.append((num, bar))

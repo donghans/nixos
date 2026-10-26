@@ -76,6 +76,8 @@ check("표기치 대비 줄이 박스 폭(70)을 넘지 않음", all(cell_len(l)
 _n1 = lv.render_io(dict(_syn, net={"eth0": (1.0, 1.0), "wlan0": (0.0, 0.0)}), 70).plain.count("\n")
 _n2 = lv.render_io(dict(_syn, net={"eth0": (1.0, 1.0), "wlan0": (0.0, 0.0), "incusbr0": (5e6, 5e6), "tailscale0": (1e3, 2e3), "tap9": (9.0, 9.0)}), 70).plain.count("\n")
 check("네트워크: 가상 인터페이스가 생겼다 없어져도 행 수가 같다(합계 한 줄)", _n1 == _n2, (_n1, _n2))
+_z = lv.render_io(dict(_syn, net={"eth0": (0.0, 0.0)}, disk={}), 70).plain
+check("0.1% 미만은 「<.1%」 가 아니라 0% 로 표기(7칸 폭 유지)", "<.1%" not in _z and "     0%" in _z, _z)
 check("링크·디스크 정보가 없는 표본에서도 예외 없음", len(lv.render_io(dict(s1, net={}, disk={}, links={}, disk_info={}), 60).plain) > 10)
 _nv = lv.nvme_link_bytes_s("nvme0n1")
 check("NVMe PCIe 링크 상한: 이 호스트(Gen4 x4)면 약 7.88 GB/s, 없으면 None", _nv is None or 7.5e9 < _nv < 8.0e9, str(_nv))
