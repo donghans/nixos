@@ -245,7 +245,10 @@ Netdata 의 "앱 그룹" 개념을 우리 시스템에 맞게 가져왔다(`obse
 
 한 호스트의 기록만으로는 「정상인가」를 모른다 — 같은 앱이 노트북에서만 높거나 한쪽에만 설치된 확장이 있으면 시험 전에 후보가 된다(1Password 는 데스크톱에 없는 확장이었다). 공유 저장소(`claude_ctx` Postgres, `donghans ctx` 와 같은 서버·접속 규칙)에 **요약만** 올려 비교한다(`observe_fleet.py`, 표는 `claude-ctx/schema.sql` 의 `observe_app_hourly`·`observe_power_hourly`·`observe_ext_inventory`).
 - 올리는 것: 시간별 앱 평균 CPU·자발 문맥 전환(그 시간 전체 표본으로 나눈 평균), 시간별 평균 psys·pkg, 브라우저 확장 설치 목록(프로필 **폴더 이름**·확장 ID·버전·서비스 워커 유무). **원본 표본·프로세스 목록·창 제목·주소·확장 이름은 올리지 않는다.**
-- `observectl fleet push [--since 26h]` — 이 호스트 요약을 올린다(멱등: 같은 시간·앱은 덮어씀). user 타이머 `observe-fleet-push` 가 6시간마다 부른다. 서버에 못 붙으면 **조용히 넘기지 않고** 실패로 알린다.
+- `observectl fleet push|sync [--since 기간]` — 이 호스트 요약을 올린다(멱등: 같은 시간·앱은 덮어씀). 기본은 **마지막 성공 시각의 2시간 앞부터** 올린다(처음엔 26시간) — 접속이 안 돼 실패한 동안 쌓인 표본이 다음 성공 때 함께 올라간다(로컬 보존 14일까지, 상태는 `~/.local/state/observe/fleet-push.json`). 서버에 못 붙으면 **조용히 넘기지 않고** 사유를 기록하고 실패로 알린다(자동 재시도는 없음 — 다음 주기나 수동 sync). `push` 와 `sync` 는 같은 동작(sync 는 사람용 이름).
+- `observectl fleet status` — 마지막 성공 시각·실패 사유·타이머 다음 실행. 8시간 넘게 못 올렸으면 경고.
+- 자동: user 타이머 `observe-fleet-push` 가 6시간마다(`Persistent`, 꺼져 있던 동안 놓친 실행은 켜질 때). 배터리·핫스팟에서도 보낸다(한 번 약 190 KB, 하루 4번 약 0.8 MB, CPU 약 1초).
+- 수동: `observectl fleet sync` 또는 **usageui 의 `y` 키**(별도 프로세스로 부르고 결과를 알림으로 보임).
 - `observectl fleet compare <호스트> [--host 기준] [--days 3]` — 기준 호스트에서 상대보다 높은 앱(차이 0.3%p 이상이면서 3배↑ 이거나 상대에 없음). 사용 패턴이 다른 호스트라 높다고 바로 문제는 아니다 — 후보를 가리는 용도.
 - `observectl fleet inventory` — 한 호스트에만 있는 확장(★ = 백그라운드 서비스 워커 있음 = 주기 활동 후보).
 - `observectl fleet hosts` — 올라온 호스트와 기간.

@@ -80,6 +80,55 @@ def ext_inventory(roots):
     return out
 
 
+# ------------------------------------------------------------------ 올리기 기록(실패해도 쌓아 뒀다 다음에 같이)
+STATE_NAME = "fleet-push.json"
+FIRST_SPAN = 26 * HOUR        # 처음 올릴 때(기록 없음) 되돌아볼 기간
+MAX_BACK = 14 * 24 * HOUR     # 로컬 표본 보존 기간(14일) — 그보다 앞은 어차피 없다
+OVERLAP = 2 * HOUR            # 마지막 성공 시각 앞쪽을 겹쳐 다시 올린다(그 시간의 부분 집계가 덮어써짐)
+
+
+def state_path():
+    import observe_core as core
+    return os.path.join(core.state_dir(), STATE_NAME)
+
+
+def read_state(path=None):
+    try:
+        with open(path or state_path()) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def write_state(st, path=None):
+    path = path or state_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(st, f)
+    os.replace(tmp, path)
+
+
+def since_for(st, now, first=FIRST_SPAN, max_back=MAX_BACK, overlap=OVERLAP):
+    """이번에 올릴 표본의 시작 시각과 밀린 시간. 마지막 **성공** 시각(last_ok)에서 overlap 만큼 앞부터 — 실패한 동안의 표본이 다음 성공 때 함께 올라간다.
+    반환 (시작 epoch 초, 밀린 초 또는 None(처음)). 로컬 보존 기간(max_back)보다 앞으로는 가지 않는다."""
+    ok = st.get("last_ok")
+    if not isinstance(ok, (int, float)):
+        return now - first, None
+    return max(ok - overlap, now - max_back), max(0.0, now - ok)
+
+
+def record(st, now, ok, rows=None, error=None):
+    """올리기 시도 결과를 상태에 반영(성공이면 last_ok 갱신·오류 지움, 실패면 오류만 남기고 last_ok 는 그대로)."""
+    st = dict(st)
+    st["last_try"] = now
+    if ok:
+        st["last_ok"] = now; st["rows"] = rows; st.pop("error", None)
+    else:
+        st["error"] = (error or "")[:200]
+    return st
+
+
 # ------------------------------------------------------------------ 올리기
 def push(conn, hostname, app_rows, power_rows, inv):
     """멱등 올리기. 같은 (호스트, 시각, 앱)은 덮어쓴다(부분 시간이 다음 올리기에 채워짐). 확장 목록은 호스트별로 통째로 교체한다."""

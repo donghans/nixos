@@ -251,5 +251,24 @@ async def spk():
         check("튄 순간에서 다시 다른 순간으로 가도 Esc 한 번에 처음 범위로", app.rng is before)
 asyncio.run(spk())
 check("기본 범위: 센서와 무관하게 7일", ud.preset("7일", now).secs == 7 * 86400 and "7일" in ud.PRESETS)
+# --- y 키: observectl fleet sync 를 별도 프로세스로 부르고 결과 마지막 줄을 알림으로 보임(실패는 error)
+check("y 키가 호스트 동기화에 연결됨", any(getattr(b, "key", "") == "y" and b.action == "fleet_sync" for b in usageui.UsageUI.BINDINGS))
+async def fsync():
+    calls, notes = [], []
+    class R:
+        def __init__(self, rc, out): self.returncode, self.stdout, self.stderr = rc, out, ""
+    real_run, real_which = usageui.subprocess.run, usageui.shutil.which
+    try:
+        usageui.shutil.which = lambda n: "/fake/observectl" if n == "observectl" else real_which(n)
+        usageui.subprocess.run = lambda cmd, **k: (calls.append(cmd), R(0, "x: 앱 5행 올림\n"))[1]
+        app = usageui.UsageUI()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause(0.3)
+            app.notify = lambda m, **k: notes.append((m, k.get("severity")))
+            await pilot.press("y"); await pilot.pause(0.6)
+        check("y: observectl fleet sync 를 호출하고 결과를 알림으로 보임", calls == [["/fake/observectl", "fleet", "sync"]] and any("올림" in m for m, _ in notes), str((calls, notes)))
+    finally:
+        usageui.subprocess.run, usageui.shutil.which = real_run, real_which
+asyncio.run(fsync())
 os.environ["OBSERVE_USAGE_PROFILE"] = "laptop"
 finish("usageui")

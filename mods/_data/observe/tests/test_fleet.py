@@ -39,6 +39,22 @@ check("compare_means: 차이가 0.3%p 미만이면 제외", fl.compare_means({"x
 d = fl.inventory_diff({"nb": {("v", "A" * 32): ("Default", "1", True), ("v", "B" * 32): ("Default", "2", False)}, "dt": {("v", "B" * 32): ("Default", "2", False)}})
 check("inventory_diff: 한 호스트에만 있는 확장(서비스 워커 표시), 공통은 제외", d == [("nb", "v", "A" * 32, "Default", "1", True)], str(d))
 
+# --- 올리기 기록(실패해도 쌓아 뒀다 다음에 같이)
+NOW = 1_800_100_000.0
+since, pend = fl.since_for({}, NOW)
+check("since_for: 기록이 없으면 26시간 전부터, 밀림 없음(None)", since == NOW - 26 * 3600 and pend is None, str((since, pend)))
+st = fl.record({}, NOW, True, rows="앱 5")
+check("record: 성공이면 last_ok 갱신·오류 없음", st["last_ok"] == NOW and "error" not in st and st["rows"] == "앱 5", str(st))
+st2 = fl.record(st, NOW + 21600, False, error="접속 실패 " * 100)
+check("record: 실패면 last_ok 는 그대로, 오류만 기록(길이 제한)", st2["last_ok"] == NOW and st2["last_try"] == NOW + 21600 and 0 < len(st2["error"]) <= 200, str(st2)[:120])
+since2, pend2 = fl.since_for(st2, NOW + 3 * 21600)
+check("since_for: 3번 실패한 뒤에도 마지막 성공(2시간 겹침)부터 — 밀린 18시간이 다음에 같이 올라감", since2 == NOW - 2 * 3600 and pend2 == 3 * 21600, str((since2, pend2)))
+since3, _ = fl.since_for({"last_ok": NOW - 40 * 86400}, NOW)
+check("since_for: 로컬 보존(14일)보다 앞으로는 가지 않음", since3 == NOW - 14 * 86400, str(since3))
+sp = os.path.join(TMP, "fleet-state", "fleet-push.json")
+fl.write_state(st2, sp)
+check("write_state/read_state: 파일을 거쳐도 같고, 없거나 깨진 파일은 빈 상태", fl.read_state(sp) == st2 and fl.read_state(os.path.join(TMP, "없음.json")) == {} and (open(os.path.join(TMP, "깨짐.json"), "w").write("{x") and fl.read_state(os.path.join(TMP, "깨짐.json")) == {}))
+
 # --- DB 통합(임시 Postgres)
 try:
     import psycopg  # noqa: F401
@@ -74,7 +90,32 @@ else:
         dd = fl.inventory_diff(inv_db)
         check("inventory(DB): nb2 에만 있는 서비스 워커 확장이 차이로 나옴", any(r[0] == "nb2" and r[5] for r in dd), str(dd))
         conn.close()
-        import observe_cli
+        # CLI: 실패→기록→성공 때 밀린 것까지 올림, status 출력
+        import io, contextlib
+        os.environ["OBSERVE_STATE_DIR"] = os.path.join(TMP, "cli-state")
+        import importlib, observe_core; importlib.reload(observe_core)
+        import observe_cli; importlib.reload(observe_cli)
+        good = pg.dsn
+        os.environ["CLAUDE_CTX_DSN"] = "host=/nonexistent port=1 dbname=x user=x"
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+                observe_cli.main(["fleet", "sync"])
+            rc_fail = 0
+        except SystemExit as e:
+            rc_fail = e.code
+        stf = fl.read_state()
+        check("sync: 접속 실패면 종료 코드가 0 이 아니고 사유가 기록되며 last_ok 는 없음(쌓아 둠)", rc_fail not in (0, None) and "error" in stf and "last_ok" not in stf, f"{rc_fail} {stf}")
+        os.environ["CLAUDE_CTX_DSN"] = good
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            observe_cli.main(["fleet", "sync"])
+        stf = fl.read_state()
+        check("sync: 접속이 돌아오면 올리고 last_ok 갱신·오류 지움", "last_ok" in stf and "error" not in stf and "올림" in out.getvalue(), out.getvalue() + str(stf))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            observe_cli.main(["fleet", "status"])
+        check("status: 마지막 성공 시각을 보임, 실패 사유 없음", "마지막 성공" in out.getvalue() and "실패 사유" not in out.getvalue(), out.getvalue())
         check("observectl fleet 서브명령이 등록됨", "fleet" in open(os.path.join(ROOT, "observe_cli.py")).read())
     finally:
         pg.stop()

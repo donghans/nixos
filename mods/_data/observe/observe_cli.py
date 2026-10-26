@@ -320,18 +320,44 @@ def cmd_browser(a):
 
 
 def cmd_fleet(a):
-    """여러 호스트 교차 확인(공유 저장소 claude_ctx): push=이 호스트 요약 올리기 · compare=다른 호스트와 비교 · inventory=확장 목록 비교 · hosts=올라온 호스트."""
+    """여러 호스트 교차 확인(공유 저장소 claude_ctx): push·sync=이 호스트 요약 올리기(실패하면 쌓아 뒀다 다음에 같이) · status=올리기 상태 · compare=다른 호스트와 비교 · inventory=확장 목록 비교 · hosts=올라온 호스트."""
     import observe_fleet as fl
     roots = [("vivaldi", os.path.expanduser("~/.config/vivaldi"))]
+    me, now = fl.host(), time.time()
+    st = fl.read_state()
+    if a.what == "status":
+        ok, err = st.get("last_ok"), st.get("error")
+        print(f"{me}: 마지막 성공 " + (f"{core.hms(ok)} ({(now - ok) / 3600:.1f}시간 전, {st.get('rows') or '?'})" if ok else "없음(아직 올린 적 없음)") + (f" · 마지막 실패 사유: {err}" if err else ""))
+        if ok and now - ok > 8 * 3600:
+            print(f"⚠ {(now - ok) / 3600:.0f}시간째 못 올림 — 다음 올리기 때 밀린 표본을 같이 올립니다(로컬 보존 14일까지). 지금 올리려면 `observectl fleet sync`")
+        try:
+            t = subprocess.run(["systemctl", "--user", "list-timers", "observe-fleet-push.timer", "--no-legend"], capture_output=True, text=True, timeout=5).stdout.strip()
+            print("타이머: " + (" ".join(t.split()[:4]) if t else "없음(nixup 으로 켜짐)"))
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return
     try:
         conn = fl.connect()
-    except Exception as e:                       # 조용히 넘기지 않는다 — 서버가 꺼져 있거나 이 기기가 허용 목록에 없을 수 있다
-        sys.exit(f"공유 저장소 접속 실패: {str(e)[:200]} (서버 beelink-ser7-co 가 켜져 있고 이 기기가 claude-ctx allowedClients 에 있어야 합니다)")
-    me = fl.host()
-    if a.what == "push":
-        app_rows, power_rows = fl.hourly(samples(core.parse_when(a.since)))
-        na, npw, ni = fl.push(conn, me, app_rows, power_rows, fl.ext_inventory(roots))
-        print(f"{me}: 앱 {na}행 · 전력 {npw}행 · 확장 {ni}개 올림(최근 {a.since})")
+    except Exception as e:                       # 조용히 넘기지 않는다 — 서버가 꺼져 있거나 이 기기가 허용 목록에 없을 수 있다. 실패는 기록하고 표본은 쌓아 둔다(다음 성공 때 같이)
+        if a.what in ("push", "sync"):
+            fl.write_state(fl.record(st, now, False, error=str(e)))
+        tail = " — 올리지 못한 표본은 다음에 같이 올립니다" if a.what in ("push", "sync") else ""
+        sys.exit(f"공유 저장소 접속 실패: {str(e)[:200]} (서버 beelink-ser7-co 가 켜져 있고 이 기기가 claude-ctx allowedClients 에 있어야 합니다{tail})")
+    if a.what in ("push", "sync"):
+        if a.since:
+            since, pending = core.parse_when(a.since), None
+        else:
+            since, pending = fl.since_for(st, now)
+        app_rows, power_rows = fl.hourly(samples(since))
+        try:
+            na, npw, ni = fl.push(conn, me, app_rows, power_rows, fl.ext_inventory(roots))
+        except Exception as e:
+            conn.rollback()
+            fl.write_state(fl.record(st, now, False, error=str(e)))
+            sys.exit(f"올리기 실패: {str(e)[:200]} (표본은 로컬에 남아 있어 다음에 같이 올립니다)")
+        fl.write_state(fl.record(st, now, True, rows=f"앱 {na}·전력 {npw}·확장 {ni}"))
+        extra = f" · 밀렸던 {pending / 3600:.1f}시간 포함" if pending and pending > 8 * 3600 else ""
+        print(f"{me}: 앱 {na}행 · 전력 {npw}행 · 확장 {ni}개 올림(시작 {core.hms(since)}){extra}")
     elif a.what == "hosts":
         with conn.cursor() as cur:
             cur.execute("SELECT host, min(hour), max(hour), sum(samples), round(avg(psys_w)::numeric, 2) FROM observe_power_hourly GROUP BY host ORDER BY host")
@@ -1064,7 +1090,7 @@ def main(argv=None):
     s = sub.add_parser("ebpf", help="시간 제한형 eBPF 정밀 모드: tiers(단계·비용) | on <sample|counts|full> [--for 10m] | off | status"); s.add_argument("action", choices=["tiers", "on", "off", "status"]); s.add_argument("tier", nargs="?"); s.add_argument("--for", dest="for_", default="10m", help="제한 시간(기본 10m, 최대 60분)"); s.set_defaults(f=cmd_ebpf)
     s = sub.add_parser("query", help="범용 조회: 신호 여러 개를 시간 간격(--step)이나 그룹(--by)으로 묶어 집계(--agg). 신호 = 별칭(psys pkg vi core uncore pc8 pc10 cpu_all) · 표본 경로(pw.psys_w) · app:<앱>.cpu|ctxsw · proc:<comm>.cpu|ctxsw · nd:<Netdata 신호>"); s.add_argument("signal", nargs="+"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--step", help="시간 간격(예: 5m). 없으면 --by 로 묶음"); s.add_argument("--by", default="none", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.add_argument("--agg", default="mean", choices=list(qy.AGGS)); s.add_argument("--digits", type=int, default=2); s.set_defaults(f=cmd_query)
     s = sub.add_parser("browser", help="브라우저(Vivaldi) 탭·확장별 CPU(top) 또는 감시기가 잡은 폭주 기록(bursts)"); s.add_argument("what", nargs="?", default="top", choices=["top", "bursts", "periodic", "sw"], help="top=탭·확장별 CPU · bursts=폭주 기록 · periodic=규칙적 반복 활동 기록 · sw=확장 서비스 워커(스레드 CPU, 포트가 있으면 시작 횟수)"); s.add_argument("--seconds", type=float, default=5.0); s.add_argument("-n", type=int, default=12); s.add_argument("--since", default="24h"); s.set_defaults(f=cmd_browser)
-    s = sub.add_parser("fleet", help="여러 호스트 교차 확인(공유 저장소 claude_ctx): push=이 호스트 요약 올리기 · compare <호스트>=앱 CPU 비교 · inventory=브라우저 확장 목록 비교 · hosts"); s.add_argument("what", choices=["push", "compare", "inventory", "hosts"]); s.add_argument("other", nargs="?", help="compare: 비교할 호스트"); s.add_argument("--host", help="compare: 기준 호스트(기본 이 호스트)"); s.add_argument("--days", type=int, default=3); s.add_argument("--since", default="26h", help="push: 이 기간의 표본을 올림"); s.add_argument("-n", type=int, default=15); s.set_defaults(f=cmd_fleet)
+    s = sub.add_parser("fleet", help="여러 호스트 교차 확인(공유 저장소 claude_ctx): push|sync=이 호스트 요약 올리기(실패하면 쌓아 뒀다 다음에 같이) · status=올리기 상태 · compare <호스트>=앱 CPU 비교 · inventory=확장 목록 비교 · hosts"); s.add_argument("what", choices=["push", "sync", "status", "compare", "inventory", "hosts"]); s.add_argument("other", nargs="?", help="compare: 비교할 호스트"); s.add_argument("--host", help="compare: 기준 호스트(기본 이 호스트)"); s.add_argument("--days", type=int, default=3); s.add_argument("--since", default=None, help="push·sync: 이 기간의 표본을 올림(기본: 마지막 성공 시각 2시간 전부터 — 실패한 동안 밀린 것 포함, 처음엔 26시간)"); s.add_argument("-n", type=int, default=15); s.set_defaults(f=cmd_fleet)
     s = sub.add_parser("nd", help="Netdata 어댑터(있을 때만): defs=신호 정의, stats=구간 평균, apps=앱 그룹 CPU, charts=차트 찾기, get=차트 값"); s.add_argument("what", choices=["defs", "stats", "apps", "charts", "get"]); s.add_argument("chart", nargs="?", help="charts: 이름 조각 · get: 차트 이름"); s.add_argument("--since", default="10m"); s.add_argument("--until"); s.add_argument("-n", type=int, default=10); s.set_defaults(f=cmd_nd)
     s = sub.add_parser("timeline"); s.add_argument("--at", required=True); s.add_argument("--span", type=float, default=60); s.add_argument("--journal", default="all", choices=["all", "warn", "none"]); s.set_defaults(f=cmd_timeline)
     s = sub.add_parser("bpf", help="eBPF(bpftrace) 프리셋을 N초 동안 실행: exec wake profile psr io net"); s.add_argument("preset", choices=["exec", "wake", "profile", "psr", "io", "net"]); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--comm", help="프로세스 이름 필터(영숫자·._- 15자)"); s.add_argument("-n", type=int, default=12, help="표의 상위 행 수"); s.add_argument("--no-spans", action="store_true", help="exec: 프로세스 스팬을 이벤트 로그에 적지 않음"); s.set_defaults(f=cmd_bpf)

@@ -157,7 +157,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('apps')", "앱"), Binding("3", "tab('cause')", "원인"),
         Binding("4", "tab('system')", "시스템"), Binding("6", "tab('live')", "실시간 화면(별칭)", show=False), Binding("tab", "sub_toggle", "기록↔실시간", priority=True),
         Binding("t", "set_range", "범위"), Binding("s", "spikes", "튄 순간"), Binding("escape", "restore", "원래 범위", show=False), Binding("v", "cycle_baseline", "비교 기준"),
-        Binding("r,f5", "reload", "새로고침"), Binding("b", "btop", "btop"), Binding("e", "export", "저장"),
+        Binding("r,f5", "reload", "새로고침"), Binding("b", "btop", "btop"), Binding("e", "export", "저장"), Binding("y", "fleet_sync", "호스트 동기화"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
@@ -561,6 +561,21 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             return
         with self.suspend():
             subprocess.run([exe])
+
+    @work(thread=True, exclusive=True, group="fleet")
+    def action_fleet_sync(self):
+        """호스트 간 비교용 요약을 공유 저장소에 올린다(`observectl fleet sync` — 실패하면 쌓아 뒀다 다음에 같이). TUI 는 psycopg 가 없는 파이썬이라 별도 프로세스로 부른다."""
+        exe = shutil.which("observectl")
+        if not exe:
+            self.call_from_thread(self.notify, "observectl 이 없습니다", severity="warning")
+            return
+        self.call_from_thread(self.notify, "공유 저장소로 올리는 중…")
+        try:
+            r = subprocess.run([exe, "fleet", "sync"], capture_output=True, text=True, timeout=60)
+            msg = (r.stdout or r.stderr).strip().splitlines()
+            self.call_from_thread(self.notify, (msg[-1] if msg else "응답 없음")[:200], severity="information" if r.returncode == 0 else "error")
+        except (OSError, subprocess.SubprocessError) as e:
+            self.call_from_thread(self.notify, f"올리기 실패: {str(e)[:120]}", severity="error")
 
     def action_export(self):
         """지금 탭의 내용을 텍스트 파일로 저장(홈 디렉터리)."""
