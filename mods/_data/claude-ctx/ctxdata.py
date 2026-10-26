@@ -11,6 +11,93 @@ import ctx_instr as ci
 import ctx_secrets as cs
 
 
+# ---------------------------------------------------------------- 메시지 종류(자동 메시지 vs 사람) — 설계: _plan/ctx-message-kinds.md
+# Claude Code 가 `user`·`prompt` 로 저장하는 자동 메시지는 `<태그>` 로 시작한다. 분류는 **행 단위, 메시지의 첫 태그 기준**이고 SQL(`~`)과 파이썬(`re`)이
+# **같은 패턴 문자열**을 쓴다(공백은 `[ \t\r\n]` 만, 유니코드 공백·BOM 으로 시작하면 사람으로 둔다 — 알려진 한계).
+AUTO_TAGS = ("task-notification", "local-command-stdout", "local-command-caveat", "bash-stdout", "system-reminder")   # 사람 말이 아님 — 통계·F2·대조에서 뺀다
+CMD_TAGS = ("command-message", "command-name")      # 스킬·슬래시 명령 호출(사람이 호출) — 통계에는 들어가되 제목 후보로는 뒤로 민다
+SHELL_TAGS = ("bash-input",)                         # `!명령` 입력(사람)
+HUMAN_TAGS = ("pasted_content",)                     # 사람이 붙여 넣은 내용(사람)
+KNOWN_TAGS = AUTO_TAGS + CMD_TAGS + SHELL_TAGS + HUMAN_TAGS
+_AFTER = "[ >\r\n]"
+
+
+def _tag_re(tags) -> str:
+    return "^[ \t\r\n]*<(" + "|".join(tags) + ")" + _AFTER
+
+
+AUTO_RE = _tag_re(AUTO_TAGS)                         # 첫 태그가 자동
+NOTPLAIN_RE = _tag_re(AUTO_TAGS + CMD_TAGS + SHELL_TAGS)   # 제목 후보에서 밀리는 것(자동·명령·셸 입력)
+UNKNOWN_RE = "^[ \t\r\n]*<(?!(?:" + "|".join(KNOWN_TAGS) + ")" + _AFTER + ")[a-zA-Z_][a-zA-Z0-9_-]*" + _AFTER   # 알려지지 않은 태그로 시작
+_FIRST = re.compile("^[ \t\r\n]*<([a-zA-Z_][a-zA-Z0-9_-]*)" + _AFTER)
+CAT_LABEL = {"human": "", "command": "스킬 호출", "shell": "셸 입력", "pasted": "붙여넣기", "task": "작업 알림", "localcmd": "명령 출력",
+             "reminder": "시스템 알림", "meta": "주입", "unknown": "태그"}
+META_LABEL = (("Base directory", "스킬 본문"), ("Another Claude", "다른 세션 메시지"), ("[Cross-session", "교차 세션"), ("[Image", "이미지 표지"),
+              ("<local-command", "명령 출력"), ("<system-remind", "시스템 알림"))
+
+
+def _inner(text: str, tag: str) -> str:
+    m = re.search(rf"<{tag}>(.*?)</{tag}>", text, re.S)
+    return m.group(1).strip() if m else ""
+
+
+def classify(role: str, kind: str, text: str | None):
+    """(분류, 한 줄 요약) — 분류는 CAT_LABEL 의 키. 요약이 빈 문자열이면 원문을 그대로 보이면 된다.
+    자동·meta 인지(통계·F2·대조에서 뺄지)는 `is_auto` 로 본다."""
+    t = text or ""
+    if kind == "meta":
+        head = t.lstrip()
+        sub = next((lb for pre, lb in META_LABEL if head.startswith(pre)), "")
+        return "meta", sub + (": " if sub else "") + " ".join(head.split())[:100]
+    if kind != "prompt" or role != "user":
+        return "human", ""
+    m = _FIRST.match(t)
+    if not m:
+        return "human", ""
+    tag = m.group(1)
+    if tag == "task-notification":
+        st, sm = _inner(t, "status"), _inner(t, "summary")
+        return "task", f"[{st or '작업'}] {sm}".strip() if sm or st else ""
+    if tag in ("local-command-stdout", "local-command-caveat", "bash-stdout"):
+        return "localcmd", (" ".join(_inner(t, tag).split())[:100] or "(빈 출력)")
+    if tag == "system-reminder":
+        return "reminder", " ".join(_inner(t, tag).split())[:100]
+    if tag in CMD_TAGS:
+        return "command", command_summary(t)
+    if tag == "bash-input":
+        return "shell", "! " + " ".join(_inner(t, tag).split())[:100]
+    if tag == "pasted_content":
+        return "pasted", " ".join(_inner(t, tag).split())[:300]      # 태그를 벗긴 본문(펼치면 원문)
+    return "unknown", ""
+
+
+def command_summary(text: str) -> str:
+    """스킬 호출 메시지 → `/이름 인자`. 이름은 `<command-name>` 내용(슬래시 없으면 붙임), 인자는 `<command-args>` 내용(개행→공백, 120자)."""
+    name = _inner(text, "command-name") or _inner(text, "command-message")
+    if not name:
+        return ""
+    args = " ".join(_inner(text, "command-args").split())[:120]
+    return ("" if name.startswith("/") else "/") + name + (" " + args if args else "")
+
+
+def is_auto(role: str, kind: str, text: str | None) -> bool:
+    """통계·F2·대조에서 사람 발언으로 세지 않는 메시지(자동 메시지·meta)."""
+    return kind == "meta" or classify(role, kind, text)[0] in ("task", "localcmd", "reminder")
+
+
+def title_text(raw: str | None, masker=cs.IDENTITY, width=120) -> str:
+    """세션 제목용 텍스트. **치환을 먼저 하고 자른다**(자르는 경계에서 비밀이 반쯤 남는 것을 막음). 스킬 호출이면 `/이름 인자` 로 바꾼다."""
+    t = masker.text(raw or "")
+    if _FIRST.match(t) and _FIRST.match(t).group(1) in CMD_TAGS:
+        t = command_summary(t) or t
+    return t.replace("\n", " ").strip()[:width]
+
+
+TITLE_RANK_SQL = "(CASE WHEN coalesce(text, '') ~ %s THEN 2 WHEN coalesce(text, '') ~ %s THEN 1 ELSE 0 END)"   # 파라미터: AUTO_RE, NOTPLAIN_RE
+TITLE_RANK_ARGS = (AUTO_RE, NOTPLAIN_RE)
+TITLE_RAW = 2000          # 제목 후보로 SQL 에서 받아 오는 앞부분 길이(치환 후 자름)
+
+
 def human_bytes(n) -> str:
     n = float(n or 0)
     for unit in ("B", "KB", "MB", "GB"):
@@ -27,18 +114,18 @@ def _like(q: str) -> str:
 def overview(conn):
     """전체 합계 · 표별 크기 · 저장소(프로젝트)별 집계."""
     t = conn.execute("""SELECT (SELECT count(*) FROM sessions), (SELECT count(*) FROM messages),
-                               (SELECT count(*) FROM messages WHERE kind='prompt'), (SELECT coalesce(sum(length(text)),0) FROM messages),
-                               pg_database_size(current_database())""").fetchone()
+                               (SELECT count(*) FROM messages WHERE kind='prompt' AND coalesce(text,'') !~ %s), (SELECT coalesce(sum(length(text)),0) FROM messages),
+                               pg_database_size(current_database()), (SELECT count(*) FROM messages WHERE kind='prompt' AND text ~ %s)""", (AUTO_RE, AUTO_RE)).fetchone()
     tables = conn.execute("""SELECT c.relname, pg_total_relation_size(c.oid) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                              WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY 2 DESC""").fetchall()
     projects = conn.execute("""SELECT coalesce(s.repo_url, '(저장소 없음)') AS repo, count(DISTINCT s.session_id) AS sessions, count(m.uuid) AS messages,
-                                      count(m.uuid) FILTER (WHERE m.kind = 'prompt') AS prompts,
+                                      count(m.uuid) FILTER (WHERE m.kind = 'prompt' AND coalesce(m.text, '') !~ %s) AS prompts,
                                       coalesce(sum(length(m.text)), 0) AS text_chars,
                                       coalesce(sum(pg_column_size(m.text) + pg_column_size(m.raw)), 0) AS stored_bytes,
                                       max(s.last_ts) AS last_ts, array_agg(DISTINCT s.host) AS hosts
-                               FROM sessions s LEFT JOIN messages m USING (session_id) GROUP BY 1 ORDER BY 3 DESC""").fetchall()
+                               FROM sessions s LEFT JOIN messages m USING (session_id) GROUP BY 1 ORDER BY 3 DESC""", (AUTO_RE,)).fetchall()
     return dict(
-        totals=dict(sessions=t[0], messages=t[1], prompts=t[2], text_chars=t[3], db_bytes=t[4]),
+        totals=dict(sessions=t[0], messages=t[1], prompts=t[2], text_chars=t[3], db_bytes=t[4], auto_prompts=t[5]),
         tables=[dict(name=r[0], bytes=r[1]) for r in tables],
         projects=[dict(repo=r[0], sessions=r[1], messages=r[2], prompts=r[3], text_chars=r[4], stored_bytes=r[5], last_ts=r[6], hosts=[h for h in (r[7] or []) if h]) for r in projects],
     )
@@ -158,7 +245,8 @@ def session_stats(conn, *, days=None, repo=None, host=None, model=None, session_
     sql = f"""
       WITH m AS (
         SELECT session_id,
-               count(*) FILTER (WHERE kind = 'prompt' AND NOT is_sidechain) AS prompts,
+               count(*) FILTER (WHERE kind = 'prompt' AND NOT is_sidechain AND coalesce(text, '') !~ %s) AS prompts,
+               count(*) FILTER (WHERE kind = 'prompt' AND NOT is_sidechain AND text ~ %s) AS autos,
                count(*) FILTER (WHERE kind = 'response' AND NOT is_sidechain) AS responses,
                count(*) FILTER (WHERE kind = 'tool_use' AND NOT is_sidechain) AS tools,
                count(*) FILTER (WHERE is_sidechain) AS subagent_msgs,
@@ -170,19 +258,19 @@ def session_stats(conn, *, days=None, repo=None, host=None, model=None, session_
                sum(output_tokens) AS output, array_agg(DISTINCT model) FILTER (WHERE model IS NOT NULL) AS models
         FROM usage_events GROUP BY session_id),
       t AS (
-        SELECT DISTINCT ON (session_id) session_id, text FROM messages WHERE kind = 'prompt' AND NOT is_sidechain AND coalesce(text, '') <> ''
-        ORDER BY session_id, ts)
+        SELECT DISTINCT ON (session_id) session_id, left(text, {TITLE_RAW}) AS text FROM messages WHERE kind = 'prompt' AND NOT is_sidechain AND coalesce(text, '') <> ''
+        ORDER BY session_id, {TITLE_RANK_SQL}, ts)
       SELECT s.session_id, s.repo_url, s.host, s.branch, s.cwd, s.first_ts, s.last_ts, extract(epoch FROM s.last_ts - s.first_ts) AS duration_s,
              coalesce(m.prompts, 0) AS prompts, coalesce(m.responses, 0), coalesce(m.tools, 0) AS tools, coalesce(m.subagent_msgs, 0), coalesce(m.turn_ms, 0), coalesce(m.compacts, 0),
-             coalesce(u.requests, 0), u.cost, coalesce(u.input, 0), coalesce(u.output, 0), coalesce(u.models, '{{}}'), left(t.text, 200)
+             coalesce(u.requests, 0), u.cost, coalesce(u.input, 0), coalesce(u.output, 0), coalesce(u.models, '{{}}'), t.text, coalesce(m.autos, 0)
       FROM sessions s LEFT JOIN m USING (session_id) LEFT JOIN u USING (session_id) LEFT JOIN t USING (session_id){where}
       ORDER BY {orders[order]} LIMIT %s"""
     keys = ("session_id", "repo", "host", "branch", "cwd", "first", "last", "duration_s", "prompts", "responses", "tools", "subagent_msgs",
-            "turn_ms", "compacts", "requests", "cost", "input", "output", "models", "title")
+            "turn_ms", "compacts", "requests", "cost", "input", "output", "models", "title", "autos")
     out = []
-    for r in conn.execute(sql, [*args, limit]).fetchall():
+    for r in conn.execute(sql, [AUTO_RE, AUTO_RE, *TITLE_RANK_ARGS, *args, limit]).fetchall():
         d = dict(zip(keys, r))
-        d["title"] = masker.text((d["title"] or "").replace("\n", " ").strip())
+        d["title"] = title_text(d["title"], masker, 200)
         out.append(d)
     return out
 
@@ -193,24 +281,28 @@ def session_summary(conn, *, days=None, repo=None, host=None, model=None, tz=Non
     tz = tz or local_tz()
     row = conn.execute(f"""
       WITH base AS (SELECT s.session_id, s.first_ts, s.last_ts FROM sessions s{where}),
-           m AS (SELECT session_id, count(*) FILTER (WHERE kind = 'prompt' AND NOT is_sidechain) AS prompts,
+           m AS (SELECT session_id, count(*) FILTER (WHERE kind = 'prompt' AND NOT is_sidechain AND coalesce(text, '') !~ %s) AS prompts,
+                        count(*) FILTER (WHERE kind = 'prompt' AND NOT is_sidechain AND text ~ %s) AS autos,
+                        count(*) FILTER (WHERE kind = 'prompt' AND NOT is_sidechain AND text ~ %s) AS unknowns,
                         count(*) FILTER (WHERE kind = 'tool_use' AND NOT is_sidechain) AS tools FROM messages WHERE session_id IN (SELECT session_id FROM base) GROUP BY 1),
            u AS (SELECT session_id, sum(cost_usd) AS cost FROM usage_events WHERE session_id IN (SELECT session_id FROM base) GROUP BY 1)
       SELECT count(*), coalesce(sum(m.prompts), 0), coalesce(sum(m.tools), 0), coalesce(sum(u.cost), 0),
              coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM b.last_ts - b.first_ts)), 0),
-             coalesce(avg(extract(epoch FROM b.last_ts - b.first_ts)), 0), coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY m.prompts), 0)
-      FROM base b LEFT JOIN m USING (session_id) LEFT JOIN u USING (session_id)""", args).fetchone()
+             coalesce(avg(extract(epoch FROM b.last_ts - b.first_ts)), 0), coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY m.prompts), 0),
+             coalesce(sum(m.autos), 0), coalesce(sum(m.unknowns), 0)
+      FROM base b LEFT JOIN m USING (session_id) LEFT JOIN u USING (session_id)""", [*args, AUTO_RE, AUTO_RE, UNKNOWN_RE]).fetchone()
     mwhere = ["m.kind = 'prompt'", "NOT m.is_sidechain", "m.ts IS NOT NULL", "m.session_id IN (SELECT session_id FROM sessions s" + where + ")"]
     margs = list(args)
     if days:
         mwhere.append("m.ts > now() - make_interval(days => %s)"); margs.append(days)
+    mwhere.append("coalesce(m.text, '') !~ %s"); margs.append(AUTO_RE)
     hours, wdays = [0] * 24, [0] * 7
     for h, wd, n in conn.execute(f"""SELECT extract(hour FROM m.ts AT TIME ZONE %s)::int, extract(isodow FROM m.ts AT TIME ZONE %s)::int, count(*)
                                      FROM messages m WHERE {' AND '.join(mwhere)} GROUP BY 1, 2""", [tz, tz, *margs]).fetchall():
         hours[h] += n
         wdays[wd - 1] += n
     return dict(sessions=row[0], prompts=row[1], tools=row[2], cost=float(row[3]), median_duration_s=float(row[4]), avg_duration_s=float(row[5]),
-                median_prompts=float(row[6]), by_hour=hours, by_weekday=wdays)
+                median_prompts=float(row[6]), autos=int(row[7]), unknown_tags=int(row[8]), by_hour=hours, by_weekday=wdays)
 
 
 def session_tools(conn, session_id, top=6):
@@ -226,9 +318,7 @@ def session_links(conn, session_id, masker=cs.IDENTITY):
     def titled(rows):
         out = []
         for sid, first, last in rows:
-            t = conn.execute("""SELECT left(text, 120) FROM messages WHERE session_id = %s AND kind = 'prompt' AND NOT is_sidechain AND coalesce(text, '') <> ''
-                                ORDER BY ts LIMIT 1""", (sid,)).fetchone()
-            out.append(dict(session_id=sid, first=first, last=last, title=masker.text(((t[0] if t else "") or "").replace("\n", " ").strip())))
+            out.append(dict(session_id=sid, first=first, last=last, title=session_titles(conn, [sid], masker).get(sid, "")))
         return out
     parents = conn.execute("""SELECT s.session_id, s.first_ts, s.last_ts FROM sessions s WHERE s.session_id IN
                                 (SELECT DISTINCT p.session_id FROM messages m JOIN messages p ON p.uuid = m.parent_uuid WHERE m.session_id = %s AND p.session_id <> %s)
@@ -277,6 +367,8 @@ def search(conn, query="", *, regex=False, repo=None, role=None, kinds=("prompt"
         where.append("s.repo_url ILIKE %s"); args.append(_like(repo))
     if role:
         where.append("m.role = %s"); args.append(role)
+    if role == "user":      # 「사용자 발언」 검색(F2·대조·CLI --role user)은 자동 메시지(작업 알림 등)를 사람 말로 세지 않는다
+        where.append("NOT (m.kind = 'prompt' AND coalesce(m.text, '') ~ %s)"); args.append(AUTO_RE)
     if days:
         where.append("m.ts > now() - make_interval(days => %s)"); args.append(days)
     sql = f"""SELECT m.ts, m.session_id, m.uuid, m.role, m.kind, s.repo_url, s.host, s.branch, m.text
@@ -284,7 +376,8 @@ def search(conn, query="", *, regex=False, repo=None, role=None, kinds=("prompt"
     args.append(limit)
     out = []
     for ts, sid, uid, rl, kd, rurl, host, br, text in conn.execute(sql, args).fetchall():
-        out.append(dict(ts=ts, session_id=sid, uuid=uid, role=rl, kind=kd, repo=rurl, host=host, branch=br,
+        cat = classify(rl, kd, text)[0]
+        out.append(dict(ts=ts, session_id=sid, uuid=uid, role=rl, kind=kd, repo=rurl, host=host, branch=br, cat=cat,
                         snippet=snippet(masker.text(text or ""), query, regex), full=masker.text(text or "")))
     titles = session_titles(conn, {h["session_id"] for h in out}, masker)
     for h in out:
@@ -313,13 +406,14 @@ def group_sessions(hits, title_query=None, regex=False):
 
 
 def session_titles(conn, session_ids, masker=cs.IDENTITY, width=120):
-    """{세션 ID: 첫 사용자 프롬프트 앞부분} — 세션 목록·검색 결과에서 어느 대화인지 알아보는 제목으로 쓴다."""
+    """{세션 ID: 제목} — 세션 목록·검색 결과에서 어느 대화인지 알아보는 제목. 첫 「순수 사람」 프롬프트(자동 메시지·스킬 호출·셸 입력은 뒤로 밀림), 없으면 첫 스킬 호출(`/이름 인자`).
+    치환을 먼저 하고 자른다."""
     ids = sorted(session_ids)
     if not ids:
         return {}
-    rows = conn.execute("""SELECT DISTINCT ON (session_id) session_id, left(text, %s) FROM messages
-                           WHERE session_id = ANY(%s) AND kind = 'prompt' AND NOT is_sidechain AND coalesce(text, '') <> '' ORDER BY session_id, ts""", (width, ids)).fetchall()
-    return {sid: masker.text((t or "").replace("\n", " ").strip()) for sid, t in rows}
+    rows = conn.execute(f"""SELECT DISTINCT ON (session_id) session_id, left(text, {TITLE_RAW}) FROM messages
+                            WHERE session_id = ANY(%s) AND kind = 'prompt' AND NOT is_sidechain AND coalesce(text, '') <> '' ORDER BY session_id, {TITLE_RANK_SQL}, ts""", (ids, *TITLE_RANK_ARGS)).fetchall()
+    return {sid: title_text(t, masker, width) for sid, t in rows}
 
 
 def group_hits(hits):

@@ -347,6 +347,29 @@ async def run():
         check("F6: 제목만 — 제목(첫 프롬프트)에 '배포' 가 없는 세션은 빠짐", all("배포" in g["title"] for g in app.groups) and "제목만" in rt.border_title, [g["title"] for g in app.groups])
         await pilot.press("f6"); await settle(pilot, lambda: "제목만: 꺼짐" in txt(app.query_one("#sstate")))
 
+        # --- 자동 메시지(작업 알림·스킬 호출) 배지·접기·숨김 토글
+        _msgs = [("user", "prompt", "<command-message>donghans-resume</command-message>\n<command-name>/donghans-resume</command-name>\n<command-args>c9bf</command-args>"),
+                 ("user", "prompt", "<task-notification>\n<task-id>x1</task-id>\n<status>completed</status>\n<summary>배포 끝났다</summary>\n</task-notification>"),
+                 ("user", "prompt", "진짜 사람의 말")]
+        with cc.connect() as c:
+            c.execute("INSERT INTO sessions (session_id, host, hosts, repo_url, first_ts, last_ts) VALUES (%s,%s,%s,%s,%s,%s)", ("iiii0001", "h1", ["h1"], A, "2026-10-11T01:00:00Z", "2026-10-11T01:05:00Z"))
+            for i, (r_, k_, t_) in enumerate(_msgs):
+                c.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (f"iiii-{i:04d}", "iiii0001", "h1", f"2026-10-11T01:0{i}:00Z", r_, k_, t_, json.dumps({"i": i})))
+        app.push_screen(ctxui.SessionScreen(app, "iiii0001", None)); await pilot.pause(0.8)
+        scr = app.screen
+        body = sess_txt(scr)
+        check("자동 메시지: 작업 알림은 [작업 알림] 배지+한 줄 요약(원문 태그는 접힘)", "[작업 알림]" in body and "[completed] 배포 끝났다" in body and "<task-id>" not in body, body[:300])
+        check("스킬 호출은 [스킬 호출] 배지와 /이름 인자", "[스킬 호출]" in body and "/donghans-resume c9bf" in body and "<command-name>" not in body)
+        check("대화 화면 제목: 첫 사람 프롬프트", "진짜 사람의 말" in txt(scr.query_one("#sess-head")), txt(scr.query_one("#sess-head"))[:120])
+        await pilot.press("down"); await pilot.press("enter"); await pilot.pause(0.3)
+        check("Enter: 작업 알림 원문 펼침", "<task-id>x1</task-id>" in sess_txt(scr))
+        await pilot.press("i"); await pilot.pause(0.4)
+        hid = sess_txt(scr)
+        check("i: 자동 메시지 숨김(작업 알림 사라지고 스킬 호출·사람 말은 남음)", "[작업 알림]" not in hid and "<task-id>" not in hid and "진짜 사람의 말" in hid and "/donghans-resume" in hid and "자동 메시지 숨김" in txt(scr.query_one("#sess-state")), txt(scr.query_one("#sess-state")))
+        await pilot.press("i"); await pilot.pause(0.4)
+        check("i 다시: 자동 메시지 보임", "[작업 알림]" in sess_txt(scr))
+        await pilot.press("escape"); await pilot.pause(0.3)
+        check("자동 메시지 시험 후 대화 화면 닫힘", not isinstance(app.screen, ctxui.SessionScreen))
         # --- 지침 탭(공유 정본 · DB 만 · 사람 전용 편집)
         import contextlib, stat
         with cc.connect() as c:

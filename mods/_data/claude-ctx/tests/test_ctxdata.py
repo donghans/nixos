@@ -228,6 +228,46 @@ try:
     check("instr_save: 빈 본문은 거부", code == 1 and cd.instr_raw(conn, A, "override")[0] == 2, msg)
     conn.commit()
 
+    # --- 자동 메시지 분류(_plan/ctx-message-kinds.md)
+    CMD = "<command-message>donghans-resume</command-message>\n<command-name>/donghans-resume</command-name>\n<command-args>c9bf\n7759</command-args>"
+    TASK = "<task-notification>\n<task-id>x1</task-id>\n<status>completed</status>\n<summary>배포 끝났다</summary>\n</task-notification>"
+    cl = cd.classify
+    check("classify: 스킬 호출 → /이름 인자(개행은 공백)", cl("user", "prompt", CMD) == ("command", "/donghans-resume c9bf 7759"), str(cl("user", "prompt", CMD)))
+    check("classify: command-message 로 시작해도 command-name 이 이름(슬래시 없으면 붙임)", cl("user", "prompt", "<command-message>x</command-message><command-name>foo</command-name>")[1] == "/foo")
+    check("classify: 작업 알림 → [상태] 요약", cl("user", "prompt", TASK) == ("task", "[completed] 배포 끝났다"))
+    check("classify: 앞 공백·개행 뒤 태그도 인식, 유니코드 공백(NBSP)으로 시작하면 사람", cl("user", "prompt", "\n\t <local-command-stdout>ok</local-command-stdout>")[0] == "localcmd" and cl("user", "prompt", "\u00a0<task-notification>x")[0] == "human")
+    check("classify: 사람·붙여넣기·셸 입력·알 수 없는 태그·assistant", cl("user", "prompt", "그냥 말")[0] == "human" and cl("user", "prompt", "<pasted_content>x</pasted_content>")[0] == "pasted"
+          and cl("user", "prompt", "<bash-input>ls</bash-input>") == ("shell", "! ls") and cl("user", "prompt", "<div>x</div>")[0] == "unknown" and cl("assistant", "response", "<task-notification>")[0] == "human")
+    check("classify: 태그 이름이 접두만 같으면(<task-notificationx>) 알려진 태그가 아님", cl("user", "prompt", "<task-notificationx>a")[0] == "unknown")
+    check("classify: meta 는 시작 문구로 세분하고 자동", cl("user", "meta", "Base directory for this skill: /x")[1].startswith("스킬 본문") and cd.is_auto("user", "meta", "x") and not cd.is_auto("user", "prompt", CMD) and cd.is_auto("user", "prompt", TASK))
+    mm = cs.Masker([dict(label="PW", kind="literal", value="hunter2-pass")])
+    tt = cd.title_text("ab hunter2-pass cd", mm, 8)
+    check("title_text: 치환을 먼저 하고 자른다(경계에서 비밀 조각이 남지 않음)", "hunt" not in tt and "[prot" in tt, tt)
+    seed("gggg0101", A, "h1", [("user", "prompt", "2026-10-08T01:00:00Z", CMD), ("user", "prompt", "2026-10-08T01:01:00Z", TASK),
+                               ("user", "prompt", "2026-10-08T01:02:00Z", "진짜 사람 말 배포"), ("user", "prompt", "2026-10-08T01:03:00Z", "<pasted_content>붙임 배포</pasted_content>")])
+    seed("hhhh0102", B, "h1", [("user", "prompt", "2026-10-09T01:00:00Z", TASK), ("user", "prompt", "2026-10-09T01:01:00Z", CMD.replace("c9bf\n7759", "hunter2-pass"))])
+    conn.commit()
+    ti = cd.session_titles(conn, ["gggg0101", "hhhh0102"])
+    check("제목: 첫 순수 사람 프롬프트(스킬 호출·작업 알림은 뒤로 밀림)", ti["gggg0101"] == "진짜 사람 말 배포", str(ti))
+    check("제목: 사람 프롬프트가 없으면 첫 스킬 호출 요약(작업 알림 아님)", ti["hhhh0102"] == "/donghans-resume hunter2-pass", str(ti))
+    check("제목: masker 가 요약 안의 비밀도 치환", cd.session_titles(conn, ["hhhh0102"], mm)["hhhh0102"] == "/donghans-resume [protected]")
+    st = {x["session_id"]: x for x in cd.session_stats(conn, limit=50)}
+    check("세션 통계: 프롬프트 수는 자동 제외(스킬 호출·붙여넣기·사람 = 3), 자동 1 별도", st["gggg0101"]["prompts"] == 3 and st["gggg0101"]["autos"] == 1 and st["hhhh0102"]["prompts"] == 1 and st["hhhh0102"]["autos"] == 1, str((st["gggg0101"]["prompts"], st["gggg0101"]["autos"])))
+    check("세션 통계 제목도 같은 규칙", st["gggg0101"]["title"] == "진짜 사람 말 배포" and st["hhhh0102"]["title"].startswith("/donghans-resume"))
+    r_user, r_all = cd.search(conn, "배포 끝", role="user"), cd.search(conn, "배포 끝")
+    check("검색 role=user(F2·대조·CLI): 작업 알림 제외, 전체 검색에는 cat=task 로 나옴", not r_user and any(x["cat"] == "task" for x in r_all), str((len(r_user), [x["cat"] for x in r_all])))
+    check("검색 role=user: 사람·붙여넣기는 그대로 나옴", {x["cat"] for x in cd.search(conn, "배포", role="user") if x["session_id"] == "gggg0101"} == {"human", "pasted"})
+    sm = cd.session_summary(conn)
+    ov2 = cd.overview(conn)
+    check("요약·개요: 자동 건수(2)와 개요 합계의 프롬프트에서 제외", sm["autos"] == 2 and ov2["totals"]["auto_prompts"] == 2 and sm["unknown_tags"] == 0, str((sm["autos"], ov2["totals"])))
+    # SQL(~)과 파이썬(re) 판별이 같은 패턴이라 건수가 같아야 한다 — 개행·탭·앞 공백 케이스 포함
+    for i, tx in enumerate(["\n<task-notification>a", "\t <bash-stdout>b", "<system-reminder>c", "<local-command-caveat>\nd", "  <command-name>/x</command-name>", "<foo bar>x", "\u00a0<task-notification>n", "x <task-notification>"]):
+        conn.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (f"mkf-{i}", "gggg0101", "h1", f"2026-10-10T01:0{i}:00Z", "user", "prompt", tx, "{}"))
+    conn.commit()
+    rows = conn.execute("SELECT text, text ~ %s, text ~ %s FROM messages WHERE kind = 'prompt'", (cd.AUTO_RE, cd.UNKNOWN_RE)).fetchall()
+    import re as _re
+    check("SQL 정규식과 Python 정규식 판별이 모든 프롬프트에서 일치(자동·알 수 없는 태그)", all(bool(_re.search(cd.AUTO_RE, t)) == a and bool(_re.search(cd.UNKNOWN_RE, t)) == u for t, a, u in rows) and len(rows) > 12, str(len(rows)))
+    check("알 수 없는 태그 건수가 요약에 잡힘(<foo bar>)", cd.session_summary(conn)["unknown_tags"] == 1)
     check("delete_secret", cd.delete_secret(conn, "ANTHROPIC_KEY") == 1 and cd.delete_secret(conn, "ANTHROPIC_KEY") == 0)
     conn.close()
 finally:

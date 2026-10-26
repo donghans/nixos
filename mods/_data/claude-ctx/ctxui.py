@@ -186,6 +186,7 @@ class SessionScreen(ModalScreen):
         Binding("y", "copy", "복사"), Binding("m", "toggle_mask", "치환 켬/끔"),
         Binding("left_square_bracket", "link('parents')", "앞 세션", show=False), Binding("right_square_bracket", "link('children')", "뒤 세션", show=False),
         Binding("a", "load_all", "전부 불러오기", show=False),
+        Binding("i", "toggle_auto", "자동 메시지 숨김/표시"),
     ]
 
     def __init__(self, app_ref, session_id: str, uuid: str | None, needle: str = "", regex: bool = False):
@@ -193,6 +194,7 @@ class SessionScreen(ModalScreen):
         self.ctx_app, self.session_id, self.uuid = app_ref, session_id, uuid
         self.needle, self.regex = needle, regex
         self.tools = self.side = False
+        self.hide_auto = False                 # 자동 메시지(작업 알림·명령 출력 등) 숨김
         self.limit = MSG_MAX
         self.expanded: set[str] = set()
         self.all_open = False
@@ -205,7 +207,7 @@ class SessionScreen(ModalScreen):
             yield Static("", id="sess-head")
             yield VerticalScroll(id="msgs")
             yield Static("", id="sess-state", classes="state")
-            yield Static("↑↓ 이동 · Enter 펼침 · f 전체 펼침 · n/N 검색어 · y 복사 · t 도구 · s 서브에이전트 · [ ] 이어진 세션 · m 치환 · Esc 닫기", id="sess-keys", classes="state")
+            yield Static("↑↓ 이동 · Enter 펼침 · f 전체 펼침 · n/N 검색어 · y 복사 · t 도구 · s 서브에이전트 · i 자동 메시지 · [ ] 이어진 세션 · m 치환 · Esc 닫기", id="sess-keys", classes="state")
 
     def on_mount(self):
         self.load(focus_uuid=self.uuid)
@@ -234,7 +236,7 @@ class SessionScreen(ModalScreen):
         self.rebuild(focus_uuid)
 
     def visible(self):
-        return [m for m in self.all_msgs if self.side or not m["side"]]
+        return [m for m in self.all_msgs if (self.side or not m["side"]) and not (self.hide_auto and cd.is_auto(m["role"], m["kind"], m["text"]))]
 
     def rebuild(self, focus_uuid=None):
         vis = self.visible()
@@ -264,10 +266,22 @@ class SessionScreen(ModalScreen):
     def render_msg(self, m) -> Text:
         t = Text()
         tag = {"tool_use": " · 도구 호출", "tool_result": " · 도구 결과"}.get(m["kind"], "")
-        t.append(f"[{fmt_ts(m['ts'])}] {ROLE_LABEL.get(m['role'], m['role'])}{tag}{' (서브에이전트)' if m['side'] else ''}\n",
-                 style="bold #b8a46a" if m["role"] == "user" and m["kind"] == "prompt" else "#7a7a7a")
+        cat, summ = cd.classify(m["role"], m["kind"], m["text"])
+        auto = cd.is_auto(m["role"], m["kind"], m["text"])
+        t.append(f"[{fmt_ts(m['ts'])}] {ROLE_LABEL.get(m['role'], m['role'])}{tag}{' (서브에이전트)' if m['side'] else ''}",
+                 style="bold #b8a46a" if m["role"] == "user" and m["kind"] == "prompt" and not auto else "#7a7a7a")
+        if cd.CAT_LABEL.get(cat):
+            t.append(f" [{cd.CAT_LABEL[cat]}]", style="#7a7a7a" if auto else "bold #33ccff")      # 자동은 흐린 배지, 사람이 한 것(스킬 호출·셸·붙여넣기)은 강조
+        t.append("\n")
         body = (m["text"] or "").strip() or "(빈 내용)"
         open_ = self.all_open or m["uuid"] in self.expanded
+        if summ and not open_:                 # 자동·명령 메시지는 한 줄 요약으로 접는다(Enter: 원문)
+            body = summ + (f"   (+{len(body):,}자 원문 — Enter: 펼치기)" if len(body) > len(summ) + 20 else "")
+            t.append(body, style="#7a7a7a" if auto else "#ffffff")
+            rx = self.hit_re()
+            if rx:
+                t.highlight_regex(rx, style="bold #000000 on #b8a46a")
+            return t
         limit = MSG_PREVIEW if m["kind"] in ("prompt", "response") else 300
         if not open_ and len(body) > limit:
             body = body[:limit].rstrip() + f"\n… (+{len(body) - limit:,}자 더 — Enter: 펼치기)"
@@ -307,6 +321,7 @@ class SessionScreen(ModalScreen):
         n = len(self.msgs)
         bits = [f"메시지 {self.sel + 1 if n else 0}/{n}" + (f" (앞 {self.hidden_before} · 뒤 {self.hidden_after} 생략 — a: 전부)" if self.hidden_before or self.hidden_after else ""),
                 "도구 " + ("보임" if self.tools else "숨김") + " (t)", "서브에이전트 " + ("보임" if self.side else "숨김") + " (s)",
+                "자동 메시지 " + ("숨김" if self.hide_auto else "보임") + " (i)",
                 "치환 " + ("켜짐" if self.ctx_app.mask else "꺼짐 — 원문 표시 중") + " (m)"]
         if self.needle:
             bits.append(f"검색어 '{self.needle}' (n/N 이동)")
@@ -356,6 +371,10 @@ class SessionScreen(ModalScreen):
     def action_toggle_tools(self):
         self.tools = not self.tools
         self.load(focus_uuid=self.keep_focus())
+
+    def action_toggle_auto(self):
+        self.hide_auto = not self.hide_auto
+        self.rebuild(self.keep_focus())
 
     def action_toggle_side(self):
         self.side = not self.side
@@ -454,6 +473,7 @@ class CtxUI(uikit.HelpMixin, App):
         ('치환(m)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
         ('제한 모드', 'LLM 세션이 실행하면: 모든 탭을 볼 수 있지만 화면의 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(키 형식·password=·한글 비밀번호)이 [protected] 로 치환되고(끌 수 없음), 후보 미리보기도 [protected](N자)로 가려지며, 값 보기(v)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용된다'),
         ('필터 키', '검색 탭: F2 사용자 발언만 · F3 정규식 · F4 도구 메시지 포함 · F6 제목만 · Space 세션 펼침 · x 모두 펼침. 대시보드: p 기간 · b 단위 · g 분류 · o 정렬 · c 필터 지움'),
+        ('자동 메시지', 'Claude Code 가 사람 대신 남기는 메시지(작업 알림·명령 출력·시스템 알림 등, `<태그>` 로 시작)는 흐린 배지+한 줄 요약으로 접혀 보이고 통계 프롬프트 수·사용자 발언 검색·대조에서 빠진다. 스킬 호출(/이름)·셸 입력·붙여넣기는 사람이 한 것이라 포함. 대화 화면 i: 자동 메시지 숨김/표시'),
         ('세션 기준 검색', '검색은 늘 전체 대화를 대상으로 하되 결과를 세션 단위로 묶어 보여 준다(제목·일치 건수·가장 최근 일치). Enter 는 그 세션 대화를 열고, Space 로 펼치면 일치한 메시지들이 아래에 나온다. F6 제목만은 세션 제목(첫 프롬프트)에 일치한 세션만 남긴다'),
     ]
     HELP_NOTES = [
@@ -694,7 +714,7 @@ class CtxUI(uikit.HelpMixin, App):
             self.flash(f"DB 조회 실패: {e}", "error"); return
         t = ov["totals"]
         head = Text()
-        head.append(f"세션 {t['sessions']:,} · 메시지 {t['messages']:,} · 프롬프트 {t['prompts']:,} · 텍스트 {cd.human_bytes(t['text_chars'])} · DB {cd.human_bytes(t['db_bytes'])}\n", style="bold")
+        head.append(f"세션 {t['sessions']:,} · 메시지 {t['messages']:,} · 프롬프트 {t['prompts']:,}(자동 {t['auto_prompts']:,} 제외) · 텍스트 {cd.human_bytes(t['text_chars'])} · DB {cd.human_bytes(t['db_bytes'])}\n", style="bold")
         head.append("표별: " + "  ".join(f"{x['name']} {cd.human_bytes(x['bytes'])}" for x in ov["tables"][:6]), style="#9a9a9a")
         self.query_one("#ovhead", Static).update(head)
         tb = self.query_one("#projects", DataTable)
@@ -781,7 +801,7 @@ class CtxUI(uikit.HelpMixin, App):
             if opened:
                 for h in g["hits"]:
                     k = f"{g['session_id']}|{h['uuid']}"
-                    tb.add_row(Text(fmt_ts(h["ts"]), style="grey62"), Text("  └ " + (h["role"] if h["kind"] in ("prompt", "response") else h["kind"]), style="grey62"), "", "", "", self.highlight(h["snippet"][:160], q), key=k)
+                    tb.add_row(Text(fmt_ts(h["ts"]), style="grey62"), Text("  └ " + (h["role"] if h["kind"] in ("prompt", "response") else h["kind"]) + (f" [{cd.CAT_LABEL[h['cat']]}]" if cd.CAT_LABEL.get(h.get("cat")) else ""), style="grey62"), "", "", "", self.highlight(h["snippet"][:160], q), key=k)
                     keys.append(k)
         if keep in keys:
             tb.move_cursor(row=keys.index(keep))
@@ -898,6 +918,7 @@ class CtxUI(uikit.HelpMixin, App):
         t = Text()
         t.append(f"세션 {summ['sessions']:,}개 · 프롬프트 {int(summ['prompts']):,} · 도구 호출 {int(summ['tools']):,} · 비용 ${summ['cost']:,.2f}\n", style="bold")
         n = max(summ["sessions"], 1)
+        t.append(f"자동 메시지 {summ['autos']:,}건(작업 알림·명령 출력 등)은 프롬프트 수에서 제외" + (f" · 알 수 없는 태그로 시작 {summ['unknown_tags']:,}건(AUTO_TAGS 점검)" if summ["unknown_tags"] else "") + "\n", style="#7a7a7a")
         t.append(f"세션당  프롬프트 {summ['prompts'] / n:.1f} (중앙값 {summ['median_prompts']:.0f}) · 비용 ${summ['cost'] / n:.2f}\n", style="#cfcfcf")
         t.append(f"세션 길이  중앙값 {fmt_dur(summ['median_duration_s'])} · 평균 {fmt_dur(summ['avg_duration_s'])}", style="#cfcfcf")
         t.append("   (resume 으로 이어진 세션이 평균을 끌어올림)\n\n", style="#7a7a7a")

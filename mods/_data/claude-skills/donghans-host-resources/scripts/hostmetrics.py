@@ -474,7 +474,7 @@ def ctx_last_chat(sids):
         return {}
     arr = ",".join(f"'{x}%'" for x in sids)
     q = ("select substr(session_id,1,8), "
-         "extract(epoch from max(ts) filter (where role='user' and text not like '[tool_%' and text not like '<system-reminder%')), "
+         "extract(epoch from max(ts) filter (where role='user' and text not like '[tool_%' and text !~ '^[ \\t\\r\\n]*<(task-notification|local-command-stdout|local-command-caveat|bash-stdout|system-reminder)[ >\\r\\n]')), "   # 자동 메시지(작업 알림 등)는 사용자 입력이 아니다 — 패턴 정본: claude-ctx/ctxdata.py AUTO_TAGS
          "extract(epoch from max(ts) filter (where role='assistant' and text not like '[tool_%' and length(text)>0)) "
          f"from messages where host = '{socket.gethostname()}' and session_id like any (array[{arr}]) group by 1")
     r = subprocess.run(["donghans", "ctx", "sql", q], capture_output=True, text=True, timeout=10)

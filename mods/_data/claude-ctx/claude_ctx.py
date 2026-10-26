@@ -419,6 +419,9 @@ def cmd_search(a):
         sql += " AND s.repo_url = %s"; args.append(repo)
     if a.role:
         sql += " AND m.role = %s"; args.append(a.role)
+    if a.role == "user":      # 「사용자 발언」은 자동 메시지(작업 알림·명령 출력 등)를 뺀다 — LLM 이 자동 보고를 사용자 지시로 읽지 않게(_plan/ctx-message-kinds.md)
+        import ctxdata as cd
+        sql += " AND NOT (m.kind = 'prompt' AND coalesce(m.text, '') ~ %s)"; args.append(cd.AUTO_RE)
     if a.days:
         sql += " AND m.ts > now() - make_interval(days => %s)"; args.append(a.days)
     sql += " ORDER BY m.ts DESC LIMIT %s"; args.append(a.limit)
@@ -430,20 +433,26 @@ def cmd_search(a):
             t = mk.text(text or "")                         # 치환을 먼저 하고 자른다(경계에서 잘린 비밀 조각이 남지 않게)
             i = t.lower().find(q.lower())
             st = max((i if i >= 0 else 0) - 60, 0)
-            print(mk.text(f"[{ts:%Y-%m-%d %H:%M}] {sid[:8]} {role}/{kind} @{host} {rurl or '-'}#{br or '-'}") + f"\n  {t[st:st + 240].strip()!r}")
+            import ctxdata as cd
+            cat = cd.classify(role, kind, t)[0]
+            tag = f" [{cd.CAT_LABEL[cat]}]" if cd.CAT_LABEL.get(cat) else ""
+            print(mk.text(f"[{ts:%Y-%m-%d %H:%M}] {sid[:8]} {role}/{kind}{tag} @{host} {rurl or '-'}#{br or '-'}") + f"\n  {t[st:st + 240].strip()!r}")
     return 0
 
 
 def cmd_recent(a):
     repo = _repo_filter(a)
-    sql = """SELECT s.session_id, s.last_ts, s.host, s.cwd, s.repo_url, s.branch, count(m.uuid) FILTER (WHERE m.kind='prompt') AS prompts,
-                    (SELECT text FROM messages x WHERE x.session_id=s.session_id AND x.kind='prompt' ORDER BY x.ts LIMIT 1) AS first_prompt
+    import ctxdata as cd
+    sql = """SELECT s.session_id, s.last_ts, s.host, s.cwd, s.repo_url, s.branch, count(m.uuid) FILTER (WHERE m.kind='prompt' AND coalesce(m.text,'') !~ %s) AS prompts,
+                    count(m.uuid) FILTER (WHERE m.kind='prompt' AND m.text ~ %s) AS autos
              FROM sessions s LEFT JOIN messages m USING (session_id) WHERE (%s::text IS NULL OR s.repo_url = %s)
              GROUP BY s.session_id ORDER BY s.last_ts DESC NULLS LAST LIMIT %s"""
     with connect(readonly=True) as c:
         mk = _masker(a, c)
-        for sid, last, host, cwd, rurl, br, n, fp in c.execute(sql, (repo, repo, a.limit)):
-            print(mk.text(f"{sid}  {last:%m-%d %H:%M}  @{host}  {rurl or '-'}#{br or '-'}  {cwd}  프롬프트 {n}\n    첫 프롬프트: {mk.text((fp or '')).strip()[:120]!r}"))
+        rows = c.execute(sql, (cd.AUTO_RE, cd.AUTO_RE, repo, repo, a.limit)).fetchall()
+        titles = cd.session_titles(c, [r[0] for r in rows], mk, 120)      # 첫 사람 프롬프트(없으면 첫 스킬 호출 `/이름`) — 치환 후 자름
+        for sid, last, host, cwd, rurl, br, n, autos in rows:
+            print(mk.text(f"{sid}  {last:%m-%d %H:%M}  @{host}  {rurl or '-'}#{br or '-'}  {cwd}  프롬프트 {n}" + (f" (자동 {autos})" if autos else "")) + f"\n    첫 프롬프트: {titles.get(sid, '')!r}")
     return 0
 
 
@@ -463,8 +472,14 @@ def cmd_session(a):
         rows = c.execute(q + " ORDER BY ts", args).fetchall()
         if a.n:
             rows = rows[-a.n:]
+        import ctxdata as cd
         for ts, role, kind, side, text, uid in rows:
-            print(f"\n[{ts:%m-%d %H:%M}] {uid[:8]} {role}{'(sub)' if side else ''}: {mk.text(text or '').strip()[: (None if a.full else 1500)]}")
+            body = mk.text(text or "").strip()
+            cat, summ = cd.classify(role, kind, body)
+            lab = cd.CAT_LABEL.get(cat, "")
+            if lab and summ and not a.full:                 # 자동·명령 메시지는 한 줄 요약(--full 이면 원문)
+                body, lab = f"[{lab}] {summ}", ""
+            print(f"\n[{ts:%m-%d %H:%M}] {uid[:8]} {role}{'(sub)' if side else ''}{' [' + lab + ']' if lab else ''}: {body[: (None if a.full else 1500)]}")
     return 0
 
 
