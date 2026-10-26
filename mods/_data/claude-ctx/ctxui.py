@@ -473,6 +473,9 @@ class CtxUI(uikit.HelpMixin, App):
     #verify-tables DataTable { width: 1fr; }
     #sdetail, #cdetail { height: auto; max-height: 4; padding: 0 1; color: #b8a46a; }
     #dash-scroll { height: 1fr; }
+    #dash-scroll.narrow .dash-row { layout: vertical; height: auto; }
+    #dash-scroll.narrow .dash-row > * { width: 100%; height: 14; }
+    #dash-scroll.narrow #dr3 > * { height: 18; }
     #dr1, #dr2 { height: 14; }
     #dr3 { height: 22; }
     #stats-box { layout: vertical; padding: 0 1; }
@@ -536,13 +539,13 @@ class CtxUI(uikit.HelpMixin, App):
                 yield Static("", id="stat-state", classes="state")
                 with VerticalScroll(id="dash-scroll"):
                     yield uikit.box(Static("", id="ovhead"), "전체 · 표별 용량")
-                    with Horizontal(id="dr1"):
+                    with Horizontal(id="dr1", classes="dash-row"):
                         yield uikit.box(DataTable(id="projects", cursor_type="row", zebra_stripes=False), "저장소(프로젝트)별 — Enter: 이 저장소 검색")
                         yield uikit.box(VerticalScroll(Static("", id="stat-limits"), id="stat-limits-box"), "계정별 한도 사용률 — 창마다 찍은 최고 % (색 = 계정)")
-                    with Horizontal(id="dr2"):
+                    with Horizontal(id="dr2", classes="dash-row"):
                         yield uikit.box(DataTable(id="stat-trend", cursor_type="row"), "토큰·비용 추이")
                         yield uikit.box(DataTable(id="stat-break", cursor_type="row"), "분류별")
-                    with Horizontal(id="dr3"):
+                    with Horizontal(id="dr3", classes="dash-row"):
                         yield uikit.box(VerticalScroll(Static("", id="stat-summary"), id="stat-summary-box"), "세션 통계")
                         yield uikit.box(DataTable(id="stat-sessions", cursor_type="row"), "세션 — Enter: 대화 보기")
             with TabPane("2 검색", id="search"):
@@ -580,6 +583,14 @@ class CtxUI(uikit.HelpMixin, App):
         self.query_one("#instr-table", DataTable).add_columns("저장소", "이름", "rev", "수정 머신", "수정 시각", "길이")
         self.update_state()
         self.reload_overview()
+
+    DASH_NARROW_COLS = 110      # 이보다 좁으면 대시보드의 2열 배치를 1열로(좁은 터미널에서 표가 잘리지 않게)
+
+    def on_resize(self, event):
+        try:
+            self.query_one("#dash-scroll").set_class(event.size.width < self.DASH_NARROW_COLS, "narrow")
+        except Exception:
+            pass
 
     # --- 공통
     def masker(self):
