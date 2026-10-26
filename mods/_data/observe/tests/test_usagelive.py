@@ -45,7 +45,7 @@ check("rates: 직전 표본 없음·dt 0 이면 빈 dict", lv.rates({"a": (1, 1)
 
 # --- 표시 조각
 parts = lv.mem_segments(s1)
-check("메모리 구성: 칸 합이 총량을 넘지 않고 7구간(ZRAM 점유 포함)", sum(b for _, b, _ in parts) <= s1["mem"]["total"] + 1 and len(parts) == 7 and parts[5][0].startswith("ZRAM"))
+check("메모리 구성: 칸 합이 총량을 넘지 않고 8구간(ZRAM·slab 분리)", sum(b for _, b, _ in parts) <= s1["mem"]["total"] + 1 and len(parts) == 8 and parts[5][0].startswith("ZRAM"))
 for w in (10, 37, 80):
     check(f"seg_bar: 폭 {w} 에 정확히 맞음", len(lv.seg_bar(parts, w).plain) == w)
 for name, fn in (("판정", lv.render_verdict), ("압박", lv.render_pressure), ("세션", lv.render_sessions)):
@@ -65,7 +65,7 @@ def active(app):
     return ("live" if app.query_one("#dsub", TabbedContent).active == "live" else "dashboard") if outer == "dashboard" else outer
 
 async def drive():
-    app = usageui.UsageUI(ud.preset("1시간", time.time()))
+    app = usageui.UsageUI(ud.preset("1시간", time.time()), tab="dashboard")
     async with app.run_test(size=(140, 45)) as pilot:
         await pilot.pause(0.8)
         check("앱: 실시간 탭 밖에서는 타이머·샘플러 없음", app._timer is None and app.sampler is None)
@@ -105,6 +105,14 @@ async def narrow():
     async with app.run_test(size=(90, 40)) as pilot:
         await pilot.pause(2.0)
         check("앱: --tab live 로 시작하면 바로 실시간 탭, 폭 90칸이면 1열(narrow)", active(app) == "live" and app._timer is not None and app.query_one("#livebox").has_class("narrow"))
+async def default_start():
+    app = usageui.UsageUI(ud.preset("1시간", time.time()))
+    async with app.run_test(size=(140, 45)) as pilot:
+        await pilot.pause(2.0)
+        check("앱: 옵션 없이 열면 1번 탭의 실시간 쪽이 먼저 보이고 타이머가 돈다", active(app) == "live" and app._timer is not None and app.live_sample is not None)
+        await pilot.press("tab"); await pilot.pause(0.3)
+        check("앱: 기록 대시보드는 Tab 으로 한 번에", active(app) == "dashboard")
+asyncio.run(default_start())
 asyncio.run(drive())
 asyncio.run(narrow())
 finish("usagelive")

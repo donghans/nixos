@@ -138,11 +138,11 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     Collapsible > Contents { height: auto; padding: 0; }
     DataTable { height: 1fr; background: #000000; }
     #range-err { height: auto; }
-    #livebox { height: 34; }
+    #livebox { height: 36; }
     #lsess { height: 11; }
     #lleft, #lright { width: 1fr; height: 1fr; }
     #lleft > #lverdict { height: 8; }
-    #lleft > #lmem { height: 16; }
+    #lleft > #lmem { height: 18; }
     #lleft > #lpsi { height: 10; }
     #lright > #lio { height: 17; }
     #lright > #ltop { height: 17; }
@@ -167,7 +167,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         self.prof = ud.host_profile()
         self.desktop = not self.prof["battery"]
         if tab is None:
-            tab = "dashboard"        # 노트북·데스크톱 모두 대시보드가 첫 화면(데스크톱 대시보드에 '지금 어떤가'·깨움 상위·앱 요약을 모음)
+            tab = "live"             # 기본은 1번 탭의 「실시간」 쪽(가장 먼저·자주 보는 화면). 기록 대시보드는 Tab 또는 --tab dashboard
         self.expand = expand
         self.rng = rng or ud.preset("7일", time.time())
         self.baseline = baseline
@@ -588,7 +588,7 @@ class TableBox(Vertical):
 def main(argv=None):
     p = argparse.ArgumentParser(prog="usageui", description="전력·자원 사용 습관 TUI")
     p.add_argument("--range", default=None, help="처음 범위(기본: 7일): 1시간·6시간·오늘·어제·3일·7일 · -30m · 10:00..11:30")
-    p.add_argument("--tab", default=None, help="처음 탭(기본: 배터리 있으면 dashboard, 없으면 apps)", choices=["dashboard", "apps", "cause", "system", "help", "live"])
+    p.add_argument("--tab", default=None, help="처음 화면(기본: live = 1번 탭의 실시간, dashboard = 1번 탭의 기록)", choices=["dashboard", "apps", "cause", "system", "help", "live"])
     p.add_argument("--expand", action="store_true", help="원인 탭의 상세 표를 처음부터 펼침")
     p.add_argument("--baseline", default="prev", choices=[k for k, _ in BASELINES])
     a = p.parse_args(argv)

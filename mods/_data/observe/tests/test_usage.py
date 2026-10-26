@@ -104,7 +104,7 @@ import usageui
 from textual.widgets import DataTable, TabbedContent, Input
 
 async def drive():
-    app = usageui.UsageUI(ud.preset("1시간", now))
+    app = usageui.UsageUI(ud.preset("1시간", now), tab="dashboard")
     async with app.run_test(size=(140, 45)) as pilot:
         await pilot.pause(1.0)
         check("앱: 실시간 탭 밖에서는 타이머 없음(수동 갱신만)", app._timer is None)
@@ -128,11 +128,11 @@ async def drive():
         inp.value = "-30m"; await pilot.press("enter"); await pilot.pause(1.0)
         check("범위 대화상자: -30m 입력 → 범위 변경·재조회", app.view["range"].secs < 1900 and not isinstance(app.screen, usageui.RangeScreen))
 async def narrow():
-    app = usageui.UsageUI(ud.preset("1시간", now))
+    app = usageui.UsageUI(ud.preset("1시간", now), tab="dashboard")
     async with app.run_test(size=(100, 40)) as pilot:
         await pilot.pause(1.0)
         check("앱: 폭 100칸이면 대시보드가 1열(narrow)", app.query_one("#dash").has_class("narrow"))
-    app = usageui.UsageUI(ud.preset("1시간", now))
+    app = usageui.UsageUI(ud.preset("1시간", now), tab="dashboard")
     async with app.run_test(size=(150, 40)) as pilot:
         await pilot.pause(1.0)
         check("앱: 폭 150칸이면 2열", not app.query_one("#dash").has_class("narrow"))
@@ -184,7 +184,7 @@ check("데스크톱 기기 상태: 덮개·PSR·pc8 없이 CPU 주파수·부하
 check("데스크톱 작업 구간 표: 전력량 열 없음(2열)", all(len(r) == 2 for r in uv.span_rows(dv)))
 
 async def desk():
-    app = usageui.UsageUI(ud.preset("1시간", now))
+    app = usageui.UsageUI(ud.preset("1시간", now), tab="dashboard")
     async with app.run_test(size=(140, 45)) as pilot:
         await pilot.pause(1.0)
         check("데스크톱 앱: 기본 첫 탭이 대시보드", app.desktop and app.query_one("#tabs", TabbedContent).active == "dashboard")
@@ -228,7 +228,7 @@ check("조회 모델에 spikes 가 들어 있음(리스트)", isinstance(dv["spi
 
 async def spk():
     from usageui import SpikesScreen
-    app = usageui.UsageUI(ud.preset("1시간", now))
+    app = usageui.UsageUI(ud.preset("1시간", now), tab="dashboard")
     async with app.run_test(size=(150, 55)) as pilot:
         await pilot.pause(1.0)
         check("대시보드에 '튀었던 순간' 박스(dspk)", len(app.query("#dspk")) == 1)

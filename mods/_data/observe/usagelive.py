@@ -202,8 +202,9 @@ def mem_segments(s):
     # ZRAM 은 압축한 데이터를 RAM 에 두므로 MemFree 에서 빠져 있다 — 따로 보여야 '기타'가 영문 모를 덩어리로 남지 않는다
     zram = sum(d.get("compressed", 0) for d in s["swap"]["devices"] if d["kind"] == "zram")
     parts.append(("ZRAM 압축 점유", zram, "magenta"))
+    parts.append(("커널 slab", mi.get("Slab", 0), "dark_cyan"))
     rest = max(total - sum(b for _, b, _ in parts), 0)
-    return parts + [("기타(커널 slab·페이지테이블 등)", rest, "grey50")]
+    return parts + [("그 밖(페이지테이블·드라이버 등)", rest, "grey50")]
 
 
 def seg_bar(parts, width):
@@ -229,11 +230,11 @@ def render_mem(s, w):
         t.append("■", style=st)
         t.append(f" {name:<22}{b / GIB:6.1f} GiB  {b / m['total'] * 100:4.0f}%")
     t.append(f"\n\n  바로 쓸 수 있음(보수적) {m['reclaimable_floor'] / GIB:.1f} GiB = 빈 메모리 + 식은 캐시", style="bold")
-    t.append(f"\n  커널 MemAvailable {m['available_raw'] / GIB:.1f} GiB — 활성 캐시·slab 을 더한 낙관값", style="grey62")
+    t.append(f"\n  커널 MemAvailable {m['available_raw'] / GIB:.1f} GiB — 활성 캐시·회수 가능 slab({m['sreclaimable'] / GIB:.1f} GiB)을 더한 낙관값", style="grey62")
     dev = ", ".join(f"{d['kind']} {d['used'] / GIB:.1f}/{d['size'] / GIB:.1f}" + (f"(RAM 점유 {d['compressed'] / GIB:.1f})" if "compressed" in d else "") for d in sw["devices"]) or "없음"
     t.append(f"\n  스왑 사용 {sw['used'] / GIB:.1f}/{sw['total'] / GIB:.1f} GiB — {dev}", style="grey70")
     if s["tmpfs"]:
-        t.append("\n  tmpfs: " + ", ".join(f"{p} {u / GIB:.1f} GiB" for p, u, _ in s["tmpfs"][:3]), style="grey62")
+        t.append("\n  tmpfs: " + ", ".join(f"{p} {u / GIB:.1f} GiB" for p, u, _ in s["tmpfs"][:3]) + " (스왑 몫 포함, Shmem=RAM분)", style="grey62")
     return t
 
 
