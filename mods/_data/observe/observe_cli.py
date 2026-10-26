@@ -431,11 +431,15 @@ def cmd_fleet(a):
             conn.rollback()
             fl.write_state(fl.record(st, now, False, error=str(e)))
             sys.exit(f"올리기 실패: {str(e)[:200]} (표본은 로컬에 남아 있어 다음에 같이 올립니다)")
-        fl.write_state(fl.record(st, now, True, rows=f"앱 {na}·전력 {npw}·확장 {ni}"))
+        st2 = fl.record(st, now, True, rows=f"앱 {na}·전력 {npw}·확장 {ni}")
+        if fl.LAST_SKIPPED:                      # 인사이트 표가 없어 일부를 못 올렸다 — 마지막 성공 시각을 앞으로 옮기지 않아 다음 올리기가 그 구간을 다시 포함한다(멱등)
+            st2["last_ok"] = st.get("last_ok") or since
+            st2["error"] = "인사이트 표 없음(서버 nixup 필요): " + ", ".join(fl.LAST_SKIPPED)
+        fl.write_state(st2)
         extra = f" · 밀렸던 {pending / 3600:.1f}시간 포함" if pending and pending > 8 * 3600 else ""
         print(f"{me}: 앱 {na}행 · 전력 {npw}행 · 확장 {ni}개 올림(시작 {core.hms(since)}){extra}")
         if fl.LAST_SKIPPED:
-            print(f"  (인사이트 표 {', '.join(fl.LAST_SKIPPED)} 가 서버에 아직 없어 건너뜀 — 서버 호스트에서 nixup 하면 생김. 기본 요약은 올라갔고 이 부분은 다음 올리기에 포함됨)")
+            print(f"  (인사이트 표 {', '.join(fl.LAST_SKIPPED)} 가 서버에 아직 없어 건너뜀 — 서버 호스트에서 nixup 하면 생김. 기본 요약은 올라갔고, 이 부분은 표가 생긴 뒤 다음 올리기에 다시 포함됨)")
     elif a.what == "changes":
         apps = fl.fetch_apps_hourly(conn, a.days)
         ch = [r for r in fl.fetch_changes(conn, a.days) if r[3] == "nixup"]

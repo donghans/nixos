@@ -203,6 +203,13 @@ else:
             cur.execute("SELECT count(*) FROM observe_changes WHERE host = 'nb3'"); n_ch3 = cur.fetchone()[0]
         c2.close()
         check("표가 없는 서버: 기본 요약(앱 1행)과 있는 인사이트 표(변경)는 올라가고, 없는 표(포커스·유닛)만 건너뜀", n3[0] == 1 and n_app3 == 1 and n_ch3 == 1 and sorted(fl.LAST_SKIPPED) == ["observe_focus_hourly", "observe_units"], f"{n3} {n_app3} {n_ch3} {fl.LAST_SKIPPED}")
+        before_ok = fl.read_state().get("last_ok")
+        out = io.StringIO()
+        os.environ["CLAUDE_CTX_DSN"] = pg.dsn
+        with contextlib.redirect_stdout(out):
+            observe_cli.main(["fleet", "sync"])
+        stx = fl.read_state()
+        check("표가 없어 건너뛰면 last_ok 를 앞으로 옮기지 않고(다음에 다시 포함) 사유를 상태에 남김", "건너뜀" in out.getvalue() and stx.get("last_ok") == before_ok and "인사이트 표 없음" in stx.get("error", ""), out.getvalue() + str(stx))
         check("observectl fleet 서브명령이 등록됨", "fleet" in open(os.path.join(ROOT, "observe_cli.py")).read())
     finally:
         pg.stop()
