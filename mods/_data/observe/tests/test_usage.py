@@ -133,6 +133,14 @@ async def narrow():
     async with app.run_test(size=(100, 40)) as pilot:
         await pilot.pause(1.0)
         check("앱: 폭 100칸이면 대시보드가 1열(narrow)", app.query_one("#dash").has_class("narrow"))
+        def overlaps(parent):
+            kids = [c for c in parent.children if c.display]
+            return [(a.id, b.id) for i, a in enumerate(kids) for b in kids[i + 1:] if a.region.overlaps(b.region)]
+        bad = [(c.id, o) for c in app.query("#dash, #dash Vertical, #dash Horizontal") for o in overlaps(c)]
+        check("앱: 1열(100칸)에서 박스끼리 겹치지 않는다(바깥 박스 높이가 안쪽 그래프를 담는다)", not bad, bad)
+        inner = [w for w in app.query("#dpower > .box, #dbatt .box") if w.display]
+        check("앱: 1열에서 바깥 박스 안에 안쪽 그래프가 전부 들어 있다(잘리지 않음)", all(w.region.y + w.region.height <= w.parent.region.y + w.parent.region.height for w in inner), [(w.id, w.region, w.parent.region) for w in inner])
+        check("앱: 1열이면 요약(오른쪽 열)이 그래프(왼쪽 열)보다 위", app.query_one("#dright").region.y < app.query_one("#dleft").region.y)
     app = usageui.UsageUI(ud.preset("1시간", now), tab="dashboard")
     async with app.run_test(size=(150, 40)) as pilot:
         await pilot.pause(1.5)

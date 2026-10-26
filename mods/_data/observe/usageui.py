@@ -147,7 +147,12 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     #dright > #dctx { height: 8; }
     #dash.narrow { layout: vertical; height: auto; }
     #dash.narrow #dleft, #dash.narrow #dright { width: 100%; height: auto; }
-    #dash.narrow .box { height: 12; }
+    #dash.narrow #dleft > #dpower { height: auto; }
+    #dash.narrow #dpower > .box { height: 12; }
+    #dash.narrow #dpower > #dbands { height: 8; }
+    #dash.narrow #dleft > #dbatt { height: 14; }
+    #dash.narrow #dright > #dnow { height: 6; }
+    #dash.narrow #dright > #dapps { height: 14; }
     #dpower { height: 1fr; min-height: 20; }
     #dleft > #dspk { height: 13; }
     #dbatt { height: 12; }
@@ -383,6 +388,12 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                 if not narrow and box.has_class("narrow"):
                     narrow = w < self._wrap_at.get(key, 0) + self.WRAP_RETRY_COLS      # 줄바꿈으로 좁혔던 폭보다 충분히 넓어지기 전엔 1열 유지
                 box.set_class(narrow, "narrow")
+                if key == "dash":                # 1열이면 요약(오른쪽 열)을 그래프(왼쪽 열)보다 먼저 보여 준다
+                    left, right = self.query_one("#dleft"), self.query_one("#dright")
+                    if narrow and box.children[0] is left:
+                        box.move_child(right, before=left)
+                    elif not narrow and box.children[0] is right:
+                        box.move_child(left, before=right)
         except Exception:
             pass
 
