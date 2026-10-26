@@ -19,6 +19,13 @@ description: 성능·자원·전력 문제를 추측하지 말고 observectl(관
 - 호스트 간 교차 확인(공유 저장소): `observectl fleet push|sync|status|compare <호스트>|inventory|hosts`(usageui `y` 키 = sync, 실패하면 쌓아 뒀다 다음에 같이) · usageui 5번 「호스트」 탭에서 전력 그래프·앱 비교·확장 차이를 본다 · `fleet changes`(nixup 전후 변화, 다른 호스트가 대조군) · `fleet priority <기준호스트>`(포커스 비중×초과 CPU) · `fleet periodic|units` — 한 호스트에서만 높은 앱·한쪽에만 있는 확장을 후보로 뽑는다(원본·이름·주소는 올리지 않음)
 - 실험 전후 비교는 `observectl mark` 로 조건 표지를 붙이고 `observectl window --by mark`.
 
+## 측정(A/B)과 시험 틀 — 효과를 확인할 때
+- 절차: `observectl on L0` 로 켜고 안정화 → 조건을 번갈아(ABAB, 쌍 3 이상·구간 5분 이상 권장) → `observectl ab` 로 판정. 틀은 `mods/_data/observe/examples/abab_lib.sh`(`abab_set_a/b`·`abab_verify_a/b`·`abab_restore`; 환경변수 `SEG`·`PAIRS`·`SETTLE`·`ABAB_ALT=1`·`ABAB_AC_MODE=1`·`ABAB_LOCK_CMD`·`AB_ARGS`).
+- `observectl ab` 는 psys·패키지·순간 V×I·누적 계량을 한꺼번에 비교하고 지표끼리 어긋나면 알린다. 경고: 구간 시작 직후 표본이 높으면 「안정화 부족 의심」, 한 구간에서만 CPU 가 튄 앱은 「교란 의심」.
+- **verify 는 조건을 건 API 의 응답이 아니라 효과를 보는 독립 신호로 한다**(확장을 `chrome.management` 로 껐다는 응답이 거짓이었던 사례 — `observectl browser sw` 로 서비스 워커가 실제로 멈췄는지 본다).
+- 상태 지표(PSR 잔류·flip/s·깨움/s·C-state)를 먼저, 와트는 확인용. 시험 중에는 노트북에 ssh 폴링을 하지 않는다. 전력 시험 절차 전체는 호스트 로컬 스킬 `power-test`(`.claude/skills/power-test/SKILL.md`).
+- 한계: `browser periodic` 은 15초 폴이라 그보다 짧은 주기는 못 본다. `fleet` 은 서버(`claude-ctx`)에 표가 있어야 하고(서버 `nixup`) 호스트가 `allowedClients` 에 있어야 접속된다. 호스트 간 전력(W) 절댓값 비교는 하드웨어가 달라 하지 않는다.
+
 ## 출력은 `--json` 으로 (LLM·스크립트용 — 표 모양은 무시)
 모든 `observectl` 하위 명령이 `--json` 을 받는다(`observectl top --by app --json`). 사람이 보는 표의 정렬·모양에는 신경 쓰지 말고 **JSON 을 읽는다.** 봉투: `{"command", "ok", "structured", "exit_code", "data"|"text", "notes", "error"}`.
 - `structured:true` 명령(`status`·`top`·`states`·`events`·`query`·`wakers`·`energy`): `data` 에 구조화 값. 예) `top` → `data.rows[{name, cpu_core_pct, ctxsw_vol_per_s, appearances, of_samples}]`, `query` → `data.rows[{label, n, values:{신호: 값}}]`, `status` → `data.{enabled, level, collector, samples_24h, last_sample.age_s, …}`. `explain` 은 기존 자체 `--json`.
