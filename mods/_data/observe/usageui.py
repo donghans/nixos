@@ -141,9 +141,9 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     #livebox { height: 36; }
     #lsess { height: 11; }
     #lleft, #lright { width: 1fr; height: 1fr; }
-    #lleft > #lverdict { height: 8; }
+    #lleft > #lverdict { height: 9; }
     #lleft > #lmem { height: 18; }
-    #lleft > #lpsi { height: 10; }
+    #lleft > #lpsi { height: 11; }
     #lright > #lio { height: 17; }
     #lright > #ltop { height: 17; }
     #livebox.narrow { layout: vertical; height: auto; }

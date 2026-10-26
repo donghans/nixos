@@ -51,6 +51,8 @@ for w in (10, 37, 80):
 for name, fn in (("판정", lv.render_verdict), ("압박", lv.render_pressure), ("세션", lv.render_sessions)):
     check(f"render {name}: 비어 있지 않은 Text", len(fn(s1).plain) > 10)
 check("render 메모리·IO·상위: 비어 있지 않음", all(len(f(s1, 60).plain) > 10 for f in (lv.render_mem, lv.render_io, lv.render_top)))
+check("render 판정: 두 축·OOM 까지 여유·새 작업 수용 가이드가 보임", all(k in lv.render_verdict(s1).plain for k in ("속도", "용량", "OOM 까지 여유", "새 작업")))
+check("render 압박: avg60 과 메모리 대기 주체 줄", "avg60" in lv.render_pressure(s1).plain and "대기 주체" in lv.render_pressure(s1).plain)
 check("render 메모리: 보수적 값과 MemAvailable 두 값을 모두 보임", "보수적" in lv.render_mem(s1, 60).plain and "MemAvailable" in lv.render_mem(s1, 60).plain)
 check("render 첫 표본에서도 예외 없음", all(len(f(s0, 60).plain) > 5 for f in (lv.render_mem, lv.render_io, lv.render_top)))
 check("human_bytes", lv.human_bytes(None) == "-" and lv.human_bytes(1536 * 1024, True) == "1.5 MiB/s" and lv.human_bytes(12) == "12 B")

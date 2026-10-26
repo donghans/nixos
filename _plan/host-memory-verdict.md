@@ -1,6 +1,6 @@
 # 호스트 메모리 「판정」 재검토 — ZRAM 가득·보수적 가용·PSI 기준이 이 호스트에 맞는가
 
-상태: **조사 결과와 개정 제안(코드는 아직 안 바꿈).** 작성 2026-10-26, 호스트 beelink-ser7-co. 실측 스크립트: `mods/_data/observe/examples/memverdict/`.
+상태: **조사 결과와 개정 제안 — 개정은 2026-10-26 에 적용했다(§7).** 작성 2026-10-26, 호스트 beelink-ser7-co. 실측 스크립트: `mods/_data/claude-skills/donghans-host-resources/scripts/`.
 
 ## 0. 읽기 전에 (용어)
 
@@ -29,12 +29,12 @@
 ### 2-2 meminfo 검산
 Active+Inactive(anon) 13.97 GiB ≈ AnonPages+Shmem 13.87 GiB(겹침 없음). 총 30.07 − 빈 0.29 − LRU 19.12 = 10.66 GiB 가 slab 2.76 + 페이지테이블 0.38 + ZRAM 5.45 + 약 1.7 GiB 미설명으로 갈라진다. 커널 `MemAvailable` 공식을 필드로 재현하면 6.69 GiB(실제 6.53). 보수적 가용 3.93 GiB.
 
-### 2-3 NVMe 스왑 경로 벤치마크(`mods/_data/observe/examples/memverdict/swapbench.py`, cgroup 메모리 300 MiB 제한 안에서 1.5 GiB 사용, 2회 실행 중 완전한 1회)
+### 2-3 NVMe 스왑 경로 벤치마크(`mods/_data/claude-skills/donghans-host-resources/scripts/swapbench.py`, cgroup 메모리 300 MiB 제한 안에서 1.5 GiB 사용, 2회 실행 중 완전한 1회)
 - 채우기(스왑아웃): 약 315 MiB/s. 순차 읽기(스왑인+동시 스왑아웃): 약 122~124 MiB/s(RAM 상주 대비 약 25배 느림).
 - 무작위 한 쪽 접근 지연: p50 48 µs, p90 60 µs, p99 345 µs, p999 2.6 ms, 최대 6.3 ms(RAM 상주 p50 0.3 µs). 초당 약 2만 접근.
 - 이 시험 동안 호스트 메모리 PSI avg10 은 최대 약 2.5%, IO some avg10 최대 5%.
 
-### 2-4 다른 프로세스에 주는 영향(`probe.py`, 스레셔 없음 vs 있음, 각 1회·10~14초)
+### 2-4 다른 프로세스에 주는 영향(`swapbench.py --bystander` 의 프로브, 스레셔 없음 vs 있음, 각 1회·10~14초)
 | | 스레셔 없음 | 스레셔(스왑 약 100 MiB/s 양방향) 중 |
 |---|---|---|
 | sleep(1ms) 초과 p50 / p99 / p999 (µs) | 9.4 / 58 / 133 | 10.1 / 69 / 230 |
@@ -80,3 +80,13 @@ Active+Inactive(anon) 13.97 GiB ≈ AnonPages+Shmem 13.87 GiB(겹침 없음). �
 - 앞 창 앱이 스왑을 쓸 때의 체감 지연, 전역(제한 없는) 스왑 폭주 시험(다른 세션·VM 에 피해를 줄 수 있어 하지 않음).
 - ZRAM `writeback`(백업 장치 연결로 오래된 페이지를 NVMe 로 내리는 방법)과 `zramctl`·`swappiness` 튜닝 효과 — 시험하지 않았다.
 - 벤치마크 반복·분산, SSD 수명 영향(쓰기 약 5 GiB 규모로 무시할 수준으로 추정, 미확인).
+
+## 7. 적용 결과 (2026-10-26)
+
+사용자가 §4 의 개정을 승인해 `hostmetrics.py`·`hostres.py`·SKILL.md·usageui 실시간 탭에 적용했다. 시험: `test_hostmetrics.py` 24, `test_usagelive.py` 42 통과(회귀 `test_usage.py` 96 통과).
+- 판정 = **속도 축**(메모리 PSI avg60: 주의 full ≥1% 또는 순간 ≥5% / 압박 full ≥3% 또는 some ≥20% / 심각 full ≥10%) 과 **용량 축**(OOM 까지 여유 = MemAvailable + 스왑 여유: <8 / <3 / <1 GiB) 중 높은 쪽. 이유에 [속도]/[용량] 표시.
+- 판정에서 뺀 것(「참고」 줄로만): ZRAM 가득, 디스크 스왑 사용량, 스왑 되읽기, 보수적 가용 크기.
+- 추가: `psi_cgroups`(메모리 대기를 만든 cgroup, 가장 깊은 쪽으로 좁힘 — 스왑 폭주 시험 중 폭주 scope 가 some 8.7% 로 잡히는 것을 확인), `capacity_guide`(새 작업이 쓸 메모리별 영향 표), `info_lines`.
+- **호스트별 스왑 기준점**(사용자 요청: 주력이 아니거나 NVMe 가 아닌 워크스테이션도 있음): `HOST_CALIBRATION` 에 호스트별 벤치마크 실측과 임계값 덮어쓰기를 둔다. 기준점이 없는 호스트에서는 출력에 「스왑 기준점 없음」과 `swapbench.py --bystander --entry` 안내가 뜨고, 스왑이 회전 디스크면(`/proc/self/mountinfo`→`/sys/block/*/queue/rotational`) 경고가 뜬다. `swapbench.py` 가 스킬 폴더로 들어왔고 호스트가 바쁘면(메모리 PSI full avg60 ≥1% 또는 스왑 여유 <4 GiB) 거부한다.
+- **2차 실측으로 달라진 해석**: 같은 `swapbench.py` 를 ZRAM 슬롯 약 96%(일부 여유)일 때 다시 돌리자 무작위 접근 p50 이 48 → 7.6 µs 로 크게 낮아졌다(일부가 ZRAM 에 적중), p99 는 345 → 273 µs, 순차 122 → 166 MiB/s. 즉 **p50 은 ZRAM 상태에 따라 변하고 p99(디스크 경로)가 안정적**이라 기준점 항목에 두 번의 값을 함께 적었다. 스레셔 중 타 프로세스 지연도 2차에서 sleep p99 38.0→39.5 µs, 16MiB 할당 p99 6.2→3.0 ms 로 영향이 없음을 다시 확인(n=2).
+- 아직 안 한 것: 사용자 체감 시각으로 임계값 교정(§5), 노트북(msi-summit-me)에서의 기준점 측정.

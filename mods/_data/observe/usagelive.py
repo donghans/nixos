@@ -184,11 +184,16 @@ def pct_style(v, warn, bad):
 
 def render_verdict(s):
     lv, why = hm.verdict(s)
+    ax = hm.verdict_axes(s)
     t = Text(" ")
     t.append(f" {lv} ", style=LEVEL_STYLE.get(lv, "bold") + " reverse")
-    t.append(f"  구간 {s['window_s']}s" + ("" if s["measured"] else " (첫 표본 — 변화율은 다음 갱신부터)"), style="grey50")
-    for w in why[:4] or ["압박 징후 없음"]:
+    t.append(f"  속도 {hm.NAMES[ax['speed'][0]]} · 용량 {hm.NAMES[ax['capacity'][0]]}", style="grey70")
+    t.append(f"  구간 {s['window_s']}s" + ("" if s["measured"] else " (첫 표본)"), style="grey50")
+    for w in why[:3] or ["압박 징후 없음"]:
         t.append("\n  " + w, style="grey70")
+    g = hm.capacity_guide(s)
+    t.append(f"\n  OOM 까지 여유 {hm.headroom(s) / GIB:.1f} GiB(MemAvailable + 스왑 여유)", style="bold")
+    t.append(f"\n  새 작업: ~{g[0][0]:.1f} GiB 바로 · ~{g[1][0]:.1f} 캐시 밀어냄 · ~{g[2][0]:.1f} 스왑 의존 · 그 이상 OOM 위험", style="grey62")
     return t
 
 
@@ -253,12 +258,15 @@ def render_pressure(s):
         if k != "cpu":
             t.append("  full ")
             t.append(f"{fv(full):>6}", style=pct_style(full or 0, 0.5, 1))
+        t.append(f"   avg60 some {fv(p.get('some_avg60')):>5}" + (f" full {fv(p.get('full_avg60')):>5}" if k != "cpu" else ""), style="grey62")
         t.append("\n")
+    cg = s.get("psi_cgroups") or []
+    t.append("\n 메모리 대기 주체: ", style="grey70")
+    t.append(" · ".join(f"{hm.friendly(c['path'])[:26]} {c['some_pct']:.1f}%" for c in cg[:3]) if cg else "없음", style="default" if cg else "grey50")
     t.append("\n 스왑 되읽기 pswpin ")
-    t.append("-" if r["pswpin"] is None else f"{r['pswpin']:.0f}/s", style="red" if (r["pswpin"] or 0) >= 1000 else "default")
-    t.append("  pswpout " + ("-" if r["pswpout"] is None else f"{r['pswpout']:.0f}/s"))
-    t.append("\n 다시 읽은 캐시 " + ("-" if r["refault_file"] is None else f"{r['refault_file']:.0f}/s") + "  직접 회수 대기 " + ("-" if r["allocstall"] is None else f"{r['allocstall']:.0f}/s"), style="grey62")
-    t.append("\n 사용량이 아니라 '기다렸는가' 지표: some=일부 작업이 대기, full=전부 대기(PSI)", style="grey50")
+    t.append("-" if r["pswpin"] is None else f"{r['pswpin']:.0f}/s", style="default")
+    t.append("  pswpout " + ("-" if r["pswpout"] is None else f"{r['pswpout']:.0f}/s") + "  (정보 — 판정은 PSI·OOM 여유)", style="grey62")
+    t.append("\n PSI = 사용량이 아니라 '기다렸는가': some=일부 작업 대기, full=전부 대기. 판정은 지속(avg60) 기준", style="grey50")
     return t
 
 
