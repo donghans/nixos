@@ -58,4 +58,4 @@
 
 ## 7. 구현 결과 (제안 3 — 2026-10-26)
 - `schema.sql`(열 `usage_events.account_id`·`account_email` + 인덱스), `claude_ctx.py`(수집이 계정 속성을 적재, `backfill_accounts`·`donghans ctx backfill-accounts`), `ctxdata.py`(`BREAKDOWNS` 에 계정), `ctxui.py`(계정 불명 비율 표기, 도움말 「비용」). 시험: `test_ctxdata` 128(백필 dry-run·apply·멱등·계정 불명 행 포함) · `test_ctxui` 146 · `test_ctx_db` 68.
-- 사용자가 「진행에 문제없다면 해줄래」로 승인했다. 실제 DB 백필 결과는 배포 뒤 이 문서 또는 커밋 메시지에 건수로 적는다.
+- 사용자가 「진행에 문제없다면 해줄래」로 승인했다. **실제 DB 백필 결과(2026-10-26)**: beelink 원본으로 15,611건(계정 2개), 노트북 원본으로 800건(계정 2개 — 한 계정은 beelink 쪽과 같음)을 채웠다. dry-run 건수와 apply 건수가 일치했고 재실행은 0건(멱등). 결과: 계정이 3개이고 **계정 불명 0건** — `donghans@bitstep.it` $632.15(13,470건) · `772610158.xyz@gmail.com` $92.08(2,693건) · `b.donghans@gmail.com` $12.16(248건), 합 $736.39. (계정 3개라는 것도 이번에 처음 드러났다 — 이전 `limit_samples` 로는 1개로 보였다.)
