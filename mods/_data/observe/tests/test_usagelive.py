@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """usageui 실시간 탭 시험: 샘플러(변화율·느린 항목 주기·세션 ctx 미호출·비용), 표시 조각, Textual 앱(탭 진입 때만 타이머, 이탈 때 정지, 포커스 상실 때 멈춤, 간격 자동 증가)."""
+from rich.cells import cell_len
 import asyncio, os, re, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 TMP = tempfile.mkdtemp(prefix="usagelive-test-")
@@ -59,10 +60,21 @@ check("render 압박: avg60 과 메모리 대기 주체 줄", "avg60" in lv.rend
 check("render 메모리: 보수적 값과 MemAvailable 두 값을 모두 보임", "보수적" in lv.render_mem(s1, 60).plain and "MemAvailable" in lv.render_mem(s1, 60).plain)
 check("render 첫 표본에서도 예외 없음", all(len(f(s0, 60).plain) > 5 for f in (lv.render_mem, lv.render_io, lv.render_top)))
 def _core_lines(n, w=60):
-    return [l for l in lv.render_io(dict(s1, cores=[10.0] * n), w).plain.splitlines()[1:] if l.strip() and "%" in l][:8]
+    return [l for l in lv.render_io(dict(s1, cores=[10.0] * n), w).plain.split("네트워크")[0].splitlines()[1:] if l.strip() and "%" in l]
 
 
 check("코어 열 수: 4코어 이하는 2열, 그 위는 4열(16코어 → 4줄)", len(_core_lines(4)) == 2 and len(_core_lines(8)) == 2 and len(_core_lines(16)) == 4 and _core_lines(16)[0].count("%") == 4 and _core_lines(2)[0].count("%") == 2)
+_syn = dict(s1, net={"eth0": (62.5e6, 1.25e6), "wlan0": (0.0, 0.0), "tap1": (1e3, 1e3)}, links={"eth0": dict(kind="유선", mbps=1000), "wlan0": dict(kind="Wi-Fi", mbps=540)},
+            disk={"nvme0n1": (3.5e9, 0.25e9), "sdz": (1e6, 1e6), "nvme1n1": (3.94e9, 0)}, disk_info={"nvme0n1": dict(model="X", name="Samsung 테스트", read=7000e6, write=5000e6), "sdz": dict(model="Foo", name=None, read=None, write=None, link=None), "nvme1n1": dict(model="Bar", name=None, read=None, write=None, link=7.88e9)})
+_io = lv.render_io(_syn, 70).plain
+check("네트워크: 물리 NIC 는 링크 속도 대비 %(1 Gbps 에서 62.5 MB/s = 50%), 트래픽 있는 비링크(tap)는 속도 정보 없음 표시·% 없음", "유선 링크 1000 Mbit/s" in _io and " 50.0%" in _io and "링크 속도 정보 없음" in _io, _io)
+check("네트워크: Wi-Fi 는 AP 표기 최대 속도임을 밝힘", "Wi-Fi 링크 540 Mbit/s*" in _io and "AP 표기 최대" in _io)
+check("디스크: 표기치 대비 %(3.5 GB/s ÷ 7000 MB/s = 50%, 0.25 GB/s ÷ 5000 MB/s = 5%), 미등록 모델은 % 없이 안내", " 50.0%" in _io and "  5.0%" in _io and "정보 없음" in _io and "Samsung 테스트" in _io and "PCIe 링크 상한 7,880 MB/s(표기치 미등록)" in _io, _io)
+check("표기치 대비 줄이 박스 폭(70)을 넘지 않음", all(cell_len(l) <= 70 for l in _io.splitlines()), max(cell_len(l) for l in _io.splitlines()))
+check("링크·디스크 정보가 없는 표본에서도 예외 없음", len(lv.render_io(dict(s1, net={}, disk={}, links={}, disk_info={}), 60).plain) > 10)
+_nv = lv.nvme_link_bytes_s("nvme0n1")
+check("NVMe PCIe 링크 상한: 이 호스트(Gen4 x4)면 약 7.88 GB/s, 없으면 None", _nv is None or 7.5e9 < _nv < 8.0e9, str(_nv))
+check("phys_links: 이 호스트에서 예외 없이 dict", isinstance(lv.phys_links(None), dict) and isinstance(lv.disk_info(), dict))
 check("코어 열 수: 폭이 좁으면 열을 줄여도 줄이 폭을 넘지 않음", all(len(l) <= 40 for l in _core_lines(16, 40)))
 check("human_bytes", lv.human_bytes(None) == "-" and lv.human_bytes(1536 * 1024, True) == "1.5 MiB/s" and lv.human_bytes(12) == "12 B")
 

@@ -266,7 +266,7 @@ async def fsync():
             await pilot.pause(0.3)
             app.notify = lambda m, **k: notes.append((m, k.get("severity")))
             await pilot.press("y"); await pilot.pause(0.6)
-        check("y: observectl fleet sync 를 호출하고 결과를 알림으로 보임", calls == [["/fake/observectl", "fleet", "sync"]] and any("올림" in m for m, _ in notes), str((calls, notes)))
+        check("y: observectl fleet sync 를 호출하고 결과를 알림으로 보임", [c for c in calls if c[0] != "nmcli"] == [["/fake/observectl", "fleet", "sync"]] and any("올림" in m for m, _ in notes), str((calls, notes)))
     finally:
         usageui.subprocess.run, usageui.shutil.which = real_run, real_which
 asyncio.run(fsync())

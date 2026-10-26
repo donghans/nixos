@@ -227,6 +227,11 @@ HOST_CALIBRATION = {
     ),
 }
 CALIBRATED_HOSTS = set(HOST_CALIBRATION)
+# 디스크 제조사 표기 성능(순차 읽기·쓰기, 바이트/초) — 모델 이름(/sys/block/<dev>/device/model)에 키가 들어 있으면 적용. usageui 실시간 탭의 「표기치 대비 %」가 쓴다.
+# 표기치는 최대 순차 속도라 실사용(작은 블록·랜덤·지속 쓰기)은 훨씬 낮은 것이 정상이다. 모델이 여기 없으면 % 를 내지 않고 모델명만 보인다 — 새 디스크는 데이터시트 값을 추가할 것.
+DISK_SPECS = {
+    "MZVL21T0HCLR": dict(read=7000e6, write=5000e6, name="Samsung PM9A1 1TB(OEM)", source="소매처 표기 최대 순차 7000/5000~5100 MB/s(쓰기는 5000·5100 두 표기가 있어 낮은 값 사용), 제조사 데이터시트로 확인하지 않음, 2026-10-26"),
+}
 CALIB = dict(
     full60_warn=1.0, full60_press=3.0, full60_crit=10.0,   # 메모리 PSI full avg60 % — 이력 분위: ≥1% 2.2%, ≥3% 0.1%
     some60_press=20.0,                                      # 메모리 PSI some avg60 %

@@ -141,14 +141,14 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     #range-err { height: auto; }
     #fstat { height: 8; }
     #fp0, #fp1 { height: 11; }
-    #livebox { height: 38; }
+    #livebox { height: 40; }
     #lsess { height: 11; }
     #lleft, #lright { width: 1fr; height: 1fr; }
-    #lleft > #lio { height: 18; }
+    #lleft > #lio { height: 20; }
     #lleft > #lmem { height: 20; }
     #lright > #lverdict { height: 9; }
     #lright > #lpsi { height: 11; }
-    #lright > #ltop { height: 18; }
+    #lright > #ltop { height: 20; }
     #livebox.narrow { layout: vertical; height: auto; }
     #livebox.narrow #lleft, #livebox.narrow #lright { width: 100%; height: auto; }
     #livebox.narrow .box { height: 14; }

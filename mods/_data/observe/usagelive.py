@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import os
+import re
+import subprocess
 import sys
 import threading
 import time
@@ -53,6 +55,76 @@ def read_disk():
         f = line.split()
         if len(f) >= 10 and f[2] in whole:
             out[f[2]] = (int(f[5]) * 512, int(f[9]) * 512)
+    return out
+
+
+def phys_links(wifi_rate=None):
+    """{인터페이스: dict(kind, mbps)} — **물리 NIC 만**(브리지·tap·docker·tailscale 제외, 연결된 것). 유선은 sysfs speed(협상 속도), Wi-Fi 는 접속 AP 의 표기 속도(nmcli RATE — 신호에 따라 실제 링크는 이보다 낮다).
+    wifi_rate 는 호출부가 (느리게) 구해 넘긴다 — 프로세스를 띄우는 일이라 매 표본마다 하지 않는다."""
+    out = {}
+    base = "/sys/class/net"
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return out
+    for n in names:
+        d = os.path.join(base, n)
+        if n == "lo" or not os.path.exists(os.path.join(d, "device")) or (hm.read(f"{d}/operstate") or "").strip() != "up":
+            continue
+        if os.path.isdir(os.path.join(d, "wireless")):
+            if wifi_rate:
+                out[n] = dict(kind="Wi-Fi", mbps=wifi_rate)
+            continue
+        try:
+            sp = int((hm.read(f"{d}/speed") or "-1").strip())
+        except ValueError:
+            sp = -1
+        if sp > 0:
+            out[n] = dict(kind="유선", mbps=sp)
+    return out
+
+
+def read_wifi_rate():
+    """접속 중인 Wi-Fi AP 의 표기 속도(Mbit/s) 또는 None. nmcli 가 없거나 느리면 None."""
+    try:
+        r = subprocess.run(["nmcli", "-t", "-f", "IN-USE,RATE", "dev", "wifi", "list", "--rescan", "no"], capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in r.stdout.splitlines():
+        if line.startswith("*:"):
+            m = re.match(r"\*:(\d+(?:\.\d+)?)\s*Mbit/s", line)
+            return float(m.group(1)) if m else None
+    return None
+
+
+def nvme_link_bytes_s(dev):
+    """NVMe 장치의 PCIe 링크 이론 상한(바이트/초) 또는 None — sysfs 의 현재 링크 속도(GT/s)×레인 수×인코딩 효율. 하드웨어가 직접 알려 주는 값이라 표기치 표가 없어도 쓴다."""
+    if not dev.startswith("nvme"):
+        return None
+    try:
+        ctrl = os.path.realpath(f"/sys/block/{dev}/device")          # /sys/devices/.../nvme/nvme0
+        for base in (os.path.join(ctrl, "device"), os.path.join(os.path.dirname(ctrl), "device")):
+            sp, wd = hm.read(f"{base}/current_link_speed"), hm.read(f"{base}/current_link_width")
+            if sp and wd:
+                gt = float(sp.split()[0])
+                eff = 0.8 if gt <= 5.0 else 128 / 130            # PCIe 1·2 세대 8b/10b, 3 세대 이상 128b/130b
+                return gt * 1e9 * int(wd) * eff / 8
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def disk_info():
+    """{장치: dict(model, read, write, name, link)} — 모델명은 sysfs, 표기 성능은 hostmetrics.DISK_SPECS(없으면 read/write 가 None), link 는 NVMe PCIe 링크 상한(하드웨어에서 읽음, 없으면 None)."""
+    out = {}
+    try:
+        devs = [d for d in os.listdir("/sys/block") if not d.startswith(("loop", "ram", "zram", "dm-"))]
+    except OSError:
+        return out
+    for d in devs:
+        model = " ".join((hm.read(f"/sys/block/{d}/device/model") or "").split())
+        spec = next((v for k, v in getattr(hm, "DISK_SPECS", {}).items() if k in model), None)
+        out[d] = dict(model=model or d, read=spec["read"] if spec else None, write=spec["write"] if spec else None, name=spec["name"] if spec else None, link=nvme_link_bytes_s(d))
     return out
 
 
@@ -125,6 +197,8 @@ class LiveSampler:
         self._sbegin = None
         self._ticks = None
         self._apps_t = None
+        self._links = {}
+        self._disk_info = disk_info()
         self.resolver = ap.AppResolver()
         self.hz = os.sysconf("SC_CLK_TCK")
         self._lock = threading.Lock()
@@ -145,6 +219,7 @@ class LiveSampler:
         dt = (t0 - self._t) if self._t else 0
         net, disk = read_net(), read_disk()
         s["net"], s["disk"] = rates(net, self._net, dt), rates(disk, self._disk, dt)
+        s["disk_info"] = self._disk_info
         self._net, self._disk = net, disk
         cores = read_cores()
         s["cores"] = [None if not self._cores or i >= len(self._cores) or c[0] == self._cores[i][0] else (1 - (c[1] - self._cores[i][1]) / (c[0] - self._cores[i][0])) * 100
@@ -171,7 +246,8 @@ class LiveSampler:
         first = self._sbegin is None
         sess = hm.sessions_end(self._sbegin or hm.sessions_begin(), not first, False)
         self._sbegin = hm.sessions_begin()
-        self._slow = dict(apps=apps[:12], cons=hm.cgroup_consumers(8), sessions=sess, apps_measured=adt > 0)
+        self._links = phys_links(read_wifi_rate())               # nmcli 호출이 있어 느린 항목과 같은 주기로
+        self._slow = dict(links=self._links, apps=apps[:12], cons=hm.cgroup_consumers(8), sessions=sess, apps_measured=adt > 0)
         self._slow_t = t0
         self._slow_ms = (time.monotonic() - ts) * 1000
         self.slow_every = max(self.base_slow_every, self._slow_ms / 1000 * 10)    # 느린 항목이 느려질수록(바쁜 호스트) 드물게 잰다(CPU 약 10% 이하)
@@ -306,19 +382,57 @@ def render_io(s, w):
         t.append(f"{'-' if v is None else format(v, '.0f') + '%':>4} ")
         if (i + 1) % per_row == 0 or i == len(cores) - 1:
             t.append("\n")
-    t.append("\n 네트워크(수신/송신)")
-    if s["net"]:
-        for k, (rx, tx) in sorted(s["net"].items(), key=lambda kv: -(kv[1][0] + kv[1][1]))[:4]:
-            t.append(f"\n  {fit(k, 13)}{human_bytes(rx, True):>12} / {human_bytes(tx, True):<12}")
-    else:
+    t.append("\n 네트워크 — 링크 속도 대비(수신↓ 송신↑)")
+    links = s.get("links", {})
+    net = s["net"]
+    # 링크 속도를 아는 물리 NIC 는 늘 보이고, 속도를 모르는 인터페이스(브리지·tap·내려간 NIC 등)는 지금 트래픽이 있는 것만 상위 2개
+    busy = sorted((k for k in net if k not in links and net[k][0] + net[k][1] >= 1024), key=lambda k: -(net[k][0] + net[k][1]))[:2]
+    shown = sorted((k for k in net if k in links), key=lambda k: -(net[k][0] + net[k][1])) + busy
+    for k in shown:
+        rx, tx = net[k]
+        ln = links.get(k)
+        t.append(f"\n  {k}" + (f"  {ln['kind']} 링크 {ln['mbps']:g} Mbit/s" + ("*" if ln["kind"] == "Wi-Fi" else "") if ln else "  (링크 속도 정보 없음 — 가상·미연결)"), style="bold" if ln else "grey62")
+        t.append("\n")
+        cap = ln["mbps"] * 125000 if ln else None            # Mbit/s → 바이트/초
+        t.append_text(_rate_line("↓", rx, cap, w))
+        t.append_text(_rate_line("↑", tx, cap, w))
+    if any(links.get(k, {}).get("kind") == "Wi-Fi" for k in shown):
+        t.append("\n  * Wi-Fi: AP 표기 최대 속도(실제 링크는 신호에 따라 낮음)", style="grey50")
+    if not net:
         t.append("\n  -", style="grey50")
-    t.append("\n 디스크(읽기/쓰기)")
+    t.append("\n 디스크 — 표기 순차 최대(없으면 PCIe 링크 상한) 대비(읽기/쓰기)")
+    info = s.get("disk_info", {})
     if s["disk"]:
         for k, (rd, wr) in sorted(s["disk"].items(), key=lambda kv: -(kv[1][0] + kv[1][1]))[:3]:
-            t.append(f"\n  {fit(k, 13)}{human_bytes(rd, True):>12} / {human_bytes(wr, True):<12}")
+            di = info.get(k, {})
+            sp_r, sp_w, link = di.get("read"), di.get("write"), di.get("link")
+            if sp_r:
+                cap_r, cap_w, basis = sp_r, sp_w, f"표기 R {sp_r / 1e6:g}/W {sp_w / 1e6:g} MB/s"
+            elif link:
+                cap_r = cap_w = link
+                basis = f"PCIe 링크 상한 {link / 1e6:,.0f} MB/s(표기치 미등록)"
+            else:
+                cap_r = cap_w = None
+                basis = "(표기·링크 정보 없음 — % 없음)"
+            t.append(f"\n  {k}  {di.get('name') or di.get('model') or ''}  {basis}", style="bold" if cap_r else "grey62")
+            t.append("\n")
+            t.append_text(_rate_line("읽기", rd, cap_r, w))
+            t.append_text(_rate_line("쓰기", wr, cap_w, w))
     else:
         t.append("\n  -", style="grey50")
     return t
+
+
+def _rate_line(label, rate, cap, w):
+    """`    ↓   8.5 KiB/s ██░░░░  0.1%` 한 칸(Text) — cap(바이트/초)이 있으면 막대와 %, 없으면 속도만. 칸 폭은 박스 폭(w)의 절반."""
+    half = max(24, (w - 2) // 2)
+    txt = Text(f"    {label} {human_bytes(rate, True):>11} ")
+    if cap:
+        frac = rate / cap
+        txt.append(pg.hbar(min(frac, 1.0), max(4, min(10, half - cell_len(txt.plain) - 7))), style=pct_style(frac * 100, 50, 85))
+        txt.append(f" {frac * 100:4.1f}%" if frac >= 0.001 else " <.1% ")
+    txt.append(" " * max(half - cell_len(txt.plain), 0))
+    return txt
 
 
 def render_top(s, w):
