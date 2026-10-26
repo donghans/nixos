@@ -135,9 +135,10 @@ def overview(conn):
 # 합계가 필요한 토큰·비용은 요청 단위인 usage_events 로만 센다(messages 의 usage 는 resume/fork 로 이중 계산되므로 쓰지 않는다 — schema.sql 참고).
 # 한계: usage_events 는 OTel 수집을 켠 시점부터만 있다(coverage() 로 시작 시각을 화면에 보인다).
 BUCKETS = {"hour": "시간", "day": "일", "week": "주", "month": "월"}
-BREAKDOWNS = {"model": "모델", "repo": "저장소", "host": "머신", "source": "출처", "effort": "effort"}
+BREAKDOWNS = {"model": "모델", "repo": "저장소", "account": "계정", "host": "머신", "source": "출처", "effort": "effort"}
 _BREAK_SQL = {"model": "coalesce(u.model, '(모름)')", "repo": "coalesce(s.repo_url, '(저장소 없음)')", "host": "u.host",
-              "source": "coalesce(u.query_source, '(모름)')", "effort": "coalesce(u.effort, '(모름)')"}
+              "source": "coalesce(u.query_source, '(모름)')", "effort": "coalesce(u.effort, '(모름)')",
+              "account": "coalesce(u.account_email, u.account_id, '(계정 불명)')"}      # 요청별 계정(OTel user.email) — 수집 전·원본 없는 기록은 「(계정 불명)」
 
 
 def local_tz() -> str:
@@ -208,7 +209,7 @@ def limit_windows(conn, *, days=None, host=None, last=48):
 
 
 def usage_breakdown(conn, by="model", *, days=None, repo=None, host=None, model=None):
-    """분류(모델·저장소·머신·출처·effort)별 합계(비용 큰 순)와 전체 합계. 반환: (행 목록, 합계 dict)."""
+    """분류(모델·저장소·계정·머신·출처·effort)별 합계(비용 큰 순)와 전체 합계. 반환: (행 목록, 합계 dict)."""
     if by not in _BREAK_SQL:
         raise ValueError(f"by 는 {'|'.join(_BREAK_SQL)} 중 하나")
     where, args = _usage_where(days, repo, host, model)

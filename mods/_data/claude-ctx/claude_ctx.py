@@ -2,6 +2,7 @@
 """donghans — Claude Code 대화·사용량 공유 저장소(Postgres) 클라이언트.
 
   donghans ctx hook <이벤트>        훅에서 호출(stdin = 훅 JSON). 실패해도 조용히 끝난다(Claude 입력을 막지 않는다).
+  backfill-accounts [--apply] [--file 경로]   OTel 원본으로 usage_events 의 계정(account_id·email)을 채운다(기본 dry-run, 건수만)
   ingest [--days N|--all] [--no-otel]   트랜스크립트·OTel·한도 기록을 따라잡는다(오프셋 기반, 여러 번 돌려도 안전).
   search <검색어> [--repo URL|--here] [--role user|assistant] [--days N] [--limit N]
   recent [--repo URL|--here] [--limit N]   최근 세션 목록
@@ -238,6 +239,63 @@ def ingest_transcript(conn, path):
         return len(rows)
 
 
+def backfill_accounts(conn, path=None, apply=False):
+    """OTel 원본(events.jsonl)의 요청별 계정(`user.account_uuid`·`user.email`)으로 `usage_events.account_id/email` 이 NULL 인 행을 채운다.
+    apply=False 면 쓰지 않고 건수만 센다. 반환 dict(read=원본 api_request 수, with_account=계정이 있는 수, matched=DB 에 있고 NULL 이던 행 수, updated=갱신한 행 수, accounts={uuid: 건수}).
+    원본은 이 호스트의 것이라 다른 호스트가 올린 행은 request_id 가 없어 matched 에 안 잡힌다."""
+    path = path or os.path.join(OTEL, "events.jsonl")
+    res = dict(read=0, with_account=0, matched=0, updated=0, accounts={})
+    if not os.path.isfile(path):
+        return res
+    batch = []
+    def flush():
+        if not batch:
+            return
+        ids = [b[0] for b in batch]
+        null_ids = {r[0] for r in conn.execute("SELECT request_id FROM usage_events WHERE request_id = ANY(%s) AND account_id IS NULL", (ids,)).fetchall()}
+        todo = [b for b in batch if b[0] in null_ids]
+        res["matched"] += len(todo)
+        if apply and todo:
+            cur = conn.cursor()
+            cur.executemany("UPDATE usage_events SET account_id=%s, account_email=%s WHERE request_id=%s AND account_id IS NULL", [(b[1], b[2], b[0]) for b in todo])
+            res["updated"] += len(todo)
+        batch.clear()
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for l in f:
+            try:
+                d = json.loads(l)
+            except Exception:
+                continue
+            for rl in d.get("resourceLogs", []):
+                for sl in rl.get("scopeLogs", []):
+                    for r in sl.get("logRecords", []):
+                        if (r.get("body") or {}).get("stringValue") != "claude_code.api_request":
+                            continue
+                        a = {x["key"]: next(iter(x["value"].values()), None) for x in r.get("attributes", [])}
+                        if not a.get("request_id"):
+                            continue
+                        res["read"] += 1
+                        if a.get("user.account_uuid"):
+                            res["with_account"] += 1
+                            res["accounts"][a["user.account_uuid"]] = res["accounts"].get(a["user.account_uuid"], 0) + 1
+                            batch.append((a["request_id"], a["user.account_uuid"], a.get("user.email")))
+                            if len(batch) >= 2000:
+                                flush()
+    flush()
+    if apply:
+        conn.commit()
+    return res
+
+
+def cmd_backfill_accounts(a):
+    with connect() as c:
+        r = backfill_accounts(c, a.file, apply=a.apply)
+    print(f"원본 api_request {r['read']:,}건 중 계정이 있는 것 {r['with_account']:,}건 · DB 에서 계정이 비어 있던 일치 행 {r['matched']:,}건" + (f" → {r['updated']:,}건 갱신" if a.apply else " (dry-run — 쓰려면 --apply)"))
+    for k, v in sorted(r["accounts"].items(), key=lambda kv: -kv[1]):
+        print(f"  계정 {k[:8]}…  {v:,}건")
+    return 0
+
+
 def transcript_family(path):
     """본 트랜스크립트 + 서브에이전트 기록."""
     base = path[:-6] if path.endswith(".jsonl") else path
@@ -273,11 +331,11 @@ def ingest_otel(conn):
                                 rows.append(dict(rid=a["request_id"], host=HOST, ts=a.get("event.timestamp"), sid=a.get("session.id"), pid=a.get("prompt.id"),
                                                  model=a.get("model"), it=i("input_tokens"), ot=i("output_tokens"), cr=i("cache_read_tokens"),
                                                  cc=i("cache_creation_tokens"), cost=f("cost_usd"), dur=i("duration_ms"), qs=a.get("query_source"),
-                                                 eff=a.get("effort"), spd=a.get("speed")))
+                                                 eff=a.get("effort"), spd=a.get("speed"), acct=a.get("user.account_uuid"), email=a.get("user.email")))
                 if rows:
                     cur.executemany("""INSERT INTO usage_events (request_id, host, ts, session_id, prompt_id, model, input_tokens, output_tokens,
-                        cache_read_tokens, cache_create_tokens, cost_usd, duration_ms, query_source, effort, speed)
-                        VALUES (%(rid)s,%(host)s,%(ts)s,%(sid)s,%(pid)s,%(model)s,%(it)s,%(ot)s,%(cr)s,%(cc)s,%(cost)s,%(dur)s,%(qs)s,%(eff)s,%(spd)s)
+                        cache_read_tokens, cache_create_tokens, cost_usd, duration_ms, query_source, effort, speed, account_id, account_email)
+                        VALUES (%(rid)s,%(host)s,%(ts)s,%(sid)s,%(pid)s,%(model)s,%(it)s,%(ot)s,%(cr)s,%(cc)s,%(cost)s,%(dur)s,%(qs)s,%(eff)s,%(spd)s,%(acct)s,%(email)s)
                         ON CONFLICT (request_id) DO NOTHING""", rows)
                 cur.execute("""INSERT INTO ingest_state (host, path, byte_offset) VALUES (%s,%s,%s)
                                ON CONFLICT (host, path) DO UPDATE SET byte_offset=excluded.byte_offset, updated_at=now()""", (INGEST_HOST, p, new))
@@ -988,6 +1046,7 @@ def main():
     top = ap.add_subparsers(dest="group", required=True)
     ctx = top.add_parser("ctx", help="대화·사용량 공유 저장소").add_subparsers(dest="cmd", required=True)
     p = ctx.add_parser("hook"); p.add_argument("event"); p.set_defaults(f=cmd_hook)
+    p = ctx.add_parser("backfill-accounts", help="OTel 원본(events.jsonl)으로 usage_events 의 계정 열을 채운다(기본 dry-run)"); p.add_argument("--apply", action="store_true"); p.add_argument("--file"); p.set_defaults(f=cmd_backfill_accounts)
     p = ctx.add_parser("ingest"); p.add_argument("--days", type=int, default=2); p.add_argument("--all", action="store_true"); p.add_argument("--no-otel", action="store_true"); p.set_defaults(f=cmd_ingest)
     p = ctx.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.set_defaults(f=cmd_search)
     p = ctx.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.set_defaults(f=cmd_recent)

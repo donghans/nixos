@@ -268,6 +268,35 @@ try:
     import re as _re
     check("SQL 정규식과 Python 정규식 판별이 모든 프롬프트에서 일치(자동·알 수 없는 태그)", all(bool(_re.search(cd.AUTO_RE, t)) == a and bool(_re.search(cd.UNKNOWN_RE, t)) == u for t, a, u in rows) and len(rows) > 12, str(len(rows)))
     check("알 수 없는 태그 건수가 요약에 잡힘(<foo bar>)", cd.session_summary(conn)["unknown_tags"] == 1)
+    # --- 계정별 비용(요청별 계정 열) + 백필
+    base_unk = {r["key"]: r["cost"] for r in cd.usage_breakdown(conn, "account", repo="alpha")[0]}.get("(계정 불명)", 0.0)     # 앞선 시험이 남긴 계정 없는 행
+    for rid, acct, email, cost in (("acc-1", "uuidA", "a@x.test", 1.0), ("acc-2", "uuidA", "a@x.test", 2.0), ("acc-3", "uuidB", "b@x.test", 4.0), ("acc-4", None, None, 8.0)):
+        conn.execute("INSERT INTO usage_events (request_id, host, ts, session_id, model, cost_usd, account_id, account_email) VALUES (%s,'h1','2026-10-12T01:00:00Z','gggg0101','m',%s,%s,%s)", (rid, cost, acct, email))
+    conn.commit()
+    brk, tot = cd.usage_breakdown(conn, "account", repo="alpha")
+    bk = {r["key"]: r["cost"] for r in brk}
+    check("분류별 계정: 이메일별 합계와 (계정 불명) 행(NULL)이 따로 나옴", bk.get("a@x.test") == 3.0 and bk.get("b@x.test") == 4.0 and abs(bk.get("(계정 불명)") - (base_unk + 8.0)) < 1e-9, str(bk))
+    check("분류별 계정: 비용 큰 순", [r["cost"] for r in brk] == sorted((r["cost"] for r in brk), reverse=True), str([(r["key"], r["cost"]) for r in brk]))
+    check("BREAKDOWNS 에 계정이 있고 g 순환 대상", "account" in cd.BREAKDOWNS and cd.BREAKDOWNS["account"] == "계정")
+    # 백필: 원본(events.jsonl)으로 NULL 행만 채운다
+    import tempfile
+    otel = os.path.join(tempfile.mkdtemp(prefix="otel-"), "events.jsonl")
+    def rec(rid, acct, email):
+        attrs = [{"key": "request_id", "value": {"stringValue": rid}}] + ([{"key": "user.account_uuid", "value": {"stringValue": acct}}, {"key": "user.email", "value": {"stringValue": email}}] if acct else [])
+        return json.dumps({"resourceLogs": [{"scopeLogs": [{"logRecords": [{"body": {"stringValue": "claude_code.api_request"}, "attributes": attrs}]}]}]})
+    with open(otel, "w") as f:
+        f.write("\n".join([rec("acc-4", "uuidC", "c@x.test"), rec("acc-1", "uuidZ", "z@x.test"), rec("nope-1", "uuidC", "c@x.test"), rec("acc-x", None, None), "깨진 줄"]) + "\n")
+    dry = cc.backfill_accounts(conn, otel)
+    check("백필 dry-run: 원본 api_request 4건 중 계정 3건, DB 에서 계정이 비어 있던 일치 행은 acc-4 한 건, 아무것도 쓰지 않음", dry["read"] == 4 and dry["with_account"] == 3 and dry["matched"] == 1 and dry["updated"] == 0
+          and conn.execute("SELECT account_id FROM usage_events WHERE request_id='acc-4'").fetchone()[0] is None, str(dry))
+    done = cc.backfill_accounts(conn, otel, apply=True)
+    check("백필 apply: NULL 이던 행만 갱신(이미 계정이 있는 acc-1 은 그대로), 원본에 없는 요청은 건드리지 않음", done["updated"] == 1 and conn.execute("SELECT account_id, account_email FROM usage_events WHERE request_id='acc-4'").fetchone() == ("uuidC", "c@x.test")
+          and conn.execute("SELECT account_id FROM usage_events WHERE request_id='acc-1'").fetchone()[0] == "uuidA", str(done))
+    check("백필 재실행은 멱등(갱신 0건)", cc.backfill_accounts(conn, otel, apply=True)["updated"] == 0)
+    check("백필: 원본 파일이 없으면 0건(예외 없음)", cc.backfill_accounts(conn, "/nonexistent-zzz")["read"] == 0)
+    conn.execute("DELETE FROM usage_events WHERE request_id LIKE 'acc-%'")
+    conn.commit()
+
     check("delete_secret", cd.delete_secret(conn, "ANTHROPIC_KEY") == 1 and cd.delete_secret(conn, "ANTHROPIC_KEY") == 0)
     conn.close()
 finally:

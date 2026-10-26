@@ -472,6 +472,7 @@ class CtxUI(uikit.HelpMixin, App):
         ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침)'),
         ('치환(m)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
         ('제한 모드', 'LLM 세션이 실행하면: 모든 탭을 볼 수 있지만 화면의 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(키 형식·password=·한글 비밀번호)이 [protected] 로 치환되고(끌 수 없음), 후보 미리보기도 [protected](N자)로 가려지며, 값 보기(v)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용된다'),
+        ('비용', 'Claude Code(OpenTelemetry)가 요청마다 보고한 cost_usd 의 합이다. 구독에서 실제 청구액과 같은지는 확인하지 못했다(청구액이라고 단정하지 말 것). 계정별은 요청마다 찍힌 계정(OTel user.email) 기준이고, 수집 전이거나 원본이 없는 기록은 「(계정 불명)」으로 따로 보인다. 한도 그래프는 계정 단위라 저장소·모델 필터가 걸리지 않는다'),
         ('필터 키', '검색 탭: F2 사용자 발언만 · F3 정규식 · F4 도구 메시지 포함 · F6 제목만 · Space 세션 펼침 · x 모두 펼침. 대시보드: p 기간 · b 단위 · g 분류 · o 정렬 · c 필터 지움'),
         ('자동 메시지', 'Claude Code 가 사람 대신 남기는 메시지(작업 알림·명령 출력·시스템 알림 등, `<태그>` 로 시작)는 흐린 배지+한 줄 요약으로 접혀 보이고 통계 프롬프트 수·사용자 발언 검색·대조에서 빠진다. 스킬 호출(/이름)·셸 입력·붙여넣기는 사람이 한 것이라 포함. 대화 화면 i: 자동 메시지 숨김/표시'),
         ('세션 기준 검색', '검색은 늘 전체 대화를 대상으로 하되 결과를 세션 단위로 묶어 보여 준다(제목·일치 건수·가장 최근 일치). Enter 는 그 세션 대화를 열고, Space 로 펼치면 일치한 메시지들이 아래에 나온다. F6 제목만은 세션 제목(첫 프롬프트)에 일치한 세션만 남긴다'),
@@ -959,7 +960,9 @@ class CtxUI(uikit.HelpMixin, App):
         for r in brk:
             share = r["cost"] / tot["cost"] if tot["cost"] else 0
             tb.add_row(short_repo(r["key"]) if self.stat_by == "repo" else r["key"], f"{r['requests']:,}", f"${r['cost']:,.2f}", f"{share:6.1%}", fmt_num(r["output"]))
-        self.query_one("#stat-break").border_title = f"{cd.BREAKDOWNS[self.stat_by]}별 — {len(brk)}개 (g: 분류 바꾸기)"
+        unk = next((r for r in brk if r["key"] == "(계정 불명)"), None) if self.stat_by == "account" else None
+        self.query_one("#stat-break").border_title = (f"{cd.BREAKDOWNS[self.stat_by]}별 — {len(brk)}개 (g: 분류 바꾸기)"
+                                                      + (f" · 계정 불명 {unk['cost'] / tot['cost']:.0%}" if unk and tot["cost"] else ""))
         t = Text()
         t.append(f"세션 {summ['sessions']:,}개 · 프롬프트 {int(summ['prompts']):,} · 도구 호출 {int(summ['tools']):,} · 비용 ${summ['cost']:,.2f}\n", style="bold")
         n = max(summ["sessions"], 1)

@@ -143,6 +143,12 @@ Claude Code 는 사람이 치지 않은 것(작업 알림 `<task-notification>`,
 - **바꾸지 않은 곳(의도)**: `handoff draft`·`donghans-resume` 의 사용자 메시지 수집은 이미 `<` 로 시작하는 모든 메시지를 빼서 더 엄격하다. 비밀 후보 탐지(`_scan_rows`)는 종류를 가리지 않는 것이 맞다. `hostmetrics.ctx_last_chat`(사용자 입력 시각)은 같은 자동 태그 집합으로 거르도록 고쳤다(패턴 복제, 정본은 `ctxdata.py`).
 - **한계**: 유니코드 공백·BOM 으로 시작하는 메시지는 사람으로 둔다. 사람이 `<task-notification>` 같은 태그로 시작하는 글을 직접 붙이면 자동으로 오분류될 수 있다(펼치면 원문). 읽기 시점 정규식이라 전체 스캔 — 실측 14만 메시지에서 개요 1.3초·세션 통계 0.6초(열 추가는 필요해지면 사용자와 상의).
 
+### 계정별 비용 (2026-10-26)
+OTel `claude_code.api_request` 이벤트에는 요청마다 `user.account_uuid`·`user.email` 이 항상 있다(실측: 15,341건 중 누락 0). 수집(`ingest_otel`)이 이를 `usage_events.account_id`·`account_email` 에 남기고, 대시보드 「분류별」에서 `g` 로 「계정」을 고르면 이메일별 비용이 나온다(세션 도중 계정이 바뀌어도 요청 단위라 맞다). **세션→계정 추정(`limit_samples` 최빈 계정)은 쓰지 않는다** — 세션 중 계정이 바뀐 사례가 있어 틀린 합계를 만든다.
+- **과거 행 백필**: `donghans ctx backfill-accounts`(기본 dry-run — 원본 건수·DB 에서 비어 있던 일치 행 수만 보임) → `--apply` 로 `usage_events` 에서 `account_id IS NULL` 인 행만 채운다(이미 계정이 있는 행·원본에 없는 요청은 그대로, 재실행해도 멱등). 원본(`~/.local/share/claude-otel/events.jsonl`)은 **그 호스트의 것**이라 다른 호스트(노트북 등)의 과거분은 그 호스트에서 따로 돌려야 하고, 못 채운 행은 「(계정 불명)」으로 따로 보이며 분류별 제목에 그 비율이 적힌다.
+- 한도 그래프는 계정 단위라 저장소·모델 필터가 걸리지 않는다. 비용은 Claude Code 가 보고한 `cost_usd` 의 합이며 구독에서 실제 청구액과 같은지는 확인하지 못했다(화면 도움말 「비용」).
+- 설계·검증 이력과 남은 제안(저장소별 표 비용 열 등): `_plan/ctxui-cost-dashboard.md`.
+
 ### 쓰는 법
 ```bash
 donghans secret add NAS_PW            # 터미널에서 숨겨 입력(평문 저장, 대화에 안 남음)

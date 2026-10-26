@@ -100,6 +100,11 @@ ALTER TABLE limit_samples ADD COLUMN IF NOT EXISTS account_plan text;   -- 계�
 ALTER TABLE limit_samples ADD COLUMN IF NOT EXISTS five_hour_resets_at timestamptz;
 ALTER TABLE limit_samples ADD COLUMN IF NOT EXISTS seven_day_resets_at timestamptz;
 CREATE INDEX IF NOT EXISTS limit_samples_acct ON limit_samples (account_id, ts DESC);
+-- 4: 요청별 계정 — OTel api_request 이벤트에 user.account_uuid·user.email 이 항상 있어 수집 시점에 정확히 남긴다(세션 도중 계정이 바뀌어도 맞음).
+--    이전 행은 `donghans ctx backfill-accounts` 로 OTel 원본(events.jsonl)에서 채운다. 원본이 없는 호스트의 과거 행은 NULL(계정 불명).
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS account_id text;
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS account_email text;
+CREATE INDEX IF NOT EXISTS usage_account ON usage_events (account_id, ts DESC);
 
 -- 인수인계: 머신이 달라도 resume 할 수 있게 문서를 DB 에도 둔다(저장소는 repo_url 로 식별)
 CREATE TABLE IF NOT EXISTS handoffs (
