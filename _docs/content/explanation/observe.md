@@ -232,3 +232,26 @@ Netdata 의 "앱 그룹" 개념을 우리 시스템에 맞게 가져왔다(`obse
 - 묶는 규칙: 커널 스레드 → `kernel` · Nix 래퍼 이름 정리(`.claude-wrapped` → `claude`) · 알려 둔 계열(netdata+플러그인, vivaldi+도우미, nix 계열, hyprland 계열, kitty, tailscaled, waybar) · **Electron 은 맨 위 프로세스의 `app.asar` 경로(Nix 저장소 이름)로 앱을 정함**(예: `bitwarden-desktop`; 도우미 zygote·renderer·gpu 가 같은 앱으로 묶임) · 그 밖에는 정리한 이름 그대로. 명령줄은 asar 경로만 보고 저장하지 않는다. 실행 파일을 못 읽는 보호된 프로세스는 comm 으로 보강한다.
 - 사용: `observectl top --by app`, `observectl explain` 의 "프로세스·앱" 섹션(앱 단위 표 + 기준 대비 변화 순위는 앱 CPU 로). v3 이하 표본에는 `apps` 가 없어 옛 표(상위 16행)로 대체한다.
 - 한계: 규칙 표에 없는 앱은 정리한 프로세스 이름으로 나온다(필요하면 `observe_apps.RULES` 에 추가). 맵이 아니라 30초 구간의 합계라 짧은 사건은 흐림.
+
+## 규칙적 반복 활동 · 서비스 워커 `browser periodic|sw` (2026-10-26)
+
+배경: 첫째 프로필 Vivaldi 의 1Password 확장이 서비스 워커를 **60초마다 5초 동안 34% CPU** 로 깨우고 있었는데(장부 #133·#134), `browser bursts`(30% 이상이 15초 폴 2번 연속)는 평균 약 11% 로 보여 **못 잡았다**. 낮은 강도로 규칙적인 활동은 폭주 기준에 안 걸린다.
+- `observectl browser sw [--seconds N]`: 브라우저 프로세스의 `ServiceWorker` 스레드 CPU(/proc 의 스레드 이름만 읽음, 디버깅 포트 불필요) + 포트가 있으면 **확장별 서비스 워커 시작 횟수**(ServiceWorker 도메인 이벤트, 확장 ID 앞 12자만). 분당 1 근처로 일정하면 확장의 알람이 깨우는 것.
+- `observe-browser` 감시기: 15초 폴의 합계 CPU·서비스 워커 스레드 CPU 를 30분 창(120폴)에 두고 5분마다 자기상관(`find_period`)으로 **반복 주기**를 찾아 `browser.periodic` 이벤트로 남긴다(같은 종류는 1시간에 한 번). `observectl browser periodic` 로 본다. 조건: 표준편차 1%p 이상, 3회 이상 반복, 상관 0.6 이상.
+- 한계: 15초 폴이라 그보다 짧은 주기는 못 본다. 주기 활동이 아주 짧고 낮으면 표준편차 기준 아래다(그땐 `browser sw` 로 직접). 어떤 확장인지는 ID 로 chrome://extensions 에서 확인(이름은 올리지 않는다).
+
+## 호스트 간 교차 확인 `fleet` (2026-10-26)
+
+한 호스트의 기록만으로는 「정상인가」를 모른다 — 같은 앱이 노트북에서만 높거나 한쪽에만 설치된 확장이 있으면 시험 전에 후보가 된다(1Password 는 데스크톱에 없는 확장이었다). 공유 저장소(`claude_ctx` Postgres, `donghans ctx` 와 같은 서버·접속 규칙)에 **요약만** 올려 비교한다(`observe_fleet.py`, 표는 `claude-ctx/schema.sql` 의 `observe_app_hourly`·`observe_power_hourly`·`observe_ext_inventory`).
+- 올리는 것: 시간별 앱 평균 CPU·자발 문맥 전환(그 시간 전체 표본으로 나눈 평균), 시간별 평균 psys·pkg, 브라우저 확장 설치 목록(프로필 **폴더 이름**·확장 ID·버전·서비스 워커 유무). **원본 표본·프로세스 목록·창 제목·주소·확장 이름은 올리지 않는다.**
+- `observectl fleet push [--since 26h]` — 이 호스트 요약을 올린다(멱등: 같은 시간·앱은 덮어씀). user 타이머 `observe-fleet-push` 가 6시간마다 부른다. 서버에 못 붙으면 **조용히 넘기지 않고** 실패로 알린다.
+- `observectl fleet compare <호스트> [--host 기준] [--days 3]` — 기준 호스트에서 상대보다 높은 앱(차이 0.3%p 이상이면서 3배↑ 이거나 상대에 없음). 사용 패턴이 다른 호스트라 높다고 바로 문제는 아니다 — 후보를 가리는 용도.
+- `observectl fleet inventory` — 한 호스트에만 있는 확장(★ = 백그라운드 서비스 워커 있음 = 주기 활동 후보).
+- `observectl fleet hosts` — 올라온 호스트와 기간.
+- 한계: 시간별 평균이라 짧은 폭주는 흐려지고, 호스트마다 수집 수준(노트북 기본 꺼짐)이 달라 표본 수가 다르다(가중 평균으로 맞춤). 새 기기는 `claude-ctx.nix` 의 `allowedClients` 에 있어야 접속된다. 표 생성은 서버 호스트에서 `nixup`(스키마 서비스)이 해야 한다.
+
+## 측정 틀 보강 (2026-10-26)
+- `observectl ab`: 구간 시작 직후 표본(앞 2개)이 나머지보다 1.4배·0.3 W 이상 높으면 「안정화 부족 의심」 경고(`settle_suspects`). Vivaldi 시험에서 안정화 직후 첫 창이 전 조건 6~10 W 로 튀었다.
+- `abab_lib.sh`: `ABAB_LOCK_CMD=examples/input_lock.sh` 로 시험 중 터치패드·키보드를 잠그고 끝·중단·실패에 푼다(풀 때 `hypr-input-policy` 로 사용자 정책 복원). 잠금 자체의 전력 영향은 안 보였다(장부 #128).
+- `verify` 지침: 조건을 건 API 의 응답이 아니라 효과를 보는 독립 신호로 확인한다(`chrome.management.setEnabled(false)` 는 「꺼짐」이라 답했지만 서비스 워커는 계속 돌았다, 장부 #133).
+
