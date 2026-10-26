@@ -434,6 +434,8 @@ def cmd_fleet(a):
         fl.write_state(fl.record(st, now, True, rows=f"앱 {na}·전력 {npw}·확장 {ni}"))
         extra = f" · 밀렸던 {pending / 3600:.1f}시간 포함" if pending and pending > 8 * 3600 else ""
         print(f"{me}: 앱 {na}행 · 전력 {npw}행 · 확장 {ni}개 올림(시작 {core.hms(since)}){extra}")
+        if fl.LAST_SKIPPED:
+            print(f"  (인사이트 표 {', '.join(fl.LAST_SKIPPED)} 가 서버에 아직 없어 건너뜀 — 서버 호스트에서 nixup 하면 생김. 기본 요약은 올라갔고 이 부분은 다음 올리기에 포함됨)")
     elif a.what == "changes":
         apps = fl.fetch_apps_hourly(conn, a.days)
         ch = [r for r in fl.fetch_changes(conn, a.days) if r[3] == "nixup"]

@@ -296,8 +296,10 @@ def render_io(s, w):
     t = Text()
     cores = s["cores"]
     t.append(f" CPU {s['cpu']['count']}스레드 — 평균 " + ("-" if s["cpu"]["busy_pct"] is None else f"{s['cpu']['busy_pct']:.0f}%") + f" · load {s['cpu']['load'][0]:.1f}\n", style="bold")
-    bw = 8
-    per_row = max(1, (w - 2) // (bw + 11))
+    per_row = 2 if len(cores) <= 4 else 4                  # 듀얼·쿼드 같은 적은 코어는 2열, 그 이상은 4열
+    while per_row > 1 and (w - 2) // per_row - 9 < 4:     # 칸 하나 = 번호 4 + 막대 + 값 4 + 공백 — 막대가 4칸도 못 나오면 열을 줄인다
+        per_row //= 2
+    bw = max(4, min(12, (w - 2) // per_row - 9))
     for i, v in enumerate(cores):
         t.append(f" {i:>2} ", style="grey62")
         t.append(pg.hbar((v or 0) / 100, bw), style=pct_style(v or 0, 50, 85) if v is not None else "grey35")

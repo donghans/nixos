@@ -268,6 +268,9 @@ def record(st, now, ok, rows=None, error=None):
 
 
 # ------------------------------------------------------------------ 올리기
+LAST_SKIPPED = []      # 마지막 push 에서 표가 없어 건너뛴 인사이트 표 이름
+
+
 def push(conn, hostname, app_rows, power_rows, inv, extra=None):
     """멱등 올리기. 같은 (호스트, 시각, 앱)은 덮어쓴다(부분 시간이 다음 올리기에 채워짐). 확장 목록은 호스트별로 통째로 교체한다."""
     with conn.cursor() as cur:
@@ -281,20 +284,34 @@ def push(conn, hostname, app_rows, power_rows, inv, extra=None):
             cur.execute("DELETE FROM observe_ext_inventory WHERE host = %s", (hostname,))
             cur.executemany("INSERT INTO observe_ext_inventory (host, browser, profile, ext_id, version, has_sw) VALUES (%s, %s, %s, %s, %s, %s)",
                             [(hostname, e["browser"], e["profile"], e["ext_id"], e["version"], e["has_sw"]) for e in inv])
-        ex = extra or {}
-        if ex.get("focus"):
-            cur.executemany("INSERT INTO observe_focus_hourly (host, hour, app, seconds) VALUES (%s, to_timestamp(%s), %s, %s) ON CONFLICT (host, hour, app) DO UPDATE SET seconds = EXCLUDED.seconds",
-                            [(hostname, h, a, s) for h, a, s in ex["focus"]])
-        if ex.get("changes"):
-            cur.executemany("INSERT INTO observe_changes (host, t0, t1, kind, detail, status) VALUES (%s, to_timestamp(%s), to_timestamp(%s), %s, %s, %s) "
-                            "ON CONFLICT (host, t0, kind) DO UPDATE SET t1 = EXCLUDED.t1, detail = EXCLUDED.detail, status = EXCLUDED.status",
-                            [(hostname, a, b, k, d, st) for a, b, k, d, st in ex["changes"]])
-        if ex.get("periodic"):
-            cur.executemany("INSERT INTO observe_periodic (host, t, series, period_s, corr, burst_pct, mean_pct) VALUES (%s, to_timestamp(%s), %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
-                            [(hostname, t, s, p, c, b, m) for t, s, p, c, b, m in ex["periodic"]])
-        if ex.get("units") is not None:
-            cur.execute("DELETE FROM observe_units WHERE host = %s", (hostname,))
-            cur.executemany("INSERT INTO observe_units (host, scope, unit) VALUES (%s, %s, %s)", [(hostname, sc, u) for sc, u in ex["units"]])
+    # 교차 호스트 인사이트용 표(schema v5)는 서버가 아직 nixup 전이면 없을 수 있다 — 그래도 기본 요약(앱·전력·확장)은 올라가야 하므로 표별로 세이브포인트에 담아 없으면 건너뛴다
+    LAST_SKIPPED.clear()
+    ex = extra or {}
+    jobs = [("focus", "observe_focus_hourly", "INSERT INTO observe_focus_hourly (host, hour, app, seconds) VALUES (%s, to_timestamp(%s), %s, %s) ON CONFLICT (host, hour, app) DO UPDATE SET seconds = EXCLUDED.seconds",
+             lambda r: (hostname, r[0], r[1], r[2])),
+            ("changes", "observe_changes", "INSERT INTO observe_changes (host, t0, t1, kind, detail, status) VALUES (%s, to_timestamp(%s), to_timestamp(%s), %s, %s, %s) ON CONFLICT (host, t0, kind) DO UPDATE SET t1 = EXCLUDED.t1, detail = EXCLUDED.detail, status = EXCLUDED.status",
+             lambda r: (hostname, r[0], r[1], r[2], r[3], r[4])),
+            ("periodic", "observe_periodic", "INSERT INTO observe_periodic (host, t, series, period_s, corr, burst_pct, mean_pct) VALUES (%s, to_timestamp(%s), %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+             lambda r: (hostname, r[0], r[1], r[2], r[3], r[4], r[5]))]
+    for key, table, sql, mk in jobs:
+        if not ex.get(key):
+            continue
+        try:
+            with conn.transaction(), conn.cursor() as cur:
+                cur.executemany(sql, [mk(r) for r in ex[key]])
+        except Exception as e:
+            if type(e).__name__ != "UndefinedTable":
+                raise
+            LAST_SKIPPED.append(table)
+    if ex.get("units") is not None:
+        try:
+            with conn.transaction(), conn.cursor() as cur:
+                cur.execute("DELETE FROM observe_units WHERE host = %s", (hostname,))
+                cur.executemany("INSERT INTO observe_units (host, scope, unit) VALUES (%s, %s, %s)", [(hostname, sc, u) for sc, u in ex["units"]])
+        except Exception as e:
+            if type(e).__name__ != "UndefinedTable":
+                raise
+            LAST_SKIPPED.append("observe_units")
     conn.commit()
     return len(app_rows), len(power_rows), len(inv or [])
 

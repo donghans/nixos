@@ -58,6 +58,12 @@ check("render 판정: 두 축·OOM 까지 여유·새 작업 수용 가이드가
 check("render 압박: avg60 과 메모리 대기 주체 줄", "avg60" in lv.render_pressure(s1).plain and "대기 주체" in lv.render_pressure(s1).plain)
 check("render 메모리: 보수적 값과 MemAvailable 두 값을 모두 보임", "보수적" in lv.render_mem(s1, 60).plain and "MemAvailable" in lv.render_mem(s1, 60).plain)
 check("render 첫 표본에서도 예외 없음", all(len(f(s0, 60).plain) > 5 for f in (lv.render_mem, lv.render_io, lv.render_top)))
+def _core_lines(n, w=60):
+    return [l for l in lv.render_io(dict(s1, cores=[10.0] * n), w).plain.splitlines()[1:] if l.strip() and "%" in l][:8]
+
+
+check("코어 열 수: 4코어 이하는 2열, 그 위는 4열(16코어 → 4줄)", len(_core_lines(4)) == 2 and len(_core_lines(8)) == 2 and len(_core_lines(16)) == 4 and _core_lines(16)[0].count("%") == 4 and _core_lines(2)[0].count("%") == 2)
+check("코어 열 수: 폭이 좁으면 열을 줄여도 줄이 폭을 넘지 않음", all(len(l) <= 40 for l in _core_lines(16, 40)))
 check("human_bytes", lv.human_bytes(None) == "-" and lv.human_bytes(1536 * 1024, True) == "1.5 MiB/s" and lv.human_bytes(12) == "12 B")
 
 # --- Textual 앱
