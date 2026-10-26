@@ -21,7 +21,7 @@ import procscan as ps
 
 # (코드, 이름 글롭 리스트, 설명) — 소프트 보호. 이름은 comm·exe·app 중 하나라도 일치하면 해당.
 SOFT = [
-    ("desktop", ["hyprland", "start-hyprland", "uwsm*", "waybar", "hypridle", "hyprlock", "hyprpaper", "hyprcursor", "swaync*"], "컴포지터·패널"),
+    ("desktop", pg.DESKTOP, "데스크톱 환경(소유 뷰의 「내 환경」과 같은 목록)"),
     ("vm-container", pg.VM_CONTAINER, "VM·컨테이너 데몬"),
     ("nix", ["nix", "nix-*", "nixos-rebuild*", "nixup*", "rnixup*", "nom", "home-manager*"], "nix 빌드·배포"),
     ("infra", ["sshd*", "systemd*", "(sd-pam)", "dbus-*", "pipewire*", "wireplumber", "observe*", "usageui", "procui"], "세션 인프라·관측 수집기"),

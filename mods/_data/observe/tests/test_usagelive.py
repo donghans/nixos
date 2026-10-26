@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """usageui 실시간 탭 시험: 샘플러(변화율·느린 항목 주기·세션 ctx 미호출·비용), 표시 조각, Textual 앱(탭 진입 때만 타이머, 이탈 때 정지, 포커스 상실 때 멈춤, 간격 자동 증가)."""
-import asyncio, os, sys, tempfile, time
+import asyncio, os, re, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 TMP = tempfile.mkdtemp(prefix="usagelive-test-")
 os.environ["OBSERVE_DATA_DIR"] = os.path.join(TMP, "var"); os.environ["OBSERVE_STATE_DIR"] = os.path.join(TMP, "state")
@@ -19,7 +19,7 @@ sm = lv.LiveSampler(slow_every=0.5)
 s0 = sm.sample()
 check("첫 표본: measured=False, 구간 값은 None, 판정은 계산됨", s0["measured"] is False and s0["rates"]["pswpin"] is None and hm.verdict(s0)[0] in ("여유", "주의", "압박", "심각"))
 check("첫 표본: 느린 항목(앱·cgroup·세션)이 이미 채워짐, 앱 CPU 는 아직 미측정", {"apps", "cons", "sessions"} <= set(s0) and s0["apps_measured"] is False)
-time.sleep(0.6)
+time.sleep(sm.slow_every + 0.1)      # 느린 항목을 재는 데 걸린 시간에 비례해 주기가 늘어나므로(바쁜 호스트 보호) 갱신된 주기만큼 기다린다
 s1 = sm.sample()
 check("둘째 표본: measured=True, 변화율 숫자, 코어별 사용률 리스트(코어 수와 같음)", s1["measured"] and s1["rates"]["pswpin"] >= 0 and len(s1["cores"]) == os.cpu_count() and all(v is None or 0 <= v <= 100.5 for v in s1["cores"]))
 check("둘째 표본: 느린 주기(0.5s)가 지나 앱 CPU 가 측정됨", s1["apps_measured"] is True and s1["apps"] and all(a["cpu"] >= 0 for a in s1["apps"]))
@@ -59,7 +59,10 @@ check("human_bytes", lv.human_bytes(None) == "-" and lv.human_bytes(1536 * 1024,
 
 # --- Textual 앱
 import usagedata as ud, usageui
-from textual.widgets import TabbedContent
+from textual.widgets import Static, TabbedContent
+
+def status_text(app):
+    return str(app.query_one("#status", Static).render())
 
 def active(app):
     """보이는 화면 이름 — 1번 탭 안의 실시간 쪽이면 'live', 기록 쪽이면 'dashboard', 그 밖은 바깥 탭 이름."""
@@ -98,9 +101,25 @@ async def drive():
         await pilot.press("6"); await pilot.pause(1.5)
         check("앱: 다시 6 으로 오면 재개", app._timer is not None and app.sampler._t > t_stop)
         app.live_sec = 1.0
-        app.live_sample = dict(app.live_sample, cost_ms=800.0)
-        app._live_draw(app.live_sample)
-        check("앱: 한 번 재는 시간이 길면(800ms) 간격을 자동으로 늘림(≥4초)", app.live_sec >= 4.0)
+        base = dict(app.live_sample)
+        app._live_draw(dict(base, fast_ms=20.0, slow_ms=900.0, cost_ms=920.0))
+        check("앱: 느린 항목(PSS 순회 등)만 오래 걸려도(900ms) 갱신 간격은 그대로 1초(예전엔 4초로 굳었음)", app.live_sec == 1.0)
+        app._live_draw(dict(base, fast_ms=800.0, slow_ms=100.0, cost_ms=900.0))
+        check("앱: 빠른 표본 자체가 느리면(800ms) 간격을 늘림(≥4초)", app.live_sec >= 4.0)
+        app._live_draw(dict(base, fast_ms=20.0, slow_ms=100.0, cost_ms=120.0))
+        check("앱: 다시 빨라지면 간격이 1초로 되돌아감", app.live_sec == 1.0)
+        check("앱: 실시간 화면의 상태줄은 표본 시각·갱신 간격·r/Tab 안내이고 기록 범위 문구는 없음", "실시간 · 표본" in status_text(app) and "r 지금 갱신" in status_text(app) and "범위" not in status_text(app) and "비교 기준" not in status_text(app))
+        check("앱: 판정 박스에 표본 시각(HH:MM:SS)이 보임", re.search(r"표본 \d\d:\d\d:\d\d", app.query_one("#lverdict")._text.plain) is not None)
+        check("앱: 실시간 화면에서는 범위(t)·튄 순간(s)·비교 기준(v)·저장(e) 동작이 막히고 r·Tab 은 열려 있음", all(app.check_action(a, ()) is False for a in ("set_range", "spikes", "cycle_baseline", "export")) and app.check_action("reload", ()) is True and app.check_action("sub_toggle", ()) is True)
+        called = []
+        app.reload = lambda: called.append("history reload")
+        app.action_reload()
+        check("앱: 실시간 화면에서 r 은 기록 재조회가 아니라 지금 한 번 더 재기", called == [])
+        await pilot.press("tab"); await pilot.pause(0.6)
+        check("앱: 기록 화면으로 가면 범위·튄 순간·비교 기준 동작이 다시 열리고 상태줄이 데이터 기준 문구로 돌아옴", app.check_action("set_range", ()) is True and "실시간 · 표본" not in status_text(app) and ("데이터 기준" in status_text(app) or "불러오는" in status_text(app)), status_text(app))
+        app.action_reload()
+        check("앱: 기록 화면에서 r 은 기록 재조회", called == ["history reload"])
+        await pilot.press("tab"); await pilot.pause(0.5)
         app._live_stop()
 async def narrow():
     app = usageui.UsageUI(ud.preset("1시간", time.time()), tab="live")

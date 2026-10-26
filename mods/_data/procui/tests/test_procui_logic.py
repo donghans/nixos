@@ -90,6 +90,7 @@ code = lambda p, c=pc: {x for x, _ in pa.protect_reasons(p, c)}
 check("보호: PID 1·조상(12 = 13 의 부모)·자기 자신·커널·다른 UID 는 하드", {"pid1", "other-uid"} <= code(fp[0]) and "self" in code(fp[3]) and "self" in code(fp[4]) and "kernel" in code(fp[6]) and "other-uid" in code(fp[5]))
 check("보호: 소프트(데스크톱·VM·LLM 세션) 이름 판정, 일반 앱은 없음", "desktop" in code(fp[1]) and "vm-container" in code(fp[5]) and "llm-session" in code(fp[3]) and code(fp[2]) == set())
 check("보호: nix·세션 인프라·관측 수집기", "nix" in code(fake(comm="nixos-rebuild", app="nixos-rebuild", exe="nixos-rebuild")) and "infra" in code(fake(comm="sshd", app="sshd")) and "infra" in code(fake(comm="observe-collector", app="observe-collector")))
+check("보호(데스크톱)는 소유 뷰의 「내 환경」 목록(pg.DESKTOP)과 같은 이름 집합 — 그룹은 내 환경인데 보호가 안 되는 불일치가 없음", all("desktop" in code(fake(comm=n.replace("*", "x"), exe=n.replace("*", "x"), app=n.replace("*", "x"))) for n in pg.DESKTOP))
 pcu = pa.PCtx(fp, extra=prot, self_pid=13, me=1000)
 check("보호: 사용자 [protect] 규칙(app/comm 글롭)", "user" in code(fp[2], pcu) and "user" in code(fake(comm="mytool-x", app="mytool-x"), pcu) and "user" not in code(fp[2], pc))
 check("보호: 뷰 규칙을 바꿔도(hyprland 를 '내 작업'으로 분류) 보호는 그대로", pg.classify(dict(name="t", default="내 작업", rules=[]), fp[1], fc) == "내 작업" and "desktop" in code(fp[1]))

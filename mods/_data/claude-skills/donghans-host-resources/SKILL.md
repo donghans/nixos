@@ -54,7 +54,7 @@ python3 -I ~/.claude/skills/donghans-host-resources/scripts/hostres.py --json   
 - **buff/cache 의 정체**: tmpfs(`/tmp`·`/dev/shm`)와 VM·컨테이너 공유메모리(`Shmem`)는 사실상 사용 중인 메모리다(`MemAvailable` 은 처음부터 Shmem 을 회수 가능으로 세지 않으므로 거기서 또 빼면 이중 차감). tmpfs 사용량은 스왑에 나간 몫을 포함해 Shmem 보다 클 수 있다.
 - **변화율/s**: `/proc/vmstat` 의 pswpin·pswpout·pgmajfault·workingset_refault_file·allocstall 증가량 ÷ 초. 누적값은 부팅 이후 합이라 현재 압박의 증거가 아니다.
 - **소비자 상위**: cgroup 의 anon+shmem 에서 하위 cgroup 몫을 뺀 「자기 몫」. incus VM 은 `incus.service` 로 잡힌다.
-- **최근 이력(스파크라인)**: 칸당 5분(기본), 왼쪽 과거 → 오른쪽 지금. 호스트 PSI·가용 메모리·스왑은 Netdata(127.0.0.1:19999, **유효 보존 약 4일** — 그 앞은 공백이라 0 으로 채워지니 해석 금지)에서 읽는다.
+- **최근 이력(스파크라인)**: 칸당 5분(기본), 왼쪽 과거 → 오른쪽 지금. 호스트 PSI·가용 메모리·스왑은 Netdata(127.0.0.1:19999, **유효 이력이 2026-10-22 이후로 짧았다** — 그 앞은 공백이라 0 으로 채워지니 해석 금지)에서 읽는다.
 - **LLM 세션**: claude 등 세션 프로세스와 자식 트리별 — 작동중/대기와 그 시각(`~/.claude/sessions/<pid>.json`), 마지막 사용자 입력·응답 시각(transcript, 못 찾으면 공유 ctx 저장소 `[ctx 보충]`, 접속 실패는 「못 쟀음」), 서브에이전트 실행·완료, 세션이 띄운 자식 프로세스(이름별 개수·PSS·최장 가동, 명령줄은 읽지 않음), PSS·CPU·가동 시간(유휴 세션 CPU 는 20초 평균 0.7~1% 가 평상시). 세션이 아닌 claude 프로세스(Vivaldi 의 `--chrome-native-host`)는 한 줄로 따로. **Docker 컨테이너·incus VM 은 데몬 소속이라 세션 아래에 안 잡힌다** — 어느 세션이 띄웠는지는 이 표로 알 수 없고 추정이면 추정이라고 적는다.
 
 ## 새 호스트에 쓸 때 (다른 워크스테이션·NVMe 가 아닌 곳)

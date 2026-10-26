@@ -155,7 +155,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     BINDINGS = [
         Binding("q", "quit", "종료"),
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('apps')", "앱"), Binding("3", "tab('cause')", "원인"),
-        Binding("4", "tab('system')", "시스템"), Binding("5", "tab('help')", "용어"), Binding("6", "tab('live')", "실시간", show=False), Binding("tab", "sub_toggle", "기록↔실시간", priority=True),
+        Binding("4", "tab('system')", "시스템"), Binding("5", "tab('help')", "용어"), Binding("6", "tab('live')", "실시간 화면(별칭)", show=False), Binding("tab", "sub_toggle", "기록↔실시간", priority=True),
         Binding("t", "set_range", "범위"), Binding("s", "spikes", "튄 순간"), Binding("escape", "restore", "원래 범위", show=False), Binding("v", "cycle_baseline", "비교 기준"),
         Binding("r,f5", "reload", "새로고침"), Binding("b", "btop", "btop"), Binding("e", "export", "저장"),
         *uikit.HelpMixin.HELP_BINDINGS,
@@ -336,7 +336,22 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
 
     # --- 데이터: 수동 갱신만(타이머 없음)
     def action_reload(self):
-        self.reload()
+        if self._live_visible():
+            self._live_tick()               # 실시간 화면에서 r = 지금 한 번 더 재기(기록 재조회가 아님)
+        else:
+            self.reload()
+
+    def _live_visible(self):
+        try:
+            return self.query_one("#tabs", TabbedContent).active == "dashboard" and self.query_one("#dsub", TabbedContent).active == "live"
+        except Exception:
+            return False
+
+    def check_action(self, action, parameters):
+        """실시간 화면에서는 범위·튄 순간·비교 기준·저장(기록 화면 전용)을 푸터에서 숨기고 막는다."""
+        if action in ("set_range", "spikes", "cycle_baseline", "export") and self._live_visible():
+            return False
+        return True
 
     @work(thread=True, exclusive=True, group="load")
     def reload(self):
@@ -385,6 +400,8 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             self._status(uv.freshness(v))
 
     def _status(self, msg):
+        if self._live_visible() and self.live_sample:       # 실시간 화면에서는 기록 상태줄(데이터 기준·범위·비교 기준)이 맞지 않으니 덮어쓰지 않는다
+            return
         v = self.view
         extra = ""
         if v:
@@ -456,14 +473,14 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         sub.active = "dash-hist" if sub.active == "live" else "live"
 
     def on_tabbed_content_tab_activated(self, ev):
-        try:
-            seen = self.query_one("#tabs", TabbedContent).active == "dashboard" and self.query_one("#dsub", TabbedContent).active == "live"
-        except Exception:
-            seen = False
+        seen = self._live_visible()
         if seen:
             self._live_start()
         else:
             self._live_stop()
+            if self.view:
+                self._status(uv.freshness(self.view))      # 기록 화면의 상태줄(데이터 기준 시각·범위)로 되돌림
+        self.refresh_bindings()
         if self.view and ev.pane.id in ("cause", "system"):
             self._lazy_worker(ev.pane.id)
 
@@ -500,9 +517,13 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         for panel in self.query("#live Panel"):
             panel.build()
             panel.refresh()
-        # 한 번 재는 데 걸린 시간이 간격의 20% 를 넘으면 간격을 늘려 UI 가 샘플링에 묻히지 않게 한다
-        need = round(s["cost_ms"] / 1000 * 5, 1)
-        if self._timer is not None and need > self.live_sec:
+        if self._live_visible():
+            self.query_one("#status", Static).update(
+                f" 실시간 · 표본 {time.strftime('%H:%M:%S', time.localtime(s['t']))} · 갱신 {self.live_sec:.1f}초(이 화면이 보일 때만) · 표본 비용 {s['fast_ms']:.0f} ms"
+                f"(느린 항목 {s['slow_ms']:.0f} ms 는 {self.sampler.slow_every:.0f}초마다) · r 지금 갱신 · Tab 기록 화면")
+        # 갱신 간격 조절: 느린 항목을 뺀 한 번 재는 시간의 5배(= CPU 20% 이하)를 0.5초 단위로 맞춘다. 늘어난 뒤에도 바빠진 게 풀리면 1초로 되돌아간다
+        need = max(self.LIVE_SEC, round(s["fast_ms"] / 1000 * 5 * 2) / 2)
+        if self._timer is not None and abs(need - self.live_sec) >= 0.5:
             self.live_sec = need
             self._timer.stop()
             self._timer = self.set_interval(self.live_sec, self._live_tick)

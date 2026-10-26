@@ -114,7 +114,8 @@ class LiveSampler:
     이미 재는 중이면 기다리지 않고 None 을 돌려준다 — 느린 첫 표본 중에 타이머가 겹쳐 직전 표본·시각이 뒤섞이는 것을 막는다."""
 
     def __init__(self, slow_every=5.0):
-        self.slow_every = slow_every
+        self.slow_every = self.base_slow_every = slow_every
+        self._slow_ms = 0.0
         self._b = None
         self._t = None
         self._net = self._disk = self._cores = None
@@ -149,15 +150,20 @@ class LiveSampler:
                       for i, c in enumerate(cores)]
         self._cores = cores
         s["meminfo"] = hm.meminfo()
-        if self._slow_t is None or t0 - self._slow_t >= self.slow_every:
+        refreshed = self._slow_t is None or t0 - self._slow_t >= self.slow_every
+        if refreshed:
             self._refresh_slow(t0)
         s.update(self._slow)
         s["measured"] = measured
         self._t = t0
+        s["t"] = time.time()                                    # 표본 시각 — 화면에 보여 낡은 값을 알아보게 한다
         s["cost_ms"] = (time.monotonic() - t0) * 1000
+        s["slow_ms"] = self._slow_ms
+        s["fast_ms"] = max(s["cost_ms"] - (self._slow_ms if refreshed else 0), 0)   # 느린 항목을 새로 잰 표본이면 그 몫을 뺀 값 — 갱신 간격 조절은 이 값으로 한다
         return s
 
     def _refresh_slow(self, t0):
+        ts = time.monotonic()
         adt = (t0 - self._apps_t) if self._apps_t else 0
         apps, self._ticks = proc_apps(self.resolver, self._ticks, adt, self.hz)
         self._apps_t = t0
@@ -166,6 +172,8 @@ class LiveSampler:
         self._sbegin = hm.sessions_begin()
         self._slow = dict(apps=apps[:12], cons=hm.cgroup_consumers(8), sessions=sess, apps_measured=adt > 0)
         self._slow_t = t0
+        self._slow_ms = (time.monotonic() - ts) * 1000
+        self.slow_every = max(self.base_slow_every, self._slow_ms / 1000 * 10)    # 느린 항목이 느려질수록(바쁜 호스트) 드물게 잰다(CPU 약 10% 이하)
 
 
 # ---------- 표시 조각(Text) ----------
@@ -188,7 +196,7 @@ def render_verdict(s):
     t = Text(" ")
     t.append(f" {lv} ", style=LEVEL_STYLE.get(lv, "bold") + " reverse")
     t.append(f"  속도 {hm.NAMES[ax['speed'][0]]} · 용량 {hm.NAMES[ax['capacity'][0]]}", style="grey70")
-    t.append(f"  구간 {s['window_s']}s" + ("" if s["measured"] else " (첫 표본)"), style="grey50")
+    t.append(f"  구간 {s['window_s']}s" + ("" if s["measured"] else " (첫 표본)") + (f" · 표본 {time.strftime('%H:%M:%S', time.localtime(s['t']))}" if s.get("t") else ""), style="grey50")
     for w in why[:3] or ["압박 징후 없음"]:
         t.append("\n  " + w, style="grey70")
     g = hm.capacity_guide(s)
@@ -266,7 +274,7 @@ def render_pressure(s):
     t.append("\n 스왑 되읽기 pswpin ")
     t.append("-" if r["pswpin"] is None else f"{r['pswpin']:.0f}/s", style="default")
     t.append("  pswpout " + ("-" if r["pswpout"] is None else f"{r['pswpout']:.0f}/s") + "  (정보 — 판정은 PSI·OOM 여유)", style="grey62")
-    t.append("\n PSI = 사용량이 아니라 '기다렸는가': some=일부 작업 대기, full=전부 대기. 판정은 지속(avg60) 기준", style="grey50")
+    t.append("\n PSI = 기다린 시간 비율(some 일부·full 전부). 판정은 avg60", style="grey50")
     return t
 
 
