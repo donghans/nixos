@@ -122,6 +122,15 @@ class NameInput(ModalScreen[str]):
 
 class DisplayUI(uikit.HelpMixin, App):
     TITLE = "화면 관리"
+    HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
+        ('화면 모드', '확장 / 미러 / 내장만 / 외부만 — Enter 로 바로 적용. m 으로 목록에 포커스'),
+        ('프리셋', '프리젠테이션 등 해상도 조합 — Enter 적용, S 저장, d 삭제'),
+        ('확인 시간', '적용하면 정해진 시간(기본 10초) 안에 확인하지 않으면 이전 구성으로 되돌린다 — 되지 않는 모드로 화면이 안 나와도 스스로 복구된다'),
+        ('모니터별 설정', 's 해상도 · r 주사율 · c 배율 · p 위치 · a 적용. 위치는 기준 모니터에 대한 상대 위치와 정렬'),
+    ]
+    HELP_NOTES = [
+        'q·Esc 로 종료. r 은 새로고침이 아니라 주사율이다(새로고침은 F5)',
+    ]
     ENABLE_COMMAND_PALETTE = False  # 푸터의 ^p palette 안내 숨김 (clipui 와 같음, 쓰지 않음)
     # 색은 lazygit(mods/sys/utils/lazygit.nix) / clipui 와 같음: 비활성 테두리 #595959, 포커스 #33ccff, 선택 줄 #268bd2, 배경 검정.
     CSS = uikit.BASE_CSS + """

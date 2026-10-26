@@ -305,6 +305,17 @@ class Preview(TextArea):
 
 class ClipUI(uikit.HelpMixin, App):
     TITLE = "클립보드"
+    HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
+        ('검색', '퍼지 + 항목 내용 전체. 필터: app:이름 · >10k(크기) · is:sensitive · is:dup. Enter = 복사'),
+        ('체크·삭제', 'F2/Space 체크 · F3 전체 체크 · F4 해제 · F8(d) 삭제 — 체크한 항목을 일괄 삭제'),
+        ('정렬', 'F6: 최신순 · 크기순 · 많이 쓴 순 · 많이 복사된 순 · 오래된 순'),
+        ('미리보기', '전문 미리보기와 부분 복사. F7 로 켬/끔(창이 낮으면 자동으로 숨김)'),
+        ('부가 정보', '저장 시점의 시각·출처 앱·복사/사용 횟수(clipmeta 사이드카) — 기록을 시작하기 전에 복사된 항목은 「부가 정보 없음」'),
+        ('통계·최적화', 'F9 통계, F10 DB 최적화'),
+    ]
+    HELP_NOTES = [
+        '검색창이 기본 포커스라 q 는 글자로 들어간다 — 종료는 Esc(검색 지운 뒤) 또는 목록에서 q',
+    ]
     ENABLE_COMMAND_PALETTE = False  # 푸터의 ^p palette 안내 숨김 (쓰지 않음)
 
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
@@ -641,7 +652,7 @@ class ClipUI(uikit.HelpMixin, App):
         if isinstance(screen, ConfirmScreen):
             screen.dismiss(True)
             return
-        if isinstance(screen, (InfoScreen, StatsScreen)):
+        if isinstance(screen, (InfoScreen, StatsScreen, uikit.HelpScreen)):       # 도움말도 Enter 로 닫힌다(예전엔 우선순위 Enter 가 도움말에서 아무 일도 안 했다)
             screen.dismiss(None)
             return
         if isinstance(screen, ModalScreen):

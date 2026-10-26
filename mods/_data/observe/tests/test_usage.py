@@ -112,7 +112,7 @@ async def drive():
         n0 = app.view["loaded_at"]
         await pilot.press("r"); await pilot.pause(1.0)
         check("앱: r 로 새로고침하면 데이터 기준 시각이 갱신", app.view["loaded_at"] > n0)
-        for key, tab in (("2", "apps"), ("3", "cause"), ("4", "system"), ("5", "help"), ("1", "dashboard")):
+        for key, tab in (("2", "apps"), ("3", "cause"), ("4", "system"), ("1", "dashboard")):
             await pilot.press(key); await pilot.pause(0.5)
             check(f"앱: {key} 키로 {tab} 탭", app.query_one("#tabs", TabbedContent).active == tab)
         await pilot.press("2"); await pilot.pause(0.5)

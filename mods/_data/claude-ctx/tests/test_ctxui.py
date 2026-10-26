@@ -406,9 +406,52 @@ async def run():
         check("1: 개요로 돌아옴", app.current_tab() == "overview")
 
 
+async def run_restricted():
+    """제한 모드(LLM 세션): 열람 제한 정보(비밀·후보)는 열리지도 읽히지도 않고 치환이 고정되며 비밀·지침 수정이 막히되, 나머지는 쓸 수 있다."""
+    with cc.connect() as c:
+        cs.add_secret(c, "RESTRICT_PW", "literal", PW, replace=True)
+        n_secrets = len(cs.load_secrets(c, only_enabled=False))
+    app = ctxui.CtxUI(restricted=True)
+    async with app.run_test(size=(160, 50)) as pilot:
+        await settle(pilot, lambda: rows(app, "#projects") == 3)
+        check("제한: 개요는 정상 로드(저장소 3곳)", rows(app, "#projects") == 3 and app.restricted)
+        tabs = [str(app.query_one("#tabs").get_tab(n).label) for n in ("secrets", "cands")]
+        check("제한: 비밀·후보 탭 라벨에 [제한] 표시", all("[제한]" in t for t in tabs), tabs)
+        check("제한: 상태줄에 제한 모드 안내", "제한 모드" in txt(app.query_one("#sstate")))
+        for key in ("4", "5"):
+            await pilot.press(key); await pilot.pause(0.5)
+            check(f"제한: {key} 키로 비밀·후보 탭을 열 수 없음(개요에 머묾)", app.current_tab() == "overview")
+        app.query_one("#tabs").active = "secrets"; await pilot.pause(0.6)
+        check("제한: 마우스·코드로 비밀 탭을 열어도 개요로 되돌아가고 비밀 표는 비어 있음(데이터를 읽지 않음)", app.current_tab() == "overview" and rows(app, "#secrets-table") == 0)
+        app.query_one("#tabs").active = "cands"; await pilot.pause(0.6)
+        check("제한: 후보 탭도 같고 후보 탐지(스캔)가 돌지 않음", app.current_tab() == "overview" and app.cand_rows == {} and rows(app, "#cands-table") == 0)
+        await pilot.press("m"); await pilot.pause(0.3)
+        check("제한: m 으로 치환을 끌 수 없고 마스커가 여전히 비밀을 가림", app.mask is True and PW not in app.masker().text(f"비번 {PW}") and "[protected]" in app.masker().text(f"비번 {PW}"))
+        for fn in ("action_secret_add", "action_secret_delete", "action_secret_toggle", "action_reveal", "action_cand_ignore"):
+            getattr(app, fn)(); await pilot.pause(0.15)
+        with cc.connect() as c:
+            after = len(cs.load_secrets(c, only_enabled=False))
+        check("제한: 비밀 추가·삭제·끄기·값 보기·후보 무시가 모두 막힘(대화상자 없음, 등록 수 불변, 값 미표시)", not isinstance(app.screen, ctxui.PromptScreen) and not isinstance(app.screen, ctxui.ConfirmScreen) and after == n_secrets and not app._reveal, (after, n_secrets))
+        await pilot.press("6"); await pilot.pause(0.5)
+        check("제한: 통계 탭은 그대로 열림", app.current_tab() == "stats")
+        await pilot.press("7"); await pilot.pause(0.8)
+        it = app.query_one("#instr-table")
+        check("제한: 지침 탭 보기는 가능(목록이 보임)", app.current_tab() == "instr" and it.row_count >= 1)
+        check("제한: 지침 편집(edit_instr)은 편집기를 열지 않고 False", app.edit_instr("x", "y") is False)
+        await pilot.press("2"); await pilot.pause(0.4)
+        check("제한: 검색 탭은 그대로 열림", app.current_tab() == "search")
+    # 사람(제한 없음)은 이전과 같다 — 비밀 탭이 열림
+    app2 = ctxui.CtxUI()
+    async with app2.run_test(size=(160, 50)) as pilot:
+        await settle(pilot, lambda: rows(app2, "#projects") == 3)
+        await pilot.press("4"); await pilot.pause(0.8)
+        check("사람(제한 없음): 4 키로 비밀 탭이 열리고 라벨에 [제한] 없음", app2.current_tab() == "secrets" and "[제한]" not in str(app2.query_one("#tabs").get_tab("secrets").label) and not app2.restricted)
+
+
 try:
     seed()
     asyncio.run(run())
+    asyncio.run(run_restricted())
 finally:
     pg.stop()
 finish("ctxui")

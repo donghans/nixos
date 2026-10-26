@@ -3,11 +3,12 @@
 (f-string 의 :<n 은 글자 수 기준이라 한글 표가 어긋난다 — 실제 터미널 촬영에서 용어 탭·범례가 어긋난 것을 찾아 고쳤다.)"""
 import os, re, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE); DATA = os.path.dirname(ROOT)
-for p in (ROOT, os.path.join(DATA, "claude-skills", "donghans-host-resources", "scripts"), os.path.join(DATA, "procui"), os.path.join(DATA, "_testkit")):
+for p in (ROOT, os.path.join(DATA, "_uikit"), os.path.join(DATA, "claude-skills", "donghans-host-resources", "scripts"), os.path.join(DATA, "procui"), os.path.join(DATA, "_testkit")):
     sys.path.insert(0, p)
 from rich.cells import cell_len
 from rich.text import Text
 import usagelive as lv
+import uikit
 import usageview as uv
 import procscan as ps
 from harness import checker
@@ -40,9 +41,9 @@ fk = dict(s, apps_measured=True, apps=[dict(app="아주아주긴한글앱이름�
 w = 60
 T = [l for l in lv.render_top(fk, w).plain.splitlines() if "MiB" in l and "%" in l and "개" in l]
 check("상위 소비자: 앱 줄이 박스 폭(60칸)을 넘지 않고 개수 열이 같은 칸", T and all(cell_len(l) <= w for l in T) and len({col(l, "개") + 0 for l in T}) <= 2, [(cell_len(l), col(l, "개")) for l in T])
-# 용어 탭: 이름 칸이 맞고 설명 줄바꿈이 들여쓰기되며 어떤 줄도 폭을 넘지 않음
+# 도움말의 용어 절(예전 용어 탭): 이름 칸이 맞고 설명 줄바꿈이 들여쓰기되며 어떤 줄도 폭을 넘지 않음
 for width in (60, 100, 150):
-    G = uv.glossary_text(width, "키: 1~5 탭 · t 범위").plain.splitlines()
+    G = uikit.terms_text(uv.GLOSSARY, width).plain.splitlines()
     kw = max(cell_len(k) for k, _ in uv.GLOSSARY) + 2
     dw = max(20, width - kw - 2)
     starts, firsts = set(), []
@@ -50,10 +51,10 @@ for width in (60, 100, 150):
         ln = next((l for l in G if l.startswith(" " + k + " ")), None)
         if ln is not None:
             firsts.append(ln)
-            starts.add(col(ln, uv.wrap_cells(d, dw)[0]))
+            starts.add(col(ln, uikit.wrap_cells(d, dw)[0]))
     conts = [l for l in G if l.startswith(" " * (1 + kw)) and l.strip()]
-    check(f"용어 탭(폭 {width}): 항목마다 설명이 같은 칸(1+이름 칸)에서 시작, 줄바꿈 줄은 같은 칸으로 들여쓰기, 줄 길이 ≤ 폭", len(firsts) == len(uv.GLOSSARY) and starts == {1 + kw} and all(cell_len(l) <= width for l in G) and (width >= 100 or conts), (len(firsts), starts, max(cell_len(l) for l in G)))
-check("wrap_cells: 한글 폭 기준으로 끊고 빈 입력도 안전", all(cell_len(x) <= 10 for x in uv.wrap_cells("한글로 된 긴 문장을 열 칸 폭으로 줄바꿈 합니다", 10)) and uv.wrap_cells("", 10) == [""] or uv.wrap_cells("", 10) == [])
+    check(f"도움말 용어(폭 {width}): 항목마다 설명이 같은 칸(1+이름 칸)에서 시작, 줄바꿈 줄은 같은 칸으로 들여쓰기, 줄 길이 ≤ 폭", len(firsts) == len(uv.GLOSSARY) and starts == {1 + kw} and all(cell_len(l) <= width for l in G) and (width >= 100 or conts), (len(firsts), starts, max(cell_len(l) for l in G)))
+check("wrap_cells: 한글 폭 기준으로 끊고 빈 입력도 안전", all(cell_len(x) <= 10 for x in uikit.wrap_cells("한글로 된 긴 문장을 열 칸 폭으로 줄바꿈 합니다", 10)) and uikit.wrap_cells("", 10) == [""] or uikit.wrap_cells("", 10) == [])
 # 라벨-값 줄: 값이 칸을 넘어도 노트에 붙지 않음
 t = Text(); uv._line(t, "범위", "10-19 14:18 ~ 10-26 14:18", "7일 · 지금까지", lw=14, vw=14)
 check("라벨-값 줄: 값이 칸 폭을 넘어도 뒤에 한 칸 이상 띄움(「14:187일」 방지)", "14:18 7일" in t.plain, t.plain)

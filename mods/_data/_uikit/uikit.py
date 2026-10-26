@@ -4,12 +4,15 @@
   - PALETTE / BASE_CSS : 검정 배경, 둥근 회색 테두리(포커스 시 하늘색), 선택 줄 파랑, 하단 키 안내줄(Footer) 색
   - DIALOG_CSS         : 가운데 뜨는 대화상자(#dialog, #stats-box) 모양
   - `.box` 클래스      : btop 처럼 제목이 달린 테두리 칸(border_title). `box(widget, "제목")` 로 붙인다
-  - HelpScreen / HelpMixin : `?`(또는 F1)로 그 앱의 키 목록을 보여 주는 도움말(Binding 에서 자동 생성)
+  - HelpScreen / HelpMixin : `?`(또는 F1)로 **키 목록(Binding 에서 자동 생성) + 앱별 용어·사용법(HELP_TERMS) + 공통 종료 안내**를 한 화면에 보여 주는 도움말.
+                             앱마다 따로 두던 「용어」 탭은 여기로 합친다(모든 uikit 앱 공통 규칙)
+  - pad / wrap_cells / terms_text : 한글(2칸 폭) 기준 칸 맞춤·줄바꿈(f-string 의 :<n 은 글자 수라 한글 표가 어긋남)
   - PauseOnBlurMixin   : 창이 포커스를 잃으면 주기 갱신을 멈춘다(보이지 않는 화면 갱신이 PSR 을 방해하지 않도록)
 각 앱은 `CSS = uikit.BASE_CSS + (앱 고유 규칙 문자열)` 로 쓰고 같은 디렉터리(배포 시) 또는 ../_uikit(소스)에서 이 파일을 가져온다.
 """
 from __future__ import annotations
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual import events
 from textual.binding import Binding
@@ -42,6 +45,7 @@ DataTable:focus > .datatable--cursor { background: #268bd2; color: #ffffff; text
 DIALOG_CSS = """
 InfoScreen, StatsScreen, ConfirmScreen, BusyScreen, HelpScreen { align: center middle; }
 #dialog { width: 70%; max-width: 90; height: auto; background: #101010; border: round #33ccff; padding: 1 2; }
+#dialog.help { width: 92%; max-width: 124; max-height: 94%; }
 #stats-box { width: 90%; max-width: 120; height: 90%; background: #101010; border: round #33ccff; padding: 1 2; }
 #stats-scroll { height: 1fr; }
 #dialog-title { text-style: bold; padding-bottom: 1; }
@@ -59,6 +63,10 @@ def box(widget, title: str = "", subtitle: str = ""):
     return widget
 
 
+BUILTIN_DESC = {"Focus Next": "다음 칸으로 포커스", "Focus Previous": "이전 칸으로 포커스", "Copy selected text": "선택한 글자 복사(종료 아님)",
+                "Quit the app": "종료", "Command palette": "명령 팔레트"}    # Textual 기본 바인딩 설명을 한글로
+
+
 def binding_rows(bindings):
     """BINDINGS(리스트, Binding/튜플 혼합) → [(키 표시, 설명)] — 설명이 비었거나 중복된 줄은 건너뛴다."""
     rows, seen = [], set()
@@ -71,39 +79,101 @@ def binding_rows(bindings):
         if (keys, b.description) in seen:
             continue
         seen.add((keys, b.description))
-        rows.append((keys, b.description))
+        rows.append((keys, BUILTIN_DESC.get(b.description, b.description)))
     return rows
 
 
+def pad(s, n):
+    """칸 폭(한글 2칸) 기준으로 n 칸까지 공백을 채운다 — 이미 넘치면 뒤에 한 칸만 둔다(다음 열에 붙지 않게)."""
+    s = str(s)
+    return s + " " * max(1, n - cell_len(s))
+
+
+def wrap_cells(text, width):
+    """칸 폭 기준 줄바꿈 — 공백 단위로 끊고 width 칸을 넘기지 않는다(한 단어가 더 길면 그대로 둠)."""
+    lines, cur = [], ""
+    for word in str(text).split(" "):
+        cand = f"{cur} {word}" if cur else word
+        if not cur or cell_len(cand) <= width:
+            cur = cand
+        else:
+            lines.append(cur)
+            cur = word
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def terms_text(terms, width, key_style="#33ccff"):
+    """[(용어, 설명)] → 이름 칸을 칸 폭으로 맞추고 설명은 이름 칸만큼 들여써 줄바꿈한 Text. width = 쓸 수 있는 칸 수."""
+    if not terms:
+        return Text()
+    kw = min(max(cell_len(k) for k, _ in terms) + 2, 26)
+    dw = max(20, width - kw - 2)
+    t = Text()
+    for k, d in terms:
+        for i, line in enumerate(wrap_cells(d, dw)):
+            t.append(" " + (pad(k, kw) if i == 0 else " " * kw), style=key_style)
+            t.append(line + "\n")
+    return t
+
+
+COMMON_HELP = ("Ctrl+Q 어디서나 종료 · Ctrl+C 는 복사일 뿐 종료가 아님(누르면 안내만 뜸) · Ctrl+P 명령 팔레트 · "
+               "도움말 닫기: Esc · q · ? · F1 · Enter, 긴 도움말은 ↑↓ PgUp/PgDn 으로 스크롤")
+
+
 class HelpScreen(ModalScreen):
-    """키 목록 대화상자. 아무 키나 누르면 닫힌다."""
+    """도움말 대화상자: 키 목록 + (있으면) 앱별 메모·용어·사용법 + 공통 안내. Esc·q·?·F1·Enter 로 닫고 ↑↓ PgUp/PgDn 으로 스크롤한다(다른 키는 닫지 않는다)."""
     BINDINGS = [Binding("escape,q,enter,question_mark,f1", "close", "닫기")]
 
-    def __init__(self, title: str, rows):
+    def __init__(self, title: str, rows, terms=None, notes=None):
         super().__init__()
-        self._title, self._rows = title, rows
+        self._title, self._rows, self._terms, self._notes = title, rows, terms or [], notes or []
 
     def compose(self):
-        with VerticalScroll(id="dialog"):
-            yield Static(f"{self._title} — 키", id="dialog-title")
-            t = Text()
-            for keys, desc in self._rows:
-                t.append(f"{keys:<18}", style="#33ccff")
-                t.append(desc + "\n")
-            yield Static(t)
-            yield Static("아무 키나 누르면 닫힘", id="dialog-hint")
+        with VerticalScroll(id="dialog", classes="help"):
+            yield Static(f"{self._title} — 도움말", id="dialog-title")
+            yield Static("", id="help-keys")
+            yield Static("", id="help-terms")
+            yield Static("", id="help-common")
+            yield Static("Esc · q · ? · F1 · Enter 로 닫기  ·  ↑↓ PgUp/PgDn 스크롤", id="dialog-hint")
+
+    def on_mount(self):
+        width = max(50, min(114, int(self.app.size.width * 0.9) - 8))
+        kw = min(max([cell_len(k) for k, _ in self._rows] + [8]) + 2, 24)
+        t = Text(" 키\n", style="bold")
+        for keys, desc in self._rows:
+            t.append(" " + pad(keys, kw), style="#33ccff")
+            t.append(desc + "\n")
+        for n in self._notes:
+            for line in wrap_cells(n, width - 2):
+                t.append(" " + line + "\n", style="grey62")
+        self.query_one("#help-keys", Static).update(t)
+        if self._terms:
+            tt = Text("\n 용어 · 사용법\n", style="bold")
+            tt.append_text(terms_text(self._terms, width))
+            self.query_one("#help-terms", Static).update(tt)
+        c = Text("\n 공통\n", style="bold")
+        for line in wrap_cells(COMMON_HELP, width - 2):
+            c.append(" " + line + "\n", style="grey62")
+        self.query_one("#help-common", Static).update(c)
+        self.query_one("#dialog").focus()               # 스크롤 키가 바로 먹도록
 
     def action_close(self):
         self.dismiss()
 
 
 class HelpMixin:
-    """`?` / F1 로 도움말을 띄운다. App 에 섞어 쓰고 BINDINGS 에 `*HelpMixin.HELP_BINDINGS` 를 넣는다. 입력칸이 포커스일 땐 글자 입력이 우선이라 F1 만 동작."""
+    """`?` / F1 로 도움말을 띄운다. App 에 섞어 쓰고 BINDINGS 에 `*HelpMixin.HELP_BINDINGS` 를 넣는다. 입력칸이 포커스일 땐 글자 입력이 우선이라 F1 만 동작.
+    앱은 `HELP_TERMS = [(용어, 설명), …]`(용어 탭 대신 — 값의 뜻·검색 문법·개념)와 `HELP_NOTES = ["종료·Esc 규칙 같은 한두 줄", …]` 를 둘 수 있고, 함수 `help_terms()` 로 동적으로 줄 수도 있다."""
     HELP_BINDINGS = [Binding("question_mark,f1", "help", "도움말")]
+    HELP_TERMS: list = []
+    HELP_NOTES: list = []
 
     def action_help(self):
         rows = binding_rows(list(self.BINDINGS) + [b for sc in [self.screen] for b in getattr(sc, "BINDINGS", [])])
-        self.push_screen(HelpScreen(getattr(self, "TITLE", "도움말"), rows))
+        terms = self.help_terms() if hasattr(self, "help_terms") else self.HELP_TERMS
+        self.push_screen(HelpScreen(getattr(self, "TITLE", "도움말"), rows, terms, self.HELP_NOTES))
 
 
 class PauseOnBlurMixin:

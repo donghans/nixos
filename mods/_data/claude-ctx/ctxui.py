@@ -9,7 +9,8 @@
   6 통계   기간별 토큰·비용 추이(분류별 포함)와 세션 통계(시간대·요일 분포, 세션 표). 저장소·머신·모델·기간 필터   (Enter: 그 세션 대화)
   7 지침   프로젝트별 지침(공유 정본 project_instructions)을 모든 저장소에 대해 보고 고친다 — 로컬 캐시 없이 DB 만 대상   (Enter: 본문 · e: 편집기)
 
-원문(DB)은 바꾸지 않는다. 화면의 치환(m)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. 사람이 터미널에서 직접 쓰는 도구라 TTY 가 아니면 실행하지 않는다.
+원문(DB)은 바꾸지 않는다. 화면의 치환(m)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. TTY 가 없으면 실행하지 않는다.
+**제한 모드**: LLM 세션이 실행한 경우(환경 표식 — claude_ctx.AGENT_ENV_MARKERS) 열람 제한 정보만 뺀다 — 4 비밀·5 후보 탭은 열리지 않고(데이터도 읽지 않음), 치환(m)을 끌 수 없고, 비밀 추가·삭제·끄기·값 보기·후보 무시와 지침 편집은 막힌다. 개요·검색·대조·통계·지침 보기는 `donghans ctx` CLI 와 같은 범위(치환된 출력)라 그대로 쓴다.
 등록한 비밀은 `donghans ctx …` 출력과 `donghans secret run` 출력에서 치환되고, 로컬 트랜스크립트는 `donghans secret scrub` 으로 바꾼다.
 """
 from __future__ import annotations
@@ -446,6 +447,15 @@ class InstrScreen(ModalScreen):
 # ---------------------------------------------------------------- 앱
 class CtxUI(uikit.HelpMixin, App):
     TITLE = "ctxui — 공유 컨텍스트 관리"
+    HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
+        ('탭', '1 개요(저장소별 세션·메시지·용량) · 2 검색 · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 통계(토큰·비용 추이와 세션 통계) · 7 지침(프로젝트별 공유 지침)'),
+        ('치환(m)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
+        ('제한 모드', 'LLM 세션이 실행하면: 4 비밀·5 후보 탭이 열리지 않고(데이터도 읽지 않음), 치환을 끌 수 없고, 비밀·지침을 고칠 수 없다. 나머지는 `donghans ctx` CLI 와 같은 범위'),
+        ('필터 키', '검색 탭: F2 사용자 발언만 · F3 정규식 · F4 도구 메시지 포함. 통계 탭: p 기간 · b 단위 · g 분류 · o 정렬 · c 필터 지움'),
+    ]
+    HELP_NOTES = [
+        '종료는 q. Esc 는 목록으로 포커스를 돌린다',
+    ]
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
     PromptScreen, ConfirmScreen, SessionScreen { align: center middle; }
     TabbedContent { height: 1fr; }
@@ -487,8 +497,13 @@ class CtxUI(uikit.HelpMixin, App):
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
-    def __init__(self):
+    RESTRICTED_TABS = ("secrets", "cands")        # 제한 모드(LLM 세션)에서 열 수 없는 탭 — 비밀 목록·키처럼 보이는 문자열 후보
+
+    def __init__(self, restricted=False):
+        """restricted=True 는 LLM 세션이 실행한 경우: 열람 제한 정보(비밀·후보)는 보이지도 읽지도 않고, 치환을 끌 수 없고, 비밀·지침을 고치지 못한다.
+        나머지(개요·검색·대조·통계·지침 보기)는 `donghans ctx` CLI 와 같은 범위라 그대로 쓴다."""
         super().__init__()
+        self.restricted = restricted
         self.mask = True
         self.only_user = False
         self.regex = False
@@ -552,6 +567,10 @@ class CtxUI(uikit.HelpMixin, App):
         self.query_one("#stat-break", DataTable).add_columns("분류", "요청", "비용", "비중", "출력")
         self.query_one("#stat-sessions", DataTable).add_columns("최근", "머신", "저장소", "프롬프트", "도구", "턴시간", "비용", "모델", "첫 프롬프트")
         self.query_one("#instr-table", DataTable).add_columns("저장소", "이름", "rev", "수정 머신", "수정 시각", "길이")
+        if self.restricted:                                   # 제한 모드: 열 수 없는 탭을 라벨로 알린다
+            tabs = self.query_one("#tabs", TabbedContent)
+            for name, label in (("secrets", "4 비밀 [제한]"), ("cands", "5 후보 [제한]")):
+                tabs.get_tab(name).label = label
         self.update_state()
         self.reload_overview()
 
@@ -571,15 +590,29 @@ class CtxUI(uikit.HelpMixin, App):
     def flash(self, msg: str, severity="information"):
         self.notify(msg, severity=severity, timeout=5)
 
+    def deny(self, what="이 동작") -> bool:
+        """제한 모드면 안내하고 True(호출한 동작은 중단해야 한다)."""
+        if self.restricted:
+            self.flash(f"제한 모드(LLM 세션): {what} 은(는) 사람이 터미널에서 직접 실행할 때만 쓸 수 있습니다", "warning")
+        return self.restricted
+
     def action_tab(self, name: str):
+        if name in self.RESTRICTED_TABS and self.deny("비밀·후보 탭"):
+            return
         self.query_one("#tabs", TabbedContent).active = name
         self.call_after_refresh(self.action_focus_table)
         self.on_tab_shown(name)
 
     def on_tabbed_content_tab_activated(self, ev: TabbedContent.TabActivated):
+        if self.restricted and ev.pane.id in self.RESTRICTED_TABS:            # 마우스·방향키로 들어와도 데이터를 읽지 않고 개요로 되돌린다
+            self.deny("비밀·후보 탭")
+            self.query_one("#tabs", TabbedContent).active = "overview"
+            return
         self.on_tab_shown(ev.pane.id)
 
     def on_tab_shown(self, name: str):
+        if self.restricted and name in self.RESTRICTED_TABS:
+            return
         if name == "secrets":
             self.reload_secrets()
         elif name == "cands" and not self.cand_rows:
@@ -599,6 +632,8 @@ class CtxUI(uikit.HelpMixin, App):
             pass
 
     def action_toggle_mask(self):
+        if self.deny("치환 끄기(원문 보기)"):
+            return
         self.mask = not self.mask
         self.flash("치환 " + ("켜짐" if self.mask else "꺼짐 — 화면에 원문이 보입니다"), "information" if self.mask else "warning")
         self.update_state()
@@ -610,7 +645,7 @@ class CtxUI(uikit.HelpMixin, App):
 
     def update_state(self):
         self.query_one("#sstate", Static).update(
-            f"역할: {'사용자만' if self.only_user else '전체'} (F2)   ·   정규식: {'켜짐' if self.regex else '꺼짐'} (F3)   ·   도구 메시지: {'포함' if self.with_tools else '제외'} (F4)   ·   치환: {'켜짐' if self.mask else '꺼짐'} (m)")
+            f"역할: {'사용자만' if self.only_user else '전체'} (F2)   ·   정규식: {'켜짐' if self.regex else '꺼짐'} (F3)   ·   도구 메시지: {'포함' if self.with_tools else '제외'} (F4)   ·   치환: {'켜짐' if self.mask else '꺼짐'} (m)" + ("   ·   제한 모드(LLM 세션): 치환 고정 · 비밀/후보 탭 차단 · 비밀·지침 수정 불가" if self.restricted else ""))
 
     def action_toggle_role(self):
         self.only_user = not self.only_user
@@ -861,6 +896,8 @@ class CtxUI(uikit.HelpMixin, App):
         self.query_one("#instr-table").border_title = f"프로젝트 지침 {len(rows)}건(공유 정본) — Enter: 본문 · e: 편집기로 고치기"
 
     def edit_instr(self, repo: str, name: str) -> bool:
+        if self.deny("지침 고치기(`donghans instr set` 을 쓰세요)"):
+            return False
         """편집기($VISUAL·$EDITOR·vi)로 원문을 열고, 바뀌었으면 연 시점의 rev 를 기대값으로 DB 에 올린다. 거부(낡은 rev·비밀·빈 본문)는 사유를 알리고 저장하지 않는다. 저장되면 True."""
         with cc.connect(readonly=True) as c:
             got = cd.instr_raw(c, repo, name)
@@ -909,6 +946,8 @@ class CtxUI(uikit.HelpMixin, App):
             return None
 
     def action_secret_add(self):
+        if self.deny("비밀·후보 관리"):
+            return
         if self.current_tab() != "secrets":
             return
 
@@ -930,6 +969,8 @@ class CtxUI(uikit.HelpMixin, App):
         self.push_screen(PromptScreen("비밀 이름", "영문·숫자·_ (환경변수 이름이 됨)"), got_label)
 
     def action_secret_delete(self):
+        if self.deny("비밀·후보 관리"):
+            return
         key = self.selected_key("#secrets-table") if self.current_tab() == "secrets" else None
         if not key:
             return
@@ -943,6 +984,8 @@ class CtxUI(uikit.HelpMixin, App):
         self.push_screen(ConfirmScreen(f"'{key}' 을(를) 등록표에서 삭제할까요? (DB 원문은 그대로)"), done)
 
     def action_secret_toggle(self):
+        if self.deny("비밀·후보 관리"):
+            return
         if self.current_tab() == "instr" and len(self.screen_stack) == 1:
             key = self.selected_key("#instr-table")
             if key:
@@ -957,6 +1000,8 @@ class CtxUI(uikit.HelpMixin, App):
         self.reload_secrets()
 
     def action_reveal(self):
+        if self.deny("비밀·후보 관리"):
+            return
         tab = self.current_tab()
         if tab == "secrets":
             key = self.selected_key("#secrets-table")
@@ -1009,6 +1054,8 @@ class CtxUI(uikit.HelpMixin, App):
         self.push_screen(PromptScreen(f"이 후보({d['pattern']}, {len(d['value'])}자)의 이름", "영문·숫자·_ — 예: NAS_PW"), got)
 
     def action_cand_ignore(self):
+        if self.deny("비밀·후보 관리"):
+            return
         key = self.selected_key("#cands-table") if self.current_tab() == "cands" else None
         d = self.cand_rows.get(key or "")
         if not d:
@@ -1020,9 +1067,10 @@ class CtxUI(uikit.HelpMixin, App):
 
 
 def main():
-    if not (sys.stdin.isatty() and sys.stdout.isatty()) or cc.is_agent_session():
-        sys.exit("ctxui 는 사람이 터미널에서 직접 실행하는 도구입니다")
-    CtxUI().run()
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        sys.exit("ctxui 는 화면(TTY)이 있는 터미널에서만 실행합니다")
+    # LLM 세션이 실행하면(환경 표식) 제한 모드: 열람 제한 정보(비밀·후보)는 읽지도 보이지도 않고 치환을 끌 수 없다. 개요·검색·대조·통계·지침 보기는 `donghans ctx` CLI 와 같은 범위라 허용
+    CtxUI(restricted=cc.is_agent_session()).run()
 
 
 if __name__ == "__main__":

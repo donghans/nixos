@@ -111,6 +111,16 @@ class ConfirmScreen(ModalScreen):
 
 class SessionsUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     TITLE = "claude-sessions — tmux 세션"
+    HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
+        ('세션', 'claude 가 도는 tmux 세션 목록 — ssh 에서도 다른 터미널에서도 같은 화면이다'),
+        ('붙기 / 분리', 'Enter 로 붙고, 분리는 F12 또는 Ctrl+] d — 분리하면 이 목록으로 돌아온다'),
+        ('여러 곳 붙음', '한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다. d 로 붙은 곳을 모두 뗀다'),
+        ('정리', 'x = 세션 종료(확인 대화상자)'),
+        ('화면 미리보기', '선택한 세션의 지금 화면 일부를 아래에 보인다(그 세션의 내용이므로 어깨너머 노출에 주의)'),
+    ]
+    HELP_NOTES = [
+        '종료는 q. Esc 는 대화상자만 닫는다',
+    ]
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
     NewScreen, ConfirmScreen { align: center middle; }
     #list { height: 1fr; }

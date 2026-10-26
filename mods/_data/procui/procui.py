@@ -166,6 +166,19 @@ class InfoScreen(ModalScreen):
 
 class ProcUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     TITLE = "procui"
+    HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
+        ('뷰', '프로세스를 묶는 방식. g 로 순환: 소유 · 앱 · 서비스 · 세션(+ groups.toml 의 사용자 뷰). 모든 프로세스는 뷰마다 정확히 한 그룹에 들어간다'),
+        ('소유 뷰', '커널 / 컨테이너·VM / 시스템(다른 UID) / 내 환경(컴포지터·패널·오디오·세션 버스 등) / 내 작업(내 UID 의 나머지)'),
+        ('그룹 행', 'Space = 보호되지 않은 구성원 전체 선택, Enter = 펼침/접음, d = 합계와 상위 12'),
+        ('보호', '하드 보호(PID 1·procui 자신과 조상·커널 스레드·다른 UID)는 풀 수 없다. 소프트 보호(데스크톱 환경·VM·컨테이너 데몬·nix 빌드·세션 인프라·LLM 세션)는 프로세스 이름을 다시 입력하면 개별로만 풀린다'),
+        ('종료 순서', 'k 미리보기 → y 실행(SIGTERM, 3초 대기) → 살아남으면 다시 확인한 뒤 SIGKILL. 되돌릴 수 없고 무확인·자동 모드는 없다'),
+        ('필터 식', '단어 · app:이름 · group:이름 · user:me|root|UID · cpu>50 · mem>500M · pid:N — 공백은 AND'),
+        ('RSS / PSS', 'RSS 는 공유 메모리까지 센 값(과대), PSS 는 공유 페이지를 나눠 센 값(상세·미리보기에서만 읽음, 권한이 없으면 못 쟀음)'),
+        ('설정·기록', '~/.config/procui/groups.toml 로 뷰·규칙·보호 이름을 추가한다. 종료 기록은 ~/.local/state/procui/actions.jsonl(시각·이름·PID·신호·결과만)'),
+    ]
+    HELP_NOTES = [
+        '종료는 q. Esc 는 대화상자만 닫는다(목록에서는 아무 일 없음). 갱신은 수동 r, a 로 2초 자동 갱신',
+    ]
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
     #head { height: 3; padding: 0 1; }
     #filter { height: 3; }

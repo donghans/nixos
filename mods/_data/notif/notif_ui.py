@@ -108,6 +108,16 @@ class Preview(TextArea):
 
 
 class NotifUI(uikit.HelpMixin, App):
+    HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
+        ('그룹', '왼쪽: 전체 · ‼ 시스템 문제 · 앱 이름(건수, 긴급이 있으면 ‼N). ↑↓ 로 고르면 오른쪽 목록이 바로 바뀐다'),
+        ('검색 문법', '글자(앱·제목·본문에 모두 포함) · app:이름 · is:problem · is:urgent · since:3h|2d|1w — 그룹 건수도 검색에 맞춰 바뀐다'),
+        ('Enter / Esc', 'Enter = 현재 알림 복사 후 종료(그룹에서는 목록으로). Esc = 검색 지우기 → 그룹을 「전체」로 → 종료'),
+        ('영역 이동', 'Tab, ←/→ 로 그룹 ↔ 목록. 목록에서 c 본문만 복사 · g 그룹 · / 검색'),
+        ('F 키', 'F5 새로고침 · F6 그룹 패널 · F7 미리보기 · F9 통계(지금 그룹/검색 기준) · F10 서비스 점검'),
+    ]
+    HELP_NOTES = [
+        '검색창이 기본 포커스라 q 는 글자로 들어간다 — 종료는 Esc(여러 번) 또는 목록에서 q',
+    ]
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
     #search { background: #000000; border: round #595959; }
     #search:focus { border: round #33ccff; }

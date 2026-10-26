@@ -340,37 +340,6 @@ def collector_text(c):
     return t
 
 
-def wrap_cells(text, width):
-    """칸 폭(한글 2칸) 기준 줄바꿈 — 공백 단위로 끊고 width 칸을 넘기지 않는다(한 단어가 더 길면 그대로 둠)."""
-    lines, cur = [], ""
-    for word in str(text).split(" "):
-        cand = f"{cur} {word}" if cur else word
-        if not cur or cell_len(cand) <= width:
-            cur = cand
-        else:
-            lines.append(cur)
-            cur = word
-    if cur:
-        lines.append(cur)
-    return lines
-
-
-def glossary_text(width, tail=""):
-    """용어 탭: 이름 칸(한글 폭 기준으로 정렬) + 설명(줄바꿈 때 이름 칸만큼 들여쓰기). width = 쓸 수 있는 칸 수."""
-    kw = max(cell_len(k) for k, _ in GLOSSARY) + 2
-    dw = max(20, width - kw - 2)
-    t = Text()
-    for k, d in GLOSSARY:
-        for i, line in enumerate(wrap_cells(d, dw)):
-            t.append(" " + (pad(k, kw) if i == 0 else " " * kw), style="#33ccff")
-            t.append(line + "\n")
-    if tail:
-        t.append("\n")
-        for line in wrap_cells(tail, max(20, width - 2)):
-            t.append(" " + line + "\n", style="grey50")
-    return t
-
-
 GLOSSARY = [
     ("측정 / 추정", "측정 = 장치가 보고한 값을 그대로 쓴 것, 추정 = 가정을 거쳐 계산한 것. 화면의 모든 값에 라벨을 붙였습니다."),
     ("psys", "RAPL 이 보고하는 플랫폼 전력. 패널·SSD 등 일부(약 1 W)가 빠져 총 소비보다 적게 보입니다."),

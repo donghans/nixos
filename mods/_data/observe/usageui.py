@@ -3,7 +3,7 @@
 
 원칙: ① 조회는 범위 기준(기본 = 지금까지 최근 7일) ② **갱신은 수동만**(타이머 없음 — r/F5; 예외: 1번 탭 안의 실시간 쪽만 그 화면이 보일 때 1초마다 지금 값을 갱신, 이력 저장 없음) ③ 값마다 '측정/추정' 표시
 ④ 프로세스 *관리*(종료·nice)는 btop(b 키), 프로세스 *지표*(누가 얼마나 쓰나)는 여기.
-탭: 1 대시보드(전력·배터리·습관·앱) / 2 앱·프로세스 / 3 원인 / 4 시스템·기기(Netdata·수집 상태) / 5 용어 (1번 탭 안 Tab: 실시간 — 지금 값만)
+탭: 1 대시보드(전력·배터리·습관·앱) / 2 앱·프로세스 / 3 원인 / 4 시스템·기기(Netdata·수집 상태) (1번 탭 안 Tab: 실시간 — 지금 값만). 값의 뜻은 ? 도움말의 용어
 측정 중에는 열어 두지 마세요(화면 갱신은 없지만 조회 순간 CPU 를 씁니다)."""
 from __future__ import annotations
 
@@ -155,7 +155,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     BINDINGS = [
         Binding("q", "quit", "종료"),
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('apps')", "앱"), Binding("3", "tab('cause')", "원인"),
-        Binding("4", "tab('system')", "시스템"), Binding("5", "tab('help')", "용어"), Binding("6", "tab('live')", "실시간 화면(별칭)", show=False), Binding("tab", "sub_toggle", "기록↔실시간", priority=True),
+        Binding("4", "tab('system')", "시스템"), Binding("6", "tab('live')", "실시간 화면(별칭)", show=False), Binding("tab", "sub_toggle", "기록↔실시간", priority=True),
         Binding("t", "set_range", "범위"), Binding("s", "spikes", "튄 순간"), Binding("escape", "restore", "원래 범위", show=False), Binding("v", "cycle_baseline", "비교 기준"),
         Binding("r,f5", "reload", "새로고침"), Binding("b", "btop", "btop"), Binding("e", "export", "저장"),
         *uikit.HelpMixin.HELP_BINDINGS,
@@ -237,9 +237,6 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                         b = uikit.box(Panel(lambda w, h, key=key: self._ndchart(key, w, h), id=f"nd{i}"), title)
                         b.add_class("mid")
                         yield b
-            with TabPane("용어 [5]", id="help"):
-                with VerticalScroll():
-                    yield uikit.box(Static(self._help_text(), id="helptext"), "용어 — 값이 무엇을 뜻하나")
         with Vertical(id="status-row"):
             yield Static("", id="status")
         yield Footer()
@@ -296,7 +293,6 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         try:
             self.query_one("#dash").set_class(self.size.width < self.NARROW_COLS, "narrow")
             self.query_one("#livebox").set_class(self.size.width < self.LIVE_NARROW_COLS, "narrow")
-            self.query_one("#helptext", Static).update(self._help_text(max(40, self.size.width - 6)))
         except Exception:
             pass
 
@@ -327,9 +323,8 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             return Text(" 이 탭을 열면 Netdata 에서 읽어 옵니다(꺼져 있으면 '관측 공백')", style="grey50"), ""
         return uv.nd_chart(self.sysdata, key, self.view["range"], w, h)
 
-    def _help_text(self, width=100):
-        """용어 탭 본문 — 이름 칸을 한글 폭 기준으로 맞추고 설명은 이름 칸만큼 들여써 줄바꿈한다(창 폭이 바뀌면 _fit 이 다시 만든다)."""
-        return uv.glossary_text(width, "키: 1~5 탭(1번은 Tab 으로 기록↔실시간) · t 범위 · s 튄 순간 순위 · v 비교 기준 · r/F5 새로고침 · b btop · e 내보내기 · ? 키 목록 · q 종료")
+    HELP_TERMS = uv.GLOSSARY          # 값의 뜻은 별도 「용어」 탭 대신 ? 도움말에 키 목록과 함께 보인다
+    HELP_NOTES = ["1 대시보드는 Tab 으로 기록 ↔ 실시간. 종료는 q · Esc 는 튄 순간으로 옮겼을 때 원래 범위로 되돌림(종료 아님)"]
 
     # --- 데이터: 수동 갱신만(타이머 없음)
     def action_reload(self):
@@ -606,7 +601,7 @@ class TableBox(Vertical):
 def main(argv=None):
     p = argparse.ArgumentParser(prog="usageui", description="전력·자원 사용 습관 TUI")
     p.add_argument("--range", default=None, help="처음 범위(기본: 7일): 1시간·6시간·오늘·어제·3일·7일 · -30m · 10:00..11:30")
-    p.add_argument("--tab", default=None, help="처음 화면(기본: live = 1번 탭의 실시간, dashboard = 1번 탭의 기록)", choices=["dashboard", "apps", "cause", "system", "help", "live"])
+    p.add_argument("--tab", default=None, help="처음 화면(기본: live = 1번 탭의 실시간, dashboard = 1번 탭의 기록)", choices=["dashboard", "apps", "cause", "system", "live"])
     p.add_argument("--expand", action="store_true", help="원인 탭의 상세 표를 처음부터 펼침")
     p.add_argument("--baseline", default="prev", choices=[k for k, _ in BASELINES])
     a = p.parse_args(argv)
