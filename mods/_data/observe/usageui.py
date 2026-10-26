@@ -590,6 +590,10 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             self._timer.stop()
             self._timer = None
 
+    def pause_on_blur(self):
+        """창이 포커스를 잃어도 **전원이 연결돼 있으면 계속 갱신**한다(보는 쪽이 낫다는 사용자 선호). 배터리 방전 중에만 멈춘다(PSR·전력)."""
+        return live.on_battery()
+
     def refresh_data(self):
         """PauseOnBlurMixin 이 창 포커스가 돌아올 때 부른다 — 실시간 탭이 보이는 중일 때만 한 번 갱신."""
         if self._timer is not None:
@@ -602,13 +606,15 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             self.call_from_thread(self._live_draw, s)
 
     def _live_draw(self, s):
+        if self._blurred and self._timer is not None and self.pause_on_blur():     # 포커스 없는 채로 전원을 뽑았으면 그때부터 멈춘다
+            self._timer.pause()
         self.live_sample = s
         for panel in self.query("#live Panel"):
             panel.build()
             panel.refresh()
         if self._live_visible():
             self.query_one("#status", Static).update(
-                f" 실시간 · 표본 {time.strftime('%H:%M:%S', time.localtime(s['t']))} · 갱신 {self.live_sec:.1f}초(이 화면이 보일 때만) · 표본 비용 {s['fast_ms']:.0f} ms"
+                f" 실시간 · 표본 {time.strftime('%H:%M:%S', time.localtime(s['t']))} · 갱신 {self.live_sec:.1f}초(이 화면이 보일 때만" + ("" if live.on_battery() else " · 전원 연결 중이라 창 포커스를 잃어도 계속") + f") · 표본 비용 {s['fast_ms']:.0f} ms"
                 f"(느린 항목 {s['slow_ms']:.0f} ms 는 {self.sampler.slow_every:.0f}초마다) · r 지금 갱신 · Tab 기록 화면")
         # 갱신 간격 조절: 느린 항목을 뺀 한 번 재는 시간의 5배(= CPU 20% 이하)를 0.5초 단위로 맞춘다. 늘어난 뒤에도 바빠진 게 풀리면 1초로 되돌아간다
         need = max(self.LIVE_SEC, round(s["fast_ms"] / 1000 * 5 * 2) / 2)

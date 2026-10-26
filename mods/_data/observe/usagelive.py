@@ -59,6 +59,18 @@ def read_disk():
     return out
 
 
+def on_battery():
+    """배터리로 방전 중이면 True(전원 연결·충전 중이거나 배터리가 없는 호스트는 False) — 보이지 않을 때 갱신을 멈출지 정하는 기준."""
+    try:
+        for d in os.listdir("/sys/class/power_supply"):
+            base = f"/sys/class/power_supply/{d}"
+            if (hm.read(f"{base}/type") or "").strip() == "Battery" and (hm.read(f"{base}/status") or "").strip() == "Discharging":
+                return True
+    except OSError:
+        pass
+    return False
+
+
 def phys_links(wifi_rate=None):
     """{인터페이스: dict(kind, mbps)} — **물리 NIC 만**(브리지·tap·docker·tailscale 제외, 연결된 것). 유선은 sysfs speed(협상 속도), Wi-Fi 는 접속 AP 의 표기 속도(nmcli RATE — 신호에 따라 실제 링크는 이보다 낮다).
     wifi_rate 는 호출부가 (느리게) 구해 넘긴다 — 프로세스를 띄우는 일이라 매 표본마다 하지 않는다."""
@@ -282,6 +294,19 @@ def pct_style(v, warn, bad):
     return "red" if v >= bad else "yellow" if v >= warn else "green"
 
 
+TRACK_STYLE = "grey23"      # 안 찬 막대 구간(트랙)의 색 — 어두운 배경에서 짙은 회색으로 보이는 틀
+
+
+def track_bar(frac, width, style):
+    """채운 부분(style)과 **안 찬 부분을 짙은 회색 블록(트랙)** 으로 이은 막대 — 막대가 얼마나 찼는지 한눈에 보인다. 길이는 항상 width 칸."""
+    bar = pg.hbar(frac, width)
+    filled = bar.rstrip(" ")
+    t = Text()
+    t.append(filled, style=style)
+    t.append("█" * (width - len(filled)), style=TRACK_STYLE)
+    return t
+
+
 def render_verdict(s):
     lv, why = hm.verdict(s)
     ax = hm.verdict_axes(s)
@@ -381,7 +406,7 @@ def render_io(s, w):
     bw = max(4, min(12, (w - 2) // per_row - 9))
     for i, v in enumerate(cores):
         t.append(f" {i:>2} ", style="grey62")
-        t.append(pg.hbar((v or 0) / 100, bw), style=pct_style(v or 0, 50, 85) if v is not None else "grey35")
+        t.append_text(track_bar((v or 0) / 100, bw, pct_style(v or 0, 50, 85) if v is not None else TRACK_STYLE))
         t.append(f"{'-' if v is None else format(v, '.0f') + '%':>4} ")
         if (i + 1) % per_row == 0 or i == len(cores) - 1:
             t.append("\n")
@@ -439,7 +464,7 @@ def _rate_pair(a, b, w):
             frac = rate / cap
             num.append(f"  {frac * 100:4.1f}%" if frac >= 0.001 else "  <.1% ")
             bar = Text("    ")
-            bar.append(pg.hbar(min(frac, 1.0), half - 6), style=pct_style(frac * 100, 50, 85))
+            bar.append_text(track_bar(min(frac, 1.0), half - 6, pct_style(frac * 100, 50, 85)))
         cells.append((num, bar))
     out = Text()
     for num, _ in cells:

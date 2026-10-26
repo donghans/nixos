@@ -7,7 +7,7 @@
   - HelpScreen / HelpMixin : `?`(또는 F1)로 **키 목록(Binding 에서 자동 생성) + 앱별 용어·사용법(HELP_TERMS) + 공통 종료 안내**를 한 화면에 보여 주는 도움말.
                              앱마다 따로 두던 「용어」 탭은 여기로 합친다(모든 uikit 앱 공통 규칙)
   - pad / wrap_cells / terms_text : 한글(2칸 폭) 기준 칸 맞춤·줄바꿈(f-string 의 :<n 은 글자 수라 한글 표가 어긋남)
-  - PauseOnBlurMixin   : 창이 포커스를 잃으면 주기 갱신을 멈춘다(보이지 않는 화면 갱신이 PSR 을 방해하지 않도록)
+  - PauseOnBlurMixin   : 창이 포커스를 잃으면 주기 갱신을 멈춘다(보이지 않는 화면 갱신이 PSR 을 방해하지 않도록). 앱이 pause_on_blur() 로 조건을 바꿀 수 있다
 각 앱은 `CSS = uikit.BASE_CSS + (앱 고유 규칙 문자열)` 로 쓰고 같은 디렉터리(배포 시) 또는 ../_uikit(소스)에서 이 파일을 가져온다.
 """
 from __future__ import annotations
@@ -190,14 +190,21 @@ class HelpMixin:
 
 
 class PauseOnBlurMixin:
-    """포커스를 잃으면 `self._timer`(set_interval 결과)를 멈추고, 돌아오면 재개하며 `refresh_data()` 를 한 번 부른다."""
+    """포커스를 잃으면 `self._timer`(set_interval 결과)를 멈추고, 돌아오면 재개하며 `refresh_data()` 를 한 번 부른다.
+    앱이 `pause_on_blur()` 를 덮어 쓰면 멈출지 정할 수 있다(예: usageui — 배터리 방전 중일 때만 멈춤). `self._blurred` 로 지금 포커스가 없는지 알 수 있다."""
     _timer = None
+    _blurred = False
+
+    def pause_on_blur(self) -> bool:
+        return True
 
     def on_app_blur(self, _ev: events.AppBlur):
-        if self._timer:
+        self._blurred = True
+        if self._timer and self.pause_on_blur():
             self._timer.pause()
 
     def on_app_focus(self, _ev: events.AppFocus):
+        self._blurred = False
         if self._timer:
             self._timer.resume()
         fn = getattr(self, "refresh_data", None)

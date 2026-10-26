@@ -74,7 +74,11 @@ check("표기치 대비 줄이 박스 폭(70)을 넘지 않음", all(cell_len(l)
 check("링크·디스크 정보가 없는 표본에서도 예외 없음", len(lv.render_io(dict(s1, net={}, disk={}, links={}, disk_info={}), 60).plain) > 10)
 _nv = lv.nvme_link_bytes_s("nvme0n1")
 check("NVMe PCIe 링크 상한: 이 호스트(Gen4 x4)면 약 7.88 GB/s, 없으면 None", _nv is None or 7.5e9 < _nv < 8.0e9, str(_nv))
+check("on_battery: bool", isinstance(lv.on_battery(), bool))
 check("phys_links: 이 호스트에서 예외 없이 dict", isinstance(lv.phys_links(None), dict) and isinstance(lv.disk_info(), dict))
+_tb = lv.track_bar(0.25, 12, "green")
+check("track_bar: 폭이 항상 같고, 찬 부분은 지정 색·안 찬 부분은 짙은 회색 블록", len(_tb.plain) == 12 and _tb.plain == "███" + "█" * 9 and any(sp.style == "grey23" for sp in _tb.spans) and any(sp.style == "green" for sp in _tb.spans), str(_tb.spans))
+check("track_bar: 0%·100% 경계", lv.track_bar(0, 8, "red").plain == "█" * 8 and lv.track_bar(1, 8, "red").plain == "█" * 8 and all(sp.style == "grey23" for sp in lv.track_bar(0, 8, "red").spans))
 check("코어 열 수: 폭이 좁으면 열을 줄여도 줄이 폭을 넘지 않음", all(len(l) <= 40 for l in _core_lines(16, 40)))
 check("human_bytes", lv.human_bytes(None) == "-" and lv.human_bytes(1536 * 1024, True) == "1.5 MiB/s" and lv.human_bytes(12) == "12 B")
 
@@ -115,6 +119,21 @@ async def drive():
                 break
         check("앱: 탭이 보이는 동안 표본이 계속 갱신됨", app.sampler._t > n)
         check("앱: LLM 세션 박스(탭 안의 모든 Panel)도 표본으로 그려짐", "첫 표본" not in app.query_one("#lsess")._text.plain and "첫 표본" not in app.query_one("#lio")._text.plain)
+        _ob = lv.on_battery
+        try:
+            lv.on_battery = lambda: False
+            app.on_app_blur(None); await pilot.pause(0.1)
+            check("앱: 전원 연결 중이면 창 포커스를 잃어도 실시간 갱신 타이머가 계속 돈다", app._timer is not None and app._timer._active.is_set() and app._blurred)
+            lv.on_battery = lambda: True
+            app._live_draw(app.live_sample); await pilot.pause(0.1)
+            check("앱: 포커스 없는 채로 배터리 방전으로 바뀌면 다음 갱신에서 멈춘다", not app._timer._active.is_set())
+            app.on_app_focus(None); await pilot.pause(0.2)
+            check("앱: 포커스가 돌아오면 재개", app._timer._active.is_set() and not app._blurred)
+            app.on_app_blur(None); await pilot.pause(0.1)
+            check("앱: 배터리 방전 중이면 포커스를 잃을 때 멈춘다(기존 동작)", not app._timer._active.is_set())
+            app.on_app_focus(None); await pilot.pause(0.2)
+        finally:
+            lv.on_battery = _ob
         await pilot.press("d"); await pilot.pause(0.4)
         check("앱: 실시간 화면에서 d → 디스크 벤치마크 확인 대화상자(바로 실행하지 않음)", app.screen.__class__.__name__ == "BenchScreen")
         await pilot.press("n"); await pilot.pause(0.3)
