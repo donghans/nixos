@@ -15,6 +15,9 @@ check, finish = checker()
 called = {"ctx": 0}
 orig = hm.ctx_last_chat
 hm.ctx_last_chat = lambda sids: called.__setitem__("ctx", called["ctx"] + 1) or {}
+quick = lv.LiveSampler(slow_every=60)
+q0 = quick.sample(); time.sleep(2.3); q1 = quick.sample()
+check("첫 느린 스캔 뒤 주기(60초)를 기다리지 않고 2초 안팎에 앱 CPU 가 측정됨", q0["apps_measured"] is False and q1["apps_measured"] is True and q1["apps"])
 sm = lv.LiveSampler(slow_every=0.5)
 s0 = sm.sample()
 check("첫 표본: measured=False, 구간 값은 None, 판정은 계산됨", s0["measured"] is False and s0["rates"]["pswpin"] is None and hm.verdict(s0)[0] in ("여유", "주의", "압박", "심각"))

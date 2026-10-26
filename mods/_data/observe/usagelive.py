@@ -174,6 +174,8 @@ class LiveSampler:
         self._slow_t = t0
         self._slow_ms = (time.monotonic() - ts) * 1000
         self.slow_every = max(self.base_slow_every, self._slow_ms / 1000 * 10)    # 느린 항목이 느려질수록(바쁜 호스트) 드물게 잰다(CPU 약 10% 이하)
+        if adt == 0:                                  # 첫 스캔은 앱 CPU 를 잴 직전 표본이 없다 — 주기를 기다리지 않고 2초 뒤 한 번 더 재서 앱 CPU 표를 바로 채운다
+            self._slow_t = t0 - self.slow_every + 2.0
 
 
 # ---------- 표시 조각(Text) ----------
