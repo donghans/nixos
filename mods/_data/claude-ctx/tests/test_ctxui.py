@@ -523,6 +523,8 @@ async def run_restricted():
         await pilot.press("f1"); await pilot.pause(0.4)
         hd = " ".join(d for _, d in app.screen._rows) if type(app.screen).__name__ == "HelpScreen" else ""
         check("제한: 도움말 키 목록에서도 막힌 동작(치환 켬/끔·비밀 추가·삭제·켬/끔·값 보기·무시)이 빠지고 열린 동작(검색·통계·새로고침)은 있음", hd and not any(x in hd for x in ("치환 켬/끔", "비밀 추가", "값 보기", "무시", "삭제")) and "새로고침" in hd and "통계" in hd, hd[:200])
+        _terms = " ".join(d for _, d in ctxui.CtxUI.HELP_TERMS)
+        check("도움말 용어(제한 모드)가 현재 정책을 설명(모든 탭 열람·값 조회 불가)하고 낡은 「탭이 열리지 않음」 문구가 없음", "모든 탭을 볼 수 있" in _terms and "열리지 않고" not in _terms and "[protected]" in _terms, _terms[:100])
         await pilot.press("escape"); await pilot.pause(0.3)
         app.action_tab("instr"); await settle(pilot, lambda: app.current_tab() == "instr" and app.query_one("#instr-table").row_count >= 1, timeout=6)
         check("제한: 지침 탭 보기는 가능(목록이 보임), 편집(edit_instr)은 편집기를 열지 않고 False", app.current_tab() == "instr" and app.query_one("#instr-table").row_count >= 1 and app.edit_instr("x", "y") is False)
