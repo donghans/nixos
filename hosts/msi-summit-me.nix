@@ -104,7 +104,27 @@ in {
       ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x8086", ATTR{device}=="0x51e8", ATTR{power/control}="on"
       # 터치스크린 USB 절전(hypr-input-policy)이 root 없이 power/control 에 쓸 수 있게: users 그룹 쓰기 허용(해당 장치만)
       ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="04f3", ATTR{idProduct}=="2ffa", RUN+="${pkgs.coreutils}/bin/chgrp users /sys%p/power/control", RUN+="${pkgs.coreutils}/bin/chmod g+w /sys%p/power/control"
+      # AC 어댑터를 꽂거나 뽑을 때만(POWER_SUPPLY_NAME=ADP1) kfence-policy 를 부른다(배터리 잔량 변화 이벤트에는 부르지 않음)
+      SUBSYSTEM=="power_supply", ACTION=="change", ENV{POWER_SUPPLY_NAME}=="ADP1", TAG+="systemd", ENV{SYSTEMD_WANTS}+="kfence-policy.service"
     '';
+
+    # == KFENCE(커널 메모리 오류 샘플링 검사) — 배터리 때는 끄고 AC 일 때만 켠다 ==
+    # KFENCE 는 100ms 마다 할당 하나를 보호 페이지에 두고 잘못된 접근(해제 후 사용·범위 밖 접근)을 리포트하는 버그 탐지기이고, 타이머가 초당 약 10번 CPU 를 깨운다.
+    # 끄면 쉬는 psys 가 약 0.15 W 낮다(장부 #124, 4쌍 모두 같은 방향, 추정 — 전부 패키지 몫 #137). 배터리에서는 이 상시 깨움을 남기지 않고, AC 일 때는 한 번에 찾을 수 있게 켜 둔다.
+    # 런타임 쓰기라 재부팅이 필요 없고 되돌리기도 즉시다(커널 로그에 `kfence: disabled` / `re-enabled`). 부팅 때와 AC 어댑터 변화(udev, 위)마다 현재 전원에 맞춘다.
+    # 값 100 은 커널 기본(CONFIG_KFENCE_SAMPLE_INTERVAL=100)과 같다. 배터리 때 끄므로 그동안의 메모리 오류는 리포트되지 않는다 — 터졌는지는 `journalctl -k | grep -c "BUG: KFENCE"` 로 센다
+    # (지금까지 5일·부팅 29번 동안 0건). 2번 이상 나오면 확인한다. 정책을 끄려면 이 서비스와 위 udev 규칙 한 줄을 지운다.
+    systemd.services.kfence-policy = {
+      description = "KFENCE sampling: on at AC, off on battery (runtime)";
+      wantedBy = ["multi-user.target"];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        p=/sys/module/kfence/parameters/sample_interval
+        [ -w "$p" ] || exit 0
+        if [ "$(cat /sys/class/power_supply/ADP1/online 2>/dev/null)" = 1 ]; then v=100; else v=0; fi
+        [ "$(cat "$p")" = "$v" ] || echo "$v" > "$p"
+      '';
+    };
 
     # == Services & Hardware ==
     # (목적: 부팅 시 I2C 버스 간섭 방지)
