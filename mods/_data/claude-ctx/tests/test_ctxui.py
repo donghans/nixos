@@ -177,6 +177,7 @@ async def run():
         # 추가
         await pilot.press("a"); await pilot.pause(0.4)
         check("a: 이름 입력 대화상자", isinstance(app.screen, ctxui.PromptScreen))
+        check("비밀 이름 입력: 대화상자가 화면 가운데에 뜸(좌우 ±1칸 — 예전엔 왼쪽 위 구석)", abs(app.screen.query_one("#dialog").region.x + app.screen.query_one("#dialog").region.width / 2 - app.size.width / 2) <= 1)
         await type_text(pilot, "newpw"); await pilot.press("enter"); await pilot.pause(0.4)
         check("a: 값 입력 대화상자는 가려서 표시(password)", isinstance(app.screen, ctxui.PromptScreen) and app.screen.query_one("#prompt-input").password)
         await type_text(pilot, "secretvalue99"); await pilot.press("enter"); await settle(pilot, lambda: rows(app, "#secrets-table") == 2)

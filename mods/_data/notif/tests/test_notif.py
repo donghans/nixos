@@ -48,6 +48,13 @@ st = notif.stats(ents)
 check("통계: 전체/시간대/긴급도 분포", st["total"] == 4 and st["by_hour"][15] == 1 and st["urgency"][2] == 1 and st["urgency"][None] == 2, str(st["urgency"]))
 check("통계 표시에 앱과 막대가 나옴", "Slack" in notif.render_stats(st) and "█" in notif.render_stats(st))
 check("기록 없을 때 통계 문구", "없습니다" in notif.render_stats(notif.stats([])))
+# 한글 앱 이름이 섞여도 통계 표의 개수 열·막대가 같은 칸에서 시작한다(f-string :<24 는 글자 수 기준이라 한글 행이 밀렸다)
+_ents = [dict(ts=datetime.datetime(2026, 10, 26, 9, i), app=a, summary="s", body="b", urgency=1, raw="") for i, a in enumerate(["Slack"] * 3 + ["시스템 점검"] * 3 + ["카카오톡"] * 2)]
+_txt = notif.render_stats(notif.stats(_ents))
+_rows = [l for l in _txt.splitlines() if "█" in l and l.startswith("  ") and any(k in l for k in ("Slack", "시스템 점검", "카카오톡"))]
+_bar_cols = {notif.cells(l[:l.index("█")]) for l in _rows}
+check("통계 표: 한글·영문 앱 이름 행의 막대가 같은 칸에서 시작(칸 폭 기준 정렬)", len(_rows) == 3 and len(_bar_cols) == 1, _bar_cols)
+check("notif.fit: 한글 2칸 폭 기준으로 n 칸에 맞추고 길면 …", notif.cells(notif.fit("시스템 점검", 24)) == 24 and notif.cells(notif.fit("가" * 30, 10)) == 10 and notif.fit("가" * 30, 10).count("…") == 1)
 
 # Notify 호출 → 기록 한 줄
 line = notif.entry_from_notify(["app", 0, "", "제목", "본문", [], {"urgency": {"type": "y", "data": 2}}, -1])

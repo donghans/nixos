@@ -43,7 +43,7 @@ DataTable:focus > .datatable--cursor { background: #268bd2; color: #ffffff; text
 """
 
 DIALOG_CSS = """
-InfoScreen, StatsScreen, ConfirmScreen, BusyScreen, HelpScreen { align: center middle; }
+ModalScreen { align: center middle; }   /* 이름 목록이 아니라 모든 대화상자 화면 — 목록에 없는 RangeScreen·SpikeScreen·OverrideScreen 이 왼쪽 위 구석에 뜨던 것을 고침 */
 #dialog { width: 70%; max-width: 90; height: auto; background: #101010; border: round #33ccff; padding: 1 2; }
 #dialog.help { width: 92%; max-width: 124; max-height: 94%; }
 #stats-box { width: 90%; max-width: 120; height: 90%; background: #101010; border: round #33ccff; padding: 1 2; }

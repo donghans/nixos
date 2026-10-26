@@ -54,6 +54,16 @@ async def drive():
             await pilot.press("f1"); await pilot.pause(0.15)
             await pilot.press(k); await pilot.pause(0.15)
             check(f"{k} 로도 닫힘", type(app.screen).__name__ != "HelpScreen")
+        from textual.screen import ModalScreen as _MS
+        from textual.containers import Vertical as _V
+        class WhateverScreen(_MS):          # DIALOG_CSS 예전 이름 목록에 없던 이름
+            def compose(self):
+                with _V(id="dialog"):
+                    yield Static("아무 대화상자")
+        app.push_screen(WhateverScreen()); await pilot.pause(0.3)
+        d = app.screen.query_one("#dialog")
+        check("DIALOG_CSS: 이름과 상관없이 모든 대화상자가 화면 가운데(좌우·상하 ±1칸)", abs(d.region.x + d.region.width / 2 - app.size.width / 2) <= 1 and abs(d.region.y + d.region.height / 2 - app.size.height / 2) <= 1.5, (d.region, app.size))
+        await pilot.press("escape"); app.pop_screen(); await pilot.pause(0.2)
         await pilot.press("f1"); await pilot.pause(0.2)
         check("F1 로도 도움말", type(app.screen).__name__ == "HelpScreen")
         await pilot.press("f1"); await pilot.pause(0.2)

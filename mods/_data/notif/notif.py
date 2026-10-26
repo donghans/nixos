@@ -164,6 +164,22 @@ def one_line(e: dict, width: int = 0) -> str:
     return s if not width or len(s) <= width else s[: width - 1] + "…"
 
 
+def cells(s):
+    """표시 칸 수(한글·전각 2칸, 결합문자 0칸)."""
+    import unicodedata
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 0 if unicodedata.combining(c) else 1 for c in str(s))
+
+
+def fit(s, n):
+    """칸 폭 기준으로 n 칸에 맞춘다(길면 …로 자르고 짧으면 공백으로 채움) — f-string 의 :<n 은 글자 수라 한글 앱 이름 표가 어긋난다."""
+    s = str(s)
+    if cells(s) > n:
+        while s and cells(s) > n - 1:
+            s = s[:-1]
+        s += "…"
+    return s + " " * (n - cells(s))
+
+
 def bar(n: int, top: int, width: int = 24) -> str:
     return "█" * (max(1, round(n / top * width)) if n else 0)
 
@@ -176,7 +192,7 @@ def render_stats(st: dict) -> str:
     L.append(f"긴급도: 낮음 {u[0]} / 보통 {u[1]} / 긴급 {u[2]} / 알 수 없음(이전 기록) {u[None]}")
     L += ["", "앱별"]
     top = st["apps"][0][1]
-    L += [f"  {a:<24} {n:>5}  {bar(n, top)}" + (f"  (긴급 {k})" if k else "") for a, n, k, _ in st["apps"][:15]]
+    L += [f"  {fit(a, 24)} {n:>5}  {bar(n, top)}" + (f"  (긴급 {k})" if k else "") for a, n, k, _ in st["apps"][:15]]
     L += ["", "시간대별"]
     ht = max(st["by_hour"].values())
     L += [f"  {h:02d}시 {st['by_hour'].get(h, 0):>5}  {bar(st['by_hour'].get(h, 0), ht)}" for h in range(24) if st["by_hour"].get(h)]
@@ -383,7 +399,7 @@ def main(argv: list) -> int:
         return 0
     if a.cmd == "apps":
         for app, n, k, last in group_by_app(select(entries, since=since)):
-            print(f"{app:<28} {n:>5}건" + (f"  긴급 {k}" if k else "") + f"   마지막 {last:%m-%d %H:%M}")
+            print(f"{fit(app, 28)} {n:>5}건" + (f"  긴급 {k}" if k else "") + f"   마지막 {last:%m-%d %H:%M}")
         return 0
     if a.cmd == "stats":
         print(render_stats(stats(select(entries, since=since))))

@@ -122,6 +122,7 @@ async def drive():
         check("앱: v 로 비교 기준 순환(prev → yday)", app.baseline == "yday")
         await pilot.press("t"); await pilot.pause(0.5)
         check("앱: t 로 범위 대화상자", isinstance(app.screen, usageui.RangeScreen))
+        check("범위: 대화상자가 화면 가운데에 뜸(좌우 ±1칸 — 예전엔 왼쪽 위 구석)", abs(app.screen.query_one("#dialog").region.x + app.screen.query_one("#dialog").region.width / 2 - app.size.width / 2) <= 1)
         inp = app.screen.query_one("#range-input", Input)
         inp.value = "엉터리"; await pilot.press("enter"); await pilot.pause(0.3)
         check("범위 대화상자: 잘못된 입력은 오류를 보이고 닫히지 않음", isinstance(app.screen, usageui.RangeScreen))

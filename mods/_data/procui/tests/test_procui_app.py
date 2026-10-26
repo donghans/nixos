@@ -76,6 +76,7 @@ async def protection():
         check("A: 보호 프로세스는 선택되지 않음", len(app.sel) == 0)
         await pilot.press("down"); await pilot.press("space"); await settle(pilot)
         check("프로세스 행 Space: 보호 해제 대화상자(이름 입력)", isinstance(app.screen, procui.OverrideScreen))
+        check("보호 해제: 대화상자가 화면 가운데에 뜸(좌우 ±1칸 — 예전엔 왼쪽 위 구석)", abs(app.screen.query_one("#dialog").region.x + app.screen.query_one("#dialog").region.width / 2 - app.size.width / 2) <= 1)
         for ch in "wrong": await pilot.press(ch)
         await pilot.press("enter"); await settle(pilot)
         check("이름을 틀리게 입력하면 선택되지 않음", len(app.sel) == 0 and "취소" in status(app))
