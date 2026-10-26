@@ -421,8 +421,12 @@ def cmd_fleet(a):
         else:
             since, pending = fl.since_for(st, now)
         app_rows, power_rows = fl.hourly(samples(since))
+        import observe_trace as tr
+        evs = list(core.iter_jsonl(core.state_dir(), "events", since - 3600, now + 120))
+        spans = tr.build_spans(evs)
+        extra = {"focus": fl.focus_hourly(spans), "changes": fl.change_spans(spans), "periodic": fl.periodic_rows(e for e in evs if e.get("comp") == "browser"), "units": fl.running_units()}
         try:
-            na, npw, ni = fl.push(conn, me, app_rows, power_rows, fl.ext_inventory(roots))
+            na, npw, ni = fl.push(conn, me, app_rows, power_rows, fl.ext_inventory(roots), extra)
         except Exception as e:
             conn.rollback()
             fl.write_state(fl.record(st, now, False, error=str(e)))
@@ -430,6 +434,68 @@ def cmd_fleet(a):
         fl.write_state(fl.record(st, now, True, rows=f"앱 {na}·전력 {npw}·확장 {ni}"))
         extra = f" · 밀렸던 {pending / 3600:.1f}시간 포함" if pending and pending > 8 * 3600 else ""
         print(f"{me}: 앱 {na}행 · 전력 {npw}행 · 확장 {ni}개 올림(시작 {core.hms(since)}){extra}")
+    elif a.what == "changes":
+        apps = fl.fetch_apps_hourly(conn, a.days)
+        ch = [r for r in fl.fetch_changes(conn, a.days) if r[3] == "nixup"]
+        if not ch:
+            print("이 기간에 올라온 nixup 구간이 없습니다(`observectl fleet sync` 를 변경 뒤에 하세요).")
+        for host_, t0, t1, kind, detail, status in ch[:a.n]:
+            up, down, why = fl.change_effects(apps, host_, t0, t1)
+            others = [h for h in apps if h != host_]
+            print(f"\n{core.hms(t0)} {host_} {kind}({detail or '-'}, {status}, {t1 - t0:.0f}초) — 대조군: {', '.join(others) or '없음'}")
+            if why:
+                print(f"  (판정 보류: {why})")
+                continue
+            for title, rows in (("▲ 늘어남(대조군은 그대로)", up[:6]), ("▼ 줄어듦(대조군은 그대로)", down[:6])):
+                if rows:
+                    print(f"  {title}")
+                    for app, b, a_, d, cd in rows:
+                        print(f"    {app[:28]:<28}{b:>7.2f} → {a_:>6.2f}  ({d:+.2f}%p" + (f", 대조군 {cd:+.2f}" if cd is not None else ", 대조군 없음") + ")")
+            if not up and not down:
+                print("  앱 CPU 에 눈에 띄는 변화 없음")
+        print("\n※ 시간별 평균이라 변경 전후 각 2시간(온전한 시간)을 비교하고, 사용 패턴이 같은 시각에 달라진 것도 섞일 수 있습니다 — 후보를 가리는 용도.")
+    elif a.what == "priority":
+        base = a.host or me                          # 대상(최적화하려는 호스트)
+        ref = a.other
+        if not ref:
+            sys.exit("기준 호스트가 필요합니다: observectl fleet priority <기준호스트> [--host 대상호스트] [--usage-from 사용하는호스트]")
+        usage = a.usage_from or ref
+        focus = fl.fetch_focus(conn, usage, a.days)
+        if not focus:
+            sys.exit(f"{usage} 의 포커스 기록이 올라와 있지 않습니다(`observectl fleet sync`; 포커스 기록기 observe-focus 가 켜져 있어야 함)")
+        mt, nt = fl.host_means(conn, base, a.days); mr, nr = fl.host_means(conn, ref, a.days)
+        fg, bg, mix = fl.priority(focus, mr, mt)
+        print(f"대상 {base}(표본 {nt}개) · 기준 {ref}(표본 {nr}개) · 사용 비중은 {usage} 의 포커스 시간 기준 · 최근 {a.days}일")
+        print("사용 비중 상위(전력 시험 부하 시나리오 후보): " + " · ".join(f"{k} {p:.0f}%" for k, p in mix))
+        print(f"\n[포커스 앱 — 끌 수 없고 고쳐 써야 하는 것] {'앱':<18}{'포커스%':>8}{base[:10]:>12}{ref[:10]:>12}{'초과':>8}")
+        for k, pct, tc, rc, ex_ in fg[:a.n]:
+            print(f"{'':<42}{k[:17]:<18}{pct:>8.1f}{tc:>12.2f}{rc:>12.2f}{ex_:>+8.2f}")
+        print(f"\n[배경 — 포커스가 거의 없는데 {base} 가 더 높은 것(끄거나 줄일 후보)] {'앱':<24}{base[:10]:>12}{ref[:10]:>12}{'초과':>8}")
+        for app, tc, rc, ex_ in bg[:a.n]:
+            print(f"{'':<64}{app[:23]:<24}{tc:>12.2f}{rc:>12.2f}{ex_:>+8.2f}")
+        if not bg:
+            print("  (없음)")
+        print("\n※ CPU %는 코어 1개=100%. 포커스 앱 이름(창 클래스)과 프로세스 앱 이름은 첫 토큰으로 맞춰서 일부 어긋날 수 있습니다.")
+    elif a.what == "periodic":
+        rows = fl.fetch_periodic(conn, a.days)
+        if not rows:
+            print("이 기간에 올라온 규칙적 반복 활동이 없습니다(각 호스트에서 observe-browser 감시기가 30분 이상 쌓은 뒤 sync).")
+        for h, t, series, per, corr, burst, mean in rows[:a.n * 3]:
+            print(f"{core.hms(t)} {h:<20}{series:<10} 주기 {per:g}초 · 상관 {corr:.2f} · 튈 때 +{burst or 0:.1f}%p · 평균 {mean or 0:.2f}%")
+        by = {}
+        for h, t, series, per, *_ in rows:
+            by.setdefault((series, round(per / 10) * 10), set()).add(h)
+        for (series, per), hs in sorted(by.items()):
+            if len(hs) > 1:
+                print(f"※ {series} 주기 약 {per}초가 {', '.join(sorted(hs))} 모두에서 감지됨 — 같은 원인일 수 있음")
+    elif a.what == "units":
+        ub = fl.fetch_units(conn)
+        if not ub:
+            sys.exit("올라온 유닛 목록이 없습니다(`observectl fleet sync`)")
+        print("호스트별 상시 유닛 수: " + " · ".join(f"{h} {len(v)}개" for h, v in sorted(ub.items())))
+        print("한 호스트에만 있는 상시 서비스·타이머(범위 user/system — 이름만):")
+        for h, sc, u in fl.units_only(ub)[:a.n * 4]:
+            print(f"  {h:<22}{sc:<8}{u}")
     elif a.what == "export":                     # usageui 호스트 탭이 읽는 JSON(사람용 아님)
         print(json.dumps(fl.export(conn, me, a.days), ensure_ascii=False))
     elif a.what == "hosts":
@@ -1185,7 +1251,7 @@ def main(argv=None):
     s = sub.add_parser("ebpf", help="시간 제한형 eBPF 정밀 모드: tiers(단계·비용) | on <sample|counts|full> [--for 10m] | off | status"); s.add_argument("action", choices=["tiers", "on", "off", "status"]); s.add_argument("tier", nargs="?"); s.add_argument("--for", dest="for_", default="10m", help="제한 시간(기본 10m, 최대 60분)"); s.set_defaults(f=cmd_ebpf)
     s = sub.add_parser("query", help="범용 조회: 신호 여러 개를 시간 간격(--step)이나 그룹(--by)으로 묶어 집계(--agg). 신호 = 별칭(psys pkg vi core uncore pc8 pc10 cpu_all) · 표본 경로(pw.psys_w) · app:<앱>.cpu|ctxsw · proc:<comm>.cpu|ctxsw · nd:<Netdata 신호>"); s.add_argument("signal", nargs="+"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--step", help="시간 간격(예: 5m). 없으면 --by 로 묶음"); s.add_argument("--by", default="none", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.add_argument("--agg", default="mean", choices=list(qy.AGGS)); s.add_argument("--digits", type=int, default=2); s.set_defaults(f=cmd_query)
     s = sub.add_parser("browser", help="브라우저(Vivaldi) 탭·확장별 CPU(top) 또는 감시기가 잡은 폭주 기록(bursts)"); s.add_argument("what", nargs="?", default="top", choices=["top", "bursts", "periodic", "sw"], help="top=탭·확장별 CPU · bursts=폭주 기록 · periodic=규칙적 반복 활동 기록 · sw=확장 서비스 워커(스레드 CPU, 포트가 있으면 시작 횟수)"); s.add_argument("--seconds", type=float, default=5.0); s.add_argument("-n", type=int, default=12); s.add_argument("--since", default="24h"); s.set_defaults(f=cmd_browser)
-    s = sub.add_parser("fleet", help="여러 호스트 교차 확인(공유 저장소 claude_ctx): push|sync=이 호스트 요약 올리기(실패하면 쌓아 뒀다 다음에 같이) · status=올리기 상태 · compare <호스트>=앱 CPU 비교 · inventory=확장 목록 비교 · hosts · export=usageui 용 JSON"); s.add_argument("what", choices=["push", "sync", "status", "compare", "inventory", "hosts", "export"]); s.add_argument("other", nargs="?", help="compare: 비교할 호스트"); s.add_argument("--host", help="compare: 기준 호스트(기본 이 호스트)"); s.add_argument("--days", type=int, default=3); s.add_argument("--since", default=None, help="push·sync: 이 기간의 표본을 올림(기본: 마지막 성공 시각 2시간 전부터 — 실패한 동안 밀린 것 포함, 처음엔 26시간)"); s.add_argument("-n", type=int, default=15); s.set_defaults(f=cmd_fleet)
+    s = sub.add_parser("fleet", help="여러 호스트 교차 확인(공유 저장소 claude_ctx): push|sync=이 호스트 요약 올리기(실패하면 쌓아 뒀다 다음에 같이) · status=올리기 상태 · compare <호스트>=앱 CPU 비교 · inventory=확장 목록 비교 · hosts · export=usageui 용 JSON · changes=nixup 전후 변화(대조군 비교) · priority <기준호스트>=포커스 비중×초과 CPU 우선순위 · periodic=주기 활동 감지 모음 · units=한 호스트에만 있는 상시 유닛"); s.add_argument("what", choices=["push", "sync", "status", "compare", "inventory", "hosts", "export", "changes", "priority", "periodic", "units"]); s.add_argument("other", nargs="?", help="compare: 비교할 호스트"); s.add_argument("--host", help="compare: 기준 호스트(기본 이 호스트)"); s.add_argument("--usage-from", dest="usage_from", help="priority: 사용자가 실제로 쓰는(포커스 기록을 볼) 호스트, 기본 기준 호스트"); s.add_argument("--days", type=int, default=3); s.add_argument("--since", default=None, help="push·sync: 이 기간의 표본을 올림(기본: 마지막 성공 시각 2시간 전부터 — 실패한 동안 밀린 것 포함, 처음엔 26시간)"); s.add_argument("-n", type=int, default=15); s.set_defaults(f=cmd_fleet)
     s = sub.add_parser("nd", help="Netdata 어댑터(있을 때만): defs=신호 정의, stats=구간 평균, apps=앱 그룹 CPU, charts=차트 찾기, get=차트 값"); s.add_argument("what", choices=["defs", "stats", "apps", "charts", "get"]); s.add_argument("chart", nargs="?", help="charts: 이름 조각 · get: 차트 이름"); s.add_argument("--since", default="10m"); s.add_argument("--until"); s.add_argument("-n", type=int, default=10); s.set_defaults(f=cmd_nd)
     s = sub.add_parser("timeline"); s.add_argument("--at", required=True); s.add_argument("--span", type=float, default=60); s.add_argument("--journal", default="all", choices=["all", "warn", "none"]); s.set_defaults(f=cmd_timeline)
     s = sub.add_parser("bpf", help="eBPF(bpftrace) 프리셋을 N초 동안 실행: exec wake profile psr io net"); s.add_argument("preset", choices=["exec", "wake", "profile", "psr", "io", "net"]); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--comm", help="프로세스 이름 필터(영숫자·._- 15자)"); s.add_argument("-n", type=int, default=12, help="표의 상위 행 수"); s.add_argument("--no-spans", action="store_true", help="exec: 프로세스 스팬을 이벤트 로그에 적지 않음"); s.set_defaults(f=cmd_bpf)

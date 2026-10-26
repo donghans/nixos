@@ -188,3 +188,39 @@ CREATE TABLE IF NOT EXISTS observe_ext_inventory (
   PRIMARY KEY (host, browser, profile, ext_id)
 );
 INSERT INTO schema_version (v) VALUES (4) ON CONFLICT DO NOTHING;  -- 4: observe_* (호스트 간 비교)
+
+-- observectl 교차 호스트 인사이트(observe_fleet.py): 포커스 시간·nixup 구간·주기 활동 감지·상시 유닛. 앱 이름·시각·유닛 이름만(창 제목·주소·내용 없음).
+CREATE TABLE IF NOT EXISTS observe_focus_hourly (
+  host    text NOT NULL,
+  hour    timestamptz NOT NULL,
+  app     text NOT NULL,           -- 창 클래스 기반 앱 이름(observe-focus). 제목은 기록하지 않음
+  seconds real NOT NULL,
+  PRIMARY KEY (host, hour, app)
+);
+CREATE TABLE IF NOT EXISTS observe_changes (
+  host   text NOT NULL,
+  t0     timestamptz NOT NULL,
+  t1     timestamptz,
+  kind   text NOT NULL,            -- 구간 종류(nixup 등)
+  detail text NOT NULL DEFAULT '', -- 예: nixup 의 하위 명령(os·home·all)
+  status text NOT NULL DEFAULT 'ok',
+  PRIMARY KEY (host, t0, kind)
+);
+CREATE TABLE IF NOT EXISTS observe_periodic (
+  host        text NOT NULL,
+  t           timestamptz NOT NULL,
+  series      text NOT NULL,       -- browser | sw_thread
+  period_s    real NOT NULL,
+  corr        real NOT NULL,
+  burst_pct   real,
+  mean_pct    real,
+  PRIMARY KEY (host, t, series)
+);
+CREATE TABLE IF NOT EXISTS observe_units (
+  host   text NOT NULL,
+  scope  text NOT NULL CHECK (scope IN ('user', 'system')),
+  unit   text NOT NULL,            -- 인스턴스 해시는 @* 로 줄임
+  PRIMARY KEY (host, scope, unit)
+);
+INSERT INTO schema_version (v) VALUES (5) ON CONFLICT DO NOTHING;  -- 5: observe_focus_hourly·changes·periodic·units
+

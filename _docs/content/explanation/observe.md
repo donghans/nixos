@@ -261,3 +261,10 @@ Netdata 의 "앱 그룹" 개념을 우리 시스템에 맞게 가져왔다(`obse
 - `abab_lib.sh`: `ABAB_LOCK_CMD=examples/input_lock.sh` 로 시험 중 터치패드·키보드를 잠그고 끝·중단·실패에 푼다(풀 때 `hypr-input-policy` 로 사용자 정책 복원). 잠금 자체의 전력 영향은 안 보였다(장부 #128).
 - `verify` 지침: 조건을 건 API 의 응답이 아니라 효과를 보는 독립 신호로 확인한다(`chrome.management.setEnabled(false)` 는 「꺼짐」이라 답했지만 서비스 워커는 계속 돌았다, 장부 #133).
 
+### 교차 호스트 인사이트 `fleet changes|priority|periodic|units` (2026-10-26)
+같은 nix 설정을 두 호스트가 공유하고 한쪽 데이터가 다른 쪽의 **대조군**이 된다는 점을 쓴다. 올리는 것(push 가 함께 올림, 이름·시각만): 시간별 **포커스 시간**(앱 이름, 창 제목 없음), **nixup 구간**(시각·하위 명령 os/home/all·상태), 브라우저 **주기 활동 감지**(`browser.periodic`), 지금 active 인 **상시 서비스·타이머 이름**(user·system, 인스턴스 해시는 `@*` 로 줄임, 일시 유닛 제외).
+- `observectl fleet changes [--days 14]` — nixup 구간마다 전후 2시간(온전한 시간)의 앱 평균 CPU 변화를 같은 시각 다른 호스트의 변화와 비교. **늘어남**(변화 +0.3%p 이상, 2배↑, 대조군 변화가 절반 미만)과 **줄어듦**을 표로. 변경 뒤 2시간 데이터가 올라오기 전에는 「판정 보류」. 시간별 평균이라 한계가 있다: 사용 패턴이 같은 시각에 달라진 것도 섞일 수 있는 후보용.
+- `observectl fleet priority <기준호스트> [--host 대상] [--usage-from 쓰는호스트]` — 사용자가 실제로 쓰는 호스트의 **포커스 비중**과, 대상 호스트가 기준보다 높은 CPU 를 합친다. 출력 ① 사용 비중 상위(전력 시험 부하 시나리오 후보) ② **포커스 앱**(끌 수 없고 고쳐 써야 하는 것: 비중·대상·기준·초과) ③ **배경**(포커스 거의 없는데 대상이 더 높은 것 = 끄거나 줄일 후보). 포커스 앱 이름(창 클래스)과 프로세스 앱 이름은 첫 토큰으로 맞춘다(vivaldi-stable ↔ vivaldi-bin) — 일부 어긋날 수 있다.
+- `observectl fleet periodic` — 호스트별 주기 활동 감지 모음, 같은 주기가 두 호스트에서 나오면 같은 원인 후보로 표시.
+- `observectl fleet units` — 한 호스트에만 있는 상시 서비스·타이머(노트북 `blueman-tray` 같은 것이 후보로 올라온다).
+- 표는 `claude-ctx/schema.sql`(버전 5: `observe_focus_hourly`·`observe_changes`·`observe_periodic`·`observe_units`). 표 생성은 서버 호스트에서 `claude-ctx-schema` 서비스(nixup)가 한다 — 표가 없으면 push 가 실패로 알리고 표본은 쌓아 둔다.
