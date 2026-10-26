@@ -297,6 +297,16 @@ try:
     conn.execute("DELETE FROM usage_events WHERE request_id LIKE 'acc-%'")
     conn.commit()
 
+    # --- 한도 창: 계정 열이 빈 샘플은 같은 창의 계정에 합친다
+    for n, (aid, email, f, rs) in enumerate([("A", "a@x.test", 30, 1), ("A", "a@x.test", 50, 2), (None, None, 70, 2), (None, None, 20, 3), ("A", "a@x.test", 10, 4), ("B", "b@x.test", 40, 4), (None, None, 99, 4)]):
+        conn.execute("INSERT INTO limit_samples (host, ts, session_id, five_hour_pct, account_id, account_email, five_hour_resets_at) VALUES ('h1', now() - make_interval(secs => %s), 'lw', %s, %s, %s, date_trunc('hour', now()) + make_interval(hours => %s))", (n, f, aid, email, rs * 5))
+    conn.commit()
+    lw = {a["account"]: [round(v) for _, v in a["windows"]] for a in cd.limit_windows(conn)["5h"]}
+    check("limit_windows: 계정이 빈 샘플은 같은 창의 계정에 합쳐 최고값을 쓴다(A: 30, 70, 10)", lw.get("A", [])[:2] == [30, 70], lw)
+    check("limit_windows: 같은 창에 계정이 없는 샘플은 '?' 로 남는다", 20 in lw.get("?", []), lw)
+    check("limit_windows: 같은 창에 계정이 둘이면 모호하므로 '?' 에 둔다(A 10 · B 40 · ? 99)", lw.get("A", [])[-1:] == [10] and lw.get("B") == [40] and 99 in lw.get("?", []), lw)
+    conn.execute("DELETE FROM limit_samples WHERE session_id = 'lw'"); conn.commit()
+
     check("delete_secret", cd.delete_secret(conn, "ANTHROPIC_KEY") == 1 and cd.delete_secret(conn, "ANTHROPIC_KEY") == 0)
     conn.close()
 finally:

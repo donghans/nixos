@@ -472,7 +472,8 @@ async def run():
 
 
 async def run_wrap():
-    """대시보드 줄바꿈 → 1열 전환: 폭에 따라 글 칸이 줄바꿈되지 않아야 한다(2열이면 줄바꿈 없음, 아니면 1열)."""
+    """대시보드 줄바꿈 → 1열 전환: 폭에 따라 글 칸이 줄바꿈되지 않아야 한다(2열이면 줄바꿈 없음, 아니면 1열). 그래프·막대는 칸 폭에 맞고 박스는 겹치지 않는다."""
+    barw = {}
     for cols in (100, 150, 400):
         app = ctxui.CtxUI()
         async with app.run_test(size=(cols, 50)) as pilot:
@@ -481,10 +482,19 @@ async def run_wrap():
             box = app.query_one("#dash-scroll")
             narrow = box.has_class("narrow")
             check(f"대시보드 {cols}칸: 2열이면 글이 줄바꿈되지 않고, 줄바꿈이 생기면 1열", narrow or not app._wrapping(), (narrow, app._wrapping()))
+            tt = app.query_one("#stat-trend")
+            barw[cols] = max((len(tt.get_row_at(i)[3].plain) for i in range(tt.row_count)), default=0)
+            lt = txt(app.query_one("#stat-limits"))
+            check(f"대시보드 {cols}칸: 한도는 점자 그래프(시간축 날짜 포함)이고 시간대별도 점자 그래프", any("\u2800" <= ch <= "\u28ff" and ch != "\u2800" for ch in lt) and "10-" in lt and any("\u2800" <= ch <= "\u28ff" for ch in txt(app.query_one("#stat-summary"))), lt[:300])
+            tops = [app.query_one("#" + k) for kids in app.DASH_ROWS.values() for k in kids]
+            bad = [(a.id, b.id) for i, a in enumerate(tops) for b in tops[i + 1:] if a.region.overlaps(b.region)]
+            check(f"대시보드 {cols}칸: 박스끼리 겹치지 않는다", not bad, bad)
+            check(f"대시보드 {cols}칸: 추이·분류 표 박스 높이가 내용(행 3개 안팎)에 맞아 예전 고정 14줄보다 낮다", all(app.query_one("#" + k).region.height < 14 for k in ("stat-trend", "stat-break")), [(k, app.query_one("#" + k).region.height) for k in ("stat-trend", "stat-break")])
             if cols == 100:
                 check("대시보드 100칸: 최소 폭 규칙으로 1열", narrow)
             if cols == 400:
                 check("대시보드 아주 넓은 폭(400칸): 2열 유지", not narrow and not app._wrapping(), (narrow, app._wrapping(), app._wrap_at))
+    check("대시보드: 비용 막대는 박스가 넓을수록 길다(150칸 < 400칸, 18칸 고정 아님)", barw[400] > barw[150] > 0 and barw[400] > 18, barw)
 
 
 async def run_restricted():

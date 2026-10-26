@@ -34,6 +34,7 @@ except ImportError:                                # 소스 트리: ../_uikit
 
 import claude_ctx as cc
 import ctx_secrets as cs
+import ctxchart as cch
 import ctxdata as cd
 
 TABS = [("dashboard", "대시보드"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("instr", "지침")]
@@ -77,31 +78,52 @@ def bar(v, vmax, width=20) -> str:
     return "█" * (eighths // 8) + (" ▏▎▍▌▋▊▉"[eighths % 8] if eighths % 8 else "")
 
 
-def spark(values) -> str:
-    """한 줄 스파크라인(▁~█)."""
-    m = max(values) if values else 0
-    return "".join(" " if not m or v <= 0 else "▁▂▃▄▅▆▇█"[min(7, int(v / m * 7.999))] for v in values)
-
-
 ACCT_COLORS = ["#33ccff", "#ffb347", "#b4e04e", "#ff6f91", "#c792ea", "#ffd166"]   # 계정마다 고정 색(계정 ID 순)
 
 
-def spark100(values) -> str:
-    """0~100 % 절대 눈금 스파크라인(창끼리 높이를 비교할 수 있게 최대값으로 늘리지 않는다)."""
-    return "".join("▁▂▃▄▅▆▇█"[max(0, min(7, int(v / 100 * 7.999)))] for v in values)
+def summary_text(summ, width=46) -> Text:
+    """세션 통계 칸 글. 가장 긴 줄이 1열 전환 기준(칸 폭 ≈ 화면의 1/3)보다 짧게 짧은 줄로 나누고, 그래프·막대는 width 에 맞춘다."""
+    t = Text()
+    n = max(summ["sessions"], 1)
+    t.append(f"세션 {summ['sessions']:,}개 · 비용 ${summ['cost']:,.2f}\n", style="bold")
+    t.append(f"프롬프트 {int(summ['prompts']):,} · 도구 호출 {int(summ['tools']):,}\n", style="bold")
+    t.append(f"자동 메시지 {summ['autos']:,}건은 프롬프트에서 제외\n", style="#7a7a7a")
+    if summ["unknown_tags"]:
+        t.append(f"알 수 없는 태그 {summ['unknown_tags']:,}건(AUTO_TAGS 점검)\n", style="#7a7a7a")
+    t.append(f"세션당  프롬프트 {summ['prompts'] / n:.1f} (중앙값 {summ['median_prompts']:.0f}) · ${summ['cost'] / n:.2f}\n", style="#cfcfcf")
+    t.append(f"세션 길이  중앙값 {fmt_dur(summ['median_duration_s'])} · 평균 {fmt_dur(summ['avg_duration_s'])}\n", style="#cfcfcf")
+    t.append("(resume 이어진 세션이 평균을 올림)\n\n", style="#7a7a7a")
+    t.append("시간대별 프롬프트(0~24시)\n", style="#9a9a9a")
+    t.append_text(cch.hour_chart(summ["by_hour"], width, 4, "#33ccff"))
+    top = sorted(range(24), key=lambda h: -summ["by_hour"][h])[:3]
+    t.append("\n많은 시간: " + " ".join(f"{h}시({summ['by_hour'][h]})" for h in top if summ["by_hour"][h]) + "\n\n", style="#cfcfcf")
+    t.append("요일별 프롬프트\n", style="#9a9a9a")
+    wmax = max(summ["by_weekday"])
+    bw = max(10, min(80, width - 9))
+    for i, v in enumerate(summ["by_weekday"]):
+        t.append(f"{WEEKDAYS[i]} {v:>5,} ", style="#cfcfcf")
+        t.append(cch.fit_bar(v, wmax, bw) + "\n", style="#33ccff")
+    t.rstrip()
+    return t
 
 
-def limits_text(win) -> Text:
-    """계정별 한도 창 그래프 — 한 계정 = 한 색, 줄마다 5h/7d 창이 지날 때마다 그 창에서 찍은 최고 %."""
+LIMIT_SPAN = {"5h": 5 * 3600, "7d": 7 * 86400}      # 한도 창 길이(초)
+LIMIT_H = {"5h": 4, "7d": 2}                           # 창 종류별 그래프 높이(줄)
+
+
+def limits_text(win, width=60) -> Text:
+    """계정별 한도 창 그래프 — 한 계정 = 한 색. 5h/7d 마다 점자 면적 그래프(x=시간, y=0~100 %)로, 창마다 그 창에서 찍은 최고 %를 창 길이만큼 채운다. width = 칸 폭."""
     t = Text()
     ids = sorted({a["account"] for k in win.values() for a in k})
     if not ids:
         t.append("한도 샘플 없음 — 계정·리셋 시각 수집은 상태줄 갱신 이후부터", style="#7a7a7a")
         return t
     color = {i: ACCT_COLORS[n % len(ACCT_COLORS)] for n, i in enumerate(ids)}
-    for i in ids:
+    for n, i in enumerate(ids):
         row = {k: next((a for a in win[k] if a["account"] == i), None) for k in win}
         ref = row["5h"] or row["7d"]
+        if n:
+            t.append("\n")
         t.append("● ", style=color[i]); t.append(ref["label"], style=f"bold {color[i]}")
         t.append(f"  {ref['plan'] or '플랜 불명'}\n", style="#9a9a9a")
         for k in ("5h", "7d"):
@@ -109,8 +131,10 @@ def limits_text(win) -> Text:
             if not a or not a["windows"]:
                 continue
             vals = [v for _, v in a["windows"]]
-            t.append(f"  {k} ", style="#9a9a9a"); t.append(spark100(vals), style=color[i])
-            t.append(f"  지금 {vals[-1]:.0f}% · 최고 {max(vals):.0f}% · {len(vals)}창\n", style="#cfcfcf")
+            t.append(f"{k}  지금 {vals[-1]:.0f}% · 최고 {max(vals):.0f}% · {len(vals)}창\n", style="#cfcfcf")
+            t.append_text(cch.window_chart(a["windows"], LIMIT_SPAN[k], width, LIMIT_H[k], color[i]))
+            t.append("\n")
+    t.rstrip()
     return t
 
 
@@ -608,7 +632,7 @@ class CtxUI(uikit.HelpMixin, App):
 
     DASH_NARROW_COLS = 110      # 이보다 좁으면 대시보드의 2열 배치를 1열로(좁은 터미널에서 표가 잘리지 않게)
     WRAP_RETRY_COLS = 12        # 줄바꿈 때문에 1열이 된 뒤, 이만큼 넓어지면 2열을 다시 시도
-    DASH_TEXTS = ("#ovhead", "#stat-limits", "#stat-summary")      # 줄바꿈이 생기는 글 칸(표는 줄바꿈 대신 잘리므로 제외)
+    DASH_TEXTS = ("#stat-limits", "#stat-summary")      # 2열/1열에 따라 폭이 달라지는 글 칸(표는 줄바꿈 대신 잘리므로, 전체 폭인 #ovhead 는 열 배치와 무관하므로 제외)
 
     def _wrapping(self):
         """대시보드의 글 칸 중 가장 긴 논리 줄이 칸 폭보다 길어 줄바꿈될 것들 [(id, 칸 폭, 필요 폭)]."""
@@ -650,12 +674,14 @@ class CtxUI(uikit.HelpMixin, App):
             self._wrap_pending = False
             self._wrap_at = self.size.width
             box.add_class("narrow")
+            self.call_after_refresh(self._paint_dash)
         else:
             self._wrap_pending = True
             self.set_timer(0.35, self._check_wrap)
 
     def on_resize(self, event):
         self._fit_dash()
+        self.call_after_refresh(self._paint_dash)
         self.call_after_refresh(self._check_wrap)
 
     # --- 공통
@@ -768,6 +794,7 @@ class CtxUI(uikit.HelpMixin, App):
         for p in ov["projects"]:
             tb.add_row(short_repo(p["repo"]), f"{p['sessions']:,}", f"{p['messages']:,}", f"{p['prompts']:,}", cd.human_bytes(p["text_chars"]),
                        cd.human_bytes(p["stored_bytes"]), fmt_ts(p["last_ts"]), ",".join(p["hosts"]), key=p["repo"])
+        self._fit_heights()
 
     def on_data_table_row_selected(self, ev: DataTable.RowSelected):
         tid, key = ev.data_table.id, (ev.row_key.value if ev.row_key else None)
@@ -945,15 +972,8 @@ class CtxUI(uikit.HelpMixin, App):
 
     def show_stats(self, cov, trend, brk, tot, summ, sess, lim):
         self._stat_loaded = True
-        self.query_one("#stat-limits", Static).update(limits_text(lim))
+        self._st = dict(lim=lim, trend=trend, tot=tot, summ=summ)
         self.update_stat_state(cov)
-        fmt_b = lambda b: {"hour": b.strftime("%m-%d %H시"), "day": f"{b:%m-%d} ({WEEKDAYS[b.weekday()]})", "week": b.strftime("%m-%d 주"), "month": b.strftime("%Y-%m")}[self.stat_bucket]
-        tt = self.query_one("#stat-trend", DataTable)
-        tt.clear()
-        cmax = max((r["cost"] for r in trend), default=0)
-        for r in reversed(trend):    # 최근이 위
-            tt.add_row(fmt_b(r["bucket"]), f"{r['requests']:,}", f"${r['cost']:,.2f}", Text(bar(r["cost"], cmax, 18), style="#33ccff"),
-                       fmt_num(r["input"] + r["cache_create"]), fmt_num(r["output"]), fmt_num(r["cache_read"]))
         self.query_one("#stat-trend").border_title = f"토큰·비용 추이 — {cd.BUCKETS[self.stat_bucket]} 단위 · 합계 ${tot['cost']:,.2f} · 요청 {tot['requests']:,} · 출력 {fmt_num(tot['output'])}"
         tb = self.query_one("#stat-break", DataTable)
         tb.clear()
@@ -963,28 +983,6 @@ class CtxUI(uikit.HelpMixin, App):
         unk = next((r for r in brk if r["key"] == "(계정 불명)"), None) if self.stat_by == "account" else None
         self.query_one("#stat-break").border_title = (f"{cd.BREAKDOWNS[self.stat_by]}별 — {len(brk)}개 (g: 분류 바꾸기)"
                                                       + (f" · 계정 불명 {unk['cost'] / tot['cost']:.0%}" if unk and tot["cost"] else ""))
-        t = Text()
-        t.append(f"세션 {summ['sessions']:,}개 · 프롬프트 {int(summ['prompts']):,} · 도구 호출 {int(summ['tools']):,} · 비용 ${summ['cost']:,.2f}\n", style="bold")
-        n = max(summ["sessions"], 1)
-        t.append(f"자동 메시지 {summ['autos']:,}건(작업 알림·명령 출력 등)은 프롬프트 수에서 제외" + (f" · 알 수 없는 태그로 시작 {summ['unknown_tags']:,}건(AUTO_TAGS 점검)" if summ["unknown_tags"] else "") + "\n", style="#7a7a7a")
-        t.append(f"세션당  프롬프트 {summ['prompts'] / n:.1f} (중앙값 {summ['median_prompts']:.0f}) · 비용 ${summ['cost'] / n:.2f}\n", style="#cfcfcf")
-        t.append(f"세션 길이  중앙값 {fmt_dur(summ['median_duration_s'])} · 평균 {fmt_dur(summ['avg_duration_s'])}", style="#cfcfcf")
-        t.append("   (resume 으로 이어진 세션이 평균을 끌어올림)\n\n", style="#7a7a7a")
-        t.append("시간대별 프롬프트(0~23시)\n", style="#9a9a9a")
-        t.append(spark(summ["by_hour"]) + "\n", style="#33ccff")
-        axis = [" "] * 24
-        for h in (0, 6, 12, 18):
-            axis[h:h + len(str(h))] = str(h)
-        axis[22:24] = "23"
-        t.append("".join(axis) + "\n", style="#7a7a7a")
-        top = sorted(range(24), key=lambda h: -summ["by_hour"][h])[:3]
-        t.append("가장 많은 시간: " + ", ".join(f"{h}시({summ['by_hour'][h]})" for h in top if summ["by_hour"][h]) + "\n\n", style="#cfcfcf")
-        t.append("요일별 프롬프트\n", style="#9a9a9a")
-        wmax = max(summ["by_weekday"])
-        for i, v in enumerate(summ["by_weekday"]):
-            t.append(f"{WEEKDAYS[i]} {v:>5,} ", style="#cfcfcf")
-            t.append(bar(v, wmax, 24) + "\n", style="#33ccff")
-        self.query_one("#stat-summary", Static).update(t)
         ts = self.query_one("#stat-sessions", DataTable)
         ts.clear()
         for r in sess:
@@ -992,7 +990,69 @@ class CtxUI(uikit.HelpMixin, App):
             ts.add_row(fmt_ts(r["last"]), r["host"], short_repo(r["repo"]), r["prompts"], r["tools"], fmt_dur(r["turn_ms"] / 1000),
                        f"${r['cost']:,.2f}" if r["cost"] is not None else "-", models[:20], Text((r["title"] or "")[:60]), key=r["session_id"])
         self.query_one("#stat-sessions").border_title = f"세션 {len(sess)}개{' (최대 300)' if len(sess) >= 300 else ''} — {dict(STAT_ORDERS)[self.stat_order]}순 (o) · Enter: 대화 보기"
+        self._paint_dash()
+        self.call_after_refresh(self._paint_dash)      # 칸 폭이 확정된 뒤 한 번 더(처음 열 때 폭을 아직 모를 수 있다)
         self.call_after_refresh(self._check_wrap)
+
+    def _fmt_bucket(self, b):
+        return {"hour": b.strftime("%m-%d %H시"), "day": f"{b:%m-%d} ({WEEKDAYS[b.weekday()]})", "week": b.strftime("%m-%d 주"), "month": b.strftime("%Y-%m")}[self.stat_bucket]
+
+    def _paint_dash(self):
+        """칸 폭에 따라 달라지는 것(한도·시간대 그래프, 비용 막대, 요일 막대)을 지금 폭으로 다시 그리고 박스 높이를 내용에 맞춘다."""
+        st = getattr(self, "_st", None)
+        if not st:
+            return
+        lim_w = self.query_one("#stat-limits-box").size.width - 6 or 60      # 테두리 2 + 글 여백 2 + 세로 스크롤바 2(내용이 길어 생겨도 줄바꿈되지 않게 늘 비워 둔다)
+        lt = limits_text(st["lim"], max(30, lim_w))
+        self.query_one("#stat-limits", Static).update(lt)
+        sm_w = self.query_one("#stat-summary-box").size.width - 6 or 46
+        sm = summary_text(st["summ"], max(30, sm_w))
+        self.query_one("#stat-summary", Static).update(sm)
+        self._need = {"stat-limits-box": lt.plain.count("\n") + 1, "stat-summary-box": sm.plain.count("\n") + 1}
+        self._paint_trend(st["trend"])
+        self._fit_heights()
+
+    def _paint_trend(self, trend):
+        """추이 표: 비용 막대 칸을 표 폭에서 다른 칸이 쓰고 남는 만큼으로 정한다(박스가 넓어지면 막대도 길어진다)."""
+        from rich.cells import cell_len
+        tt = self.query_one("#stat-trend", DataTable)
+        rows = [(self._fmt_bucket(r["bucket"]), f"{r['requests']:,}", f"${r['cost']:,.2f}", r["cost"], fmt_num(r["input"] + r["cache_create"]), fmt_num(r["output"]), fmt_num(r["cache_read"])) for r in reversed(trend)]    # 최근이 위
+        heads = ("구간", "요청", "비용", "", "입력", "출력", "캐시읽기")
+        others = sum(max(cell_len(heads[i]), max((cell_len(r[j]) for r in rows), default=0)) + 2 for i, j in ((0, 0), (1, 1), (2, 2), (4, 4), (5, 5), (6, 6)))
+        bw = max(6, min(80, tt.size.width - others - 2 - 2 - 2)) if tt.size.width else 18      # 테두리·막대 칸 여백·세로 스크롤바
+        cmax = max((r["cost"] for r in trend), default=0)
+        cur = tt.cursor_row
+        tt.clear()
+        for r in rows:
+            tt.add_row(r[0], r[1], r[2], Text(cch.fit_bar(r[3], cmax, bw), style="#33ccff"), r[4], r[5], r[6])
+        if rows:
+            tt.move_cursor(row=min(cur, len(rows) - 1), animate=False)
+        self._need["stat-trend"] = len(rows) + 3
+
+    DASH_ROWS = {"dr1": ("projects", "stat-limits-box"), "dr2": ("stat-trend", "stat-break"), "dr3": ("stat-summary-box", "stat-sessions")}
+    DASH_CAP = 26          # 박스 하나의 최대 높이(줄) — 표가 이보다 길면 안에서 스크롤
+
+    def _fit_heights(self):
+        """박스 높이를 내용(표 행 수·글 줄 수)에 맞춘다. 2열이면 한 줄(row)의 높이를 두 박스 중 큰 쪽에, 1열이면 박스마다 따로."""
+        try:
+            narrow = self.query_one("#dash-scroll").has_class("narrow")
+            need = dict(getattr(self, "_need", {}))
+            for tid in ("projects", "stat-break", "stat-sessions"):
+                need[tid] = self.query_one("#" + tid, DataTable).row_count + 3
+            need["stat-sessions"] = max(need["stat-sessions"], 12)       # 세션 표는 길어서 스크롤 — 최소한 열 줄은 보이게
+            h = {k: max(6, min(self.DASH_CAP, v + (2 if k.endswith("-box") else 0))) for k, v in need.items()}
+            for row, kids in self.DASH_ROWS.items():
+                r = self.query_one("#" + row)
+                if narrow:
+                    r.styles.height = None
+                    for k in kids:
+                        self.query_one("#" + k).styles.height = h.get(k, 8)
+                else:
+                    for k in kids:
+                        self.query_one("#" + k).styles.height = None
+                    r.styles.height = max(h.get(k, 8) for k in kids)
+        except Exception:
+            pass
 
     def action_stat_period(self):
         if self.current_tab() == "dashboard" and len(self.screen_stack) == 1:

@@ -187,7 +187,8 @@ def usage_trend(conn, *, days=None, bucket="day", repo=None, host=None, model=No
 
 def limit_windows(conn, *, days=None, host=None, last=48):
     """계정별 한도 창(5h·7d)마다 찍은 최고 %. {kind: [{account, label, plan, windows:[(리셋시각, 최고%)…오래된 것부터 last 개]}…]}.
-    계정은 account_id(없으면 '?'), 창은 리셋 시각으로 가른다. 라벨은 이메일."""
+    계정은 account_id(없으면 '?'), 창은 리셋 시각으로 가른다. 라벨은 이메일.
+    계정 열이 비어 있는 샘플('?')은 같은 창(같은 리셋 시각)에 계정이 찍힌 샘플이 있으면 그 계정에 합친다(계정이 둘 이상이면 모호하므로 '?' 로 둔다)."""
     out = {}
     for kind, pct, rs in (("5h", "five_hour_pct", "five_hour_resets_at"), ("7d", "seven_day_pct", "seven_day_resets_at")):
         where, args = f"{pct} IS NOT NULL AND {rs} IS NOT NULL", []
@@ -197,13 +198,21 @@ def limit_windows(conn, *, days=None, host=None, last=48):
             where += " AND host ILIKE %s"; args.append(_like(host))
         rows = conn.execute(f"""SELECT coalesce(account_id, '?'), max(account_email), max(account_plan), {rs}, max({pct})
                   FROM limit_samples WHERE {where} GROUP BY 1, {rs} ORDER BY 1, {rs}""", args).fetchall()
+        known = {}                                  # 리셋 시각 → 그 창에 계정이 찍힌 샘플이 있는 계정 id들
+        for aid, _e, _p, r, _m in rows:
+            if aid != "?":
+                known.setdefault(r, set()).add(aid)
         accts = {}
         for aid, email, plan, r, mx in rows:
-            a = accts.setdefault(aid, dict(account=aid, label=email or ("계정 불명" if aid == "?" else aid[:8]), plan=plan, windows=[]))
+            if aid == "?" and len(known.get(r, ())) == 1:     # 계정 열이 비어 있던 샘플도 같은 창이면 그 계정의 것이다(창 하나는 계정 하나) — 따로 「계정 불명」으로 세면 같은 창이 두 번 보인다
+                aid = next(iter(known[r]))
+            a = accts.setdefault(aid, dict(account=aid, label=email or ("계정 불명" if aid == "?" else aid[:8]), plan=plan, windows={}))
+            if email and a["label"] != email:
+                a["label"] = email
             a["plan"] = a["plan"] or plan
-            a["windows"].append((r, float(mx)))
+            a["windows"][r] = max(a["windows"].get(r, 0.0), float(mx))
         for a in accts.values():
-            a["windows"] = a["windows"][-last:]
+            a["windows"] = sorted(a["windows"].items())[-last:]
         out[kind] = sorted(accts.values(), key=lambda a: a["account"])
     return out
 
