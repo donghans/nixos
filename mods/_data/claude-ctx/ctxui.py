@@ -590,6 +590,15 @@ class CtxUI(uikit.HelpMixin, App):
     def flash(self, msg: str, severity="information"):
         self.notify(msg, severity=severity, timeout=5)
 
+    def check_action(self, action, parameters):
+        """제한 모드에서는 막힌 동작(비밀·후보 탭, 치환 끄기, 비밀·후보 관리)을 푸터·도움말에서 숨긴다(눌러도 deny 가 막는다)."""
+        if self.restricted:
+            if action == "tab" and parameters and parameters[0] in self.RESTRICTED_TABS:
+                return False
+            if action in ("toggle_mask", "secret_add", "secret_delete", "secret_toggle", "reveal", "cand_ignore"):
+                return False
+        return True
+
     def deny(self, what="이 동작") -> bool:
         """제한 모드면 안내하고 True(호출한 동작은 중단해야 한다)."""
         if self.restricted:

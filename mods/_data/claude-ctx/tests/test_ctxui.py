@@ -418,6 +418,7 @@ async def run_restricted():
         tabs = [str(app.query_one("#tabs").get_tab(n).label) for n in ("secrets", "cands")]
         check("제한: 비밀·후보 탭 라벨에 [제한] 표시", all("[제한]" in t for t in tabs), tabs)
         check("제한: 상태줄에 제한 모드 안내", "제한 모드" in txt(app.query_one("#sstate")))
+        check("제한: 막힌 동작(4·5 탭, m, 비밀·후보 관리)은 푸터에서 숨기고 열린 동작(1·2·3·6·7, r)은 보임", all(app.check_action("tab", (t,)) is False for t in ("secrets", "cands")) and all(app.check_action("tab", (t,)) is True for t in ("overview", "search", "verify", "stats", "instr")) and app.check_action("toggle_mask", ()) is False and app.check_action("reload", ()) is True)
         for key in ("4", "5"):
             await pilot.press(key); await pilot.pause(0.5)
             check(f"제한: {key} 키로 비밀·후보 탭을 열 수 없음(개요에 머묾)", app.current_tab() == "overview")
