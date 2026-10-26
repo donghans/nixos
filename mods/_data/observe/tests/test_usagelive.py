@@ -22,7 +22,7 @@ sm = lv.LiveSampler(slow_every=0.5)
 s0 = sm.sample()
 check("첫 표본: measured=False, 구간 값은 None, 판정은 계산됨", s0["measured"] is False and s0["rates"]["pswpin"] is None and hm.verdict(s0)[0] in ("여유", "주의", "압박", "심각"))
 check("첫 표본: 느린 항목(앱·cgroup·세션)이 이미 채워짐, 앱 CPU 는 아직 미측정", {"apps", "cons", "sessions"} <= set(s0) and s0["apps_measured"] is False)
-time.sleep(sm.slow_every + 0.1)      # 느린 항목을 재는 데 걸린 시간에 비례해 주기가 늘어나므로(바쁜 호스트 보호) 갱신된 주기만큼 기다린다
+time.sleep(max(sm.slow_every, 2.0) + 0.3)      # 느린 항목을 재는 데 걸린 시간에 비례해 주기가 늘어나므로(바쁜 호스트 보호) 갱신된 주기만큼 기다린다
 s1 = sm.sample()
 check("둘째 표본: measured=True, 변화율 숫자, 코어별 사용률 리스트(코어 수와 같음)", s1["measured"] and s1["rates"]["pswpin"] >= 0 and len(s1["cores"]) == os.cpu_count() and all(v is None or 0 <= v <= 100.5 for v in s1["cores"]))
 check("둘째 표본: 느린 주기(0.5s)가 지나 앱 CPU 가 측정됨", s1["apps_measured"] is True and s1["apps"] and all(a["cpu"] >= 0 for a in s1["apps"]))
@@ -64,6 +64,16 @@ check("human_bytes", lv.human_bytes(None) == "-" and lv.human_bytes(1536 * 1024,
 import usagedata as ud, usageui
 from textual.widgets import Static, TabbedContent
 
+async def until(pilot, cond, timeout=10.0, step=0.15):
+    """조건이 참이 될 때까지 기다린다(고정 대기는 부하가 큰 호스트에서 흔들려 조건 기다림으로 바꿨다)."""
+    end = time.time() + timeout
+    while time.time() < end:
+        if cond():
+            return True
+        await pilot.pause(step)
+    return cond()
+
+
 def status_text(app):
     return str(app.query_one("#status", Static).render())
 
@@ -77,7 +87,7 @@ async def drive():
     async with app.run_test(size=(140, 45)) as pilot:
         await pilot.pause(0.8)
         check("앱: 실시간 탭 밖에서는 타이머·샘플러 없음", app._timer is None and app.sampler is None)
-        await pilot.press("6"); await pilot.pause(2.6)
+        await pilot.press("6"); await until(pilot, lambda: app.live_sample is not None and app.live_sample.get("measured"))
         check("앱: 6 키로 live 탭 진입, 타이머 시작·샘플 도착", active(app) == "live" and app._timer is not None and app.live_sample is not None)
         n = app.sampler._t
         check("앱: 판정 박스에 내용이 그려짐", "판정" in str(app.query_one("#lverdict").border_title) and len(app.query_one("#lverdict")._text.plain) > 10)
@@ -89,19 +99,19 @@ async def drive():
         check("앱: LLM 세션 박스(탭 안의 모든 Panel)도 표본으로 그려짐", "첫 표본" not in app.query_one("#lsess")._text.plain and "첫 표본" not in app.query_one("#lio")._text.plain)
         await pilot.press("tab"); await pilot.pause(0.5)
         check("앱: Tab 으로 같은 1번 탭의 기록 쪽으로 가면 타이머 정지", active(app) == "dashboard" and app._timer is None)
-        await pilot.press("tab"); await pilot.pause(1.2)
+        await pilot.press("tab"); await until(pilot, lambda: app._timer is not None)
         check("앱: Tab 다시 → 실시간 쪽, 타이머 재개", active(app) == "live" and app._timer is not None)
         await pilot.press("2"); await pilot.pause(0.5)
         check("앱: 다른 바깥 탭(2)으로 가면 타이머 정지(실시간 쪽이 선택돼 있어도)", app._timer is None and app.query_one("#dsub", TabbedContent).active == "live")
         await pilot.press("tab"); await pilot.pause(0.3)
         check("앱: 1번 탭이 아닐 때 Tab 은 기록↔실시간을 바꾸지 않음(포커스 이동)", app.query_one("#dsub", TabbedContent).active == "live" and app._timer is None)
-        await pilot.press("1"); await pilot.pause(1.2)
+        await pilot.press("1"); await until(pilot, lambda: app._timer is not None)
         check("앱: 1 로 돌아오면 마지막으로 보던 실시간 쪽이 다시 보이고 타이머 재개", active(app) == "live" and app._timer is not None)
         await pilot.press("tab"); await pilot.press("1"); await pilot.pause(0.3)
         check("앱: 기록 쪽에서 1 을 눌러도 기록 그대로(타이머 없음)", active(app) == "dashboard" and app._timer is None)
         t_stop = app.sampler._t; await pilot.pause(1.6)
         check("앱: 정지 후에는 표본이 늘지 않음", app.sampler._t == t_stop)
-        await pilot.press("6"); await pilot.pause(1.5)
+        await pilot.press("6"); await until(pilot, lambda: app._timer is not None and app.sampler._t > t_stop)
         check("앱: 다시 6 으로 오면 재개", app._timer is not None and app.sampler._t > t_stop)
         app.live_sec = 1.0
         base = dict(app.live_sample)
@@ -127,12 +137,12 @@ async def drive():
 async def narrow():
     app = usageui.UsageUI(ud.preset("1시간", time.time()), tab="live")
     async with app.run_test(size=(90, 40)) as pilot:
-        await pilot.pause(2.0)
+        await until(pilot, lambda: app._timer is not None)
         check("앱: --tab live 로 시작하면 바로 실시간 탭, 폭 90칸이면 1열(narrow)", active(app) == "live" and app._timer is not None and app.query_one("#livebox").has_class("narrow"))
 async def default_start():
     app = usageui.UsageUI(ud.preset("1시간", time.time()))
     async with app.run_test(size=(140, 45)) as pilot:
-        await pilot.pause(2.0)
+        await until(pilot, lambda: app._timer is not None and app.live_sample is not None)
         check("앱: 옵션 없이 열면 1번 탭의 실시간 쪽이 먼저 보이고 타이머가 돈다", active(app) == "live" and app._timer is not None and app.live_sample is not None)
         await pilot.press("tab"); await pilot.pause(0.3)
         check("앱: 기록 대시보드는 Tab 으로 한 번에", active(app) == "dashboard")

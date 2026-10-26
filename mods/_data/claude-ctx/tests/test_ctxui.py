@@ -67,6 +67,19 @@ async def settle(pilot, cond, timeout=8.0):
     return cond()
 
 
+def risky_cells(app):
+    """DataTable 의 **문자열** 셀 중 대괄호 마크업처럼 보이는 것(`[protected]` 등) — 문자열로 넣으면 Rich 마크업으로 해석돼 화면에서 글자가 사라진다(Text 로 넣어야 한다)."""
+    import re
+    from textual.widgets import DataTable
+    out = []
+    for t in app.query(DataTable):
+        for key in t.rows:
+            for c in t.get_row(key):
+                if isinstance(c, str) and re.search(r"\[(?!\d+\])[A-Za-z/#@][^\]]*\]", c):
+                    out.append((t.id, c[:60]))
+    return out
+
+
 def rows(app, sel):
     return app.query_one(sel).row_count
 
@@ -431,7 +444,13 @@ async def run_restricted():
         await pilot.press("v"); await pilot.pause(0.3)
         check("제한: v(값 보기)는 막혀 값이 표시되지 않음", PW not in txt(app.query_one("#sdetail")) and app._reveal is False)
         # --- 후보 탭: 열린다, 미리보기는 [protected]
+        _calls = []
+        _orig = cd.scan_candidates
+        cd.scan_candidates = lambda c: (_calls.append(1), _orig(c))[1]
         await pilot.press("5"); await settle(pilot, lambda: app.current_tab() == "cands" and rows(app, "#cands-table") >= 1, timeout=15)
+        await pilot.pause(1.0)
+        cd.scan_candidates = _orig
+        check("탭을 한 번 열면 후보 탐지는 한 번만 돈다(예전엔 action_tab 과 TabActivated 가 둘 다 불러 두 번 돌고 알림이 겹쳤다)", len(_calls) == 1, len(_calls))
         ct = app.query_one("#cands-table")
         ccells = " ".join(str(ct.get_row_at(i)) for i in range(ct.row_count))
         check("제한: 후보 탭이 열리고 후보가 탐지되며 미리보기는 [protected](N자)이고 값(키)은 어디에도 없음", ct.row_count >= 1 and "[protected] (" in ccells and KEY2 not in ccells and cs.preview(KEY2) not in ccells, ccells[:240])
@@ -468,9 +487,43 @@ async def run_restricted():
         with cc.connect() as c:
             after = len(cs.load_secrets(c, only_enabled=False))
         check("제한: 비밀 추가·삭제·끄기·값 보기·후보 무시가 모두 막힘(대화상자 없음, 등록 수 불변, 값 미표시)", not isinstance(app.screen, ctxui.PromptScreen) and not isinstance(app.screen, ctxui.ConfirmScreen) and after == n_secrets and not app._reveal, (after, n_secrets))
+        # --- 대화 화면은 세션 전체가 아니라 보일 창만 치환한다(메시지 수만 개짜리 세션이 느리던 문제)
+        with cc.connect() as c:
+            c.execute("INSERT INTO sessions (session_id, host, hosts, repo_url, first_ts, last_ts) VALUES (%s,%s,%s,%s,%s,%s)", ("eeee0001", "h1", ["h1"], A, "2026-10-07T01:00:00Z", "2026-10-07T04:00:00Z"))
+            for i in range(200):
+                c.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (f"eeee-{i:04d}", "eeee0001", "h1", f"2026-10-07T{1 + i // 60:02d}:{i % 60:02d}:00Z", "user" if i % 2 == 0 else "assistant", "prompt" if i % 2 == 0 else "response", f"긴 세션 {i}번째 메시지", json.dumps({"i": i})))
+        _n = []
+        _t = cs.Masker.text
+        cs.Masker.text = lambda self, x: (_n.append(1), _t(self, x))[1]
+        _mm = ctxui.MSG_MAX
+        ctxui.MSG_MAX = 50
+        try:
+            app.push_screen(ctxui.SessionScreen(app, "eeee0001", "eeee-0100")); await settle(pilot, lambda: isinstance(app.screen, ctxui.SessionScreen) and len(app.screen.msgs) > 0)
+            await pilot.pause(0.5)
+            n_open = len(_n)
+            shown = len(app.screen.msgs)
+            hb, ha = app.screen.hidden_before, app.screen.hidden_after
+        finally:
+            ctxui.MSG_MAX = _mm
+            cs.Masker.text = _t
+        check("대화 화면: 200개 메시지 세션에서 창(50개)만 그리고 앞 75·뒤 75 생략 표시", shown == 50 and hb + ha == 150 and hb == 75, (shown, hb, ha))
+        check("대화 화면: 치환 호출이 세션 전체(200)가 아니라 창 크기 안팎(<110)이라 큰 세션이 느려지지 않음", n_open < 110, n_open)
+        await pilot.press("escape"); await pilot.pause(0.3)
         await pilot.press("6"); await pilot.pause(0.5)
         check("제한: 통계 탭은 그대로 열림", app.current_tab() == "stats")
-        await pilot.press("7"); await pilot.pause(0.8)
+        await pilot.press("3"); await pilot.pause(0.4)
+        vq = app.query_one("#phrase"); vq.value = "새 키는"; await submit(pilot, vq); await pilot.pause(1.0)
+        check("표 셀: 모든 DataTable 의 문자열 셀에 마크업으로 해석될 대괄호(예: [protected])가 없음 — 화면에서 글자가 사라지지 않게 Text 로 넣었는지", risky_cells(app) == [], risky_cells(app))
+        app.action_tab("instr")       # 입력칸에 포커스가 있으면 숫자 키가 글자로 들어가므로 동작을 직접 호출
+        await settle(pilot, lambda: app.query_one("#instr-table").row_count >= 1, timeout=6)
+        check("지침 탭으로 가면 지침 표에 포커스(Enter·↑↓ 가 바로 동작)", app.focused is not None and app.focused.id == "instr-table")
+        app.action_tab("stats"); await pilot.pause(0.5)
+        check("통계 탭으로 가면 세션 표에 포커스", app.focused is not None and app.focused.id == "stat-sessions")
+        await pilot.press("f1"); await pilot.pause(0.4)
+        hd = " ".join(d for _, d in app.screen._rows) if type(app.screen).__name__ == "HelpScreen" else ""
+        check("제한: 도움말 키 목록에서도 막힌 동작(치환 켬/끔·비밀 추가·삭제·켬/끔·값 보기·무시)이 빠지고 열린 동작(검색·통계·새로고침)은 있음", hd and not any(x in hd for x in ("치환 켬/끔", "비밀 추가", "값 보기", "무시", "삭제")) and "새로고침" in hd and "통계" in hd, hd[:200])
+        await pilot.press("escape"); await pilot.pause(0.3)
+        app.action_tab("instr"); await settle(pilot, lambda: app.current_tab() == "instr" and app.query_one("#instr-table").row_count >= 1, timeout=6)
         check("제한: 지침 탭 보기는 가능(목록이 보임), 편집(edit_instr)은 편집기를 열지 않고 False", app.current_tab() == "instr" and app.query_one("#instr-table").row_count >= 1 and app.edit_instr("x", "y") is False)
     # 사람(제한 없음)은 이전과 같다 — 후보 미리보기가 흐린 미리보기, 값 보기 가능
     app2 = ctxui.CtxUI()

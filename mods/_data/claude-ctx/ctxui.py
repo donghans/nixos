@@ -223,12 +223,13 @@ class SessionScreen(ModalScreen):
         kinds = ("prompt", "response") + (("tool_use", "tool_result") if self.tools else ())
         with cc.connect(readonly=True) as c:
             masker = self.ctx_app.masker()
-            s, msgs = cd.session_context(c, self.session_id, None, 0, kinds=kinds, masker=masker)
+            s, msgs = cd.session_rows(c, self.session_id, kinds)             # 원문 — 치환은 화면에 그릴 창(rebuild)만 한다
             stats = cd.session_stats(c, session_id=self.session_id, masker=masker, limit=1)
             self.info = dict(s=s, stats=stats[0] if stats else None, tools=cd.session_tools(c, self.session_id), links=cd.session_links(c, self.session_id, masker))
         if focus_uuid and any(m["uuid"] == focus_uuid and m["side"] for m in msgs):
             self.side = True                      # 서브에이전트 쪽 메시지가 찾은 대상이면 자동으로 보여 준다
         self.all_msgs = msgs
+        self.row_masker = masker
         self.rebuild(focus_uuid)
 
     def visible(self):
@@ -245,6 +246,7 @@ class SessionScreen(ModalScreen):
             self.hidden_before, self.hidden_after = lo, len(vis) - lo - self.limit
             vis = vis[lo: lo + self.limit]
             idx = None if idx is None else idx - lo
+        vis = [dict(m, text=self.row_masker.text(m["text"])) for m in vis]     # 보일 창만 치환(세션 전체가 아니라)
         self.msgs = vis
         if focus_uuid and idx is not None:
             self.expanded.add(focus_uuid)
@@ -598,9 +600,12 @@ class CtxUI(uikit.HelpMixin, App):
         return self.restricted
 
     def action_tab(self, name: str):
-        self.query_one("#tabs", TabbedContent).active = name
+        tabs = self.query_one("#tabs", TabbedContent)
+        if tabs.active == name:
+            self.on_tab_shown(name)              # 이미 그 탭이면 TabActivated 가 오지 않으므로 직접 갱신
+        else:
+            tabs.active = name                   # 바뀌면 TabActivated → on_tab_shown (예전엔 여기서 한 번 더 불러 후보 탐지·통계가 두 번 돌고 알림이 겹쳤다)
         self.call_after_refresh(self.action_focus_table)
-        self.on_tab_shown(name)
 
     def on_tabbed_content_tab_activated(self, ev: TabbedContent.TabActivated):
         self.on_tab_shown(ev.pane.id)
@@ -618,7 +623,8 @@ class CtxUI(uikit.HelpMixin, App):
             self.reload_instr()
 
     def action_focus_table(self):
-        ids = {"overview": "#projects", "search": "#results", "verify": "#vrepos", "secrets": "#secrets-table", "cands": "#cands-table"}
+        ids = {"overview": "#projects", "search": "#results", "verify": "#vrepos", "secrets": "#secrets-table", "cands": "#cands-table",
+               "stats": "#stat-sessions", "instr": "#instr-table"}      # 통계·지침 탭도 표에 포커스 — 없으면 7 키 뒤 Enter·↑↓ 가 아무 일도 안 했다
         try:
             self.query_one(ids[self.current_tab()]).focus()
         except Exception:
@@ -638,7 +644,7 @@ class CtxUI(uikit.HelpMixin, App):
 
     def update_state(self):
         self.query_one("#sstate", Static).update(
-            f"역할: {'사용자만' if self.only_user else '전체'} (F2)   ·   정규식: {'켜짐' if self.regex else '꺼짐'} (F3)   ·   도구 메시지: {'포함' if self.with_tools else '제외'} (F4)   ·   치환: {'켜짐' if self.mask else '꺼짐'} (m)" + ("   ·   제한 모드(LLM 세션): 모든 텍스트 [protected] 치환 고정 · 비밀 값 조회·추가·삭제·끄기·후보 무시·지침 편집 불가" if self.restricted else ""))
+            f"역할: {'사용자만' if self.only_user else '전체'} (F2)   ·   정규식: {'켜짐' if self.regex else '꺼짐'} (F3)   ·   도구 메시지: {'포함' if self.with_tools else '제외'} (F4)   ·   치환: {'켜짐' if self.mask else '꺼짐'} (m)" + ("   ·   제한 모드(LLM): 치환 고정·값 조회/수정 불가" if self.restricted else ""))
 
     def action_toggle_role(self):
         self.only_user = not self.only_user
@@ -727,7 +733,7 @@ class CtxUI(uikit.HelpMixin, App):
             self.flash(str(e), "error"); return   # 잘못된 입력이면 이전 결과를 지우지 않는다
         tb.clear()
         for r in rows:
-            tb.add_row(fmt_ts(r["ts"]), r["role"] if r["kind"] in ("prompt", "response") else r["kind"], short_repo(r["repo"]), r["session_id"][:8], (r["title"] or "")[:24],
+            tb.add_row(fmt_ts(r["ts"]), r["role"] if r["kind"] in ("prompt", "response") else r["kind"], short_repo(r["repo"]), r["session_id"][:8], Text((r["title"] or "")[:24]),
                        self.highlight(r["snippet"][:160], q), key=f"{r['session_id']}|{r['uuid']}")
         self.query_one("#results").border_title = f"결과 {len(rows)}건" + (" (최대 300)" if len(rows) >= 300 else "") + " — Enter: 앞뒤 대화"
         if rows:
@@ -747,7 +753,7 @@ class CtxUI(uikit.HelpMixin, App):
         vr.clear(); vh.clear()
         self._verify_hits = {g["repo"]: g["hits"] for g in groups}
         for g in groups:
-            vr.add_row(short_repo(g["repo"]), g["count"], g["sessions"], fmt_ts(g["last"]), g["quote"][:80], key=g["repo"])
+            vr.add_row(short_repo(g["repo"]), g["count"], g["sessions"], fmt_ts(g["last"]), Text(g["quote"][:80]), key=g["repo"])
         self.query_one("#vrepos").border_title = f"저장소별 — {sum(g['count'] for g in groups)}건 / {len(groups)}곳"
         if groups:
             vr.focus()
@@ -757,7 +763,7 @@ class CtxUI(uikit.HelpMixin, App):
         vh = self.query_one("#vhits", DataTable)
         vh.clear()
         for r in getattr(self, "_verify_hits", {}).get(repo, [])[:300]:
-            vh.add_row(fmt_ts(r["ts"]), r["session_id"][:8], r["snippet"][:140], key=f"{r['session_id']}|{r['uuid']}")
+            vh.add_row(fmt_ts(r["ts"]), r["session_id"][:8], Text(r["snippet"][:140]), key=f"{r['session_id']}|{r['uuid']}")
 
     def on_data_table_row_highlighted(self, ev: DataTable.RowHighlighted):
         if ev.data_table.id == "vrepos" and ev.row_key and ev.row_key.value:
@@ -839,7 +845,7 @@ class CtxUI(uikit.HelpMixin, App):
         for r in sess:
             models = ",".join(sorted({m.split("-")[1] if m.startswith("claude-") and "-" in m[7:] else m for m in r["models"]}))   # claude-sonnet-5-5 → sonnet
             ts.add_row(fmt_ts(r["last"]), r["host"], short_repo(r["repo"]), r["prompts"], r["tools"], fmt_dur(r["turn_ms"] / 1000),
-                       f"${r['cost']:,.2f}" if r["cost"] is not None else "-", models[:20], (r["title"] or "")[:60], key=r["session_id"])
+                       f"${r['cost']:,.2f}" if r["cost"] is not None else "-", models[:20], Text((r["title"] or "")[:60]), key=r["session_id"])
         self.query_one("#stat-sessions").border_title = f"세션 {len(sess)}개{' (최대 300)' if len(sess) >= 300 else ''} — {dict(STAT_ORDERS)[self.stat_order]}순 (o) · Enter: 대화 보기"
 
     def action_stat_period(self):
@@ -1023,7 +1029,7 @@ class CtxUI(uikit.HelpMixin, App):
         tb.clear()
         self.cand_rows = {d["fp"]: d for d in found}
         for d in found:
-            tb.add_row(d["fp"], d["pattern"], (f"{cs.MASK} ({len(d['value'])}자)" if self.restricted else cs.preview(d["value"])), d["count"], len(d["sessions"]), ",".join(sorted(short_repo(r) for r in d["repos"]))[:50] or "-",
+            tb.add_row(d["fp"], d["pattern"], Text(f"{cs.MASK} ({len(d['value'])}자)" if self.restricted else cs.preview(d["value"])), d["count"], len(d["sessions"]), ",".join(sorted(short_repo(r) for r in d["repos"]))[:50] or "-",
                        fmt_ts(d["last"]), key=d["fp"])
         self.query_one("#cands-table").border_title = f"자동 탐지 후보 {len(found)}개 — Enter 승인 · i 무시 · v 값 보기 · r 다시 탐지"
         self.flash(f"후보 {len(found)}개")

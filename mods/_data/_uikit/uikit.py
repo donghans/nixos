@@ -170,8 +170,21 @@ class HelpMixin:
     HELP_TERMS: list = []
     HELP_NOTES: list = []
 
+    def _binding_enabled(self, b):
+        """앱의 check_action 이 False 라고 한 동작(예: ctxui 제한 모드에서 막힌 키)은 도움말 키 목록에서도 뺀다."""
+        if isinstance(b, tuple):
+            return True
+        try:
+            from textual.actions import parse
+            ns, name, args = parse(b.action)
+        except Exception:
+            return True
+        return not (not ns and self.check_action(name, args) is False)
+
     def action_help(self):
-        rows = binding_rows(list(self.BINDINGS) + [b for sc in [self.screen] for b in getattr(sc, "BINDINGS", [])])
+        bindings = list(self.BINDINGS) + [b for sc in [self.screen] for b in getattr(sc, "BINDINGS", [])]
+        bindings = [b for b in bindings if self._binding_enabled(b)]
+        rows = binding_rows(bindings)
         terms = self.help_terms() if hasattr(self, "help_terms") else self.HELP_TERMS
         self.push_screen(HelpScreen(getattr(self, "TITLE", "도움말"), rows, terms, self.HELP_NOTES))
 

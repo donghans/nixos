@@ -23,12 +23,24 @@ def status(app): return str(app.query_one("#status", Static).render())
 def keys(app): return list(app._rowkeys)
 def log_lines(): return [json.loads(l) for l in open(LOG).read().splitlines()] if os.path.exists(LOG) else []
 async def settle(pilot, t=0.5): await pilot.pause(t)
+async def until(pilot, cond, timeout=10.0, step=0.15):
+    """조건이 참이 될 때까지 기다린다(고정 대기는 부하가 큰 호스트에서 흔들려 조건 기다림으로 바꿨다). 끝내 거짓이면 False."""
+    end = time.time() + timeout
+    while time.time() < end:
+        if cond():
+            return True
+        await pilot.pause(step)
+    return cond()
+async def started(pilot, app, min_groups=1):
+    """앱이 첫 스캔을 마치고 0.8초 뒤 재스캔(CPU 계산)까지 끝낼 때까지."""
+    await until(pilot, lambda: len(app.groups) >= min_groups and len(app.procs) > 10)
+    await pilot.pause(1.0)
 
 async def drive():
     a, b = spawn(f"{TAG}a"), spawn(f"{TAG}b")
     app = procui.ProcUI(filter_text=TAG, log_path=LOG)
     async with app.run_test(size=(150, 45)) as pilot:
-        await settle(pilot, 1.0)
+        await started(pilot, app)
         check("시작: 소유 뷰·필터로 그룹 1개(내 작업), 필터 결과가 적어 자동 펼침(그룹 행 + 프로세스 2행)", app.view["name"] == "소유" and len(app.groups) == 1 and app.groups[0]["name"] == "내 작업" and len(keys(app)) == 3 and keys(app)[0] == "g|내 작업", keys(app))
         check("머리줄: 뷰 이름·그룹·프로세스·선택 0개", "뷰 소유" in head(app) and "선택 0개" in head(app))
         await pilot.press("space"); await settle(pilot)
@@ -44,7 +56,7 @@ async def drive():
         check("Esc 로 취소하면 아무것도 죽지 않고 기록도 없음", a.poll() is None and b.poll() is None and log_lines() == [] and "취소" in status(app))
         # 실행 경로
         await pilot.press("k"); await settle(pilot)
-        await pilot.press("y"); await pilot.pause(2.5)
+        await pilot.press("y"); await until(pilot, lambda: a.poll() is not None and b.poll() is not None)
         check("y: SIGTERM 으로 두 프로세스 종료", a.poll() == -15 and b.poll() == -15, (a.poll(), b.poll()))
         L = log_lines()
         check("기록: 2건 sent, 그룹 이름·이름·PID 만(명령 인자 없음)", len(L) == 2 and all(r["status"] == "sent" and r["sig"] == 15 and r["group"] == "소유" for r in L) and set(L[0]) == {"t", "group", "pid", "comm", "sig", "status", "detail"})
@@ -55,7 +67,7 @@ async def protection():
     c = spawn("sshd-ptest")                       # 소프트 보호(infra: sshd*)
     app = procui.ProcUI(filter_text="sshd-ptest", log_path=LOG)
     async with app.run_test(size=(150, 45)) as pilot:
-        await settle(pilot, 1.0)
+        await started(pilot, app)
         pk = [k for k in keys(app) if k.startswith("p|")]
         check("소프트 보호 프로세스 행에 잠금(인프라) 표시, 그룹 행은 잠금 1", len(pk) == 1 and "잠금 1" in str(app.query_one("#tbl", DataTable).get_row_at(0)[6]) and "인프라" in str(app.query_one("#tbl", DataTable).get_row_at(1)[6]))
         await pilot.press("space"); await settle(pilot)
@@ -73,13 +85,13 @@ async def protection():
         check("이름을 정확히 입력하면 선택+override", len(app.sel) == 1 and len(app.override) == 1)
         await pilot.press("k"); await settle(pilot)
         check("미리보기에 보호를 푼 대상 1개 포함", isinstance(app.screen, procui.ConfirmScreen) and "1개" in app.screen._body.plain)
-        await pilot.press("y"); await pilot.pause(2.5)
+        await pilot.press("y"); await until(pilot, lambda: c.poll() is not None)
         check("override 한 소프트 보호 프로세스는 종료됨", c.poll() == -15)
 
 async def hard():
     app = procui.ProcUI(filter_text=f"pid:{os.getppid()}", log_path=LOG)
     async with app.run_test(size=(150, 45)) as pilot:
-        await settle(pilot, 1.0)
+        await started(pilot, app)
         pk = [k for k in keys(app) if k.startswith("p|")]
         check("시험을 띄운 쉘(부모=조상)은 목록에 있고 '내 터미널' 잠금", len(pk) == 1 and "내 터미널" in str(app.query_one("#tbl", DataTable).get_row_at(1)[6]))
         await pilot.press("down"); await pilot.press("space"); await settle(pilot)
@@ -90,7 +102,7 @@ async def hard():
 async def views():
     app = procui.ProcUI(log_path=LOG)
     async with app.run_test(size=(150, 45)) as pilot:
-        await settle(pilot, 1.0)
+        await started(pilot, app)
         check("필터 없이: 소유 뷰 그룹들이 표에 나오고 모두 접힌 상태", len(app.groups) >= 2 and all(k.startswith("g|") for k in keys(app)))
         n = len(app.procs)
         check("그룹의 프로세스 합이 전체 프로세스 수와 같음(누락 없음)", sum(g["n"] for g in app.groups) == n)
@@ -133,7 +145,7 @@ async def custom():
     d = spawn("pt-custom1")
     app = procui.ProcUI(view="작업별", filter_text="pt-custom", config_path=cfg, log_path=LOG)
     async with app.run_test(size=(150, 45)) as pilot:
-        await settle(pilot, 1.0)
+        await started(pilot, app)
         check("groups.toml: 사용자 뷰로 시작, 깨진 규칙은 경고(상태줄)", app.view["name"] == "작업별" and "설정 경고" in status(app))
         check("사용자 [protect] 규칙이 보호로 표시됨", "사용자 규칙" in str(app.query_one("#tbl", DataTable).get_row_at(1)[6]))
     d.kill(); d.wait()

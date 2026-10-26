@@ -320,18 +320,28 @@ def phrase_by_repo(conn, phrase, *, regex=False, role="user", days=None, masker=
     return group_hits(hits)
 
 
-def session_context(conn, session_id, around_uuid=None, window=12, kinds=("prompt", "response"), masker=cs.IDENTITY):
-    """한 세션의 대화. around_uuid 가 있으면 그 메시지 앞뒤 window 개만. 반환: (세션 요약 dict, 메시지 목록)."""
+def session_rows(conn, session_id, kinds=("prompt", "response")):
+    """한 세션의 메시지 **원문**(치환 안 함) 전부와 세션 요약. 화면이 보일 창만 골라 치환하도록 치환과 분리했다
+    (예전엔 대화 화면이 열릴 때마다 세션 전체를 치환해 메시지 수만 개짜리 세션에서 느렸다). 반환: (세션 요약 dict | None, 메시지 목록)."""
     s = conn.execute("SELECT session_id, host, cwd, repo_url, branch, first_ts, last_ts FROM sessions WHERE session_id = %s", (session_id,)).fetchone()
     if not s:
         return None, []
     rows = conn.execute("SELECT ts, uuid, role, kind, is_sidechain, text FROM messages WHERE session_id = %s AND kind = ANY(%s) ORDER BY ts, uuid", (session_id, list(kinds))).fetchall()
-    msgs = [dict(ts=r[0], uuid=r[1], role=r[2], kind=r[3], side=r[4], text=masker.text(r[5] or "")) for r in rows]
+    return (dict(session_id=s[0], host=s[1], cwd=s[2], repo=s[3], branch=s[4], first=s[5], last=s[6]),
+            [dict(ts=r[0], uuid=r[1], role=r[2], kind=r[3], side=r[4], text=r[5] or "") for r in rows])
+
+
+def session_context(conn, session_id, around_uuid=None, window=12, kinds=("prompt", "response"), masker=cs.IDENTITY):
+    """한 세션의 대화. around_uuid 가 있으면 그 메시지 앞뒤 window 개만. 반환: (세션 요약 dict, 메시지 목록)."""
+    summary, raw = session_rows(conn, session_id, kinds)
+    if summary is None:
+        return None, []
+    msgs = [dict(m, text=masker.text(m["text"])) for m in raw]
     if around_uuid:
         idx = next((i for i, m in enumerate(msgs) if m["uuid"] == around_uuid), None)
         if idx is not None:
             msgs = msgs[max(idx - window, 0): idx + window + 1]
-    return dict(session_id=s[0], host=s[1], cwd=s[2], repo=s[3], branch=s[4], first=s[5], last=s[6]), msgs
+    return summary, msgs
 
 
 # ---------------------------------------------------------------- 비밀 등록표

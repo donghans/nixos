@@ -72,7 +72,7 @@ def table_rows(groups, expanded, sel, pc):
             for p in g["procs"]:
                 r = pa.protect_reasons(p, pc)
                 picked = pa.key(p) in sel
-                rows.append((f"p|{p['pid']}|{p['start']}", [Text("[x]" if picked else "[ ]", style="bold" if picked else "default"), Text("   " + p["comm"]), p["app"],
+                rows.append((f"p|{p['pid']}|{p['start']}", [Text("[x]" if picked else "[ ]", style="bold" if picked else "default"), Text("   " + p["comm"]), Text(p["app"]),
                                                          str(p["pid"]), f"{p['cpu']:.1f}", f"{p['rss'] / ps.MIB:.0f}",
                                                          Text("잠금: " + ", ".join(SHORT.get(c, c) for c, _ in r), style="yellow" if not pa.is_hard(r) else "red") if r else ""]))
     return rows
