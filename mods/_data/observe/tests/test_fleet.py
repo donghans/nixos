@@ -116,6 +116,12 @@ else:
         with contextlib.redirect_stdout(out):
             observe_cli.main(["fleet", "status"])
         check("status: 마지막 성공 시각을 보임, 실패 사유 없음", "마지막 성공" in out.getvalue() and "실패 사유" not in out.getvalue(), out.getvalue())
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            observe_cli.main(["fleet", "export", "--days", "3"])
+        ex = json.loads(out.getvalue())
+        check("fleet export: usageui 용 JSON(호스트·전력·앱 평균·표본 수·확장 차이)", ex["version"] == 1 and set(ex["hosts"]) >= {"nb", "nb2", "dt"} and "vivaldi-bin" in ex["means"]["nb2"] and ex["samples"]["dt"] == 100 and ex["power"]["nb2"][0][2] == 1.0, str(list(ex)))
+        check("fleet export: 확장 차이에 서비스 워커 확장(nb2)", any(r[0] == "nb2" and r[5] for r in ex["inventory_diff"]), str(ex["inventory_diff"]))
         check("observectl fleet 서브명령이 등록됨", "fleet" in open(os.path.join(ROOT, "observe_cli.py")).read())
     finally:
         pg.stop()

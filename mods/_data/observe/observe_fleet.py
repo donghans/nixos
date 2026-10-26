@@ -194,3 +194,21 @@ def inventory_diff(inv):
             if all(key not in inv[o] for o in hosts if o != h):
                 out.append((h, key[0], key[1], profs, ver, sw))
     return sorted(out, key=lambda r: (r[0], not r[5], r[2]))
+
+
+# ------------------------------------------------------------------ 화면(usageui 호스트 탭)용 내보내기
+def export(conn, me, days=3, top=40):
+    """usageui 가 읽는 JSON(사전): 호스트별 시간별 전력, 앱 평균, 표본 수, 한 호스트에만 있는 확장. TUI 는 psycopg 가 없는 파이썬이라 observectl 가 대신 읽어 JSON 으로 준다."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT host, extract(epoch FROM hour)::bigint, psys_w, pkg_w, samples FROM observe_power_hourly WHERE hour >= now() - make_interval(days => %s) ORDER BY host, hour", (days,))
+        power = {}
+        for h, t, ps, pk, n in cur.fetchall():
+            power.setdefault(h, []).append([int(t), ps, pk, n])
+    hosts = sorted(power)
+    means, samples = {}, {}
+    for h in hosts:
+        m, n = host_means(conn, h, days)
+        samples[h] = n
+        means[h] = {a: [round(v[0], 3), round(v[1], 1)] for a, v in sorted(m.items(), key=lambda kv: -kv[1][0])[:top]}
+    return {"version": 1, "fetched": int(time.time()), "days": days, "me": me, "hosts": hosts, "power": power, "means": means, "samples": samples,
+            "inventory_diff": [list(r) for r in inventory_diff(inventory(conn))]}

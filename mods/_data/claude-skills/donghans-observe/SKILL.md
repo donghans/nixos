@@ -16,7 +16,7 @@ description: 성능·자원·전력 문제를 추측하지 말고 observectl(관
 - 누가 CPU 를 깨우나: `observectl wakers 10`  · 그 순간 무슨 일이: `observectl timeline --at 12:09:37 --span 60`
 - 한 구간을 포커스·프로세스·스팬으로 묶어 기준 구간과 비교: `observectl explain …`  · 구간(스팬) 폭포: `observectl trace --since 1h`(nixup·덮개 정책 등)
 - 브라우저 탭·확장별 CPU: `observectl browser top` / 폭주 기록 `observectl browser bursts`(Vivaldi 디버깅 포트 127.0.0.1:9222 필요) / 규칙적 반복 활동 `observectl browser periodic` / 확장 서비스 워커 `observectl browser sw`(스레드 CPU, 포트가 있으면 확장별 시작 횟수)
-- 호스트 간 교차 확인(공유 저장소): `observectl fleet push|sync|status|compare <호스트>|inventory|hosts`(usageui `y` 키 = sync, 실패하면 쌓아 뒀다 다음에 같이) — 한 호스트에서만 높은 앱·한쪽에만 있는 확장을 후보로 뽑는다(원본·이름·주소는 올리지 않음)
+- 호스트 간 교차 확인(공유 저장소): `observectl fleet push|sync|status|compare <호스트>|inventory|hosts`(usageui `y` 키 = sync, 실패하면 쌓아 뒀다 다음에 같이) · usageui 5번 「호스트」 탭에서 전력 그래프·앱 비교·확장 차이를 본다 — 한 호스트에서만 높은 앱·한쪽에만 있는 확장을 후보로 뽑는다(원본·이름·주소는 올리지 않음)
 - 실험 전후 비교는 `observectl mark` 로 조건 표지를 붙이고 `observectl window --by mark`.
 
 ## 출력은 `--json` 으로 (LLM·스크립트용 — 표 모양은 무시)

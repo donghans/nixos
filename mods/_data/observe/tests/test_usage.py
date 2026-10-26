@@ -270,5 +270,46 @@ async def fsync():
     finally:
         usageui.subprocess.run, usageui.shutil.which = real_run, real_which
 asyncio.run(fsync())
+# --- 5 호스트 탭: 열면 받아 오고(가짜 load), 표·그래프가 채워지며, o 로 상대 호스트가 바뀐다
+import usagefleet as ufl_
+_NOW = int(time.time()); _H = [_NOW - 3600 * i for i in range(24, 0, -1)]
+_FD = {"version": 1, "fetched": _NOW, "days": 3, "me": "nb", "hosts": ["dt", "nb", "srv"],
+       "power": {"nb": [[t, 2.0, 1.0, 100] for t in _H], "dt": [[t, None, 20.0, 100] for t in _H], "srv": [[t, None, 9.0, 100] for t in _H]},
+       "means": {"nb": {"vivaldi-bin": [0.6, 10.0], "tailscaled": [0.5, 40.0]}, "dt": {"vivaldi-bin": [0.05, 5.0]}, "srv": {"vivaldi-bin": [0.6, 5.0]}},
+       "samples": {"nb": 100, "dt": 100, "srv": 100}, "inventory_diff": [["nb", "vivaldi", "a" * 32, "Default", "1.0", True]]}
+async def fleet_tab():
+    real = ufl_.load
+    ufl_.load = lambda *a, **k: (_FD, None)
+    try:
+        app = usageui.UsageUI()
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause(0.5)
+            await pilot.press("5"); await pilot.pause(1.2)
+            check("5 키: 호스트 탭이 열리고 데이터를 받음", app.query_one("#tabs", TabbedContent).active == "fleet" and app.fleet and app.fleet["me"] == "nb")
+            cmp_ = app.query_one("#tfcmp", DataTable)
+            rows = [cmp_.get_row_at(i)[0] for i in range(cmp_.row_count)]
+            check("호스트 탭: 앱 비교 표에 vivaldi-bin(3배↑)·tailscaled(한쪽에만)", rows == ["vivaldi-bin", "tailscaled"], str(rows))
+            check("호스트 탭: 확장 차이 표에 ★ 확장 1개", app.query_one("#tfinv", DataTable).row_count == 1)
+            check("호스트 탭: 상태 글에 호스트 3개와 비교 대상 표시", "dt(표본" in app._fstat().plain and "nb ↔ dt" in app._fstat().plain)
+            await pilot.press("o"); await pilot.pause(0.4)
+            cmp_ = app.query_one("#tfcmp", DataTable)
+            rows2 = [cmp_.get_row_at(i)[0] for i in range(cmp_.row_count)]
+            check("o 키: 상대 호스트가 srv 로 바뀌고 비교 표가 달라짐(vivaldi 는 비슷해져 빠짐)", "nb ↔ srv" in app._fstat().plain and rows2 == ["tailscaled"], f"{app._fstat().plain[:120]} {rows2}")
+    finally:
+        ufl_.load = real
+asyncio.run(fleet_tab())
+async def fleet_none():
+    real = ufl_.load
+    ufl_.load = lambda *a, **k: (None, "접속 실패 시험")
+    try:
+        app = usageui.UsageUI()
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause(0.5)
+            await pilot.press("5"); await pilot.pause(1.0)
+            check("호스트 탭: 데이터를 못 받으면 사유와 올리는 방법을 안내(예외 없음)", "접속 실패 시험" in app._fstat().plain and app.query_one("#tfcmp", DataTable).row_count == 1)
+            await pilot.press("o"); await pilot.pause(0.2)
+    finally:
+        ufl_.load = real
+asyncio.run(fleet_none())
 os.environ["OBSERVE_USAGE_PROFILE"] = "laptop"
 finish("usageui")

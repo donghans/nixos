@@ -9,6 +9,7 @@ done
 PY=${PYTHON:-$(grep -o '/nix/store/[^ "]*python3[^ "]*/bin/python3[^ "]*' "$(command -v displayui 2>/dev/null)" 2>/dev/null | head -1)}
 # notif 는 위에서 (textual 없이) 핵심만 돌렸고, 화면 시험은 textual 이 있는 python 으로 한 번 더
 [ -n "$PY" ] && { out=$(cd "$D/notif" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$PY" tests/test_notif.py 2>&1); r=$?; printf '%-9s %s\n' notif-ui "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
+[ -n "$PY" ] && { out=$(cd "$D/observe" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$PY" tests/test_usagefleet.py 2>&1); r=$?; printf '%-9s %s\n' usagefleet "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
 [ -n "$PY" ] && { out=$(cd "$D/observe" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$PY" tests/test_usage.py 2>&1); r=$?; printf '%-9s %s\n' usageui "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
 [ -n "$PY" ] && { out=$(cd "$D/_uikit" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$PY" tests/test_uikit.py 2>&1); r=$?; printf '%-9s %s\n' uikit "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
 out=$(cd "$D/display" && PYTHON=${PY:-python3} sh tests/run.sh 2>&1); r=$?

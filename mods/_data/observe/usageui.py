@@ -31,6 +31,7 @@ import observe_core as core
 import observe_explain as ex
 import observe_netdata as ndmod
 import usagedata as ud
+import usagefleet as ufl
 import usagelive as live
 import usageview as uv
 
@@ -138,6 +139,8 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     Collapsible > Contents { height: auto; padding: 0; }
     DataTable { height: 1fr; background: #000000; }
     #range-err { height: auto; }
+    #fstat { height: 8; }
+    #fp0, #fp1 { height: 11; }
     #livebox { height: 36; }
     #lsess { height: 11; }
     #lleft, #lright { width: 1fr; height: 1fr; }
@@ -155,7 +158,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     BINDINGS = [
         Binding("q", "quit", "종료"),
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('apps')", "앱"), Binding("3", "tab('cause')", "원인"),
-        Binding("4", "tab('system')", "시스템"), Binding("6", "tab('live')", "실시간 화면(별칭)", show=False), Binding("tab", "sub_toggle", "기록↔실시간", priority=True),
+        Binding("4", "tab('system')", "시스템"), Binding("5", "tab('fleet')", "호스트"), Binding("o", "fleet_other", "상대 호스트"), Binding("6", "tab('live')", "실시간 화면(별칭)", show=False), Binding("tab", "sub_toggle", "기록↔실시간", priority=True),
         Binding("t", "set_range", "범위"), Binding("s", "spikes", "튄 순간"), Binding("escape", "restore", "원래 범위", show=False), Binding("v", "cycle_baseline", "비교 기준"),
         Binding("r,f5", "reload", "새로고침"), Binding("b", "btop", "btop"), Binding("e", "export", "저장"), Binding("y", "fleet_sync", "호스트 동기화"),
         *uikit.HelpMixin.HELP_BINDINGS,
@@ -176,6 +179,10 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         self.view = None
         self.cause = None            # ex.build 결과 | False(표본 없음) | None(아직)
         self.sysdata = None          # {"snap", "series"}
+        self.fleet = None            # 호스트 탭 데이터(usagefleet.load 결과) | None(아직)
+        self.fleet_note = None       # 낡은 값·못 받은 사유
+        self.fleet_i = 0             # 상대 호스트 순번(o 키)
+        self._fleet_busy = False
         self._busy = False
         self._back = None            # 튄 순간으로 이동하기 전의 범위(Esc 로 복귀)
         self.sampler = None          # 실시간 탭 샘플러(처음 열 때 만든다)
@@ -237,6 +244,13 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                         b = uikit.box(Panel(lambda w, h, key=key: self._ndchart(key, w, h), id=f"nd{i}"), title)
                         b.add_class("mid")
                         yield b
+            with TabPane("호스트 [5]", id="fleet"):
+                with VerticalScroll():
+                    yield uikit.box(Panel(lambda w, h: self._fstat(), id="fstat"), "호스트 비교 — 공유 저장소(claude_ctx)에 올라온 요약")
+                    yield uikit.box(Panel(lambda w, h: self._fpower(0, w, h), id="fp0"), "전력 추이 — 이 호스트(시간별 평균)")
+                    yield uikit.box(Panel(lambda w, h: self._fpower(1, w, h), id="fp1"), "전력 추이 — 상대 호스트(o 로 바꿈)")
+                    yield self._table_box("tfcmp", "이 호스트가 상대보다 높은 앱 — 코어 1개=100%(한쪽에만 있거나 3배↑)", ("앱", "이 호스트 %", "상대 %", "표시"), "mid")
+                    yield self._table_box("tfinv", "한 호스트에만 설치된 브라우저 확장 — ★ 는 백그라운드 서비스 워커(주기 활동 후보)", ("호스트", "브라우저", "확장 ID", "프로필", "버전", "표시"), "mid")
         with Vertical(id="status-row"):
             yield Static("", id="status")
         yield Footer()
@@ -275,6 +289,44 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.desktop_cpu_top(v, w)), id="dcpu"), "CPU 상위 앱 — 연산 부하")
             yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.desktop_ctxsw(v, w)), id="dctx"), "깨움(문맥 전환) 상위 앱")
             yield uikit.box(Panel(lambda w, h: self._v(lambda v: uv.summary_apps(v, w)), id="dapps"), "앱 — CPU 점유 · 오래 본 앱")
+
+    # --- 호스트 탭(공유 저장소 요약. usagefleet 가 `observectl fleet export` 로 받는다)
+    def _fhosts(self):
+        d = self.fleet
+        if not d:
+            return None, None
+        o = ufl.others(d)
+        return d.get("me"), (o[self.fleet_i % len(o)] if o else None)
+
+    def _fstat(self):
+        if self.fleet is None:
+            return Text(" 공유 저장소에서 받는 중…" if self._fleet_busy else " 이 탭을 열면 공유 저장소(claude_ctx)에서 받아 옵니다", style="grey50")
+        base, other = self._fhosts()
+        return ufl.status_text(self.fleet, self.fleet_note, base, other)
+
+    def _fpower(self, i, w, h):
+        base, other = self._fhosts()
+        host = (base, other)[i]
+        if not self.fleet or not host:
+            return Text(" (데이터 없음)" if i == 0 else " (상대 호스트가 아직 올리지 않았습니다)", style="grey50")
+        return ufl.power_chart(self.fleet, host, w, h, i)
+
+    def _fill_fleet(self):
+        def fill(tid, rows, empty):
+            t = self.query_one(f"#{tid}", DataTable)
+            t.clear()
+            for r in rows:
+                t.add_row(*r)
+            if not rows:
+                t.add_row(empty, *[""] * (len(t.columns) - 1))
+        base, other = self._fhosts()
+        fill("tfcmp", ufl.compare_rows(self.fleet, base, other) if self.fleet and base and other else [], "차이가 큰 앱이 없습니다(또는 상대 호스트 데이터 없음)")
+        fill("tfinv", ufl.inventory_rows(self.fleet) if self.fleet else [], "한 호스트에만 있는 확장이 없습니다")
+
+    def action_fleet_other(self):
+        if self.fleet and ufl.others(self.fleet):
+            self.fleet_i += 1
+            self.redraw()
 
     def _sumtext(self, v):
         t = uv.summary_range(v)
@@ -343,6 +395,11 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         """실시간 화면에서는 범위·튄 순간·비교 기준·저장(기록 화면 전용)을 푸터에서 숨기고 막는다."""
         if action in ("set_range", "spikes", "cycle_baseline", "export") and self._live_visible():
             return False
+        if action == "fleet_other":
+            try:
+                return self.query_one("#tabs", TabbedContent).active == "fleet"
+            except Exception:
+                return False
         return True
 
     @work(thread=True, exclusive=True, group="load")
@@ -353,12 +410,24 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         self.view = view
         self.cause = None
         self.sysdata = None
+        self.fleet = None
         self.call_from_thread(self.redraw)
         self._lazy(self.query_one("#tabs", TabbedContent).active)
         self._busy = False
 
     def _lazy(self, tab):
-        """네트워크가 필요한 탭(원인·시스템)은 열 때 계산한다."""
+        """네트워크가 필요한 탭(원인·시스템·호스트)은 열 때 계산한다."""
+        if tab == "fleet" and self.fleet is None and not self._fleet_busy:
+            self._fleet_busy = True
+            self.call_from_thread(self.redraw)
+            try:
+                self.fleet, self.fleet_note = ufl.load()
+                if self.fleet is None:
+                    self.fleet = {}
+            finally:
+                self._fleet_busy = False
+            self.call_from_thread(self.redraw)
+            return
         view = self.view
         if view is None:
             return
@@ -386,6 +455,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         for panel in self.query(Panel):
             panel.build()
             panel.refresh()
+        self._fill_fleet()
         if v:
             self._fill_tables(v)
             self._fill_cause()
@@ -473,7 +543,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             if self.view:
                 self._status(uv.freshness(self.view))      # 기록 화면의 상태줄(데이터 기준 시각·범위)로 되돌림
         self.refresh_bindings()
-        if self.view and ev.pane.id in ("cause", "system"):
+        if (self.view and ev.pane.id in ("cause", "system")) or ev.pane.id == "fleet":
             self._lazy_worker(ev.pane.id)
 
     # --- 실시간 탭: 이 탭이 보일 때만 타이머가 돈다(다른 탭·창 포커스 상실 시 멈춤). 이력은 저장하지 않는다
@@ -574,6 +644,10 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             r = subprocess.run([exe, "fleet", "sync"], capture_output=True, text=True, timeout=60)
             msg = (r.stdout or r.stderr).strip().splitlines()
             self.call_from_thread(self.notify, (msg[-1] if msg else "응답 없음")[:200], severity="information" if r.returncode == 0 else "error")
+            if r.returncode == 0:
+                self.fleet = None                        # 올린 값이 반영되게 호스트 탭을 다시 받는다
+                if self.query_one("#tabs", TabbedContent).active == "fleet":
+                    self._lazy("fleet")
         except (OSError, subprocess.SubprocessError) as e:
             self.call_from_thread(self.notify, f"올리기 실패: {str(e)[:120]}", severity="error")
 

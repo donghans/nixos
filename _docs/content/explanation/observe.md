@@ -252,7 +252,8 @@ Netdata 의 "앱 그룹" 개념을 우리 시스템에 맞게 가져왔다(`obse
 - 수동: `observectl fleet sync` 또는 **usageui 의 `y` 키**(별도 프로세스로 부르고 결과를 알림으로 보임).
 - `observectl fleet compare <호스트> [--host 기준] [--days 3]` — 기준 호스트에서 상대보다 높은 앱(차이 0.3%p 이상이면서 3배↑ 이거나 상대에 없음). 사용 패턴이 다른 호스트라 높다고 바로 문제는 아니다 — 후보를 가리는 용도.
 - `observectl fleet inventory` — 한 호스트에만 있는 확장(★ = 백그라운드 서비스 워커 있음 = 주기 활동 후보).
-- `observectl fleet hosts` — 올라온 호스트와 기간.
+- `observectl fleet hosts` — 올라온 호스트와 기간. `observectl fleet export [--days N]` — usageui 호스트 탭이 읽는 JSON(사람용 아님).
+- **usageui 「호스트 [5]」 탭**(`5` 키, 열 때 받아 옴): 이 호스트와 상대 호스트의 시간별 평균 전력 그래프(psys 가 없는 호스트는 패키지), 이 호스트가 상대보다 높은 앱 표(한쪽에만 있거나 3배↑), 한 호스트에만 설치된 확장 표(★=서비스 워커), 올라온 호스트·표본 수·낡음 경고. `o` 키로 상대 호스트를 바꾸고(호스트가 3개 이상일 때), `y` 로 이 호스트를 동기화한 뒤 다시 받아 온다. 접속이 안 되면 마지막으로 받은 값(`~/.local/state/observe/fleet-view.json`)을 낡았다는 표시와 함께 보이고, 값이 없으면 사유와 올리는 방법을 안내한다. TUI 의 파이썬에는 psycopg 가 없어 `observectl fleet export` 를 별도 프로세스로 부른다(`usagefleet.py`).
 - 한계: 시간별 평균이라 짧은 폭주는 흐려지고, 호스트마다 수집 수준(노트북 기본 꺼짐)이 달라 표본 수가 다르다(가중 평균으로 맞춤). 새 기기는 `claude-ctx.nix` 의 `allowedClients` 에 있어야 접속된다. 표 생성은 서버 호스트에서 `nixup`(스키마 서비스)이 해야 한다.
 
 ## 측정 틀 보강 (2026-10-26)
