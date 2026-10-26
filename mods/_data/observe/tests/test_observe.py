@@ -332,4 +332,14 @@ buf = _io.StringIO()
 with _cx.redirect_stdout(buf):
     observe_cli.main(["top", "--since", "10m", "--by", "cpu"])
 check("top --by cpu: 옛 표본도 포함(CPU 는 프로세스 전체 값이라 유효)", "claude" in buf.getvalue() and "multi" in buf.getvalue(), buf.getvalue())
+
+# --- 안정화 부족 의심(구간 시작 직후 표본이 높음)
+def _seg(vals): return [("A", [{"pw": {"psys_w": v}} for v in vals])]
+ok_seg = _seg([2.0, 2.1, 1.9, 2.0, 2.1, 2.0])
+bad_seg = _seg([6.5, 7.0, 2.0, 2.1, 1.9, 2.0, 2.1])
+check("settle_suspects: 고른 구간은 의심 없음", observe_cli.settle_suspects(ok_seg) == [])
+sus = observe_cli.settle_suspects(bad_seg)
+check("settle_suspects: 앞 2개가 6.8 W, 나머지 2.0 W 면 의심(앞 평균·나머지 평균 반환)", len(sus) == 1 and sus[0][0] == 0 and abs(sus[0][1] - 6.75) < 0.01 and abs(sus[0][2] - 2.02) < 0.05, str(sus))
+check("settle_suspects: 표본이 너무 적으면 판단하지 않음", observe_cli.settle_suspects(_seg([9.0, 9.0, 1.0])) == [])
+check("settle_suspects: 약간 높은 정도(+0.2 W)는 무시", observe_cli.settle_suspects(_seg([2.3, 2.3, 2.0, 2.0, 2.0, 2.0])) == [])
 finish("observe")

@@ -789,6 +789,20 @@ def ab_checks(seg, allow):
     return bad, warn
 
 
+def settle_suspects(seg, k=2, ratio=1.4, min_abs=0.3, path="pw.psys_w"):
+    """안정화 부족 의심: 구간 앞쪽 k 개 표본의 평균이 나머지 평균보다 ratio 배 이상이고 min_abs 이상 높은 구간.
+    (2026-10-26 Vivaldi 시험에서 안정화 직후 첫 창이 전 조건에서 6~10 W 로 튄 일 — 틀이 알려 주지 않으면 사람이 눈으로 빼야 했다.) 반환 [(구간 번호 0부터, 앞쪽 평균, 나머지 평균)]."""
+    out = []
+    for i, (_, g) in enumerate(seg):
+        v = [x for x in (get(r, path) for r in g) if isinstance(x, (int, float))]
+        if len(v) < k + 3:
+            continue
+        head, rest = sum(v[:k]) / k, sum(v[k:]) / (len(v) - k)
+        if head - rest >= min_abs and head >= ratio * rest:
+            out.append((i, head, rest))
+    return out
+
+
 def ab_rows(seg, ca, cb, metrics, threshold, ndv=None):
     """지표마다 (이름, A 구간값, B 구간값, 판정 dict, 신뢰 표시, 신뢰 가능 여부). ndv = netdata_segment_values 결과."""
     out = []
@@ -894,6 +908,8 @@ def cmd_ab(a):
     bad, w = ab_checks(seg, allow)
     invalid += bad
     warn += w
+    for i, head, rest in settle_suspects(seg):
+        warn.append(f"구간 {i + 1}({seg[i][0]}) 시작 직후 표본이 높음(앞 2개 평균 {head:.2f} W, 나머지 {rest:.2f} W) — 안정화가 부족했을 수 있음(--settle 을 늘리거나 그 구간을 의심)")
     # 짧아서 버려진 구간·안정화 구간에서 덮개/AC 가 달랐다면 시험 도중 조건이 바뀐 흔적(예: 중간에 덮개를 엶) — 경고
     used = {name: {str(get(r, path)) for _, g in seg for r in g} for name, path in (("lid", "dev.lid"), ("ac", "pw.ac"))}
     everything = [r for _, g in segments(rows, 0) for r in g]

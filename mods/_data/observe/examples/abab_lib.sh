@@ -17,11 +17,17 @@
 #   - 조건을 바꾼 직후 실제 값을 읽어 확인(verify)하고, 다르면 중단.
 #   - 마지막 `observectl ab` 에 `--require dev.lid=… --require pw.ac=…` 를 자동으로 붙여 교란을 한 번 더 검증.
 #
+#   - (선택) ABAB_LOCK_CMD="입력잠금.sh" 이면 시작 때 `입력잠금.sh on`, 끝·중단·실패 때 `입력잠금.sh off` 를 부른다 — 시험 중 터치패드·키보드를 실수로 만져 교란하지 않도록
+#     (예: examples/input_lock.sh). 잠금이 시험 대상 자체가 아님을 먼저 확인할 것(장부 #128: 잠금의 전력 영향은 이 틀에서 안 보임). 복구는 틀이 보장하고, 스크립트는 자체 보험 타이머를 가진다.
+#
+# verify 작성 지침(장부 #133): **조건을 건 API 의 응답이 아니라 독립된 신호로 확인한다.** 예를 들어 Vivaldi 확장을 `chrome.management.setEnabled(false)` 로 껐을 때 응답은 「꺼짐」이었지만
+#   그 확장의 서비스 워커는 60초마다 계속 켜졌다. 끄기가 실제로 먹었는지는 `observectl browser sw`(시작 횟수·스레드 CPU)처럼 효과를 직접 보는 신호로 확인한다.
+#
 # 주의: root 명령은 setuid 래퍼(/run/wrappers/bin/sudo)여야 한다(PATH 앞에 /run/current-system/sw/bin 을 두면 안 됨).
 export PATH=/run/wrappers/bin:/run/current-system/sw/bin:$PATH
 # ABAB_ALT=1 이면 짝수 쌍을 B 먼저 돌린다(A B | B A …) — A→B 전환이 늘 같은 방향이라 생기는 순서 편향 확인용.
 SEG=${SEG:-300}; PAIRS=${PAIRS:-3}; SETTLE=${SETTLE:-40}; OBS=${OBS:-observectl}
-_ABAB_DONE=0; _ABAB_SLP=""; _ABAB_RC=0; _ABAB_TLP=0
+_ABAB_DONE=0; _ABAB_SLP=""; _ABAB_RC=0; _ABAB_TLP=0; _ABAB_LOCK=0
 _ABAB_FINISHED=0; _NPAIR_OK=0; _T_PAIR_END=""; _ABAB_REC=""
 RAPL_CMD=${RAPL_CMD:-timeout 5 sudo -n cat /sys/class/powercap/intel-rapl:1/energy_uj /sys/class/powercap/intel-rapl:0/energy_uj}   # 누적 에너지(μJ) 두 줄: psys, 패키지
 ABAB_OUT_DIR=${ABAB_OUT_DIR:-$HOME/.local/state/observe/ab-runs}   # 구간마다 한 줄씩 남기는 기록과 분석 결과(중간에 중단돼도 남는다)
@@ -34,6 +40,7 @@ _abab_cleanup() {
     _ABAB_DONE=1
     [ -n "$_ABAB_SLP" ] && kill "$_ABAB_SLP" 2>/dev/null
     abab_restore
+    [ "$_ABAB_LOCK" = 1 ] && ${ABAB_LOCK_CMD} off >/dev/null 2>&1
     [ "$_ABAB_TLP" = 1 ] && ${TLP_CMD:-sudo -n tlp} start >/dev/null 2>&1
     $OBS mark --clear >/dev/null 2>&1
     echo "$(date +%T) 복구 완료"
@@ -86,6 +93,9 @@ abab_run() {
         ${TLP_CMD:-sudo -n tlp} bat >/dev/null || { echo "FAIL: tlp bat 적용 실패"; exit 3; }
         _ABAB_TLP=1
         echo "AC 모드: AC 를 꽂은 채 TLP 배터리 정책으로 측정합니다(배터리 지표 없음 — psys·패키지로 판정)"
+    fi
+    if [ -n "${ABAB_LOCK_CMD:-}" ]; then
+        _ABAB_LOCK=1; ${ABAB_LOCK_CMD} on || echo "⚠ 입력 잠금 실패(${ABAB_LOCK_CMD}) — 시험 중 입력을 만지지 않도록 주의"
     fi
     mkdir -p "$ABAB_OUT_DIR" && _ABAB_REC="$ABAB_OUT_DIR/$T0-$(basename "$0" .sh).tsv" || _ABAB_REC=/dev/null
     { echo "# 환경 지문(재현용): 시각 $(date -Is) · 커널 $(uname -r)"
