@@ -270,6 +270,36 @@ def cmd_query(a):
 
 
 def cmd_browser(a):
+    if a.what == "periodic":
+        evs = list(read_events(argparse.Namespace(comp="browser", level="info", grep="browser.periodic"), core.parse_when(a.since), None))
+        if not evs:
+            print("이 기간에 기록된 규칙적 반복 활동이 없습니다(감시기 observe-browser 가 켜져 있어야 하고 30분 이상 쌓여야 함).")
+        for e in evs:
+            print(f"{core.hms(e['t'])} {e.get('series')} 주기 {e.get('period_s')}초 · 상관 {e.get('corr')} · 튈 때 평균보다 +{e.get('burst_over_mean_pct')}%p · 평균 {e.get('mean_pct')}%")
+        return
+    if a.what == "sw":
+        secs = max(a.seconds, 5.0)
+        t0, tk0 = time.monotonic(), br.sw_thread_ticks()
+        starts, err = {}, None
+        if br.available():
+            try:
+                starts = br.sw_events(secs)
+            except (br.BrowserError, OSError) as e:
+                err = str(e)[:80]
+                time.sleep(max(0.0, secs - (time.monotonic() - t0)))
+        else:
+            time.sleep(secs)
+        dt = time.monotonic() - t0
+        pct = 100 * (br.sw_thread_ticks() - tk0) / br.HZ / dt
+        print(f"확장 서비스 워커 스레드 CPU(코어 1개=100%) {dt:.0f}초 평균: {pct:.2f}%  — /proc 의 스레드 이름만 읽음")
+        if starts:
+            print(f"{'확장 ID(앞 12자)':<18}{'시작 횟수':>8}{'분당':>8}")
+            for k, n in sorted(starts.items(), key=lambda kv: -kv[1]):
+                print(f"{k:<18}{n:>8}{n * 60 / dt:>8.1f}")
+            print("(분당 1 근처로 일정하면 확장의 알람(alarms)이 깨우는 것 — 확장 이름은 chrome://extensions 에서 ID 로 확인)")
+        else:
+            print(err and f"(시작 횟수는 못 셌음: {err})" or ("(시작 이벤트 없음)" if br.available() else "(디버깅 포트가 없어 시작 횟수는 건너뜀)"))
+        return
     if a.what == "bursts":
         evs = [e for e in read_events(argparse.Namespace(comp="browser", level="info", grep="browser.burst"), core.parse_when(a.since), None)]
         if not evs:
@@ -970,7 +1000,7 @@ def main(argv=None):
     s = sub.add_parser("explain", help="한 구간을 여러 출처(전력·상태·시스템·Netdata·프로세스·포커스·스팬)로 묶어 설명하고 기준 구간과 비교"); s.add_argument("--since", default="30m"); s.add_argument("--until"); s.add_argument("--at", help="중심 시각(HH:MM 등) — --span 초 만큼의 구간"); s.add_argument("--span", type=float, default=300); s.add_argument("--baseline", default="prev", help="none | prev(바로 앞의 같은 길이, 기본) | 시작..끝"); s.add_argument("--no-netdata", action="store_true"); s.add_argument("--json", action="store_true"); s.set_defaults(f=cmd_explain)
     s = sub.add_parser("ebpf", help="시간 제한형 eBPF 정밀 모드: tiers(단계·비용) | on <sample|counts|full> [--for 10m] | off | status"); s.add_argument("action", choices=["tiers", "on", "off", "status"]); s.add_argument("tier", nargs="?"); s.add_argument("--for", dest="for_", default="10m", help="제한 시간(기본 10m, 최대 60분)"); s.set_defaults(f=cmd_ebpf)
     s = sub.add_parser("query", help="범용 조회: 신호 여러 개를 시간 간격(--step)이나 그룹(--by)으로 묶어 집계(--agg). 신호 = 별칭(psys pkg vi core uncore pc8 pc10 cpu_all) · 표본 경로(pw.psys_w) · app:<앱>.cpu|ctxsw · proc:<comm>.cpu|ctxsw · nd:<Netdata 신호>"); s.add_argument("signal", nargs="+"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--step", help="시간 간격(예: 5m). 없으면 --by 로 묶음"); s.add_argument("--by", default="none", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.add_argument("--agg", default="mean", choices=list(qy.AGGS)); s.add_argument("--digits", type=int, default=2); s.set_defaults(f=cmd_query)
-    s = sub.add_parser("browser", help="브라우저(Vivaldi) 탭·확장별 CPU(top) 또는 감시기가 잡은 폭주 기록(bursts)"); s.add_argument("what", nargs="?", default="top", choices=["top", "bursts"]); s.add_argument("--seconds", type=float, default=5.0); s.add_argument("-n", type=int, default=12); s.add_argument("--since", default="24h"); s.set_defaults(f=cmd_browser)
+    s = sub.add_parser("browser", help="브라우저(Vivaldi) 탭·확장별 CPU(top) 또는 감시기가 잡은 폭주 기록(bursts)"); s.add_argument("what", nargs="?", default="top", choices=["top", "bursts", "periodic", "sw"], help="top=탭·확장별 CPU · bursts=폭주 기록 · periodic=규칙적 반복 활동 기록 · sw=확장 서비스 워커(스레드 CPU, 포트가 있으면 시작 횟수)"); s.add_argument("--seconds", type=float, default=5.0); s.add_argument("-n", type=int, default=12); s.add_argument("--since", default="24h"); s.set_defaults(f=cmd_browser)
     s = sub.add_parser("nd", help="Netdata 어댑터(있을 때만): defs=신호 정의, stats=구간 평균, apps=앱 그룹 CPU, charts=차트 찾기, get=차트 값"); s.add_argument("what", choices=["defs", "stats", "apps", "charts", "get"]); s.add_argument("chart", nargs="?", help="charts: 이름 조각 · get: 차트 이름"); s.add_argument("--since", default="10m"); s.add_argument("--until"); s.add_argument("-n", type=int, default=10); s.set_defaults(f=cmd_nd)
     s = sub.add_parser("timeline"); s.add_argument("--at", required=True); s.add_argument("--span", type=float, default=60); s.add_argument("--journal", default="all", choices=["all", "warn", "none"]); s.set_defaults(f=cmd_timeline)
     s = sub.add_parser("bpf", help="eBPF(bpftrace) 프리셋을 N초 동안 실행: exec wake profile psr io net"); s.add_argument("preset", choices=["exec", "wake", "profile", "psr", "io", "net"]); s.add_argument("sec", nargs="?", type=int, default=10); s.add_argument("--comm", help="프로세스 이름 필터(영숫자·._- 15자)"); s.add_argument("-n", type=int, default=12, help="표의 상위 행 수"); s.add_argument("--no-spans", action="store_true", help="exec: 프로세스 스팬을 이벤트 로그에 적지 않음"); s.set_defaults(f=cmd_bpf)
