@@ -15,7 +15,7 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
   py = pkgs.python3;
   dir = pkgs.runCommand "observe-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_tiers.py" "observe_apps.py" "observe_query.py" "observe_focus.py" "observe_browser.py" "observe_fleet.py" "usagegraph.py" "usagechart.py" "usagefleet.py" "usagedata.py" "usagespikes.py" "usageview.py" "usagelive.py" "usageui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_tiers.py" "observe_apps.py" "observe_query.py" "observe_focus.py" "observe_browser.py" "observe_fleet.py" "usagegraph.py" "usagechart.py" "usagefleet.py" "usagedata.py" "usagespikes.py" "usageview.py" "usagelive.py" "diskbench.py" "usageui.py"]}
     # procui(프로세스 관리 TUI) — 같은 디렉터리의 observe_apps·hostmetrics·uikit 을 import 하므로 한 디렉터리에 둔다
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/procui + "/${f}"} $out/${f}") ["procscan.py" "procgroups.py" "procactions.py" "procplan.py" "procui.py" "procctl.py"]}
     cp ${../../_data/observe/examples/power_knobs.py} $out/power_knobs.py

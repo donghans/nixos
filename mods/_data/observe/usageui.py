@@ -3,7 +3,7 @@
 
 원칙: ① 조회는 범위 기준(기본 = 지금까지 최근 7일) ② **갱신은 수동만**(타이머 없음 — r/F5; 예외: 1번 탭 안의 실시간 쪽만 그 화면이 보일 때 1초마다 지금 값을 갱신, 이력 저장 없음) ③ 값마다 '측정/추정' 표시
 ④ 프로세스 *관리*(종료·nice)는 btop(b 키), 프로세스 *지표*(누가 얼마나 쓰나)는 여기.
-탭: 1 대시보드(전력·배터리·습관·앱) / 2 앱·프로세스 / 3 원인 / 4 시스템·기기(Netdata·수집 상태) (1번 탭 안 Tab: 실시간 — 지금 값만). 값의 뜻은 ? 도움말의 용어
+탭: 1 대시보드(전력·배터리·습관·앱) / 2 앱·프로세스 / 3 원인 / 4 시스템·기기(Netdata·수집 상태) (1번 탭 안 Tab: 실시간 ↔ 기록). 값의 뜻은 ? 도움말의 용어
 측정 중에는 열어 두지 마세요(화면 갱신은 없지만 조회 순간 CPU 를 씁니다)."""
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ except ImportError:
 import observe_core as core
 import observe_explain as ex
 import observe_netdata as ndmod
+import diskbench
 import usagedata as ud
 import usagefleet as ufl
 import usagelive as live
@@ -37,6 +38,30 @@ import usageview as uv
 
 Panel = uikit.Panel
 BASELINES = [("prev", "바로 앞의 같은 길이"), ("yday", "어제 같은 시간대"), ("none", "비교 안 함")]
+
+
+class BenchScreen(ModalScreen):
+    """디스크 벤치마크 확인 대화상자 — 임시 파일을 쓰고 지우는 일이라 실행 전에 묻는다. y/Enter 실행, n/Esc 취소."""
+    BINDINGS = [Binding("y,enter", "yes", "실행"), Binding("n,escape", "no", "취소")]
+
+    def __init__(self, size_mib):
+        super().__init__()
+        self.size_mib = size_mib
+
+    def compose(self):
+        with Vertical(id="dialog"):
+            yield Static("디스크 벤치마크", id="dialog-title")
+            yield Static(f"이 시스템의 순차 읽기·쓰기 속도를 재서 디스크 사용률(%)의 기준으로 씁니다.\n"
+                         f"· 홈 아래 {diskbench.bench_dir()} 에 임시 파일 {self.size_mib} MiB 를 쓰고 읽고 지웁니다(몇 초, 그동안 다른 측정·화면에 영향).\n"
+                         f"· 그 파일이 놓인 디스크만 잽니다. 네트워크는 재지 않습니다(링크 속도는 하드웨어가 알려 줌).\n"
+                         f"· 짧은 순차 측정이라 캐시가 찬 뒤의 지속 쓰기·4K 랜덤은 재지 않습니다.")
+            yield Static("y / Enter 실행 · n / Esc 취소", id="dialog-hint")
+
+    def action_yes(self):
+        self.dismiss(True)
+
+    def action_no(self):
+        self.dismiss(False)
 
 
 class RangeScreen(ModalScreen):
@@ -160,7 +185,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('apps')", "앱"), Binding("3", "tab('cause')", "원인"),
         Binding("4", "tab('system')", "시스템"), Binding("5", "tab('fleet')", "호스트"), Binding("o", "fleet_other", "상대 호스트"), Binding("6", "tab('live')", "실시간 화면(별칭)", show=False), Binding("tab", "sub_toggle", "기록↔실시간", priority=True),
         Binding("t", "set_range", "범위"), Binding("s", "spikes", "튄 순간"), Binding("escape", "restore", "원래 범위", show=False), Binding("v", "cycle_baseline", "비교 기준"),
-        Binding("r,f5", "reload", "새로고침"), Binding("b", "btop", "btop"), Binding("e", "export", "저장"), Binding("y", "fleet_sync", "호스트 동기화"),
+        Binding("r,f5", "reload", "새로고침"), Binding("b", "btop", "btop"), Binding("e", "export", "저장"), Binding("y", "fleet_sync", "호스트 동기화"), Binding("d", "disk_bench", "디스크 실측"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
@@ -194,16 +219,9 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     def compose(self) -> ComposeResult:
         with TabbedContent(initial=self.start_tab, id="tabs"):
             with TabPane("대시보드 [1]", id="dashboard"):
-                # 같은 1번 탭 안의 이중 탭: 기록(범위 기준 대시보드) ↔ 실시간(지금 값만). Tab 키로 오간다
+                # 같은 1번 탭 안의 이중 탭: 실시간(지금 값만, 앞) ↔ 기록(범위 기준 대시보드). Tab 키로 오간다
                 with TabbedContent(initial=self.start_sub, id="dsub"):
-                    with TabPane("기록", id="dash-hist"):
-                        with VerticalScroll(id="dashscroll"):
-                            with Horizontal(id="dash"):
-                                if self.desktop:
-                                    yield from self._compose_dash_desktop()
-                                else:
-                                    yield from self._compose_dash_laptop()
-                    with TabPane("실시간 — 지금 값", id="live"):
+                    with TabPane("실시간", id="live"):
                         with VerticalScroll():
                             with Horizontal(id="livebox"):
                                 with Vertical(id="lleft"):
@@ -214,6 +232,13 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                                     yield uikit.box(Panel(lambda w, h: self._live(live.render_pressure), id="lpsi"), "압박(PSI) · 스왑 입출력")
                                     yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_top(s, w)), id="ltop"), "상위 소비자")
                             yield uikit.box(Panel(lambda w, h: self._live(live.render_sessions), id="lsess"), "LLM 세션")
+                    with TabPane("기록", id="dash-hist"):
+                        with VerticalScroll(id="dashscroll"):
+                            with Horizontal(id="dash"):
+                                if self.desktop:
+                                    yield from self._compose_dash_desktop()
+                                else:
+                                    yield from self._compose_dash_laptop()
             with TabPane("앱·프로세스 [2]", id="apps"):
                 with VerticalScroll():
                     yield self._table_box("tapps", "앱(전체 프로세스를 앱으로 묶은 합) — CPU 는 코어 1개=100%", ("앱", "CPU %", "CPU 점유", "전환/s", "메모리 MB", "프로세스", "CPU+GPU 전력량 추정 Wh*" if not self.prof["psys"] else "전력량 추정 Wh*"), "xl")
@@ -395,6 +420,8 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         """실시간 화면에서는 범위·튄 순간·비교 기준·저장(기록 화면 전용)을 푸터에서 숨기고 막는다."""
         if action in ("set_range", "spikes", "cycle_baseline", "export") and self._live_visible():
             return False
+        if action == "disk_bench":
+            return self._live_visible()
         if action == "fleet_other":
             try:
                 return self.query_one("#tabs", TabbedContent).active == "fleet"
@@ -623,6 +650,28 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         kinds = [k for k, _ in BASELINES]
         self.baseline = kinds[(kinds.index(self.baseline) + 1) % len(kinds)]
         self.reload()
+
+    def action_disk_bench(self):
+        if not self._live_visible():
+            return
+
+        def done(yes):
+            if yes:
+                self.notify("디스크 벤치마크 중… (몇 초)")
+                self._run_bench()
+        self.push_screen(BenchScreen(1024), done)
+
+    @work(thread=True, group="bench")
+    def _run_bench(self):
+        info = live.disk_info()
+        res = diskbench.run(1024, models={k: v["model"] for k, v in info.items()})
+        if "error" in res:
+            self.call_from_thread(self.notify, f"벤치마크 중단: {res['error']}", severity="error")
+            return
+        if self.sampler is not None:
+            self.sampler._disk_info = live.disk_info()        # 새 기준이 바로 반영되게
+        msg = " · ".join(f"{k} 읽기 {v['read'] / 1e6:,.0f}/쓰기 {v['write'] / 1e6:,.0f} MB/s" for k, v in res.items())
+        self.call_from_thread(self.notify, f"실측 완료: {msg}", severity="information")
 
     def action_btop(self):
         exe = shutil.which("btop")

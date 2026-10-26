@@ -23,6 +23,7 @@ try:
 except ImportError:  # 소스에서 직접 실행할 때(설치본은 같은 디렉터리에 복사됨)
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "claude-skills", "donghans-host-resources", "scripts"))
     import hostmetrics as hm
+import diskbench as db
 import observe_apps as ap
 import usagegraph as pg
 
@@ -115,7 +116,9 @@ def nvme_link_bytes_s(dev):
 
 
 def disk_info():
-    """{장치: dict(model, read, write, name, link)} — 모델명은 sysfs, 표기 성능은 hostmetrics.DISK_SPECS(없으면 read/write 가 None), link 는 NVMe PCIe 링크 상한(하드웨어에서 읽음, 없으면 None)."""
+    """{장치: dict(model, read, write, name, link, bench)} — 모델명은 sysfs, 표기 성능은 hostmetrics.DISK_SPECS(없으면 read/write 가 None), link 는 NVMe PCIe 링크 상한(하드웨어에서 읽음, 없으면 None),
+    bench 는 diskbench 의 실측 기록(dict(read, write, at, direct) 또는 None) — 있으면 % 의 분모로 가장 먼저 쓴다."""
+    saved = db.load()
     out = {}
     try:
         devs = [d for d in os.listdir("/sys/block") if not d.startswith(("loop", "ram", "zram", "dm-"))]
@@ -124,7 +127,7 @@ def disk_info():
     for d in devs:
         model = " ".join((hm.read(f"/sys/block/{d}/device/model") or "").split())
         spec = next((v for k, v in getattr(hm, "DISK_SPECS", {}).items() if k in model), None)
-        out[d] = dict(model=model or d, read=spec["read"] if spec else None, write=spec["write"] if spec else None, name=spec["name"] if spec else None, link=nvme_link_bytes_s(d))
+        out[d] = dict(model=model or d, read=spec["read"] if spec else None, write=spec["write"] if spec else None, name=spec["name"] if spec else None, link=nvme_link_bytes_s(d), bench=saved.get(d))
     return out
 
 
@@ -394,19 +397,20 @@ def render_io(s, w):
         t.append(f"\n  {k}" + (f"  {ln['kind']} 링크 {ln['mbps']:g} Mbit/s" + ("*" if ln["kind"] == "Wi-Fi" else "") if ln else "  (링크 속도 정보 없음 — 가상·미연결)"), style="bold" if ln else "grey62")
         t.append("\n")
         cap = ln["mbps"] * 125000 if ln else None            # Mbit/s → 바이트/초
-        t.append_text(_rate_line("↓", rx, cap, w))
-        t.append_text(_rate_line("↑", tx, cap, w))
+        t.append_text(_rate_pair(("↓", rx, cap), ("↑", tx, cap), w))
     if any(links.get(k, {}).get("kind") == "Wi-Fi" for k in shown):
         t.append("\n  * Wi-Fi: AP 표기 최대 속도(실제 링크는 신호에 따라 낮음)", style="grey50")
     if not net:
         t.append("\n  -", style="grey50")
-    t.append("\n 디스크 — 표기 순차 최대(없으면 PCIe 링크 상한) 대비(읽기/쓰기)")
+    t.append("\n 디스크 — 실측(없으면 표기·PCIe 링크 상한) 대비(읽기/쓰기)")
     info = s.get("disk_info", {})
     if s["disk"]:
         for k, (rd, wr) in sorted(s["disk"].items(), key=lambda kv: -(kv[1][0] + kv[1][1]))[:3]:
             di = info.get(k, {})
-            sp_r, sp_w, link = di.get("read"), di.get("write"), di.get("link")
-            if sp_r:
+            sp_r, sp_w, link, bn = di.get("read"), di.get("write"), di.get("link"), di.get("bench")
+            if bn:
+                cap_r, cap_w, basis = bn["read"], bn["write"], f"실측 R {bn['read'] / 1e6:,.0f}/W {bn['write'] / 1e6:,.0f} MB/s({time.strftime('%m-%d', time.localtime(bn['at']))})"
+            elif sp_r:
                 cap_r, cap_w, basis = sp_r, sp_w, f"표기 R {sp_r / 1e6:g}/W {sp_w / 1e6:g} MB/s"
             elif link:
                 cap_r = cap_w = link
@@ -416,23 +420,37 @@ def render_io(s, w):
                 basis = "(표기·링크 정보 없음 — % 없음)"
             t.append(f"\n  {k}  {di.get('name') or di.get('model') or ''}  {basis}", style="bold" if cap_r else "grey62")
             t.append("\n")
-            t.append_text(_rate_line("읽기", rd, cap_r, w))
-            t.append_text(_rate_line("쓰기", wr, cap_w, w))
+            t.append_text(_rate_pair(("읽기", rd, cap_r), ("쓰기", wr, cap_w), w))
+        if not any(v.get("bench") for v in info.values()):
+            t.append("\n  d: 짧은 디스크 벤치마크로 이 시스템의 실측 속도를 기준으로 쓰기", style="grey50")
     else:
         t.append("\n  -", style="grey50")
     return t
 
 
-def _rate_line(label, rate, cap, w):
-    """`    ↓   8.5 KiB/s ██░░░░  0.1%` 한 칸(Text) — cap(바이트/초)이 있으면 막대와 %, 없으면 속도만. 칸 폭은 박스 폭(w)의 절반."""
+def _rate_pair(a, b, w):
+    """두 방향(↓↑ · 읽기/쓰기)을 한 쌍으로: 윗줄 `라벨 속도 %`, 아랫줄은 칸 폭 전체를 쓰는 **그래프 막대**(분모 cap 이 있을 때만). a·b = (라벨, 바이트/초, cap)."""
     half = max(24, (w - 2) // 2)
-    txt = Text(f"    {label} {human_bytes(rate, True):>11} ")
-    if cap:
-        frac = rate / cap
-        txt.append(pg.hbar(min(frac, 1.0), max(4, min(10, half - cell_len(txt.plain) - 7))), style=pct_style(frac * 100, 50, 85))
-        txt.append(f" {frac * 100:4.1f}%" if frac >= 0.001 else " <.1% ")
-    txt.append(" " * max(half - cell_len(txt.plain), 0))
-    return txt
+    cells = []
+    for label, rate, cap in (a, b):
+        num = Text(f"    {label} {human_bytes(rate, True):>11}")
+        bar = Text()
+        if cap:
+            frac = rate / cap
+            num.append(f"  {frac * 100:4.1f}%" if frac >= 0.001 else "  <.1% ")
+            bar = Text("    ")
+            bar.append(pg.hbar(min(frac, 1.0), half - 6), style=pct_style(frac * 100, 50, 85))
+        cells.append((num, bar))
+    out = Text()
+    for num, _ in cells:
+        out.append_text(num)
+        out.append(" " * max(half - cell_len(num.plain), 0))
+    if any(bar.plain for _, bar in cells):
+        out.append("\n")
+        for _, bar in cells:
+            out.append_text(bar)
+            out.append(" " * max(half - cell_len(bar.plain), 0))
+    return out
 
 
 def render_top(s, w):

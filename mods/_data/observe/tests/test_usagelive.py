@@ -115,6 +115,10 @@ async def drive():
                 break
         check("앱: 탭이 보이는 동안 표본이 계속 갱신됨", app.sampler._t > n)
         check("앱: LLM 세션 박스(탭 안의 모든 Panel)도 표본으로 그려짐", "첫 표본" not in app.query_one("#lsess")._text.plain and "첫 표본" not in app.query_one("#lio")._text.plain)
+        await pilot.press("d"); await pilot.pause(0.4)
+        check("앱: 실시간 화면에서 d → 디스크 벤치마크 확인 대화상자(바로 실행하지 않음)", app.screen.__class__.__name__ == "BenchScreen")
+        await pilot.press("n"); await pilot.pause(0.3)
+        check("앱: n 으로 취소하면 대화상자가 닫히고 벤치마크는 돌지 않음", app.screen.__class__.__name__ != "BenchScreen" and not any(w.name == "_run_bench" for w in app.workers))
         await pilot.press("tab"); await pilot.pause(0.5)
         check("앱: Tab 으로 같은 1번 탭의 기록 쪽으로 가면 타이머 정지", active(app) == "dashboard" and app._timer is None)
         await pilot.press("tab"); await until(pilot, lambda: app._timer is not None)
