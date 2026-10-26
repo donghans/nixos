@@ -10,6 +10,8 @@ description: 성능·자원·전력 문제를 추측하지 말고 observectl(관
 - 수집 기본값: **노트북은 꺼짐**(전력 측정에 변수를 섞지 않으려고; 켜기 `observectl on`, 끄기 `observectl off`), 그 밖(데스크톱·서버)은 켜짐. 노트북에서 켜거나 수준(L1)·eBPF 를 올릴 때는 측정에 영향을 주니 먼저 사용자에게 말한다.
 - 호스트 종류별 방향(`hostname` 으로 어느 쪽인지 확인): 노트북은 **전력→배터리 사용량 관리·개선**, 데스크톱은 **비효율 프로세스 관리와 집중할 곳에 자원 쓰기**(배터리·psys·Intel C-state 지표는 없거나 비어 있을 수 있음 — 값이 `None`/없음이면 없는 것이지 0 이 아님).
 
+용어: **psys**=플랫폼 전체 전력(RAPL, W) · **PSR**=패널 자체 화면 절전 · **flip/s**=화면 갱신 횟수/초 · **ABAB**=조건 A·B 를 번갈아 재는 방식 · **L0/L1**=수집 수준(30초/5초 간격) · **V×I**=배터리의 순간 전압×전류 전력 · **claude-ctx**=여러 호스트가 공유하는 Postgres(`donghans ctx`). 수집 보존은 14일·1GiB, `observectl status` 가 「수집 꺼짐」이면 조회할 기록이 없으니 사용자에게 켤지 묻는다.
+
 ## 자주 쓰는 조회 (sudo 불필요, 개별 조건은 `observectl <명령> --help`)
 - 상위 프로세스: `observectl top --by cpu|ctxsw|app --since 1h -n 15`(cpu 는 코어 1개=100%, ctxsw 는 자발적 문맥 전환/s)
 - 시간대별·그룹별 집계: `observectl query app:<앱>.cpu proc:<comm>.cpu --since 6h --step 10m --agg mean`(신호 별칭은 `observectl query --help`)
@@ -20,14 +22,15 @@ description: 성능·자원·전력 문제를 추측하지 말고 observectl(관
 - 실험 전후 비교는 `observectl mark` 로 조건 표지를 붙이고 `observectl window --by mark`.
 
 ## 측정(A/B)과 시험 틀 — 효과를 확인할 때
-- 절차: `observectl on L0` 로 켜고 안정화 → 조건을 번갈아(ABAB, 쌍 3 이상·구간 5분 이상 권장) → `observectl ab` 로 판정. 틀은 `mods/_data/observe/examples/abab_lib.sh`(`abab_set_a/b`·`abab_verify_a/b`·`abab_restore`; 환경변수 `SEG`·`PAIRS`·`SETTLE`·`ABAB_ALT=1`·`ABAB_AC_MODE=1`·`ABAB_LOCK_CMD`·`AB_ARGS`).
+- 절차: `observectl on L0` 로 켜고(**노트북이면 켜기 전에 사용자에게 알린다**, 위) 안정화 → 조건을 번갈아(ABAB, 쌍 3 이상·구간 5분 이상 권장) → `observectl ab` 로 판정. 틀은 `~/nixos/mods/_data/observe/examples/abab_lib.sh`(`abab_set_a/b`·`abab_verify_a/b`·`abab_restore`; 환경변수 `SEG`·`PAIRS`·`SETTLE`·`ABAB_ALT=1`·`ABAB_AC_MODE=1`·`ABAB_LOCK_CMD`·`AB_ARGS`).
 - `observectl ab` 는 psys·패키지·순간 V×I·누적 계량을 한꺼번에 비교하고 지표끼리 어긋나면 알린다. 경고: 구간 시작 직후 표본이 높으면 「안정화 부족 의심」, 한 구간에서만 CPU 가 튄 앱은 「교란 의심」.
-- **verify 는 조건을 건 API 의 응답이 아니라 효과를 보는 독립 신호로 한다**(확장을 `chrome.management` 로 껐다는 응답이 거짓이었던 사례 — `observectl browser sw` 로 서비스 워커가 실제로 멈췄는지 본다).
-- 상태 지표(PSR 잔류·flip/s·깨움/s·C-state)를 먼저, 와트는 확인용. 시험 중에는 노트북에 ssh 폴링을 하지 않는다. 전력 시험 절차 전체는 호스트 로컬 스킬 `power-test`(`.claude/skills/power-test/SKILL.md`).
+- **verify 는 조건을 건 API 의 응답이 아니라 효과를 보는 독립 신호로 한다**(예: 브라우저 확장을 껐다는 응답 대신 `observectl browser sw` 로 서비스 워커가 실제로 멈췄는지 본다 — 사례 장부 #133).
+- 상태 지표(PSR 잔류·flip/s·깨움/s·C-state)를 먼저, 와트는 확인용. 시험 중에는 노트북에 ssh 폴링을 하지 않는다. 전력 시험 절차 전체는 이 저장소의 호스트 로컬 스킬 `power-test`(`~/nixos/.claude/skills/power-test/SKILL.md`)에 있다 — **그 파일이 없으면**(다른 저장소·호스트) `abab_lib.sh` 머리말과 `observectl ab --help` 를 따른다. 「ssh 폴링 금지」는 원격 노트북 전력 시험 중에만 해당한다(데스크톱 점검에는 해당 없음).
+- 시험이 중간에 실패·중단돼도 `abab_lib.sh` 가 `abab_restore`(원래 상태 복구)를 정확히 한 번 실행하고 구간 기록·부분 분석을 남긴다.
 - 한계: `browser periodic` 은 15초 폴이라 그보다 짧은 주기는 못 본다. `fleet` 은 서버(`claude-ctx`)에 표가 있어야 하고(서버 `nixup`) 호스트가 `allowedClients` 에 있어야 접속된다. 호스트 간 전력(W) 절댓값 비교는 하드웨어가 달라 하지 않는다.
 
 ## 출력은 `--json` 으로 (LLM·스크립트용 — 표 모양은 무시)
-모든 `observectl` 하위 명령이 `--json` 을 받는다(`observectl top --by app --json`). 사람이 보는 표의 정렬·모양에는 신경 쓰지 말고 **JSON 을 읽는다.** 봉투: `{"command", "ok", "structured", "exit_code", "data"|"text", "notes", "error"}`.
+모든 `observectl` 하위 명령이 `--json` 을 받는다(`<명령> --help` 에 보인다)(`observectl top --by app --json`). 사람이 보는 표의 정렬·모양에는 신경 쓰지 말고 **JSON 을 읽는다.** 봉투: `{"command", "ok", "structured", "exit_code", "data"|"text", "notes", "error"}`.
 - `structured:true` 명령(`status`·`top`·`states`·`events`·`query`·`wakers`·`energy`): `data` 에 구조화 값. 예) `top` → `data.rows[{name, cpu_core_pct, ctxsw_vol_per_s, appearances, of_samples}]`, `query` → `data.rows[{label, n, values:{신호: 값}}]`, `status` → `data.{enabled, level, collector, samples_24h, last_sample.age_s, …}`. `explain` 은 기존 자체 `--json`.
 - `structured:false` 명령(나머지): `text` 에 사람용 출력 그대로. 필요한 값이 구조화돼 있지 않으면 사용자에게 말해 그 명령을 구조화한다.
 - 표 위에 괄호로 찍던 참고 문구(옛 형식 표본 제외, 값이 하나도 없는 신호 등)는 **`notes`** 에 온다 — 값이 `null` 이면 측정이 없는 것이지 0 이 아니다. 실패는 `ok:false` + `error` + 종료 코드(0 이 아님).
