@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """usageui — 전력·자원 사용 습관 TUI (Textual). observectl 이 쌓은 표본을 '시간 범위' 기준으로 조회해 보여 준다.
 
-원칙: ① 조회는 범위 기준(기본 = 지금까지 최근 7일) ② **갱신은 수동만**(타이머 없음 — r/F5) ③ 값마다 '측정/추정' 표시
+원칙: ① 조회는 범위 기준(기본 = 지금까지 최근 7일) ② **갱신은 수동만**(타이머 없음 — r/F5; 예외: 6 실시간 탭만 그 탭이 보일 때 1초마다 지금 값을 갱신, 이력 저장 없음) ③ 값마다 '측정/추정' 표시
 ④ 프로세스 *관리*(종료·nice)는 btop(b 키), 프로세스 *지표*(누가 얼마나 쓰나)는 여기.
-탭: 1 대시보드(전력·배터리·습관·앱) / 2 앱·프로세스 / 3 원인 / 4 시스템·기기(Netdata·수집 상태) / 5 용어
+탭: 1 대시보드(전력·배터리·습관·앱) / 2 앱·프로세스 / 3 원인 / 4 시스템·기기(Netdata·수집 상태) / 5 용어 / 6 실시간(지금 값만)
 측정 중에는 열어 두지 마세요(화면 갱신은 없지만 조회 순간 CPU 를 씁니다)."""
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ import observe_core as core
 import observe_explain as ex
 import observe_netdata as ndmod
 import usagedata as ud
+import usagelive as live
 import usageview as uv
 
 Panel = uikit.Panel
@@ -98,7 +99,7 @@ class SpikesScreen(ModalScreen):
         self.dismiss(None)
 
 
-class UsageUI(uikit.HelpMixin, App):
+class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     TITLE = "usageui"
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
     TabbedContent { height: 1fr; }
@@ -137,13 +138,24 @@ class UsageUI(uikit.HelpMixin, App):
     Collapsible > Contents { height: auto; padding: 0; }
     DataTable { height: 1fr; background: #000000; }
     #range-err { height: auto; }
+    #livebox { height: 1fr; min-height: 40; }
+    #lleft, #lright { width: 1fr; height: 1fr; }
+    #lleft > #lverdict { height: 8; }
+    #lleft > #lmem { height: 16; }
+    #lleft > #lpsi { height: 9; }
+    #lright > #lio { height: 22; }
+    #lright > #ltop { height: 17; }
+    #lright > #lsess { height: 12; }
+    #livebox.narrow { layout: vertical; height: auto; }
+    #livebox.narrow #lleft, #livebox.narrow #lright { width: 100%; height: auto; }
+    #livebox.narrow .box { height: 14; }
     #dialog.wide { width: 96%; max-width: 220; }
     #dialog.wide DataTable { height: auto; max-height: 14; }
     """
     BINDINGS = [
         Binding("q", "quit", "종료"),
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('apps')", "앱"), Binding("3", "tab('cause')", "원인"),
-        Binding("4", "tab('system')", "시스템"), Binding("5", "tab('help')", "용어"),
+        Binding("4", "tab('system')", "시스템"), Binding("5", "tab('help')", "용어"), Binding("6", "tab('live')", "실시간"),
         Binding("t", "set_range", "범위"), Binding("s", "spikes", "튄 순간"), Binding("escape", "restore", "원래 범위", show=False), Binding("v", "cycle_baseline", "비교 기준"),
         Binding("r,f5", "reload", "새로고침"), Binding("b", "btop", "btop"), Binding("e", "export", "저장"),
         *uikit.HelpMixin.HELP_BINDINGS,
@@ -165,6 +177,10 @@ class UsageUI(uikit.HelpMixin, App):
         self.sysdata = None          # {"snap", "series"}
         self._busy = False
         self._back = None            # 튄 순간으로 이동하기 전의 범위(Esc 로 복귀)
+        self.sampler = None          # 실시간 탭 샘플러(처음 열 때 만든다)
+        self._timer = None           # 실시간 탭이 보일 때만 있는 갱신 타이머(PauseOnBlurMixin 이 포커스를 잃으면 멈춤)
+        self.live_sec = self.LIVE_SEC
+        self.live_sample = None
 
     # --- 구성: 표·그래프마다 박스(btop 처럼 박스 안 박스). 대시보드는 2열(좁으면 1열)
     def compose(self) -> ComposeResult:
@@ -209,6 +225,17 @@ class UsageUI(uikit.HelpMixin, App):
             with TabPane("용어 [5]", id="help"):
                 with VerticalScroll():
                     yield uikit.box(Static(self._help_text(), id="helptext"), "용어 — 값이 무엇을 뜻하나")
+            with TabPane("실시간 [6]", id="live"):
+                with VerticalScroll():
+                    with Horizontal(id="livebox"):
+                        with Vertical(id="lleft"):
+                            yield uikit.box(Panel(lambda w, h: self._live(live.render_verdict), id="lverdict"), "판정 — 지금")
+                            yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_mem(s, w)), id="lmem"), "메모리 구성 — 진짜 여유")
+                            yield uikit.box(Panel(lambda w, h: self._live(live.render_pressure), id="lpsi"), "압박(PSI) · 스왑 입출력")
+                        with Vertical(id="lright"):
+                            yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_io(s, w)), id="lio"), "CPU 코어 · 네트워크 · 디스크 — 초당")
+                            yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_top(s, w)), id="ltop"), "상위 소비자")
+                            yield uikit.box(Panel(lambda w, h: self._live(live.render_sessions), id="lsess"), "LLM 세션")
         with Vertical(id="status-row"):
             yield Static("", id="status")
         yield Footer()
@@ -257,11 +284,14 @@ class UsageUI(uikit.HelpMixin, App):
     def _health(self):
         return uv.summary_battery(self.view, ud.battery_health()) if self.view else Text(" 불러오는 중…", style="grey50")
 
+    LIVE_NARROW_COLS = 100
+    LIVE_SEC = 1.0                     # 실시간 탭 갱신 간격(초). 한 번 재는 데 걸리는 시간이 간격의 20% 를 넘으면 자동으로 늘린다
     NARROW_COLS = 125                  # 이보다 좁으면 대시보드를 1열로(오른쪽 칸 글이 줄바꿈되기 때문)
 
     def _fit(self):
         try:
             self.query_one("#dash").set_class(self.size.width < self.NARROW_COLS, "narrow")
+            self.query_one("#livebox").set_class(self.size.width < self.LIVE_NARROW_COLS, "narrow")
         except Exception:
             pass
 
@@ -297,7 +327,7 @@ class UsageUI(uikit.HelpMixin, App):
         for k, d in uv.GLOSSARY:
             t.append(f" {k:<14}", style="#33ccff")
             t.append(d + "\n")
-        t.append("\n 키: 1~5 탭 · t 범위 · s 튄 순간 순위 · v 비교 기준 · r/F5 새로고침 · b btop · e 내보내기 · ? 키 목록 · q 종료", style="grey50")
+        t.append("\n 키: 1~6 탭 · t 범위 · s 튄 순간 순위 · v 비교 기준 · r/F5 새로고침 · b btop · e 내보내기 · ? 키 목록 · q 종료", style="grey50")
         return t
 
     # --- 데이터: 수동 갱신만(타이머 없음)
@@ -410,8 +440,51 @@ class UsageUI(uikit.HelpMixin, App):
         self.query_one("#tabs", TabbedContent).active = name
 
     def on_tabbed_content_tab_activated(self, ev):
+        if ev.pane.id == "live":
+            self._live_start()
+        else:
+            self._live_stop()
         if self.view and ev.pane.id in ("cause", "system"):
             self._lazy_worker(ev.pane.id)
+
+    # --- 실시간 탭: 이 탭이 보일 때만 타이머가 돈다(다른 탭·창 포커스 상실 시 멈춤). 이력은 저장하지 않는다
+    def _live(self, fn):
+        return fn(self.live_sample) if self.live_sample else Text(" 첫 표본을 재는 중…", style="grey50")
+
+    def _live_start(self):
+        if self._timer is not None:
+            return
+        if self.sampler is None:
+            self.sampler = live.LiveSampler()
+        self._timer = self.set_interval(self.live_sec, self._live_tick)
+        self._live_tick()
+
+    def _live_stop(self):
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+
+    def refresh_data(self):
+        """PauseOnBlurMixin 이 창 포커스가 돌아올 때 부른다 — 실시간 탭이 보이는 중일 때만 한 번 갱신."""
+        if self._timer is not None:
+            self._live_tick()
+
+    @work(thread=True, exclusive=True, group="live")
+    def _live_tick(self):
+        s = self.sampler.sample()
+        self.call_from_thread(self._live_draw, s)
+
+    def _live_draw(self, s):
+        self.live_sample = s
+        for panel in self.query("#livebox Panel"):
+            panel.build()
+            panel.refresh()
+        # 한 번 재는 데 걸린 시간이 간격의 20% 를 넘으면 간격을 늘려 UI 가 샘플링에 묻히지 않게 한다
+        need = round(s["cost_ms"] / 1000 * 5, 1)
+        if self._timer is not None and need > self.live_sec:
+            self.live_sec = need
+            self._timer.stop()
+            self._timer = self.set_interval(self.live_sec, self._live_tick)
 
     @work(thread=True, exclusive=True, group="lazy")
     def _lazy_worker(self, tab):
@@ -494,7 +567,7 @@ class TableBox(Vertical):
 def main(argv=None):
     p = argparse.ArgumentParser(prog="usageui", description="전력·자원 사용 습관 TUI")
     p.add_argument("--range", default=None, help="처음 범위(기본: 7일): 1시간·6시간·오늘·어제·3일·7일 · -30m · 10:00..11:30")
-    p.add_argument("--tab", default=None, help="처음 탭(기본: 배터리 있으면 dashboard, 없으면 apps)", choices=["dashboard", "apps", "cause", "system", "help"])
+    p.add_argument("--tab", default=None, help="처음 탭(기본: 배터리 있으면 dashboard, 없으면 apps)", choices=["dashboard", "apps", "cause", "system", "help", "live"])
     p.add_argument("--expand", action="store_true", help="원인 탭의 상세 표를 처음부터 펼침")
     p.add_argument("--baseline", default="prev", choices=[k for k, _ in BASELINES])
     a = p.parse_args(argv)

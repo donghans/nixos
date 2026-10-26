@@ -107,7 +107,7 @@ async def drive():
     app = usageui.UsageUI(ud.preset("1시간", now))
     async with app.run_test(size=(140, 45)) as pilot:
         await pilot.pause(1.0)
-        check("앱: 타이머 없음(수동 갱신만)", not any(getattr(x, "_interval", None) for x in []) and not hasattr(app, "_timer"))
+        check("앱: 실시간 탭 밖에서는 타이머 없음(수동 갱신만)", app._timer is None)
         check("앱: 첫 조회 후 상태줄에 데이터 기준 시각·새로고침 안내", "데이터 기준" in str(app.query_one("#status").render()) and "r 새로고침" in str(app.query_one("#status").render()))
         n0 = app.view["loaded_at"]
         await pilot.press("r"); await pilot.pause(1.0)

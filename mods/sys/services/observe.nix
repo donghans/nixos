@@ -15,13 +15,19 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
   py = pkgs.python3;
   dir = pkgs.runCommand "observe-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_tiers.py" "observe_apps.py" "observe_query.py" "observe_focus.py" "observe_browser.py" "usagegraph.py" "usagechart.py" "usagedata.py" "usagespikes.py" "usageview.py" "usageui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_tiers.py" "observe_apps.py" "observe_query.py" "observe_focus.py" "observe_browser.py" "usagegraph.py" "usagechart.py" "usagedata.py" "usagespikes.py" "usageview.py" "usagelive.py" "usageui.py"]}
+    # procui(프로세스 관리 TUI) — 같은 디렉터리의 observe_apps·hostmetrics·uikit 을 import 하므로 한 디렉터리에 둔다
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/procui + "/${f}"} $out/${f}") ["procscan.py" "procgroups.py" "procactions.py" "procui.py"]}
     cp ${../../_data/observe/examples/power_knobs.py} $out/power_knobs.py
     cp ${../../_data/_uikit/uikit.py} $out/uikit.py
+    # 호스트 측정·판정 모듈의 정본은 donghans-host-resources 스킬 폴더(복제본을 따로 두지 않는다). usageui 실시간 탭·procui 가 import 한다
+    cp ${../../_data/claude-skills/donghans-host-resources/scripts/hostmetrics.py} $out/hostmetrics.py
   '';
   observectl = pkgs.writeShellScriptBin "observectl" ''exec ${py}/bin/python3 ${dir}/observe_cli.py "$@"'';
   # 전력·자원 사용 습관 TUI(Textual) — 같은 디렉터리의 observe_core 를 import 하므로 dir 에서 실행한다
   usageui = pkgs.writeShellScriptBin "usageui" ''exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${dir}/usageui.py "$@"'';
+  # 프로세스 관리 TUI(Textual) — usageui(읽기 전용 모니터)와 분리한 조치 도구. 그룹·필터·보호·안전한 일괄 종료
+  procui = pkgs.writeShellScriptBin "procui" ''exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${dir}/procui.py "$@"'';
   observeEmit = pkgs.writeShellScriptBin "observe-emit" ''exec ${py}/bin/python3 ${dir}/observe_emit.py "$@"'';
 in {
   # 창 수명·포커스 구간(스팬) 기록: Hyprland 이벤트 소켓을 읽어 observectl trace --comp windows 로 앱별 포커스 시간·에너지를 본다(앱 수정 없음, 창 제목은 기록 안 함).
@@ -67,8 +73,18 @@ in {
     icon = "utilities-system-monitor";
   };
 
+  hm.xdg.desktopEntries.procui = {
+    name = "Process Manager";
+    genericName = "Group, filter and safely stop processes";
+    comment = "procui — 프로세스를 그룹으로 보고 보호 규칙을 지키며 종료";
+    exec = "${procui}/bin/procui";
+    terminal = true;
+    categories = ["System" "Monitor"];
+    icon = "utilities-system-monitor";
+  };
+
   os = {
-    environment.systemPackages = [observectl observeEmit usageui];
+    environment.systemPackages = [observectl observeEmit usageui procui];
 
     # MSR(패키지 C-state 잔여율)을 읽으려면 msr 모듈이 필요(root 만 접근). 수집기가 없을 때 modprobe 도 시도하지만 부팅 때 올려 둔다.
     boot.kernelModules = ["msr"];

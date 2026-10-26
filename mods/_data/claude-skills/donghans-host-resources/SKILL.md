@@ -36,6 +36,10 @@ python3 -I ~/.claude/skills/donghans-host-resources/scripts/hostres.py --json   
   - PSS(공유 페이지를 나눠 계산해 합계가 겹치지 않음)·CPU(측정 구간)·가동 시간. 유휴 세션의 CPU 는 20초 평균 0.7~1% 가 평상시다(짧은 구간은 일시적으로 더 튈 수 있음).
   - 세션이 아닌 claude 프로세스(Vivaldi 의 Claude-in-Chrome 네이티브 호스트 `--chrome-native-host`)는 세션에서 빼고 한 줄로 따로 적는다.
 
+## 구조 메모
+- 측정·판정·세션 수집은 `scripts/hostmetrics.py`(출력 없음), 화면 조립·CLI 는 `scripts/hostres.py` 다. hostres 는 `python3 -I` 에서도 import 되도록 스크립트 폴더를 `sys.path` 에 직접 넣는다.
+- `hostmetrics.py` 는 usageui 의 「실시간」 탭과 `procui` 도 같은 파일을 쓴다(`observe.nix` 가 설치 때 복사 — 정본은 이 폴더 하나). `begin()`/`end()` 로 증분 측정, `session_meta(use_ctx=False)` 면 ctx 저장소를 부르지 않는다(폴링용).
+
 ## 한계(있는 그대로 보고할 것)
 - **세션별 이력은 기록되지 않는다.** 세션 표는 현재 시점 값(상태·마지막 대화·서브에이전트는 기록에서 읽은 값)뿐이다. 「언제까지 활성이었나」는 대기 세션의 `대기 …부터`·마지막 응답 시각으로 알 수 있다. 이 스킬은 **실행한 컴퓨터 한 대의 자원만** 다룬다: 세션 표도 이 호스트에서 실행 중인 세션만 나열하고(다른 머신·끝난 세션은 제외), ctx 보충도 이 호스트(`hostname`)의 기록만 조회한다.
 - Netdata 가 꺼져 있거나 구간 밖이면 해당 줄만 생략된다(스크립트가 실패하지 않는다). 못 읽은 항목은 「못 쟀음」으로 적는다.
