@@ -224,10 +224,10 @@ class NotifUI(uikit.HelpMixin, App):
         apps = notif.group_by_app(list(reversed(base)))
         problems = sum(1 for e in base if notif.is_problem(e))
         warn = Text("‼ ", style="bold #ff5555")
-        rows = [(ALL, Text(pad("전체", GROUP_WIDTH - 12) + f"{len(base):>6}")),
+        rows = [(ALL, Text(pad("전체", GROUP_WIDTH - 13) + f"{len(base):>6}")),
                 (PROBLEMS, warn + Text(pad("시스템 문제", GROUP_WIDTH - 14) + f"{problems:>6}"))]
         for app, n, k, _ in apps:
-            t = Text(pad(app, GROUP_WIDTH - 12) + f"{n:>6}")
+            t = Text(pad(app, GROUP_WIDTH - 13) + f"{n:>6}")      # 패널 안쪽 폭 26칸 = 이름 17 + 건수 6 + 「 ‼N」 3 — 이전엔 1칸 넘쳐 긴급 건수가 …로 잘렸다
             if k:
                 t.append(f" ‼{k}", style="bold #ff5555")
             rows.append(("app:" + app, t))

@@ -17,6 +17,22 @@ MIB = 1 << 20
 GIB = 1 << 30
 
 
+def cells(s):
+    """표시 칸 수(한글·전각 2칸). 표준 라이브러리만 쓴다 — procctl 은 rich 없이 돈다."""
+    import unicodedata
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 0 if unicodedata.combining(c) else 1 for c in str(s))
+
+
+def fit(s, n):
+    """칸 폭 기준으로 n 칸에 맞춘다(길면 …로 자르고 짧으면 공백으로 채움) — f-string 의 :<n 은 글자 수라 한글 이름 표가 어긋난다."""
+    s = str(s)
+    if cells(s) > n:
+        while s and cells(s) > n - 1:
+            s = s[:-1]
+        s += "…"
+    return s + " " * (n - cells(s))
+
+
 def read(path):
     try:
         with open(path) as f:

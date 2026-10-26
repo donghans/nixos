@@ -133,6 +133,8 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 
 ## `uikit` — 우리 TUI 공통 틀 (2026-10-21)
 
+- **한글 정렬 규칙(2026-10-26 전 앱 촬영 교차 검증에서 확인)**: 표·범례·라벨-값 줄을 f-string 의 `{x:<n}` 으로 맞추지 않는다 — 글자 수 기준이라 한글(2칸 폭)이 섞이면 열이 어긋난다. 칸 폭 기준 `pad`/`fit`(clipui·notif_ui·usageview·usagelive·procscan 에 각각 있음)을 쓰고, 줄바꿈이 필요하면 `usageview.wrap_cells`(설명은 이름 칸만큼 들여씀)를 쓴다. 라벨-값 줄(`usageview._line`)은 값이 칸을 넘어도 뒤에 한 칸 이상 띄운다. 시험 `observe/tests/test_layout.py` 가 범례·압박·세션 박스·용어 탭·procctl 표의 열 위치를 칸 단위로 검사한다. 이 검증에서 usageui 용어 탭(설명 시작 칸이 제각각·줄바꿈이 왼쪽 끝으로 감김), 시스템 탭(긴 한글 라벨이 값에 붙음), 구간 요약(값이 노트에 붙어 「14:187일」), 알림 센터 그룹 패널(긴급 건수가 …로 잘림)을 고쳤다. `ctxui` 는 LLM 세션에서 실행을 거부하도록 만들어져 있어(비밀 보호) 촬영하지 못했다 — 사람이 직접 확인할 것.
+
 `mods/_data/_uikit/uikit.py`. displayui · clipui · notif_ui · usageui 가 복사해 쓰던 겉모습과 동작을 모았다: 검정 배경·둥근 회색 테두리(포커스 시 하늘색)·선택 줄 파랑·Footer 색(`BASE_CSS`), 대화상자 모양(`DIALOG_CSS`), 제목 달린 박스(`.box`, `uikit.box(위젯, 제목)`), `?`/F1 도움말(`HelpMixin`, 키 목록은 BINDINGS 에서 자동 생성), 포커스를 잃으면 갱신 정지(`PauseOnBlurMixin`). 각 앱은 `CSS = uikit.BASE_CSS + (앱 고유 규칙)` 로 쓴다. 배포 시 각 모듈이 `uikit.py` 를 같은 디렉터리에 복사하고, 소스 트리에서는 `../_uikit` 에서 가져온다. 시험: `_uikit/tests/test_uikit.py`.
 
 ## 스팬(구간)과 `observectl trace` (2026-10-21)

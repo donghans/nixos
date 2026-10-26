@@ -296,6 +296,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         try:
             self.query_one("#dash").set_class(self.size.width < self.NARROW_COLS, "narrow")
             self.query_one("#livebox").set_class(self.size.width < self.LIVE_NARROW_COLS, "narrow")
+            self.query_one("#helptext", Static).update(self._help_text(max(40, self.size.width - 6)))
         except Exception:
             pass
 
@@ -326,13 +327,9 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             return Text(" 이 탭을 열면 Netdata 에서 읽어 옵니다(꺼져 있으면 '관측 공백')", style="grey50"), ""
         return uv.nd_chart(self.sysdata, key, self.view["range"], w, h)
 
-    def _help_text(self):
-        t = Text()
-        for k, d in uv.GLOSSARY:
-            t.append(f" {k:<14}", style="#33ccff")
-            t.append(d + "\n")
-        t.append("\n 키: 1~5 탭(1번은 Tab 으로 기록↔실시간) · t 범위 · s 튄 순간 순위 · v 비교 기준 · r/F5 새로고침 · b btop · e 내보내기 · ? 키 목록 · q 종료", style="grey50")
-        return t
+    def _help_text(self, width=100):
+        """용어 탭 본문 — 이름 칸을 한글 폭 기준으로 맞추고 설명은 이름 칸만큼 들여써 줄바꿈한다(창 폭이 바뀌면 _fit 이 다시 만든다)."""
+        return uv.glossary_text(width, "키: 1~5 탭(1번은 Tab 으로 기록↔실시간) · t 범위 · s 튄 순간 순위 · v 비교 기준 · r/F5 새로고침 · b btop · e 내보내기 · ? 키 목록 · q 종료")
 
     # --- 데이터: 수동 갱신만(타이머 없음)
     def action_reload(self):

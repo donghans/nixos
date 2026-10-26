@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 
+from rich.cells import cell_len
 from rich.text import Text
 
 try:
@@ -179,6 +180,16 @@ class LiveSampler:
 
 
 # ---------- 표시 조각(Text) ----------
+def fit(s, n):
+    """칸 폭(한글 2칸) 기준으로 n 칸에 맞춘다 — 길면 자르고(…) 짧으면 공백으로 채움. f-string 의 :<n 은 글자 수라 한글 표가 어긋난다."""
+    s = str(s)
+    if cell_len(s) > n:
+        while s and cell_len(s) > n - 1:
+            s = s[:-1]
+        s += "…"
+    return s + " " * (n - cell_len(s))
+
+
 def human_bytes(x, per_s=False):
     if x is None:
         return "-"
@@ -240,10 +251,11 @@ def render_mem(s, w):
     parts = mem_segments(s)
     t = Text(" ")
     t.append_text(seg_bar(parts, max(10, w - 3)))
+    lw = max(cell_len(n) for n, _, _ in parts) + 2      # 범례 이름 칸 = 가장 긴 이름(한글 2칸) + 2
     for name, b, st in parts:
         t.append("\n  ")
         t.append("■", style=st)
-        t.append(f" {name:<22}{b / GIB:6.1f} GiB  {b / m['total'] * 100:4.0f}%")
+        t.append(f" {fit(name, lw)}{b / GIB:6.1f} GiB  {b / m['total'] * 100:4.0f}%")
     t.append(f"\n\n  바로 쓸 수 있음(보수적) {m['reclaimable_floor'] / GIB:.1f} GiB = 빈 메모리 + 식은 캐시", style="bold")
     t.append(f"\n  커널 MemAvailable {m['available_raw'] / GIB:.1f} GiB — 활성 캐시·회수 가능 slab({m['sreclaimable'] / GIB:.1f} GiB)을 더한 낙관값", style="grey62")
     dev = ", ".join(f"{d['kind']} {d['used'] / GIB:.1f}/{d['size'] / GIB:.1f}" + (f"(RAM 점유 {d['compressed'] / GIB:.1f})" if "compressed" in d else "") for d in sw["devices"]) or "없음"
@@ -263,7 +275,7 @@ def render_pressure(s):
         p = ps[k]
         some = p["some_pct"] if p["some_pct"] is not None else p["some_avg10"]
         full = p["full_pct"] if p["full_pct"] is not None else p["full_avg10"]
-        t.append(f" {name:<4} some ")
+        t.append(f" {fit(name, 7)}some ")
         t.append(f"{fv(some):>6}", style=pct_style(some or 0, 3, 10))
         if k != "cpu":
             t.append("  full ")
@@ -295,13 +307,13 @@ def render_io(s, w):
     t.append("\n 네트워크(수신/송신)")
     if s["net"]:
         for k, (rx, tx) in sorted(s["net"].items(), key=lambda kv: -(kv[1][0] + kv[1][1]))[:4]:
-            t.append(f"\n  {k:<12}{human_bytes(rx, True):>12} / {human_bytes(tx, True):<12}")
+            t.append(f"\n  {fit(k, 13)}{human_bytes(rx, True):>12} / {human_bytes(tx, True):<12}")
     else:
         t.append("\n  -", style="grey50")
     t.append("\n 디스크(읽기/쓰기)")
     if s["disk"]:
         for k, (rd, wr) in sorted(s["disk"].items(), key=lambda kv: -(kv[1][0] + kv[1][1]))[:3]:
-            t.append(f"\n  {k:<12}{human_bytes(rd, True):>12} / {human_bytes(wr, True):<12}")
+            t.append(f"\n  {fit(k, 13)}{human_bytes(rd, True):>12} / {human_bytes(wr, True):<12}")
     else:
         t.append("\n  -", style="grey50")
     return t
@@ -315,7 +327,7 @@ def render_top(s, w):
     nw = max(8, w - 36)       # 이름 칸: 줄이 박스 폭을 넘어 줄바꿈되지 않게 꼬리(프로세스 수·RSS)를 뺀 나머지
     for a in s.get("apps", [])[:6]:
         if s.get("apps_measured"):
-            t.append(f"  {a['cpu']:6.1f}%  {a['app'][:nw]:<{nw}} {a['n']:>4}개 {a['rss'] / MIB:7.0f} MiB\n")
+            t.append(f"  {a['cpu']:6.1f}%  {fit(a['app'], nw)} {a['n']:>4}개 {a['rss'] / MIB:7.0f} MiB\n")
     return t
 
 
@@ -329,6 +341,6 @@ def render_sessions(s):
         st = {"busy": "작동중", "idle": "대기"}.get(m["status"], m["status"]) if m else "상태 기록 없음"
         run = len(m["sub"]["running"]) if m else 0
         t.append("  ")
-        t.append(f"{st:<6}", style="green" if st == "작동중" else "grey62")
-        t.append(f" {(m['name'] if m else kind)[:14]:<14} {cwd[:12]:<12} PSS {pss:5.0f} MiB · 프로세스 {n}" + (f" · 서브에이전트 {run}" if run else "") + "\n")
+        t.append(fit(st, 8), style="green" if st == "작동중" else "grey62")
+        t.append(f" {fit(m['name'] if m else kind, 15)}{fit(cwd, 13)}PSS {pss:5.0f} MiB · 프로세스 {n}" + (f" · 서브에이전트 {run}" if run else "") + "\n")
     return t

@@ -27,9 +27,20 @@ def _f(x, p=2, unit=""):
     return "-" if x != x else f"{x:.{p}f}{unit}"
 
 
-def _line(t, label, value, note="", vstyle="bold", lw=16, vw=22):
-    t.append(" " + pad(label, lw), style="grey70")
-    t.append(pad(value, vw), style=vstyle)
+def short_dur(sec):
+    """좁은 칸용 짧은 기간: 90분 미만 「N분」, 2일 미만 「N.N시간」, 그 이상 「N.N일」."""
+    sec = max(float(sec or 0), 0)
+    return f"{sec / 60:.0f}분" if sec < 5400 else f"{sec / 3600:.1f}시간" if sec < 172800 else f"{sec / 86400:.1f}일"
+
+
+def pad1(s, n):
+    """pad 와 같되 칸을 넘쳐도 뒤에 최소 한 칸은 둔다(값이 다음 열에 붙어 「14:187일」처럼 읽히는 것을 막음)."""
+    return s + " " * max(1, n - cell_len(s))
+
+
+def _line(t, label, value, note="", vstyle="bold", lw=20, vw=22):
+    t.append(" " + pad1(label, lw), style="grey70")
+    t.append(pad1(value, vw), style=vstyle)
     if note:
         t.append(note, style="grey50")
     t.append("\n")
@@ -52,12 +63,12 @@ def freshness(view, now=None):
 def summary_range(view):
     s, rng = view["summary"], view["range"]
     t = Text()
-    _line(t, "범위", f"{s['range']}", f"{rng.label}" + (" · 지금까지" if rng.follows_now else ""), lw=14, vw=14)
-    _line(t, "수집", f"표본 {s['n']}개", f"{pg.fmt_dur(s['hours'])}" + (f" · 공백 {int(s['gap_s'])}초" if s["gap_s"] >= 60 else ""), lw=14, vw=14)
+    _line(t, "범위", f"{s['range']}", f"{rng.label}" + (" · 지금까지" if rng.follows_now else ""), lw=14, vw=27)
+    _line(t, "수집", f"표본 {s['n']}개", f"{short_dur(s['hours'] * 3600)}" + (f" · 공백 {short_dur(s['gap_s'])}" if s["gap_s"] >= 60 else ""), lw=14, vw=27)
     b = view["baseline"]
     if b:
         f = lambda x: time.strftime("%H:%M", time.localtime(x))
-        _line(t, "비교 기준", f"{f(b[0])} ~ {f(b[1])}", "원인 탭", lw=14, vw=14)
+        _line(t, "비교 기준", f"{f(b[0])} ~ {f(b[1])}", "원인 탭", lw=14, vw=27)
     return t
 
 
@@ -326,6 +337,37 @@ def collector_text(c):
     eb = ctl.get("ebpf")
     live = eb and eb.get("until", 0) > time.time()
     _line(t, "정밀 eBPF", f"{eb['tier']} (켜짐)" if live else "꺼짐", "observectl ebpf on sample --for 10m 로 켬")
+    return t
+
+
+def wrap_cells(text, width):
+    """칸 폭(한글 2칸) 기준 줄바꿈 — 공백 단위로 끊고 width 칸을 넘기지 않는다(한 단어가 더 길면 그대로 둠)."""
+    lines, cur = [], ""
+    for word in str(text).split(" "):
+        cand = f"{cur} {word}" if cur else word
+        if not cur or cell_len(cand) <= width:
+            cur = cand
+        else:
+            lines.append(cur)
+            cur = word
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def glossary_text(width, tail=""):
+    """용어 탭: 이름 칸(한글 폭 기준으로 정렬) + 설명(줄바꿈 때 이름 칸만큼 들여쓰기). width = 쓸 수 있는 칸 수."""
+    kw = max(cell_len(k) for k, _ in GLOSSARY) + 2
+    dw = max(20, width - kw - 2)
+    t = Text()
+    for k, d in GLOSSARY:
+        for i, line in enumerate(wrap_cells(d, dw)):
+            t.append(" " + (pad(k, kw) if i == 0 else " " * kw), style="#33ccff")
+            t.append(line + "\n")
+    if tail:
+        t.append("\n")
+        for line in wrap_cells(tail, max(20, width - 2)):
+            t.append(" " + line + "\n", style="grey50")
     return t
 
 

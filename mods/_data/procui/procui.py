@@ -411,7 +411,7 @@ class ProcUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             g = cur[1]
             body = Text(f"프로세스 {g['n']}개 · CPU 합 {g['cpu']:.1f}% · RSS 합 {gib(g['rss'])}(공유 포함)\n\n상위 12:\n")
             for p in g["procs"][:12]:
-                body.append(f"  {p['comm'][:24]:<24} pid {p['pid']:<8} CPU {p['cpu']:5.1f}%  RSS {p['rss'] / ps.MIB:6.0f} MiB\n")
+                body.append(f"  {ps.fit(p['comm'], 24)} pid {p['pid']:<8} CPU {p['cpu']:5.1f}%  RSS {p['rss'] / ps.MIB:6.0f} MiB\n")
             self.push_screen(InfoScreen(f"그룹 — {g['name']}", body))
             return
         p = cur[1]

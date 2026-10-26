@@ -99,7 +99,7 @@ def cmd_groups(a):
     groups = pg.build_groups(procs, view, ctx, pred, a.sort)
     rows = [dict(group=g["name"], n=g["n"], cpu=round(g["cpu"], 1), rss_mib=round(g["rss"] / ps.MIB), protected=sum(1 for p in g["procs"] if pa.protect_reasons(p, pc))) for g in groups]
     text = f"뷰 {view['name']} · 그룹 {len(rows)}개 · 프로세스 {sum(r['n'] for r in rows)}/{len(procs)}개\n" + "\n".join(
-        f"  {r['group'][:34]:<34} {r['n']:>4}개  CPU {r['cpu']:>6.1f}%  RSS {r['rss_mib']:>6} MiB" + (f"  잠금 {r['protected']}" if r["protected"] else "") for r in rows)
+        f"  {ps.fit(r['group'], 34)} {r['n']:>4}개  CPU {r['cpu']:>6.1f}%  RSS {r['rss_mib']:>6} MiB" + (f"  잠금 {r['protected']}" if r["protected"] else "") for r in rows)
     emit(dict(view=view["name"], groups=rows, warnings=warns + fw), a.json, text + ("\n경고: " + " / ".join(warns + fw) if warns + fw and not a.json else ""))
 
 
@@ -125,7 +125,7 @@ def cmd_show(a):
         die(pp.NO_TARGET, f"뷰 '{view['name']}' 에 그룹 '{a.target}' 없음 — 예: {', '.join(names)}", a.json)
     mem = [dict(pid=p["pid"], comm=p["comm"], cpu=round(p["cpu"], 1), rss_mib=round(p["rss"] / ps.MIB), protection=[t for _, t in pa.protect_reasons(p, pc)]) for p in g["procs"]]
     emit(dict(group=g["name"], n=g["n"], members=mem), a.json, f"그룹 {g['name']} — {g['n']}개, CPU {g['cpu']:.1f}%, RSS {gib(g['rss'])}\n" + "\n".join(
-        f"  pid {m['pid']:<8} {m['comm'][:24]:<24} CPU {m['cpu']:>5.1f}%  RSS {m['rss_mib']:>6} MiB" + (f"  잠금: {', '.join(m['protection'])}" if m["protection"] else "") for m in mem[:40]))
+        f"  pid {m['pid']:<8} {ps.fit(m['comm'], 24)} CPU {m['cpu']:>5.1f}%  RSS {m['rss_mib']:>6} MiB" + (f"  잠금: {', '.join(m['protection'])}" if m["protection"] else "") for m in mem[:40]))
 
 
 # ---------- plan ----------
@@ -190,7 +190,7 @@ def cmd_plan(a):
     mem = plan["pss_kib"] * 1024 if plan["pss_kib"] else plan["rss"]
     t = [f"계획 {plan['id']} — {'에이전트' if caller['agent'] else '사람'} 모드 · 만료 {time.strftime('%H:%M:%S', time.localtime(plan['expires']))} · 뷰 {view['name']} · 범위 {scope}",
          f"대상 {len(targets)}개 (예상 확보 {gib(mem)}" + (" PSS" if plan["pss_kib"] else " RSS, 공유 포함이라 과대") + "):"]
-    t += [f"  pid {x['pid']:<8} {x['comm'][:24]:<24} {x['group'][:20]:<20} RSS {x['rss'] // ps.MIB:>6} MiB" for x in targets[:30]]
+    t += [f"  pid {x['pid']:<8} {ps.fit(x['comm'], 24)} {ps.fit(x['group'], 20)} RSS {x['rss'] // ps.MIB:>6} MiB" for x in targets[:30]]
     if excluded:
         t.append(f"보호로 제외 {len(excluded)}개:")
         t += [f"  {e['comm']}({e['pid']}) — {', '.join(e['reasons'])}" for e in excluded[:10]]
