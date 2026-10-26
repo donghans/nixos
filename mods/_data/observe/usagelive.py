@@ -498,7 +498,7 @@ def render_io(s, w):
     per_row = 2 if len(cores) <= 4 else 4                  # 듀얼·쿼드 같은 적은 코어는 2열, 그 이상은 4열
     while per_row > 1 and (w - 2) // per_row - 9 < 4:     # 칸 하나 = 번호 4 + 막대 + 값 4 + 공백 — 막대가 4칸도 못 나오면 열을 줄인다
         per_row //= 2
-    bw = max(4, min(12, (w - 2) // per_row - 9))
+    bw = max(4, (w - 2) // per_row - 9)     # 칸 폭을 꽉 채운다(넓은 화면에서도 100% 칸이 열 폭만큼 — 네트워크·디스크 막대와 같은 방식)
     for i, v in enumerate(cores):
         t.append(f" {i:>2} ", style="grey62")
         t.append_text(track_bar((v or 0) / 100, bw, pct_style(v or 0, 50, 85) if v is not None else TRACK_STYLE))
