@@ -141,14 +141,14 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     #range-err { height: auto; }
     #fstat { height: 8; }
     #fp0, #fp1 { height: 11; }
-    #livebox { height: 36; }
+    #livebox { height: 38; }
     #lsess { height: 11; }
     #lleft, #lright { width: 1fr; height: 1fr; }
-    #lleft > #lverdict { height: 9; }
-    #lleft > #lmem { height: 18; }
-    #lleft > #lpsi { height: 11; }
-    #lright > #lio { height: 17; }
-    #lright > #ltop { height: 17; }
+    #lleft > #lio { height: 18; }
+    #lleft > #lmem { height: 20; }
+    #lright > #lverdict { height: 9; }
+    #lright > #lpsi { height: 11; }
+    #lright > #ltop { height: 18; }
     #livebox.narrow { layout: vertical; height: auto; }
     #livebox.narrow #lleft, #livebox.narrow #lright { width: 100%; height: auto; }
     #livebox.narrow .box { height: 14; }
@@ -207,11 +207,11 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                         with VerticalScroll():
                             with Horizontal(id="livebox"):
                                 with Vertical(id="lleft"):
-                                    yield uikit.box(Panel(lambda w, h: self._live(live.render_verdict), id="lverdict"), "판정 — 지금")
-                                    yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_mem(s, w)), id="lmem"), "메모리 구성 — 진짜 여유")
-                                    yield uikit.box(Panel(lambda w, h: self._live(live.render_pressure), id="lpsi"), "압박(PSI) · 스왑 입출력")
-                                with Vertical(id="lright"):
                                     yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_io(s, w)), id="lio"), "CPU 코어 · 네트워크 · 디스크 — 초당")
+                                    yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_mem(s, w)), id="lmem"), "메모리 구성 — 진짜 여유")
+                                with Vertical(id="lright"):
+                                    yield uikit.box(Panel(lambda w, h: self._live(live.render_verdict), id="lverdict"), "판정 — 지금")
+                                    yield uikit.box(Panel(lambda w, h: self._live(live.render_pressure), id="lpsi"), "압박(PSI) · 스왑 입출력")
                                     yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_top(s, w)), id="ltop"), "상위 소비자")
                             yield uikit.box(Panel(lambda w, h: self._live(live.render_sessions), id="lsess"), "LLM 세션")
             with TabPane("앱·프로세스 [2]", id="apps"):
