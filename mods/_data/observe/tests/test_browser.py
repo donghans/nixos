@@ -111,7 +111,7 @@ check("sw_thread_ticks: vivaldi 프로세스의 ServiceWorker 스레드만 합(5
 # --- 규칙적 반복 활동 찾기
 flat = [1.0] * 60
 check("find_period: 평평하면 None", br.find_period(flat, 15) is None)
-per4 = [11.0 if i % 4 == 0 else 1.0 for i in range(120)]                      # 15초 폴, 60초마다 한 번 높음(1Password 사례)
+per4 = [11.0 if i % 4 == 0 else 1.0 for i in range(120)]                      # 15초 폴, 60초마다 한 번 높음(번호 0 확장 사례)
 f = br.find_period(per4, 15)
 check("find_period: 4폴(60초) 주기를 찾고 튐 크기를 낸다", f is not None and f[0] == 60.0 and f[1] >= 0.9 and 6.0 <= f[2] <= 9.0, str(f))
 import random

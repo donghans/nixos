@@ -237,14 +237,16 @@ Netdata 의 "앱 그룹" 개념을 우리 시스템에 맞게 가져왔다(`obse
 
 ## 규칙적 반복 활동 · 서비스 워커 `browser periodic|sw` (2026-10-26)
 
-배경: 첫째 프로필 Vivaldi 의 1Password 확장이 서비스 워커를 **60초마다 5초 동안 34% CPU** 로 깨우고 있었는데(장부 #133·#134), `browser bursts`(30% 이상이 15초 폴 2번 연속)는 평균 약 11% 로 보여 **못 잡았다**. 낮은 강도로 규칙적인 활동은 폭주 기준에 안 걸린다.
+배경: 첫째 프로필 Vivaldi 의 번호 0 확장(비밀번호 관리자)이 서비스 워커를 **60초마다 5초 동안 34% CPU** 로 깨우고 있었는데(장부 #133·#134), `browser bursts`(30% 이상이 15초 폴 2번 연속)는 평균 약 11%(5초 34%를 15초 폴로 평균한 값, 장부 #133 의 하루 평균 약 3%와는 다른 통계량)로 보여 **못 잡았다**. 낮은 강도로 규칙적인 활동은 폭주 기준에 안 걸린다.
 - `observectl browser sw [--seconds N]`: 브라우저 프로세스의 `ServiceWorker` 스레드 CPU(/proc 의 스레드 이름만 읽음, 디버깅 포트 불필요) + 포트가 있으면 **확장별 서비스 워커 시작 횟수**(ServiceWorker 도메인 이벤트, 확장 ID 앞 12자만). 분당 1 근처로 일정하면 확장의 알람이 깨우는 것.
 - `observe-browser` 감시기: 15초 폴의 합계 CPU·서비스 워커 스레드 CPU 를 30분 창(120폴)에 두고 5분마다 자기상관(`find_period`)으로 **반복 주기**를 찾아 `browser.periodic` 이벤트로 남긴다(같은 종류는 1시간에 한 번). `observectl browser periodic` 로 본다. 조건: 표준편차 1%p 이상, 3회 이상 반복, 상관 0.6 이상.
 - 한계: 15초 폴이라 그보다 짧은 주기는 못 본다. 주기 활동이 아주 짧고 낮으면 표준편차 기준 아래다(그땐 `browser sw` 로 직접). 어떤 확장인지는 ID 로 chrome://extensions 에서 확인(이름은 올리지 않는다).
 
 ## 호스트 간 교차 확인 `fleet` (2026-10-26)
 
-한 호스트의 기록만으로는 「정상인가」를 모른다 — 같은 앱이 노트북에서만 높거나 한쪽에만 설치된 확장이 있으면 시험 전에 후보가 된다(1Password 는 데스크톱에 없는 확장이었다). 공유 저장소(`claude_ctx` Postgres, `donghans ctx` 와 같은 서버·접속 규칙)에 **요약만** 올려 비교한다(`observe_fleet.py`, 표는 `claude-ctx/schema.sql` 의 `observe_app_hourly`·`observe_power_hourly`·`observe_ext_inventory`).
+**전제**: 서버 호스트에서 `nixup`(스키마 서비스 `claude-ctx-schema`)이 새 표를 만들어야 하고, 각 호스트가 `claude-ctx.nix` 의 `allowedClients` 에 있어야 한다. 표가 없으면 `push` 는 기본 요약(앱·전력·확장)만 올리고 인사이트 표는 건너뛴다(마지막 성공 시각을 옮기지 않아 표가 생긴 뒤 다시 포함됨). 용어: **L0**=수집 수준 30초 간격, **psys/pkg**=플랫폼 전체·CPU 패키지 전력(RAPL), **대조군**=같은 시각의 다른 호스트.
+
+한 호스트의 기록만으로는 「정상인가」를 모른다 — 같은 앱이 노트북에서만 높거나 한쪽에만 설치된 확장이 있으면 시험 전에 후보가 된다(번호 0 확장(비밀번호 관리자) 는 데스크톱에 없는 확장이었다). 공유 저장소(`claude_ctx` Postgres, `donghans ctx` 와 같은 서버·접속 규칙)에 **요약만** 올려 비교한다(`observe_fleet.py`, 표는 `claude-ctx/schema.sql` 의 `observe_app_hourly`·`observe_power_hourly`·`observe_ext_inventory`).
 - 올리는 것: 시간별 앱 평균 CPU·자발 문맥 전환(그 시간 전체 표본으로 나눈 평균), 시간별 평균 psys·pkg, 브라우저 확장 설치 목록(프로필 **폴더 이름**·확장 ID·버전·서비스 워커 유무). **원본 표본·프로세스 목록·창 제목·주소·확장 이름은 올리지 않는다.**
 - `observectl fleet push|sync [--since 기간]` — 이 호스트 요약을 올린다(멱등: 같은 시간·앱은 덮어씀). 기본은 **마지막 성공 시각의 2시간 앞부터** 올린다(처음엔 26시간) — 접속이 안 돼 실패한 동안 쌓인 표본이 다음 성공 때 함께 올라간다(로컬 보존 14일까지, 상태는 `~/.local/state/observe/fleet-push.json`). 서버에 못 붙으면 **조용히 넘기지 않고** 사유를 기록하고 실패로 알린다(자동 재시도는 없음 — 다음 주기나 수동 sync). `push` 와 `sync` 는 같은 동작(sync 는 사람용 이름).
 - `observectl fleet status` — 마지막 성공 시각·실패 사유·타이머 다음 실행. 8시간 넘게 못 올렸으면 경고.
@@ -267,4 +269,4 @@ Netdata 의 "앱 그룹" 개념을 우리 시스템에 맞게 가져왔다(`obse
 - `observectl fleet priority <기준호스트> [--host 대상] [--usage-from 쓰는호스트]` — 사용자가 실제로 쓰는 호스트의 **포커스 비중**과, 대상 호스트가 기준보다 높은 CPU 를 합친다. 출력 ① 사용 비중 상위(전력 시험 부하 시나리오 후보) ② **포커스 앱**(끌 수 없고 고쳐 써야 하는 것: 비중·대상·기준·초과) ③ **배경**(포커스 거의 없는데 대상이 더 높은 것 = 끄거나 줄일 후보). 포커스 앱 이름(창 클래스)과 프로세스 앱 이름은 첫 토큰으로 맞춘다(vivaldi-stable ↔ vivaldi-bin) — 일부 어긋날 수 있다.
 - `observectl fleet periodic` — 호스트별 주기 활동 감지 모음, 같은 주기가 두 호스트에서 나오면 같은 원인 후보로 표시.
 - `observectl fleet units` — 한 호스트에만 있는 상시 서비스·타이머(노트북 `blueman-tray` 같은 것이 후보로 올라온다).
-- 표는 `claude-ctx/schema.sql`(버전 5: `observe_focus_hourly`·`observe_changes`·`observe_periodic`·`observe_units`). 표 생성은 서버 호스트에서 `claude-ctx-schema` 서비스(nixup)가 한다 — 표가 없으면 push 가 실패로 알리고 표본은 쌓아 둔다.
+- 표는 `mods/_data/claude-ctx/schema.sql`(버전 5: `observe_focus_hourly`·`observe_changes`·`observe_periodic`·`observe_units`). 표 생성은 서버 호스트에서 `claude-ctx-schema` 서비스(nixup)가 한다 — 표가 없으면 push 가 실패로 알리고 표본은 쌓아 둔다.
