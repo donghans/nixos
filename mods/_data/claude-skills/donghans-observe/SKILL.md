@@ -19,6 +19,12 @@ description: 성능·자원·전력 문제를 추측하지 말고 observectl(관
 - 호스트 간 교차 확인(공유 저장소): `observectl fleet push|sync|status|compare <호스트>|inventory|hosts`(usageui `y` 키 = sync, 실패하면 쌓아 뒀다 다음에 같이) — 한 호스트에서만 높은 앱·한쪽에만 있는 확장을 후보로 뽑는다(원본·이름·주소는 올리지 않음)
 - 실험 전후 비교는 `observectl mark` 로 조건 표지를 붙이고 `observectl window --by mark`.
 
+## 출력은 `--json` 으로 (LLM·스크립트용 — 표 모양은 무시)
+모든 `observectl` 하위 명령이 `--json` 을 받는다(`observectl top --by app --json`). 사람이 보는 표의 정렬·모양에는 신경 쓰지 말고 **JSON 을 읽는다.** 봉투: `{"command", "ok", "structured", "exit_code", "data"|"text", "notes", "error"}`.
+- `structured:true` 명령(`status`·`top`·`states`·`events`·`query`·`wakers`·`energy`): `data` 에 구조화 값. 예) `top` → `data.rows[{name, cpu_core_pct, ctxsw_vol_per_s, appearances, of_samples}]`, `query` → `data.rows[{label, n, values:{신호: 값}}]`, `status` → `data.{enabled, level, collector, samples_24h, last_sample.age_s, …}`. `explain` 은 기존 자체 `--json`.
+- `structured:false` 명령(나머지): `text` 에 사람용 출력 그대로. 필요한 값이 구조화돼 있지 않으면 사용자에게 말해 그 명령을 구조화한다.
+- 표 위에 괄호로 찍던 참고 문구(옛 형식 표본 제외, 값이 하나도 없는 신호 등)는 **`notes`** 에 온다 — 값이 `null` 이면 측정이 없는 것이지 0 이 아니다. 실패는 `ok:false` + `error` + 종료 코드(0 이 아님).
+
 ## 제한·주의
 - 정밀 도구(`observectl bpf <프리셋>`, `observectl ebpf on …`)는 요청할 때만 N초 실행되고 시간이 제한된다. 오래 켜 두지 않는다. `observectl display` 는 읽는 것이 디스플레이를 깨울 수 있어 노트북 전력 측정 중에는 쓰지 않는다.
 - 개인정보: 프로세스는 comm·exe 이름만, 창 제목·URL·명령 인자·입력 내용은 기록하지 않는다. 조회 결과를 외부로 보낼 때도 이 원칙을 지킨다.

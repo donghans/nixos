@@ -17,7 +17,7 @@
   observectl ab [--metric psys_w] [--threshold 0.3] [--settle 20]   observectl mark 로 나눈 A/B 구간을 통계로 판정(임계 이상 + 모든 쌍 같은 부호일 때만 '확인')
   observectl hyprtrace on|off               다음 로그인부터 Hyprland TRACE 로그(HYPRLAND_TRACE=1). 켜면 로그/전력에 영향이 있으니 필요할 때만
 """
-import argparse, collections, json, os, re, subprocess, sys, time, uuid
+import argparse, collections, io, json, math, os, re, subprocess, sys, time, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import observe_core as core
@@ -44,6 +44,59 @@ def get(s, path):
 def mean_of(rows, f):
     v = [x for x in (f(r) for r in rows) if isinstance(x, (int, float))]
     return stats.mean(v) if v else float("nan")
+
+
+# ---- LLM·스크립트용 출력 계약(--json) ----
+# 모든 하위 명령이 `--json` 을 받는다(예: `observectl top --json`, `observectl --json status`). 사람이 보는 표의 모양에는 신경 쓰지 않고 **알아듣기 쉬운 구조**를 준다.
+# 봉투: {"command": 명령, "ok": true|false, "structured": true|false, "data": 구조화 데이터(structured 일 때), "text": 사람용 출력 그대로(structured=false 일 때),
+#        "notes": 참고 문구 리스트(옛 형식 표본 제외 등 표 위에 괄호로 찍던 말), "error": 실패 사유(ok=false), "exit_code": 정수}
+# structured=true 인 명령: status · top · states · events · query · wakers · energy · explain(자체 --json). 나머지는 structured=false 로 text 에 사람용 출력을 담는다.
+JSON_STRUCTURED = {"status", "top", "states", "events", "query", "wakers", "energy", "explain"}
+
+
+class Out:
+    """명령이 구조화 데이터를 내놓는 통로. --json 이면 data/notes 를 모아 한 번에 JSON 으로, 아니면 기존처럼 바로 찍는다."""
+
+    def __init__(self, a):
+        self.json = bool(getattr(a, "json", False))
+        self.notes, self.data = [], None
+
+    def note(self, text):
+        if self.json:
+            self.notes.append(text)
+        else:
+            print(text)
+
+    def done(self, data):
+        self.data = data
+
+
+def _out(a):
+    return getattr(a, "out", None) or Out(a)
+
+
+def _clean(v):
+    """JSON 은 NaN·Infinity 를 표현하지 못하므로 None 으로(무한대 변화율 등)."""
+    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+        return None
+    if isinstance(v, dict):
+        return {k: _clean(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_clean(x) for x in v]
+    return v
+
+
+def emit_json(cmd, ok, *, data=None, text=None, notes=(), error=None, code=0):
+    obj = {"command": cmd, "ok": ok, "structured": data is not None, "exit_code": code}
+    if data is not None:
+        obj["data"] = _clean(data)
+    if text is not None:
+        obj["text"] = text
+    if notes:
+        obj["notes"] = list(notes)
+    if error:
+        obj["error"] = error
+    print(json.dumps(obj, ensure_ascii=False, indent=1, default=str))
 
 
 def fmt(x, w=6, p=2):
@@ -101,16 +154,22 @@ def _status_tail(last):
 
 
 def cmd_status(a):
+    out = _out(a)
     ctl = core.read_control()
     active = subprocess.run(["systemctl", "is-active", "observe-collector"], capture_output=True, text=True).stdout.strip()
     rows = samples(time.time() - 86400)
-    print(f"수집 {'켜짐' if ctl['enabled'] else '꺼짐'} · 수준 {ctl['level']}({ctl['interval_s'].get(ctl['level'])}초) · 수집기 프로세스 {active} · 표지 {ctl.get('mark')}")
-    print(f"이벤트 수준: {ctl['components']}")
     n = len(rows)
     last = rows[-1] if rows else None
-    print(f"최근 24시간 표본 {n}개" + (f" · 마지막 {core.hms(last['t'])} ({time.time() - last['t']:.0f}초 전){_status_tail(last)}" if last else ""))
     size = sum(os.path.getsize(os.path.join(core.SAMPLE_DIR, f)) for f in os.listdir(core.SAMPLE_DIR)) if os.path.isdir(core.SAMPLE_DIR) else 0
     ev = sum(1 for _ in core.iter_jsonl(core.state_dir(), "events", time.time() - 86400))
+    if out.json:
+        out.done(dict(enabled=ctl["enabled"], level=ctl["level"], interval_s=ctl["interval_s"].get(ctl["level"]), collector=active, mark=ctl.get("mark"), components=ctl["components"],
+                      samples_24h=n, last_sample=None if not last else dict(t=last["t"], age_s=round(time.time() - last["t"]), state=last.get("state"), psys_w=get(last, "pw.psys_w"), pkg_w=get(last, "pw.pkg_w")),
+                      sample_files_mib=round(size / 1048576, 1), events_24h=ev, state_dir=core.state_dir()))
+        return
+    print(f"수집 {'켜짐' if ctl['enabled'] else '꺼짐'} · 수준 {ctl['level']}({ctl['interval_s'].get(ctl['level'])}초) · 수집기 프로세스 {active} · 표지 {ctl.get('mark')}")
+    print(f"이벤트 수준: {ctl['components']}")
+    print(f"최근 24시간 표본 {n}개" + (f" · 마지막 {core.hms(last['t'])} ({time.time() - last['t']:.0f}초 전){_status_tail(last)}" if last else ""))
     print(f"표본 파일 {size / 1048576:.1f} MiB · 최근 24시간 이벤트 {ev}개 ({core.state_dir()})")
 
 
@@ -172,6 +231,10 @@ def cmd_energy(a):
     res = energy_by_group(rows, a.by)
     if not res:
         sys.exit("누적 계량값(q_uah)이 있는 방전 표본이 없습니다(수집기를 새 버전으로 재시작한 뒤 쌓인 표본만 가능)")
+    if _out(a).json:
+        _out(a).done(dict(by=a.by, note="쌍을 합산하므로 짧은 그룹은 부정확", groups=[dict(group=str(k), n=g["n"], hours=g["hours"], coulomb_w=g["coulomb_w"], psys_w=g["psys_w"], vi_w=g["vi_w"])
+                                                                                    for k, g in sorted(res.items(), key=lambda kv: -kv[1]["hours"])]))
+        return
     print(f"누적 계량 기준 평균 전력 vs psys vs 순간 V×I — 그룹 기준 {a.by} (쌍을 합산하므로 짧은 그룹은 부정확)")
     print(f"{'그룹':<18}{'n':>4}{'시간(분)':>9}{'계량 W':>8}{'psys W':>8}{'V×I W':>8}{'계량−psys':>10}{'V×I−계량':>10}")
     for k, g in sorted(res.items(), key=lambda kv: -kv[1]["hours"]):
@@ -260,6 +323,15 @@ def cmd_query(a):
     except ValueError as e:
         sys.exit(str(e))
     legacy = sum(1 for r in rows if r.get("legacy"))
+    if _out(a).json:
+        if legacy and any(s.startswith(("app:", "proc:")) for s in sigs):
+            _out(a).note(f"옛 형식 표본 {legacy}개는 앱·프로세스 값이 없거나 메인 스레드만 센 값이라 그 신호에서는 빠짐")
+        for i_, sg in enumerate(sigs):
+            if all(vals[i_] is None for _g, _n, vals in res):
+                _out(a).note(f"신호 '{sg}' 는 값이 하나도 없음(이름이 틀렸거나 이 구간 표본에 그 값이 없음 — 가능한 신호 이름은 observectl query -h)")
+        _out(a).done(dict(start=rows[0]["t"], end=rows[-1]["t"], samples=len(rows), agg=a.agg, step=a.step, by=None if a.step else a.by, signals=list(sigs),
+                          rows=[dict(label=(g if a.step else str(g)), n=n, values={sg: v for sg, v in zip(sigs, vals)}) for g, n, vals in res]))
+        return
     print(f"{core.hms(rows[0]['t'])} ~ {core.hms(rows[-1]['t'])} · 표본 {len(rows)}개 · 집계 {a.agg} · " + (f"{a.step} 간격" if a.step else f"그룹 {a.by}"))
     if legacy and any(s.startswith(("app:", "proc:")) for s in sigs):
         print(f"(옛 형식 표본 {legacy}개는 앱·프로세스 값이 없거나 메인 스레드만 센 값이라 그 신호에서는 빠짐)")
@@ -403,8 +475,16 @@ def cmd_states(a):
             segs.append((cur, start["t"], r["t"]))
             start, cur = r, r.get("state")
     segs.append((cur, start["t"], rows[-1]["t"]))
+    out = _out(a)
     if not core.host_profile()["battery"] and len(segs) == 1:
-        print("(이 호스트는 깊은 절전 상태·덮개를 측정할 수 없어 구간이 하나뿐입니다 — 시간대별 변화는 `observectl query pkg cpu_all --since 1h --step 10m`)")
+        out.note("(이 호스트는 깊은 절전 상태·덮개를 측정할 수 없어 구간이 하나뿐입니다 — 시간대별 변화는 `observectl query pkg cpu_all --since 1h --step 10m`)")
+    if out.json:
+        res_ = []
+        for st, t0, t1 in segs:
+            g = [r for r in rows if t0 <= r["t"] <= t1]
+            res_.append(dict(state=st, start=t0, end=t1, minutes=round((t1 - t0) / 60, 1), psys_w=mean_of(g, lambda r: get(r, "pw.psys_w")), pkg_w=mean_of(g, lambda r: get(r, "pw.pkg_w")), vt=get(g[0], "dev.vt"), lid=get(g[0], "dev.lid")))
+        out.done(dict(segments=res_))
+        return
     for st, t0, t1 in segs:
         g = [r for r in rows if t0 <= r["t"] <= t1]
         if not core.host_profile()["battery"]:
@@ -415,7 +495,7 @@ def cmd_states(a):
 
 def cmd_top(a):
     if a.by == "wake":
-        print("(--by wake 는 --by ctxsw 의 옛 이름입니다 — 프로세스의 자발적 문맥 전환/s. 시스템 전체 깨움은 `observectl bpf wake`)")
+        _out(a).note("(--by wake 는 --by ctxsw 의 옛 이름입니다 — 프로세스의 자발적 문맥 전환/s. 시스템 전체 깨움은 `observectl bpf wake`)")
         a.by = "ctxsw"
     rows = samples(core.parse_when(a.since))
     if not rows:
@@ -424,7 +504,7 @@ def cmd_top(a):
         skipped = sum(1 for r in rows if any("ctxsw_vol_leader_s" in p for p in r.get("proc", [])))
         rows = [r for r in rows if not any("ctxsw_vol_leader_s" in p for p in r.get("proc", []))]
         if skipped:
-            print(f"(옛 형식 표본 {skipped}개 제외: 프로세스별 자발적 전환이 메인 스레드만이라 멀티스레드 프로세스를 크게 과소 집계했음)")
+            _out(a).note(f"(옛 형식 표본 {skipped}개 제외: 프로세스별 자발적 전환이 메인 스레드만이라 멀티스레드 프로세스를 크게 과소 집계했음)")
         if not rows:
             sys.exit("새 형식(모든 스레드 합) 표본이 아직 없습니다 — 수집기가 새 버전으로 쌓은 뒤에 보세요")
     acc = collections.defaultdict(lambda: [0.0, 0.0, 0])
@@ -433,7 +513,7 @@ def cmd_top(a):
         if not have:
             sys.exit("앱 단위(v4) 표본이 아직 없습니다 — 수집기가 새 버전으로 쌓은 뒤에 보세요")
         if len(have) < len(rows):
-            print(f"(앱 단위 표본 {len(have)}개만 사용, 그 이전 {len(rows) - len(have)}개는 제외)")
+            _out(a).note(f"(앱 단위 표본 {len(have)}개만 사용, 그 이전 {len(rows) - len(have)}개는 제외)")
         rows = have
         for r in rows:
             for p_ in r["apps"]:
@@ -455,6 +535,12 @@ def cmd_top(a):
     n = len(rows)
     key = (lambda kv: -kv[1][1]) if a.by in ("ctxsw", "io") else (lambda kv: -kv[1][0])
     head = "이름              읽기B/s  쓰기B/s" if a.by == "io" else ("앱(전체 프로세스 합)          CPU(코어1개=100%)  자발전환/s  (등장)" if a.by == "app" else "이름                      CPU(코어1개=100%)  자발전환/s  (등장)")
+    if _out(a).json:
+        w_name = "wr_bps" if a.by == "io" else "ctxsw_vol_per_s"
+        c_name = "rd_bps" if a.by == "io" else "cpu_core_pct"
+        _out(a).done(dict(by=a.by, samples=n, note="등장하지 않은 표본은 0 으로 평균", columns={"cpu_core_pct 또는 rd_bps": "CPU 코어 1개=100% (io 모드는 읽기 B/s)", "ctxsw_vol_per_s 또는 wr_bps": "자발적 문맥 전환/s (io 모드는 쓰기 B/s)"},
+                          rows=[{"name": k, c_name: c / n, w_name: w / n, "appearances": m, "of_samples": n} for k, (c, w, m) in sorted(acc.items(), key=key)[:a.n]]))
+        return
     print(f"표본 {n}개 평균 기준(등장하지 않은 표본은 0 으로 계산) · 정렬 {a.by}\n{head}")
     for k, (c, w, m) in sorted(acc.items(), key=key)[:a.n]:
         print(f"{k[:28]:<28}{c / n:>8.2f}{w / n:>16.1f}   ({m}/{n})")
@@ -477,7 +563,11 @@ def fmt_event(e):
 
 
 def cmd_events(a):
-    for e in read_events(a, core.parse_when(a.since), core.parse_when(a.until) if a.until else None):
+    evs = read_events(a, core.parse_when(a.since), core.parse_when(a.until) if a.until else None)
+    if _out(a).json:
+        _out(a).done(dict(events=list(evs)))
+        return
+    for e in evs:
         print(fmt_event(e))
 
 
@@ -770,6 +860,9 @@ def cmd_wakers(a):
     if not r.get("ok"):
         sys.exit(r.get("error"))
     d = r["data"]
+    if _out(a).json:
+        _out(a).done(d)
+        return
     print(f"{d['sec']}초 동안 총 {d['total']}건 ({d['total'] / d['sec']:.0f}/s)")
     for title, k in (("타이머 콜백(timer)", "timer"), ("하이타이머 콜백(hrtimer)", "hrtimer"), ("IRQ 핸들러", "irq"), ("workqueue 함수", "work"), ("깨우는 쪽(sched_waking)", "waker")):
         if d.get(k):
@@ -1103,8 +1196,38 @@ def main(argv=None):
     s.add_argument("--require", action="append", help="모든 구간의 모든 표본이 만족해야 하는 조건 '경로=값'(여러 번 가능, 예: --require dev.lid=closed)")
     s.add_argument("--no-netdata", action="store_true", help="Netdata 1초 지표를 비교에서 뺀다"); s.add_argument("--ignore-app", action="append", help="교란 감지에서 뺄 앱(켜고 끄는 대상 앱 자체, 예: bitwarden-desktop). 여러 번 지정 가능"); s.add_argument("--allow-mixed", help="구간 사이에 달라도 되는 항목(쉼표: lid,ac,ssid). 기본은 덮개·AC 가 다르면 무효, SSID 가 다르면 경고"); s.set_defaults(f=cmd_ab)
     s = sub.add_parser("hyprtrace"); s.add_argument("mode", choices=["on", "off"]); s.set_defaults(f=cmd_hyprtrace)
+    for name, sp in sub.choices.items():                      # 모든 하위 명령이 --json 을 받는다(explain 은 이미 있음)
+        if not any("--json" in act.option_strings for act in sp._actions):
+            sp.add_argument("--json", action="store_true", help="구조화(JSON) 출력 — 봉투 형식은 observe_cli.py 의 「LLM·스크립트용 출력 계약」 주석 참고")
     a = p.parse_args(argv)
-    a.f(a)
+    run(a)
+
+
+def run(a):
+    """--json 이 아니면 그대로 실행. --json 이면 구조화 명령은 data, 나머지는 text 봉투로, 실패(sys.exit(문구))는 error 봉투로 낸다."""
+    if not getattr(a, "json", False) or a.cmd == "explain":
+        return a.f(a)
+    import contextlib
+    a.out = Out(a)
+    buf = io.StringIO()
+    code, err = 0, None
+    try:
+        with contextlib.redirect_stdout(buf):
+            a.f(a)
+    except SystemExit as e:
+        if e.code in (None, 0):
+            code = 0
+        elif isinstance(e.code, int):
+            code = e.code
+        else:
+            code, err = 1, str(e.code)
+    if err or code:
+        emit_json(a.cmd, False, text=buf.getvalue() or None, notes=a.out.notes, error=err or f"종료 코드 {code}", code=code)
+        sys.exit(code)
+    if a.out.data is not None:
+        emit_json(a.cmd, True, data=a.out.data, notes=a.out.notes)
+    else:
+        emit_json(a.cmd, True, text=buf.getvalue(), notes=a.out.notes)
 
 
 if __name__ == "__main__":
