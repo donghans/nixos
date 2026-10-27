@@ -6,6 +6,7 @@
   - `.box` 클래스      : btop 처럼 제목이 달린 테두리 칸(border_title). `box(widget, "제목")` 로 붙인다
   - HelpScreen / HelpMixin : `?`(또는 F1)로 **키 목록(Binding 에서 자동 생성) + 앱별 용어·사용법(HELP_TERMS) + 공통 종료 안내**를 한 화면에 보여 주는 도움말.
                              앱마다 따로 두던 「용어」 탭은 여기로 합친다(모든 uikit 앱 공통 규칙)
+  - select_box / sync_select : 값을 키로 순환하던 설정(정렬·단위·뷰…)을 제목 달린 드롭다운 칸으로 보여 주는 도우미(`.selects` 줄에 넣는다). 키는 그대로 두고 드롭다운이 같이 따라간다
   - pad / wrap_cells / terms_text : 한글(2칸 폭) 기준 칸 맞춤·줄바꿈(f-string 의 :<n 은 글자 수라 한글 표가 어긋남)
   - PauseOnBlurMixin   : 창이 포커스를 잃으면 주기 갱신을 멈춘다(보이지 않는 화면 갱신이 PSR 을 방해하지 않도록). 앱이 pause_on_blur() 로 조건을 바꿀 수 있다
 각 앱은 `CSS = uikit.BASE_CSS + (앱 고유 규칙 문자열)` 로 쓰고 같은 디렉터리(배포 시) 또는 ../_uikit(소스)에서 이 파일을 가져온다.
@@ -18,7 +19,7 @@ from textual import events
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Static
+from textual.widgets import Select, Static
 
 PALETTE = {
     "bg": "#000000", "border": "#595959", "focus": "#33ccff", "select": "#268bd2", "select_dim": "#1b2a38",
@@ -40,6 +41,10 @@ DataTable > .datatable--cursor { background: #1b2a38; color: #cfcfcf; text-style
 DataTable:focus > .datatable--cursor { background: #268bd2; color: #ffffff; text-style: none; }
 #status-row { height: 1; }
 #status { width: 1fr; color: #9a9a9a; padding: 0 1; }
+.selects { height: 3; }
+.selects Select { width: 1fr; height: 3; }
+.selects SelectCurrent { border: none; background: #000000; padding: 0 1; height: 1; }
+.selects SelectOverlay { background: #101010; border: round #595959; }
 """
 
 DIALOG_CSS = """
@@ -51,6 +56,17 @@ ModalScreen { align: center middle; }   /* 이름 목록이 아니라 모든 대
 #dialog-title { text-style: bold; padding-bottom: 1; }
 #dialog-hint { color: #7a7a7a; padding-top: 1; }
 """
+
+
+def select_box(options, value, id: str, title: str):
+    """제목 달린 드롭다운 칸. options=[(보이는 글, 값)…], value 는 그중 하나. 빈 선택은 없다(allow_blank=False)."""
+    return box(Select(options, value=value, allow_blank=False, id=id), title)
+
+
+def sync_select(sel, value) -> None:
+    """키로 바꾼 상태를 드롭다운에 맞춘다. 이미 같은 값이면 건드리지 않아 Select.Changed 가 되돌아오지 않는다(앱 핸들러는 「현재 상태와 같으면 무시」로 받는다)."""
+    if sel.value != value:
+        sel.value = value
 
 
 def box(widget, title: str = "", subtitle: str = ""):

@@ -43,6 +43,18 @@ sl = sc.plain.split("\n")
 check("구간 그래프: 높이 6 + 눈금줄, 폭 이하, 최대값 눈금($243)과 처음·끝 구간 이름", len(sl) == 7 and all(cell_len(l) <= 70 for l in sl) and sl[0].lstrip().startswith("$243") and "10-22" in sl[6] and "10-27" in sl[6], sl)
 body = [l[cx.AXIS_W:] for l in sl[:6]]
 check("구간 그래프: 가장 높은 구간(242.8)만 맨 윗줄에 닿는다", 0 < sum(ch != "\u2800" for ch in body[0]) < len(body[0]) * 0.35, body[0])
-check("구간 그래프: 막대 사이에 한 점 폭 틈이 있다(맨 아랫줄에 반쪽 칸 ⡇)", "\u2847" in body[5], body[5])
 check("구간 그래프: 값이 없으면 None, 한 구간·전부 0 도 그려진다", cx.series_chart([], [], 50, 4, "c") is None and cx.series_chart([3.0], ["a"], 40, 4, "c") is not None and cx.series_chart([0, 0], ["a", "b"], 40, 4, "c") is not None)
+# --- 안티에일리어싱 비슷한 처리: 윗면 농도·창 경계 농도
+def colors(t):
+    return {str(sp.style) for sp in t.spans if sp.style and str(sp.style).startswith("#")}
+flat = cx.window_chart([(R0, 100.0)], 5 * 3600, 60, 4, "#33ccff")
+check("점 그래프: 꼭대기까지 꽉 찬 평평한 창은 색이 한 가지(농도 1)뿐이다", colors(flat) == {"#33ccff"}, colors(flat))
+frac = cx.window_chart([(R0, 58.0)], 5 * 3600, 60, 4, "#33ccff")
+check("점 그래프: 값이 점 사이에 걸치면(58% = 9.28/16 점) 윗칸이 더 흐린 색이다", len(colors(frac)) >= 2 and any(c != "#33ccff" for c in colors(frac)), colors(frac))
+two = cx.window_chart([(R0, 80.0), (R0 + timedelta(hours=5, minutes=20), 80.0)], 5 * 3600, 60, 4, "#33ccff")
+check("점 그래프: 창 경계(부분만 덮인 열)도 농도가 낮아진다", len(colors(two)) >= 2, colors(two))
+raw = cx.braille_area_aa([50.0] * 8, None, 4, 0, 100)
+check("braille_area_aa: 값이 칸 경계에 정확히 맞으면 농도 1 (50% = 8/16 점)", all(a == 1.0 for r in raw for ch, a in r if ch != "\u2800"), raw)
+h = cx.hour_chart([0] * 12 + [10] * 12, 60, 4, "#33ccff")
+check("시간대 그래프: 계단이 아니라 보간 — 0 → 10 경계에서 중간 높이 열이 있다", len(colors(h)) >= 2, colors(h))
 finish("ctxchart")

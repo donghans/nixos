@@ -524,10 +524,6 @@ class CtxUI(uikit.HelpMixin, App):
     #stat-trend-chart, #stat-limits-box { width: 3fr; }
     #stat-break, #stat-summary-box { width: 2fr; }
     #stat-trend, #projects, #stat-sessions { width: 1fr; }
-    .selects { height: 3; }
-    .selects Select { width: 1fr; height: 3; }
-    .selects SelectCurrent { border: none; background: #000000; padding: 0 1; height: 1; }
-    .selects SelectOverlay { background: #101010; border: round #595959; }
     #stats-box { layout: vertical; padding: 0 1; }
     #sess-head { height: auto; max-height: 9; padding: 0 1; }
     #msgs { height: 1fr; }
@@ -584,10 +580,10 @@ class CtxUI(uikit.HelpMixin, App):
                     yield uikit.box(Input(placeholder="머신 일부", id="f-host"), "머신(통계)")
                     yield uikit.box(Input(placeholder="모델 일부 (예: sonnet)", id="f-model"), "모델(통계)")
                 with Horizontal(classes="selects"):      # p/b/g/o 키와 같은 상태를 고르는 드롭다운(키로 바꾸면 여기도 따라 바뀐다)
-                    yield uikit.box(Select([(l, i) for i, (_, l) in enumerate(STAT_PERIODS)], value=self.stat_period, allow_blank=False, id="sel-period"), "기간 (p)")
-                    yield uikit.box(Select([(l, k) for k, l in cd.BUCKETS.items()], value=self.stat_bucket, allow_blank=False, id="sel-bucket"), "단위 (b)")
-                    yield uikit.box(Select([(l, k) for k, l in cd.BREAKDOWNS.items()], value=self.stat_by, allow_blank=False, id="sel-by"), "분류 (g)")
-                    yield uikit.box(Select([(l, k) for k, l in STAT_ORDERS], value=self.stat_order, allow_blank=False, id="sel-order"), "세션 정렬 (o)")
+                    yield uikit.select_box([(l, i) for i, (_, l) in enumerate(STAT_PERIODS)], self.stat_period, "sel-period", "기간 (p)")
+                    yield uikit.select_box([(l, k) for k, l in cd.BUCKETS.items()], self.stat_bucket, "sel-bucket", "단위 (b)")
+                    yield uikit.select_box([(l, k) for k, l in cd.BREAKDOWNS.items()], self.stat_by, "sel-by", "분류 (g)")
+                    yield uikit.select_box([(l, k) for k, l in STAT_ORDERS], self.stat_order, "sel-order", "세션 정렬 (o)")
                 yield Static("", id="stat-state", classes="state")
                 with VerticalScroll(id="dash-scroll"):
                     yield uikit.box(Static("", id="ovhead"), "전체 · 표별 용량")
@@ -1039,19 +1035,22 @@ class CtxUI(uikit.HelpMixin, App):
             tt.move_cursor(row=min(cur, len(rows) - 1), animate=False)
         self._need["stat-trend"] = len(rows) + 3
 
-    COST_H = 6              # 비용 그래프 높이(줄) — 박스 = 그래프 + 시간축 1줄 + 테두리 2줄
+    def cost_h(self):
+        """비용 그래프 높이(줄): 터미널이 높을수록 크게(6~12). 박스 = 그래프 + 시간축 1줄 + 테두리 2줄."""
+        return max(6, min(12, self.size.height // 8))
 
     def _paint_cost_chart(self, trend, tot):
         """구간(일·주…)별 비용 막대 그래프. 폭은 박스 폭에 맞춘다(usageui 의 전력 그래프처럼 위쪽에 크게)."""
         box = self.query_one("#stat-trend-chart", Static)
         w = self.query_one("#stat-trend-chart").size.width - 4 or 60
-        t = cch.series_chart([r["cost"] for r in trend], [self._fmt_bucket(r["bucket"]) for r in trend], max(30, w), self.COST_H, "#33ccff", lambda v: f"${v:,.0f}" if v >= 10 else f"${v:.2f}")
+        t = cch.series_chart([r["cost"] for r in trend], [self._fmt_bucket(r["bucket"]) for r in trend], max(30, w), self.cost_h(), "#33ccff", lambda v: f"${v:,.0f}" if v >= 10 else f"${v:.2f}")
         box.update(t if t is not None else Text(" 비용 기록 없음 — 이 기간·필터에 사용량이 없습니다", style="grey50"))
         costs = [r["cost"] for r in trend]
         box.border_title = f"비용 — {cd.BUCKETS[self.stat_bucket]}별"
         box.border_subtitle = f"합계 ${tot['cost']:,.2f} · 최대 ${max(costs):,.2f} · 평균 ${sum(costs) / len(costs):,.2f}" if costs else ""
 
     DASH_ROWS = {"dr1": ("stat-trend-chart", "stat-break"), "dr2": ("stat-trend",), "dr3": ("stat-limits-box", "stat-summary-box"), "dr4": ("projects",), "dr5": ("stat-sessions",)}
+    DASH_NO_STRETCH = ("stat-break",)      # 같은 줄의 옆 박스(그래프)가 높아도 늘이지 않고 내용 높이로 위에 붙인다(빈 칸 대신 빈 공간)
     DASH_CAP = 26          # 박스 하나의 최대 높이(줄) — 표가 이보다 길면 안에서 스크롤
 
     def _fit_heights(self):
@@ -1061,7 +1060,7 @@ class CtxUI(uikit.HelpMixin, App):
             need = dict(getattr(self, "_need", {}))
             for tid in ("projects", "stat-break", "stat-sessions"):
                 need[tid] = self.query_one("#" + tid, DataTable).row_count + 3
-            need["stat-trend-chart"] = self.COST_H + 3                    # 그래프 + 시간축 1줄 + 테두리
+            need["stat-trend-chart"] = self.cost_h() + 3                    # 그래프 + 시간축 1줄 + 테두리
             need["stat-sessions"] = max(need["stat-sessions"], 12)       # 세션 표는 길어서 스크롤 — 최소한 열 줄은 보이게
             cap = {"projects": 12, "stat-trend": 14}
             h = {k: max(6, min(cap.get(k, self.DASH_CAP), v + (2 if k.endswith("-box") else 0))) for k, v in need.items()}
@@ -1073,7 +1072,7 @@ class CtxUI(uikit.HelpMixin, App):
                         self.query_one("#" + k).styles.height = h.get(k, 8)
                 else:
                     for k in kids:
-                        self.query_one("#" + k).styles.height = None
+                        self.query_one("#" + k).styles.height = h.get(k, 8) if k in self.DASH_NO_STRETCH else None
                     r.styles.height = max(h.get(k, 8) for k in kids)
         except Exception:
             pass
@@ -1087,9 +1086,7 @@ class CtxUI(uikit.HelpMixin, App):
         """키(p·b·g·o)로 바꾼 상태를 드롭다운 값에 맞춘다(같은 값이면 건드리지 않아 Changed 가 되돌아오지 않는다)."""
         for sid, v in (("sel-period", self.stat_period), ("sel-bucket", self.stat_bucket), ("sel-by", self.stat_by), ("sel-order", self.stat_order)):
             try:
-                sel = self.query_one("#" + sid, Select)
-                if sel.value != v:
-                    sel.value = v
+                uikit.sync_select(self.query_one("#" + sid, Select), v)
             except Exception:
                 pass
 

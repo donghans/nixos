@@ -19,9 +19,9 @@ from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Input, Static
+from textual.widgets import DataTable, Footer, Input, Select, Static
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 for _p in (HERE, os.path.join(HERE, "..", "observe"), os.path.join(HERE, "..", "_uikit"),
@@ -181,7 +181,8 @@ class ProcUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     ]
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
     #head { height: 3; padding: 0 1; }
-    #filter { height: 3; }
+    #filter { height: 3; width: 1fr; }
+    #topbar .selects-item, #topbar Select { width: 22; }
     #tbl { height: 1fr; background: #000000; }
     #dialog { width: 90%; max-width: 110; max-height: 90%; }
     """
@@ -213,7 +214,10 @@ class ProcUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     # --- 구성
     def compose(self) -> ComposeResult:
         yield Static("", id="head")
-        yield uikit.box(Input(value=self.filter_text, placeholder="필터: 이름·app:이름·group:이름·user:me|root·cpu>50·mem>500M·pid:123 (공백=AND)", id="filter"), "필터 ( / 키 )")
+        with Horizontal(id="topbar", classes="selects"):      # g·s 키와 같은 상태를 고르는 드롭다운(키로 바꾸면 따라 바뀐다). 고른 뒤엔 표로 포커스를 돌려 Space·k 가 표에 먹게 한다
+            yield uikit.box(Input(value=self.filter_text, placeholder="필터: 이름·app:이름·group:이름·user:me|root·cpu>50·mem>500M·pid:123 (공백=AND)", id="filter"), "필터 ( / 키 )")
+            yield uikit.select_box([(v["name"], i) for i, v in enumerate(self.views)], self.view_i, "sel-view", "뷰 (g)")
+            yield uikit.select_box([(SORT_NAMES[k], k) for k in SORT_ORDER], self.sort, "sel-sort", "정렬 (s)")
         t = DataTable(id="tbl", cursor_type="row", zebra_stripes=True)
         # 폭을 고정한다 — 자동 폭은 첫 표시 때 값 폭으로 굳어 「앱」·「보호」 칸이 잘려 보였다(실제 터미널 촬영에서 확인)
         for label, w in (("", 3), ("이름 / 그룹", 30), ("앱", 18), ("PID", 8), ("CPU %", 7), ("RSS MiB", 9), ("보호", 34)):
@@ -311,11 +315,29 @@ class ProcUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     def action_cycle_view(self):
         self.view_i = (self.view_i + 1) % len(self.views)
         self.expanded = set()
+        self._sync_selects()
         self.redraw()
 
     def action_cycle_sort(self):
         self.sort = SORT_ORDER[(SORT_ORDER.index(self.sort) + 1) % len(SORT_ORDER)]
+        self._sync_selects()
         self.redraw()
+
+    def _sync_selects(self):
+        uikit.sync_select(self.query_one("#sel-view", Select), self.view_i)
+        uikit.sync_select(self.query_one("#sel-sort", Select), self.sort)
+
+    def on_select_changed(self, ev):
+        """드롭다운으로 뷰·정렬을 고른다(현재와 같으면 키로 바꾼 값이 되돌아온 것이라 무시). 고른 뒤엔 표로 포커스를 돌려 종료·선택 키가 표에 먹게 한다."""
+        if ev.select.id == "sel-view" and ev.value != self.view_i:
+            self.view_i = ev.value
+            self.expanded = set()
+        elif ev.select.id == "sel-sort" and ev.value != self.sort:
+            self.sort = ev.value
+        else:
+            return
+        self.redraw()
+        self.query_one("#tbl", DataTable).focus()
 
     def action_focus_filter(self):
         self.query_one("#filter", Input).focus()

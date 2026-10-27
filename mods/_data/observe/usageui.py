@@ -20,7 +20,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Collapsible, DataTable, Footer, Input, Static, TabbedContent, TabPane
+from textual.widgets import Collapsible, DataTable, Footer, Input, Select, Static, TabbedContent, TabPane
 
 try:
     import uikit
@@ -243,6 +243,9 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                                 yield uikit.box(Panel(lambda w, h: self._live(lambda s: live.render_power(s, w)), id="lpower"), "전력 · 배터리 — 지금")
                             yield uikit.box(Panel(lambda w, h: self._live(live.render_sessions), id="lsess"), "LLM 세션")
                     with TabPane("기록", id="dash-hist"):
+                        with Horizontal(classes="selects"):          # t·v 키와 같은 상태를 고르는 드롭다운(키로 바꾸면 따라 바뀐다)
+                            yield uikit.select_box(self._range_options(), self._range_value(), "sel-range", "범위 (t)")
+                            yield uikit.select_box([(l, k) for k, l in BASELINES], self.baseline, "sel-base", "비교 기준 (v)")
                         with VerticalScroll(id="dashscroll"):
                             with Horizontal(id="dash"):
                                 if self.desktop:
@@ -538,7 +541,49 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             self.sysdata = {"snap": snap, "series": series}
             self.call_from_thread(self.redraw)
 
+    RANGE_CUR, RANGE_CUSTOM = "__cur__", "__custom__"
+
+    def _range_options(self):
+        """범위 드롭다운 항목: 프리셋들 + (프리셋이 아닌 범위면) 현재 범위 + 직접 입력."""
+        opts = [(p, p) for p in ud.PRESETS]
+        if self.rng.label not in ud.PRESETS:
+            opts.append((f"{self.rng.label} · {self.rng.text()}", self.RANGE_CUR))
+        return opts + [("직접 입력…", self.RANGE_CUSTOM)]
+
+    def _range_value(self):
+        return self.rng.label if self.rng.label in ud.PRESETS else self.RANGE_CUR
+
+    def _sync_hist_selects(self):
+        """키·대화상자로 바뀐 범위·비교 기준을 드롭다운에 맞춘다. 항목이 달라졌을 때만 항목을 다시 만들고(그때 나오는 Changed 는 _sel_busy 로 무시), 값은 같으면 건드리지 않는다."""
+        try:
+            sel = self.query_one("#sel-range", Select)
+        except Exception:
+            return
+        opts = self._range_options()
+        if getattr(self, "_range_opts", None) != opts:
+            self._range_opts, self._sel_busy = opts, True
+            sel.set_options(opts)
+            self.set_timer(0.4, lambda: setattr(self, "_sel_busy", False))
+        uikit.sync_select(sel, self._range_value())
+        uikit.sync_select(self.query_one("#sel-base", Select), self.baseline)
+
+    def on_select_changed(self, ev):
+        """드롭다운으로 범위·비교 기준을 고른다. 현재 상태와 같으면(키로 바꾼 값이 되돌아온 경우) 무시."""
+        if getattr(self, "_sel_busy", False):
+            return
+        v = ev.value
+        if ev.select.id == "sel-range":
+            if v in ud.PRESETS and self.rng.label != v:
+                self.rng, self._back = ud.preset(v, time.time()), None
+                self.reload()
+            elif v == self.RANGE_CUSTOM:
+                self.action_set_range()
+        elif ev.select.id == "sel-base" and v != self.baseline:
+            self.baseline = v
+            self.reload()
+
     def redraw(self):
+        self._sync_hist_selects()
         v = self.view
         for panel in self.query(Panel):
             panel.build()
@@ -696,6 +741,8 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                 self.rng = rng
                 self._back = None            # 범위를 직접 고르면 '원래대로' 는 없어짐
                 self.reload()
+            else:
+                self._sync_hist_selects()    # 취소하면 드롭다운(직접 입력…)을 현재 범위로 되돌린다
         self.push_screen(RangeScreen(self.rng), done)
 
     def action_spikes(self):

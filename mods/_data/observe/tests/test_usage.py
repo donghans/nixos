@@ -128,6 +128,22 @@ async def drive():
         check("범위 대화상자: 잘못된 입력은 오류를 보이고 닫히지 않음", isinstance(app.screen, usageui.RangeScreen))
         inp.value = "-30m"; await pilot.press("enter"); await pilot.pause(1.0)
         check("범위 대화상자: -30m 입력 → 범위 변경·재조회", app.view["range"].secs < 1900 and not isinstance(app.screen, usageui.RangeScreen))
+async def dropdowns():
+    """기록 화면의 범위·비교 기준 드롭다운: 키·대화상자와 같은 상태를 보여 주고, 고르면 범위·기준이 바뀐다."""
+    app = usageui.UsageUI(ud.preset("7일", now), tab="dashboard")
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause(1.0)
+        rs, bs = app.query_one("#sel-range"), app.query_one("#sel-base")
+        check("앱: 범위 드롭다운은 현재 프리셋(7일), 비교 기준 드롭다운은 현재 기준(prev)", rs.value == "7일" and bs.value == "prev", (rs.value, bs.value))
+        await pilot.press("v"); await pilot.pause(1.0)
+        check("앱: v 키로 비교 기준을 바꾸면 드롭다운이 따라간다", bs.value == app.baseline and app.baseline != "prev", (bs.value, app.baseline))
+        rs.value = "1시간"; await pilot.pause(1.5)
+        check("앱: 범위 드롭다운으로 1시간을 고르면 범위가 바뀐다", app.rng.label == "1시간" and rs.value == "1시간", (app.rng.label, rs.value))
+        bs.value = "yday"; await pilot.pause(1.5)
+        check("앱: 비교 기준 드롭다운으로 고르면 기준이 바뀐다", app.baseline == "yday", app.baseline)
+        app.rng = ud.parse_range("-30m", time.time()); app.reload(); await pilot.pause(1.5)
+        check("앱: 프리셋이 아닌 범위(-30m)면 드롭다운이 그 범위를 보여 준다(직접 항목)", rs.value == app.RANGE_CUR, (rs.value, app.rng.label))
+asyncio.run(dropdowns())
 async def narrow():
     app = usageui.UsageUI(ud.preset("1시간", now), tab="dashboard")
     async with app.run_test(size=(100, 40)) as pilot:

@@ -244,7 +244,7 @@ async def run():
         await pilot.press("g"); await settle(pilot, lambda: "분류: 저장소" in txt(app.query_one("#stat-state")))
         check("통계 g: 분류 순환(모델 → 저장소)", app.query_one("#stat-break").border_title.startswith("저장소별") and rows(app, "#stat-break") == 2)
         check("통계 g: 분류 드롭다운도 키 상태(저장소)를 따라간다", app.query_one("#sel-by").value == "repo", app.query_one("#sel-by").value)
-        app.query_one("#sel-by").value = "host"; await settle(pilot, lambda: "분류: 머신" in txt(app.query_one("#stat-state")))
+        app.query_one("#sel-by").value = "host"; await settle(pilot, lambda: app.query_one("#stat-break").border_title.startswith("머신별"))
         check("통계: 분류 드롭다운으로 고르면 상태·표·제목이 바뀐다(머신별)", app.stat_by == "host" and app.query_one("#stat-break").border_title.startswith("머신별") and rows(app, "#stat-break") >= 1, (app.stat_by, app.query_one("#stat-break").border_title))
         app.query_one("#sel-period").value = 1; await settle(pilot, lambda: "기간: 1일" in txt(app.query_one("#stat-state")))
         check("통계: 기간 드롭다운으로 고르면 상태가 바뀐다(1일)", app.stat_period == 1, app.stat_period)
