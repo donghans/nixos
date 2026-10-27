@@ -119,6 +119,13 @@
       lockedMsg = "텐트/태블릿 모드에서는 켜짐으로 고정돼 있습니다 (힌지를 열면 직접 조절 가능)";
     };
 
+    # 외부 키보드 판정/감시 CLI (mods/_data/extkbd/extkbd.py). 도구 경로를 고정해 서비스 PATH 에 기대지 않는다.
+    # (감시가 다시 실행할 정책 경로는 정책이 이 CLI 를 참조하므로 순환을 피하려 서비스 쪽 환경 변수 EXTKBD_POLICY 로 준다)
+    extkbdCli = pkgs.writeShellScriptBin "extkbd" ''
+      export EXTKBD_UDEVADM=${pkgs.systemd}/bin/udevadm EXTKBD_BUSCTL=${pkgs.systemd}/bin/busctl EXTKBD_GDBUS=${lib.getExe' pkgs.glib "gdbus"}
+      exec ${pkgs.python3}/bin/python3 -I ${../../_data/extkbd/extkbd.py} "$@"
+    '';
+
     # 내장 키보드 이름(호스트가 지정). 비어 있으면 정책이 키보드를 건드리지 않는다(알려지지 않은 기기에서 키보드를 잘못 끄지 않도록).
     kbName = config.wayland.windowManager.hyprland.internalKeyboardName;
     tsUsb = config.wayland.windowManager.hyprland.touchscreenUsbId;
@@ -128,17 +135,26 @@
     #   tent, tablet  : **강제** 키보드 끔 / 터치패드 끔 / 터치스크린 켬 (접힌 채 등 쪽 키·패드가 눌리는 것 방지). 수동 상태 파일은 건드리지 않아서
     #                   노트북 모드로 돌아오면 원래 상태로 복원됨.
     #   안전장치: 사용 모드 서비스가 멈췄거나 파일이 없으면 posture CLI 가 laptop 을 돌려줌 → 키보드가 꺼진 채 남지 않음. 복구는 힌지를 190° 미만으로 여는 것.
-    #   `--print` 는 판정만 출력("모드 각도 키보드 터치패드 터치스크린"), 장치는 건드리지 않음.
+    #   **외부 키보드(USB/2.4G/블루투스)가 연결돼 있으면 노트북 모드에서도 내장 키보드를 끔**(`extkbd present`; 키보드를 내장 키보드 위에 얹어 쓸 때의 오입력 방지).
+    #   판정이 불확실하거나 `extkbd` 가 실패하면 "없음"(내장 키보드 켬)으로 본다. 설계/근거: _docs/content/explanation/external-keyboard.md
+    #   `--print` 는 판정만 출력("모드 각도 키보드 터치패드 터치스크린"), 장치는 건드리지 않음. 3번째 필드(키보드)가 곧 "내장 키보드가 켜져야 하는가"(외부 키보드 반영 후).
+    #   장치를 건드리는 실행은 서로 겹치지 않게 잠금(flock)으로 직렬화한다: 힌지/로그인/reload(posture-apply)와 외부 키보드 감시(extkbd-watch)가 동시에 돌아도 낡은 판정이 나중에 덮어쓰지 않도록.
     # (장치 켜기/끄기(hl.device enabled)는 런타임 설정이라 hyprctl reload 때 초기화되므로 로그인/reload 때도 다시 적용 — posture-apply)
     inputPolicy = pkgs.writeShellScriptBin "hypr-input-policy" ''
       STATE_DIR="$HOME/.local/state/hypr"
       mkdir -p "$STATE_DIR"
+      # 판정(읽기)부터 적용(쓰기)까지를 한 덩어리로 잠근다(`--print` 는 읽기만 하므로 제외). 30초 넘게 못 잡으면 그냥 진행(잠금 때문에 정책이 영영 안 도는 것보다 낫다)
+      if [ "$1" != --print ]; then exec 9> "$STATE_DIR/policy.lock"; ${pkgs.util-linux}/bin/flock -w 30 9 || true; fi
       read -r mode angle lid < <(${config.posture.cli}/bin/posture get mode angle lid)   # (한 번에 읽음: 호출당 파이썬 시작 ~50ms)
       [ -n "$angle" ] || angle=-1
+      # 외부 키보드 여부(내장 키보드를 지정한 호스트에서만 의미가 있다). 어떤 이유로든 실패하면 없음
+      ext=false
+      ${lib.optionalString (kbName != null) ''${extkbdCli}/bin/extkbd present && ext=true''}
       case "$mode" in
         tent|tablet) kb=false; tp=false; ts=true ;;
         *)
           kb=true
+          [ "$ext" = true ] && kb=false
           tp=$(cat "$STATE_DIR/touchpad_enabled" 2>/dev/null || echo true)
           ts=$(cat "$STATE_DIR/touchscreen_enabled" 2>/dev/null || echo false)
           ;;
@@ -178,12 +194,27 @@
           case "$mode" in
             tablet) msg="태블릿 모드 (힌지 $angle°): 키보드·터치패드 끔, 터치스크린 켬" ;;
             tent) msg="텐트 모드 (힌지 $angle°): 키보드·터치패드 끔, 터치스크린 켬" ;;
-            *) msg="노트북 모드 (힌지 $angle°): 키보드 켬, 터치패드·터치스크린은 마지막 설정으로 복원" ;;
+            *) if [ "$kb" = true ]; then
+                 msg="노트북 모드 (힌지 $angle°): 키보드 켬, 터치패드·터치스크린은 마지막 설정으로 복원"
+               else
+                 msg="노트북 모드 (힌지 $angle°): 외부 키보드가 있어 내장 키보드는 끔, 터치패드·터치스크린은 마지막 설정으로 복원"
+               fi ;;
           esac
           ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:hinge -u low "사용 모드" "$msg"
         fi
       fi
-      ${pkgs.util-linux}/bin/logger -t hypr-input-policy "mode=$mode angle=$angle lid=$lid keyboard=$kb touchpad=$tp touchscreen=$ts"
+      ${lib.optionalString (kbName != null) ''
+        # 외부 키보드가 생기거나 없어졌을 때만 알림(처음 실행은 조용히)
+        last_ext=$(cat "$STATE_DIR/extkbd_last" 2>/dev/null)
+        if [ "$last_ext" != "$ext" ]; then
+          echo "$ext" > "$STATE_DIR/extkbd_last"
+          if [ -n "$last_ext" ]; then
+            if [ "$ext" = true ]; then msg="외부 키보드 연결됨 — 노트북 모드에서는 내장 키보드를 끕니다"; else msg="외부 키보드 없음 — 노트북 모드에서는 내장 키보드를 켭니다"; fi
+            ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:extkbd -u low "외부 키보드" "$msg"
+          fi
+        fi
+      ''}
+      ${pkgs.util-linux}/bin/logger -t hypr-input-policy "mode=$mode angle=$angle lid=$lid ext=$ext keyboard=$kb touchpad=$tp touchscreen=$ts"
     '';
 
     # 로그인과 설정 reload 뒤에도 같은 정책을 다시 적용
@@ -235,6 +266,7 @@
         inputPolicy
         restoreInput
         deviceMenu
+        extkbdCli
         volumeControl
         brightnessControl
         lidScreen
@@ -246,6 +278,25 @@
         (lib.mkBefore ["${lidPolicy}/bin/lid-policy"])
         ["${inputPolicy}/bin/hypr-input-policy"]
       ]);
+
+      # 외부 키보드 감시: 입력 장치 추가/제거와 블루투스 연결 변화가 있을 때만(이벤트 구동, 폴링 없음) 입력 장치 정책을 다시 실행한다.
+      # 내장 키보드를 지정한 노트북에서만 만든다(정책이 그 키보드만 건드리므로). Hyprland 환경 변수가 올라온 뒤(graphical-session)에 시작해야 hyprctl 이 동작한다.
+      # 감시 대상(udevadm/gdbus)이 종료하면 이 서비스도 실패 종료하고 5초 뒤 다시 시작(시작 때 정책을 한 번 돌려 놓친 변화를 맞춘다). 시작 제한은 두지 않는다.
+      systemd.user.services.extkbd-watch = lib.mkIf (config.workspace.type == "laptop" && kbName != null) {
+        Unit = {
+          Description = "외부 키보드 연결/해제 감시 (내장 키보드 끄기/켜기 정책 재실행)";
+          After = ["graphical-session.target"];
+          PartOf = ["graphical-session.target"];
+          StartLimitIntervalSec = 0;
+        };
+        Service = {
+          ExecStart = "${extkbdCli}/bin/extkbd watch";
+          Environment = ["EXTKBD_POLICY=${inputPolicy}/bin/hypr-input-policy"];
+          Restart = "on-failure";
+          RestartSec = 5;
+        };
+        Install.WantedBy = ["graphical-session.target"];
+      };
 
       # 입력 장치 정책을 사용 모드 허브의 소비자로 등록. 로그인(hyprland.start)/reload(config.reloaded) 때 실행하는 것도 허브가 함
       # (이유: Hyprland 는 시작/reload 때 장치를 모두 켠 상태로 되돌림)
