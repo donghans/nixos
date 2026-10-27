@@ -78,4 +78,32 @@ check("시간대 그래프: 24칸(시 단위)도 그려진다", cx.slot_chart([1
 
 check("fit_bar: 폭 안에서 비율대로(전부=가득, 절반=절반)", cx.fit_bar(10, 10, 20) == "█" * 20 and cx.fit_bar(5, 10, 20) == "█" * 10 and cell_len(cx.fit_bar(7, 10, 33)) <= 33)
 check("fit_bar: 0·음수·폭 0 은 빈 문자열", cx.fit_bar(0, 10, 20) == "" and cx.fit_bar(3, 0, 20) == "" and cx.fit_bar(3, 10, 0) == "")
+# --- 5h·7d 겹침 그래프
+R7 = R0 + timedelta(days=7)
+s7 = [(R0 + timedelta(hours=h), 10 + 60 * h / 168, R7) for h in range(0, 168, 2)]                      # 7d: 7일에 걸쳐 10 → 70%
+s5 = []
+for k in range(0, 28):                                                                                    # 5h: 약 6시간 간격의 창 28개, 창마다 0 → 40%
+    reset = R0 + timedelta(hours=6 * k + 5)
+    s5 += [(reset - timedelta(hours=5 - i * 0.5), 4 * (i + 1), reset) for i in range(10)]
+for w in (50, 100, 190):
+    t = cx.limit_chart_both(s5, s7, w, 6, "#33ccff", now=R7.timestamp() + 1)
+    lines = t.plain.split("\n")
+    check(f"겹침 그래프 폭 {w}: 높이 6 + 시간축 1줄, 폭 이하, y 눈금 100·50·0", len(lines) == 7 and all(cell_len(l) <= w for l in lines) and lines[0].lstrip().startswith("100") and lines[3].lstrip().startswith("50") and lines[5].lstrip().startswith("0"), (len(lines), [cell_len(l) for l in lines]))
+t = cx.limit_chart_both(s5, s7, 100, 6, "#33ccff", now=R7.timestamp() + 1)
+styles = {str(sp.style) for sp in t.spans}
+check("겹침 그래프: 5h 색(#33ccff)과 7d 선의 밝은 색(tint)이 모두 쓰인다", "#33ccff" in styles and cx.tint("#33ccff") in styles and styles <= {"#33ccff", cx.tint("#33ccff"), "grey50"}, styles)
+# 7d 선은 오른쪽으로 갈수록 올라간다: 선 색이 칠해진 칸의 가장 높은 줄이 오른쪽에서 더 위
+line_c = cx.tint("#33ccff")
+cells = []                                    # (줄, 칸 번호) 중 7d 선 색
+spans = sorted(t.spans, key=lambda sp: sp.start)
+for sp in spans:
+    if str(sp.style) == line_c:
+        r = t.plain[:sp.start].count("\n")
+        c = sp.start - (t.plain.rfind("\n", 0, sp.start) + 1) - cx.AXIS_W
+        for k in range(sp.end - sp.start):
+            cells.append((r, c + k))
+left = [r for r, c in cells if c < 15]; right = [r for r, c in cells if c > 70]
+check("겹침 그래프: 7d 선이 왼쪽(10%)보다 오른쪽(70%)에서 더 위 줄에 있다", left and right and min(right) < min(left), (min(left) if left else None, min(right) if right else None))
+check("겹침 그래프: 7d 가 없으면 5h 만(limit_chart), 5h 가 없으면 7d 만, 둘 다 없으면 None", cx.limit_chart_both(s5, [], 80, 5, "cyan", now=R7.timestamp()).plain.count("\n") == 5 and cx.limit_chart_both([], s7, 80, 3, "cyan", now=R7.timestamp()) is not None and cx.limit_chart_both([], [], 80, 5, "cyan") is None)
+check("tint: 흰색 쪽으로 밝아진다", cx.tint("#000000", 0.5) == "#808080" and cx.tint("#ffffff") == "#ffffff")
 finish("ctxchart")

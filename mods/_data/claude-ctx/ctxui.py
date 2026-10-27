@@ -107,12 +107,12 @@ def summary_text(summ, width=46) -> Text:
     return t
 
 
-LIMIT_SPAN = {"5h": 5 * 3600, "7d": 7 * 86400}      # 한도 창 길이(초)
-LIMIT_H = {"5h": 4, "7d": 3}                           # 창 종류별 그래프 높이(줄)
+LIMIT_H = 6                                            # 5h·7d 겹침 그래프 높이(줄)
 
 
 def limits_text(win, width=60) -> Text:
-    """계정별 한도 사용률 — 한 계정 = 한 색. 5h/7d 마다 점자 면적 그래프(x=시간, y=0~100 %)로, 실제 샘플(5h 5분·7d 1시간 단위)이 창 안에서 0 에서 올라가다 리셋에서 떨어지는 모양 그대로. width = 칸 폭."""
+    """계정별 한도 사용률 — 한 계정 = 한 색(밝은 짝 = 7d 선). 계정마다 그래프 하나에 5h(면적, 창 안에서 0 에서 올라가다 리셋에서 떨어지는 톱니)와 7d(윗면 선)를 같은 시간 축(7일)으로 겹친다.
+    실제 샘플(5h 5분·7d 1시간 단위)로 그린다. width = 칸 폭."""
     t = Text()
     ids = sorted({a["account"] for k in win.values() for a in k})
     if not ids:
@@ -124,18 +124,19 @@ def limits_text(win, width=60) -> Text:
         ref = row["5h"] or row["7d"]
         if n:
             t.append("\n")
-        t.append("● ", style=color[i]); t.append(ref["label"], style=f"bold {color[i]}")
+        c5, c7 = color[i], cch.tint(color[i])
+        t.append("● ", style=c5); t.append(ref["label"], style=f"bold {c5}")
         t.append(f"  {ref['plan'] or '플랜 불명'}\n", style="#9a9a9a")
-        for k in ("5h", "7d"):
+        for k, col in (("5h", c5), ("7d", c7)):
             a = row[k]
-            if not a or not a["windows"]:
-                continue
-            vals = [v for _, v in a["windows"]]
-            t.append(f"{k}  지금 {vals[-1]:.0f}% · 최고 {max(vals):.0f}% · {len(vals)}창\n", style="#cfcfcf")
-            ch = cch.limit_chart(a["series"], LIMIT_SPAN[k], width, LIMIT_H[k], color[i])
-            if ch is not None:
-                t.append_text(ch)
-                t.append("\n")
+            if a and a["windows"]:
+                vals = [v for _, v in a["windows"]]
+                t.append(f"{k} ", style=f"bold {col}"); t.append(f"지금 {vals[-1]:.0f}% 최고 {max(vals):.0f}% ({len(vals)}창)   " if k == "5h" else f"지금 {vals[-1]:.0f}% 최고 {max(vals):.0f}%", style="#cfcfcf")
+        t.append("\n")
+        ch = cch.limit_chart_both(row["5h"]["series"] if row["5h"] else [], row["7d"]["series"] if row["7d"] else [], width, LIMIT_H, c5, line_style=c7)
+        if ch is not None:
+            t.append_text(ch)
+            t.append("\n")
     t.rstrip()
     return t
 
@@ -595,7 +596,7 @@ class CtxUI(uikit.HelpMixin, App):
                     with Horizontal(id="dr2", classes="dash-row"):
                         yield uikit.box(DataTable(id="stat-trend", cursor_type="row"), "토큰·비용 추이")
                     with Horizontal(id="dr3", classes="dash-row"):      # 한도 그래프 | 세션 통계(+시간대 그래프)
-                        yield uikit.box(VerticalScroll(Static("", id="stat-limits"), id="stat-limits-box"), "계정별 한도 사용률 — 창마다 찍은 최고 % (색 = 계정)")
+                        yield uikit.box(VerticalScroll(Static("", id="stat-limits"), id="stat-limits-box"), "계정별 한도 사용률 — 5h(면적)·7d(밝은 선) 실제 샘플 (색 = 계정)")
                         yield uikit.box(VerticalScroll(Static("", id="stat-summary"), id="stat-summary-box"), "세션 통계")
                     with Horizontal(id="dr4", classes="dash-row"):
                         yield uikit.box(DataTable(id="projects", cursor_type="row", zebra_stripes=False), "저장소(프로젝트)별 — Enter: 이 저장소 검색")
