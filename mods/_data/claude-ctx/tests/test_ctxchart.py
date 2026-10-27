@@ -38,4 +38,11 @@ check("시간대 그래프: 값이 0 인 데이터도 그려진다(0 나눔 없�
 
 check("fit_bar: 폭 안에서 비율대로(전부=가득, 절반=절반)", cx.fit_bar(10, 10, 20) == "█" * 20 and cx.fit_bar(5, 10, 20) == "█" * 10 and cell_len(cx.fit_bar(7, 10, 33)) <= 33)
 check("fit_bar: 0·음수·폭 0 은 빈 문자열", cx.fit_bar(0, 10, 20) == "" and cx.fit_bar(3, 0, 20) == "" and cx.fit_bar(3, 10, 0) == "")
+sc = cx.series_chart([79.2, 195.9, 183.9, 60.2, 242.8, 4.2], ["10-22", "10-23", "10-24", "10-25", "10-26", "10-27"], 70, 6, "cyan", lambda v: f"${v:,.0f}")
+sl = sc.plain.split("\n")
+check("구간 그래프: 높이 6 + 눈금줄, 폭 이하, 최대값 눈금($243)과 처음·끝 구간 이름", len(sl) == 7 and all(cell_len(l) <= 70 for l in sl) and sl[0].lstrip().startswith("$243") and "10-22" in sl[6] and "10-27" in sl[6], sl)
+body = [l[cx.AXIS_W:] for l in sl[:6]]
+check("구간 그래프: 가장 높은 구간(242.8)만 맨 윗줄에 닿는다", 0 < sum(ch != "\u2800" for ch in body[0]) < len(body[0]) * 0.35, body[0])
+check("구간 그래프: 막대 사이에 한 점 폭 틈이 있다(맨 아랫줄에 반쪽 칸 ⡇)", "\u2847" in body[5], body[5])
+check("구간 그래프: 값이 없으면 None, 한 구간·전부 0 도 그려진다", cx.series_chart([], [], 50, 4, "c") is None and cx.series_chart([3.0], ["a"], 40, 4, "c") is not None and cx.series_chart([0, 0], ["a", "b"], 40, 4, "c") is not None)
 finish("ctxchart")

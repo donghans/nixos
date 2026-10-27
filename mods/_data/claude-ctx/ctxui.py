@@ -24,7 +24,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Input, Static, TabbedContent, TabPane
+from textual.widgets import DataTable, Footer, Input, Select, Static, TabbedContent, TabPane
 
 try:
     import uikit                                   # 배포: 같은 디렉터리에 복사됨
@@ -520,9 +520,14 @@ class CtxUI(uikit.HelpMixin, App):
     #dash-scroll { height: 1fr; }
     #dash-scroll.narrow .dash-row { layout: vertical; height: auto; }
     #dash-scroll.narrow .dash-row > * { width: 100%; height: 14; }
-    #dash-scroll.narrow #dr3 > * { height: 18; }
-    #dr1, #dr2 { height: 14; }
-    #dr3 { height: 22; }
+    .dash-row { height: 14; }
+    #stat-trend-chart, #stat-limits-box { width: 3fr; }
+    #stat-break, #stat-summary-box { width: 2fr; }
+    #stat-trend, #projects, #stat-sessions { width: 1fr; }
+    .selects { height: 3; }
+    .selects Select { width: 1fr; height: 3; }
+    .selects SelectCurrent { border: none; background: #000000; padding: 0 1; height: 1; }
+    .selects SelectOverlay { background: #101010; border: round #595959; }
     #stats-box { layout: vertical; padding: 0 1; }
     #sess-head { height: auto; max-height: 9; padding: 0 1; }
     #msgs { height: 1fr; }
@@ -532,10 +537,6 @@ class CtxUI(uikit.HelpMixin, App):
     #stat-limits-box { height: 1fr; }
     #stat-limits { padding: 0 1; }
     #stat-summary { padding: 0 1; }
-    #projects, #stat-trend { width: 3fr; }
-    #stat-sessions { width: 2fr; }
-    #stat-limits-box, #stat-break { width: 2fr; }
-    #stat-summary-box { width: 1fr; }
     #ovhead { height: auto; }
     """
     BINDINGS = [
@@ -582,17 +583,25 @@ class CtxUI(uikit.HelpMixin, App):
                     yield uikit.box(Input(placeholder="저장소 일부", id="f-repo"), "저장소(통계)")
                     yield uikit.box(Input(placeholder="머신 일부", id="f-host"), "머신(통계)")
                     yield uikit.box(Input(placeholder="모델 일부 (예: sonnet)", id="f-model"), "모델(통계)")
+                with Horizontal(classes="selects"):      # p/b/g/o 키와 같은 상태를 고르는 드롭다운(키로 바꾸면 여기도 따라 바뀐다)
+                    yield uikit.box(Select([(l, i) for i, (_, l) in enumerate(STAT_PERIODS)], value=self.stat_period, allow_blank=False, id="sel-period"), "기간 (p)")
+                    yield uikit.box(Select([(l, k) for k, l in cd.BUCKETS.items()], value=self.stat_bucket, allow_blank=False, id="sel-bucket"), "단위 (b)")
+                    yield uikit.box(Select([(l, k) for k, l in cd.BREAKDOWNS.items()], value=self.stat_by, allow_blank=False, id="sel-by"), "분류 (g)")
+                    yield uikit.box(Select([(l, k) for k, l in STAT_ORDERS], value=self.stat_order, allow_blank=False, id="sel-order"), "세션 정렬 (o)")
                 yield Static("", id="stat-state", classes="state")
                 with VerticalScroll(id="dash-scroll"):
                     yield uikit.box(Static("", id="ovhead"), "전체 · 표별 용량")
-                    with Horizontal(id="dr1", classes="dash-row"):
-                        yield uikit.box(DataTable(id="projects", cursor_type="row", zebra_stripes=False), "저장소(프로젝트)별 — Enter: 이 저장소 검색")
-                        yield uikit.box(VerticalScroll(Static("", id="stat-limits"), id="stat-limits-box"), "계정별 한도 사용률 — 창마다 찍은 최고 % (색 = 계정)")
+                    with Horizontal(id="dr1", classes="dash-row"):      # 얼마나 썼나: 비용 그래프 | 분류별
+                        yield uikit.box(Static("", id="stat-trend-chart"), "비용 추이")
+                        yield uikit.box(DataTable(id="stat-break", cursor_type="row"), "분류별")
                     with Horizontal(id="dr2", classes="dash-row"):
                         yield uikit.box(DataTable(id="stat-trend", cursor_type="row"), "토큰·비용 추이")
-                        yield uikit.box(DataTable(id="stat-break", cursor_type="row"), "분류별")
-                    with Horizontal(id="dr3", classes="dash-row"):
+                    with Horizontal(id="dr3", classes="dash-row"):      # 한도 그래프 | 세션 통계(+시간대 그래프)
+                        yield uikit.box(VerticalScroll(Static("", id="stat-limits"), id="stat-limits-box"), "계정별 한도 사용률 — 창마다 찍은 최고 % (색 = 계정)")
                         yield uikit.box(VerticalScroll(Static("", id="stat-summary"), id="stat-summary-box"), "세션 통계")
+                    with Horizontal(id="dr4", classes="dash-row"):
+                        yield uikit.box(DataTable(id="projects", cursor_type="row", zebra_stripes=False), "저장소(프로젝트)별 — Enter: 이 저장소 검색")
+                    with Horizontal(id="dr5", classes="dash-row"):
                         yield uikit.box(DataTable(id="stat-sessions", cursor_type="row"), "세션 — Enter: 대화 보기")
             with TabPane("2 검색", id="search"):
                 with Horizontal(classes="filters"):
@@ -1010,6 +1019,7 @@ class CtxUI(uikit.HelpMixin, App):
         self.query_one("#stat-summary", Static).update(sm)
         self._need = {"stat-limits-box": lt.plain.count("\n") + 1, "stat-summary-box": sm.plain.count("\n") + 1}
         self._paint_trend(st["trend"])
+        self._paint_cost_chart(st["trend"], st["tot"])
         self._fit_heights()
 
     def _paint_trend(self, trend):
@@ -1019,7 +1029,7 @@ class CtxUI(uikit.HelpMixin, App):
         rows = [(self._fmt_bucket(r["bucket"]), f"{r['requests']:,}", f"${r['cost']:,.2f}", r["cost"], fmt_num(r["input"] + r["cache_create"]), fmt_num(r["output"]), fmt_num(r["cache_read"])) for r in reversed(trend)]    # 최근이 위
         heads = ("구간", "요청", "비용", "", "입력", "출력", "캐시읽기")
         others = sum(max(cell_len(heads[i]), max((cell_len(r[j]) for r in rows), default=0)) + 2 for i, j in ((0, 0), (1, 1), (2, 2), (4, 4), (5, 5), (6, 6)))
-        bw = max(6, min(80, tt.size.width - others - 2 - 2 - 2)) if tt.size.width else 18      # 테두리·막대 칸 여백·세로 스크롤바
+        bw = max(6, min(200, tt.size.width - others - 2 - 2 - 2)) if tt.size.width else 18      # 테두리·막대 칸 여백·세로 스크롤바
         cmax = max((r["cost"] for r in trend), default=0)
         cur = tt.cursor_row
         tt.clear()
@@ -1029,7 +1039,19 @@ class CtxUI(uikit.HelpMixin, App):
             tt.move_cursor(row=min(cur, len(rows) - 1), animate=False)
         self._need["stat-trend"] = len(rows) + 3
 
-    DASH_ROWS = {"dr1": ("projects", "stat-limits-box"), "dr2": ("stat-trend", "stat-break"), "dr3": ("stat-summary-box", "stat-sessions")}
+    COST_H = 6              # 비용 그래프 높이(줄) — 박스 = 그래프 + 시간축 1줄 + 테두리 2줄
+
+    def _paint_cost_chart(self, trend, tot):
+        """구간(일·주…)별 비용 막대 그래프. 폭은 박스 폭에 맞춘다(usageui 의 전력 그래프처럼 위쪽에 크게)."""
+        box = self.query_one("#stat-trend-chart", Static)
+        w = self.query_one("#stat-trend-chart").size.width - 4 or 60
+        t = cch.series_chart([r["cost"] for r in trend], [self._fmt_bucket(r["bucket"]) for r in trend], max(30, w), self.COST_H, "#33ccff", lambda v: f"${v:,.0f}" if v >= 10 else f"${v:.2f}")
+        box.update(t if t is not None else Text(" 비용 기록 없음 — 이 기간·필터에 사용량이 없습니다", style="grey50"))
+        costs = [r["cost"] for r in trend]
+        box.border_title = f"비용 — {cd.BUCKETS[self.stat_bucket]}별"
+        box.border_subtitle = f"합계 ${tot['cost']:,.2f} · 최대 ${max(costs):,.2f} · 평균 ${sum(costs) / len(costs):,.2f}" if costs else ""
+
+    DASH_ROWS = {"dr1": ("stat-trend-chart", "stat-break"), "dr2": ("stat-trend",), "dr3": ("stat-limits-box", "stat-summary-box"), "dr4": ("projects",), "dr5": ("stat-sessions",)}
     DASH_CAP = 26          # 박스 하나의 최대 높이(줄) — 표가 이보다 길면 안에서 스크롤
 
     def _fit_heights(self):
@@ -1039,8 +1061,10 @@ class CtxUI(uikit.HelpMixin, App):
             need = dict(getattr(self, "_need", {}))
             for tid in ("projects", "stat-break", "stat-sessions"):
                 need[tid] = self.query_one("#" + tid, DataTable).row_count + 3
+            need["stat-trend-chart"] = self.COST_H + 3                    # 그래프 + 시간축 1줄 + 테두리
             need["stat-sessions"] = max(need["stat-sessions"], 12)       # 세션 표는 길어서 스크롤 — 최소한 열 줄은 보이게
-            h = {k: max(6, min(self.DASH_CAP, v + (2 if k.endswith("-box") else 0))) for k, v in need.items()}
+            cap = {"projects": 12, "stat-trend": 14}
+            h = {k: max(6, min(cap.get(k, self.DASH_CAP), v + (2 if k.endswith("-box") else 0))) for k, v in need.items()}
             for row, kids in self.DASH_ROWS.items():
                 r = self.query_one("#" + row)
                 if narrow:
@@ -1054,28 +1078,53 @@ class CtxUI(uikit.HelpMixin, App):
         except Exception:
             pass
 
+    def _stat_changed(self):
+        self._sync_selects()
+        self.update_stat_state()
+        self.reload_stats()
+
+    def _sync_selects(self):
+        """키(p·b·g·o)로 바꾼 상태를 드롭다운 값에 맞춘다(같은 값이면 건드리지 않아 Changed 가 되돌아오지 않는다)."""
+        for sid, v in (("sel-period", self.stat_period), ("sel-bucket", self.stat_bucket), ("sel-by", self.stat_by), ("sel-order", self.stat_order)):
+            try:
+                sel = self.query_one("#" + sid, Select)
+                if sel.value != v:
+                    sel.value = v
+            except Exception:
+                pass
+
+    def on_select_changed(self, ev: Select.Changed):
+        """드롭다운으로 기간·단위·분류·정렬을 고른다. 현재 상태와 같으면(키로 바꾼 값이 되돌아온 경우) 무시."""
+        attr = {"sel-period": "stat_period", "sel-bucket": "stat_bucket", "sel-by": "stat_by", "sel-order": "stat_order"}.get(ev.select.id or "")
+        if not attr or ev.value is Select.BLANK or getattr(self, attr) == ev.value:
+            return
+        setattr(self, attr, ev.value)
+        self.update_stat_state()
+        self.reload_stats()
+        self.set_focus(None)
+
     def action_stat_period(self):
         if self.current_tab() == "dashboard" and len(self.screen_stack) == 1:
             self.stat_period = (self.stat_period + 1) % len(STAT_PERIODS)
-            self.reload_stats()
+            self._stat_changed()
 
     def action_stat_bucket(self):
         if self.current_tab() == "dashboard" and len(self.screen_stack) == 1:
             keys = list(cd.BUCKETS)
             self.stat_bucket = keys[(keys.index(self.stat_bucket) + 1) % len(keys)]
-            self.reload_stats()
+            self._stat_changed()
 
     def action_stat_by(self):
         if self.current_tab() == "dashboard" and len(self.screen_stack) == 1:
             keys = list(cd.BREAKDOWNS)
             self.stat_by = keys[(keys.index(self.stat_by) + 1) % len(keys)]
-            self.reload_stats()
+            self._stat_changed()
 
     def action_stat_order(self):
         if self.current_tab() == "dashboard" and len(self.screen_stack) == 1:
             keys = [k for k, _ in STAT_ORDERS]
             self.stat_order = keys[(keys.index(self.stat_order) + 1) % len(keys)]
-            self.reload_stats()
+            self._stat_changed()
 
     def action_stat_clear(self):
         if self.current_tab() == "dashboard" and len(self.screen_stack) == 1:

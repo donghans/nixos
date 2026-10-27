@@ -90,6 +90,25 @@ def hour_chart(by_hour, width, height, style):
     return _plot(vals, width, height, 0, top, style, labels, axis)
 
 
+def series_chart(values, labels, width, height, style, fmt=lambda v: f"{v:,.0f}"):
+    """구간별 값(예: 일별 비용) 막대 그래프 한 개. values·labels 는 같은 길이(오래된 것부터). 구간 하나 = 가로 plot 폭/구간 수 칸(넓으면 구간 사이에 한 칸 틈).
+    y 는 0~최대, x 눈금은 처음·가운데·끝 구간 이름. 반환 Text(높이 = height 줄 + 눈금 1줄), 값이 없으면 None."""
+    if not values:
+        return None
+    plot_w = max(10, width - AXIS_W)
+    cols = plot_w * 2
+    n = len(values)
+    top = max(values) or 1
+    vals = []
+    for c in range(cols):
+        i = min(n - 1, c * n // cols)
+        edge = cols / n >= 3 and min(n - 1, (c + 1) * n // cols) != i      # 구간의 마지막 열은 비워 막대를 구분한다(맨 끝 구간은 제외)
+        vals.append(None if edge else values[i])
+    labels_y = {0: fmt(top), height // 2: fmt(top / 2), height - 1: "0"} if height >= 4 else {0: fmt(top), height - 1: "0"}
+    marks = [(0.0, labels[0])] + ([(0.5, labels[n // 2])] if n >= 3 and plot_w >= 40 else []) + ([(1.0, labels[-1])] if n >= 2 else [])
+    return _plot(vals, width, height, 0, top, style, labels_y, _axis(plot_w, marks))
+
+
 def fit_bar(v, vmax, width):
     """가로 막대(1/8 칸 해상도) — width 칸 안에서 v/vmax 만큼. v·vmax 가 0 이하이거나 width<1 이면 빈 문자열."""
     if not vmax or v <= 0 or width < 1:
