@@ -38,4 +38,4 @@ description: 성능·자원·전력 문제를 추측하지 말고 observectl(관
 ## 제한·주의
 - 정밀 도구(`observectl bpf <프리셋>`, `observectl ebpf on …`)는 요청할 때만 N초 실행되고 시간이 제한된다. 오래 켜 두지 않는다. `observectl display` 는 읽는 것이 디스플레이를 깨울 수 있어 노트북 전력 측정 중에는 쓰지 않는다.
 - 개인정보: 프로세스는 comm·exe 이름만, 창 제목·URL·명령 인자·입력 내용은 기록하지 않는다. 조회 결과를 외부로 보낼 때도 이 원칙을 지킨다.
-- 앱별 전력량 추정(Wh)은 psys 센서가 있는 호스트에서만 의미가 있다. 자세한 설명·한계는 `~/nixos/_docs/content/explanation/observe.md`.
+- 앱별 전력량 추정(Wh)은 psys 센서가 있는 호스트에서만 의미가 있다. 자세한 설명·한계는 `~/nixos/mods/_tools/observe/README.md`.

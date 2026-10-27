@@ -38,7 +38,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   '';
 
   # incus VM `qa-desktop`(화면 확인용 QA 데스크톱)이 있는 호스트에서만 지침에 넣는다(호스트 toml 의 qa-desktop = true; 프리셋 기본 꺼짐).
-  # 여러 프로젝트의 QA 세션이 VM 하나를 공유한다. 절차 본문: donghans-qa-desktop 스킬, 설명·검증 기록: _docs/content/explanation/qa-desktop.md.
+  # 여러 프로젝트의 QA 세션이 VM 하나를 공유한다. 절차 본문: donghans-qa-desktop 스킬, 설명·검증 기록: mods/_tools/qa-desktop/README.md.
   qaDesktopInstructions = lib.optionalString config.mods.sys.services.qa-desktop.enable ''
 
     # 화면 확인용 QA 데스크톱 (incus VM `qa-desktop`)
@@ -133,7 +133,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # (목적: ssh 와 kitty 에서 같은 claude 세션을 이어 쓰기) claude 를 전용 tmux 서버(`tmux -L claude`, 일반 tmux 와 분리) 안에서 돌리고,
   # `llm-sessions`(목록 UI)로 어디서든 붙는다. 한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다(tmux 기본 동작).
   # 대화형 `claude` 셸 함수만 이 경로를 타고(아래 initContent), `claude -p`·서브커맨드·스크립트가 부르는 claude 는 그대로다. 끄기: CLAUDE_TMUX=0 claude.
-  # 설계·시험 기록: _docs/content/explanation/claude-sessions.md
+  # 설계·시험 기록: mods/_tools/llm-sessions/README.md
   sessionsSrc = pkgs.runCommand "llm-sessions-src" {} ''
     mkdir -p $out
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm-sessions + "/${f}"} $out/${f}") ["llm_sessions.py" "tmuxsess.py" "claude-tmux" "claude-tmux.conf"]}

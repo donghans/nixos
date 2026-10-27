@@ -18,7 +18,7 @@
   모드 session : **tty2(kmscon)의 Claude 처럼 그래픽 세션에 안 묶인 세션에서만.** 그래픽 세션 켜짐 2구간 → Hyprland 세션 종료(`wayland-wm@hyprland\\x2duwsm.desktop.service` 정지) → 꺼짐 2구간 → Netdata 정지 2구간.
                한 방향(그래픽 세션은 복구하지 않음: 사용자가 다시 로그인/재부팅). Netdata 는 끝에 다시 켠다
 
-덮개가 닫히고 방전 중일 때만 시작한다(최대 1시간 대기). 일회성 실험용 스크립트라 시험은 없다(결과는 posture.md).
+덮개가 닫히고 방전 중일 때만 시작한다(최대 1시간 대기). 일회성 실험용 스크립트라 시험은 없다(결과는 mods/_tools/posture/README.md).
 구간마다: 배터리 전력(전압×전류), RAPL(패키지/psys) 평균, powertop 의 패키지 C-state 비율과 초당 깨어남, EC GPE 비율을 기록한다.
 끝나거나 죽을 때 Netdata 는 반드시 다시 켠다."""
 import atexit, json, os, re, signal, statistics, subprocess, sys, time

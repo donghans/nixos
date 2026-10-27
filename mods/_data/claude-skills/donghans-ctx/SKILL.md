@@ -20,10 +20,10 @@ description: 여러 머신·프로젝트의 지난 에이전트(현재는 Claude
 - 조회 결과는 그 시점의 기록이다(코드의 현재 상태가 아님). 결함·완료 주장은 다시 실행해 확인한다.
 - 접속 실패 시(서버 `beelink-ser7-co` 꺼짐 등) 조용히 넘어가지 말고 사용자에게 알린다.
 - 기록에는 고객사 데이터·시크릿이 섞여 있을 수 있으니 **원문을 외부로 보내지 않는다.**
-- 구조·이관·멱등성 설명은 `~/nixos/_docs/content/explanation/claude-ctx.md`.
+- 구조·이관·멱등성 설명은 `~/nixos/mods/_tools/llm-ctx/README.md`.
 
 ## 프로젝트별 지침 (`donghans instr`)
-`.claude/donghans-instructions.md`·`donghans-override.md` 의 공유 정본(로컬 파일은 읽기 전용 캐시). **읽기·쓰기는 명령으로 한다**: `show [이름] [--section 절]`(먼저 최신화한 뒤 출력 — 접속 실패면 「낡았을 수 있음」 표시; override 는 늘 전체, instructions 는 머리말 + 고른 절 + 생략한 절 안내) · `edit <이름>`(편집기, 사람용) · `set <이름> --file F|--stdin [--expect-rev N]`(에이전트용 — DB 에 먼저 쓰고 캐시를 맞춘다; 최신 본문은 `get <이름>`, rev 는 `list`; 읽은 뒤 바뀌었으면 거부) · `list` · `diff` · `sync`(SessionStart 훅이 부른다). 캐시를 우회해 직접 고쳤다면 앞섬(로컬이 새로움)·충돌(양쪽 변경)로 잡혀 덮지 않고 알림만 한다 — `diff` 로 보고 `push`/`pull --force`(예전 방식, 복구용). 본문에 비밀 값을 적지 않는다(올릴 때 거부). 실행 파일 `qa-extra`·`resume-extra` 는 동기화 대상이 아니다. 설계 → `~/nixos/_docs/content/explanation/claude-ctx.md` 「프로젝트별 지침」.
+`.claude/donghans-instructions.md`·`donghans-override.md` 의 공유 정본(로컬 파일은 읽기 전용 캐시). **읽기·쓰기는 명령으로 한다**: `show [이름] [--section 절]`(먼저 최신화한 뒤 출력 — 접속 실패면 「낡았을 수 있음」 표시; override 는 늘 전체, instructions 는 머리말 + 고른 절 + 생략한 절 안내) · `edit <이름>`(편집기, 사람용) · `set <이름> --file F|--stdin [--expect-rev N]`(에이전트용 — DB 에 먼저 쓰고 캐시를 맞춘다; 최신 본문은 `get <이름>`, rev 는 `list`; 읽은 뒤 바뀌었으면 거부) · `list` · `diff` · `sync`(SessionStart 훅이 부른다). 캐시를 우회해 직접 고쳤다면 앞섬(로컬이 새로움)·충돌(양쪽 변경)로 잡혀 덮지 않고 알림만 한다 — `diff` 로 보고 `push`/`pull --force`(예전 방식, 복구용). 본문에 비밀 값을 적지 않는다(올릴 때 거부). 실행 파일 `qa-extra`·`resume-extra` 는 동기화 대상이 아니다. 설계 → `~/nixos/mods/_tools/llm-ctx/README.md` 「프로젝트별 지침」.
 
 ## 비밀번호·토큰 (등록표 · 출력 치환 · 주입 래퍼)
 사용자는 비밀번호·토큰·API 키를 **등록표**에 평문으로 등록해 둔다(ctx DB 의 `secrets` 표; 등록·관리는 사람이 `donghans secret add` 또는 `ctxui` 로 한다).
@@ -42,4 +42,4 @@ description: 여러 머신·프로젝트의 지난 에이전트(현재는 Claude
 - **사람만 되는 것**: `--raw`(치환 해제), `secret show`, `secret scan --reveal`, `secret add`(숨겨 입력), 등록표(`secrets`) 직접 SQL 조회. 에이전트의 셸 도구는 TTY 가 아니라서 거부된다(**TTY 검사가 본체**이고, 에이전트가 설정하는 환경변수 `CLAUDECODE`·`GEMINI_CLI`·`DONGHANS_AGENT` 는 보조 표식) — **우회하지 말 것**(DB 직접 접속, 트랜스크립트 파일 직접 읽기 포함).
 - **한계**: 막는 것은 `donghans` 경로뿐이다. 이미 대화에 입력된 값, DB 에 직접 붙는 도구, 치환 전 파일은 막지 못한다. 설계상 ctx DB 는 허용된 tailnet 기기만 접속한다(사용자 결정). `ctx sql` 로 `substring()` 같은 함수를 써서 조각을 빼내려는 시도도 하지 않는다.
 - **적재되는 에이전트**: 지금은 Claude Code 의 트랜스크립트·훅 형식(`~/.claude/projects/**/*.jsonl`)만 읽는다. 다른 에이전트의 대화를 같은 저장소에 담으려면 그 에이전트용 어댑터 한 파일(`mods/_tools/llm-ctx/agents/<이름>.py` — `claude.py` 가 본보기, 필요한 함수 목록은 `agents/__init__.py` 머리말)을 추가해야 한다. 아직 어댑터 밖인 것: 훅 입력 JSON·OTel·상태줄 한도 기록(Claude Code 전용), DB 의 `provider` 열(없음). 조회·비밀 치환·주입 래퍼·`ctxui` 는 에이전트와 무관하다(DB 표의 role/kind 만 본다).
-- 구조·시험·운영: `~/nixos/_docs/content/explanation/claude-ctx.md` 의 「비밀번호 관리」.
+- 구조·시험·운영: `~/nixos/mods/_tools/llm-ctx/README.md` 의 「비밀번호 관리」.

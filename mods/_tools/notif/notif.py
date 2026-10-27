@@ -65,7 +65,7 @@ def log_files(log_dir: str = LOG_DIR, user: str = USER) -> list:
 
 def read_entries(log_dir: str = LOG_DIR, user: str = USER) -> list:
     """모든 기록(오래된 것부터). .gz 도 읽는다.
-    **기록된 순서**를 유지한다: 부팅 직후 약 30초는 시스템 시각이 9시간 앞서(RTC 문제, posture.md 참고) 그 시각으로 정렬하면 "미래" 알림이 최신으로 올라온다."""
+    **기록된 순서**를 유지한다: 부팅 직후 약 30초는 시스템 시각이 9시간 앞서(RTC 문제, mods/_tools/posture/README.md 참고) 그 시각으로 정렬하면 "미래" 알림이 최신으로 올라온다."""
     out = []
     for path in log_files(log_dir, user):
         opener = gzip.open if path.endswith(".gz") else open

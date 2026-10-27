@@ -6,7 +6,7 @@
 
 ## 1. 목적과 배경 (사용자 요구)
 - 대상은 노트북 `msi-summit-me`(MSI Summit E16 Flip, 360도 힌지 2-in-1)뿐이다. 데스크톱(`beelink-ser7-co`) 등 다른 호스트는 대상이 아니다.
-- 사용자의 내장 키보드는 고장 상태라(키 몇 개가 자꾸 안 눌림. 이력은 `posture.md` 의 「후속 조사 (2026-10-20 새벽)」 4번) 외부 키보드를 쓴다. 외부 키보드를 **내장 키보드 위에 얹어 두고** 쓰는 일이 많아서, 이때 내장 키보드 키가 눌려 오입력되는 것을 막고 싶다.
+- 사용자의 내장 키보드는 고장 상태라(키 몇 개가 자꾸 안 눌림. 이력은 `mods/_tools/posture/README.md` 의 「후속 조사 (2026-10-20 새벽)」 4번) 외부 키보드를 쓴다. 외부 키보드를 **내장 키보드 위에 얹어 두고** 쓰는 일이 많아서, 이때 내장 키보드 키가 눌려 오입력되는 것을 막고 싶다.
 - 요구: 외부 키보드(유선 USB, 2.4G 무선 수신기, 블루투스)가 **연결되면** 내장 키보드를 비활성화하고, **연결이 끊기면** 다시 활성화한다.
 - 이 사용자는 블루투스 키보드 `AULA-F87Pro 5.0` 을 이 노트북에 이미 연결해 둔 상태다.
 
@@ -22,7 +22,7 @@
 | F5 | 블루투스 장치의 MAC 은 입력 노드의 `uniq`(예: `/sys/class/input/input40/uniq` = `d6:f0:27:b9:65:70`)이고, BlueZ 의 `Connected` 상태는 `busctl --system call org.bluez / org.freedesktop.DBus.ObjectManager GetManagedObjects` 로 일반 사용자가 읽을 수 있다(장치별 `Address`·`Connected`). | 직접확인 (`bluetoothctl info` 로 `Connected: yes` 도 확인) |
 | F6 | 일반 사용자의 `busctl monitor` 는 `BecomeMonitor ... Access denied` 로 실패한다(직접확인). `gdbus monitor --system --dest org.bluez`(nixpkgs `glib`; 노트북에는 `gdbus` 가 없어 `nix-shell -p glib` 로 실행)는 일반 사용자로 시작되고 `The name org.bluez is owned by :1.7` 을 출력했다(직접확인). 대상 이름이 없을 때(`--dest org.nonexistent.Foo`)는 종료하지 않고 "does not have an owner" 를 출력하며 기다린다(직접확인, 데스크톱). **실제 BlueZ 신호(`Connected` 변화)가 이 방식으로 들어오는지는 아직 확인하지 못했다**(Q5). `udevadm monitor` 도 일반 사용자로 된다(기존 `devwatch.py` 가 씀, 코드 읽음). | 직접확인(시작·권한·이름 대기) / **미확인(신호 수신)** |
 | F7 | 이미 내장 키보드를 끄는 정책이 있다: `mods/gui/base/core.bind.hwctl.nix` 의 `hypr-input-policy`(133행~). 텐트/태블릿 모드(139행 `tent\|tablet) kb=false; ...`)에서 키보드를 끄고 노트북 모드(141행 `kb=true`)에서 켠다. 끄는 방법은 Hyprland 의 `hl.device({name=..., enabled=...})`(166행 `set_enabled`)이며 **대상은 호스트가 `internalKeyboardName` 으로 지정한 키보드 하나**(옵션 선언은 같은 파일 285행, msi 의 지정은 `hosts/msi-summit-me.nix:335`)뿐이다. (줄 번호는 이 변경 전 기준. `set_enabled` 는 149행에서 정의하고 166행에서 호출한다.) 지정이 없는 호스트에서는 키보드를 건드리지 않는다. | 직접확인 (파일 읽음) |
-| F8 | 그 정책은 이벤트를 놓쳐도 아무 때나 실행하면 현재 상태에 맞춰지는 **수준 기반·멱등** 소비자다(상태 파일과 `posture` CLI 값만 읽어 장치를 맞추는 코드를 읽고 낸 판단이며, `posture.md` 에 그렇게 명시돼 있지는 않다). 힌지 모드 변화(`posture-apply`), 로그인, Hyprland reload 때 실행된다(`core.posture.nix`: `hyprland.start`, `config.reloaded`, `posture-apply.path`). | 직접확인(실행 시점) / 코드 읽고 추론(멱등성) |
+| F8 | 그 정책은 이벤트를 놓쳐도 아무 때나 실행하면 현재 상태에 맞춰지는 **수준 기반·멱등** 소비자다(상태 파일과 `posture` CLI 값만 읽어 장치를 맞추는 코드를 읽고 낸 판단이며, `mods/_tools/posture/README.md` 에 그렇게 명시돼 있지는 않다). 힌지 모드 변화(`posture-apply`), 로그인, Hyprland reload 때 실행된다(`core.posture.nix`: `hyprland.start`, `config.reloaded`, `posture-apply.path`). | 직접확인(실행 시점) / 코드 읽고 추론(멱등성) |
 | F9 | 사용자 서비스 환경에는 `HYPRLAND_INSTANCE_SIGNATURE`·`WAYLAND_DISPLAY` 가 올라와 있어서(노트북 `systemctl --user show-environment`) 서비스에서 `hyprctl` 을 부를 수 있다. | 직접확인 |
 | F10 | 정책 `--print` 의 출력은 `모드 각도 키보드 터치패드 터치스크린` 5필드이고 두 곳이 파싱한다: 토글(99행, `cut -d' ' -f4/5`)과 메뉴(208행, `read -r mode angle kb tp ts`). 필드를 **뒤에 덧붙이면 208행의 마지막 변수 `ts` 에 합쳐져 깨진다**. | 직접확인 |
 | F11 | 이 노트북은 전력 시험을 자주 한다(`power-evidence.md`). 상시 폴링·주기 깨어남을 새로 넣으면 안 된다 — 이벤트 구동이어야 한다. | 미재확인 (사용자 CLAUDE.md 의 관측·전력 지침과 `power-evidence.md` 제목에서 추정. 상시 폴링 금지는 이 세션의 설계 판단) |
