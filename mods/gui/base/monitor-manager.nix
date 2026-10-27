@@ -1,4 +1,4 @@
-# 화면 관리: displayctl(CLI) + displayui(TUI, Textual) — 본체는 mods/_tools/desktop/display/
+# 화면 관리: displayctl(CLI) + displayui(TUI, Textual) — 본체는 mods/_tools/desktop/monitor-manager/
 #  - 화면 모드(확장/미러/노트북만/외부만), 프리젠테이션 등 프리셋(해상도 고정, 이전 구성 복귀)
 #  - 모니터별 해상도·주사율·배율·상대 위치. 모니터가 알려 주는 모드 외의 값도 시도하고 적용 뒤 실제 값을 검증
 #  - 해상도/주사율 변경은 확인이 없으면 되돌림: TUI 확인 창과 별개로 systemd 사용자 타이머가 예약돼서 TUI/터미널이 죽어도 되돌려짐
@@ -18,7 +18,7 @@ mkPartOf "mods.gui" ({
   jq = "${pkgs.jq}/bin/jq";
   hyprctl = "${pkgs.hyprland}/bin/hyprctl";
   py = pkgs.python3.withPackages (ps: [ps.textual]);
-  src = name: builtins.readFile (../../_tools/desktop/display + "/${name}");
+  src = name: builtins.readFile (../../_tools/desktop/monitor-manager + "/${name}");
 
   # displayctl.py(얇은 진입점)와 displayui.py, 본체 패키지 dispctl/ 를 한 디렉터리에 둔다(displayui.py 가 `import displayctl` 하므로 같은 디렉터리여야 함).
   # Nix 자리표시자(@hyprctl@, @notify_send@)는 dispctl/config.py 한 곳에만 있다.

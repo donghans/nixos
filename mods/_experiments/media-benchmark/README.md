@@ -16,7 +16,7 @@ PATH 에 뷰어/플레이어가 없고(ImageMagick `convert` 뿐), `xdg-mime que
 
 ## 측정 방법과 조건
 
-- 도구: `mods/_experiments/media-bench/bench.py` (`python3 bench.py 5`). 프로그램은 nix 로 임시 내려받고 시험 파일은 ffmpeg 로 합성한다.
+- 도구: `mods/_experiments/media-benchmark/bench.py` (`python3 bench.py 5`). 프로그램은 nix 로 임시 내려받고 시험 파일은 ffmpeg 로 합성한다.
 - **창 시간**: 실행부터 Hyprland 에 새 창이 생길 때까지. 첫 화면/첫 소리가 나는 시점이 **아니다**.
 - **CPU(2초)**: 창이 뜬 뒤 2초까지 그 프로세스 트리가 쓴 CPU 시간.
 - 프로그램별 5회, 번갈아 실행, **중앙값**. 시험 파일: PNG 1080p, JPG 4K, H.264 1080p 6초(AAC), FLAC 6초.
@@ -168,7 +168,7 @@ Thunar 의 "Open in swayimg" 는 폴더에 쓸 수 있지만 loupe 는 폴더를
   실제 pptx(`Ⅴ. 프로젝트 관리_v0.93 (1).pptx`)에서 눈으로 대조한 결과 `에스코어 드림 6 Bold`(고딕) 제목은 **바탕체 계열**로, `KoPub돋움체` 본문은 가는 굴림/돋움 계열로 그려졌음(확정은 아님).
   이 문서가 쓰는데 없는 글꼴: KoPub돋움체/바탕체, 에스코어 드림 5·6·7, 산돌고딕B. nixpkgs 에도 없음.
 - **해결**: 없는 이름과 같은 이름의 글꼴을 Pretendard(`pkgs.pretendard`, 굵기별 정적 OTF)에서 만들어 둠. 이름표(name 테이블)만 바꾼 복사본이고 글리프는 Pretendard 그대로.
-  `mods/_tools/desktop/office-fonts/alias.py` + `office.nix` 의 `fontAliasMap`(이름 → Pretendard 굵기). 활성화 때 `~/.local/share/fonts/zz-alias-*.otf` 로 실제 파일 복사(ONLYOFFICE 가 심볼릭 링크를 건너뜀).
+  `mods/_tools/desktop/office-font-alias/alias.py` + `office.nix` 의 `fontAliasMap`(이름 → Pretendard 굵기). 활성화 때 `~/.local/share/fonts/zz-alias-*.otf` 로 실제 파일 복사(ONLYOFFICE 가 심볼릭 링크를 건너뜀).
   검증: 별칭을 넣고 ONLYOFFICE 를 **완전히 재시작**하자 `fonts.log` 가 재스캔되고, 제목이 바탕체에서 굵은 고딕(Pretendard Bold)으로, 본문이 Pretendard 로 바뀜.
 - 주의: (1) ONLYOFFICE 는 프로필 경로와 무관하게 **프로세스가 하나뿐**이고 글꼴 목록은 시작할 때 한 번만 읽으므로 새 글꼴은 완전 종료 후 다시 켜야 보임(독립 인스턴스로 시험 불가).
   (2) 모양은 Pretendard 이지 원래 KoPub/에스코어 드림이 아님 → 글자 폭이 달라 줄바꿈 위치가 조금 다를 수 있음. (3) `KoPub바탕체`(명조)는 별칭을 만들지 않아 지금도 ONLYOFFICE 기본 대체(바탕 계열).

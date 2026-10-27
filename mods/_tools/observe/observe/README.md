@@ -126,7 +126,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 
 ## `procui` — 프로세스 관리 TUI (2026-10-26)
 
-`procui`(앱 런처 "Process Manager")는 프로세스를 **그룹으로 묶어 보고, 필터하고, 골라서 안전하게 종료**하며 세부 사용량을 보는 Textual 앱이다. usageui 는 읽기 전용 모니터, procui 는 **조치 도구**이고 둘을 섞지 않는다(되돌릴 수 없는 동작을 한곳에 모으려고). 계획·배경은 `donghans doc show plan procui`, 본체는 `mods/_tools/observe/procui/`(`procscan.py` 스냅샷 · `procgroups.py` 뷰·규칙·필터 · `procactions.py` 보호·계획·pidfd 종료·기록 · `procui.py` 화면). 설치는 이 파일 위쪽 `observe.nix` 의 같은 디렉터리(observe_apps·hostmetrics·uikit 를 import).
+`procui`(앱 런처 "Process Manager")는 프로세스를 **그룹으로 묶어 보고, 필터하고, 골라서 안전하게 종료**하며 세부 사용량을 보는 Textual 앱이다. usageui 는 읽기 전용 모니터, procui 는 **조치 도구**이고 둘을 섞지 않는다(되돌릴 수 없는 동작을 한곳에 모으려고). 계획·배경은 `donghans doc show plan procui`, 본체는 `mods/_tools/observe/process-manager/`(`procscan.py` 스냅샷 · `procgroups.py` 뷰·규칙·필터 · `procactions.py` 보호·계획·pidfd 종료·기록 · `procui.py` 화면). 설치는 이 파일 위쪽 `observe.nix` 의 같은 디렉터리(observe_apps·hostmetrics·uikit 를 import).
 
 - **뷰(`g` 로 순환)**: 소유(커널 / 컨테이너·VM / 시스템 / 내 환경 / 내 작업) · 앱(observe 앱 규칙) · 서비스(cgroup 유닛) · 세션(LLM 세션과 그 자식 트리). 모든 프로세스는 뷰마다 정확히 한 그룹에 들어간다. 「내 작업」 = 내 UID 인 프로세스에서 데스크톱 환경(컴포지터·패널·오디오·세션 버스 등)을 뺀 것.
 - **확장(`~/.config/procui/groups.toml`)**: `[[view]]` 로 새 뷰를 만들거나 같은 이름의 내장 뷰 **앞**에 규칙(`[[view.rule]]`)을 끼운다. 조건: `kernel·uid·app·comm·exe·cgroup·session·ancestor_app·cpu_gt·rss_gt`(이름은 글롭, 명령 인자는 쓰지 않음), 그룹 이름 치환 `@app @comm @unit @session`. `[protect]` 의 `app`/`comm` 은 보호 이름을 더한다. 잘못된 항목은 버리고 상태줄에 경고한다.
@@ -137,7 +137,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 - **기록**: `~/.local/state/procui/actions.jsonl`(시각·그룹·이름·PID·신호·결과, 명령 인자 없음). 갱신은 기본 수동(`r`), `a` 로 2초 자동 갱신(선택 중 줄이 움직이는 것을 피하려고 기본 꺼짐).
 - 상세(`d`/Enter): CPU·RSS·PSS·스레드·FD·I/O·cgroup·부모 사슬·자식·뷰별 그룹·보호 사유. 권한이 없는 항목은 「못 쟀음」.
 - **`procctl`(LLM·사람용 비대화형 CLI, 2026-10-26)**: 같은 코어를 명령줄로 연다 — `groups`·`show`(읽기 전용) · `plan`(아무것도 죽이지 않고 계획 ID·대상·보호로 제외·범위 밖·예상 확보 메모리) · `apply <ID>`(그 계획의 대상에만 SIGTERM) · `escalate <ID>`(살아남은 것에만 SIGKILL, 별도 호출) · `log`. 소스 `procctl.py`(CLI)·`procplan.py`(계획 저장·검증), 계획 파일 `~/.local/state/procui/plans/<id>.json`(만료 10분, sig 로 우발적 변조 감지 — 악의적 위조 방지는 아님, 실제 안전은 apply 의 pidfd 재검증·보호 재계산). 종료 코드 0/2(대상 없음·범위 밖·상한)/3(거부: 만료·변조·이미 적용·권한)/4(전부 보호)/5(일부 실패). **에이전트(조상에 LLM 세션이 있는 호출자 — 환경 변수가 아니라 `/proc` 조상으로 판별)는 기본 범위가 자기 세션의 자식 트리, 자기가 만든 계획만 apply, 대상 최대 20개, 보호는 못 푼다.** 소프트 보호 해제는 CLI 에 옵션이 없고 사람이 `procui` 에서만. 하네스 연동: `llm-cli.nix` 가 `--settings` 로 주입하는 권한 규칙이 `procctl groups|show|plan|log` 는 자동 허용, `apply|escalate` 는 항상 사용자 확인(문법은 Claude Code 의 Bash 접두 일치 — 실제 적용은 새로 시작한 `claude` 세션에서 확인 필요), 사용자 지침(CLAUDE.md)이 「pkill·killall·kill 대신 procctl」을 요구하고 스킬 `donghans-procctl` 이 절차를 담는다. 시험 `tests/test_procctl.py`(가짜 세션 루트 `claude` 가 procctl 을 자식으로 실행해 실제 조상 사슬로 에이전트 모드를 만들고, 사람 모드는 이중 fork 로 조상에서 분리).
-- 시험: `mods/_tools/observe/procui/tests/test_procui_logic.py`(스냅샷·그룹 누락 0·TOML·보호·pidfd 종료·PID 재사용 시뮬레이션; 시험이 `prctl` 로 고유 이름을 붙여 띄운 프로세스만 종료), `test_procui_app.py`(Textual 헤드리스, 사용 `nix-shell -p "python3.withPackages (ps: [ps.textual])"`).
+- 시험: `mods/_tools/observe/process-manager/tests/test_procui_logic.py`(스냅샷·그룹 누락 0·TOML·보호·pidfd 종료·PID 재사용 시뮬레이션; 시험이 `prctl` 로 고유 이름을 붙여 띄운 프로세스만 종료), `test_procui_app.py`(Textual 헤드리스, 사용 `nix-shell -p "python3.withPackages (ps: [ps.textual])"`).
 
 ## `uikit` — 우리 TUI 공통 틀 (2026-10-21)
 

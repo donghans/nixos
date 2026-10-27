@@ -3,7 +3,7 @@
 
 이 파일이 있는 이유: `import displayctl as dc`(displayui, 시험)와 `python3 displayctl.py …`(시험의 서브프로세스, Nix 래퍼)가
 단일 파일일 때와 똑같이 동작하게 하는 호환 껍데기다. 이름은 패키지에서 그대로 가져온다.
-(Nix 가 @hyprctl@, @notify_send@ 자리표시자를 dispctl/config.py 에서 실제 경로로 치환한다 — mods/gui/base/display-manager.nix)
+(Nix 가 @hyprctl@, @notify_send@ 자리표시자를 dispctl/config.py 에서 실제 경로로 치환한다 — mods/gui/base/monitor-manager.nix)
 """
 import os
 import sys

@@ -13,7 +13,7 @@
 systemd 사용자 타이머(displayctl-revert)가 시간이 지나면 `displayctl revert-pending` 을 실행해 되돌린다. TUI 나 터미널이 죽어도
 (화면이 안 나와서 확인을 못 해도) 별도 프로세스가 되돌린다. 확인(`displayctl confirm`)하면 기록을 지우고 타이머를 취소한다.
 
-(Nix 가 @hyprctl@, @notify_send@ 자리표시자를 실제 경로로 치환한다 — mods/gui/base/display-manager.nix)
+(Nix 가 @hyprctl@, @notify_send@ 자리표시자를 실제 경로로 치환한다 — mods/gui/base/monitor-manager.nix)
 
 모듈 구성(위에서 아래로만 import 한다 — 순환 없음):
   config       상수/환경변수/선택지/내장 프리셋 (Nix 자리표시자 치환 대상)

@@ -123,7 +123,7 @@ in {
         bindd("SUPER + Hangul", hl.dsp.exec_cmd("systemctl --user restart app-org.fcitx.Fcitx5@autostart"), "fcitx5 재시작")
 
         -- Fn+F11 은 펌웨어가 SUPER+P(Windows 의 Win+P 방식)를 보내므로 SUPER+P 에 할당
-        -- 화면 전환 키(SUPER+P, Fn+F11)는 display-manager.nix (displayui)
+        -- 화면 전환 키(SUPER+P, Fn+F11)는 monitor-manager.nix (displayui)
 
         -- Special workspace
         bindd("SUPER + S", hl.dsp.workspace.toggle_special("magic"), "스페셜 워크스페이스 토글")

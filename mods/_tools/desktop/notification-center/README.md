@@ -1,6 +1,6 @@
 # 알림 센터 (notif) — 알림 기록 조회와 시스템 장애 알림
 
-**상태: 적용 완료 (2026-10-19)**. 구성: `mods/gui/utils/notify-logger.nix`(서비스·런처·타이머), 본체 `mods/_tools/desktop/notif/`(notif.py, notif_ui.py, 시험), waybar 모듈은 `mods/gui/base/waybar.nix`.
+**상태: 적용 완료 (2026-10-19)**. 구성: `mods/gui/utils/notify-logger.nix`(서비스·런처·타이머), 본체 `mods/_tools/desktop/notification-center/`(notif.py, notif_ui.py, 시험), waybar 모듈은 `mods/gui/base/waybar.nix`.
 
 ## 쓰는 법
 | 하는 일 | 명령 |
@@ -45,7 +45,7 @@
 - **waybar**: 실패한 유닛이 있을 때만 빨간 `⚠ N` 이 나타나고(없으면 모듈이 사라짐) 툴팁에 목록, 클릭하면 문제 화면이 열린다. (처음에 쓴 Font Awesome 경고 글리프는 이 폰트에 없어서 `θ` 처럼 보였다 → `⚠`.)
 
 ## 장치 감시 (`notif devices`, user 서비스 `notif-devices`)
-장치 연결/해제, 마운트/언마운트, 전원 어댑터 전환을 알림(앱 이름 `devices`, 낮은 긴급도)으로 알려서 알림 센터의 `devices` 그룹에 모은다. 본체는 `mods/_tools/desktop/notif/devwatch.py`(시험 30개). 시작할 때 이미 있는 장치/마운트는 알리지 않는다.
+장치 연결/해제, 마운트/언마운트, 전원 어댑터 전환을 알림(앱 이름 `devices`, 낮은 긴급도)으로 알려서 알림 센터의 `devices` 그룹에 모은다. 본체는 `mods/_tools/desktop/notification-center/devwatch.py`(시험 30개). 시작할 때 이미 있는 장치/마운트는 알리지 않는다.
 | 무엇 | 어떻게 | 알림 |
 |---|---|---|
 | 오디오 | `pw-dump -m` 으로 PipeWire 노드 추가/제거를 지켜봄 | **외부 장치(USB/블루투스)와 헤드폰/헤드셋 노드만**. 같은 장치의 출력/입력은 한 알림으로(예: "오디오 장치 연결: MSI DOCK — 출력 · 입력") |

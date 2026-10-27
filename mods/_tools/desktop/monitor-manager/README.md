@@ -1,6 +1,6 @@
 # 화면 관리 (displayctl / displayui)
 
-Hyprland 의 모니터 구성을 CLI(`displayctl`)와 TUI(`displayui`)로 관리한다. 본체는 `mods/_tools/desktop/display/`, 패키징은 `mods/gui/base/display-manager.nix`.
+Hyprland 의 모니터 구성을 CLI(`displayctl`)와 TUI(`displayui`)로 관리한다. 본체는 `mods/_tools/desktop/monitor-manager/`, 패키징은 `mods/gui/base/monitor-manager.nix`.
 
 ## 사용
 
@@ -58,7 +58,7 @@ displayctl reset                      # 저장된 구성을 지우고 설정 파
 - 터치스크린/펜 매핑(`hosts/msi-summit-me.nix` 의 `hl.device`)은 모니터가 꺼졌다 켜질 때 유지되는지 확인하지 못했다.
 - 시험: 실제 Hyprland 를 건드리지 않도록 가짜 `hyprctl` 로 코어와 TUI(Textual Pilot)를 시험한다. 실제 환경의 관찰된 동작(미러/disabled 지속,
   내장 패널의 48Hz 미만 거부)을 흉내 내고, 창 이동과 모니터 끄기의 순서도 검증한다.
-  `PYTHON=<textual 이 있는 python> mods/_tools/desktop/display/tests/run.sh`
+  `PYTHON=<textual 이 있는 python> mods/_tools/desktop/monitor-manager/tests/run.sh`
 
 ## 화면 디자인 (displayui / clipui)
 

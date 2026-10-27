@@ -23,7 +23,7 @@ MSI Summit E16 Flip(360도 힌지)에서 **힌지 각도 → 사용 모드(lapto
 - `mods/_tools/desktop/posture/posture`: 조회 CLI. **안전한 기본값 처리가 여기 한 곳**: 서비스 정지, 파일 없음/깨짐, 스키마 불일치 → `mode=laptop`, 덮개는 `open`(화면이 꺼진 채 남지 않는 쪽).
 - `mods/gui/base/core.posture.nix`: 서비스, 사용자 경로 유닛(`/run/posture/state.json` 변경 감시 → `posture-apply.service`), Nix 옵션 `posture.consumers`(소비자 명령 목록).
 - 소비자는 "수준 기반 + 멱등": 이벤트를 놓쳐도 아무 때나 실행하면 현재 상태에 맞춰짐. 로그인(`hyprland.start`)/reload(`config.reloaded`)에도 같은 소비자를 실행(Hyprland 가 시작/reload 때 장치 상태를 초기화하므로).
-- 현재 소비자(실행 순서): `lid-policy`(덮개 닫힘/열림 → 백라이트 끄기/켜기 + 호스트 추가 명령, `core.bind.hwctl.nix`), `vkb apply-posture`(`vkb.nix`), `displayctl rotate auto`(`display-manager.nix`), `hypr-input-policy`(입력 장치 정책, `core.bind.hwctl.nix`). 추가하려면 `posture.consumers` 에 명령 한 줄.
+- 현재 소비자(실행 순서): `lid-policy`(덮개 닫힘/열림 → 백라이트 끄기/켜기 + 호스트 추가 명령, `core.bind.hwctl.nix`), `vkb apply-posture`(`vkb.nix`), `displayctl rotate auto`(`monitor-manager.nix`), `hypr-input-policy`(입력 장치 정책, `core.bind.hwctl.nix`). 추가하려면 `posture.consumers` 에 명령 한 줄.
 - 적용 범위: 허브/덮개/입력 정책은 모든 노트북(`type = "laptop"`), 가상 키보드·화면 자동 회전·터치 제스처·waybar 키보드 버튼은 **2-in-1 호스트만**(`hosts/<호스트>.toml` 의 `convertible = true`).
 - `state.json`(`schema: 1`): `{"mode", "orientation": {"rotation","flat"}, "lid": "open|closed|null", "sensors": {...}, "ts"}` — **소비자가 알아야 하는 값이 변할 때만** 갱신하고 경로 유닛은 이 파일만 본다.
   `telemetry.json`: `{"hinge": {"angle","screen","keyboard"}, "ts"}` — 각도는 **5° 이상** 달라질 때 갱신하지만 감시하지 않아 소비자를 깨우지 않는다. (분리 이유: 각도를 상태 파일에 두었을 때 덮개를 여는 몇 초 동안 5° 마다 모든 소비자가 5번 넘게 다시 실행됐다. 2026-10-17 저널로 확인)
@@ -38,7 +38,7 @@ MSI Summit E16 Flip(360도 힌지)에서 **힌지 각도 → 사용 모드(lapto
 |---|---|---|---|
 | laptop | 켬(**외부 키보드가 연결돼 있으면 끔** — 아래) | **마지막 수동 상태**(메뉴에서 정한 값, 기록이 없으면 켬) | **마지막 수동 상태**(기록이 없으면 꺼짐) |
 | tent / tablet | **끔(강제)** | **끔(강제)** | **켬(강제)** |
-- **외부 키보드(2026-10-27 추가, 코드는 작성됨·배포 전)**: 노트북 모드에서도 외부 키보드(USB/2.4G 수신기/블루투스)가 연결돼 있으면 내장 키보드를 끈다(내장 키보드 위에 외부 키보드를 얹어 쓸 때의 오입력 방지). 판정·감시·근거와 확인 못 한 것은 `mods/_tools/desktop/extkbd/README.md`.
+- **외부 키보드(2026-10-27 추가, 코드는 작성됨·배포 전)**: 노트북 모드에서도 외부 키보드(USB/2.4G 수신기/블루투스)가 연결돼 있으면 내장 키보드를 끈다(내장 키보드 위에 외부 키보드를 얹어 쓸 때의 오입력 방지). 판정·감시·근거와 확인 못 한 것은 `mods/_tools/desktop/external-keyboard/README.md`.
 - 수동 상태 파일(`~/.local/state/hypr/touchpad_enabled`, `touchscreen_enabled`)은 텐트/태블릿에서 **건드리지 않아서** 노트북 모드로 돌아오면 원래 상태로 복원됨.
 - 입력 장치 메뉴(wofi): 노트북 모드는 직접 토글, 텐트/태블릿은 "고정" 표시(선택해도 안내만). 토글 스크립트도 접힌 모드에서는 거부.
 - 대상 키보드는 호스트가 `wayland.windowManager.hyprland.internalKeyboardName` 로 지정한 것만(이 기기는 `at-translated-set-2-keyboard`; 핫키 `msi-wmi-hotkeys` 등은 그대로, 지정하지 않으면 키보드는 건드리지 않음). 펜(stylus)은 항상 켜짐.
@@ -80,7 +80,7 @@ Hyprland 0.55 가 노출하는 프로토콜(`wayland-info`로 확인): `zwp_virt
 - 한계: 한/영 전환이 `Ctr`+스페이스 두 번 누름(전용 키 없음), 화면 폭 전체를 차지해서 크기/위치 조정 필요, 터치(손가락) 입력은 직접 시험하지 못함(포인터 클릭으로만 확인).
 
 ### 구현: `vkb` (접기/펴기, 크기, 창 가림 방지, 터치 버튼, 사용 모드 연동)
-`mods/_tools/desktop/vkb/vkb.py`(명령 `vkb`), 서비스/연결은 `mods/gui/base/vkb.nix`, 버튼은 `mods/gui/base/waybar.nix` + `mods/_data/waybar/style.css`.
+`mods/_tools/desktop/virtual-keyboard/vkb.py`(명령 `vkb`), 서비스/연결은 `mods/gui/base/vkb.nix`, 버튼은 `mods/gui/base/waybar.nix` + `mods/_data/waybar/style.css`.
 - **wvkbd 의 한계(소스 확인)**: 위치는 하단 전체 폭 고정, 높이는 시작할 때만 지정(`-H`/`-L`), 숨기기 전용 키 없음(`⌨` 키는 **레이어 전환**), 플로팅/폭 옵션 없음. 그래서 아래 패치로 플로팅을 추가하고, 접고 펴기는 시그널, 크기는 재시작으로 처리하며 그 위에 제어층(`vkb`)을 얹음.
   접기/펴기 전용 키는 두지 않음(waybar 버튼으로 충분). 대신 키보드 안에 도킹↔플로팅 전환 키(`⧉`)를 둠.
 - `wvkbd.service`(사용자 서비스): `--hidden` 으로 상시 대기(메모리만 차지). 시작 인자는 `vkb args` 가 `~/.config/vkb/config.json`(크기/모드/레이어)과 화면 물리 크기로 계산.
@@ -99,7 +99,7 @@ Hyprland 0.55 가 노출하는 프로토콜(`wayland-info`로 확인): `zwp_virt
   ③ `한/영` 키(`KEY_HANGEUL`; fcitx5 전환키에 `Hangul` 이 이미 등록돼 있어 설정 변경 없음). ④ 가로 배열(`Landscape`)을 PC 표준 5줄(숫자 줄, Tab/CpL/Shift 줄, 아래줄 `Ctr Sup ⧉ ⌨ 한/영 Alt 스페이스 Esc ←↓↑→`)로 교체(합 15키 폭). `Sup`(Super)는 처음에 레이어를 전환해야만 있어서 메인 배열 아래줄로 옮김(Hyprland 단축키가 전부 Super 기반).
   함정: wvkbd 의 `die()` 매크로는 중괄호 없는 두 문장이라 `if (...) die(...)` 로 쓰면 조건과 무관하게 종료한다(처음 패치에서 겪음; 중괄호로 감쌈).
   실제 화면에서 `한/영` 탭으로 hangul↔keyboard-us 전환, `⧉` 탭으로 도킹↔플로팅 전환을 확인(포인터 클릭). 다른 레이어(`special` 등)의 숫자 줄과 세로 배열은 확인하지 않음. wvkbd 버전이 바뀌면 패치가 안 맞을 수 있음(빌드가 실패하므로 알 수 있음).
-- 시험: `python3 -I mods/_tools/desktop/vkb/tests/test_vkb.py`(25, 맞춤/복원/크기 계획/mm→px 계산), `test_vkb_cli.py`(45, 가짜 hyprctl/systemctl 로 전체 흐름).
+- 시험: `python3 -I mods/_tools/desktop/virtual-keyboard/tests/test_vkb.py`(25, 맞춤/복원/크기 계획/mm→px 계산), `test_vkb_cli.py`(45, 가짜 hyprctl/systemctl 로 전체 흐름).
 - **미확인**: 손가락 터치로 waybar 버튼이 눌리는지(포인터 클릭만 확인, GTK 가 터치를 클릭으로 바꾸는 것으로 알려져 있으나 직접 확인 못 함), waybar 높이 24px 의 터치 적합성, 사용 모드 연동의 실제 힌지 시험, 가상 키보드가 보이는 동안 잠금 화면/Hyprland reload 와의 상호작용.
 
 ### 알려진 한계: 터치스크린으로는 창 이동/크기 조절이 안 됨
@@ -161,8 +161,8 @@ tent/tablet 에서 기기를 돌리면 내장 화면과 터치가 같이 돈다.
 |---|---|---|
 | `mods/gui/base/core.posture.nix` + `mods/_tools/desktop/posture/` | 허브: 센서(힌지/가속도) → 상태 파일 → 소비자 호출. 소비자의 내용은 모름 | `posture.consumers` 옵션 |
 | `mods/gui/base/core.bind.hwctl.nix` | 입력 장치 정책(`hypr-input-policy`)과 토글/메뉴, 덮개 동작(`lid-screen`) | 정책을 소비자로 등록 |
-| `mods/gui/base/vkb.nix` + `mods/_tools/desktop/vkb/` + `mods/_patches/wvkbd/` | 가상 키보드 서비스와 제어 CLI, wvkbd 패치 | `vkb apply-posture` |
-| `mods/gui/base/display-manager.nix` + `mods/_tools/desktop/display/` | 화면 구성/회전(`displayctl rotate auto`), 터치 좌표 동기화 | `displayctl rotate auto` |
+| `mods/gui/base/vkb.nix` + `mods/_tools/desktop/virtual-keyboard/` + `mods/_patches/wvkbd/` | 가상 키보드 서비스와 제어 CLI, wvkbd 패치 | `vkb apply-posture` |
+| `mods/gui/base/monitor-manager.nix` + `mods/_tools/desktop/monitor-manager/` | 화면 구성/회전(`displayctl rotate auto`), 터치 좌표 동기화 | `displayctl rotate auto` |
 - 한 가지 일은 한 곳에서: 장치 켜기/끄기와 수동 상태 파일의 기본값은 `hypr-input-policy` 에만 있고, 터치패드/터치스크린 토글은 상태 파일만 뒤집고 정책을 부른다(예전에는 토글 두 개와 정책이 각자 같은 장치 선택/적용 코드를 가졌음). 메뉴 라벨도 정책의 `--print` 값을 쓴다.
 - 두 곳에 같은 숫자가 있으면 시험이 지키게 한다: 가로 배열의 줄 수/폭 단위(5줄, 15)는 `pc-layout.patch` 와 `vkb.py`(`LAND_ROWS`/`LAND_UNITS`) 에 따로 있어서, `test_vkb.py` 가 원본 wvkbd 에 두 패치를 실제로 적용해 읽고 비교한다(패치가 안 맞아도 여기서 실패).
 - 내장 키보드 이름은 공용 모듈이 아니라 호스트가 `wayland.windowManager.hyprland.internalKeyboardName` 로 지정한다(비어 있으면 정책이 키보드를 건드리지 않음).
@@ -199,8 +199,8 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 - **공용 시험 도구 상자 `mods/_tools/_lib/_testkit/`**: `harness.py`(`checker()`: 시험마다 따로 있던 `check()`/카운터/종료 처리, `script()`), `fake_cmd.py` + `fakes.py`(`Sandbox`: 데이터 기반 가짜 `hyprctl`/`systemctl`/`pkill`/`posture`/`journalctl` — 응답과 상태를 `FAKE_DIR` 아래 파일로 정함, 동작 정의는 `fake_cmd.py` 머리말).
   vkb CLI 시험, posture 시험, doctor 시험이 이것을 쓴다(예전에는 도구마다 가짜 `hyprctl`/`systemctl` 을 따로 만들어 Hyprland 명령 형식이 바뀌면 여러 곳을 고쳐야 했음). displayctl 시험의 `fake_hyprctl.py` 는 모니터 배치를 시뮬레이션하는 도메인 전용이라 그대로 두고 `checker()` 만 공유한다.
 - **전체 시험**: `mods/_tools/run-tests.sh` (vkb 29 + vkb CLI 48 + posture 77 + doctor 11 + displayctl 코어 79 + TUI 53).
-- **중첩 Hyprland 시험 도구 `mods/_experiments/hyprland-nested/hypr-nested`**: `hypr-nested <시험할 Hyprland store 경로> <시험 설정.lua> [--wait|초]`. 유닛 이름으로만 정리하고, 시작 전 서비스 환경을 기록했다가 끝나면 복구·확인한다(위의 "환경 오염" 함정을 막음). `--wait` 는 Enter 까지 유지해서 중첩 창을 손가락/마우스로 직접 시험할 때 쓴다.
-- **displayctl 구조**: 1044줄 단일 파일을 패키지 `mods/_tools/desktop/display/dispctl/`(`config`/`hypr`/`state`/`layout`/`apply`/`transaction`/`ops`/`cli`, 위에서 아래로만 import)로 나누고 `displayctl.py` 는 얇은 진입점으로 남겼다(`import displayctl as dc` 와 서브프로세스 호출이 그대로 동작).
+- **중첩 Hyprland 시험 도구 `mods/_experiments/hypr-nested/hypr-nested`**: `hypr-nested <시험할 Hyprland store 경로> <시험 설정.lua> [--wait|초]`. 유닛 이름으로만 정리하고, 시작 전 서비스 환경을 기록했다가 끝나면 복구·확인한다(위의 "환경 오염" 함정을 막음). `--wait` 는 Enter 까지 유지해서 중첩 창을 손가락/마우스로 직접 시험할 때 쓴다.
+- **displayctl 구조**: 1044줄 단일 파일을 패키지 `mods/_tools/desktop/monitor-manager/dispctl/`(`config`/`hypr`/`state`/`layout`/`apply`/`transaction`/`ops`/`cli`, 위에서 아래로만 import)로 나누고 `displayctl.py` 는 얇은 진입점으로 남겼다(`import displayctl as dc` 와 서브프로세스 호출이 그대로 동작).
   나누면서 시험이 실제 버그를 잡았다: 되돌리기 타이머가 `__file__` 로 진입 스크립트를 찾는데 분리 후 `dispctl/transaction.py` 를 가리켜 `revert-pending` 이 아무 일도 안 했다 → `ENTRY`(패키지 한 단계 위의 `displayctl.py`)로 고침. Nix 자리표시자는 `dispctl/config.py` 한 곳.
 - **덮개 TLP 프로필**: `tlp bat`(배터리 프로필 + 수동 모드: 전원이 바뀌어도 다음 부팅/`tlp start` 까지 무시)/`tlp start`(실제 전원에 맞는 프로필 + 수동 모드 해제)는 root 가 필요해서 `hosts/msi-summit-me.nix` 에 root 유닛 `tlp-lid-closed`/`tlp-lid-open` + polkit 규칙(로컬 활성 사용자만, 해당 두 유닛만)을 두고 `lid-policy` 의 추가 명령이 `systemctl start --no-block` 으로 시작한다. 확인: 사용자 권한으로 시작해 `balanced/BAT (manual)` ↔ `performance/AC (auto)` 전환.
   **주의: 시험하다 `tlp ac`/`tlp bat` 를 직접 실행하면 수동 모드가 남아 전원이 바뀌어도 무시된다** — 2026-10-19 에 이 실수로 TLP 가 2시간 반 동안 `performance/AC (manual)` 에 머물렀다(`tlp start` 로 해제). 시험 뒤에는 `sudo tlp-stat -s` 로 `(manual)` 이 없는지 확인할 것.
@@ -216,7 +216,7 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 | 가장자리(끝에서 ~2cm 안쪽)에서 안쪽으로 쓸기 → 이전/다음 워크스페이스 | `bind` edge | **됨**(짧은 거리, 완료형) |
 | 3손가락 좌우 스와이프 → 이전/다음 워크스페이스 | `bind` swipe 3 | 손가락이 안정적으로 잡힐 때만 |
 
-원인을 원시 입력으로 찾았다(`mods/_experiments/touch-trace/touch_trace.py`, libinput debug-events 기록 분석; Hyprland 의 DEBUG 로그는 `debug:disable_logs=false` 로도 파일/저널에 안 남아 로그 진단은 불가):
+원인을 원시 입력으로 찾았다(`mods/_experiments/input-diagnostics/touch_trace.py`, libinput debug-events 기록 분석; Hyprland 의 DEBUG 로그는 `debug:disable_logs=false` 로도 파일/저널에 안 남아 로그 진단은 불가):
 - **3손가락을 대고 끌면 접촉이 자주 끊겼다 다시 잡혔다**: 3손가락 묶음 15개 중 14개에서 재접촉, 간격 중앙값 0.04초(최대 0.39초). 손가락 하나만 끊겨도 플러그인은 손가락 수가 바뀐 것으로 보고 제스처를 끝낸다. 손의 습기/힘 때문인지 패널이 가까운 손가락(12~20mm)을 못 따라가는지는 데이터만으로 구분 못 함. 이 패널은 동시 10점까지 지원.
 - **3손가락 스와이프는 세 손가락이 함께 움직이지 않았다**: 크게 움직인 건 한 손가락이고 나머지는 이동 0이거나 아예 닿지 않은 경우가 많았다.
 - **맨 가장자리에서 시작한 접촉은 ~0.1초 뒤 끝났다**(최대 41px 이동): 패널은 끝(0~2.7%, 98.7~99.97%)까지 닿지만 안쪽으로 미는 손가락을 계속 따라가지 못한다.
@@ -567,7 +567,7 @@ tty2 (VT2) ── kmsconvt@tty2.service ── kmscon ── login ── zsh �
 - 지난 밤 사건(Backspace, → 가 커널 이벤트 0)과 합치면: 둘 다 **덮개 닫힘/열림 이력이 있는 긴 가동 뒤**에 나타났고 재부팅/EC 리셋으로 풀렸다. 야간 사건 때는 serio 재연결로 안 풀렸다.
 **kmscon `cannot swap display [eDP] -22` 경고(별도 단서)**: 이전 부팅에서 13,662건(08:06 ~ 10:28, 덮개 닫힘·VT2 활성 중 화면을 다시 그릴 때마다). `-22`(EINVAL)는 eDP 에 갱신(page flip)이 안 먹는다는 뜻이다. 낮은 전력 상태(08:14~08:20, 09:09~09:33, 10:16:46~)와 분 단위로 정확히 맞지는 않아(경고는 화면이 갱신을 시도할 때만 나온다) **상관은 미확정**. 가설 H6: 낮은 상태 = VT2 가 DRM master 인데 eDP 파이프가 꺼진(scanout 없음) 상태, 높은 상태 = 파이프가 켜진 상태(10:21 에 DRM `dpms=Off` 를 읽었을 때도 높은 상태였으므로 `dpms` 속성만으로는 구분 안 됨). 검증: 두 상태에서 `/sys/kernel/debug/dri/0000:00:02.0/i915_display_info`(CRTC active/파이프/전원 우물)와 `i915_dmc_info`, `pmc_core` 의 `slp_s0`/substate 를 비교.
 **다음에 같은 증상이 나오면(재부팅·재로그인 하기 전에) — 1분이면 된다**
-1. `sudo python3 ~/nixos/mods/_experiments/input-debug/key_probe.py 15` 를 실행하고 15초 동안 **Backspace, →, 밝기 올림, 밝기 내림을 각각 3번씩** 누른다(눌린 글자 내용은 기록 안 함, 키 이름별 눌림 횟수만).
+1. `sudo python3 ~/nixos/mods/_experiments/input-diagnostics/key_probe.py 15` 를 실행하고 15초 동안 **Backspace, →, 밝기 올림, 밝기 내림을 각각 3번씩** 누른다(눌린 글자 내용은 기록 안 함, 키 이름별 눌림 횟수만).
 2. 결과 해석: `irq1_delta` = i8042 키보드 인터럽트(PS/2 신호가 하드웨어에서 커널까지 오는지), `gpe6e_delta` = EC 이벤트 인터럽트(밝기/Fn 계열).
    - 키를 눌렀는데 `irq1_delta`=0 → **키보드/EC 가 신호를 안 보냄**(하드웨어·펌웨어, EC 리셋 대상)
    - `irq1_delta` 는 늘었는데 키 이벤트 0 → **커널 입력층에서 버려짐**(atkbd/serio 쪽)

@@ -57,9 +57,9 @@ mkMod __curPos "Netdata (시스템 지표 기록: AC 1초 / 배터리 10초)" ({
     done
   '';
 
-  # Netdata API 로 배터리 잔량/전력(RAPL, 전압×전류)/CPU 를 같은 시간축 그래프와 요약으로 보여주는 도구 (스크립트: _tools/observe/netdata/power_report.py)
+  # Netdata API 로 배터리 잔량/전력(RAPL, 전압×전류)/CPU 를 같은 시간축 그래프와 요약으로 보여주는 도구 (스크립트: _tools/observe/power-report/power_report.py)
   powerReport = pkgs.writeShellScriptBin "power-report" ''
-    exec ${pkgs.python3.withPackages (p: [p.matplotlib])}/bin/python3 ${../../_tools/observe/netdata/power_report.py} "$@"
+    exec ${pkgs.python3.withPackages (p: [p.matplotlib])}/bin/python3 ${../../_tools/observe/power-report/power_report.py} "$@"
   '';
   # 어댑터를 뽑은 상태에서 화면 주사율별 소비 전력을 번갈아 재서 비교(스크립트: _tools/observe/power-ab/power_ab.py)
   # 켜고 끄는 명령(기본은 꺼짐). sudo 는 setuid 래퍼(/run/wrappers/bin/sudo)를 써야 한다.

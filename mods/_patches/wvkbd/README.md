@@ -19,5 +19,5 @@ patch -p1 -d $W/b < pc-layout.patch
 (cd $W && diff -ru a b) > new.patch          # 파일별로 나눠서 두 파일에 반영
 ```
 - 패치를 나눌 때 헤더의 시각(탭 뒤)은 지워도 된다.
-- 배열(`pc-layout.patch`)의 한 줄 폭 합(단위)과 줄 수는 `mods/_tools/desktop/vkb/vkb.py` 의 `LAND_UNITS`/`LAND_ROWS` 와 같아야 한다 → `mods/_tools/desktop/vkb/tests/test_vkb.py` 가 패치를 읽어 검사한다.
+- 배열(`pc-layout.patch`)의 한 줄 폭 합(단위)과 줄 수는 `mods/_tools/desktop/virtual-keyboard/vkb.py` 의 `LAND_UNITS`/`LAND_ROWS` 와 같아야 한다 → `mods/_tools/desktop/virtual-keyboard/tests/test_vkb.py` 가 패치를 읽어 검사한다.
 - 시험은 중첩이 아니라 `systemd-run --user --unit=<이름> wvkbd-mobintl ...` 로 띄워서 `grim` 으로 확인하고, 끝나면 **유닛 이름으로** 정리한다(이름으로 `pkill` 하면 실제 세션 프로세스도 죽는다).

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""extkbd — 외부 키보드(유선 USB / 2.4G 수신기 / 블루투스) 연결 여부 판정과 감시. 설계/근거: mods/_tools/desktop/extkbd/README.md
+"""extkbd — 외부 키보드(유선 USB / 2.4G 수신기 / 블루투스) 연결 여부 판정과 감시. 설계/근거: mods/_tools/desktop/external-keyboard/README.md
 
   extkbd present   외부 키보드가 있으면 종료 코드 0, 없으면 1 (어떤 오류든 1: 판정이 불확실하면 내장 키보드를 켜 둔다)
   extkbd status    입력 노드별 판정과 이유(진단용)
