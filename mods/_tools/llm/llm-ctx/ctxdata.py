@@ -11,7 +11,7 @@ import ctx_instr as ci
 import ctx_secrets as cs
 
 
-# ---------------------------------------------------------------- 메시지 종류(자동 메시지 vs 사람) — 설계: donghans doc show plan ctx-message-kinds
+# ---------------------------------------------------------------- 메시지 종류(자동 메시지 vs 사람) — 설계: donghans ctx doc read --project nixos plan ctx-message-kinds
 # Claude Code 가 `user`·`prompt` 로 저장하는 자동 메시지는 `<태그>` 로 시작한다. 분류는 **행 단위, 메시지의 첫 태그 기준**이고 SQL(`~`)과 파이썬(`re`)이
 # **같은 패턴 문자열**을 쓴다(공백은 `[ \t\r\n]` 만, 유니코드 공백·BOM 으로 시작하면 사람으로 둔다 — 알려진 한계).
 AUTO_TAGS = ("task-notification", "local-command-stdout", "local-command-caveat", "bash-stdout", "system-reminder")   # 사람 말이 아님 — 통계·F2·대조에서 뺀다

@@ -5,7 +5,7 @@ description: 이 NixOS 워크스테이션(beelink-ser7-co 실측으로 보정)�
 
 # donghans-host-resources — 이 워크스테이션의 자원 스냅샷·판정
 
-이 스킬은 **현재 NixOS 워크스테이션(주 대상 beelink-ser7-co)** 용이다. 판정 기준·해석은 이 호스트의 실측(`donghans doc show plan host-memory-verdict`, 2026-10-26)으로 보정했고, 다른 호스트에서 돌리면 「스왑 기준점 없음」이 출력에 뜬다(§새 호스트에 쓸 때).
+이 스킬은 **현재 NixOS 워크스테이션(주 대상 beelink-ser7-co)** 용이다. 판정 기준·해석은 이 호스트의 실측(`donghans ctx doc read --project nixos plan host-memory-verdict`, 2026-10-26)으로 보정했고, 다른 호스트에서 돌리면 「스왑 기준점 없음」이 출력에 뜬다(§새 호스트에 쓸 때).
 
 ## 실행
 ```

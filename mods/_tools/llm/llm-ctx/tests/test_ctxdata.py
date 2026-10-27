@@ -229,7 +229,7 @@ try:
     check("instr_save: 빈 본문은 거부", code == 1 and cd.instr_raw(conn, A, "override")[0] == 2, msg)
     conn.commit()
 
-    # --- 자동 메시지 분류(donghans doc show plan ctx-message-kinds)
+    # --- 자동 메시지 분류(donghans ctx doc read --project nixos plan ctx-message-kinds)
     CMD = "<command-message>donghans-resume</command-message>\n<command-name>/donghans-resume</command-name>\n<command-args>c9bf\n7759</command-args>"
     TASK = "<task-notification>\n<task-id>x1</task-id>\n<status>completed</status>\n<summary>배포 끝났다</summary>\n</task-notification>"
     cl = cd.classify

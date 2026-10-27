@@ -1,7 +1,7 @@
 """agents — LLM 에이전트(CLI)별 어댑터. 대화 기록의 형식·위치·표식처럼 **에이전트마다 다른 것**을 한곳에 모은다.
 
 왜(사용자 결정 2026-10-27): 이 도구(`donghans ctx`)는 지금 Claude Code 의 기록만 읽는다. 다른 에이전트(예: Gemini CLI)를 쓰게 되면
-파서 한 파일만 더하면 되도록, 조회·검색·비밀 치환·주입·`ctxui` 같은 **에이전트와 무관한 부분**(llm_ctx·ctx_secrets·ctx_instr·ctx_docs·ctxdata·ctxui)에서
+파서 한 파일만 더하면 되도록, 조회·검색·비밀 치환·주입·`ctxui` 같은 **에이전트와 무관한 부분**(llm_ctx·ctx_secrets·ctx_instr·ctx_store·ctxdata·ctxui)에서
 에이전트 종속 코드를 이 패키지로 뺐다. 지금 구현은 `claude` 하나다(과설계를 피하려고 두 번째 구현은 아직 없다).
 
 어댑터 모듈이 제공해야 하는 것(`claude.py` 가 본보기):

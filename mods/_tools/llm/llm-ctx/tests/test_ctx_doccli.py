@@ -162,11 +162,12 @@ j = json.loads(r.stdout) if r.stdout.strip() else {}
 check("SessionStart 훅: DB 에 못 붙어도 문서 안내는 나간다(입력을 막지도 않는다)", r.returncode == 0 and "ctx doc" in j.get("hookSpecificOutput", {}).get("additionalContext", ""), r.stdout + r.stderr)
 
 # 옛 DB 문서 이관
-import ctx_docs as cd
-cd.ensure_schema(conn)
-cd.put(conn, URL, "plan", "old/p1", "옛 계획 본문\n끝\n", "hostX", status="done", origin_path="/x/p1.md")
-cd.put(conn, URL, "note", "old/한글 이름", "---\nname: 자기 머리말\n---\n본문\n", "hostX")
-cd.put(conn, URL + "-other", "plan", "skipme", "다른 저장소\n", "hostX")
+for repo, kind, name, body, status, origin in [
+    (URL, "plan", "old/p1", "옛 계획 본문\n끝\n", "done", "/x/p1.md"),
+    (URL, "note", "old/한글 이름", "---\nname: 자기 머리말\n---\n본문\n", "active", None),
+    (URL + "-other", "plan", "skipme", "다른 저장소\n", "active", None),
+]:   # 옛 표(project_docs — 이제 읽기 전용 보관본)에 직접 시드한다
+    conn.execute("INSERT INTO project_docs (repo_url, kind, name, body, status, origin_path, updated_host) VALUES (%s,%s,%s,%s,%s,%s,'hostX')", (repo, kind, name, body, status, origin))
 conn.commit()
 rc, out, err = run("import-db", "--dry-run", sid=A)
 check("import-db --dry-run: 파일을 만들지 않는다", rc == 0 and "created 2" in out and not os.path.exists(f"{STORE}/proj/plan/old/p1.md"), out + err)

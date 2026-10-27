@@ -210,7 +210,7 @@ def snapshot(secs):
 
 
 # ---------- 판정(이 호스트용으로 보정) ----------
-# 근거: donghans doc show plan host-memory-verdict — 2026-10-26 실측(NVMe 스왑 한 번 접근 p50 약 48µs·순차 약 120 MiB/s, 스왑 폭주 cgroup 이 있어도 무관한 프로세스 지연은 거의 불변,
+# 근거: donghans ctx doc read --project nixos plan host-memory-verdict — 2026-10-26 실측(NVMe 스왑 한 번 접근 p50 약 48µs·순차 약 120 MiB/s, 스왑 폭주 cgroup 이 있어도 무관한 프로세스 지연은 거의 불변,
 # Netdata 유효 4일 이력의 PSI 분포). 시스템 전체 PSI 는 한 cgroup 이 혼자 스왑을 두드려도 오르므로 「순간 튐」(avg10)과 「지속」(avg60)을 나누고,
 # 되돌릴 수 없는 한계인 「OOM 까지 여유(MemAvailable + 스왑 여유)」를 용량 축으로 따로 본다. 사용자 체감으로 임계값을 교정할 때는 CALIB 만 고친다.
 HOST = socket.gethostname()
@@ -218,7 +218,7 @@ HOST = socket.gethostname()
 # 항목이 있으면 thresholds 로 아래 CALIB 기본값을 덮어쓰고, info_lines 가 실측값을 인사이트에 쓴다. 없으면 「보정 안 됨」을 표시한다.
 HOST_CALIBRATION = {
     "beelink-ser7-co": dict(
-        measured="2026-10-26", source="donghans doc show plan host-memory-verdict §2-3·2-4",
+        measured="2026-10-26", source="donghans ctx doc read --project nixos plan host-memory-verdict §2-3·2-4",
         swap="ZRAM(zstd·우선순위 100) + NVMe 스왑파일(SAMSUNG MZVL21T0HCLR·우선순위 10)", rotational=False,
         random_fault_us=dict(p50=48, p99=345, p999=2553), seq_mib_s=122, fill_mib_s=315,
         bystander="스왑 약 100 MiB/s 폭주 중에도 무관한 프로세스 지연 거의 불변(sleep 1ms 초과 p99 58→69µs, 16MiB 할당 p99 5.9→5.5ms)",

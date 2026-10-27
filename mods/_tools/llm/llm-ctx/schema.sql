@@ -165,8 +165,8 @@ CREATE TABLE IF NOT EXISTS project_instructions (
   PRIMARY KEY (repo_url, name)
 );
 
--- 프로젝트 문서(`donghans doc`, ctx_docs.py): 저장소에 올리지 않는 계획(plan)·QA 기록(qa)·메모(note)의 정본. 캐시 파일이 없다(읽을 때마다 DB).
--- 클라이언트도 첫 쓰기 때 같은 문장으로 표를 만든다(ctx_docs.SCHEMA_STATEMENTS) — 둘을 같이 고친다.
+-- (보관) 옛 프로젝트 문서 표. 2026-10-27 에 문서의 원천이 파일 저장소 `~/ctx`(`donghans ctx doc`)로 옮겨졌고 이 표는 읽기 전용 보관본이다 —
+-- 더 쓰는 명령이 없다(`ctx doc import-db` 가 읽을 뿐). 이관 대조(364행 바이트 일치) 뒤 2주쯤 지나 사용자가 확인하면 지운다.
 CREATE TABLE IF NOT EXISTS project_docs (
   repo_url     text NOT NULL,
   kind         text NOT NULL CHECK (kind IN ('plan','qa','note')),
