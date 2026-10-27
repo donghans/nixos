@@ -897,7 +897,8 @@ def cmd_doc_show(a):
         m = _masker(a, c)
     if not a.body_only:
         print(f"# {a.kind}/{a.name} · 상태 {d['status']} · rev {d['rev']} · {d['updated_host']} {d['updated_at']:%F %T}" + (f" · 원본 {d['origin_path']}" if d['origin_path'] else ""))
-    print(m.text(d["body"]), end="" if d["body"].endswith("\n") else "\n")
+    # --body-only 는 원본과 바이트가 같아야 한다(파일로 내보내 대조·재사용) — 끝 줄바꿈을 덧붙이지 않는다. 머리 한 줄이 붙는 보통 출력만 줄을 맺는다.
+    print(m.text(d["body"]), end="" if (a.body_only or d["body"].endswith("\n")) else "\n")
     return 0
 
 
