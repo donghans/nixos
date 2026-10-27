@@ -2,7 +2,7 @@
 """devwatch 시험: pw-dump 스트림 해석, 외부 장치/헤드폰만 알림, 재생성 무시, 출력+입력 묶음, udev(USB/전원), 마운트."""
 import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 import devwatch as dw
 from harness import checker, tmpdir
 check, finish = checker()

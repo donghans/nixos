@@ -4,7 +4,7 @@
 2부(임시 Postgres): 만들기·수정·같음·낙관적 잠금·비밀 거부·상태·검색·import 멱등·CLI. psycopg·postgres 17 이 없으면 건너뛴다."""
 import json, os, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, ROOT); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker
 check, finish = checker()
 import ctx_docs as cd

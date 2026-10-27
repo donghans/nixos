@@ -2,7 +2,7 @@
 """power-ab 시험: sysfs 읽기/와트 계산/CPU 사용률/요약/표시, 방전이 아닐 때 거부."""
 import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker, tmpdir
 check, finish = checker()
 d = tmpdir()

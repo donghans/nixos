@@ -4,7 +4,7 @@
 import os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE); DATA = os.path.dirname(ROOT)
 SK = os.path.join(DATA, "..", "..", "_data", "claude-skills", "donghans-host-resources")
-for p in (ROOT, os.path.join(SK, "scripts"), os.path.join(os.path.dirname(DATA), "_lib", "_testkit")):
+for p in (ROOT, os.path.join(SK, "scripts"), os.path.join(os.path.dirname(DATA), "_lib", "testkit")):
     sys.path.insert(0, p)
 import time
 import hostmetrics as hm

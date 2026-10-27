@@ -12,7 +12,7 @@ PY=${PYTHON:-$(grep -o '/nix/store/[^ "]*python3[^ "]*/bin/python3[^ "]*' "$(com
 [ -n "$PY" ] && { out=$(cd "$D/observe/observe" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$PY" tests/test_usagefleet.py 2>&1); r=$?; printf '%-9s %s\n' usagefleet "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
 [ -n "$PY" ] && { out=$(cd "$D/observe/observe" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$PY" tests/test_usage.py 2>&1); r=$?; printf '%-9s %s\n' usageui "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
 [ -n "$PY" ] && { out=$(cd "$D/desktop/clipboard" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$PY" -I tests/test_clipui.py 2>&1); r=$?; printf '%-9s %s\n' clipui "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
-[ -n "$PY" ] && { out=$(cd "$D/_lib/_uikit" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$PY" tests/test_uikit.py 2>&1); r=$?; printf '%-9s %s\n' uikit "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
+[ -n "$PY" ] && { out=$(cd "$D/_lib/uikit" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$PY" tests/test_uikit.py 2>&1); r=$?; printf '%-9s %s\n' uikit "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
 out=$(cd "$D/desktop/monitor-manager" && PYTHON=${PY:-python3} sh tests/run.sh 2>&1); r=$?
 printf '%-9s %s\n' display "$(echo "$out" | grep -E '코어|TUI' | tr '\n' ' ')"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep -E "FAIL|Traceback"; }
 # ctx(DB 통합·화면): psycopg + textual 이 모두 있는 python 이 필요하다 — CTX_PYTHON 으로 지정하거나(없으면 nix 로 한 번 만든다), postgres 17 이 없으면 시험 파일이 알아서 건너뛴다.

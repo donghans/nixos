@@ -2,7 +2,7 @@
 """ctx_secrets 시험(DB 없이): 치환 엔진 · 등록 검사 · 후보 탐지 · 주입 래퍼 · jsonl 파일 치환."""
 import io, json, os, stat, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 import ctx_secrets as S
 from harness import checker
 check, finish = checker()

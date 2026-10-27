@@ -2,7 +2,7 @@
 """Netdata 어댑터 시험(가짜 HTTP 서버 — 응답 모양은 실제 Netdata v2.10 API 에서 복사): 신호 정의·곱셈·공백/꺼짐 처리·앱 CPU·지원하지 않는 항목."""
 import http.server, json, os, sys, threading, time, urllib.parse
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker
 check, finish = checker()
 

@@ -2,7 +2,7 @@
 """notif 시험: 기록 파서(JSON·이전 형식), 필터/묶음/통계, 장애 감시(새 실패만 알림), waybar JSON, Notify 변환, (textual 이 있으면) 화면."""
 import datetime, gzip, json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 import notif
 from harness import checker, tmpdir
 check, finish = checker()

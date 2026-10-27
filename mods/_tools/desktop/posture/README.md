@@ -196,7 +196,7 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 ### 점검 도구와 시험 구성 (2026-10-19)
 - **`posture-doctor`**(`mods/_tools/desktop/posture/doctor.py`, 사용자 PATH 에 설치): 서비스 환경의 `WAYLAND_DISPLAY`/`HYPRLAND_INSTANCE_SIGNATURE` 가 살아 있는 인스턴스를 가리키는지, 허브 데몬/센서/`posture-apply.path`, 마지막 소비자 실행의 실패, 허브의 덮개와 ACPI 의 불일치, 덮개가 열렸는데 백라이트가 0인 화면을 점검해 OK/WARN/FAIL 과 해결 힌트를 낸다(문제가 있으면 종료 코드 1, `--json` 지원).
   이날 실제로 겪은 통합 단계 고장(환경 오염, 깨어남 유실로 꺼진 화면, 소비자 실패)을 잡으려는 것이라 시험(가짜 도구)이 못 잡는 영역을 맡는다. 문제가 의심되면 먼저 `posture-doctor`.
-- **공용 시험 도구 상자 `mods/_tools/_lib/_testkit/`**: `harness.py`(`checker()`: 시험마다 따로 있던 `check()`/카운터/종료 처리, `script()`), `fake_cmd.py` + `fakes.py`(`Sandbox`: 데이터 기반 가짜 `hyprctl`/`systemctl`/`pkill`/`posture`/`journalctl` — 응답과 상태를 `FAKE_DIR` 아래 파일로 정함, 동작 정의는 `fake_cmd.py` 머리말).
+- **공용 시험 도구 상자 `mods/_tools/_lib/testkit/`**: `harness.py`(`checker()`: 시험마다 따로 있던 `check()`/카운터/종료 처리, `script()`), `fake_cmd.py` + `fakes.py`(`Sandbox`: 데이터 기반 가짜 `hyprctl`/`systemctl`/`pkill`/`posture`/`journalctl` — 응답과 상태를 `FAKE_DIR` 아래 파일로 정함, 동작 정의는 `fake_cmd.py` 머리말).
   vkb CLI 시험, posture 시험, doctor 시험이 이것을 쓴다(예전에는 도구마다 가짜 `hyprctl`/`systemctl` 을 따로 만들어 Hyprland 명령 형식이 바뀌면 여러 곳을 고쳐야 했음). displayctl 시험의 `fake_hyprctl.py` 는 모니터 배치를 시뮬레이션하는 도메인 전용이라 그대로 두고 `checker()` 만 공유한다.
 - **전체 시험**: `mods/_tools/run-tests.sh` (vkb 29 + vkb CLI 48 + posture 77 + doctor 11 + displayctl 코어 79 + TUI 53).
 - **중첩 Hyprland 시험 도구 `mods/_experiments/hypr-nested/hypr-nested`**: `hypr-nested <시험할 Hyprland store 경로> <시험 설정.lua> [--wait|초]`. 유닛 이름으로만 정리하고, 시작 전 서비스 환경을 기록했다가 끝나면 복구·확인한다(위의 "환경 오염" 함정을 막음). `--wait` 는 Enter 까지 유지해서 중첩 창을 손가락/마우스로 직접 시험할 때 쓴다.

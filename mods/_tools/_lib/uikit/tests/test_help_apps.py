@@ -3,7 +3,7 @@
 정적(모든 앱 클래스의 HELP_TERMS) + 동적(Pilot: usageui · procui · notif). psycopg 가 있으면 ctxui 도 본다."""
 import asyncio, json, os, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); DATA = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))        # mods/_tools
-for p in ("_lib/_uikit", "observe", "procui", "notif", "clipboard", "display", "llm-sessions", "llm-ctx", "_lib/_testkit", "../_data/claude-skills/donghans-host-resources/scripts"):
+for p in ("_lib/uikit", "observe", "procui", "notif", "clipboard", "display", "llm-sessions", "llm-ctx", "_lib/testkit", "../_data/claude-skills/donghans-host-resources/scripts"):
     sys.path.insert(0, os.path.join(DATA, p))
 TMP = tempfile.mkdtemp(prefix="help-apps-")
 os.makedirs(os.path.join(TMP, "notif")); open(os.path.join(TMP, "notif", "t.log"), "w").write(json.dumps({"ts": "2026-10-26 09:00:00", "app": "Slack", "summary": "제목", "body": "본문", "urgency": 1}, ensure_ascii=False) + "\n")

@@ -3,7 +3,7 @@
 필요: tmux. 없으면 건너뛴다(CLAUDE_TMUX_BIN 으로 지정 가능). UI 부분은 textual 이 있어야 한다."""
 import asyncio, glob, os, pty, select, signal, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit")); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_uikit"))
+sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit")); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "uikit"))
 from harness import checker
 check, finish = checker()
 

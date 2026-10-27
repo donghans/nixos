@@ -2,7 +2,7 @@
 """agents(에이전트별 어댑터) 시험 — DB 없이 순수 함수만. Claude Code 어댑터의 파싱·경로 규칙과, 어댑터를 더하면 경로·적재 목록·표식에 반영되는지(교체 가능성)."""
 import json, os, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker
 check, finish = checker()
 import agents

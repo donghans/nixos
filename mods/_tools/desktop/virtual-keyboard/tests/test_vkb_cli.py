@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""vkb CLI 통합 시험: 가짜 hyprctl/systemctl/posture 로 show/hide/size/auto/apply-posture 흐름을 확인. (가짜 도구는 mods/_tools/_lib/_testkit 공용)"""
+"""vkb CLI 통합 시험: 가짜 hyprctl/systemctl/posture 로 show/hide/size/auto/apply-posture 흐름을 확인. (가짜 도구는 mods/_tools/_lib/testkit 공용)"""
 import json, os, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker
 from fakes import Sandbox
 check, finish = checker()

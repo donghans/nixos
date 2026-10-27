@@ -7,7 +7,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE);
 TMP = tempfile.mkdtemp(prefix="procctl-test-")
 ENV = dict(os.environ, PROCUI_STATE_DIR=os.path.join(TMP, "state"), PROCUI_CONFIG=os.path.join(TMP, "none.toml"))
 os.environ.update(PROCUI_STATE_DIR=ENV["PROCUI_STATE_DIR"], PROCUI_CONFIG=ENV["PROCUI_CONFIG"])
-for p in (ROOT, os.path.join(DATA, "observe"), os.path.join(os.path.dirname(DATA), "_lib", "_testkit")):
+for p in (ROOT, os.path.join(DATA, "observe"), os.path.join(os.path.dirname(DATA), "_lib", "testkit")):
     sys.path.insert(0, p)
 import procplan as pp, procscan as ps
 from harness import checker

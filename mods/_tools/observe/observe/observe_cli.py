@@ -20,10 +20,10 @@
 import argparse, collections, io, json, math, os, re, subprocess, sys, time, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_lib", "_ctlkit"))   # 소스 트리(설치본은 같은 디렉터리에 복사됨)
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_lib", "ctlkit"))   # 소스 트리(설치본은 같은 디렉터리에 복사됨)
 import ctlkit
 import observe_core as core
-from ctlkit import Out    # 공통 봉투·실행 틀(mods/_tools/_lib/_ctlkit)
+from ctlkit import Out    # 공통 봉투·실행 틀(mods/_tools/_lib/ctlkit)
 import observe_stats as stats
 import observe_explain as ex
 import observe_browser as br

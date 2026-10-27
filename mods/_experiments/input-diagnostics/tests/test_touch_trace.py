@@ -2,7 +2,7 @@
 """touch-trace 파서/요약 시험(실측 기록에서 뽑은 줄 형식 포함)."""
 import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "..", "_tools", "_lib", "_testkit"))
+sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "..", "_tools", "_lib", "testkit"))
 import touch_trace as tt
 from harness import checker
 check, finish = checker()

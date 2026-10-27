@@ -27,8 +27,8 @@ from textual.widgets import DataTable, Footer, Input, Static
 
 try:
     import uikit                                   # 배포: 같은 디렉터리에 복사됨
-except ImportError:                                # 소스 트리: ../_uikit
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_lib", "_uikit"))
+except ImportError:                                # 소스 트리: ../uikit
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_lib", "uikit"))
     import uikit
 
 import tmuxsess as tm

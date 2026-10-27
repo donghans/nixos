@@ -2,7 +2,7 @@
 """uikit 시험(textual 필요): CSS 가 실제로 파싱되는지, 도움말 키 목록 생성, box 제목, 도움말 화면 열고 닫기, 포커스 일시정지."""
 import asyncio, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "_testkit"))
+sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "testkit"))
 from harness import checker
 check, finish = checker()
 try:

@@ -25,7 +25,7 @@ from textual.widgets import Collapsible, DataTable, Footer, Input, Select, Stati
 try:
     import uikit
 except ImportError:
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_lib", "_uikit"))
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_lib", "uikit"))
     import uikit
 import observe_core as core
 import observe_explain as ex

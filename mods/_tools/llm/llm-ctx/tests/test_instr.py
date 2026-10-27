@@ -4,7 +4,7 @@
 2부(임시 Postgres): 두 「기기」(같은 저장소 URL, 다른 체크아웃)에서 채택→갱신→앞섬→충돌→강제, 비밀 거부, 훅(SessionStart) 실행. psycopg·postgres 17 이 없으면 건너뛴다."""
 import json, os, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, ROOT); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker
 check, finish = checker()
 import ctx_instr as ci

@@ -1,6 +1,6 @@
 import asyncio, os, sys, time, tempfile
 R="/home/donghans/nixos/mods/_tools"
-for p in ("observe","_lib/_uikit","procui","llm-sessions","notif","clipboard","display","../_data/claude-skills/donghans-host-resources/scripts"): sys.path.insert(0, f"{R}/{p}")
+for p in ("observe","_lib/uikit","procui","llm-sessions","notif","clipboard","display","../_data/claude-skills/donghans-host-resources/scripts"): sys.path.insert(0, f"{R}/{p}")
 which=sys.argv[1]
 def make():
     if which=="usageui":

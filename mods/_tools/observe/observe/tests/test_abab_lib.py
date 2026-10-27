@@ -2,7 +2,7 @@
 """abab_lib.sh 시험(가짜 observectl·가짜 덮개/AC 파일): 정상 흐름, 신호 때 복구 후 종료, 도중 덮개 변경 중단, 조건 검증 실패 중단, 복구는 정확히 한 번."""
 import os, signal, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker
 check, finish = checker()
 LIB = os.path.join(ROOT, "ab", "abab_lib.sh")

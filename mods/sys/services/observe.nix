@@ -19,8 +19,8 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
     # procui(프로세스 관리 TUI) — 같은 디렉터리의 observe_apps·hostmetrics·uikit 을 import 하므로 한 디렉터리에 둔다
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/observe/process-manager + "/${f}"} $out/${f}") ["procscan.py" "procgroups.py" "procactions.py" "procplan.py" "procui.py" "procctl.py"]}
     cp ${../../_tools/observe/observe/power_knobs.py} $out/power_knobs.py
-    cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
-    cp ${../../_tools/_lib/_ctlkit/ctlkit.py} $out/ctlkit.py   # ctl 공통 --json 봉투(observectl·procctl)
+    cp ${../../_tools/_lib/uikit/uikit.py} $out/uikit.py
+    cp ${../../_tools/_lib/ctlkit/ctlkit.py} $out/ctlkit.py   # ctl 공통 --json 봉투(observectl·procctl)
     # 호스트 측정·판정 모듈의 정본은 donghans-host-resources 스킬 폴더(복제본을 따로 두지 않는다). usageui 실시간 탭·procui 가 import 한다
     cp ${../../_data/claude-skills/donghans-host-resources/scripts/hostmetrics.py} $out/hostmetrics.py
   '';

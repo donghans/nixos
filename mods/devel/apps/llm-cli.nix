@@ -103,7 +103,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   ctxSrc = pkgs.runCommand "llm-ctx-src" {} ''
     mkdir -p $out
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_docs.py" "ctxdata.py" "ctxchart.py" "ctxui.py"]}
-    cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
+    cp ${../../_tools/_lib/uikit/uikit.py} $out/uikit.py
     mkdir -p $out/agents
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx/agents + "/${f}"} $out/agents/${f}") ["__init__.py" "claude.py"]}
   '';
@@ -119,7 +119,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
     mkdir -p $out
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-sessions + "/${f}"} $out/${f}") ["llm_sessions.py" "tmuxsess.py" "claude-tmux" "claude-tmux.conf"]}
     chmod +x $out/claude-tmux
-    cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
+    cp ${../../_tools/_lib/uikit/uikit.py} $out/uikit.py
   '';
   tmuxEnv = ''
     export CLAUDE_TMUX_BIN=${pkgs.tmux}/bin/tmux CLAUDE_TMUX_CONF=${sessionsSrc}/claude-tmux.conf CLAUDE_RUN_BIN=${claudeRun}

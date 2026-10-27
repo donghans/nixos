@@ -3,7 +3,7 @@
 import asyncio, os, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE); DATA = os.path.dirname(ROOT)
 os.environ.setdefault("XDG_STATE_HOME", tempfile.mkdtemp(prefix="clipui-test-")); os.environ.setdefault("XDG_DATA_HOME", os.environ["XDG_STATE_HOME"])
-sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(DATA), "_lib", "_testkit")); sys.path.insert(0, os.path.join(os.path.dirname(DATA), "_lib", "_uikit"))
+sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(DATA), "_lib", "testkit")); sys.path.insert(0, os.path.join(os.path.dirname(DATA), "_lib", "uikit"))
 from harness import checker
 import clipui
 from textual.widgets import Input, Select

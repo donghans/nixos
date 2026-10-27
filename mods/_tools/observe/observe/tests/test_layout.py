@@ -3,7 +3,7 @@
 (f-string 의 :<n 은 글자 수 기준이라 한글 표가 어긋난다 — 실제 터미널 촬영에서 용어 탭·범례가 어긋난 것을 찾아 고쳤다.)"""
 import os, re, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE); DATA = os.path.dirname(ROOT)
-for p in (ROOT, os.path.join(os.path.dirname(DATA), "_lib", "_uikit"), os.path.join(DATA, "..", "..", "_data", "claude-skills", "donghans-host-resources", "scripts"), os.path.join(DATA, "procui"), os.path.join(os.path.dirname(DATA), "_lib", "_testkit")):
+for p in (ROOT, os.path.join(os.path.dirname(DATA), "_lib", "uikit"), os.path.join(DATA, "..", "..", "_data", "claude-skills", "donghans-host-resources", "scripts"), os.path.join(DATA, "procui"), os.path.join(os.path.dirname(DATA), "_lib", "testkit")):
     sys.path.insert(0, p)
 from rich.cells import cell_len
 from rich.text import Text

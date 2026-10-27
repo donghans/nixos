@@ -9,7 +9,7 @@
   - select_box / sync_select : 값을 키로 순환하던 설정(정렬·단위·뷰…)을 제목 달린 드롭다운 칸으로 보여 주는 도우미(`.selects` 줄에 넣는다). 키는 그대로 두고 드롭다운이 같이 따라간다
   - pad / wrap_cells / terms_text : 한글(2칸 폭) 기준 칸 맞춤·줄바꿈(f-string 의 :<n 은 글자 수라 한글 표가 어긋남)
   - PauseOnBlurMixin   : 창이 포커스를 잃으면 주기 갱신을 멈춘다(보이지 않는 화면 갱신이 PSR 을 방해하지 않도록). 앱이 pause_on_blur() 로 조건을 바꿀 수 있다
-각 앱은 `CSS = uikit.BASE_CSS + (앱 고유 규칙 문자열)` 로 쓰고 같은 디렉터리(배포 시) 또는 ../_uikit(소스)에서 이 파일을 가져온다.
+각 앱은 `CSS = uikit.BASE_CSS + (앱 고유 규칙 문자열)` 로 쓰고 같은 디렉터리(배포 시) 또는 ../uikit(소스)에서 이 파일을 가져온다.
 """
 from __future__ import annotations
 

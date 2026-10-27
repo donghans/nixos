@@ -24,4 +24,4 @@ Nix 모듈(`mods/sys|gui|devel`)이 설치해 실행하는 도구(Python·쉘)�
 | `desktop/hwctl/` | 노트북 하드웨어 제어 쉘 스크립트(볼륨·밝기·덮개·터치 토글) | `desktop/hwctl/README.md` |
 | `services/qa-desktop/` | 화면 확인용 QA 데스크톱 VM 제어 | `services/qa-desktop/README.md` |
 | `services/tailpass/` | 외부 프로젝트(tailpass)의 `deploy/nix/*` 와 `.deb` 를 베낀 사본(`sync.sh`) | `services/tailpass/` 머리말 |
-| `_lib/` | 앱들이 공유하는 라이브러리: `_uikit`(TUI 공통 틀)·`_ctlkit`(CLI 의 `--json` 봉투)·`_testkit`(시험 도구) | 각 파일 머리말 |
+| `_lib/` | 앱들이 공유하는 라이브러리: `uikit`(TUI 공통 틀)·`ctlkit`(CLI 의 `--json` 봉투)·`testkit`(시험 도구) | 각 파일 머리말 |

@@ -9,7 +9,7 @@
 - ok=false 여도 data 가 함께 올 수 있다(예: procctl plan 이 대상 0개일 때 제외 목록).
 - 종료 코드는 봉투의 exit_code 와 프로세스 종료 코드가 같다(도구별 의미는 그 도구의 스킬 문서).
 - NaN·Infinity 는 JSON 이 표현하지 못하므로 None 으로 바꾼다.
-이 파일은 표준 라이브러리만 쓴다. 여러 도구가 같은 디렉터리로 복사해 import 한다(정본: mods/_tools/_lib/_ctlkit/ctlkit.py).
+이 파일은 표준 라이브러리만 쓴다. 여러 도구가 같은 디렉터리로 복사해 import 한다(정본: mods/_tools/_lib/ctlkit/ctlkit.py).
 """
 from __future__ import annotations
 

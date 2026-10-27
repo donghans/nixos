@@ -6,7 +6,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 import posture_daemon as pd
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker
 from fakes import Sandbox
 check, finish = checker()

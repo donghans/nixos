@@ -24,7 +24,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Input, Select, Static
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-for _p in (HERE, os.path.join(HERE, "..", "observe"), os.path.join(HERE, "..", "..", "_lib", "_uikit"),
+for _p in (HERE, os.path.join(HERE, "..", "observe"), os.path.join(HERE, "..", "..", "_lib", "uikit"),
            os.path.join(HERE, "..", "..", "..", "_data", "claude-skills", "donghans-host-resources", "scripts")):
     if os.path.isdir(_p) and _p not in sys.path:
         sys.path.append(_p)       # 설치본은 모든 모듈이 이 디렉터리에 같이 복사되므로 위 경로는 소스에서 직접 실행할 때만 쓰인다

@@ -25,8 +25,8 @@ import sys
 
 try:
     import uikit                                   # 배포: 같은 디렉터리에 복사됨
-except ImportError:                                # 소스 트리: ../_uikit
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_lib", "_uikit"))
+except ImportError:                                # 소스 트리: ../uikit
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_lib", "uikit"))
     import uikit
 
 WIDE_COLUMNS = 80    # 이 폭 미만이면 그룹 패널을 숨김(F6 으로 다시 보임)

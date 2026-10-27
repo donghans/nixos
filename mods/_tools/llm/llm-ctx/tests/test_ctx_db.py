@@ -3,7 +3,7 @@
 필요: psycopg 가 있는 python, postgres 17 바이너리(환경변수 CTX_PG_BIN 또는 /nix/store/*-postgresql-and-plugins-17*/bin). 없으면 건너뛴다(종료 코드 0)."""
 import glob, json, os, re, shutil, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker
 check, finish = checker()
 try:

@@ -45,7 +45,7 @@ mkPartOf "mods.gui" ({
   clipuiDir = pkgs.runCommand "clipui-py" {} ''
     mkdir -p $out
     cp ${clipmetaDir}/clipmeta.py $out/clipmeta.py
-    cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
+    cp ${../../_tools/_lib/uikit/uikit.py} $out/uikit.py
     cp ${pkgs.writeText "clipui.py" (builtins.replaceStrings ["@clipctl@" "@wlcopy@"] ["${clipctl}/bin/clipctl" wlCopy] (src "clipui.py"))} $out/clipui.py
   '';
   clipui = pkgs.writeShellScriptBin "clipui" ''exec ${py}/bin/python3 ${clipuiDir}/clipui.py "$@"'';

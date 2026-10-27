@@ -3,7 +3,7 @@
 import os, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 SK = os.path.join(os.path.dirname(ROOT), "..", "..", "_data", "claude-skills", "donghans-host-resources", "scripts")
-sys.path.insert(0, SK); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, SK); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 import hostmetrics as hm
 from harness import checker
 check, finish = checker()

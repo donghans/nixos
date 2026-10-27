@@ -5,7 +5,7 @@ import asyncio, json, os, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE); DATA = os.path.dirname(ROOT)
 TMP = tempfile.mkdtemp(prefix="procui-app-test-")
 os.environ["PROCUI_CONFIG"] = os.path.join(TMP, "none.toml"); os.environ["PROCUI_STATE_DIR"] = os.path.join(TMP, "state")
-for p in (ROOT, os.path.join(DATA, "observe"), os.path.join(os.path.dirname(DATA), "_lib", "_testkit"), os.path.join(os.path.dirname(DATA), "_lib", "_uikit"), os.path.join(DATA, "..", "..", "_data", "claude-skills", "donghans-host-resources", "scripts")):
+for p in (ROOT, os.path.join(DATA, "observe"), os.path.join(os.path.dirname(DATA), "_lib", "testkit"), os.path.join(os.path.dirname(DATA), "_lib", "uikit"), os.path.join(DATA, "..", "..", "_data", "claude-skills", "donghans-host-resources", "scripts")):
     sys.path.insert(0, p)
 import procui, procactions as pa, procscan as ps
 from textual.widgets import DataTable, Input, Static

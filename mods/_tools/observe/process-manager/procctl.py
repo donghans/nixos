@@ -25,7 +25,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-for _p in (HERE, os.path.join(HERE, "..", "observe"), os.path.join(HERE, "..", "..", "_lib", "_ctlkit")):
+for _p in (HERE, os.path.join(HERE, "..", "observe"), os.path.join(HERE, "..", "..", "_lib", "ctlkit")):
     if os.path.isdir(_p) and _p not in sys.path:
         sys.path.append(_p)
 import ctlkit

@@ -3,7 +3,7 @@
 실제 시스템 프로세스에는 신호를 보내지 않는다 — 시험이 직접 띄운 고유 이름의 sleep 자식 프로세스만 대상."""
 import os, shutil, signal, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE); DATA = os.path.dirname(ROOT)
-for p in (ROOT, os.path.join(DATA, "observe"), os.path.join(os.path.dirname(DATA), "_lib", "_testkit"), os.path.join(DATA, "..", "..", "_data", "claude-skills", "donghans-host-resources", "scripts")):
+for p in (ROOT, os.path.join(DATA, "observe"), os.path.join(os.path.dirname(DATA), "_lib", "testkit"), os.path.join(DATA, "..", "..", "_data", "claude-skills", "donghans-host-resources", "scripts")):
     sys.path.insert(0, p)
 import procscan as ps, procgroups as pg, procactions as pa
 import observe_apps

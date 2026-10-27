@@ -12,7 +12,7 @@ def reset():
     shutil.rmtree(os.environ["DISPLAYCTL_STATE"], ignore_errors=True); shutil.rmtree(os.environ["DISPLAYCTL_CONF"], ignore_errors=True)
 def mons(): return {m.name: m for m in dc.get_monitors()}
 def run(*a): return dc.main(list(a))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "_lib", "_testkit"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "_lib", "testkit"))
 from harness import checker
 check, finish = checker(verbose=True)
 

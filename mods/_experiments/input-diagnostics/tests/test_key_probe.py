@@ -2,7 +2,7 @@
 """key_probe 시험: 지정한 키만 이름별로 세고(눌림만), 나머지 키 이벤트는 개수로만 합산하며 내용은 기록하지 않는다."""
 import os, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "..", "_tools", "_lib", "_testkit"))
+sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "..", "_tools", "_lib", "testkit"))
 import key_probe as kp
 from harness import checker
 check, finish = checker()

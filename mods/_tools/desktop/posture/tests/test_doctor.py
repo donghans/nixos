@@ -2,7 +2,7 @@
 """posture-doctor 시험: 가짜 systemctl/hyprctl/journalctl 과 임시 디렉터리로 각 고장 상황을 재현해 올바른 등급이 나오는지 확인."""
 import json, os, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker
 from fakes import Sandbox
 check, finish = checker()

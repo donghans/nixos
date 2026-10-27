@@ -5,7 +5,7 @@ description: 이 환경의 ctl류 명령(observectl·procctl·hostres·donghans 
 
 # donghans-ctl — ctl 명령 색인과 `--json` 봉투
 
-사람은 TUI 를 보고, LLM 세션은 ctl 을 쓴다. ctl 은 미려한 표보다 **알아듣기 쉬운 구조**가 중요하므로 `--json` 을 주고, 가능한 한 같은 봉투를 쓴다(정본 `mods/_tools/_lib/_ctlkit/ctlkit.py`).
+사람은 TUI 를 보고, LLM 세션은 ctl 을 쓴다. ctl 은 미려한 표보다 **알아듣기 쉬운 구조**가 중요하므로 `--json` 을 주고, 가능한 한 같은 봉투를 쓴다(정본 `mods/_tools/_lib/ctlkit/ctlkit.py`).
 
 ## 공통 봉투 (`--json`)
 ```
