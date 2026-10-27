@@ -34,6 +34,7 @@ from textual.widgets import (
     LoadingIndicator,
     OptionList,
     ProgressBar,
+    Select,
     Static,
     TextArea,
 )
@@ -306,21 +307,24 @@ class Preview(TextArea):
 class ClipUI(uikit.HelpMixin, App):
     TITLE = "클립보드"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
-        ('검색', '퍼지 + 항목 내용 전체. 필터: app:이름 · >10k(크기) · is:sensitive · is:dup. Enter = 복사'),
+        ('검색', '퍼지 + 항목 내용 전체. 필터: app:이름 · >10k(크기) · is:sensitive · is:dup. Enter = 복사(창은 그대로 둔다)'),
         ('체크·삭제', 'F2/Space 체크 · F3 전체 체크 · F4 해제 · F8(d) 삭제 — 체크한 항목을 일괄 삭제'),
-        ('정렬', 'F6: 최신순 · 크기순 · 많이 쓴 순 · 많이 복사된 순 · 오래된 순'),
+        ('정렬', 'F6 으로 순환하거나 검색창 옆 「정렬」 드롭다운에서 고른다: 최신순 · 크기순 · 많이 쓴 순 · 많이 복사된 순 · 오래된 순'),
         ('미리보기', '전문 미리보기와 부분 복사. F7 로 켬/끔(창이 낮으면 자동으로 숨김)'),
         ('부가 정보', '저장 시점의 시각·출처 앱·복사/사용 횟수(clipmeta 사이드카) — 기록을 시작하기 전에 복사된 항목은 「부가 정보 없음」'),
         ('통계·최적화', 'F9 통계, F10 DB 최적화'),
     ]
     HELP_NOTES = [
         '검색창이 기본 포커스라 q 는 글자로 들어간다 — 종료는 Esc(검색 지운 뒤) 또는 목록에서 q',
+        '빠른 붙여넣기는 Super+V(wofi). 이 창은 관리용이라 Enter 로 복사해도 닫히지 않는다 — 복사 후 닫으려면 Esc / Ctrl+Q',
     ]
     ENABLE_COMMAND_PALETTE = False  # 푸터의 ^p palette 안내 숨김 (쓰지 않음)
 
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
-    #search { background: #000000; border: round #595959; }
+    #topbar { height: 3; }
+    #search { background: #000000; border: round #595959; width: 1fr; }
     #search:focus { border: round #33ccff; }
+    #topbar Select { width: 26; }
     #main { height: 1fr; layout: horizontal; }
     #main.narrow { layout: vertical; }
     ClipList { width: 1fr; height: 1fr; background: #000000; border: round #595959; padding: 0 1; text-wrap: nowrap; text-overflow: ellipsis; }
@@ -343,7 +347,7 @@ class ClipUI(uikit.HelpMixin, App):
 
     BINDINGS = [
         *uikit.HelpMixin.HELP_BINDINGS,
-        Binding("enter", "copy_quit", "복사", priority=True),
+        Binding("enter", "copy", "복사", priority=True),
         Binding("escape", "escape", "지우기/종료"),
         Binding("down", "move(1)", "아래", show=False),
         Binding("up", "move(-1)", "위", show=False),
@@ -377,10 +381,12 @@ class ClipUI(uikit.HelpMixin, App):
 
     # ---------- 화면 구성 ----------
     def compose(self) -> ComposeResult:
-        yield Input(
-            placeholder="검색 — 내용 전체에서도 찾습니다   필터: app:이름  >10k  is:sensitive  is:dup   (Enter: 복사)",
-            id="search",
-        )
+        with Horizontal(id="topbar", classes="selects"):
+            yield Input(
+                placeholder="검색 — 내용 전체에서도 찾습니다   필터: app:이름  >10k  is:sensitive  is:dup   (Enter: 복사)",
+                id="search",
+            )
+            yield uikit.select_box([(m, i) for i, m in enumerate(SORT_MODES)], self.sort_mode, "sel-sort", "정렬 (F6)")
         with Container(id="main"):
             yield ClipList(id="list")
             with Vertical(id="preview-box"):
@@ -646,7 +652,13 @@ class ClipUI(uikit.HelpMixin, App):
         else:
             self.exit()
 
-    def action_copy_quit(self) -> None:
+    def check_action(self, action: str, parameters: tuple) -> bool | None:
+        """정렬 드롭다운에 포커스가 있으면 Enter 는 드롭다운을 여는 데 쓰이도록 복사 바인딩(우선순위)을 끈다."""
+        if action == "copy" and isinstance(self.focused, Select):
+            return False
+        return super().check_action(action, parameters)
+
+    def action_copy(self) -> None:
         # Enter 는 우선순위 바인딩이라 대화상자에서도 여기로 오므로, 대화상자에서는 그 화면의 동작으로 넘긴다
         screen = self.screen
         if isinstance(screen, ConfirmScreen):
@@ -665,7 +677,8 @@ class ClipUI(uikit.HelpMixin, App):
         except Exception:  # noqa: BLE001 — 부가 정보 때문에 복사가 막히면 안 됨
             pass
         copy_bytes(fetch_raw(entry.id))
-        self.exit()
+        # 이 창은 관리용(빠른 붙여넣기는 Super+V 의 wofi)이라 복사해도 닫지 않는다 — 알림으로 복사됐음을 알린다
+        self.notify(f"복사됨: {(entry.preview or '').strip()[:50]}", timeout=2)
 
     def action_copy_selection(self) -> None:
         preview = self.query_one("#preview", Preview)
@@ -696,8 +709,17 @@ class ClipUI(uikit.HelpMixin, App):
 
     def action_cycle_sort(self) -> None:
         self.sort_mode = (self.sort_mode + 1) % len(SORT_MODES)
+        uikit.sync_select(self.query_one("#sel-sort", Select), self.sort_mode)
         self.refresh_list()
         self.notify(f"정렬: {SORT_MODES[self.sort_mode]}")
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """정렬 드롭다운으로 고른다(현재와 같으면 F6 으로 바꾼 값이 되돌아온 것이라 무시). 고른 뒤엔 검색창으로 포커스를 돌려 바로 입력·Enter 복사가 되게 한다."""
+        if event.select.id != "sel-sort" or event.value == self.sort_mode:
+            return
+        self.sort_mode = event.value
+        self.refresh_list()
+        self.query_one("#search", Input).focus()
 
     def action_reload(self) -> None:
         self.reload()
