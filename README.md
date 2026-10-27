@@ -83,7 +83,8 @@ nixos/
 │   ├── sys/            # 시스템 기반 (base, fonts, vfs, services, utils)
 │   ├── gui/            # GUI 환경 (Hyprland 번들, apps, utils)
 │   ├── devel/          # 개발 도구 (base, toolchains, apps)
-│   └── _data/          # 비-Nix 데이터 파일 (zsh 스크립트, CSS, XML 등)
+│   ├── _data/          # 비-Nix 데이터 파일 (zsh 스크립트, CSS, XML, 패치 등) — Nix 가 readFile·경로로 읽는 것
+│   └── _tools/         # 실행되는 도구·앱(Python·쉘)과 시험. 공용 라이브러리는 _lib/ (uikit·ctlkit·testkit)
 ├── hosts/              # 호스트별 고유 설정 (평탄 구조)
 │   ├── _base.toml      # 전역 메타데이터 (username, git, system)
 │   ├── _preset.*.toml  # 프리셋 정의 (workstation/server/iso)

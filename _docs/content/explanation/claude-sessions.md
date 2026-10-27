@@ -1,6 +1,6 @@
 # claude-sessions — ssh 와 kitty 에서 같은 claude 세션 이어 쓰기
 
-작성 2026-10-23. 구현: `mods/_data/claude-sessions/`, 배선: `mods/devel/apps/llm-cli.nix`. 시험: `mods/_data/claude-sessions/tests/test_claude_sessions.py`.
+작성 2026-10-23. 구현: `mods/_tools/claude-sessions/`, 배선: `mods/devel/apps/llm-cli.nix`. 시험: `mods/_tools/claude-sessions/tests/test_claude_sessions.py`.
 
 ## 사용자가 원한 것(2026-10-22~23 확인)
 - kitty 의 다른 창·VT 는 그대로, **LLM 도구(claude)에만** tmux 를 붙인다. 세션은 사용자가 끝낼 때 끝낸다.

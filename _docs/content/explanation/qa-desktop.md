@@ -9,7 +9,7 @@
 | 스위치 | `mods/sys/services/qa-desktop.nix` (호스트 toml `qa-desktop = true`, 프리셋 기본 꺼짐) | 켠 호스트의 `~/.claude/CLAUDE.md` 에 지침을 넣고 스킬을 등록. 설치·설정은 하지 않는다 |
 | 지침 | `mods/devel/apps/llm-cli.nix` 의 `qaDesktopInstructions` | 호출 조건 + 승인 필요 작업 + 데스크톱 번호 묻지 않기 |
 | 스킬 | `mods/_data/claude-skills/donghans-qa-desktop/` | 접속·실행·창 배치·공유 규칙·복구 본문 + `scripts/ws.py`·`snap.py` |
-| VM 선언·생성 | `mods/sys/services/qa-desktop.nix` 의 `decl`(크기·이미지·프로젝트 규칙) + `qa-desktop-ctl`(`mods/_data/qa-desktop/qa_desktop_ctl.py`) + `provision.sh` | 사용자 서비스 `qa-desktop-ensure` 가 로그인 때 `ensure`: **없으면 만들고, 있으면 건드리지 않는다**(2026-10-23) |
+| VM 선언·생성 | `mods/sys/services/qa-desktop.nix` 의 `decl`(크기·이미지·프로젝트 규칙) + `qa-desktop-ctl`(`mods/_tools/qa-desktop/qa_desktop_ctl.py`) + `provision.sh` | 사용자 서비스 `qa-desktop-ensure` 가 로그인 때 `ensure`: **없으면 만들고, 있으면 건드리지 않는다**(2026-10-23) |
 | 프로젝트 쪽 | VM 안 `~/qa-playwright/`(ToT 소유, 공유 Playwright 1.63·node 22), `flow_<프로젝트>/` | 스크립트는 프로젝트별 디렉터리 |
 
 ## 왜 이렇게 만들었나
@@ -51,7 +51,7 @@
 ## 처음 보는 세션·프로젝트가 막히지 않게 (2026-10-23 감사)
 - 스킬 `donghans-qa-desktop` 에 **사전 점검**(VM·키·접속·프로젝트 규칙·점유 확인)을 넣었다. 어긋나면 임의로 만들거나 고치지 않고 사용자에게 알린다(VM 생성·설정은 승인 필요 작업).
 - **점유 알림은 `scripts/occupy.py`(VM 안의 `/tmp/qa-desktop-occupancy/`)가 기본 수단**이다: 세션 간 메시지 도구가 없는 에이전트도 같은 정보를 읽고 쓴다. 엄격한 락이 아니라 알림이지만 `start` 는 「기록 후 확인」이라 충돌하면 **내 기록을 지우고 양보(종료 코드 1)** 한다(`--force` 로 강제). 2026-10-23 `list`→`start` 사이에 상대가 시작해 겹칠 뻔한 일을 계기로 바꿨다. 메시지 도구는 가속 수단.
-- **역할 분리와 자가 조정**(2026-10-23, 사용자 결정): 프로젝트마다 수정 세션과 QA 세션을 두고, 수정 세션은 자기 QA 세션에만 요청한다. 한 개발 세션이 여러 프로젝트 QA 세션을 중재하던 것은 충돌 여부를 확인하는 임시 체제였다. 확인 결과 충돌 지점은 ① 동시 사용(→ `occupy.py start --wait` 로 순번 대기, 낡은 기록 자동 정리) ② 창 배치(→ 프로젝트별 전용 데스크톱: genple=2, tot=3) ③ 보이는 데스크톱 하나뿐인 캡처·전환(→ 직렬 사용으로만 해소) ④ 재프로비저닝(GDM 재시작, 점유 없을 때·승인 후)이고, 모두 스킬 규칙과 환경으로 해소되므로 QA 세션끼리 중재 없이 동작한다. 이후 사용자가 「보이는 것만 골라 보면 되니 동시 실행도 가능해야 한다」고 짚어 점유를 **배타/공유** 두 모드로 나눴다(`start --shared`: 전환·snap·클릭 없이 page 캡처만 쓰는 시험은 서로 동시 허용, 보이는 화면을 독점하는 시험은 배타). 판정 시험: `mods/_data/qa-desktop/tests/test_occupy.py`.
+- **역할 분리와 자가 조정**(2026-10-23, 사용자 결정): 프로젝트마다 수정 세션과 QA 세션을 두고, 수정 세션은 자기 QA 세션에만 요청한다. 한 개발 세션이 여러 프로젝트 QA 세션을 중재하던 것은 충돌 여부를 확인하는 임시 체제였다. 확인 결과 충돌 지점은 ① 동시 사용(→ `occupy.py start --wait` 로 순번 대기, 낡은 기록 자동 정리) ② 창 배치(→ 프로젝트별 전용 데스크톱: genple=2, tot=3) ③ 보이는 데스크톱 하나뿐인 캡처·전환(→ 직렬 사용으로만 해소) ④ 재프로비저닝(GDM 재시작, 점유 없을 때·승인 후)이고, 모두 스킬 규칙과 환경으로 해소되므로 QA 세션끼리 중재 없이 동작한다. 이후 사용자가 「보이는 것만 골라 보면 되니 동시 실행도 가능해야 한다」고 짚어 점유를 **배타/공유** 두 모드로 나눴다(`start --shared`: 전환·snap·클릭 없이 page 캡처만 쓰는 시험은 서로 동시 허용, 보이는 화면을 독점하는 시험은 배타). 판정 시험: `mods/_tools/qa-desktop/tests/test_occupy.py`.
 - 프로젝트 지침 파일 규약·`context.py --init`·worktree 처리는 스킬 `donghans-qa` §0-A, 에이전트 결합 분석은 `llm-tooling-portability.md`.
 
 ## 운영 사실 (VM)

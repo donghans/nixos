@@ -119,11 +119,11 @@
       lockedMsg = "텐트/태블릿 모드에서는 켜짐으로 고정돼 있습니다 (힌지를 열면 직접 조절 가능)";
     };
 
-    # 외부 키보드 판정/감시 CLI (mods/_data/extkbd/extkbd.py). 도구 경로를 고정해 서비스 PATH 에 기대지 않는다.
+    # 외부 키보드 판정/감시 CLI (mods/_tools/extkbd/extkbd.py). 도구 경로를 고정해 서비스 PATH 에 기대지 않는다.
     # (감시가 다시 실행할 정책 경로는 정책이 이 CLI 를 참조하므로 순환을 피하려 서비스 쪽 환경 변수 EXTKBD_POLICY 로 준다)
     extkbdCli = pkgs.writeShellScriptBin "extkbd" ''
       export EXTKBD_UDEVADM=${pkgs.systemd}/bin/udevadm EXTKBD_BUSCTL=${pkgs.systemd}/bin/busctl EXTKBD_GDBUS=${lib.getExe' pkgs.glib "gdbus"}
-      exec ${pkgs.python3}/bin/python3 -I ${../../_data/extkbd/extkbd.py} "$@"
+      exec ${pkgs.python3}/bin/python3 -I ${../../_tools/extkbd/extkbd.py} "$@"
     '';
 
     # 내장 키보드 이름(호스트가 지정). 비어 있으면 정책이 키보드를 건드리지 않는다(알려지지 않은 기기에서 키보드를 잘못 끄지 않도록).

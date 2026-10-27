@@ -1,6 +1,6 @@
 # observectl / observe — 관측 시스템 (전력·프로세스 프로파일, 유틸리티 이벤트 로그)
 
-전력 측정과 우리가 만든 유틸리티(displayui, dispctl, posture 등)를 **추정이 아니라 기록으로** 확인하기 위한 도구 묶음. 본체는 `mods/_data/observe/`, NixOS 모듈은 `mods/sys/services/observectl.nix`(호스트 toml 의 `[mods.sys.services] observectl = true`).
+전력 측정과 우리가 만든 유틸리티(displayui, dispctl, posture 등)를 **추정이 아니라 기록으로** 확인하기 위한 도구 묶음. 본체는 `mods/_tools/observe/`, NixOS 모듈은 `mods/sys/services/observectl.nix`(호스트 toml 의 `[mods.sys.services] observectl = true`).
 Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 Netdata 가 못 보는 것을 맡는다: 스레드 단위 자발적 문맥 전환, **누가 CPU 를 깨우는지(ftrace·eBPF)**, 패키지 C-state(MSR), 유틸리티 이벤트, 실험 표지와 통계 판정.
 
 ## 켜고 끄기 (오버헤드 0 설계)
@@ -53,7 +53,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 - **표지(mark)가 한 표본 늦게 반영되던 버그**(2026-10-20): 수집기가 제어 파일을 루프 시작에서만 읽어서, `observectl mark` 변경이 다음 표본에야 반영됐다. 실험 사이의 `mark --clear` 뒤 잔여 표본이 이전 조건으로 남아 `ab` 의 구간이 5개(BABAB)로 갈리고 "무효" 판정이 났다. 수정: 표본 직전에 제어 파일을 다시 읽고, `ab` 는 표본 5개 미만 구간을 제외(`--min-samples`).
 - **스크립트의 sudo 경로**: PATH 앞에 `/run/current-system/sw/bin` 을 두면 setuid 가 아닌 `sudo` 가 잡혀 조건이 안 바뀐다 → `/run/wrappers/bin` 을 앞에 둘 것. 그래서 `ab --expect-a/--expect-b` 로 실제 조건을 검증한다.
 
-## 예제 스크립트 (`mods/_data/observe/examples/`)
+## 예제 스크립트 (`mods/_tools/observe/examples/`)
 - `abab_lib.sh` — **번갈아(ABAB) 측정 틀**(신호 처리·덮개/AC 변화 자동 중단·적용 확인·복구 한 번·`ab` 자동 검증). 구간마다 `~/.local/state/observe/ab-runs/<T0>-<스크립트>.tsv` 에 한 줄(조건·시작·끝·덮개·AC·유효 여부)을 남기고, 도중에 중단돼도(덮개 열림·신호 등) **조건이 유지된 채 끝낸 쌍까지** 자동으로 분석한다(`ab` 가 2쌍 이상을 요구해 2쌍 미만이면 기록만 남음). 결과는 `<…>.tsv.result` 로도 저장. 새 시험은 이 틀에 조건 적용 함수만 채워서 만든다. `netdata_abab.sh` 가 사용 예.
 - `wifi_abab.sh` — 검증형 Wi-Fi 절전 A/B(바꾼 직후 실제 값 확인, `--expect-*` 로 판정 검증). 틀 도입 이전 스크립트.
 - `wifi_switch.sh` — Wi-Fi 프로필 전환 + 게이트웨이 핑 실패 시 자동 복귀(원격 세션 보호).
@@ -74,7 +74,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 
 ## `usageui` — 전력·자원 사용 습관 TUI (2026-10-21)
 
-`usageui` (앱 런처에서는 "Usage Monitor", `usageui.desktop`) 는 수집기가 남긴 표본을 **시간 범위 기준**으로 조회해 보여주는 Textual 앱이다(옛 `powerui` 를 제로베이스로 다시 만들어 교체했고 별칭은 없다). 본체는 `mods/_data/observe/` 의 `usageui.py`(화면) · `usageview.py`(문구·표 행·라벨) · `usagedata.py`(범위 모델·요약·배터리 추정·하드웨어 정보) · `usagechart.py`(차트·띠) · `usagegraph.py`(점자 그래프 계산).
+`usageui` (앱 런처에서는 "Usage Monitor", `usageui.desktop`) 는 수집기가 남긴 표본을 **시간 범위 기준**으로 조회해 보여주는 Textual 앱이다(옛 `powerui` 를 제로베이스로 다시 만들어 교체했고 별칭은 없다). 본체는 `mods/_tools/observe/` 의 `usageui.py`(화면) · `usageview.py`(문구·표 행·라벨) · `usagedata.py`(범위 모델·요약·배터리 추정·하드웨어 정보) · `usagechart.py`(차트·띠) · `usagegraph.py`(점자 그래프 계산).
 
 **튀었던 순간 순위**(`usagespikes.py`, 대시보드 박스 + `s` 키 전체 표): 긴 범위 평균에 묻히는 순간 부하를 찾는다. 5분 창 평균 전력(psys 가 있으면 psys, 없으면 패키지; 노트북은 AC/방전을 따로)이 **중앙값**보다 max(1 W, 20%) 넘게 높은 창이 이어진 것을 한 사건으로 묶고, **평소보다 더 쓴 에너지(Wh)** 순으로 줄 세운다(최고값 순이 아님 — 짧은 순간값보다 오래 높았던 구간이 위). 사건마다 앞·뒤 30분, 다른 날 같은 시각, 그때 상위 앱 3개·포커스 앱을 붙인다. 상관일 뿐 원인 단정 아님. 표에서 Enter 하면 그 시각 앞뒤(최소 30분, 사건이 길면 그 길이만큼)로 범위가 옮겨가 모든 그래프가 그 순간 근처로 바뀌고, 대시보드에서 Esc 하면 원래 범위로 돌아온다(`t` 로 범위를 직접 고르면 복귀 지점은 사라짐). 5분 미만 사건은 못 잡는다(그건 `observectl timeline`·eBPF).
 
@@ -126,7 +126,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 
 ## `procui` — 프로세스 관리 TUI (2026-10-26)
 
-`procui`(앱 런처 "Process Manager")는 프로세스를 **그룹으로 묶어 보고, 필터하고, 골라서 안전하게 종료**하며 세부 사용량을 보는 Textual 앱이다. usageui 는 읽기 전용 모니터, procui 는 **조치 도구**이고 둘을 섞지 않는다(되돌릴 수 없는 동작을 한곳에 모으려고). 계획·배경은 `donghans doc show plan procui`, 본체는 `mods/_data/procui/`(`procscan.py` 스냅샷 · `procgroups.py` 뷰·규칙·필터 · `procactions.py` 보호·계획·pidfd 종료·기록 · `procui.py` 화면). 설치는 이 파일 위쪽 `observe.nix` 의 같은 디렉터리(observe_apps·hostmetrics·uikit 를 import).
+`procui`(앱 런처 "Process Manager")는 프로세스를 **그룹으로 묶어 보고, 필터하고, 골라서 안전하게 종료**하며 세부 사용량을 보는 Textual 앱이다. usageui 는 읽기 전용 모니터, procui 는 **조치 도구**이고 둘을 섞지 않는다(되돌릴 수 없는 동작을 한곳에 모으려고). 계획·배경은 `donghans doc show plan procui`, 본체는 `mods/_tools/procui/`(`procscan.py` 스냅샷 · `procgroups.py` 뷰·규칙·필터 · `procactions.py` 보호·계획·pidfd 종료·기록 · `procui.py` 화면). 설치는 이 파일 위쪽 `observe.nix` 의 같은 디렉터리(observe_apps·hostmetrics·uikit 를 import).
 
 - **뷰(`g` 로 순환)**: 소유(커널 / 컨테이너·VM / 시스템 / 내 환경 / 내 작업) · 앱(observe 앱 규칙) · 서비스(cgroup 유닛) · 세션(LLM 세션과 그 자식 트리). 모든 프로세스는 뷰마다 정확히 한 그룹에 들어간다. 「내 작업」 = 내 UID 인 프로세스에서 데스크톱 환경(컴포지터·패널·오디오·세션 버스 등)을 뺀 것.
 - **확장(`~/.config/procui/groups.toml`)**: `[[view]]` 로 새 뷰를 만들거나 같은 이름의 내장 뷰 **앞**에 규칙(`[[view.rule]]`)을 끼운다. 조건: `kernel·uid·app·comm·exe·cgroup·session·ancestor_app·cpu_gt·rss_gt`(이름은 글롭, 명령 인자는 쓰지 않음), 그룹 이름 치환 `@app @comm @unit @session`. `[protect]` 의 `app`/`comm` 은 보호 이름을 더한다. 잘못된 항목은 버리고 상태줄에 경고한다.
@@ -137,7 +137,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 - **기록**: `~/.local/state/procui/actions.jsonl`(시각·그룹·이름·PID·신호·결과, 명령 인자 없음). 갱신은 기본 수동(`r`), `a` 로 2초 자동 갱신(선택 중 줄이 움직이는 것을 피하려고 기본 꺼짐).
 - 상세(`d`/Enter): CPU·RSS·PSS·스레드·FD·I/O·cgroup·부모 사슬·자식·뷰별 그룹·보호 사유. 권한이 없는 항목은 「못 쟀음」.
 - **`procctl`(LLM·사람용 비대화형 CLI, 2026-10-26)**: 같은 코어를 명령줄로 연다 — `groups`·`show`(읽기 전용) · `plan`(아무것도 죽이지 않고 계획 ID·대상·보호로 제외·범위 밖·예상 확보 메모리) · `apply <ID>`(그 계획의 대상에만 SIGTERM) · `escalate <ID>`(살아남은 것에만 SIGKILL, 별도 호출) · `log`. 소스 `procctl.py`(CLI)·`procplan.py`(계획 저장·검증), 계획 파일 `~/.local/state/procui/plans/<id>.json`(만료 10분, sig 로 우발적 변조 감지 — 악의적 위조 방지는 아님, 실제 안전은 apply 의 pidfd 재검증·보호 재계산). 종료 코드 0/2(대상 없음·범위 밖·상한)/3(거부: 만료·변조·이미 적용·권한)/4(전부 보호)/5(일부 실패). **에이전트(조상에 LLM 세션이 있는 호출자 — 환경 변수가 아니라 `/proc` 조상으로 판별)는 기본 범위가 자기 세션의 자식 트리, 자기가 만든 계획만 apply, 대상 최대 20개, 보호는 못 푼다.** 소프트 보호 해제는 CLI 에 옵션이 없고 사람이 `procui` 에서만. 하네스 연동: `llm-cli.nix` 가 `--settings` 로 주입하는 권한 규칙이 `procctl groups|show|plan|log` 는 자동 허용, `apply|escalate` 는 항상 사용자 확인(문법은 Claude Code 의 Bash 접두 일치 — 실제 적용은 새로 시작한 `claude` 세션에서 확인 필요), 사용자 지침(CLAUDE.md)이 「pkill·killall·kill 대신 procctl」을 요구하고 스킬 `donghans-procctl` 이 절차를 담는다. 시험 `tests/test_procctl.py`(가짜 세션 루트 `claude` 가 procctl 을 자식으로 실행해 실제 조상 사슬로 에이전트 모드를 만들고, 사람 모드는 이중 fork 로 조상에서 분리).
-- 시험: `mods/_data/procui/tests/test_procui_logic.py`(스냅샷·그룹 누락 0·TOML·보호·pidfd 종료·PID 재사용 시뮬레이션; 시험이 `prctl` 로 고유 이름을 붙여 띄운 프로세스만 종료), `test_procui_app.py`(Textual 헤드리스, 사용 `nix-shell -p "python3.withPackages (ps: [ps.textual])"`).
+- 시험: `mods/_tools/procui/tests/test_procui_logic.py`(스냅샷·그룹 누락 0·TOML·보호·pidfd 종료·PID 재사용 시뮬레이션; 시험이 `prctl` 로 고유 이름을 붙여 띄운 프로세스만 종료), `test_procui_app.py`(Textual 헤드리스, 사용 `nix-shell -p "python3.withPackages (ps: [ps.textual])"`).
 
 ## `uikit` — 우리 TUI 공통 틀 (2026-10-21)
 
@@ -147,7 +147,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 - **ctl 은 LLM 용(구조화 우선), TUI 는 사람용(정렬·미려함) — 설계 원칙(2026-10-26, 사용자 지시)**: 사람은 주로 TUI 화면을 보고 LLM 세션은 `*ctl` 명령(observectl·procctl·hostres 등)을 쓴다. 그래서 ctl 은 표 정렬을 미려하게 다듬을 필요가 없고 **JSON·규격화된 데이터로 알아듣기 쉽게** 내는 것이 우선이다(그래서 `observectl` 표 머리글의 한글 칸 폭 어긋남은 고치지 않고 `--json` 으로 대신한다). `observectl` 은 모든 하위 명령이 `--json` 을 받는다 — 봉투 `{command, ok, structured, exit_code, data|text, notes, error}`, 구조화 명령(`status`·`top`·`states`·`events`·`query`·`wakers`·`energy`, `explain` 은 자체 형식)은 `data`, 나머지는 `text`, 표 위의 괄호 참고 문구는 `notes`, 실패는 `ok:false`+`error`+0 이 아닌 종료 코드, 무한대·NaN 은 `null`. 구현 `observe_cli.py` 의 「LLM·스크립트용 출력 계약」 주석과 `run()`, 시험 `observe/tests/test_cli_json.py`. 다른 ctl(`procctl`·`hostres.py --json`)도 같은 방향이다. 새 ctl 을 만들 때는 `--json` 을 먼저 설계한다.
 - **한글 정렬 규칙(2026-10-26 전 앱 촬영 교차 검증에서 확인)**: 표·범례·라벨-값 줄을 f-string 의 `{x:<n}` 으로 맞추지 않는다 — 글자 수 기준이라 한글(2칸 폭)이 섞이면 열이 어긋난다. 칸 폭 기준 `pad`/`fit`(clipui·notif_ui·usageview·usagelive·procscan 에 각각 있음)을 쓰고, 줄바꿈이 필요하면 `usageview.wrap_cells`(설명은 이름 칸만큼 들여씀)를 쓴다. 라벨-값 줄(`usageview._line`)은 값이 칸을 넘어도 뒤에 한 칸 이상 띄운다. 시험 `observe/tests/test_layout.py` 가 범례·압박·세션 박스·용어 탭·procctl 표의 열 위치를 칸 단위로 검사한다. 이 검증에서 usageui 용어 탭(설명 시작 칸이 제각각·줄바꿈이 왼쪽 끝으로 감김), 시스템 탭(긴 한글 라벨이 값에 붙음), 구간 요약(값이 노트에 붙어 「14:187일」), 알림 센터 그룹 패널(긴급 건수가 …로 잘림)을 고쳤다. `ctxui` 는 LLM 세션에서 실행을 거부하도록 만들어져 있어(비밀 보호) 촬영하지 못했다 — 사람이 직접 확인할 것.
 
-`mods/_data/_uikit/uikit.py`. displayui · clipui · notif_ui · usageui 가 복사해 쓰던 겉모습과 동작을 모았다: 검정 배경·둥근 회색 테두리(포커스 시 하늘색)·선택 줄 파랑·Footer 색(`BASE_CSS`), 대화상자 모양(`DIALOG_CSS`), 제목 달린 박스(`.box`, `uikit.box(위젯, 제목)`), `?`/F1 도움말(`HelpMixin`, 키 목록은 BINDINGS 에서 자동 생성), 포커스를 잃으면 갱신 정지(`PauseOnBlurMixin`). 각 앱은 `CSS = uikit.BASE_CSS + (앱 고유 규칙)` 로 쓴다. 배포 시 각 모듈이 `uikit.py` 를 같은 디렉터리에 복사하고, 소스 트리에서는 `../_uikit` 에서 가져온다. 시험: `_uikit/tests/test_uikit.py`.
+`mods/_tools/_lib/_uikit/uikit.py`. displayui · clipui · notif_ui · usageui 가 복사해 쓰던 겉모습과 동작을 모았다: 검정 배경·둥근 회색 테두리(포커스 시 하늘색)·선택 줄 파랑·Footer 색(`BASE_CSS`), 대화상자 모양(`DIALOG_CSS`), 제목 달린 박스(`.box`, `uikit.box(위젯, 제목)`), `?`/F1 도움말(`HelpMixin`, 키 목록은 BINDINGS 에서 자동 생성), 포커스를 잃으면 갱신 정지(`PauseOnBlurMixin`). 각 앱은 `CSS = uikit.BASE_CSS + (앱 고유 규칙)` 로 쓴다. 배포 시 각 모듈이 `uikit.py` 를 같은 디렉터리에 복사하고, 소스 트리에서는 `../_uikit` 에서 가져온다. 시험: `_uikit/tests/test_uikit.py`.
 
 ## 스팬(구간)과 `observectl trace` (2026-10-21)
 
@@ -278,4 +278,4 @@ Netdata 의 "앱 그룹" 개념을 우리 시스템에 맞게 가져왔다(`obse
 - `observectl fleet priority <기준호스트> [--host 대상] [--usage-from 쓰는호스트]` — 사용자가 실제로 쓰는 호스트의 **포커스 비중**과, 대상 호스트가 기준보다 높은 CPU 를 합친다. 출력 ① 사용 비중 상위(전력 시험 부하 시나리오 후보) ② **포커스 앱**(끌 수 없고 고쳐 써야 하는 것: 비중·대상·기준·초과) ③ **배경**(포커스 거의 없는데 대상이 더 높은 것 = 끄거나 줄일 후보). 포커스 앱 이름(창 클래스)과 프로세스 앱 이름은 첫 토큰으로 맞춘다(vivaldi-stable ↔ vivaldi-bin) — 일부 어긋날 수 있다.
 - `observectl fleet periodic` — 호스트별 주기 활동 감지 모음, 같은 주기가 두 호스트에서 나오면 같은 원인 후보로 표시.
 - `observectl fleet units` — 한 호스트에만 있는 상시 서비스·타이머(노트북 `blueman-tray` 같은 것이 후보로 올라온다).
-- 표는 `mods/_data/claude-ctx/schema.sql`(버전 5: `observe_focus_hourly`·`observe_changes`·`observe_periodic`·`observe_units`). 표 생성은 서버 호스트에서 `claude-ctx-schema` 서비스(nixup)가 한다 — 표가 없으면 push 가 실패로 알리고 표본은 쌓아 둔다.
+- 표는 `mods/_tools/claude-ctx/schema.sql`(버전 5: `observe_focus_hourly`·`observe_changes`·`observe_periodic`·`observe_units`). 표 생성은 서버 호스트에서 `claude-ctx-schema` 서비스(nixup)가 한다 — 표가 없으면 push 가 실패로 알리고 표본은 쌓아 둔다.

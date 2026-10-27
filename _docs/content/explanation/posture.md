@@ -19,8 +19,8 @@ MSI Summit E16 Flip(360도 힌지)에서 **힌지 각도 → 사용 모드(lapto
                                                            └→ /run/posture/telemetry.json (힌지 각도; 감시 안 함)
                           `posture get mode|lid|rotation|angle` / `posture json` (가져가기: 두 파일을 합쳐 보여 줌)
 ```
-- `mods/_data/posture/posture_daemon.py`: 센서와 덮개 스위치를 한 프로세스만 읽고 값을 한 번만 해석(경계값/디바운스). 발행만 하고 소비자를 모름. 힌지 센서가 없는 일반 노트북에서도 덮개 때문에 돈다(둘 다 없으면 종료).
-- `mods/_data/posture/posture`: 조회 CLI. **안전한 기본값 처리가 여기 한 곳**: 서비스 정지, 파일 없음/깨짐, 스키마 불일치 → `mode=laptop`, 덮개는 `open`(화면이 꺼진 채 남지 않는 쪽).
+- `mods/_tools/posture/posture_daemon.py`: 센서와 덮개 스위치를 한 프로세스만 읽고 값을 한 번만 해석(경계값/디바운스). 발행만 하고 소비자를 모름. 힌지 센서가 없는 일반 노트북에서도 덮개 때문에 돈다(둘 다 없으면 종료).
+- `mods/_tools/posture/posture`: 조회 CLI. **안전한 기본값 처리가 여기 한 곳**: 서비스 정지, 파일 없음/깨짐, 스키마 불일치 → `mode=laptop`, 덮개는 `open`(화면이 꺼진 채 남지 않는 쪽).
 - `mods/gui/base/core.posture.nix`: 서비스, 사용자 경로 유닛(`/run/posture/state.json` 변경 감시 → `posture-apply.service`), Nix 옵션 `posture.consumers`(소비자 명령 목록).
 - 소비자는 "수준 기반 + 멱등": 이벤트를 놓쳐도 아무 때나 실행하면 현재 상태에 맞춰짐. 로그인(`hyprland.start`)/reload(`config.reloaded`)에도 같은 소비자를 실행(Hyprland 가 시작/reload 때 장치 상태를 초기화하므로).
 - 현재 소비자(실행 순서): `lid-policy`(덮개 닫힘/열림 → 백라이트 끄기/켜기 + 호스트 추가 명령, `core.bind.hwctl.nix`), `vkb apply-posture`(`vkb.nix`), `displayctl rotate auto`(`display-manager.nix`), `hypr-input-policy`(입력 장치 정책, `core.bind.hwctl.nix`). 추가하려면 `posture.consumers` 에 명령 한 줄.
@@ -46,8 +46,8 @@ MSI Summit E16 Flip(360도 힌지)에서 **힌지 각도 → 사용 모드(lapto
 - 접힌 채 잠금 화면(hyprlock)이 뜨면 내장 키보드로 비밀번호를 칠 수 없음(얼굴 인식은 별개).
 
 ## 검증
-- 자동 시험 `mods/_data/posture/tests/test_posture.py`(75개): 판정 경계/히스테리시스, 방향 판정, 레코드 해석, 가짜 sysfs + FIFO 로 **데몬 프로세스 전체**(디바운스, 튐 무시, 다중 레코드, 각도/상태 파일 분리, 덮개 이벤트와 중복 무시, 종료 시 원복), 힌지 없는 노트북(덮개만)과 아무 센서도 없을 때 종료, CLI 안전한 기본값(깨진 파일/스키마/파일 없음/서비스 정지/덮개 모름).
-  `python3 -I mods/_data/posture/tests/test_posture.py`
+- 자동 시험 `mods/_tools/posture/tests/test_posture.py`(75개): 판정 경계/히스테리시스, 방향 판정, 레코드 해석, 가짜 sysfs + FIFO 로 **데몬 프로세스 전체**(디바운스, 튐 무시, 다중 레코드, 각도/상태 파일 분리, 덮개 이벤트와 중복 무시, 종료 시 원복), 힌지 없는 노트북(덮개만)과 아무 센서도 없을 때 종료, CLI 안전한 기본값(깨진 파일/스키마/파일 없음/서비스 정지/덮개 모름).
+  `python3 -I mods/_tools/posture/tests/test_posture.py`
 - **실제 힌지로 종단 시험(사용자가 직접 접고 엶)**: 접는 도중 `laptop(190°) → tent(325°) → tablet(353°→358°)` 로 전환되며 `keyboard=false touchpad=false touchscreen=true` 가 적용됨(저널 `hypr-input-policy`).
   사용자가 키보드를 눌러 **입력이 실제로 막힌 것**과 **터치스크린이 켜진 것**을 확인. 열면(11:52:04) `mode=laptop keyboard=true touchpad=true touchscreen=false` 로 복원됨.
 - 부하: posture-daemon CPU 0.0%(30초 평균), 메모리 약 13 MiB. 사용 모드가 안 바뀌면 소비자는 깨어나지 않음.
@@ -80,7 +80,7 @@ Hyprland 0.55 가 노출하는 프로토콜(`wayland-info`로 확인): `zwp_virt
 - 한계: 한/영 전환이 `Ctr`+스페이스 두 번 누름(전용 키 없음), 화면 폭 전체를 차지해서 크기/위치 조정 필요, 터치(손가락) 입력은 직접 시험하지 못함(포인터 클릭으로만 확인).
 
 ### 구현: `vkb` (접기/펴기, 크기, 창 가림 방지, 터치 버튼, 사용 모드 연동)
-`mods/_data/vkb/vkb.py`(명령 `vkb`), 서비스/연결은 `mods/gui/base/vkb.nix`, 버튼은 `mods/gui/base/waybar.nix` + `mods/_data/waybar/style.css`.
+`mods/_tools/vkb/vkb.py`(명령 `vkb`), 서비스/연결은 `mods/gui/base/vkb.nix`, 버튼은 `mods/gui/base/waybar.nix` + `mods/_data/waybar/style.css`.
 - **wvkbd 의 한계(소스 확인)**: 위치는 하단 전체 폭 고정, 높이는 시작할 때만 지정(`-H`/`-L`), 숨기기 전용 키 없음(`⌨` 키는 **레이어 전환**), 플로팅/폭 옵션 없음. 그래서 아래 패치로 플로팅을 추가하고, 접고 펴기는 시그널, 크기는 재시작으로 처리하며 그 위에 제어층(`vkb`)을 얹음.
   접기/펴기 전용 키는 두지 않음(waybar 버튼으로 충분). 대신 키보드 안에 도킹↔플로팅 전환 키(`⧉`)를 둠.
 - `wvkbd.service`(사용자 서비스): `--hidden` 으로 상시 대기(메모리만 차지). 시작 인자는 `vkb args` 가 `~/.config/vkb/config.json`(크기/모드/레이어)과 화면 물리 크기로 계산.
@@ -99,7 +99,7 @@ Hyprland 0.55 가 노출하는 프로토콜(`wayland-info`로 확인): `zwp_virt
   ③ `한/영` 키(`KEY_HANGEUL`; fcitx5 전환키에 `Hangul` 이 이미 등록돼 있어 설정 변경 없음). ④ 가로 배열(`Landscape`)을 PC 표준 5줄(숫자 줄, Tab/CpL/Shift 줄, 아래줄 `Ctr Sup ⧉ ⌨ 한/영 Alt 스페이스 Esc ←↓↑→`)로 교체(합 15키 폭). `Sup`(Super)는 처음에 레이어를 전환해야만 있어서 메인 배열 아래줄로 옮김(Hyprland 단축키가 전부 Super 기반).
   함정: wvkbd 의 `die()` 매크로는 중괄호 없는 두 문장이라 `if (...) die(...)` 로 쓰면 조건과 무관하게 종료한다(처음 패치에서 겪음; 중괄호로 감쌈).
   실제 화면에서 `한/영` 탭으로 hangul↔keyboard-us 전환, `⧉` 탭으로 도킹↔플로팅 전환을 확인(포인터 클릭). 다른 레이어(`special` 등)의 숫자 줄과 세로 배열은 확인하지 않음. wvkbd 버전이 바뀌면 패치가 안 맞을 수 있음(빌드가 실패하므로 알 수 있음).
-- 시험: `python3 -I mods/_data/vkb/tests/test_vkb.py`(25, 맞춤/복원/크기 계획/mm→px 계산), `test_vkb_cli.py`(45, 가짜 hyprctl/systemctl 로 전체 흐름).
+- 시험: `python3 -I mods/_tools/vkb/tests/test_vkb.py`(25, 맞춤/복원/크기 계획/mm→px 계산), `test_vkb_cli.py`(45, 가짜 hyprctl/systemctl 로 전체 흐름).
 - **미확인**: 손가락 터치로 waybar 버튼이 눌리는지(포인터 클릭만 확인, GTK 가 터치를 클릭으로 바꾸는 것으로 알려져 있으나 직접 확인 못 함), waybar 높이 24px 의 터치 적합성, 사용 모드 연동의 실제 힌지 시험, 가상 키보드가 보이는 동안 잠금 화면/Hyprland reload 와의 상호작용.
 
 ### 알려진 한계: 터치스크린으로는 창 이동/크기 조절이 안 됨
@@ -159,10 +159,10 @@ tent/tablet 에서 기기를 돌리면 내장 화면과 터치가 같이 돈다.
 ### 모듈 구성과 유지보수 규칙 (2026-10-19 점검)
 | 모듈/파일 | 책임 | 소비자 등록 |
 |---|---|---|
-| `mods/gui/base/core.posture.nix` + `mods/_data/posture/` | 허브: 센서(힌지/가속도) → 상태 파일 → 소비자 호출. 소비자의 내용은 모름 | `posture.consumers` 옵션 |
+| `mods/gui/base/core.posture.nix` + `mods/_tools/posture/` | 허브: 센서(힌지/가속도) → 상태 파일 → 소비자 호출. 소비자의 내용은 모름 | `posture.consumers` 옵션 |
 | `mods/gui/base/core.bind.hwctl.nix` | 입력 장치 정책(`hypr-input-policy`)과 토글/메뉴, 덮개 동작(`lid-screen`) | 정책을 소비자로 등록 |
-| `mods/gui/base/vkb.nix` + `mods/_data/vkb/` + `mods/_data/wvkbd/` | 가상 키보드 서비스와 제어 CLI, wvkbd 패치 | `vkb apply-posture` |
-| `mods/gui/base/display-manager.nix` + `mods/_data/display/` | 화면 구성/회전(`displayctl rotate auto`), 터치 좌표 동기화 | `displayctl rotate auto` |
+| `mods/gui/base/vkb.nix` + `mods/_tools/vkb/` + `mods/_data/wvkbd/` | 가상 키보드 서비스와 제어 CLI, wvkbd 패치 | `vkb apply-posture` |
+| `mods/gui/base/display-manager.nix` + `mods/_tools/display/` | 화면 구성/회전(`displayctl rotate auto`), 터치 좌표 동기화 | `displayctl rotate auto` |
 - 한 가지 일은 한 곳에서: 장치 켜기/끄기와 수동 상태 파일의 기본값은 `hypr-input-policy` 에만 있고, 터치패드/터치스크린 토글은 상태 파일만 뒤집고 정책을 부른다(예전에는 토글 두 개와 정책이 각자 같은 장치 선택/적용 코드를 가졌음). 메뉴 라벨도 정책의 `--print` 값을 쓴다.
 - 두 곳에 같은 숫자가 있으면 시험이 지키게 한다: 가로 배열의 줄 수/폭 단위(5줄, 15)는 `pc-layout.patch` 와 `vkb.py`(`LAND_ROWS`/`LAND_UNITS`) 에 따로 있어서, `test_vkb.py` 가 원본 wvkbd 에 두 패치를 실제로 적용해 읽고 비교한다(패치가 안 맞아도 여기서 실패).
 - 내장 키보드 이름은 공용 모듈이 아니라 호스트가 `wayland.windowManager.hyprland.internalKeyboardName` 로 지정한다(비어 있으면 정책이 키보드를 건드리지 않음).
@@ -188,19 +188,19 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
    실제 세션에서 켜기 전에 반드시 중첩 Hyprland(`systemd-run --user`)로 로드해 본다. 정리는 유닛 이름/PID 로만, 끝나면 위의 환경 오염을 확인.
 2. **우리가 쓰는 Lua API**(`hl.*`): `hl.on`, `hl.bind`, `hl.window_rule`, `hl.device`, `hl.monitor`, `hl.config`, `hl.exec_cmd`, `hl.dsp.{exec_cmd,window.move/resize/float/close/drag/alter_zorder,focus,workspace.*,exit}`, `hl.plugin.load`.
    `hyprctl eval '<lua>'` 로 쓰는 곳: `displayctl`(`hl.monitor`, `hl.device`), 입력 정책(`hl.device`), `vkb`(`hl.dsp.window.resize/move` 를 `hyprctl dispatch` 로). 올린 뒤 `hyprctl configerrors` 가 비어 있는지 본다.
-3. **자동 시험**: `mods/_data/{posture,vkb,display}/tests` 전부(가짜 hyprctl 이라 실제 API 변화는 못 잡는다 — 4 로 보완).
+3. **자동 시험**: `mods/_tools/{posture,vkb,display}/tests` 전부(가짜 hyprctl 이라 실제 API 변화는 못 잡는다 — 4 로 보완).
 4. **실기 확인**: `displayctl status`/`displayctl rotate 1` 후 `rotate 0`, `vkb show`/`vkb mode toggle`/`vkb hide`, 덮개 닫기/열기, 터치패드 토글, waybar 버튼.
 5. **함께 움직이는 것들**: `wvkbd` 패치(`mods/_data/wvkbd/README.md` 의 재생성 방법 + `test_vkb.py` 가 적용 여부를 검사), hyprlock/hypridle 설정 옵션(0.9.5 에서 `grace` 등이 사라져 오류가 났던 전례), xdg-desktop-portal-hyprland.
 6. 올리기 전 `nixup` 의 `unstable-fallback` 고정 장치(`nixup fix <패키지>`)로 되돌릴 수 있는 커밋을 확보해 둔다(`core/lib/host.nix`).
 
 ### 점검 도구와 시험 구성 (2026-10-19)
-- **`posture-doctor`**(`mods/_data/posture/doctor.py`, 사용자 PATH 에 설치): 서비스 환경의 `WAYLAND_DISPLAY`/`HYPRLAND_INSTANCE_SIGNATURE` 가 살아 있는 인스턴스를 가리키는지, 허브 데몬/센서/`posture-apply.path`, 마지막 소비자 실행의 실패, 허브의 덮개와 ACPI 의 불일치, 덮개가 열렸는데 백라이트가 0인 화면을 점검해 OK/WARN/FAIL 과 해결 힌트를 낸다(문제가 있으면 종료 코드 1, `--json` 지원).
+- **`posture-doctor`**(`mods/_tools/posture/doctor.py`, 사용자 PATH 에 설치): 서비스 환경의 `WAYLAND_DISPLAY`/`HYPRLAND_INSTANCE_SIGNATURE` 가 살아 있는 인스턴스를 가리키는지, 허브 데몬/센서/`posture-apply.path`, 마지막 소비자 실행의 실패, 허브의 덮개와 ACPI 의 불일치, 덮개가 열렸는데 백라이트가 0인 화면을 점검해 OK/WARN/FAIL 과 해결 힌트를 낸다(문제가 있으면 종료 코드 1, `--json` 지원).
   이날 실제로 겪은 통합 단계 고장(환경 오염, 깨어남 유실로 꺼진 화면, 소비자 실패)을 잡으려는 것이라 시험(가짜 도구)이 못 잡는 영역을 맡는다. 문제가 의심되면 먼저 `posture-doctor`.
-- **공용 시험 도구 상자 `mods/_data/_testkit/`**: `harness.py`(`checker()`: 시험마다 따로 있던 `check()`/카운터/종료 처리, `script()`), `fake_cmd.py` + `fakes.py`(`Sandbox`: 데이터 기반 가짜 `hyprctl`/`systemctl`/`pkill`/`posture`/`journalctl` — 응답과 상태를 `FAKE_DIR` 아래 파일로 정함, 동작 정의는 `fake_cmd.py` 머리말).
+- **공용 시험 도구 상자 `mods/_tools/_lib/_testkit/`**: `harness.py`(`checker()`: 시험마다 따로 있던 `check()`/카운터/종료 처리, `script()`), `fake_cmd.py` + `fakes.py`(`Sandbox`: 데이터 기반 가짜 `hyprctl`/`systemctl`/`pkill`/`posture`/`journalctl` — 응답과 상태를 `FAKE_DIR` 아래 파일로 정함, 동작 정의는 `fake_cmd.py` 머리말).
   vkb CLI 시험, posture 시험, doctor 시험이 이것을 쓴다(예전에는 도구마다 가짜 `hyprctl`/`systemctl` 을 따로 만들어 Hyprland 명령 형식이 바뀌면 여러 곳을 고쳐야 했음). displayctl 시험의 `fake_hyprctl.py` 는 모니터 배치를 시뮬레이션하는 도메인 전용이라 그대로 두고 `checker()` 만 공유한다.
-- **전체 시험**: `mods/_data/run-tests.sh` (vkb 29 + vkb CLI 48 + posture 77 + doctor 11 + displayctl 코어 79 + TUI 53).
-- **중첩 Hyprland 시험 도구 `mods/_data/hyprland-nested/hypr-nested`**: `hypr-nested <시험할 Hyprland store 경로> <시험 설정.lua> [--wait|초]`. 유닛 이름으로만 정리하고, 시작 전 서비스 환경을 기록했다가 끝나면 복구·확인한다(위의 "환경 오염" 함정을 막음). `--wait` 는 Enter 까지 유지해서 중첩 창을 손가락/마우스로 직접 시험할 때 쓴다.
-- **displayctl 구조**: 1044줄 단일 파일을 패키지 `mods/_data/display/dispctl/`(`config`/`hypr`/`state`/`layout`/`apply`/`transaction`/`ops`/`cli`, 위에서 아래로만 import)로 나누고 `displayctl.py` 는 얇은 진입점으로 남겼다(`import displayctl as dc` 와 서브프로세스 호출이 그대로 동작).
+- **전체 시험**: `mods/_tools/run-tests.sh` (vkb 29 + vkb CLI 48 + posture 77 + doctor 11 + displayctl 코어 79 + TUI 53).
+- **중첩 Hyprland 시험 도구 `mods/_tools/hyprland-nested/hypr-nested`**: `hypr-nested <시험할 Hyprland store 경로> <시험 설정.lua> [--wait|초]`. 유닛 이름으로만 정리하고, 시작 전 서비스 환경을 기록했다가 끝나면 복구·확인한다(위의 "환경 오염" 함정을 막음). `--wait` 는 Enter 까지 유지해서 중첩 창을 손가락/마우스로 직접 시험할 때 쓴다.
+- **displayctl 구조**: 1044줄 단일 파일을 패키지 `mods/_tools/display/dispctl/`(`config`/`hypr`/`state`/`layout`/`apply`/`transaction`/`ops`/`cli`, 위에서 아래로만 import)로 나누고 `displayctl.py` 는 얇은 진입점으로 남겼다(`import displayctl as dc` 와 서브프로세스 호출이 그대로 동작).
   나누면서 시험이 실제 버그를 잡았다: 되돌리기 타이머가 `__file__` 로 진입 스크립트를 찾는데 분리 후 `dispctl/transaction.py` 를 가리켜 `revert-pending` 이 아무 일도 안 했다 → `ENTRY`(패키지 한 단계 위의 `displayctl.py`)로 고침. Nix 자리표시자는 `dispctl/config.py` 한 곳.
 - **덮개 TLP 프로필**: `tlp bat`(배터리 프로필 + 수동 모드: 전원이 바뀌어도 다음 부팅/`tlp start` 까지 무시)/`tlp start`(실제 전원에 맞는 프로필 + 수동 모드 해제)는 root 가 필요해서 `hosts/msi-summit-me.nix` 에 root 유닛 `tlp-lid-closed`/`tlp-lid-open` + polkit 규칙(로컬 활성 사용자만, 해당 두 유닛만)을 두고 `lid-policy` 의 추가 명령이 `systemctl start --no-block` 으로 시작한다. 확인: 사용자 권한으로 시작해 `balanced/BAT (manual)` ↔ `performance/AC (auto)` 전환.
   **주의: 시험하다 `tlp ac`/`tlp bat` 를 직접 실행하면 수동 모드가 남아 전원이 바뀌어도 무시된다** — 2026-10-19 에 이 실수로 TLP 가 2시간 반 동안 `performance/AC (manual)` 에 머물렀다(`tlp start` 로 해제). 시험 뒤에는 `sudo tlp-stat -s` 로 `(manual)` 이 없는지 확인할 것.
@@ -216,7 +216,7 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 | 가장자리(끝에서 ~2cm 안쪽)에서 안쪽으로 쓸기 → 이전/다음 워크스페이스 | `bind` edge | **됨**(짧은 거리, 완료형) |
 | 3손가락 좌우 스와이프 → 이전/다음 워크스페이스 | `bind` swipe 3 | 손가락이 안정적으로 잡힐 때만 |
 
-원인을 원시 입력으로 찾았다(`mods/_data/touch-trace/touch_trace.py`, libinput debug-events 기록 분석; Hyprland 의 DEBUG 로그는 `debug:disable_logs=false` 로도 파일/저널에 안 남아 로그 진단은 불가):
+원인을 원시 입력으로 찾았다(`mods/_tools/touch-trace/touch_trace.py`, libinput debug-events 기록 분석; Hyprland 의 DEBUG 로그는 `debug:disable_logs=false` 로도 파일/저널에 안 남아 로그 진단은 불가):
 - **3손가락을 대고 끌면 접촉이 자주 끊겼다 다시 잡혔다**: 3손가락 묶음 15개 중 14개에서 재접촉, 간격 중앙값 0.04초(최대 0.39초). 손가락 하나만 끊겨도 플러그인은 손가락 수가 바뀐 것으로 보고 제스처를 끝낸다. 손의 습기/힘 때문인지 패널이 가까운 손가락(12~20mm)을 못 따라가는지는 데이터만으로 구분 못 함. 이 패널은 동시 10점까지 지원.
 - **3손가락 스와이프는 세 손가락이 함께 움직이지 않았다**: 크게 움직인 건 한 손가락이고 나머지는 이동 0이거나 아예 닿지 않은 경우가 많았다.
 - **맨 가장자리에서 시작한 접촉은 ~0.1초 뒤 끝났다**(최대 41px 이동): 패널은 끝(0~2.7%, 98.7~99.97%)까지 닿지만 안쪽으로 미는 손가락을 계속 따라가지 못한다.
@@ -237,7 +237,7 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 - 윈도우를 먼저 바꾸지 않고 Linux 만 바꾸면 윈도우에서 시각이 9시간 어긋난다(윈도우가 NTP 로 다시 맞추면 Linux 쪽이 어긋난다). 윈도우를 지울 예정이 없어지면 현재 설정(로컬 RTC)을 유지해도 되고, 대가는 위의 "부팅 직후 30초".
 
 ### posture-doctor 를 언제 쓰나 (레포를 고치는 사람/Claude 용)
-상시 백그라운드로 돌리지 않고, **"실행 중인 세션이 지금 제대로 이어져 있나"가 의심될 때 한 번 실행**하는 점검 도구다(`posture-doctor`, 문제가 있으면 종료 코드 1). 시험(`mods/_data/run-tests.sh`)이 *코드*가 맞는지 본다면, 이쪽은 *지금 떠 있는 시스템*이 맞는지 본다. `nixup check` 는 빌드 가능 여부만 보므로 둘 다 이 문제는 못 잡는다.
+상시 백그라운드로 돌리지 않고, **"실행 중인 세션이 지금 제대로 이어져 있나"가 의심될 때 한 번 실행**하는 점검 도구다(`posture-doctor`, 문제가 있으면 종료 코드 1). 시험(`mods/_tools/run-tests.sh`)이 *코드*가 맞는지 본다면, 이쪽은 *지금 떠 있는 시스템*이 맞는지 본다. `nixup check` 는 빌드 가능 여부만 보므로 둘 다 이 문제는 못 잡는다.
 
 | 상황 | 이 도구가 잡는 것 |
 |---|---|
@@ -246,7 +246,7 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 | 덮개 개폐/화면 문제를 건드렸거나 증상이 있을 때 | 허브와 ACPI 의 덮개 상태 불일치, 백라이트가 0 으로 남은 상태(까만 화면의 원인) |
 | "뭔가 이상한데 어디서부터 볼지 모르겠다" | 위 항목을 한 번에 훑어 어느 단계에서 끊겼는지 + 힌트를 알려줌 |
 
-**Claude 로 레포를 고칠 때 권장 순서**: (1) `mods/_data/run-tests.sh` (2) `nixup check` (3) `nixup home`/`os` 적용 (4) `posture-doctor`. 문제가 나오면 출력의 힌트대로 고치고, 시험으로 못 잡는 종류(환경 오염, 서비스 비활성화)는 이 도구에 점검 항목으로 추가한다(`mods/_data/posture/doctor.py`, 시험 `tests/test_doctor.py`). 로그인 때 자동 실행/알림은 일부러 넣지 않았다: 문제는 대부분 우리가 손댄 직후에 생기고, 그때는 직접 실행하는 편이 확실하다.
+**Claude 로 레포를 고칠 때 권장 순서**: (1) `mods/_tools/run-tests.sh` (2) `nixup check` (3) `nixup home`/`os` 적용 (4) `posture-doctor`. 문제가 나오면 출력의 힌트대로 고치고, 시험으로 못 잡는 종류(환경 오염, 서비스 비활성화)는 이 도구에 점검 항목으로 추가한다(`mods/_tools/posture/doctor.py`, 시험 `tests/test_doctor.py`). 로그인 때 자동 실행/알림은 일부러 넣지 않았다: 문제는 대부분 우리가 손댄 직후에 생기고, 그때는 직접 실행하는 편이 확실하다.
 
 ### PSR(패널 자체 갱신) 조사 (2026-10-19)
 **결론: `i915.enable_psr=1` 은 6.18 에서 PSR 을 켜 주지 않고, 켜도 이 패널은 실제로 자체 갱신에 들어가지 않는다. 전력 이득을 기대할 수 없어 그대로 둔다.**
@@ -257,7 +257,7 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 - 후속 선택지: `hosts/msi-summit-me.nix` 의 `"i915.enable_psr=1"` 은 효과 없이 커널 taint 만 만드니 지워도 된다(다음 `nixup os` + 재부팅 때). 지우기 전까지 해는 없음.
 
 ### 전력 측정: power-ab (2026-10-19)
-`power-report` 가 Netdata 에 쌓인 과거 기록을 보여준다면, `power-ab` 는 **지금 이 순간** 설정별 소비 전력을 번갈아 재서 비교한다(`mods/_data/power-ab/power_ab.py`, 시험 12개).
+`power-report` 가 Netdata 에 쌓인 과거 기록을 보여준다면, `power-ab` 는 **지금 이 순간** 설정별 소비 전력을 번갈아 재서 비교한다(`mods/_tools/power-ab/power_ab.py`, 시험 12개).
 - **어댑터를 뽑은 상태(방전 중)에서만** 동작한다: 소비 전력 = 배터리 전압 × 전류(sysfs)인데 어댑터가 꽂혀 있으면 전류가 0 이다. 방전 중이 아니면 안내하고 거부한다. 재는 도중 어댑터가 다시 꽂히면 중단한다.
 - 기본: 165Hz → 60Hz → 48Hz(저장된 구성) 순으로 각 90초(+안정화 15초)를 2바퀴(약 11분). 번갈아 재는 이유는 배터리 온도/잔량에 따른 느린 변화가 한 설정에 몰리지 않게 하려는 것. 표에는 "바퀴 간 차이"를 같이 보여주며, 이 값이 설정 간 차이보다 크면 측정 잡음이다. 측정 중 CPU 평균 사용률이 10% 를 넘으면 표시한다.
 - 끝나거나 중단되면 `displayctl restore` 로 저장된 화면 설정으로 되돌린다. 밝기는 건드리지 않으므로 비교할 때는 같은 밝기로 둔다.
@@ -325,7 +325,7 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 - **현재 상태: 그 해결이 실제로는 적용돼 있지 않다.** `/sys/bus/platform/drivers/idma64/` 에 `idma64.0` 이 그대로 붙어 있고 `/proc/interrupts` 의 IRQ 27 은 여전히 `idma64.0, i2c_designware.0` 둘이 공유한다(udev 룰의 `ACTION=="bind"` 가 platform 장치에 안 걸리거나 타이밍 문제로 보이지만 원인은 확인하지 못함). IRQ 27 의 spurious 통계는 `unhandled 0`(최근 구간 기준)이라 지금은 조용하다.
 - 결론: `irqpoll` 을 지워도 되는지는 **판단할 수 없다**(unbind 가 안 되는 상태에서 지우면 원래의 발열 문제가 되살아날 수 있음). 비용(전력)도 측정하지 못했다 — 지우는 시험은 재부팅이 필요. 먼저 unbind 룰이 실제로 동작하게 만든 뒤 제거 시험을 해야 한다.
 
-**배터리 방전 + 덮개 닫힘(화면 꺼짐) 에서의 A/B** — `mods/_data/power-ab/idle_ab.py`(root 로 `systemd-run`, 구간 90초 × 2바퀴 번갈아; 구간마다 배터리 전압×전류, RAPL, powertop 의 C-state/깨어남, GPE 비율). 일회성 실험용이라 시험은 없고, 저장된 스크립트는 실제로 돌린 두 스크립트를 합친 것이라 합친 뒤 다시 실행해 보지는 않았다.
+**배터리 방전 + 덮개 닫힘(화면 꺼짐) 에서의 A/B** — `mods/_tools/power-ab/idle_ab.py`(root 로 `systemd-run`, 구간 90초 × 2바퀴 번갈아; 구간마다 배터리 전압×전류, RAPL, powertop 의 C-state/깨어남, GPE 비율). 일회성 실험용이라 시험은 없고, 저장된 스크립트는 실제로 돌린 두 스크립트를 합친 것이라 합친 뒤 다시 실행해 보지는 않았다.
 | 비교 | 배터리 소비 | psys | CPU 패키지 | 깨어남/s〔구표기 L1: powertop 시스템 전체〕 | GPE/s | 패키지 pc2 |
 |---|---|---|---|---|---|---|
 | Netdata 실행 | 7.23 W | 7.57 W | 3.49 W | 705~740 | 41~43 | 66~68% |
@@ -369,7 +369,7 @@ lsmod | grep idma64                          # 비어 있어야 함
 
 **2) tty2 에서 할 쉬는 전력 시험(그래픽 세션을 끈 상태)** — 어댑터 분리 + 방전 중, 덮개는 닫아도/열어도 되지만 조건을 기록한다. 열린 작업은 사라지니 사용자가 저장한 뒤 시작.
 - 목적: 패키지가 C2 에서 못 내려가는 원인이 그래픽 세션(컴포지터/waybar/kitty/Netdata 등)인지 가른다. 지금까지: 코어는 깊게 자는데 패키지는 pc2 뿐(덮개를 닫아 화면이 꺼져도 동일), 시스템 깨어남 약 450~740/s〔구표기 L1〕, EC GPE 초당 25~43회(EC 레지스터 읽기 초당 약 10번: `systemd-logind` 44/6s, waybar 15/6s, Netdata 계열 약 30/6s).
-- 방법: `sudo -v` 를 사용자가 한 번 입력(이 시스템의 sudo 는 비밀번호 필요, 캐시 5분) → root 서비스로 한 번에 실행(`sudo systemd-run --unit=... --collect <python3> mods/_data/power-ab/idle_ab.py <powertop 경로> <모드>`; powertop 은 `nix shell nixpkgs#powertop` 로 받은 경로). 구간별(90초×2바퀴 번갈아) 배터리 전력/RAPL/powertop(pc 상태·깨어남)/GPE 비율을 기록하는 틀은 `idle_ab.py` 에 있고, 모드는 `netdata`, `usb-ts` 가 있으니 필요한 모드(예: 그래픽 세션 정지/시작, waybar 정지/시작)를 추가해 쓴다.
+- 방법: `sudo -v` 를 사용자가 한 번 입력(이 시스템의 sudo 는 비밀번호 필요, 캐시 5분) → root 서비스로 한 번에 실행(`sudo systemd-run --unit=... --collect <python3> mods/_tools/power-ab/idle_ab.py <powertop 경로> <모드>`; powertop 은 `nix shell nixpkgs#powertop` 로 받은 경로). 구간별(90초×2바퀴 번갈아) 배터리 전력/RAPL/powertop(pc 상태·깨어남)/GPE 비율을 기록하는 틀은 `idle_ab.py` 에 있고, 모드는 `netdata`, `usb-ts` 가 있으니 필요한 모드(예: 그래픽 세션 정지/시작, waybar 정지/시작)를 추가해 쓴다.
 - 순서 제안: (i) 그래픽 세션이 떠 있는 기준 구간(아직 Hyprland 가 살아 있는 tty1) (ii) Hyprland 세션 종료(`loginctl terminate-session`) 후 구간 (iii) 가능하면 Netdata 도 정지한 구간. 각 구간에서 pc2/pc3+/깨어남/GPE/배터리 W 를 비교.
 - **EC GPE 0x6E(`/sys/firmware/acpi/interrupts/gpe6E`)를 끄는 시험은 하지 않는다**(덮개/어댑터/배터리/단축키 이벤트의 통로; 하려면 자동 복구 타이머 필수). 폴러(waybar/logind/Netdata)를 멈춰 GPE 비율이 어떻게 바뀌는지만 본다.
 - 끝나면 반드시 원복: Netdata `systemctl start netdata`, 사용자가 다시 Hyprland 로그인. 터치스크린 USB `power/control` 은 정책(`hypr-input-policy`)이 관리한다.
@@ -414,7 +414,7 @@ lsmod | grep idma64                          # 비어 있어야 함
 - **안정된 쉬는 상태의 기준값**(전부 기본, 덮개 닫힘, 방전): 배터리 약 **4.3~4.4 W**, psys 약 3.9 W, 패키지 약 2.0 W, 깨어남 약 1,050/s〔구표기 L1〕, 패키지 pc2 약 20%·pc8 약 33%·pc10 0%. 즉 앞의 "패키지가 C2 에만 머문다"는 **부팅 직후 한정**이었다(안정되면 C8 까지 간다). 부팅 후 약 40분 지나서 재야 한다.
 - **Wi-Fi 절전이 꺼져 있는 이유**: TLP `laptopSettings`(`mods/sys/base/core.power.nix`, 모든 노트북 공통)에 `WIFI_PWR_ON_AC/BAT = "off"`("Wi-Fi 절전 시 주기적 연결 끊김 방지"), NetworkManager 도 `wifi.powersave = false`(TLP 값을 NM 이 덮어쓰지 못하게). 이 기종에서 연결 끊김이 실제로 있었다는 기록은 없다(일반 노트북 공통 안전 설정). 켜려면 TLP 는 `WIFI_PWR_ON_BAT = "on"`(배터리만), NM 쪽은 `wifi.powersave` 를 TLP 가 제어하게 비워야 하고, 대가는 지연(핑)이 늘 수 있음 — **아직 적용하지 않았다**(사용자 결정 대기).
 - **Netdata 가 큰 이유는 아직 모른다**: 수집기 중 `idlejitter`(20 ms 마다 깨어나는 것으로 악명 높음)를 끄는 것을 시험했으나 **효과 없음**(ABAB: 4.42 W vs 기본 4.34 W, 깨어남 1113 vs 1054/s〔구표기 L1: powertop 시스템 전체〕, 정지는 여전히 −0.66 W) → 설정을 되돌렸다. 남은 후보: `apps.plugin`(프로세스 스캔), `go.d`, `proc`(2,121개 차트 × 10초), `nfacct`, `timex`, `debugfs`. Netdata 는 `power-report`/이번 조사의 RAPL 기록원이라 통째로 끄는 대신 수집기를 하나씩 줄이는 방향이 낫다(배터리일 때만 끄는 방법도 있음).
-- 시험 중 알게 된 것: `hypridle.conf` 는 `general { lock_cmd }` 뿐이라 유휴 타이머가 없다. `iw` 는 시스템에 없어서 일회성(`nix shell nixpkgs#iw`)으로 받아 `IDLE_AB_EXTRA_PATH` 로 넘겼다. 이 시험들의 틀은 `mods/_data/power-ab/idle_ab.py`(`bisect`, `ab2` 모드, 환경변수 `IDLE_AB_CANDS`/`IDLE_AB_SETTLE`).
+- 시험 중 알게 된 것: `hypridle.conf` 는 `general { lock_cmd }` 뿐이라 유휴 타이머가 없다. `iw` 는 시스템에 없어서 일회성(`nix shell nixpkgs#iw`)으로 받아 `IDLE_AB_EXTRA_PATH` 로 넘겼다. 이 시험들의 틀은 `mods/_tools/power-ab/idle_ab.py`(`bisect`, `ab2` 모드, 환경변수 `IDLE_AB_CANDS`/`IDLE_AB_SETTLE`).
 - 아직 못 한 것: Wi-Fi 절전을 켠 채 실제 사용(지연/끊김) 확인, Netdata 수집기별 기여, 부팅 인자(`acpi_osi=Linux`, `pcie_aspm=off`, `irqpoll`) 제거 시험(재부팅 필요).
 
 ### 후속 조사 (2026-10-20 새벽): 안정화 가설 철회, Wi-Fi 절전 적용, 키보드 문제, 아침 자동 측정
@@ -567,7 +567,7 @@ tty2 (VT2) ── kmsconvt@tty2.service ── kmscon ── login ── zsh �
 - 지난 밤 사건(Backspace, → 가 커널 이벤트 0)과 합치면: 둘 다 **덮개 닫힘/열림 이력이 있는 긴 가동 뒤**에 나타났고 재부팅/EC 리셋으로 풀렸다. 야간 사건 때는 serio 재연결로 안 풀렸다.
 **kmscon `cannot swap display [eDP] -22` 경고(별도 단서)**: 이전 부팅에서 13,662건(08:06 ~ 10:28, 덮개 닫힘·VT2 활성 중 화면을 다시 그릴 때마다). `-22`(EINVAL)는 eDP 에 갱신(page flip)이 안 먹는다는 뜻이다. 낮은 전력 상태(08:14~08:20, 09:09~09:33, 10:16:46~)와 분 단위로 정확히 맞지는 않아(경고는 화면이 갱신을 시도할 때만 나온다) **상관은 미확정**. 가설 H6: 낮은 상태 = VT2 가 DRM master 인데 eDP 파이프가 꺼진(scanout 없음) 상태, 높은 상태 = 파이프가 켜진 상태(10:21 에 DRM `dpms=Off` 를 읽었을 때도 높은 상태였으므로 `dpms` 속성만으로는 구분 안 됨). 검증: 두 상태에서 `/sys/kernel/debug/dri/0000:00:02.0/i915_display_info`(CRTC active/파이프/전원 우물)와 `i915_dmc_info`, `pmc_core` 의 `slp_s0`/substate 를 비교.
 **다음에 같은 증상이 나오면(재부팅·재로그인 하기 전에) — 1분이면 된다**
-1. `sudo python3 ~/nixos/mods/_data/input-debug/key_probe.py 15` 를 실행하고 15초 동안 **Backspace, →, 밝기 올림, 밝기 내림을 각각 3번씩** 누른다(눌린 글자 내용은 기록 안 함, 키 이름별 눌림 횟수만).
+1. `sudo python3 ~/nixos/mods/_tools/input-debug/key_probe.py 15` 를 실행하고 15초 동안 **Backspace, →, 밝기 올림, 밝기 내림을 각각 3번씩** 누른다(눌린 글자 내용은 기록 안 함, 키 이름별 눌림 횟수만).
 2. 결과 해석: `irq1_delta` = i8042 키보드 인터럽트(PS/2 신호가 하드웨어에서 커널까지 오는지), `gpe6e_delta` = EC 이벤트 인터럽트(밝기/Fn 계열).
    - 키를 눌렀는데 `irq1_delta`=0 → **키보드/EC 가 신호를 안 보냄**(하드웨어·펌웨어, EC 리셋 대상)
    - `irq1_delta` 는 늘었는데 키 이벤트 0 → **커널 입력층에서 버려짐**(atkbd/serio 쪽)

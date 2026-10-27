@@ -43,7 +43,7 @@
 3. 블루투스(`ID_BUS=bluetooth`)면 BlueZ 에서 그 MAC(노드의 `uniq`, 대문자 변환)의 `Connected` 가 true 로 **확인**돼야 한다. 확인하지 못하면(BlueZ 응답 없음, `uniq` 없음, 장치 목록에 없음) **없음으로 본다** — 판정이 불확실할 때는 내장 키보드를 켜 둔다(키보드가 모두 꺼진 상태가 가장 나쁜 결과이므로).
 4. 노드의 sysfs 경로가 지금 존재해야 한다(제거 직후의 낡은 정보 배제).
 
-판정 코드는 새로 만든 `mods/_data/extkbd/extkbd.py`(표준 라이브러리만; 시험 `mods/_data/extkbd/tests/test_extkbd.py`). 명령:
+판정 코드는 새로 만든 `mods/_tools/extkbd/extkbd.py`(표준 라이브러리만; 시험 `mods/_tools/extkbd/tests/test_extkbd.py`). 명령:
 - `extkbd present` — 있으면 종료 코드 0, 없으면 1. 정책이 부른다. **정책은 0 일 때만 "있음"으로 보고, 어떤 이유의 실패(예외·시간 초과·실행 파일 없음·사용법 오류 2)든 "없음"으로 본다**(내장 키보드를 켜 둠).
 - `extkbd status` — 노드별 판정과 이유(사람이 읽는 표). 문제 진단용.
 - `extkbd watch` — 감시 데몬(§4-3).
@@ -74,7 +74,7 @@
 - 다중 외부 키보드 중 어느 것이 "실제로 쓰이는지" 판별하지 않는다(하나라도 있으면 있음).
 
 ## 5. 검증 계획
-1. **자동 시험** `mods/_data/extkbd/tests/test_extkbd.py`(기존 `mods/_data/_testkit/harness.py` 의 `checker()` 로 `check(이름, 조건)`·`finish(제목)` 형식; `mods/_data/run-tests.sh` 의 목록에 `extkbd` 로 등록): 속성 블록 파싱, 판정 규칙(i8042 제외, 가상/ACPI 제외, USB/블루투스 포함, 블루투스 Connected 미확인 → 없음, `uniq` 없음 → 없음, 제거된 노드 무시), `udevadm`/BlueZ 를 가짜 실행 파일로 대체한 `present`·`status`, 감시 데몬(가짜 이벤트 줄 → 디바운스 후 정책 1회 실행, 자식 종료 시 데몬 종료).
+1. **자동 시험** `mods/_tools/extkbd/tests/test_extkbd.py`(기존 `mods/_tools/_lib/_testkit/harness.py` 의 `checker()` 로 `check(이름, 조건)`·`finish(제목)` 형식; `mods/_tools/run-tests.sh` 의 목록에 `extkbd` 로 등록): 속성 블록 파싱, 판정 규칙(i8042 제외, 가상/ACPI 제외, USB/블루투스 포함, 블루투스 Connected 미확인 → 없음, `uniq` 없음 → 없음, 제거된 노드 무시), `udevadm`/BlueZ 를 가짜 실행 파일로 대체한 `present`·`status`, 감시 데몬(가짜 이벤트 줄 → 디바운스 후 정책 1회 실행, 자식 종료 시 데몬 종료).
 2. **Nix 평가**: `nixup check` 는 저장소 전체에 `statix fix`/`alejandra` 를 돌려 파일을 고치므로 쓰지 않았다. 대신 `nixup` 이 만드는 빌드 사본을 손으로 재현했다 — 임시 디렉터리에 `core/ hosts/ mods/` 복사, `core/flake.nix` 를 루트에 복사, `python3 -B core/scripts/nixup.task-resolve.py <저장소> <json 디렉터리>` 로 만든 `resolved.json`·`presets.json` 복사, 노트북이 쓰는 `.locks/_rolling.lock` 을 `flake.lock` 으로 복사(다른 lock 이면 무관한 `llm-cli.nix` 오류가 났다), 노트북의 `.build/.env`·`hardware.nix` 복사. 그 뒤 `nix eval "path:<디렉터리>#homeConfigurations.\"donghans@msi-summit-me\".activationPackage" --apply 'p: p.drvPath' --allow-import-from-derivation`.
    `extkbd-watch` 서비스가 msi 에만 생기는지 확인(`donghans@beelink-ser7-co` 에는 없음), 생성된 `hypr-input-policy`·`extkbd` 스크립트를 빌드해 `bash -n` 으로 문법 확인.
 3. **실기(노트북)**: 배포는 이 노트북이 **스탠드얼론**(`hosts/msi-summit-me.toml` 에 `[deploy]` 없음, 직접확인)이므로 커밋·push 후 노트북에서 `git pull && nixup` 한다. 확인할 것: (a) 지금 연결된 AULA 키보드로 `extkbd status` 가 "있음", 내장 키보드 입력이 막힘(`hyprctl devices` 의 `enabled`·실제 입력), (b) 블루투스 해제 후 내장 키보드 복원, (c) 재연결 후 다시 꺼짐, (d) 힌지 모드 변화·`hyprctl reload` 후에도 유지, (e) Q1·Q2 관찰.
@@ -83,7 +83,7 @@
 
 ## 6. 구현 결과 (2026-10-27)
 **만든 것(저장소 변경, 아직 노트북에 배포되지 않음)**
-- `mods/_data/extkbd/extkbd.py`, `mods/_data/extkbd/tests/test_extkbd.py`, `mods/_data/run-tests.sh` 의 목록에 `extkbd` 추가.
+- `mods/_tools/extkbd/extkbd.py`, `mods/_tools/extkbd/tests/test_extkbd.py`, `mods/_tools/run-tests.sh` 의 목록에 `extkbd` 추가.
 - `mods/gui/base/core.bind.hwctl.nix`: `extkbd` CLI 정의, `hypr-input-policy` 수정(flock, `ext` 판정, 노트북 모드에서 외부 키보드가 있으면 키보드 끔, 알림·저널), `extkbd-watch` 사용자 서비스(노트북이고 `internalKeyboardName` 이 있을 때만), 패키지 목록에 `extkbd` 추가.
 
 **확인한 것**

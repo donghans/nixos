@@ -12,14 +12,14 @@
   }: let
     svcCfg = config.services.custom-notify-logger;
 
-    # 기록·조회·통계·장애 감시 본체는 mods/_data/notif/notif.py (시험: mods/_data/notif/tests). 화면(notif ui)은 Textual 이 필요
+    # 기록·조회·통계·장애 감시 본체는 mods/_tools/notif/notif.py (시험: mods/_tools/notif/tests). 화면(notif ui)은 Textual 이 필요
     py = pkgs.python3.withPackages (ps: [ps.textual]);
     notifDir = pkgs.runCommand "notif-py" {} ''
       mkdir -p $out
-      cp ${../../_data/notif/notif.py} $out/notif.py
-      cp ${../../_data/notif/notif_ui.py} $out/notif_ui.py
-      cp ${../../_data/_uikit/uikit.py} $out/uikit.py
-      cp ${../../_data/notif/devwatch.py} $out/devwatch.py
+      cp ${../../_tools/notif/notif.py} $out/notif.py
+      cp ${../../_tools/notif/notif_ui.py} $out/notif_ui.py
+      cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
+      cp ${../../_tools/notif/devwatch.py} $out/devwatch.py
     '';
     # busctl/systemctl/journalctl(systemd), pkill(procps), wl-copy, notify-send 를 PATH 에 넣어 서비스 환경에서도 동작하게 함
     notif = pkgs.writeShellScriptBin "notif" ''

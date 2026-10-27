@@ -121,8 +121,8 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # (observe 의 usageui 와 같은 방식). 훅·타이머·사용자가 부르는 `donghans` 는 모두 이 래퍼다.
   ctxSrc = pkgs.runCommand "claude-ctx-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/claude-ctx + "/${f}"} $out/${f}") ["claude_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_docs.py" "ctxdata.py" "ctxchart.py" "ctxui.py"]}
-    cp ${../../_data/_uikit/uikit.py} $out/uikit.py
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/claude-ctx + "/${f}"} $out/${f}") ["claude_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_docs.py" "ctxdata.py" "ctxchart.py" "ctxui.py"]}
+    cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
   '';
   claudeCtx = pkgs.writeShellScriptBin "donghans" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg])}/bin/python3 ${ctxSrc}/claude_ctx.py "$@"'';
   # ctx 관리 TUI(Textual): 저장소별 용량·검색·발언 대조·비밀 등록표·후보 탐지. 사람이 터미널에서 쓰는 도구(`ctxui`).
@@ -134,9 +134,9 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # 설계·시험 기록: _docs/content/explanation/claude-sessions.md
   sessionsSrc = pkgs.runCommand "claude-sessions-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_data/claude-sessions + "/${f}"} $out/${f}") ["claude_sessions.py" "tmuxsess.py" "claude-tmux" "claude-tmux.conf"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/claude-sessions + "/${f}"} $out/${f}") ["claude_sessions.py" "tmuxsess.py" "claude-tmux" "claude-tmux.conf"]}
     chmod +x $out/claude-tmux
-    cp ${../../_data/_uikit/uikit.py} $out/uikit.py
+    cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
   '';
   tmuxEnv = ''
     export CLAUDE_TMUX_BIN=${pkgs.tmux}/bin/tmux CLAUDE_TMUX_CONF=${sessionsSrc}/claude-tmux.conf CLAUDE_RUN_BIN=${claudeRun}
@@ -171,7 +171,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
       # 상태 표시줄(5시간·주간 한도 % 표시 + limits.jsonl 기록)도 훅과 같은 --settings 로 주입해, 이 모듈을 쓰는 모든 호스트에 적용한다(스크립트는 스토어 경로).
       statusLine = {
         type = "command";
-        command = "${../../_data/claude-usage/claude-usage-statusline}";
+        command = "${../../_tools/claude-usage/claude-usage-statusline}";
       };
       hooks = lib.genAttrs ["UserPromptSubmit" "Stop" "SubagentStop" "SessionStart" "SessionEnd" "PreCompact"] ctxHook;
     }
@@ -395,7 +395,7 @@ in {
     # 사용량 도구: 상태 표시줄 기록기(한도 감시기는 donghans-limit-watch 스킬).
     # 상태 표시줄 연결은 위 hooksSettings.statusLine 이 --settings 로 주입한다(`claude` 셸 함수로 실행할 때). ~/.claude/settings.json 에 같은 항목이 수동으로 있어도 충돌하지 않는다.
     home.file.".local/bin/claude-usage-statusline" = {
-      source = ../../_data/claude-usage/claude-usage-statusline;
+      source = ../../_tools/claude-usage/claude-usage-statusline;
       executable = true;
       force = true;
     };

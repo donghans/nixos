@@ -6,8 +6,8 @@
 | 부분 | 위치 | 역할 |
 |---|---|---|
 | 서버 | `mods/sys/services/claude-ctx.nix` (호스트 toml 에 `claude-ctx = true`) | Postgres 17 + pgvector, DB `claude_ctx`, 역할 `claude_ctx`. localhost 와 tailnet(100.64.0.0/10) 에서만 scram 비밀번호로 접속 |
-| 스키마 | `mods/_data/claude-ctx/schema.sql` | 멱등. 서비스 `claude-ctx-schema` 가 적용 |
-| 클라이언트 | `mods/_data/claude-ctx/claude_ctx.py` → `donghans` 명령 (`donghans ctx …`, `donghans handoff put|get`) (`mods/devel/apps/llm-cli.nix`) | 훅 적재 · 백필 · 조회 · handoff 업/다운 |
+| 스키마 | `mods/_tools/claude-ctx/schema.sql` | 멱등. 서비스 `claude-ctx-schema` 가 적용 |
+| 클라이언트 | `mods/_tools/claude-ctx/claude_ctx.py` → `donghans` 명령 (`donghans ctx …`, `donghans handoff put|get`) (`mods/devel/apps/llm-cli.nix`) | 훅 적재 · 백필 · 조회 · handoff 업/다운 |
 | 훅 | 같은 파일의 `claude` 래퍼가 `--settings` 로 주입 | UserPromptSubmit/Stop/SubagentStop/SessionStart/SessionEnd/PreCompact (async) |
 | 안전망 | user 타이머 `claude-ctx-ingest` (10분) | 훅이 놓친 것을 오프셋 기준으로 따라잡음 |
 
@@ -90,14 +90,14 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 
 | 부분 | 위치 | 역할 |
 |---|---|---|
-| 핵심 | `mods/_data/claude-ctx/ctx_secrets.py` | 등록표 DDL·치환 엔진(`Masker`)·후보 탐지(`PATTERNS`)·주입 래퍼(`run_masked`)·jsonl 치환(`scrub_bytes`/`scrub_local`). DB 없이 시험 가능한 순수 함수 중심 |
+| 핵심 | `mods/_tools/claude-ctx/ctx_secrets.py` | 등록표 DDL·치환 엔진(`Masker`)·후보 탐지(`PATTERNS`)·주입 래퍼(`run_masked`)·jsonl 치환(`scrub_bytes`/`scrub_local`). DB 없이 시험 가능한 순수 함수 중심 |
 | 명령 | `claude_ctx.py` 의 `donghans secret …` | `add`(숨겨 입력, `--stdin`) · `list` · `rm/enable/disable` · `show`(TTY) · `run` · `scan` · `adopt` · `ignore` · `scrub` |
 | 치환 지점 | `ctx search/recent/session/sql` · `handoff get/draft` | 출력 직전에 치환. `--raw` 는 TTY + `CLAUDECODE` 없음일 때만 |
 | 조회 계층 | `ctxdata.py` | 개요 집계 · 검색 · 저장소별 발언 대조 · 세션 맥락 · 비밀·후보 관리(화면과 분리) |
 | 화면 | `ctxui.py` (`ctxui` 명령, Textual) | 1 대시보드(저장소별 개수·용량·DB 크기 + 한도·통계, 아래 「ctxui 통계·대화 보기」) · 2 검색(세션 기준 목록 — 전체 대화에서 찾아 세션으로 묶음, Space 로 일치 메시지 펼침·F6 제목만, 키워드/정규식·저장소·기간·역할) · 3 대조(같은 문구를 저장소별로 묶어 「내가 그렇게 말했나」) · 4 비밀(추가·끄기·삭제·값 보기) · 5 후보(승인·무시) · 6 지침(아래 「명령 경유」) |
 | 스키마 | `schema.sql` 의 `secrets` · `secret_ignores` (v2) | `ctx_secrets.SCHEMA_STATEMENTS` 와 같은 DDL(시험이 확인). 클라이언트도 쓰기 전에 `CREATE TABLE IF NOT EXISTS` 로 보장 |
 | 자동화 | `claude-ctx-ingest` 서비스의 `ExecStartPost` | 10분마다 `secret scrub --apply --quiet --idle-min 180`. 등록표가 비면 아무 일도 안 한다 |
-| 시험 | `claude-ctx/tests/` (`mods/_data/run-tests.sh` 에 등록) | `test_secrets`(순수) · `test_ctx_db`(임시 Postgres 통합) · `test_ctxdata` · `test_ctxui`(Pilot) |
+| 시험 | `claude-ctx/tests/` (`mods/_tools/run-tests.sh` 에 등록) | `test_secrets`(순수) · `test_ctx_db`(임시 Postgres 통합) · `test_ctxdata` · `test_ctxui`(Pilot) |
 
 ### 치환이 걸리는 곳과 규칙
 - 치환 형식은 `[protected]`. literal 은 값 그대로 **와 JSON 이스케이프 형태**(따옴표·역슬래시·`\uXXXX`)를, regex 는 패턴을 가린다. 값 4자 미만은 등록을 거부한다(일반 단어까지 지워지므로; `--force`).

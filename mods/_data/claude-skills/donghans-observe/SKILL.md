@@ -22,7 +22,7 @@ description: 성능·자원·전력 문제를 추측하지 말고 observectl(관
 - 실험 전후 비교는 `observectl mark` 로 조건 표지를 붙이고 `observectl window --by mark`.
 
 ## 측정(A/B)과 시험 틀 — 효과를 확인할 때
-- 절차: `observectl on L0` 로 켜고(**노트북이면 켜기 전에 사용자에게 알린다**, 위) 안정화 → 조건을 번갈아(ABAB, 쌍 3 이상·구간 5분 이상 권장) → `observectl ab` 로 판정. 틀은 `~/nixos/mods/_data/observe/examples/abab_lib.sh`(`abab_set_a/b`·`abab_verify_a/b`·`abab_restore`; 환경변수 `SEG`·`PAIRS`·`SETTLE`·`ABAB_ALT=1`·`ABAB_AC_MODE=1`·`ABAB_LOCK_CMD`·`AB_ARGS`).
+- 절차: `observectl on L0` 로 켜고(**노트북이면 켜기 전에 사용자에게 알린다**, 위) 안정화 → 조건을 번갈아(ABAB, 쌍 3 이상·구간 5분 이상 권장) → `observectl ab` 로 판정. 틀은 `~/nixos/mods/_tools/observe/examples/abab_lib.sh`(`abab_set_a/b`·`abab_verify_a/b`·`abab_restore`; 환경변수 `SEG`·`PAIRS`·`SETTLE`·`ABAB_ALT=1`·`ABAB_AC_MODE=1`·`ABAB_LOCK_CMD`·`AB_ARGS`).
 - `observectl ab` 는 psys·패키지·순간 V×I·누적 계량을 한꺼번에 비교하고 지표끼리 어긋나면 알린다. 경고: 구간 시작 직후 표본이 높으면 「안정화 부족 의심」, 한 구간에서만 CPU 가 튄 앱은 「교란 의심」.
 - **verify 는 조건을 건 API 의 응답이 아니라 효과를 보는 독립 신호로 한다**(예: 브라우저 확장을 껐다는 응답 대신 `observectl browser sw` 로 서비스 워커가 실제로 멈췄는지 본다 — 사례 장부 #133).
 - 상태 지표(PSR 잔류·flip/s·깨움/s·C-state)를 먼저, 와트는 확인용. 시험 중에는 노트북에 ssh 폴링을 하지 않는다. 전력 시험 절차 전체는 이 저장소의 호스트 로컬 스킬 `power-test`(`~/nixos/.claude/skills/power-test/SKILL.md`)에 있다 — **그 파일이 없으면**(다른 저장소·호스트) `abab_lib.sh` 머리말과 `observectl ab --help` 를 따른다. 「ssh 폴링 금지」는 원격 노트북 전력 시험 중에만 해당한다(데스크톱 점검에는 해당 없음).

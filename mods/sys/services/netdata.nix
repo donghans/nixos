@@ -57,11 +57,11 @@ mkMod __curPos "Netdata (시스템 지표 기록: AC 1초 / 배터리 10초)" ({
     done
   '';
 
-  # Netdata API 로 배터리 잔량/전력(RAPL, 전압×전류)/CPU 를 같은 시간축 그래프와 요약으로 보여주는 도구 (스크립트: _data/netdata/power_report.py)
+  # Netdata API 로 배터리 잔량/전력(RAPL, 전압×전류)/CPU 를 같은 시간축 그래프와 요약으로 보여주는 도구 (스크립트: _tools/netdata/power_report.py)
   powerReport = pkgs.writeShellScriptBin "power-report" ''
-    exec ${pkgs.python3.withPackages (p: [p.matplotlib])}/bin/python3 ${../../_data/netdata/power_report.py} "$@"
+    exec ${pkgs.python3.withPackages (p: [p.matplotlib])}/bin/python3 ${../../_tools/netdata/power_report.py} "$@"
   '';
-  # 어댑터를 뽑은 상태에서 화면 주사율별 소비 전력을 번갈아 재서 비교(스크립트: _data/power-ab/power_ab.py)
+  # 어댑터를 뽑은 상태에서 화면 주사율별 소비 전력을 번갈아 재서 비교(스크립트: _tools/power-ab/power_ab.py)
   # 켜고 끄는 명령(기본은 꺼짐). sudo 는 setuid 래퍼(/run/wrappers/bin/sudo)를 써야 한다.
   netdataOn = pkgs.writeShellScriptBin "netdata-on" ''
     /run/wrappers/bin/sudo systemctl start netdata netdata-power-state && echo "netdata 켬 — 켜 둔 동안 EC 이벤트가 늘고 쉬는 전력이 오른다(끄기: netdata-off)"
@@ -72,7 +72,7 @@ mkMod __curPos "Netdata (시스템 지표 기록: AC 1초 / 배터리 10초)" ({
   powerAb = pkgs.writeShellScriptBin "power-ab" ''
     # displayctl 은 사용자 프로필(~/.nix-profile/bin)에 있어서 PATH 를 덧붙임
     export PATH=${lib.makeBinPath [pkgs.hyprland]}:$HOME/.nix-profile/bin:/run/current-system/sw/bin:/run/wrappers/bin:$PATH   # docker(--containers), sudo(RAPL 읽기)
-    exec ${pkgs.python3}/bin/python3 ${../../_data/power-ab/power_ab.py} "$@"
+    exec ${pkgs.python3}/bin/python3 ${../../_tools/power-ab/power_ab.py} "$@"
   '';
 in {
   hm.home.packages = [powerReport powerAb];

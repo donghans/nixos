@@ -1,6 +1,6 @@
 # 알림 센터 (notif) — 알림 기록 조회와 시스템 장애 알림
 
-**상태: 적용 완료 (2026-10-19)**. 구성: `mods/gui/utils/notify-logger.nix`(서비스·런처·타이머), 본체 `mods/_data/notif/`(notif.py, notif_ui.py, 시험), waybar 모듈은 `mods/gui/base/waybar.nix`.
+**상태: 적용 완료 (2026-10-19)**. 구성: `mods/gui/utils/notify-logger.nix`(서비스·런처·타이머), 본체 `mods/_tools/notif/`(notif.py, notif_ui.py, 시험), waybar 모듈은 `mods/gui/base/waybar.nix`.
 
 ## 쓰는 법
 | 하는 일 | 명령 |
@@ -45,7 +45,7 @@
 - **waybar**: 실패한 유닛이 있을 때만 빨간 `⚠ N` 이 나타나고(없으면 모듈이 사라짐) 툴팁에 목록, 클릭하면 문제 화면이 열린다. (처음에 쓴 Font Awesome 경고 글리프는 이 폰트에 없어서 `θ` 처럼 보였다 → `⚠`.)
 
 ## 장치 감시 (`notif devices`, user 서비스 `notif-devices`)
-장치 연결/해제, 마운트/언마운트, 전원 어댑터 전환을 알림(앱 이름 `devices`, 낮은 긴급도)으로 알려서 알림 센터의 `devices` 그룹에 모은다. 본체는 `mods/_data/notif/devwatch.py`(시험 30개). 시작할 때 이미 있는 장치/마운트는 알리지 않는다.
+장치 연결/해제, 마운트/언마운트, 전원 어댑터 전환을 알림(앱 이름 `devices`, 낮은 긴급도)으로 알려서 알림 센터의 `devices` 그룹에 모은다. 본체는 `mods/_tools/notif/devwatch.py`(시험 30개). 시작할 때 이미 있는 장치/마운트는 알리지 않는다.
 | 무엇 | 어떻게 | 알림 |
 |---|---|---|
 | 오디오 | `pw-dump -m` 으로 PipeWire 노드 추가/제거를 지켜봄 | **외부 장치(USB/블루투스)와 헤드폰/헤드셋 노드만**. 같은 장치의 출력/입력은 한 알림으로(예: "오디오 장치 연결: MSI DOCK — 출력 · 입력") |
@@ -61,7 +61,7 @@
 - 기록은 **기록된 순서**를 기준으로 한다(시각으로 정렬하지 않음). 부팅 직후 약 30초는 시스템 시각이 9시간 앞서(`posture.md` 의 "RTC 를 UTC 로 통일" 참고) 그 시각으로 정렬하면 "미래" 알림이 최신으로 올라왔다. 표시되는 시각 자체는 그 구간에서는 틀린 값이다(윈도우를 새로 설치할 때 RTC 를 UTC 로 통일하면 사라진다).
 - 알림 데몬은 mako 이고 `notif` 는 mako 의 기록(`makoctl history`)이 아니라 위의 자체 기록을 쓴다 — mako 의 기록은 재시작하면 사라지고 건수 제한이 있다.
 - 시스템 유닛의 실패 원인 로그는 사용자 권한으로 못 읽을 수 있다(그러면 알림 본문이 "(로그를 읽지 못했습니다)").
-- 시험: `mods/_data/run-tests.sh` (notif 35개 + 화면 23개; 화면은 textual 이 있는 python 필요). 실제 확인: 실패하는 임시 유닛(`systemd-run --user --unit=x false`)을 만들어 알림·waybar 표시·해소를 확인했다 — 확인 후 `systemctl --user reset-failed x`.
+- 시험: `mods/_tools/run-tests.sh` (notif 35개 + 화면 23개; 화면은 textual 이 있는 python 필요). 실제 확인: 실패하는 임시 유닛(`systemd-run --user --unit=x false`)을 만들어 알림·waybar 표시·해소를 확인했다 — 확인 후 `systemctl --user reset-failed x`.
 - **복사하고 종료했는데 창이 빈 화면으로 남던 문제 (2026-10-19, notif 와 clipui 둘 다)**: Enter 로 복사하면 `wl-copy` 가 클립보드 내용을 계속 제공하려고 백그라운드로 남는데, 그 프로세스의 stderr 가 kitty 의 터미널(pty)에 물려 있어서 kitty 창이 닫히지 않았다(`wl-copy` 의 fd 2 가 `/dev/pts/0`). 프로세스(`notif ui`)는 정상 종료(status 0)하고 있었다. 복사할 때 stdout/stderr 를 `/dev/null` 로 돌리자 창이 닫혔다. `hyprctl dispatch 'hl.dsp.send_shortcut({ mods = "", key = "Return", window = "class:^notif$" })'` 로 대상 창에만 Enter 를 보내 실제 창에서 고침 전/후를 확인했다(시험은 `copy_text` 가 출력을 분리하는지를 검사).
 - **pasystray 의 "New sink" 알림 반복**: 모니터 연결과 무관하게 이 노트북 오디오 칩(sof-hda-dsp)에는 HDMI/DP 출력 3개가 항상 있고, pasystray 가 (다시 시작될 때마다) 이 출력들과 마이크·스피커·헤드폰을 "새 장치"로 한꺼번에 알렸다. 터진 시각이 `nixup home` 을 돌린 시각과 겹쳤다(오늘 14:08~16:10). 모니터 오디오를 쓰지 않으므로 `hosts/msi-summit-me.nix` 에서 WirePlumber 규칙(`~/.config/wireplumber/wireplumber.conf.d/51-no-hdmi-audio.conf`, `node.disabled = true`)으로 HDMI 출력 노드를 숨겼다 — `wpctl status` 의 HDMI 출력 3개가 0개로 줄고 스피커/독 오디오는 그대로. 스피커·헤드폰·마이크 알림은 pasystray 재시작 때 여전히 나올 수 있다(끄려면 `pasystray --notify=none`).
   - **트리거를 좁힌 결과 (2026-10-19)**: pasystray 는 다시 시작되지 않았다(11:28 부터 같은 프로세스). 변경 없는 `nixup home` 만으로도, 또 `hyprctl reload` 한 번만으로도 알림이 터졌다(HDMI 를 숨긴 뒤 6건: 스피커/헤드폰 싱크 2개 + 마이크 소스 4개). 재현이 안 된 것: `displayctl restore`, `posture-apply`, `bluetoothctl power on`, `systemctl --user daemon-reload`, 모니터 모드 전환. `hyprctl reload` 전후 `wpctl status` 에서 **내장 오디오 카드(sof-hda)의 노드 번호만 바뀌고**(스피커 67→80, 마이크 43→64 …) 독 오디오(USB) 번호는 그대로였다 — 즉 설정을 다시 읽을 때 내장 카드의 노드가 다시 만들어지고 pasystray 가 그것을 "새 장치"로 알린다. 왜 다시 만들어지는지(어느 단계가 건드리는지)는 못 찾았다(외부 모니터 DP-4 켜짐/꺼짐 가설은 DP-4 를 실제로 켜지 못해 확인하지 못함).
