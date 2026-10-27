@@ -11,6 +11,7 @@
   sql "<SELECT ...>"   읽기 전용 질의
   handoff-put/handoff-get   인수인계 문서를 DB 에 올리고 받는다(머신이 달라도 resume)
   instr show|get|edit|set|list|sync|diff|push|pull   프로젝트별 지침(.claude/donghans-*.md)의 공유 정본(ctx_instr.py) — 읽기는 show(최신화 후 출력), 쓰기는 edit|set(DB 먼저); 로컬 파일은 읽기 전용 캐시
+  doc list|show|set|status|rm|import|search   저장소에 올리지 않는 프로젝트 문서(plan 계획·qa QA 기록·note 메모)의 공유 정본(ctx_docs.py) — 캐시 파일 없이 DB 하나
   secret add|list|rm|enable|disable|show|run|scan|adopt|ignore|scrub   비밀번호 등록표 · 출력 치환 · 주입 래퍼 · 후보 탐지 · 로컬 트랜스크립트 치환(ctx_secrets.py)
   (search|recent|session|sql|handoff get 의 출력은 등록된 비밀을 [protected] 로 바꾼다. --raw 는 사람이 TTY 에서만)
 
@@ -23,6 +24,7 @@ import argparse, glob, hashlib, json, os, re, socket, subprocess, sys, tempfile,
 import psycopg
 from psycopg.types.json import Jsonb
 
+import ctx_docs as cd
 import ctx_instr as ci
 import ctx_secrets as cs
 
@@ -477,7 +479,7 @@ def cmd_search(a):
         sql += " AND s.repo_url = %s"; args.append(repo)
     if a.role:
         sql += " AND m.role = %s"; args.append(a.role)
-    if a.role == "user":      # 「사용자 발언」은 자동 메시지(작업 알림·명령 출력 등)를 뺀다 — LLM 이 자동 보고를 사용자 지시로 읽지 않게(_plan/ctx-message-kinds.md)
+    if a.role == "user":      # 「사용자 발언」은 자동 메시지(작업 알림·명령 출력 등)를 뺀다 — LLM 이 자동 보고를 사용자 지시로 읽지 않게(donghans doc show plan ctx-message-kinds)
         import ctxdata as cd
         sql += " AND NOT (m.kind = 'prompt' AND coalesce(m.text, '') ~ %s)"; args.append(cd.AUTO_RE)
     if a.days:
@@ -857,6 +859,123 @@ def cmd_handoff_draft(a):
     return 0
 
 
+# ---------------------------------------------------------------- 프로젝트 문서(ctx_docs): 계획·QA 기록·메모
+def _doc_repo(a):
+    explicit = norm_repo(getattr(a, "repo", None))
+    if explicit:
+        return explicit
+    repo = git_meta(os.getcwd()).get("repo_url")
+    if not repo:
+        sys.exit("저장소를 알 수 없다 — git 저장소 안에서 실행하거나 --repo URL 을 준다")
+    return repo
+
+
+def cmd_doc_list(a):
+    repo = _doc_repo(a)
+    with connect(readonly=True) as c:
+        try:
+            rows = cd.list_docs(c, repo, a.kind, a.status, a.prefix)
+        except psycopg.errors.UndefinedTable:
+            rows = []
+    print(f"저장소 {repo}")
+    for kind, name, status, rev, n, host, at, origin in rows:
+        print(f"- {kind}/{name}: {status} · rev {rev} · {n}자 · {host} · {at:%F %T}")
+    if not rows:
+        print("(문서 없음)")
+    return 0
+
+
+def cmd_doc_show(a):
+    repo = _doc_repo(a)
+    with connect(readonly=True) as c:
+        try:
+            d = cd.get(c, repo, a.kind, a.name)
+        except psycopg.errors.UndefinedTable:
+            d = None
+        if not d:
+            print(f"{a.kind}/{a.name}: 없다", file=sys.stderr); return 1
+        m = _masker(a, c)
+    if not a.body_only:
+        print(f"# {a.kind}/{a.name} · 상태 {d['status']} · rev {d['rev']} · {d['updated_host']} {d['updated_at']:%F %T}" + (f" · 원본 {d['origin_path']}" if d['origin_path'] else ""))
+    print(m.text(d["body"]), end="" if d["body"].endswith("\n") else "\n")
+    return 0
+
+
+def cmd_doc_set(a):
+    repo = _doc_repo(a)
+    if bool(a.file) == bool(a.stdin):
+        sys.exit("--file <경로> 또는 --stdin 중 하나를 준다")
+    body = sys.stdin.read() if a.stdin else open(a.file, errors="ignore").read()
+    with connect() as c:
+        cd.ensure_schema(c)
+        code, msg, _ = cd.put(c, repo, a.kind, a.name, body, HOST, masker=cs.load_masker(c), expect_rev=a.expect_rev, status=a.status, origin_path=os.path.abspath(a.file) if a.file else None)
+        c.commit()
+    print(msg)
+    return code
+
+
+def cmd_doc_status(a):
+    repo = _doc_repo(a)
+    with connect() as c:
+        code, msg = cd.set_status(c, repo, a.kind, a.name, a.status, HOST)
+        c.commit()
+    print(msg)
+    return code
+
+
+def cmd_doc_rm(a):
+    repo = _doc_repo(a)
+    if not a.yes:
+        print(f"{a.kind}/{a.name} 를 DB 에서 지운다(되돌릴 수 없다) — 확인하려면 --yes"); return 1
+    with connect() as c:
+        code, msg = cd.remove(c, repo, a.kind, a.name)
+        c.commit()
+    print(msg)
+    return code
+
+
+def cmd_doc_import(a):
+    repo = _doc_repo(a)
+    files = []
+    for p in a.paths:
+        if os.path.isdir(p):
+            for root, dirs, names in os.walk(p):
+                dirs[:] = sorted(d for d in dirs if d not in (".git", "node_modules", "__pycache__"))
+                files += [os.path.join(root, n) for n in sorted(names)]
+        elif os.path.isfile(p):
+            files.append(p)
+        else:
+            sys.exit(f"{p}: 없다")
+    base = a.base or os.getcwd()
+    with connect() as c:
+        cd.ensure_schema(c)
+        res = cd.import_files(c, repo, a.kind, files, base, HOST, masker=cs.load_masker(c), prefix=a.prefix or "", status=a.status, dry_run=a.dry_run)
+    cnt = {}
+    for path, name, r in res:
+        key = r.split(":")[0]
+        cnt[key] = cnt.get(key, 0) + 1
+        if a.verbose or key in ("건너뜀", "거부"):
+            print(f"  {r:<24} {name}   ← {path}")
+    print(("[dry-run] " if a.dry_run else "") + " · ".join(f"{k} {v}" for k, v in sorted(cnt.items())) + f" (총 {len(res)}개)")
+    return 1 if cnt.get("거부") else 0
+
+
+def cmd_doc_search(a):
+    repo = _doc_repo(a)
+    with connect(readonly=True) as c:
+        try:
+            rows = cd.search(c, repo, a.term, a.kind, a.limit)
+        except psycopg.errors.UndefinedTable:
+            rows = []
+        m = _masker(a, c)
+        for kind, name, status, _pos in rows:
+            d = cd.get(c, repo, kind, name)
+            print(f"- {kind}/{name} ({status}): {m.text(cd.snippet(d['body'], a.term))}")
+    if not rows:
+        print("(일치하는 문서 없음)")
+    return 0
+
+
 # ---------------------------------------------------------------- secret: 비밀번호 등록표 · 주입 래퍼 · 후보 탐지 · 로컬 치환
 def _read_secret_value(a):
     if a.stdin:
@@ -1069,6 +1188,19 @@ def main():
     p = ins.add_parser("push", help="로컬 파일을 공유 정본으로 올린다"); p.add_argument("name", nargs="?", choices=list(ci.NAMES)); p.add_argument("--force", action="store_true"); p.set_defaults(f=cmd_instr_push)
     p = ins.add_parser("pull", help="공유 정본으로 로컬 파일을 덮는다"); p.add_argument("name", nargs="?", choices=list(ci.NAMES)); p.add_argument("--force", action="store_true"); p.set_defaults(f=cmd_instr_pull)
     p = ins.add_parser("diff"); p.add_argument("name", nargs="?", choices=list(ci.NAMES)); p.add_argument("--raw", action="store_true"); p.set_defaults(f=cmd_instr_diff)
+    dc = top.add_parser("doc", help="저장소에 올리지 않는 프로젝트 문서(plan·qa·note)의 공유 정본").add_subparsers(dest="cmd", required=True)
+    K = lambda p: p.add_argument("kind", choices=cd.KINDS)
+    R = lambda p: p.add_argument("--repo", help="저장소 URL(기본: 현재 git 저장소)")
+    p = dc.add_parser("list"); p.add_argument("kind", nargs="?", choices=cd.KINDS); p.add_argument("--status", choices=cd.STATUSES); p.add_argument("--prefix"); R(p); p.set_defaults(f=cmd_doc_list)
+    p = dc.add_parser("show"); K(p); p.add_argument("name"); p.add_argument("--body-only", action="store_true", help="머리 한 줄 없이 본문만"); p.add_argument("--raw", action="store_true"); R(p); p.set_defaults(f=cmd_doc_show)
+    p = dc.add_parser("set", help="본문을 올린다(없으면 만들고, 있으면 rev+1)"); K(p); p.add_argument("name"); p.add_argument("--file"); p.add_argument("--stdin", action="store_true")
+    p.add_argument("--status", choices=cd.STATUSES); p.add_argument("--expect-rev", type=int, help="DB 가 이 rev 일 때만 쓴다"); R(p); p.set_defaults(f=cmd_doc_set)
+    p = dc.add_parser("status", help="문서 상태 바꾸기(active|done|dropped|unknown)"); K(p); p.add_argument("name"); p.add_argument("status", choices=cd.STATUSES); R(p); p.set_defaults(f=cmd_doc_status)
+    p = dc.add_parser("rm"); K(p); p.add_argument("name"); p.add_argument("--yes", action="store_true"); R(p); p.set_defaults(f=cmd_doc_rm)
+    p = dc.add_parser("import", help="파일·폴더의 텍스트 파일을 올린다(멱등; 이진·큰 파일은 건너뜀)"); K(p); p.add_argument("paths", nargs="+")
+    p.add_argument("--base", help="이름을 만들 기준 폴더(기본: 현재 폴더) — 이름 = base 기준 상대 경로에서 .md 뗀 것"); p.add_argument("--prefix", help="이름 앞에 붙일 접두"); p.add_argument("--status", choices=cd.STATUSES)
+    p.add_argument("--dry-run", action="store_true"); p.add_argument("-v", "--verbose", action="store_true"); R(p); p.set_defaults(f=cmd_doc_import)
+    p = dc.add_parser("search"); p.add_argument("term"); p.add_argument("kind", nargs="?", choices=cd.KINDS); p.add_argument("--limit", type=int, default=20); p.add_argument("--raw", action="store_true"); R(p); p.set_defaults(f=cmd_doc_search)
     se = top.add_parser("secret", help="비밀번호 등록표 · 주입 래퍼 · 후보 탐지 · 로컬 치환").add_subparsers(dest="cmd", required=True)
     p = se.add_parser("add"); p.add_argument("label"); p.add_argument("--regex", action="store_true"); p.add_argument("--note"); p.add_argument("--replace", action="store_true")
     p.add_argument("--force", action="store_true"); p.add_argument("--stdin", action="store_true", help="값을 표준입력에서 읽는다(기본은 터미널에서 숨겨 입력)"); p.set_defaults(f=cmd_secret_add)

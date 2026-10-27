@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS schema_version (v int PRIMARY KEY, applied_at timesta
 INSERT INTO schema_version (v) VALUES (1) ON CONFLICT DO NOTHING;
 INSERT INTO schema_version (v) VALUES (2) ON CONFLICT DO NOTHING;  -- 2: secrets, secret_ignores
 INSERT INTO schema_version (v) VALUES (3) ON CONFLICT DO NOTHING;  -- 3: limit_samples 계정·리셋 시각
+INSERT INTO schema_version (v) VALUES (4) ON CONFLICT DO NOTHING;  -- 4: project_docs
 
 -- 프로젝트별 지침(`.claude/donghans-instructions.md`·`donghans-override.md`)의 공유 정본 — 로컬 파일은 SessionStart 훅이 만드는 캐시(ctx_instr.py).
 -- rev 는 낙관적 잠금: 올릴 때 `WHERE rev = 읽은 값` 이 아니면 거부한다(다른 기기가 먼저 바꾼 것을 덮지 않는다). 본문에 비밀 값을 두지 않는다(올릴 때 등록표로 검사).
@@ -163,6 +164,23 @@ CREATE TABLE IF NOT EXISTS project_instructions (
   updated_at   timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (repo_url, name)
 );
+
+-- 프로젝트 문서(`donghans doc`, ctx_docs.py): 저장소에 올리지 않는 계획(plan)·QA 기록(qa)·메모(note)의 정본. 캐시 파일이 없다(읽을 때마다 DB).
+-- 클라이언트도 첫 쓰기 때 같은 문장으로 표를 만든다(ctx_docs.SCHEMA_STATEMENTS) — 둘을 같이 고친다.
+CREATE TABLE IF NOT EXISTS project_docs (
+  repo_url     text NOT NULL,
+  kind         text NOT NULL CHECK (kind IN ('plan','qa','note')),
+  name         text NOT NULL,
+  body         text NOT NULL,
+  status       text NOT NULL DEFAULT 'active' CHECK (status IN ('active','done','dropped','unknown')),
+  rev          integer NOT NULL DEFAULT 1,
+  origin_path  text,
+  updated_host text NOT NULL,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (repo_url, kind, name)
+);
+CREATE INDEX IF NOT EXISTS project_docs_status ON project_docs (repo_url, kind, status);
 
 -- observectl 호스트 간 비교(observe_fleet.py): 시간별 앱 CPU·전력 요약과 브라우저 확장 설치 목록. 원본 표본·창 제목·주소·확장 이름은 올리지 않는다.
 CREATE TABLE IF NOT EXISTS observe_app_hourly (
