@@ -1,10 +1,11 @@
-"""ctxui 의 차트 조각(rich Text 만 만든다 — Textual 앱 없이도 시험 가능): 한도 창 점자 면적 그래프, 시간대별 프롬프트 그래프, 폭에 맞춘 가로 막대.
-점자 한 글자 = 가로 2 × 세로 4 점이라 글자 칸보다 가로 2배·세로 4배 해상도다(usageui 의 그래프와 같은 방식, 배포 단위가 달라 작은 함수만 따로 둔다)."""
+"""ctxui 의 차트 조각(rich Text 만 만든다 — Textual 앱 없이도 시험 가능): 한도 사용률 시계열, 시간당 비용, 시간대별 프롬프트의 점자 면적 그래프와 폭에 맞춘 가로 막대.
+점자 한 글자 = 가로 2 × 세로 4 점이라 글자 칸보다 가로 2배·세로 4배 해상도다(usageui 의 그래프와 같은 방식, 배포 단위가 달라 작은 함수만 따로 둔다).
+색을 흐리게 해서 계단을 감추지 않는다 — 계단은 데이터가 거칠 때 생기므로, 실제 샘플·시간당·15분 단위처럼 **데이터를 곱게 재서** 줄인다."""
 from __future__ import annotations
 
+import time
 from datetime import datetime
 
-from rich.color import Color
 from rich.text import Text
 
 AXIS_W = 6                      # y 눈금 글자 폭(마지막 칸은 구분 공백)
@@ -33,67 +34,13 @@ def braille_area(values, height, lo, hi):
     return rows
 
 
-def braille_area_aa(values, covs, height, lo, hi):
-    """안티에일리어싱 비슷한 면적 그래프. 점자 점은 켜짐/꺼짐뿐이라 값이 점 사이에 걸치면 윗면이 계단져 보인다 —
-    그래서 맨 윗 점 하나는 값이 걸친 만큼(0.1 이하면 무시) 더 켜고, 그 점이 든 칸의 색 농도(alpha)를 걸친 비율로 낮춘다.
-    가로는 covs(열이 그 값으로 덮이는 비율 0~1, 창 경계 같은 곳)가 작을수록 농도를 낮추고 0.3 미만이면 켜지 않는다.
-    반환: height 개 줄(위→아래)의 [(점자 글자, 농도 0~1)…]."""
-    cols = list(values)
-    cv = list(covs) if covs is not None else [1.0] * len(cols)
-    if len(cols) % 2:
-        cols.append(None); cv.append(1.0)
-    span = 4 * height
-    dots, topa = [], []
-    for v, c in zip(cols, cv):
-        if v is None or hi <= lo or c < 0.3:
-            dots.append(0); topa.append(1.0); continue
-        x = max(0.0, min(float(span), (v - lo) / (hi - lo) * span))
-        full = int(x)
-        f = x - full
-        if f > 0.1 and full < span:
-            dots.append(full + 1); topa.append((0.5 + 0.5 * f) * (0.4 + 0.6 * c))
-        else:
-            dots.append(full); topa.append(1.0 * (0.4 + 0.6 * c))
-    rows = []
-    for r in range(height):
-        base = 4 * (height - 1 - r)
-        line = []
-        for i in range(0, len(dots), 2):
-            bits, al = 0, []
-            for k, (col, lv, ta) in enumerate(((_LEFT, dots[i], topa[i]), (_RIGHT, dots[i + 1], topa[i + 1]))):
-                n = max(0, min(4, lv - base))
-                for j in range(n):
-                    bits |= col[j]
-                if n:
-                    al.append(ta if base < lv <= base + 4 else (0.4 + 0.6 * cv[i + k]))      # 이 칸이 그 열의 맨 윗칸이면 윗면 농도, 아니면 가로 덮임 비율만
-            line.append((chr(0x2800 + bits), sum(al) / len(al) if al else 1.0))
-        rows.append(line)
-    return rows
-
-
-def _hex_shade(style, alpha):
-    """색(이름·#hex)을 검은 배경에 alpha 만큼 섞은 #rrggbb."""
-    c = Color.parse(style).get_truecolor()
-    return "#%02x%02x%02x" % (round(c.red * alpha), round(c.green * alpha), round(c.blue * alpha))
-
-
-def _plot(values, width, height, lo, hi, style, labels, axis_line=None, covs=None, aa=False):
-    """값 열(plot 폭 × 2 개)을 y 눈금(labels: 줄 번호 → 글자)과 함께 Text 로. axis_line 이 있으면 맨 아래에 붙인다. aa=True 면 윗면·창 경계를 농도로 부드럽게(braille_area_aa)."""
+def _plot(values, width, height, lo, hi, style, labels, axis_line=None):
+    """값 열(plot 폭 × 2 개)을 y 눈금(labels: 줄 번호 → 글자)과 함께 Text 로. axis_line 이 있으면 맨 아래에 붙인다."""
     t = Text()
-    if aa:
-        rows = braille_area_aa(values, covs, height, lo, hi)
-    else:
-        rows = [[(ch, 1.0) for ch in r] for r in braille_area(values, height, lo, hi)]
+    rows = braille_area(values, height, lo, hi)
     for i, r in enumerate(rows):
         t.append(f"{labels.get(i, ''):>{AXIS_W - 1}} ", style="grey50")
-        run, cur = "", None
-        for ch, a in r:
-            st = _hex_shade(style, round(a * 8) / 8) if aa else style      # 농도는 8단계로 묶어 span 수를 줄인다
-            if st != cur and run:
-                t.append(run, style=cur); run = ""
-            cur = st; run += ch
-        if run:
-            t.append(run, style=cur)
+        t.append(r, style=style)
         if i < len(rows) - 1 or axis_line:
             t.append("\n")
     if axis_line:
@@ -114,60 +61,81 @@ def _axis(plot_w, marks):
     return "".join(line)
 
 
-def window_chart(windows, span_s, width, height, style, now=None):
-    """한도 창 그래프 한 개: 창(리셋 시각 직전 span_s 초)마다 그 창에서 찍은 최고 %를 창 길이만큼 가로로 채운다. y 는 0~100 % 고정, x 는 시간(샘플 없는 창 사이는 빈칸).
-    windows=[(리셋 datetime, 최고 %)…오래된 것부터]. 반환 Text(높이 = height 줄 + 시간축 1줄), 창이 없으면 None."""
-    if not windows:
+def _epoch(t):
+    return t.timestamp() if hasattr(t, "timestamp") else float(t)
+
+
+def _time_axis(plot_w, t0, t1, fmt="%m-%d %H:%M"):
+    f = lambda s: datetime.fromtimestamp(s).strftime(fmt)
+    return _axis(plot_w, [(0.0, f(t0)), (0.5, f((t0 + t1) / 2)), (1.0, f(t1))] if plot_w >= 44 else [(0.0, f(t0)), (1.0, f(t1))])
+
+
+def limit_chart(series, span_s, width, height, style, now=None):
+    """한도 사용률 시계열 그래프 한 개. series=[(시각, %, 리셋 시각)…](시각 순). 창(리셋 직전 span_s 초)마다 사용률이 0 에서 올라가다 리셋에서 떨어지는 모양이 그대로 나온다.
+    창 안에서 사용률은 줄지 않으므로 샘플이 없는 구간은 앞 값을 이어 주되, 지금(now)을 넘기거나 창이 끝난 뒤, 창의 첫 샘플 이전은 비운다.
+    y 는 0~100 % 고정, x 는 시간(첫 창 시작 ~ 마지막 창 리셋). 반환 Text(높이 = height 줄 + 시간축 1줄), 샘플이 없으면 None."""
+    if not series:
         return None
-    ts = [(r.timestamp(), v) for r, v in windows]
-    t1 = ts[-1][0]
-    t0 = ts[0][0] - span_s
+    now = time.time() if now is None else now
+    pts = sorted((_epoch(t), float(v), _epoch(r)) for t, v, r in series)
+    resets = sorted({r for _, _, r in pts})
+    t0, t1 = resets[0] - span_s, resets[-1]
     plot_w = max(10, width - AXIS_W)
     n = plot_w * 2
     dt = (t1 - t0) / n
-    vals, covs = [], []
-    for c in range(n):
-        a, b = t0 + c * dt, t0 + (c + 1) * dt
-        best = max(((min(b, r) - max(a, r - span_s), v) for r, v in ts), key=lambda x: x[0])      # 이 열과 가장 많이 겹치는 창
-        ov, v = best
-        vals.append(v if ov > 0 else None)
-        covs.append(min(1.0, max(0.0, ov / dt)))
-    fmt = lambda s: datetime.fromtimestamp(s).strftime("%m-%d %H:%M")
+    vals = [None] * n
+    for r in resets:
+        ws = [(t, v) for t, v, rr in pts if rr == r]
+        i, cur = 0, None
+        for c in range(n):
+            ca, cb = t0 + c * dt, t0 + (c + 1) * dt
+            if cb <= r - span_s or ca >= r:
+                continue
+            while i < len(ws) and ws[i][0] <= cb:
+                cur = ws[i][1]; i += 1
+            if cur is not None and ca < now:
+                vals[c] = cur
     labels = {0: "100", height // 2: "50", height - 1: "0"} if height >= 3 else {0: "100", height - 1: "0"}
-    axis = _axis(plot_w, [(0.0, fmt(t0)), (0.5, fmt((t0 + t1) / 2)), (1.0, fmt(t1))] if plot_w >= 44 else [(0.0, fmt(t0)), (1.0, fmt(t1))])
-    return _plot(vals, width, height, 0, 100, style, labels, axis, covs, aa=True)
+    return _plot(vals, width, height, 0, 100, style, labels, _time_axis(plot_w, t0, t1))
 
 
-def hour_chart(by_hour, width, height, style):
-    """시간대별(0~23시) 그래프: 한 시간 = 가로 width/24 만큼의 막대. y 는 0~최대. 반환 Text(높이 = height 줄 + 시간축 1줄)."""
-    plot_w = max(24, width - AXIS_W)
-    n = plot_w * 2
-    vals = []
-    for c in range(n):                                 # 한 시간의 값은 그 시간의 한가운데 값으로 보고 사이는 직선으로 이어 계단을 없앤다
-        x = (c + 0.5) * 24 / n - 0.5
-        i = max(0, min(22, int(x // 1)))
-        f = max(0.0, min(1.0, x - i))
-        vals.append(by_hour[i] * (1 - f) + by_hour[i + 1] * f)
-    top = max(by_hour) if by_hour and max(by_hour) > 0 else 1
-    labels = {0: f"{top:,}", height - 1: "0"}
-    axis = _axis(plot_w, [(h / 24, str(h)) for h in (0, 6, 12, 18)] + [(1.0, "24")])
-    return _plot(vals, width, height, 0, top, style, labels, axis, aa=True)
-
-
-def series_chart(values, labels, width, height, style, fmt=lambda v: f"{v:,.0f}"):
-    """구간별 값(예: 일별 비용) 막대 그래프 한 개. values·labels 는 같은 길이(오래된 것부터). 구간 하나 = 가로 plot 폭/구간 수 칸.
-    y 는 0~최대, x 눈금은 처음·가운데·끝 구간 이름. 반환 Text(높이 = height 줄 + 눈금 1줄), 값이 없으면 None."""
-    if not values:
-        return None
+def rate_chart(points, t0, t1, unit_s, width, height, style, fmt=lambda v: f"{v:,.0f}"):
+    """구간별 합계(예: 시간별 비용 $)를 「단위 시간당」 비율의 면적 그래프로. points=[(구간 시작, 값)…], 각 구간 길이는 unit_s. 구간이 없는 시간은 0.
+    열이 구간보다 굵으면 열 안의 구간들의 시간 가중 평균, 가늘면 같은 값을 이어 그린다. y 는 0~최대. 반환 (Text, 최대 비율), 값이 없으면 (None, 0)."""
+    if not points or t1 <= t0:
+        return None, 0.0
+    pts = sorted((_epoch(t), float(v)) for t, v in points)
     plot_w = max(10, width - AXIS_W)
-    cols = plot_w * 2
-    n = len(values)
-    top = max(values) or 1
+    n = plot_w * 2
+    dt = (t1 - t0) / n
+    vals, j = [], 0
+    for c in range(n):
+        ca, cb = t0 + c * dt, t0 + (c + 1) * dt
+        while j < len(pts) and pts[j][0] + unit_s <= ca:
+            j += 1
+        tot, k = 0.0, j
+        while k < len(pts) and pts[k][0] < cb:
+            tot += pts[k][1] * max(0.0, min(cb, pts[k][0] + unit_s) - max(ca, pts[k][0])) / dt
+            k += 1
+        vals.append(tot)
+    top = max(vals) or 1.0
+    labels = {0: fmt(top), height // 2: fmt(top / 2), height - 1: "0"} if height >= 4 else {0: fmt(top), height - 1: "0"}
+    return _plot(vals, width, height, 0, top, style, labels, _time_axis(plot_w, t0, t1, "%m-%d %H:00" if unit_s < 86400 else "%m-%d")), max(vals)
+
+
+def slot_chart(bins, width, height, style):
+    """하루(0~24시)를 같은 길이로 나눈 칸(예: 15분 96칸)별 개수 그래프. 칸이 열보다 많으면 열 안의 칸들의 평균, 적으면 같은 값을 이어 그린다.
+    y 는 0~최대 칸 값, x 눈금 0·6·12·18·24. 반환 Text(높이 = height 줄 + 시간축 1줄)."""
+    plot_w = max(24, width - AXIS_W)
+    n, m = plot_w * 2, len(bins)
     vals = []
-    vals = [values[min(n - 1, c * n // cols)] for c in range(cols)]
-    labels_y = {0: fmt(top), height // 2: fmt(top / 2), height - 1: "0"} if height >= 4 else {0: fmt(top), height - 1: "0"}
-    marks = [(0.0, labels[0])] + ([(0.5, labels[n // 2])] if n >= 3 and plot_w >= 40 else []) + ([(1.0, labels[-1])] if n >= 2 else [])
-    return _plot(vals, width, height, 0, top, style, labels_y, _axis(plot_w, marks))
+    for c in range(n):
+        a, b = c * m / n, (c + 1) * m / n
+        tot = sum(bins[i] * max(0.0, min(b, i + 1) - max(a, i)) for i in range(int(a), min(m, int(b) + 1)))
+        vals.append(tot / (b - a))
+    top = max(bins) if bins and max(bins) > 0 else 1
+    labels = {0: f"{top:,}", height - 1: "0"}
+    return _plot(vals, width, height, 0, top, style, labels, _axis(plot_w, [(h / 24, str(h)) for h in (0, 6, 12, 18)] + [(1.0, "24")]))
 
 
 def fit_bar(v, vmax, width):
@@ -176,3 +144,4 @@ def fit_bar(v, vmax, width):
         return ""
     eighths = max(1, round(width * 8 * v / vmax))
     return "█" * (eighths // 8) + (" ▏▎▍▌▋▊▉"[eighths % 8] if eighths % 8 else "")
+

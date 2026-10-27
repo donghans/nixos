@@ -175,6 +175,7 @@ try:
     check("session_summary: 세션·프롬프트·도구·비용", (sm["sessions"], int(sm["prompts"]), int(sm["tools"]), round(sm["cost"], 2)) == (3, 4, 3, 1.5), str(sm))
     check("session_summary: 시간대·요일 분포 합 = 프롬프트 수", sum(sm["by_hour"]) == 4 and sum(sm["by_weekday"]) == 4 and len(sm["by_hour"]) == 24 and len(sm["by_weekday"]) == 7)
     check("session_summary: 프롬프트 01시 UTC 4건(10-01 목·10-02 금·10-06 화·10-07 수)", sm["by_hour"][1] == 4 and sm["by_weekday"][3] == 1 and sm["by_weekday"][4] == 1 and sm["by_weekday"][1] == 1 and sm["by_weekday"][2] == 1, str(sm["by_hour"]))
+    check("session_summary: 15분 단위 96칸(by_slot) 합 = 프롬프트 수, 01:00 UTC 대는 칸 4(01:00~01:15)에 모인다", len(sm["by_slot"]) == 96 and sum(sm["by_slot"]) == 4 and sum(sm["by_slot"][4:8]) == 4 and all(sm["by_hour"][h] == sum(sm["by_slot"][4 * h:4 * h + 4]) for h in range(24)), str(sm["by_slot"][:12]))
     sk = cd.session_summary(conn, repo="alpha", tz="Asia/Seoul")
     check("session_summary: 시간대 적용(KST 는 10시)", sk["by_hour"][10] == 4 and sk["by_hour"][1] == 0)
     check("session_summary: 중앙값·평균 길이는 0 이상", sm["median_duration_s"] >= 0 and sm["avg_duration_s"] >= 0)
@@ -305,6 +306,9 @@ try:
     check("limit_windows: 계정이 빈 샘플은 같은 창의 계정에 합쳐 최고값을 쓴다(A: 30, 70, 10)", lw.get("A", [])[:2] == [30, 70], lw)
     check("limit_windows: 같은 창에 계정이 없는 샘플은 '?' 로 남는다", 20 in lw.get("?", []), lw)
     check("limit_windows: 같은 창에 계정이 둘이면 모호하므로 '?' 에 둔다(A 10 · B 40 · ? 99)", lw.get("A", [])[-1:] == [10] and lw.get("B") == [40] and 99 in lw.get("?", []), lw)
+    sa = next(a for a in cd.limit_windows(conn)["5h"] if a["account"] == "A")
+    check("limit_windows: 창 안 시계열(series)이 시각순이고 창(리셋 시각)에 속한다", [x[0] for x in sa["series"]] == sorted(x[0] for x in sa["series"]) and {x[2] for x in sa["series"]} <= {r for r, _ in sa["windows"]} and len(sa["series"]) >= 3, sa["series"][:3])
+    check("limit_windows: 시계열에도 계정 없는 샘플이 같은 창의 계정에 합쳐진다(A 의 둘째 창 최고 70)", max(v for _, v, r in sa["series"] if r == sa["windows"][1][0]) == 70, sa["series"])
     conn.execute("DELETE FROM limit_samples WHERE session_id = 'lw'"); conn.commit()
 
     check("delete_secret", cd.delete_secret(conn, "ANTHROPIC_KEY") == 1 and cd.delete_secret(conn, "ANTHROPIC_KEY") == 0)

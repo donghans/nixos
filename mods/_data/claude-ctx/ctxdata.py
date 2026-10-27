@@ -186,11 +186,11 @@ def usage_trend(conn, *, days=None, bucket="day", repo=None, host=None, model=No
 
 
 def limit_windows(conn, *, days=None, host=None, last=48):
-    """계정별 한도 창(5h·7d)마다 찍은 최고 %. {kind: [{account, label, plan, windows:[(리셋시각, 최고%)…오래된 것부터 last 개]}…]}.
-    계정은 account_id(없으면 '?'), 창은 리셋 시각으로 가른다. 라벨은 이메일.
+    """계정별 한도 창(5h·7d)마다 찍은 최고 %와 창 안의 시계열. {kind: [{account, label, plan, windows:[(리셋시각, 최고%)…오래된 것부터 last 개], series:[(시각, %, 리셋시각)…]}…]}.
+    계정은 account_id(없으면 '?'), 창은 리셋 시각으로 가른다. 라벨은 이메일. series 는 샘플을 5h 는 5분, 7d 는 1시간 단위로 묶은 그 구간의 최고 %(창 안에서 사용률은 줄지 않으므로 올라가는 모양이 그대로 보인다).
     계정 열이 비어 있는 샘플('?')은 같은 창(같은 리셋 시각)에 계정이 찍힌 샘플이 있으면 그 계정에 합친다(계정이 둘 이상이면 모호하므로 '?' 로 둔다)."""
     out = {}
-    for kind, pct, rs in (("5h", "five_hour_pct", "five_hour_resets_at"), ("7d", "seven_day_pct", "seven_day_resets_at")):
+    for kind, pct, rs, step in (("5h", "five_hour_pct", "five_hour_resets_at", "5 minutes"), ("7d", "seven_day_pct", "seven_day_resets_at", "1 hour")):
         where, args = f"{pct} IS NOT NULL AND {rs} IS NOT NULL", []
         if days:
             where += " AND ts > now() - make_interval(days => %s)"; args.append(days)
@@ -202,17 +202,24 @@ def limit_windows(conn, *, days=None, host=None, last=48):
         for aid, _e, _p, r, _m in rows:
             if aid != "?":
                 known.setdefault(r, set()).add(aid)
+        merge = lambda aid, r: next(iter(known[r])) if aid == "?" and len(known.get(r, ())) == 1 else aid      # 창 하나는 계정 하나 — 따로 「계정 불명」으로 세면 같은 창이 두 번 보인다
         accts = {}
         for aid, email, plan, r, mx in rows:
-            if aid == "?" and len(known.get(r, ())) == 1:     # 계정 열이 비어 있던 샘플도 같은 창이면 그 계정의 것이다(창 하나는 계정 하나) — 따로 「계정 불명」으로 세면 같은 창이 두 번 보인다
-                aid = next(iter(known[r]))
-            a = accts.setdefault(aid, dict(account=aid, label=email or ("계정 불명" if aid == "?" else aid[:8]), plan=plan, windows={}))
+            aid = merge(aid, r)
+            a = accts.setdefault(aid, dict(account=aid, label=email or ("계정 불명" if aid == "?" else aid[:8]), plan=plan, windows={}, series=[]))
             if email and a["label"] != email:
                 a["label"] = email
             a["plan"] = a["plan"] or plan
             a["windows"][r] = max(a["windows"].get(r, 0.0), float(mx))
+        for aid, r, b, mx in conn.execute(f"""SELECT coalesce(account_id, '?'), {rs}, date_bin(%s::interval, ts, TIMESTAMPTZ '2000-01-01'), max({pct})
+                  FROM limit_samples WHERE {where} GROUP BY 1, 2, 3 ORDER BY 3""", [step, *args]).fetchall():
+            a = accts.get(merge(aid, r))
+            if a is not None:
+                a["series"].append((b, float(mx), r))
         for a in accts.values():
             a["windows"] = sorted(a["windows"].items())[-last:]
+            keep = {r for r, _ in a["windows"]}
+            a["series"] = sorted((x for x in a["series"] if x[2] in keep), key=lambda x: x[0])
         out[kind] = sorted(accts.values(), key=lambda a: a["account"])
     return out
 
@@ -286,7 +293,7 @@ def session_stats(conn, *, days=None, repo=None, host=None, model=None, session_
 
 
 def session_summary(conn, *, days=None, repo=None, host=None, model=None, tz=None):
-    """세션 통계 요약: 개수·세션당 평균·중앙값, 시간대별(0~23시)·요일별(월~일) 사용자 프롬프트 수. 필터는 session_stats 와 같다."""
+    """세션 통계 요약: 개수·세션당 평균·중앙값, 시간대별(0~23시 by_hour, 15분 단위 96칸 by_slot)·요일별(월~일) 사용자 프롬프트 수. 필터는 session_stats 와 같다."""
     where, args = _session_filters(days, repo, host, model)
     tz = tz or local_tz()
     row = conn.execute(f"""
@@ -306,13 +313,14 @@ def session_summary(conn, *, days=None, repo=None, host=None, model=None, tz=Non
     if days:
         mwhere.append("m.ts > now() - make_interval(days => %s)"); margs.append(days)
     mwhere.append("coalesce(m.text, '') !~ %s"); margs.append(AUTO_RE)
-    hours, wdays = [0] * 24, [0] * 7
-    for h, wd, n in conn.execute(f"""SELECT extract(hour FROM m.ts AT TIME ZONE %s)::int, extract(isodow FROM m.ts AT TIME ZONE %s)::int, count(*)
-                                     FROM messages m WHERE {' AND '.join(mwhere)} GROUP BY 1, 2""", [tz, tz, *margs]).fetchall():
-        hours[h] += n
+    hours, wdays, slots = [0] * 24, [0] * 7, [0] * 96
+    for sl, wd, n in conn.execute(f"""SELECT (extract(hour FROM m.ts AT TIME ZONE %s) * 4 + floor(extract(minute FROM m.ts AT TIME ZONE %s) / 15))::int, extract(isodow FROM m.ts AT TIME ZONE %s)::int, count(*)
+                                     FROM messages m WHERE {' AND '.join(mwhere)} GROUP BY 1, 2""", [tz, tz, tz, *margs]).fetchall():
+        slots[sl] += n
+        hours[sl // 4] += n
         wdays[wd - 1] += n
     return dict(sessions=row[0], prompts=row[1], tools=row[2], cost=float(row[3]), median_duration_s=float(row[4]), avg_duration_s=float(row[5]),
-                median_prompts=float(row[6]), autos=int(row[7]), unknown_tags=int(row[8]), by_hour=hours, by_weekday=wdays)
+                median_prompts=float(row[6]), autos=int(row[7]), unknown_tags=int(row[8]), by_hour=hours, by_slot=slots, by_weekday=wdays)
 
 
 def session_tools(conn, session_id, top=6):

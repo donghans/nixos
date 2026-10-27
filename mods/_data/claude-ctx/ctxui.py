@@ -93,8 +93,8 @@ def summary_text(summ, width=46) -> Text:
     t.append(f"세션당  프롬프트 {summ['prompts'] / n:.1f} (중앙값 {summ['median_prompts']:.0f}) · ${summ['cost'] / n:.2f}\n", style="#cfcfcf")
     t.append(f"세션 길이  중앙값 {fmt_dur(summ['median_duration_s'])} · 평균 {fmt_dur(summ['avg_duration_s'])}\n", style="#cfcfcf")
     t.append("(resume 이어진 세션이 평균을 올림)\n\n", style="#7a7a7a")
-    t.append("시간대별 프롬프트(0~24시)\n", style="#9a9a9a")
-    t.append_text(cch.hour_chart(summ["by_hour"], width, 4, "#33ccff"))
+    t.append("시간대별 프롬프트(15분 단위, 0~24시)\n", style="#9a9a9a")
+    t.append_text(cch.slot_chart(summ["by_slot"], width, 4, "#33ccff"))
     top = sorted(range(24), key=lambda h: -summ["by_hour"][h])[:3]
     t.append("\n많은 시간: " + " ".join(f"{h}시({summ['by_hour'][h]})" for h in top if summ["by_hour"][h]) + "\n\n", style="#cfcfcf")
     t.append("요일별 프롬프트\n", style="#9a9a9a")
@@ -108,11 +108,11 @@ def summary_text(summ, width=46) -> Text:
 
 
 LIMIT_SPAN = {"5h": 5 * 3600, "7d": 7 * 86400}      # 한도 창 길이(초)
-LIMIT_H = {"5h": 4, "7d": 2}                           # 창 종류별 그래프 높이(줄)
+LIMIT_H = {"5h": 4, "7d": 3}                           # 창 종류별 그래프 높이(줄)
 
 
 def limits_text(win, width=60) -> Text:
-    """계정별 한도 창 그래프 — 한 계정 = 한 색. 5h/7d 마다 점자 면적 그래프(x=시간, y=0~100 %)로, 창마다 그 창에서 찍은 최고 %를 창 길이만큼 채운다. width = 칸 폭."""
+    """계정별 한도 사용률 — 한 계정 = 한 색. 5h/7d 마다 점자 면적 그래프(x=시간, y=0~100 %)로, 실제 샘플(5h 5분·7d 1시간 단위)이 창 안에서 0 에서 올라가다 리셋에서 떨어지는 모양 그대로. width = 칸 폭."""
     t = Text()
     ids = sorted({a["account"] for k in win.values() for a in k})
     if not ids:
@@ -132,8 +132,10 @@ def limits_text(win, width=60) -> Text:
                 continue
             vals = [v for _, v in a["windows"]]
             t.append(f"{k}  지금 {vals[-1]:.0f}% · 최고 {max(vals):.0f}% · {len(vals)}창\n", style="#cfcfcf")
-            t.append_text(cch.window_chart(a["windows"], LIMIT_SPAN[k], width, LIMIT_H[k], color[i]))
-            t.append("\n")
+            ch = cch.limit_chart(a["series"], LIMIT_SPAN[k], width, LIMIT_H[k], color[i])
+            if ch is not None:
+                t.append_text(ch)
+                t.append("\n")
     t.rstrip()
     return t
 
@@ -967,17 +969,20 @@ class CtxUI(uikit.HelpMixin, App):
             with cc.connect(readonly=True) as c:
                 cov = cd.coverage(c)
                 trend = cd.usage_trend(c, bucket=self.stat_bucket, **f)
+                span_days = (trend[-1]["bucket"] - trend[0]["bucket"]).days + 1 if trend else 0
+                fine_b = "hour" if span_days <= 14 else "day"                     # 비용 그래프는 선택한 단위와 무관하게 시간당(2주 넘으면 일당)으로 곱게 잰다
+                fine = trend if fine_b == self.stat_bucket else cd.usage_trend(c, bucket=fine_b, **f)
                 brk, tot = cd.usage_breakdown(c, self.stat_by, **f)
                 summ = cd.session_summary(c, **f)
                 sess = cd.session_stats(c, order=self.stat_order, limit=300, masker=self.masker(), **f)
                 lim = cd.limit_windows(c, days=f.get("days"), host=f.get("host"))
         except Exception as e:
             self.call_from_thread(self.flash, f"통계 조회 실패: {e}", "error"); return
-        self.call_from_thread(self.show_stats, cov, trend, brk, tot, summ, sess, lim)
+        self.call_from_thread(self.show_stats, cov, trend, brk, tot, summ, sess, lim, (fine_b, fine))
 
-    def show_stats(self, cov, trend, brk, tot, summ, sess, lim):
+    def show_stats(self, cov, trend, brk, tot, summ, sess, lim, fine=("day", [])):
         self._stat_loaded = True
-        self._st = dict(lim=lim, trend=trend, tot=tot, summ=summ)
+        self._st = dict(lim=lim, trend=trend, tot=tot, summ=summ, fine=fine)
         self.update_stat_state(cov)
         self.query_one("#stat-trend").border_title = f"토큰·비용 추이 — {cd.BUCKETS[self.stat_bucket]} 단위 · 합계 ${tot['cost']:,.2f} · 요청 {tot['requests']:,} · 출력 {fmt_num(tot['output'])}"
         tb = self.query_one("#stat-break", DataTable)
@@ -1015,7 +1020,7 @@ class CtxUI(uikit.HelpMixin, App):
         self.query_one("#stat-summary", Static).update(sm)
         self._need = {"stat-limits-box": lt.plain.count("\n") + 1, "stat-summary-box": sm.plain.count("\n") + 1}
         self._paint_trend(st["trend"])
-        self._paint_cost_chart(st["trend"], st["tot"])
+        self._paint_cost_chart(st["fine"], st["tot"])
         self._fit_heights()
 
     def _paint_trend(self, trend):
@@ -1039,15 +1044,22 @@ class CtxUI(uikit.HelpMixin, App):
         """비용 그래프 높이(줄): 터미널이 높을수록 크게(6~12). 박스 = 그래프 + 시간축 1줄 + 테두리 2줄."""
         return max(6, min(12, self.size.height // 8))
 
-    def _paint_cost_chart(self, trend, tot):
-        """구간(일·주…)별 비용 막대 그래프. 폭은 박스 폭에 맞춘다(usageui 의 전력 그래프처럼 위쪽에 크게)."""
+    def _paint_cost_chart(self, fine, tot):
+        """시간당(2주 넘으면 일당) 비용 면적 그래프. 선택한 단위(일·주…)는 아래 추이 표가 따르고, 그래프는 늘 곱게 잰다. 폭은 박스 폭에 맞춘다(usageui 의 전력 그래프처럼 위쪽에 크게)."""
+        unit, rows = fine
         box = self.query_one("#stat-trend-chart", Static)
+        box.border_title = f"비용 — {'시간당' if unit == 'hour' else '일당'} $"
+        if not rows:
+            box.update(Text(" 비용 기록 없음 — 이 기간·필터에 사용량이 없습니다", style="grey50")); box.border_subtitle = ""
+            return
+        step = 3600 if unit == "hour" else 86400
+        pts = [(r["bucket"].timestamp(), r["cost"]) for r in rows]       # 버킷은 지역 시간의 naive 시각 — timestamp() 가 같은 지역 시간으로 읽는다
+        t0, t1 = pts[0][0], pts[-1][0] + step
         w = self.query_one("#stat-trend-chart").size.width - 4 or 60
-        t = cch.series_chart([r["cost"] for r in trend], [self._fmt_bucket(r["bucket"]) for r in trend], max(30, w), self.cost_h(), "#33ccff", lambda v: f"${v:,.0f}" if v >= 10 else f"${v:.2f}")
-        box.update(t if t is not None else Text(" 비용 기록 없음 — 이 기간·필터에 사용량이 없습니다", style="grey50"))
-        costs = [r["cost"] for r in trend]
-        box.border_title = f"비용 — {cd.BUCKETS[self.stat_bucket]}별"
-        box.border_subtitle = f"합계 ${tot['cost']:,.2f} · 최대 ${max(costs):,.2f} · 평균 ${sum(costs) / len(costs):,.2f}" if costs else ""
+        t, top = cch.rate_chart(pts, t0, t1, step, max(30, w), self.cost_h(), "#33ccff", lambda v: f"${v:,.0f}" if v >= 10 else f"${v:.2f}")
+        box.update(t)
+        peak = max(rows, key=lambda r: r["cost"])
+        box.border_subtitle = f"합계 ${tot['cost']:,.2f} · 최대 ${peak['cost']:,.2f} ({peak['bucket']:%m-%d %H시})" if unit == "hour" else f"합계 ${tot['cost']:,.2f} · 최대 ${peak['cost']:,.2f} ({peak['bucket']:%m-%d})"
 
     DASH_ROWS = {"dr1": ("stat-trend-chart", "stat-break"), "dr2": ("stat-trend",), "dr3": ("stat-limits-box", "stat-summary-box"), "dr4": ("projects",), "dr5": ("stat-sessions",)}
     DASH_NO_STRETCH = ("stat-break",)      # 같은 줄의 옆 박스(그래프)가 높아도 늘이지 않고 내용 높이로 위에 붙인다(빈 칸 대신 빈 공간)
