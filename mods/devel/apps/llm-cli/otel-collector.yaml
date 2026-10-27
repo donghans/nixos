@@ -1,0 +1,17 @@
+receivers:
+  otlp:
+    protocols:
+      grpc: { endpoint: 127.0.0.1:4317 }
+      http: { endpoint: 127.0.0.1:4318 }
+exporters:
+  file/metrics:
+    path: ${env:HOME}/.local/share/claude-otel/metrics.jsonl
+    rotation: { max_megabytes: 50, max_backups: 5 }
+  file/logs:
+    path: ${env:HOME}/.local/share/claude-otel/events.jsonl
+    rotation: { max_megabytes: 100, max_backups: 5 }
+service:
+  telemetry: { metrics: { level: none } }
+  pipelines:
+    metrics: { receivers: [otlp], exporters: [file/metrics] }
+    logs: { receivers: [otlp], exporters: [file/logs] }

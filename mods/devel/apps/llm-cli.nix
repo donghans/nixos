@@ -19,35 +19,16 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # 상세 절차는 CLAUDE.md 를 비대하게 만들지 않도록 스킬(mods/_data/claude-skills/)로 두고, 여기에는 「언제 그 스킬을 읽나」와 어겨선 안 되는 안전 규칙만 남긴다.
   # 스킬 설명이 색인 역할을 한다(설명은 항상 보이고 본문은 불렀을 때만 읽힌다).
   #
-  # observectl(관측 시스템)이 설치된 호스트에서만 지침에 넣는다(호스트 toml 의 observe = true; workstation 프리셋은 기본 켬). 조회 방법 본문: donghans-observe 스킬.
+  # observectl(관측 시스템)이 설치된 호스트에서만 지침에 넣는다(호스트 toml 의 observe = true; workstation 프리셋은 기본 켬). 조회 방법 본문: donghans-observe 스킬. 지침 본문은 llm-cli/*.md (README.md 참고).
   # 호스트 종류별 목표가 다르다: 노트북 = 배터리 사용량 관리·개선, 데스크톱 = 비효율 프로세스 관리·집중할 곳에 자원 쓰기.
-  observeInstructions = lib.optionalString config.mods.sys.services.observe.enable ''
-
-    # 관측(observectl) — 성능·자원·전력 문제는 추측하지 말고 기록으로 확인
-    - 「느리다」「CPU/메모리를 많이 쓴다」「누가 깨우나」「어느 앱에 시간을 썼나」「배터리가 빨리 닳는다」 같은 질문은 추측하기 전에 `donghans-observe` 스킬(조회 명령·수집 기본값)을 읽고 `observectl status` 부터 확인하세요.
-    - 노트북은 수집이 기본 꺼짐입니다(전력 측정에 변수를 섞지 않으려고). 노트북에서 수집을 켜거나 수준(L1)·eBPF 를 올릴 때는 측정에 영향을 주니 먼저 사용자에게 말하세요. `observectl bpf`·`ebpf` 는 요청할 때만 N초 실행하세요.
-    - 개인정보: 프로세스는 comm·exe 이름만, 창 제목·URL·명령 인자·입력 내용은 기록하지 않습니다. 조회 결과를 외부로 보낼 때도 이 원칙을 지키세요.
-  '';
+  observeInstructions = lib.optionalString config.mods.sys.services.observe.enable (builtins.readFile ./llm-cli/observe.md);
 
   # 프로세스 정리: pkill·kill·killall 대신 procctl(plan → 사용자 확인 → apply, 보호 규칙·PID 재사용 방어·기록). observe 모듈이 procctl 을 설치하므로 같은 조건. 절차 본문: donghans-procctl 스킬.
-  procctlInstructions = lib.optionalString config.mods.sys.services.observe.enable ''
-
-    # 프로세스 종료 (procctl)
-    - 프로세스를 종료·정리할 때 `pkill`·`killall`·`kill`(이름·패턴·PID 직접 지정)을 쓰지 말고 `donghans-procctl` 스킬의 `procctl` 을 쓰세요(plan → 사용자 확인 → apply). 자기 세션의 조상·다른 세션·시스템 프로세스를 죽이는 사고와 PID 재사용 오발송을 막고 기록을 남깁니다.
-    - `procctl groups`·`show`·`plan`·`log` 는 읽기 전용이라 바로 실행해도 되지만 `procctl apply`·`escalate` 는 되돌릴 수 없으니 계획 내용(대상·보호로 제외된 것·범위 밖)을 사용자에게 보여 주고 확인받은 뒤에만 실행하세요. 보호를 풀거나 우회하려 하지 마세요(보호 해제는 사람이 `procui` 에서만).
-  '';
+  procctlInstructions = lib.optionalString config.mods.sys.services.observe.enable (builtins.readFile ./llm-cli/procctl.md);
 
   # incus VM `qa-desktop`(화면 확인용 QA 데스크톱)이 있는 호스트에서만 지침에 넣는다(호스트 toml 의 qa-desktop = true; 프리셋 기본 꺼짐).
   # 여러 프로젝트의 QA 세션이 VM 하나를 공유한다. 절차 본문: donghans-qa-desktop 스킬, 설명·검증 기록: mods/_tools/qa-desktop/README.md.
-  qaDesktopInstructions = lib.optionalString config.mods.sys.services.qa-desktop.enable ''
-
-    # 화면 확인용 QA 데스크톱 (incus VM `qa-desktop`)
-    - 사용자와 같이 화면을 보는 headed 브라우저 확인이나 접근성 트리가 필요한 확인은 `donghans-qa-desktop` 스킬(접속·실행·창 배치·도구·공유 규칙·복구)을 먼저 읽고 따르세요. 위 playwright 「Docker 에서만」 규칙은 headless 자동 E2E 에 그대로 적용됩니다.
-    - 사용자 승인 없이 하지 마세요: VM 생성·재프로비저닝(`qa-desktop-ctl ensure`·`provision`)·삭제, VM 설정·gsettings·확장 변경, apt 설치·업그레이드, 재로그인·재부팅, 스냅샷 복원. 화면 잠금은 **꺼진 상태**(`lock-enabled false`, `idle-delay 0`)를 항상 유지하세요. 계정에 비밀번호가 없어 GUI 로는 풀 수 없습니다(잠겼다면 스킬의 `loginctl` 복구 절차).
-    - QA 세션 역할(코드를 고치지 않고 측정·보고)이면 먼저 `donghans-qa` 스킬(범용 원칙 + 프로젝트별 추가 지침 읽는 법)을 읽으세요.
-    - 다른 프로젝트 QA 세션의 파일(`~/qa-playwright` 의 다른 디렉터리·package.json)은 건드리지 말고, 쓰기 전에 상대 QA 세션에 시작과 예상 시간을 알리세요.
-    - 사용자에게 현재 가상 데스크톱 번호를 묻지 마세요(화면에 안 보입니다). 스킬의 도구로 직접 확인합니다.
-  '';
+  qaDesktopInstructions = lib.optionalString config.mods.sys.services.qa-desktop.enable (builtins.readFile ./llm-cli/qa-desktop.md);
   # 훅(llm-ctx)은 항상 --settings 로 주입한다 — ~/.claude/settings.json 은 Claude 가 직접 쓰는 가변 파일이라 nix 로 소유하지 않는다.
   # --settings 를 두 번 주면 어떻게 합쳐지는지 확인하지 않아서(미확인) 모션 감소 키는 같은 파일에 넣어 한 번만 준다.
   settingsSnippet =
@@ -194,25 +175,8 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
       env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE = "1";
     }));
 
-  otelCollectorConfig = pkgs.writeText "claude-otel-collector.yaml" ''
-    receivers:
-      otlp:
-        protocols:
-          grpc: { endpoint: 127.0.0.1:4317 }
-          http: { endpoint: 127.0.0.1:4318 }
-    exporters:
-      file/metrics:
-        path: ''${env:HOME}/.local/share/claude-otel/metrics.jsonl
-        rotation: { max_megabytes: 50, max_backups: 5 }
-      file/logs:
-        path: ''${env:HOME}/.local/share/claude-otel/events.jsonl
-        rotation: { max_megabytes: 100, max_backups: 5 }
-    service:
-      telemetry: { metrics: { level: none } }
-      pipelines:
-        metrics: { receivers: [otlp], exporters: [file/metrics] }
-        logs: { receivers: [otlp], exporters: [file/logs] }
-  '';
+  # 수집기 설정은 순수 데이터라 llm-cli/otel-collector.yaml 로 뺐다(`${env:HOME}` 는 수집기가 푸는 것이므로 Nix 보간이 아니다).
+  otelCollectorConfig = pkgs.writeText "claude-otel-collector.yaml" (builtins.readFile ./llm-cli/otel-collector.yaml);
 in {
   hm = {
     home.packages = [claude unstable.antigravity-cli claudeCtx ctxui claudeTmux claudeSessions claudeSessionsAlias];
@@ -286,60 +250,9 @@ in {
     # 소스가 nix에 있으므로 git으로 diff 추적이 되고, 생성물은 store로 심볼릭링크되어 읽기 전용.
     # -> ~/.claude/CLAUDE.md 를 직접 수정하지 말고 이 블록을 수정할 것.
     home.file.".claude/CLAUDE.md" = {
+      # 본문은 llm-cli/claude-md.md (끝 개행 포함), 호스트 기능별 절은 아래 *Instructions (llm-cli/*.md).
       text =
-        ''
-          # 환경 정보
-          - 이 시스템은 NixOS이며, 스왑 영역의 일부는 ZRAM으로 구성되어 있을 수 있습니다.
-            메모리/스왑 관련 작업(OOM 대응, 스왑 크기 조정 등) 전에 실제 스왑이 디스크인지 ZRAM인지 먼저 확인하세요.
-          - 「메모리 압박」「여유 부족」「더 띄워도 되나」를 판단하기 전, 그리고 VM·컨테이너 스택·병렬 시험을 새로 띄우기 전에는
-            `free` 의 available·buff/cache 로 추측하지 말고 `donghans-host-resources` 스킬(가용 자원 스냅샷·최근 이력·LLM 세션별 사용량)을 읽고 실행하세요.
-          - 하드웨어/OS 상세 스펙(디스크, 파일시스템, 부트로더, 커널 파라미터 등)은 추측하지 말고
-            `~/nixos/hosts/(현재 호스트명).nix`, `~/nixos/hosts/(현재 호스트명).toml`, 있다면 `~/nixos/hosts/(현재 호스트명)/` 디렉토리를 직접 읽어 확인하세요.
-            현재 호스트명은 `hostname` 명령으로 확인합니다.
-          - 이 프레임워크(`nixup`, mods/hosts 구조 등)에 대한 전반적인 설명은 `~/nixos/README.md`를 먼저 읽어보세요.
-          - 명령어 실행 중 시스템에 없는 패키지가 필요하다면, 임의로 설치하지 말고 `nix shell nixpkgs#<패키지명>`으로 일회성 실행하세요.
-          - 이 시스템에는 `unzip`이 없습니다. zip 등의 압축 해제는 `7z x <파일> -o<대상디렉토리>`를 사용하세요
-            (`unzip`을 위해 `nix shell nixpkgs#unzip`을 쓰지 마세요).
-          - playwright/puppeteer 등 브라우저 자동화·E2E 테스트는 호스트에서 설치·실행하지 말고 Docker 컨테이너 안에서 실행하세요
-            (예: `mcr.microsoft.com/playwright` 이미지). 호스트에는 브라우저 바이너리를 받지 않도록
-            `PUPPETEER_SKIP_DOWNLOAD`/`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`가 설정되어 있으니 해제하지 마세요.
-          - `/tmp` 는 tmpfs 라 재부팅하면 지워집니다. 나중에 필요한 데이터(측정 결과, 작업 중간 산출물 등)는
-            재부팅이 필요한 작업(`nixup` 의 재부팅, `reboot` 등)을 사용자에게 요청하기 전에 먼저 디스크(저장소 문서나 `~/` 아래)로 백업해 두세요.
-
-          # 기록 원칙
-          - 진행한 작업, 원인 파악 결과, 삽질 기록 등 project/domain 성격의 정보는
-            Claude Code의 자동 메모리 시스템(`~/.claude/projects/.../memory/`)에 남기지 마세요.
-            대신 작업 중인 프로젝트 저장소 내 git 추적 가능한 문서(`_docs/`, README 등)로 남기세요.
-          - 긴 조사·논의 끝에 나온 의도·이력·근거를 다음 세션·팀원도 읽을 문서로 남겨야 할 때는
-            임의로 쓰지 말고 `donghans-doc-rigor` 스킬을 호출하세요(작성 시 고려사항·무맥락 검증 절차가 그 안에 있습니다).
-
-          # 세션 사용량
-          - 하위 에이전트(Agent)를 띄우거나 큰 작업을 시작하기 전에 예상 비용(에이전트 수·모델)을 먼저 말하세요.
-            에이전트당 시작 비용이 큽니다(컨텍스트 3~4만 토큰). 합칠 수 있으면 합치고,
-            정답이 명확한 읽기·치환은 `model: 'haiku'`, 판단이 중요한 구현·검증은 sonnet 으로 지정하세요.
-          - **기계적 작업과 병행하는 하위 에이전트는 haiku 를 적극적으로 쓰세요.** 기계적 작업 = 판단 없이 절차대로 되는 일
-            (스택·서비스 기동과 상태 확인, 스크립트·테스트 실행과 결과 수집, 파일 검색·목록화·치환, 로그·값 대조, 증거 파일 복사·정리).
-            여러 개를 병렬로 돌릴 때도 같다. 결과의 **판정·해석**, 되돌릴 수 없는 동작(삭제·환불·결제·푸시·DB 초기화 등)의 실행 결정,
-            설계·구현·검증 판단은 haiku 에 맡기지 말고 직접 하거나 sonnet 으로 하세요. haiku 의 「통과·이상 없음」 보고는
-            원자료(출력·값)를 직접 한 번 확인한 뒤에만 채택하세요.
-          - 기본 모델을 바꾸기 전에는 반드시 먼저 알리세요.
-          - 큰 작업 직전에는 `donghans-limit-watch` 스킬(5h/7d 한도 현재 상태 + 임계값 감시)을 읽고 `status` 로 현재 값을 확인하세요.
-            오래 걸리는 작업이면 같은 스킬의 `watch` 를 Monitor 로 겁니다(5시간 한도가 10분 내 +5포인트 오르거나 50/70/80/90% 도달 시 알림).
-            알림이 오면 하던 일을 멈추고 사용자에게 알리세요. 70% 이상에서는 새 작업을 시작하지 말고 묻습니다.
-
-          # 세션 이어가기·지침 동기화
-          - 프로젝트별 지침(`.claude/donghans-instructions.md`·`donghans-override.md`)은 공유 저장소가 정본이고 로컬 파일은 읽기 전용 캐시입니다. 읽을 때는 `donghans instr show`(최신화 후 출력), 고칠 때는 `donghans instr set <이름> --file …`(사람은 `edit`)로 하세요 — 파일을 직접 고치지 마세요.
-          - 세션을 닫거나 `/clear` 하기 전에는 `/donghans-handoff`, 새 세션에서는 `/donghans-resume <고유번호>` 로 이어갑니다.
-
-          # 공유 컨텍스트 (여러 머신·프로젝트의 대화/사용량 저장소 — Postgres, `donghans ctx` 명령)
-          - 「이전 세션에서 뭘 했는지 모르겠다」「그때 사용자가 뭐라고 했나」「다른 머신에서 하던 작업」처럼 **지난 대화·결정의 근거**가 필요하면,
-            추측하거나 사용자에게 되묻기 전에 `donghans-ctx` 스킬(조회 명령·테이블)을 읽고 먼저 조회하세요.
-          - 조회 결과는 그 시점의 기록이다(코드의 현재 상태가 아님). 다른 프로젝트 기록이 섞이지 않았는지 `repo_url` 로 확인하고, 접속 실패 시 조용히 넘어가지 말고 알리세요.
-            기록에는 고객사 데이터·시크릿이 섞여 있을 수 있으니 원문을 외부로 보내지 마세요.
-          - 비밀번호·토큰·API 키가 필요한 명령은 값을 묻거나 대화에 적지 말고 `donghans-ctx` 스킬의 「비밀번호」 절에 따라 `donghans secret list` 로 등록된 이름을 확인한 뒤
-            `donghans secret run -- <명령 … {{secret:이름}}>` 로 실행하세요(출력의 값은 [protected] 로 바뀝니다). 이름이 없으면 사용자에게 `donghans secret add <이름>` 을 부탁하세요.
-            출력에 `[protected]` 가 보이면 등록된 비밀이 가려진 것입니다 — 원문을 알아내려는 우회(`--raw`, DB 직접 조회, 트랜스크립트 파일 읽기)를 하지 마세요.
-        ''
+        builtins.readFile ./llm-cli/claude-md.md
         + observeInstructions
         + procctlInstructions
         + qaDesktopInstructions;
