@@ -1,8 +1,5 @@
-..keep
-
 /.build/
 .env
-GEMINI.md
 __pycache__/
 
 # tailpass .deb — 빌드 산출물(수십MB), mods/_data/tailpass/에 로컬로만 cp해서 씀
