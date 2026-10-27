@@ -1,0 +1,16 @@
+wofi 1.5.3 패치 6) 퍼지 점수 길이 한계 상향
+wofi 는 256자를 넘는 텍스트의 퍼지 점수를 최저값으로 취급해, 긴 항목(클립보드 미리보기 등)이
+정확히 일치해도 항상 순위가 맨 뒤로 밀림. 한계를 올림 (점수 계산용 스택 배열 크기만 커짐)
+
+diff -u a/inc/match.h b/inc/match.h
+--- a/inc/match.h
++++ b/inc/match.h
+@@ -24,7 +24,7 @@
+ typedef double score_t;
+ #define SCORE_MAX INFINITY
+ #define SCORE_MIN -INFINITY
+-#define MATCH_FUZZY_MAX_LEN 256
++#define MATCH_FUZZY_MAX_LEN 2048
+ #define MAX_MULTI_CONTAINS_FILTER_SIZE 256
+ 
+ enum matching_mode {

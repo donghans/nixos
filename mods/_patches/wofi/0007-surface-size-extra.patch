@@ -1,0 +1,55 @@
+wofi 1.5.3 패치 7) 서피스 크기 보정
+레이어 서피스/창 크기를 요청할 때 CSS 의 테두리+패딩만큼(WOFI_EXTRA) 더해서 요청
+(이유: wofi 는 width/height 를 그대로 요청하지만 GTK 는 #outer-box 의 테두리+패딩 양쪽 합
+       (mods/gui/base/wofi.nix 의 extra = 2*(borderPx+paddingPx), 현재 18px) 만큼
+       더 큰 창을 요구함 → 입력/포커스마다 "요청 크기로 줄었다가 GTK 가 다시 키우는" 1프레임 흔들림 발생)
+(주의: 아래 WOFI_EXTRA(18)는 wofi.nix 의 extra 와 반드시 일치해야 함.
+       wofi.nix 의 borderPx/paddingPx 스타일 값을 바꾸면 이 패치의 18 도 함께 고칠 것
+       — 값이 이 패치 본문에 박혀 있어 자동으로 따라가지 않음)
+
+diff -u a/src/wofi.c b/src/wofi.c
+--- a/src/wofi.c
++++ b/src/wofi.c
+@@ -67,6 +67,7 @@
+ 	SORT_ORDER_ALPHABETICAL
+ };
+ 
++#define WOFI_EXTRA 18
+ static uint64_t width, height;
+ static char* x, *y;
+ static struct zwlr_layer_shell_v1* shell = NULL;
+@@ -165,7 +166,7 @@
+ }
+ 
+ static void setup_surface(struct zwlr_layer_surface_v1* surface) {
+-	zwlr_layer_surface_v1_set_size(surface, width, height);
++	zwlr_layer_surface_v1_set_size(surface, width + WOFI_EXTRA, height + WOFI_EXTRA);
+ 	zwlr_layer_surface_v1_set_keyboard_interactivity(surface, true);
+ 
+ 	if(location > 8) {
+@@ -763,12 +764,12 @@
+ 	}
+ 
+ 	if(shell != NULL) {
+-		zwlr_layer_surface_v1_set_size(wlr_surface, width, height);
++		zwlr_layer_surface_v1_set_size(wlr_surface, width + WOFI_EXTRA, height + WOFI_EXTRA);
+ 		wl_surface_commit(wl_surface);
+ 		wl_display_roundtrip(wl);
+ 	}
+ 
+-	gtk_window_resize(GTK_WINDOW(window), width, height);
++	gtk_window_resize(GTK_WINDOW(window), width + WOFI_EXTRA, height + WOFI_EXTRA);
+ 
+ 	gtk_widget_set_size_request(scroll, scroll_width, scroll_height);
+ }
+@@ -2240,8 +2241,8 @@
+ 	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+ 	gtk_widget_realize(window);
+ 	gtk_widget_set_name(window, "window");
+-	gtk_window_set_default_size(GTK_WINDOW(window), width, height);
+-	gtk_window_resize(GTK_WINDOW(window), width, height);
++	gtk_window_set_default_size(GTK_WINDOW(window), width + WOFI_EXTRA, height + WOFI_EXTRA);
++	gtk_window_resize(GTK_WINDOW(window), width + WOFI_EXTRA, height + WOFI_EXTRA);
+ 	gtk_window_set_resizable(GTK_WINDOW(window), FALSE);
+ 	gtk_window_set_decorated(GTK_WINDOW(window), FALSE);
+ 

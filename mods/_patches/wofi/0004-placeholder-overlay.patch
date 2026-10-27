@@ -1,0 +1,62 @@
+wofi 1.5.3 패치 4) 플레이스홀더
+GTK3 입력창은 포커스가 있으면 플레이스홀더를 숨기는데, 시작 시 검색창에 포커스를 두므로
+입력창 위에 라벨을 겹쳐 "텍스트가 비어 있고 IME 조합(preedit) 중이 아닐 때" 항상 표시
+(라벨은 CSS #placeholder 로 스타일링, 입력은 통과)
+(이 패치는 패치 1 이 넣은 hover_select 함수 바로 앞에 헬퍼를 끼워 넣으므로 패치 1 뒤에 적용해야 함)
+
+diff -u a/src/wofi.c b/src/wofi.c
+--- a/src/wofi.c
++++ b/src/wofi.c
+@@ -660,6 +660,30 @@
+ 	}
+ }
+ 
++static GtkWidget* placeholder_label = NULL;
++static gboolean entry_preedit_active = FALSE;
++
++static void update_placeholder(void) {
++	if(placeholder_label == NULL) {
++		return;
++	}
++	const gchar* text = gtk_entry_get_text(GTK_ENTRY(entry));
++	gtk_widget_set_visible(placeholder_label, (text == NULL || text[0] == 0) && !entry_preedit_active && !hide_search);
++}
++
++static void entry_text_changed(GtkEditable* editable, gpointer data) {
++	(void) editable;
++	(void) data;
++	update_placeholder();
++}
++
++static void entry_preedit_changed(GtkEntry* editable, gchar* preedit, gpointer data) {
++	(void) editable;
++	(void) data;
++	entry_preedit_active = preedit != NULL && preedit[0] != 0;
++	update_placeholder();
++}
++
+ static gboolean hover_select(GtkWidget* widget, GdkEventMotion* event, gpointer data) {
+ 	(void) event;
+ 	(void) data;
+@@ -2176,8 +2200,19 @@
+ 	g_signal_connect(entry, "size-allocate", G_CALLBACK(widget_allocate), NULL);
+ 
+ 	gtk_widget_set_name(entry, "input");
+-	gtk_entry_set_placeholder_text(GTK_ENTRY(entry), prompt);
+-	gtk_container_add(GTK_CONTAINER(outer_box), entry);
++	GtkWidget* entry_overlay = gtk_overlay_new();
++	gtk_container_add(GTK_CONTAINER(entry_overlay), entry);
++	placeholder_label = gtk_label_new(prompt);
++	gtk_widget_set_name(placeholder_label, "placeholder");
++	gtk_widget_set_halign(placeholder_label, GTK_ALIGN_START);
++	gtk_widget_set_valign(placeholder_label, GTK_ALIGN_CENTER);
++	gtk_widget_set_no_show_all(placeholder_label, TRUE);
++	gtk_overlay_add_overlay(GTK_OVERLAY(entry_overlay), placeholder_label);
++	gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(entry_overlay), placeholder_label, TRUE);
++	gtk_container_add(GTK_CONTAINER(outer_box), entry_overlay);
++	g_signal_connect(entry, "changed", G_CALLBACK(entry_text_changed), NULL);
++	g_signal_connect(entry, "preedit-changed", G_CALLBACK(entry_preedit_changed), NULL);
++	update_placeholder();
+ 
+ 	if(search != NULL) {
+ 		gtk_entry_set_text(GTK_ENTRY(entry), search);

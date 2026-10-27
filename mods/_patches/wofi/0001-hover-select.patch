@@ -1,0 +1,46 @@
+wofi 1.5.3 패치 1) hover select — 마우스를 움직이면 해당 항목을 선택
+(이유: 클릭해야만 선택되고 마우스 이동으로는 선택되지 않음. fuzzel 처럼 hover 만으로 선택 강조)
+(주의: 클릭이 아닌 '실제 마우스 이동'(motion)에만 반응 — 목록이 갱신되며 커서 아래로 항목이 밀려와도 선택이 튀지 않음)
+
+diff -u a/src/wofi.c b/src/wofi.c
+--- a/src/wofi.c
++++ b/src/wofi.c
+@@ -660,6 +660,29 @@
+ 	}
+ }
+ 
++static gboolean hover_select(GtkWidget* widget, GdkEventMotion* event, gpointer data) {
++	(void) event;
++	(void) data;
++	/* 항목(GtkFlowBoxChild)은 자체 GdkWindow 가 없어 motion 이벤트가 오지 않으므로
++	   최상위 창에서 받아 포인터 위치로 항목을 찾는다 */
++	GdkSeat* seat = gdk_display_get_default_seat(gdk_display_get_default());
++	GdkWindow* gdk_win = gtk_widget_get_window(widget);
++	if(seat == NULL || gdk_win == NULL) {
++		return FALSE;
++	}
++	gint wx, wy, bx, by;
++	gdk_window_get_device_position(gdk_win, gdk_seat_get_pointer(seat), &wx, &wy, NULL);
++	if(!gtk_widget_translate_coordinates(widget, inner_box, wx, wy, &bx, &by)) {
++		return FALSE;
++	}
++	GtkFlowBoxChild* hovered = gtk_flow_box_get_child_at_pos(GTK_FLOW_BOX(inner_box), bx, by);
++	if(hovered != NULL && !gtk_flow_box_child_is_selected(hovered)) {
++		user_moved = true;
++		gtk_flow_box_select_child(GTK_FLOW_BOX(inner_box), hovered);
++	}
++	return FALSE;
++}
++
+ static gboolean _insert_widget(gpointer data) {
+ 	struct mode* mode = data;
+ 	struct widget* node;
+@@ -2115,6 +2138,8 @@
+ 	g_signal_connect(inner_box, "selected-children-changed", G_CALLBACK(select_item), NULL);
+ 	g_signal_connect(entry, "activate", G_CALLBACK(activate_search), NULL);
+ 	g_signal_connect(window, "key-press-event", G_CALLBACK(key_press), NULL);
++	gtk_widget_add_events(window, GDK_POINTER_MOTION_MASK);
++	g_signal_connect(window, "motion-notify-event", G_CALLBACK(hover_select), NULL);
+ 	g_signal_connect(window, "focus-in-event", G_CALLBACK(focus), NULL);
+ 	g_signal_connect(window, "focus-out-event", G_CALLBACK(focus), config);
+ 	g_signal_connect(entry, "focus-in-event", G_CALLBACK(focus_entry), NULL);

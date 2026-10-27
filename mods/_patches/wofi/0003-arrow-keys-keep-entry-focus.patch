@@ -1,0 +1,126 @@
+wofi 1.5.3 패치 3) 방향키 이동을 "선택만 변경 + 포커스는 검색창 유지" 방식으로 변경
+기본은 GTK 포커스를 목록 항목으로 옮겨 text-input(IME)이 꺼지므로, 방향키로 이동한 뒤 입력하면 첫 글자가 다시 영어로 입력됨
+(단일 열 + 세로 방향일 때만 적용(Tab/Shift+Tab 은 끝에서 순환), 그 외는 기존 동작.
+ 스크롤은 adjustment 로 직접 보정해 포커스 이동 불필요)
++ Enter 가 항상 0번째 항목만 실행하던 것을 선택된 항목 실행으로 변경
+  (검색창 포커스 유지 시 hover/방향키 선택이 무시되므로)
+
+diff -u a/src/wofi.c b/src/wofi.c
+--- a/src/wofi.c
++++ b/src/wofi.c
+@@ -1092,7 +1092,16 @@
+ 
+ static void activate_search(GtkEntry* entry, gpointer data) {
+ 	(void) data;
+-	GtkFlowBoxChild* child = gtk_flow_box_get_child_at_index(GTK_FLOW_BOX(inner_box), 0);
++	/* 검색창에 포커스가 있어도 방향키/hover 로 선택한 항목을 실행 (선택이 없거나 숨겨졌으면 0번째) */
++	GtkFlowBoxChild* child = NULL;
++	GList* selected_items = gtk_flow_box_get_selected_children(GTK_FLOW_BOX(inner_box));
++	if(selected_items != NULL && gtk_widget_get_visible(GTK_WIDGET(selected_items->data))) {
++		child = selected_items->data;
++	}
++	g_list_free(selected_items);
++	if(child == NULL) {
++		child = gtk_flow_box_get_child_at_index(GTK_FLOW_BOX(inner_box), 0);
++	}
+ 	gboolean is_visible = gtk_widget_get_visible(GTK_WIDGET(child));
+ 	if(mode != NULL && (exec_search || child == NULL || !is_visible)) {
+ 		execute_action(mode, gtk_entry_get_text(entry));
+@@ -1234,13 +1243,75 @@
+ 	return 0;
+ }
+ 
++static void scroll_to_child(GtkWidget* child) {
++	GtkAdjustment* adj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scroll));
++	GtkWidget* wrapper = gtk_widget_get_parent(inner_box);
++	gint x, y;
++	if(adj == NULL || wrapper == NULL || !gtk_widget_translate_coordinates(child, wrapper, 0, 0, &x, &y)) {
++		return;
++	}
++	gdouble h = gtk_widget_get_allocated_height(child);
++	gdouble value = gtk_adjustment_get_value(adj);
++	gdouble page = gtk_adjustment_get_page_size(adj);
++	if(y < value) {
++		gtk_adjustment_set_value(adj, y);
++	} else if(y + h > value + page) {
++		gtk_adjustment_set_value(adj, y + h - page);
++	}
++}
++
++static void move_selection(gint delta, gboolean wrap) {
++	GList* selected = gtk_flow_box_get_selected_children(GTK_FLOW_BOX(inner_box));
++	gint idx = selected != NULL ? gtk_flow_box_child_get_index(selected->data) : -1;
++	g_list_free(selected);
++	GtkFlowBoxChild* target = NULL;
++	for(gint next = idx + delta; next >= 0; next += delta) {
++		GtkFlowBoxChild* candidate = gtk_flow_box_get_child_at_index(GTK_FLOW_BOX(inner_box), next);
++		if(candidate == NULL) {
++			break;
++		}
++		/* 필터로 숨겨진 항목은 건너뜀 */
++		if(gtk_widget_get_visible(GTK_WIDGET(candidate))) {
++			target = candidate;
++			break;
++		}
++	}
++	if(target == NULL && wrap) {
++		/* Tab 처럼 끝에서 반대쪽 끝으로 순환: 보이는 항목 중 처음(delta>0) 또는 마지막(delta<0) */
++		for(gint next = 0;; ++next) {
++			GtkFlowBoxChild* candidate = gtk_flow_box_get_child_at_index(GTK_FLOW_BOX(inner_box), next);
++			if(candidate == NULL) {
++				break;
++			}
++			if(gtk_widget_get_visible(GTK_WIDGET(candidate))) {
++				target = candidate;
++				if(delta > 0) {
++					break;
++				}
++			}
++		}
++	}
++	if(target != NULL) {
++		gtk_flow_box_select_child(GTK_FLOW_BOX(inner_box), target);
++		scroll_to_child(GTK_WIDGET(target));
++	}
++}
++
+ static void move_up(void) {
+ 	user_moved = true;
++	if(columns == 1 && outer_orientation == GTK_ORIENTATION_VERTICAL) {
++		move_selection(-1, FALSE);
++		return;
++	}
+ 	gtk_widget_child_focus(window, GTK_DIR_UP);
+ }
+ 
+ static void move_down(void) {
+ 	user_moved = true;
++	if(columns == 1 && outer_orientation == GTK_ORIENTATION_VERTICAL) {
++		move_selection(1, FALSE);
++		return;
++	}
+ 	if(outer_orientation == GTK_ORIENTATION_VERTICAL) {
+ 		if(gtk_widget_has_focus(entry) || gtk_widget_has_focus(scroll)) {
+ 			select_idx(1);
+@@ -1268,6 +1339,10 @@
+ 
+ static void move_forward(void) {
+ 	user_moved = true;
++	if(columns == 1 && outer_orientation == GTK_ORIENTATION_VERTICAL) {
++		move_selection(1, TRUE);
++		return;
++	}
+ 	if(gtk_widget_has_focus(entry) || gtk_widget_has_focus(scroll)) {
+ 		select_idx(1);
+ 		return;
+@@ -1282,6 +1357,10 @@
+ 
+ static void move_backward(void) {
+ 	user_moved = true;
++	if(columns == 1 && outer_orientation == GTK_ORIENTATION_VERTICAL) {
++		move_selection(-1, TRUE);
++		return;
++	}
+ 	gtk_widget_child_focus(window, GTK_DIR_TAB_BACKWARD);
+ 
+ 	if(gtk_widget_has_focus(entry)) {

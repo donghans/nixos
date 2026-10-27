@@ -1,0 +1,17 @@
+wofi 1.5.3 패치 2) 시작 시 포커스를 검색창에 둠
+기본은 목록 첫 항목에 포커스를 줘서 text-input(IME)이 꺼진 채 시작하고,
+첫 키가 도착한 뒤에야 검색창으로 포커스를 넘겨 첫 글자가 IME 를 거치지 않고 영어로 입력되던 문제 수정
+(방향키 이동은 "검색창 포커스면 select_idx(1)" 로 이미 짜여 있어 영향 없음)
+
+diff -u a/src/wofi.c b/src/wofi.c
+--- a/src/wofi.c
++++ b/src/wofi.c
+@@ -749,7 +749,7 @@
+ 	if(!user_moved) {
+ 		GtkFlowBoxChild* child = gtk_flow_box_get_child_at_index(GTK_FLOW_BOX(inner_box), 0);
+ 		gtk_flow_box_select_child(GTK_FLOW_BOX(inner_box), child);
+-		gtk_widget_grab_focus(GTK_WIDGET(child));
++		gtk_entry_grab_focus_without_selecting(GTK_ENTRY(entry));
+ 	}
+ 
+ 	if(GTK_IS_EXPANDER(parent)) {

@@ -1,6 +1,6 @@
 {mkPartOf, ...}:
 mkPartOf "mods.gui" ({config, ...}: let
-  # #outer-box 의 테두리/패딩 (아래 style 과 동일 값 — 바꾸면 wofi.overlay.nix 의 WOFI_EXTRA 도 extra 값으로 맞출 것)
+  # #outer-box 의 테두리/패딩 (아래 style 과 동일 값 — 바꾸면 mods/_patches/wofi/0007-surface-size-extra.patch 의 WOFI_EXTRA(18)도 extra 값으로 맞출 것)
   # (테두리는 일반 창 모드에서 Hyprland 가 직접 그리므로 CSS 테두리는 0)
   borderPx = 0;
   paddingPx = 9;

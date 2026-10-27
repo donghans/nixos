@@ -1,0 +1,33 @@
+wofi 1.5.3 패치 8) drun 검색 대상 축소
+wofi 는 이름 + .desktop 파일 경로 + 실행 명령 + 설명 + 카테고리 + 키워드 + 일반 이름을 전부 이어 붙인
+문자열에 퍼지 매칭을 해서, 글자가 흩어져 있기만 해도 무관한 앱이 걸리고(예: "pulse" → kitty, Clipboard Manager),
+파일명/실행 명령에 검색어가 들어 있는 항목(thunar-bulk-rename.desktop)이 이름이 정확히 일치하는 항목보다 위로 올라옴.
+→ 이름 + 키워드 + 일반 이름만 사용 (키워드 사이에 공백도 넣음: 원래는 붙여 써서 단어가 합쳐졌음)
+(생성 메모: 원래 오버레이의 sed 범위 치환 결과를 그대로 diff 로 옮겼으므로 들여쓰기가 없는 'ret = ...' 한 줄이 된다)
+
+diff -u a/modes/drun.c b/modes/drun.c
+--- a/modes/drun.c
++++ b/modes/drun.c
+@@ -60,7 +60,7 @@
+ 
+ 	if(keywords != NULL) {
+ 		for(size_t count = 0; keywords[count] != NULL; ++count) {
+-			char* tmp = utils_concat(2, keywords_str, keywords[count]);
++			char* tmp = utils_concat(3, keywords_str, " ", keywords[count]);
+ 			free(keywords_str);
+ 			keywords_str = tmp;
+ 		}
+@@ -71,12 +71,7 @@
+ 	if(ignore_metadata) {
+ 		ret = strdup(name);
+ 	} else {
+-		ret = utils_concat(7, name, file,
+-							exec == NULL ? "" : exec,
+-							description == NULL ? "" : description,
+-							categories == NULL ? "" : categories,
+-							keywords_str,
+-							generic_name == NULL ? "" : generic_name);
++ret = utils_concat(5, name, " ", keywords_str, " ", generic_name == NULL ? "" : generic_name);
+ 	}
+ 
+ 	free(keywords_str);
