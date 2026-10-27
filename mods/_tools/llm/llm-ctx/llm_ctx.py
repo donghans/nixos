@@ -11,7 +11,8 @@
   sql "<SELECT ...>"   읽기 전용 질의
   handoff-put/handoff-get   인수인계 문서를 DB 에 올리고 받는다(머신이 달라도 resume)
   instr show|get|edit|set|list|sync|diff|push|pull   프로젝트별 지침(.claude/donghans-*.md)의 공유 정본(ctx_instr.py) — 읽기는 show(최신화 후 출력), 쓰기는 edit|set(DB 먼저); 로컬 파일은 읽기 전용 캐시
-  doc list|show|set|status|rm|import|search   저장소에 올리지 않는 프로젝트 문서(plan 계획·qa QA 기록·note 메모)의 공유 정본(ctx_docs.py) — 캐시 파일 없이 DB 하나
+  doc list|show|set|status|rm|import|search   (옛) DB 문서 명령(ctx_docs.py) — 새 파일 저장소 `ctx doc` 로 대체 중, 이관 검증 뒤 제거
+  ctx doc list|read|path|find|propose|status|watch|sync|cleanup|init|import-db   작업 문서(plan·qa·note)의 파일 저장소 `~/ctx` — 읽기는 세션별 뷰, 쓰기는 제안으로만(ctx_store.py·ctx_doccli.py)
   secret add|list|rm|enable|disable|show|run|scan|adopt|ignore|scrub   비밀번호 등록표 · 출력 치환 · 주입 래퍼 · 후보 탐지 · 로컬 트랜스크립트 치환(ctx_secrets.py)
   (search|recent|session|sql|handoff get 의 출력은 등록된 비밀을 [protected] 로 바꾼다. --raw 는 사람이 TTY 에서만)
 
@@ -25,9 +26,11 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 import agents
+import ctx_doccli
 import ctx_docs as cd
 import ctx_instr as ci
 import ctx_secrets as cs
+import ctx_store
 
 HOST = os.environ.get("CLAUDE_CTX_HOST") or socket.gethostname()
 
@@ -323,12 +326,31 @@ def _instr_hook(conn, cwd):
     return ("프로젝트 지침 동기화: " + "; ".join(m for _, _, m in notices)) if notices else None
 
 
+def _doc_hook_early(event, p):
+    """DB 연결 전에 하는 문서 저장소 쪽 일(연결 실패가 막지 않게). 돌려주는 값: SessionStart 에 덧붙일 안내(없으면 None)."""
+    sid = p.get("session_id")
+    try:
+        if event == "SessionEnd" and sid:
+            ctx_store.mark_ended(ctx_store.views_dir(), sid)        # 감시·정리가 이 세션의 끝을 알게 하는 표식(비정상 종료는 CLAUDE_PID 생존 확인이 맡는다)
+        elif event == "SessionStart":
+            if sid:
+                ctx_store.clear_ended(ctx_store.views_dir(), sid)    # --resume/clear 로 같은 ID 가 다시 올 수 있다
+            if ctx_store.load_manifest(ctx_store.store_dir()):
+                return ("작업 문서(plan·qa·note)는 `donghans ctx doc list|read|path|find` 로 읽고 `donghans ctx doc propose` 로만 고친다"
+                        "(뷰·저장소 파일을 직접 고치지 않는다). 뷰를 만든 뒤 `donghans ctx doc watch` 를 Monitor 로 띄우면 직접 수정이 즉시 알려진다.")
+    except Exception:
+        pass
+    return None
+
+
 def cmd_hook(a):
     raw = sys.stdin.read()
     try:
         p = json.loads(raw)
     except Exception:
         return 0
+    doc_msg = _doc_hook_early(a.event, p)
+    printed = False
     try:
         conn = connect(timeout=3)
         with conn:
@@ -343,8 +365,10 @@ def cmd_hook(a):
                     upsert_session(cur, sid, cwd, p.get("transcript_path"))
             if a.event == "SessionStart":
                 msg = _instr_hook(conn, p.get("cwd"))
+                msg = "\n".join(x for x in (msg, doc_msg) if x)    # 지침 알림과 문서 안내를 한 번의 출력으로 합친다(훅 출력은 JSON 하나)
                 if msg:  # 파일이 바뀌었거나 사람이 볼 것이 있을 때만 짧게 알린다 — 지침 본문을 프롬프트에 주입하지 않는다
                     print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": msg}}, ensure_ascii=False))
+                    printed = True
             tp = p.get("transcript_path")
             if tp and os.path.isfile(tp) and a.event in ("Stop", "SubagentStop", "SessionEnd", "PreCompact", "UserPromptSubmit"):
                 for f in agents.family(tp):
@@ -352,6 +376,8 @@ def cmd_hook(a):
             if a.event in ("Stop", "SessionEnd"):
                 ingest_otel(conn)
     except Exception as e:  # 훅은 절대 입력을 막지 않는다 — 놓친 것은 ingest 가 따라잡는다
+        if a.event == "SessionStart" and doc_msg and not printed:   # DB 가 안 돼도 문서 안내는 나간다(안내는 DB 와 무관)
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": doc_msg}}, ensure_ascii=False))
         try:
             open(os.path.join(OTEL, "llm-ctx-hook.err"), "a").write(f"{time.strftime('%F %T')} {a.event} {type(e).__name__}: {e}\n")
         except Exception:
@@ -1119,6 +1145,7 @@ def main():
     p = ctx.add_parser("usage"); p.add_argument("--days", type=int, default=7); p.set_defaults(f=cmd_usage)
     p = ctx.add_parser("limits", help="계정별 한도(5h/7d) 창별 최고 사용률"); p.add_argument("--days", type=int, default=14); p.add_argument("--limit", type=int, default=20); p.set_defaults(f=cmd_limits)
     p = ctx.add_parser("sql"); p.add_argument("query"); p.add_argument("--limit", type=int, default=50); p.set_defaults(f=cmd_sql)
+    ctx_doccli.register(ctx, argparse.Namespace(norm_repo=norm_repo, git_meta=git_meta, connect=connect, load_masker=cs.load_masker, HOST=HOST, human_only=_human_only))
     ho = top.add_parser("handoff", help="인수인계 문서 업/다운").add_subparsers(dest="cmd", required=True)
     p = ho.add_parser("put"); p.add_argument("--session", required=True); p.add_argument("--doc", required=True); p.add_argument("--note", default=""); p.set_defaults(f=cmd_handoff_put)
     p = ho.add_parser("draft"); p.add_argument("--session"); p.add_argument("--focus"); p.add_argument("--model", default="haiku"); p.add_argument("--out"); p.add_argument("--dry-run", action="store_true")
