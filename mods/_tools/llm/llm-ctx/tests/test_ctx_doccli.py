@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""ctx doc CLI·훅 시험 — 임시 Postgres(비밀 검사·옛 문서 이관)와 임시 문서 저장소. psycopg·postgres 17 이 없으면 건너뛴다.
-`donghans ctx doc list|read|path|find|propose|status|init|import-db` 를 실제 프로세스로 돌리고, ctx_toolhook(PreToolUse 차단·PostToolUse 알림)과 SessionStart·SessionEnd 훅을 확인한다."""
+"""ctx doc CLI·훅 시험 — 임시 Postgres(비밀 검사)와 임시 문서 저장소. psycopg·postgres 17 이 없으면 건너뛴다.
+`donghans ctx doc list|read|path|find|propose|status|init` 를 실제 프로세스로 돌리고, ctx_toolhook(PreToolUse 차단·PostToolUse 알림)과 SessionStart·SessionEnd 훅을 확인한다."""
 import json, os, shutil, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
@@ -161,29 +161,23 @@ r = subprocess.run([sys.executable, os.path.join(ROOT, "llm_ctx.py"), "ctx", "ho
 j = json.loads(r.stdout) if r.stdout.strip() else {}
 check("SessionStart 훅: DB 에 못 붙어도 문서 안내는 나간다(입력을 막지도 않는다)", r.returncode == 0 and "ctx doc" in j.get("hookSpecificOutput", {}).get("additionalContext", ""), r.stdout + r.stderr)
 
-# 옛 DB 문서 이관
-for repo, kind, name, body, status, origin in [
-    (URL, "plan", "old/p1", "옛 계획 본문\n끝\n", "done", "/x/p1.md"),
-    (URL, "note", "old/한글 이름", "---\nname: 자기 머리말\n---\n본문\n", "active", None),
-    (URL + "-other", "plan", "skipme", "다른 저장소\n", "active", None),
-]:   # 옛 표(project_docs — 이제 읽기 전용 보관본)에 직접 시드한다
-    conn.execute("INSERT INTO project_docs (repo_url, kind, name, body, status, origin_path, updated_host) VALUES (%s,%s,%s,%s,%s,%s,'hostX')", (repo, kind, name, body, status, origin))
-conn.commit()
-rc, out, err = run("import-db", "--dry-run", sid=A)
-check("import-db --dry-run: 파일을 만들지 않는다", rc == 0 and "created 2" in out and not os.path.exists(f"{STORE}/proj/plan/old/p1.md"), out + err)
-rc, out, err = run("import-db", sid=A)
-check("import-db: 문서 2개를 내보내고 매니페스트에 없는 저장소는 건너뛴다", rc == 0 and "created 2" in out and "skipped 1" in out and "대조 실패 0" in out, out + err)
-d = st.read_doc(STORE, "proj", "plan", "old/p1")
-check("import-db: 본문은 바이트 그대로, 메타(status·원본 경로·이관 출처)는 머리말로", d["body"] == "옛 계획 본문\n끝\n" and d["meta"]["status"] == "done" and d["meta"]["origin_path"] == "/x/p1.md" and "이관" in d["meta"]["provenance"], d["meta"])
-d2 = st.read_doc(STORE, "proj", "note", "old/한글 이름")
-check("import-db: 본문의 자기 --- 머리말과 한글 이름도 그대로", d2 and d2["body"] == "---\nname: 자기 머리말\n---\n본문\n")
-check("import-db: 한 번의 커밋으로 저장소에 기록", "DB(project_docs)에서 문서 이관" in subprocess.run(["git", "-C", f"{STORE}/proj", "log", "--oneline"], capture_output=True, text=True).stdout)
-rc, out, err = run("import-db", sid=A)
-check("import-db: 두 번째는 멱등(모두 same)", rc == 0 and "same 2" in out and "created 0" in out, out + err)
-open(f"{STORE}/proj/plan/old/p1.md", "w").write(st.compose({}, "나중에 사람이 고친 본문\n"))
-rc, out, err = run("import-db", sid=A)
-check("import-db: 이미 다른 내용이 있으면 덮어쓰지 않고 실패로 알린다", rc == 1 and "어긋남" in err, out + err)
-check("import-db: 어긋난 파일은 그대로", st.read_doc(STORE, "proj", "plan", "old/p1")["body"] == "나중에 사람이 고친 본문\n")
+
+# push: 매니페스트에 remote 가 있는 프로젝트만, push 직전 비밀 검사(등록된 비밀이 든 파일이 있으면 거부)
+BARE = f"{TMP}/bare.git"
+subprocess.run(["git", "init", "-q", "--bare", BARE], check=True)
+open(f"{STORE}/manifest.toml", "a").write(f'\n[projects.pushy]\nrepo_url = "https://github.com/test/pushy"\nremote = "{BARE}"\n')
+rc, out, err = run("propose", "note", "p1", "--stdin", "--project", "pushy", sid=A, stdin="푸시 시험 문서\n")
+check("push: 제안이 반영된다(원격이 있어도 propose 는 push 하지 않는다)", rc == 0 and "반영했다" in out, out + err)
+check("push: propose 만으로는 원격이 비어 있다", subprocess.run(["git", "-C", BARE, "rev-list", "--all", "--count"], capture_output=True, text=True).stdout.strip() == "0")
+rc, out, err = run("sync", "--push", sid=A)
+check("push: sync --push 가 remote 가 있는 프로젝트만 보낸다", rc == 0 and "push pushy: ok" in out and "push proj" not in out, out + err)
+check("push: 원격에 커밋이 올라갔다", subprocess.run(["git", "-C", BARE, "rev-list", "--all", "--count"], capture_output=True, text=True).stdout.strip() != "0")
+open(f"{STORE}/pushy/note/leak.md", "w").write(st.compose({}, "비밀번호 hunter2 가 새었다\n"))
+st.commit_file(STORE, "pushy", "note/leak.md", "leak")
+before = subprocess.run(["git", "-C", BARE, "rev-list", "--all", "--count"], capture_output=True, text=True).stdout.strip()
+rc, out, err = run("sync", "--push", sid=A)
+check("push: 추적 파일에 등록된 비밀이 있으면 push 하지 않는다", "못 함" in out and "leak.md" in out, out + err)
+check("push: 거부됐으니 원격은 그대로", subprocess.run(["git", "-C", BARE, "rev-list", "--all", "--count"], capture_output=True, text=True).stdout.strip() == before)
 
 pg.stop(); shutil.rmtree(TMP, ignore_errors=True)
 sys.exit(finish("ctx doc CLI"))

@@ -247,7 +247,7 @@ in {
     systemd.user.services.ctx-doc-sync = lib.mkIf config.mods.sys.services.llm-ctx.enable {
       Unit.Description = "ctx 문서 저장소 동기화 담당 — 인박스의 제안을 검사해 커밋";
       Service = {
-        ExecStart = "${claudeCtx}/bin/donghans ctx doc sync --watch";
+        ExecStart = "${claudeCtx}/bin/donghans ctx doc sync --watch --push";
         Restart = "on-failure";
         RestartSec = 10;
       };

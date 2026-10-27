@@ -165,22 +165,8 @@ CREATE TABLE IF NOT EXISTS project_instructions (
   PRIMARY KEY (repo_url, name)
 );
 
--- (보관) 옛 프로젝트 문서 표. 2026-10-27 에 문서의 원천이 파일 저장소 `~/ctx`(`donghans ctx doc`)로 옮겨졌고 이 표는 읽기 전용 보관본이다 —
--- 더 쓰는 명령이 없다(`ctx doc import-db` 가 읽을 뿐). 이관 대조(364행 바이트 일치) 뒤 2주쯤 지나 사용자가 확인하면 지운다.
-CREATE TABLE IF NOT EXISTS project_docs (
-  repo_url     text NOT NULL,
-  kind         text NOT NULL CHECK (kind IN ('plan','qa','note')),
-  name         text NOT NULL,
-  body         text NOT NULL,
-  status       text NOT NULL DEFAULT 'active' CHECK (status IN ('active','done','dropped','unknown')),
-  rev          integer NOT NULL DEFAULT 1,
-  origin_path  text,
-  updated_host text NOT NULL,
-  created_at   timestamptz NOT NULL DEFAULT now(),
-  updated_at   timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (repo_url, kind, name)
-);
-CREATE INDEX IF NOT EXISTS project_docs_status ON project_docs (repo_url, kind, status);
+-- (삭제됨 2026-10-27) 옛 프로젝트 문서 표 project_docs: 문서의 원천이 파일 저장소 `~/ctx`(`donghans ctx doc`)로 옮겨졌고 364행을 바이트 대조한 뒤 지웠다.
+--   덤프: ~/ctx/_archive/project_docs-20261027.sql (schema_version 4 는 그 시절의 표시라 그대로 둔다).
 
 -- observectl 호스트 간 비교(observe_fleet.py): 시간별 앱 CPU·전력 요약과 브라우저 확장 설치 목록. 원본 표본·창 제목·주소·확장 이름은 올리지 않는다.
 CREATE TABLE IF NOT EXISTS observe_app_hourly (

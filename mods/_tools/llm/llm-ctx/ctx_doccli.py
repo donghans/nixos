@@ -12,7 +12,6 @@
   sync      (동기화 담당) 인박스의 제안을 검사해 반영한다. 세션 밖에서 서비스로 돈다.
   cleanup   끝난 세션의 낡은 뷰를 지운다.
   init      (사람만) 프로젝트를 매니페스트에 등록하고 저장소를 만든다.
-  import-db 옛 DB 표(project_docs)의 문서를 파일 저장소로 내보내고 바이트를 대조한다(멱등, 로컬 파일만 만든다).
 """
 import argparse
 import hashlib
@@ -226,17 +225,25 @@ def _load_masker_or_none():
         return None
 
 
-def _sync_once(store, push):
+PUSH_EVERY = 600      # 반영된 커밋이 없어도 못 보낸 것을 따라잡는 주기(초). 반영이 있으면 곧바로 보낸다.
+_last_push = {}
+
+
+def _sync_once(store, push, force_push=False):
     m = _load_masker_or_none()
     if m is None:
         return 1                      # 비밀 검사 없이 반영하지 않는다(fail-closed) — 제안은 인박스에 남고 다음 점검 때 다시 시도
+    applied = False
     for _pid, status, msg, commit in st.process_inbox(store, m):
         print(f"[sync] {status}: {msg}" + (f" ({commit})" if commit else ""), flush=True)
+        applied = applied or status == "applied"
     if push:
         man = st.load_manifest(store)
+        now = time.time()
         for proj, meta in man.items():
-            if meta.get("remote"):
+            if meta.get("remote") and (force_push or applied or now - _last_push.get(proj, 0) >= PUSH_EVERY):
                 ok, msg = st.push_project(store, proj, m, man)
+                _last_push[proj] = now
                 print(f"[sync] push {proj}: {'ok' if ok else '못 함'} — {msg}", flush=True)
     return 0
 
@@ -244,7 +251,7 @@ def _sync_once(store, push):
 def cmd_sync(a):
     store = st.store_dir()
     if not a.watch:
-        return _sync_once(store, a.push)
+        return _sync_once(store, a.push, force_push=True)
     print(f"[sync] 시작: {store}/_inbox 를 지켜본다", flush=True)
     st.watch_inbox(store, lambda: _sync_once(store, a.push), poll=float(a.interval))
     return 0
@@ -273,58 +280,6 @@ def cmd_init(a):
     return 0
 
 
-def cmd_import_db(a):
-    store = st.store_dir()
-    man = st.load_manifest(store)
-    by_repo = {m.get("repo_url"): n for n, m in man.items()}
-    done = {"created": 0, "same": 0, "skipped": 0, "mismatch": 0}
-    with H.connect(readonly=True) as c:
-        rows = c.execute("SELECT repo_url, kind, name, body, status, rev, origin_path, updated_host, updated_at FROM project_docs ORDER BY repo_url, kind, name").fetchall()
-    for repo, kind, name, body, status, rev, origin, host, at in rows:
-        proj = by_repo.get(repo)
-        if proj is None:
-            done["skipped"] += 1
-            if a.verbose:
-                print(f"  건너뜀(매니페스트에 없는 저장소 {repo}): {kind}/{name}")
-            continue
-        p = st.doc_path(store, proj, kind, name)
-        if os.path.exists(p):
-            cur = st.read_doc(store, proj, kind, name)
-            if cur and cur["body"] == body:
-                done["same"] += 1
-                continue
-            print(f"  어긋남(이미 다른 내용이 있다): {proj}/{kind}/{name}", file=sys.stderr)
-            done["mismatch"] += 1
-            continue
-        meta = {**st.default_meta(), "status": status, "origin_path": origin or "", "updated_host": host, "updated_at": at.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "provenance": f"ctx DB project_docs rev {rev} 에서 이관", "source_of_truth": "file"}
-        if not a.dry_run:
-            os.makedirs(os.path.dirname(p), exist_ok=True)
-            open(p, "w").write(st.compose(meta, body))
-        done["created"] += 1
-    if not a.dry_run:
-        for proj in set(by_repo.values()):
-            pd = os.path.join(store, proj)
-            if os.path.isdir(pd):
-                st.ensure_repo(pd)
-                st._git(pd, "add", "-A")
-                r = st._git(pd, "commit", "-q", "-m", "ctx: DB(project_docs)에서 문서 이관", check=False)
-    # 대조: 모든 행의 본문이 파일 본문과 바이트 같은지 다시 확인
-    bad = 0
-    for repo, kind, name, body, *_ in rows:
-        proj = by_repo.get(repo)
-        if proj is None:
-            continue
-        cur = st.read_doc(store, proj, kind, name)
-        if a.dry_run:
-            continue
-        if cur is None or cur["body"] != body:
-            bad += 1
-            print(f"  대조 실패: {proj}/{kind}/{name}", file=sys.stderr)
-    print(("[dry-run] " if a.dry_run else "") + " · ".join(f"{k} {v}" for k, v in done.items()) + (f" · 대조 실패 {bad}" if not a.dry_run else ""))
-    return 1 if (bad or done["mismatch"]) else 0
-
-
 # ---------------------------------------------------------------- 등록
 def register(ctx_sub, helpers):
     """`donghans ctx doc …` 를 ctx 하위 명령에 등록한다."""
@@ -347,4 +302,3 @@ def register(ctx_sub, helpers):
     p.add_argument("--watch", action="store_true", help="서비스로: 인박스를 지켜보며 반복"); p.add_argument("--push", action="store_true", help="remote 가 있는 프로젝트는 push(직전 비밀 검사)"); p.add_argument("--interval", type=float, default=30, help="--watch 의 주기 점검(초)"); p.set_defaults(f=cmd_sync)
     p = doc.add_parser("cleanup", help="끝난 세션의 낡은 뷰를 지운다"); p.add_argument("--days", type=float, default=7); p.set_defaults(f=cmd_cleanup)
     p = doc.add_parser("init", help="(사람만) 프로젝트를 매니페스트에 등록하고 저장소를 만든다"); p.add_argument("project"); p.add_argument("--repo-url"); p.add_argument("--owner", default="personal"); p.add_argument("--remote"); p.set_defaults(f=cmd_init)
-    p = doc.add_parser("import-db", help="옛 DB 표 project_docs 의 문서를 파일로 내보내고 대조한다(멱등)"); p.add_argument("--dry-run", action="store_true"); p.add_argument("-v", "--verbose", action="store_true"); p.set_defaults(f=cmd_import_db)

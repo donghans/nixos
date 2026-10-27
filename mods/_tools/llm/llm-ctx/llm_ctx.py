@@ -11,7 +11,7 @@
   sql "<SELECT ...>"   읽기 전용 질의
   handoff-put/handoff-get   인수인계 문서를 DB 에 올리고 받는다(머신이 달라도 resume)
   instr show|get|edit|set|list|sync|diff|push|pull   프로젝트별 지침(.claude/donghans-*.md)의 공유 정본(ctx_instr.py) — 읽기는 show(최신화 후 출력), 쓰기는 edit|set(DB 먼저); 로컬 파일은 읽기 전용 캐시
-  ctx doc list|read|path|find|propose|status|watch|sync|cleanup|init|import-db   작업 문서(plan·qa·note)의 파일 저장소 `~/ctx` — 읽기는 세션별 뷰, 쓰기는 제안으로만(ctx_store.py·ctx_doccli.py)
+  ctx doc list|read|path|find|propose|status|watch|sync|cleanup|init   작업 문서(plan·qa·note)의 파일 저장소 `~/ctx` — 읽기는 세션별 뷰, 쓰기는 제안으로만(ctx_store.py·ctx_doccli.py)
   secret add|list|rm|enable|disable|show|run|scan|adopt|ignore|scrub   비밀번호 등록표 · 출력 치환 · 주입 래퍼 · 후보 탐지 · 로컬 트랜스크립트 치환(ctx_secrets.py)
   (search|recent|session|sql|handoff get 의 출력은 등록된 비밀을 [protected] 로 바꾼다. --raw 는 사람이 TTY 에서만)
 

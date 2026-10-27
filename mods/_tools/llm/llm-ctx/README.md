@@ -60,7 +60,6 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 | `ctx doc watch` | 이 세션의 뷰가 직접 수정되면 한 줄로 알림(**Monitor 로 띄운다**) | |
 | `ctx doc sync [--watch]` | (동기화 담당) 인박스 제안을 검사해 커밋 — 세션 안에서 부르지 않는다 | |
 | `ctx doc init <프로젝트>` | (사람만) 매니페스트 등록 + 저장소 생성 | |
-| `ctx doc import-db` | 옛 DB 표 `project_docs` → 파일로 내보내고 바이트 대조(멱등) | 로컬 파일만 만든다 |
 
 **프로젝트 결정**: `--project` > 현재 git `repo_url` 과 매니페스트의 `repo_url` 일치. 못 찾으면 추측하지 않고 실패한다(스킬·안내문은 `--project nixos` 처럼 명시).
 
@@ -68,7 +67,7 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 뷰는 명령(`read`·`path`)이 불릴 때 **그 자리에서** 만들어진다(시작 훅·래퍼가 만들지 않는다). 끝난 세션(`SessionEnd` 표식 또는 세션 프로세스 사망)의 뷰는 `ctx doc` 호출·하루 한 번 타이머가 지운다.
 
 **쓰기(제안)**: LLM 은 저장소를 직접 고치지 않는다. `propose` 가 `~/ctx/_inbox/<세션ID>/` 에 제안을 남기면 동기화 담당(서버 호스트의 user 서비스 `ctx-doc-sync`)이 순서대로 ① 읽은 판(`base_hash`)이 지금과 같은지 ② 등록된 비밀 값이 없는지 ③ 머리말 값이 올바른지 검사해 통과하면 커밋한다. 읽은 판이 다르면 **충돌**이라 자동으로 합치지 않고 `_inbox/_conflicts/` 로 옮겨 세션에 알린다. 이미 있는 문서를 읽지 않고 덮어쓰는 제안은 거부된다. DB 에 못 붙어 비밀 검사를 못 하면 반영하지 않고 대기시킨다(fail-closed).
-`push` 는 매니페스트에 `remote` 가 있는 프로젝트만, 직전에 추적 파일 전체를 비밀 검사한 뒤 한다(기본은 remote 없음 = push 하지 않음).
+`push` 는 매니페스트에 `remote` 가 있는 프로젝트만, 직전에 추적 파일 전체를 비밀 검사한 뒤 한다(서비스는 `--push`: 반영이 있으면 곧바로, 없어도 10분마다 따라잡는다. remote 가 비어 있으면 push 하지 않는다 — 현재 nixos 만 개인 비공개 GitHub `ctx-nixos`, ToT·genple 은 외부로 나가지 않는다).
 
 **직접 수정 방지(P 철학, 안 되면 Q)**: `PreToolUse` 훅(`ctx_toolhook.py`)이 뷰·저장소 파일에 대한 `Edit`·`Write` 를 막고 `propose` 를 안내한다. Bash 명령 문자열은 막지 않는다(오탐·미탐 — plan2 05 §4-4-5). 뷰가 직접 수정되면 `watch`(inotify, 즉시) 또는 `PostToolUse` 훅(안전망)이 알리고, 뷰를 다시 만들 때 원본으로 되돌리되 고친 내용은 `.ctx-rejected/` 에 보관한다. 샌드박스는 쓰지 않는다(`claude-run` 이 sudo 를 유지해 실익이 작다).
 
@@ -76,7 +75,7 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 
 **노트북**: 이번 범위는 읽기 뷰까지(`~/ctx` 를 `git pull` 로 받으면 된다). 노트북에는 동기화 담당을 깔지 않는다 — `propose` 는 대기 상태로 남고 처리되지 않는다.
 
-시험: `tests/test_ctx_store.py`(저장소·뷰·제안·충돌·비밀·push 검사·inotify — DB 없음), `tests/test_ctx_doccli.py`(임시 Postgres: CLI·훅·DB 이관). 구현: `ctx_store.py`(본체)·`ctx_doccli.py`(명령)·`ctx_toolhook.py`(도구 훅).
+시험: `tests/test_ctx_store.py`(저장소·뷰·제안·충돌·비밀·push 검사·inotify — DB 없음), `tests/test_ctx_doccli.py`(임시 Postgres: CLI·훅). 구현: `ctx_store.py`(본체)·`ctx_doccli.py`(명령)·`ctx_toolhook.py`(도구 훅).
 
 ## 프로젝트별 지침 공유 (2026-10-23) — `donghans instr`
 
