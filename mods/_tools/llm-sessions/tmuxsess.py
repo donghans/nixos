@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tmuxsess — claude 전용 tmux 세션 조회·생성·정리(claude-sessions UI 와 CLI 가 공유). 화면 코드와 분리해 실제 tmux 서버로 시험한다.
+"""tmuxsess — claude 전용 tmux 세션 조회·생성·정리(llm-sessions UI 와 CLI 가 공유). 화면 코드와 분리해 실제 tmux 서버로 시험한다.
 
 전용 소켓(`tmux -L <소켓>`)과 전용 설정 파일(claude-tmux.conf)만 쓰므로 사용자의 일반 tmux 에는 손대지 않는다. 환경 변수:
   CLAUDE_TMUX_BIN(tmux 실행 파일) · CLAUDE_TMUX_SOCKET(기본 claude) · CLAUDE_TMUX_CONF(기본: 이 파일 옆 claude-tmux.conf) · CLAUDE_RUN_BIN(세션 안에서 실행할 것, 기본 claude-run)

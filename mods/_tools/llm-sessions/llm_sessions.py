@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""claude-sessions — claude 의 tmux 세션 목록을 보고 이어 붙거나 새로 만든다(ssh 에서도, 다른 kitty 에서도 같은 화면).
+"""llm-sessions — claude 의 tmux 세션 목록을 보고 이어 붙거나 새로 만든다(ssh 에서도, 다른 kitty 에서도 같은 화면).
 
-  claude-sessions                 목록 UI(Textual)
-  claude-sessions ls              목록을 글자로 출력
-  claude-sessions attach <이름|접두|번호>
-  claude-sessions new [디렉터리] [-- claude 인자…]   새 세션을 만들고 붙는다
+  llm-sessions                 목록 UI(Textual)
+  llm-sessions ls              목록을 글자로 출력
+  llm-sessions attach <이름|접두|번호>
+  llm-sessions new [디렉터리] [-- claude 인자…]   새 세션을 만들고 붙는다
 
 UI 키: Enter 붙기 · n 새 세션 · x 정리(세션 종료) · d 붙은 곳 모두 떼기 · r 새로고침 · ? 도움말 · q 종료.
 붙은 뒤 분리(F12 또는 Ctrl+] d)하면 이 목록으로 돌아온다. 한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다.
@@ -110,7 +110,7 @@ class ConfirmScreen(ModalScreen):
 
 
 class SessionsUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
-    TITLE = "claude-sessions — tmux 세션"
+    TITLE = "llm-sessions — tmux 세션"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
         ('세션', 'claude 가 도는 tmux 세션 목록 — ssh 에서도 다른 터미널에서도 같은 화면이다'),
         ('붙기 / 분리', 'Enter 로 붙고, 분리는 F12 또는 Ctrl+] d — 분리하면 이 목록으로 돌아온다'),
@@ -286,7 +286,7 @@ def main(argv=None) -> int:
     if argv:
         print(__doc__, file=sys.stderr); return 2
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        print("claude-sessions 는 터미널에서 실행하세요(목록만 보려면 `claude-sessions ls`)", file=sys.stderr); return 1
+        print("llm-sessions 는 터미널에서 실행하세요(목록만 보려면 `llm-sessions ls`)", file=sys.stderr); return 1
     SessionsUI().run()
     return 0
 

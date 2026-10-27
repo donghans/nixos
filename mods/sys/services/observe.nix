@@ -68,7 +68,7 @@ in {
   };
 
   # 호스트 간 비교용 요약 올리기: 6시간마다 `observectl fleet push`(최근 26시간, 멱등) — 시간별 앱 CPU·전력 평균과 브라우저 확장 목록만(원본 표본·창 제목·주소 없음).
-  # 서버(claude-ctx)에 못 붙으면 실패로 남을 뿐 다음 주기에 다시 한다(Persistent). 노트북은 수집이 꺼져 있으면 확장 목록만 올라간다. 데이터 설명은 observe_fleet.py 머리말.
+  # 서버(llm-ctx)에 못 붙으면 실패로 남을 뿐 다음 주기에 다시 한다(Persistent). 노트북은 수집이 꺼져 있으면 확장 목록만 올라간다. 데이터 설명은 observe_fleet.py 머리말.
   hm.systemd.user.services.observe-fleet-push = {
     Unit.Description = "Push observectl hourly summaries to the shared store (claude_ctx) for cross-host comparison";
     Service = {

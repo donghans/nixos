@@ -16,7 +16,7 @@ if not pg:
     print("postgres 바이너리를 못 찾아 건너뜀"); sys.exit(0)
 try:
     os.environ.update(pg.env())
-    import ctx_secrets as cs, ctxdata as cd, claude_ctx as cc
+    import ctx_secrets as cs, ctxdata as cd, llm_ctx as cc
     conn = cc.connect()
 
     def seed(sid, repo, host, msgs):

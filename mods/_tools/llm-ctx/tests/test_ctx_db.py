@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""claude_ctx + ctx_secrets 통합 시험: 임시 Postgres(unix 소켓만)에 실제 schema.sql 을 올리고 적재·치환·주입·탐지·로컬 치환을 확인한다.
+"""llm_ctx + ctx_secrets 통합 시험: 임시 Postgres(unix 소켓만)에 실제 schema.sql 을 올리고 적재·치환·주입·탐지·로컬 치환을 확인한다.
 필요: psycopg 가 있는 python, postgres 17 바이너리(환경변수 CTX_PG_BIN 또는 /nix/store/*-postgresql-and-plugins-17*/bin). 없으면 건너뛴다(종료 코드 0)."""
 import glob, json, os, re, shutil, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
@@ -44,7 +44,7 @@ try:
 
     sys.path.insert(0, ROOT)
     import ctx_secrets as cs
-    import claude_ctx as cc
+    import llm_ctx as cc
     schema_text = open(os.path.join(ROOT, "schema.sql")).read()
     check("schema.sql 이 ctx_secrets.SCHEMA_STATEMENTS 와 같은 DDL 을 담음", all(st in schema_text for st in cs.SCHEMA_STATEMENTS))
 
@@ -63,7 +63,7 @@ try:
     check("가짜 트랜스크립트 4줄 적재", n == 4, str(n))
 
     def cli(*a, stdin=None):
-        return subprocess.run([sys.executable, os.path.join(ROOT, "claude_ctx.py"), *a], capture_output=True, text=True, env={**env, "PYTHONPATH": ROOT}, input=stdin, timeout=120)
+        return subprocess.run([sys.executable, os.path.join(ROOT, "llm_ctx.py"), *a], capture_output=True, text=True, env={**env, "PYTHONPATH": ROOT}, input=stdin, timeout=120)
 
     # --- 등록 전: 치환 없음
     r = cli("ctx", "search", "NAS")
@@ -107,7 +107,7 @@ try:
     check("sql: 'secret' 이라는 단어를 찾는 정상 쿼리는 허용", r.returncode == 0, r.stdout + r.stderr)
     r = cli("ctx", "search", "NAS", "--raw")
     check("--raw 는 TTY 가 아니면 거부(Claude 가 풀 수 없음)", r.returncode != 0 and PW not in r.stdout, r.stdout + r.stderr)
-    r = subprocess.run([sys.executable, os.path.join(ROOT, "claude_ctx.py"), "ctx", "search", "NAS", "--raw"], capture_output=True, text=True, env={**env, "PYTHONPATH": ROOT, "CLAUDECODE": "1"})
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "llm_ctx.py"), "ctx", "search", "NAS", "--raw"], capture_output=True, text=True, env={**env, "PYTHONPATH": ROOT, "CLAUDECODE": "1"})
     check("CLAUDECODE 환경에서도 --raw 거부", r.returncode != 0 and PW not in r.stdout)
     r = cli("secret", "show", "NAS_PW")
     check("secret show 는 사람(TTY)만", r.returncode != 0 and PW not in r.stdout + r.stderr)
@@ -118,7 +118,7 @@ try:
         e = {k: v for k, v in env.items() if k not in ("CLAUDECODE", "GEMINI_CLI", "DONGHANS_AGENT")}
         e.update({"PYTHONPATH": ROOT, **(extra_env or {})})
         master, slave = pty.openpty()
-        p = subprocess.Popen([sys.executable, os.path.join(ROOT, "claude_ctx.py"), *args], stdin=slave, stdout=slave, stderr=slave, env=e, close_fds=True)
+        p = subprocess.Popen([sys.executable, os.path.join(ROOT, "llm_ctx.py"), *args], stdin=slave, stdout=slave, stderr=slave, env=e, close_fds=True)
         os.close(slave)
         out = b""
         while True:

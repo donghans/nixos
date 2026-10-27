@@ -9,7 +9,7 @@
   6 지침   프로젝트별 지침(공유 정본 project_instructions)을 모든 저장소에 대해 보고 고친다 — 로컬 캐시 없이 DB 만 대상   (Enter: 본문 · e: 편집기)
 
 원문(DB)은 바꾸지 않는다. 화면의 치환(m)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. TTY 가 없으면 실행하지 않는다.
-**제한 모드**: LLM 세션이 실행한 경우(환경 표식 — claude_ctx.AGENT_ENV_MARKERS) 모든 탭을 볼 수 있되 비밀 값은 추출·조회할 수 없다 — 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(후보 패턴)을 [protected] 로 치환하고(끌 수 없음), 후보 표의 미리보기도 [protected](길이)로 보이며, 값 보기(v)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용.
+**제한 모드**: LLM 세션이 실행한 경우(환경 표식 — llm_ctx.AGENT_ENV_MARKERS) 모든 탭을 볼 수 있되 비밀 값은 추출·조회할 수 없다 — 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(후보 패턴)을 [protected] 로 치환하고(끌 수 없음), 후보 표의 미리보기도 [protected](길이)로 보이며, 값 보기(v)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ except ImportError:                                # 소스 트리: ../_uikit
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "_lib", "_uikit"))
     import uikit
 
-import claude_ctx as cc
+import llm_ctx as cc
 import ctx_secrets as cs
 import ctxchart as cch
 import ctxdata as cd

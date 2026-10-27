@@ -1,10 +1,10 @@
 import json, os, sys, time, random
-R="/home/donghans/nixos/mods/_tools/claude-ctx"
+R="/home/donghans/nixos/mods/_tools/llm-ctx"
 sys.path.insert(0,R); sys.path.insert(0,R+"/tests")
 import pgscratch
 pg=pgscratch.start(); assert pg
 os.environ.update(pg.env())
-import claude_ctx as cc, ctx_secrets as cs
+import llm_ctx as cc, ctx_secrets as cs
 random.seed(3)
 conn=cc.connect()
 REPOS=["https://github.com/example/alpha","https://github.com/example/한글-프로젝트-매우긴저장소이름-테스트","https://github.com/example-org/beta-service","https://github.com/x/y"]

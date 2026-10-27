@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""claude-sessions 시험(실제 tmux 서버·pty): 세션 생성·목록·미리보기·정리 · claude-tmux 래퍼(감쌀지 판단, 붙기/분리/종료, kitty 닫힘 시 정리와 다른 접속이 있을 때 유지) · UI(Textual Pilot).
+"""llm-sessions 시험(실제 tmux 서버·pty): 세션 생성·목록·미리보기·정리 · claude-tmux 래퍼(감쌀지 판단, 붙기/분리/종료, kitty 닫힘 시 정리와 다른 접속이 있을 때 유지) · UI(Textual Pilot).
 필요: tmux. 없으면 건너뛴다(CLAUDE_TMUX_BIN 으로 지정 가능). UI 부분은 textual 이 있어야 한다."""
 import asyncio, glob, os, pty, select, signal, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
@@ -190,7 +190,7 @@ try:
         HAVE_UI = False
         print("textual 이 없어 UI 시험은 건너뜀")
     if HAVE_UI:
-        import claude_sessions as cu
+        import llm_sessions as cu
         kill_server()
         s1 = ts.create(WORK, name="claude-ui-a"); s2 = ts.create(WORK, ["--resume", "zz"], name="claude-ui-b")
         wait(lambda: all("FAKE-READY" in ts.preview(n) for n in (s1, s2)))
@@ -264,21 +264,21 @@ try:
 
         # CLI
         s1 = ts.create(WORK, name="claude-cli-a")
-        out = subprocess.run([sys.executable, os.path.join(ROOT, "claude_sessions.py"), "ls"], capture_output=True, text=True, env=os.environ)
+        out = subprocess.run([sys.executable, os.path.join(ROOT, "llm_sessions.py"), "ls"], capture_output=True, text=True, env=os.environ)
         check("CLI ls: 세션 이름·번호·분리됨", out.returncode == 0 and "claude-cli-a" in out.stdout and " 1 " in out.stdout and "분리됨" in out.stdout, out.stdout)
-        bad = subprocess.run([sys.executable, os.path.join(ROOT, "claude_sessions.py"), "attach", "없는세션"], capture_output=True, text=True, env=os.environ)
+        bad = subprocess.run([sys.executable, os.path.join(ROOT, "llm_sessions.py"), "attach", "없는세션"], capture_output=True, text=True, env=os.environ)
         check("CLI attach: 없는 세션은 종료 코드 1과 안내", bad.returncode == 1 and "찾지 못했" in bad.stderr)
-        nt = subprocess.run([sys.executable, os.path.join(ROOT, "claude_sessions.py")], capture_output=True, text=True, stdin=subprocess.DEVNULL, env=os.environ)
+        nt = subprocess.run([sys.executable, os.path.join(ROOT, "llm_sessions.py")], capture_output=True, text=True, stdin=subprocess.DEVNULL, env=os.environ)
         check("CLI: 터미널이 아니면 UI 를 띄우지 않고 안내(종료 코드 1)", nt.returncode == 1 and "ls" in nt.stderr)
-        c = Term([sys.executable, os.path.join(ROOT, "claude_sessions.py"), "attach", "cli-a"])
+        c = Term([sys.executable, os.path.join(ROOT, "llm_sessions.py"), "attach", "cli-a"])
         check("CLI attach: 접두로 붙어서 claude 화면이 보임", c.wait_for("FAKE-READY"))
         c.send(b"\x1b[24~"); check("CLI attach: F12 분리 후 정상 종료", c.exited() == 0 and "claude-cli-a" in names()); c.close()
         ts.kill("claude-cli-a")
-        n = Term([sys.executable, os.path.join(ROOT, "claude_sessions.py"), "new", WORK, "--", "--model", "x"])
+        n = Term([sys.executable, os.path.join(ROOT, "llm_sessions.py"), "new", WORK, "--", "--model", "x"])
         check("CLI new: 새 세션을 만들고 붙음(인자 전달)", n.wait_for("FAKE-READY args=--model x") and len(names()) == 1, n.buf[-200:].decode(errors="replace"))
         n.send(b"\x1b[24~"); n.exited(); n.close()
 finally:
     kill_server()
     import shutil
     shutil.rmtree(TMP, ignore_errors=True)
-finish("claude-sessions 코어")
+finish("llm-sessions 코어")

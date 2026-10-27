@@ -411,7 +411,7 @@ def scrub_local(cc, conn, files, secrets, apply=False, idle_secs=3600, log=print
     - 적용 전에 그 파일을 먼저 적재해 원문이 DB 에 있게 하고, ingest_state 오프셋을 새 크기로 맞춘다(길이가 바뀌므로).
     - 열려 있을 수 있는 파일(최근 idle_secs 안에 수정됨)은 건드리지 않는다. 쓰는 사이 파일이 바뀌면 포기한다.
     - state(dict, 호출자가 파일로 저장)가 있으면 「수정 시각·크기·등록표 해시가 지난번 점검과 같은 파일」은 읽지 않고 건너뛴다(트랜스크립트가 GB 단위라서).
-    cc = claude_ctx 모듈(ingest_transcript · lock_key · INGEST_HOST 를 쓴다). 반환: 요약 dict."""
+    cc = llm_ctx 모듈(ingest_transcript · lock_key · INGEST_HOST 를 쓴다). 반환: 요약 dict."""
     summary = dict(files=0, hit_files=0, changed=0, skipped_active=0, skipped_unsynced=0, skipped_changed=0, skipped_lines=0, cached=0, hits={})
     now = time.time()
     rh = registry_hash(secrets)

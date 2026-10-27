@@ -103,7 +103,7 @@ check("write_state/read_state: 파일을 거쳐도 같고, 없거나 깨진 파�
 # --- DB 통합(임시 Postgres)
 try:
     import psycopg  # noqa: F401
-    sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "claude-ctx", "tests")); import pgscratch
+    sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "llm-ctx", "tests")); import pgscratch
     pg = pgscratch.start() if pgscratch.find_bin() else None
 except ImportError:
     pg = None
@@ -112,7 +112,7 @@ if pg is None:
 else:
     try:
         os.environ["CLAUDE_CTX_DSN"] = pg.dsn
-        sch = open(os.path.join(os.path.dirname(ROOT), "claude-ctx", "schema.sql")).read()
+        sch = open(os.path.join(os.path.dirname(ROOT), "llm-ctx", "schema.sql")).read()
         check("schema.sql 에 observe_* 표 3개", all(t in sch for t in ("observe_app_hourly", "observe_power_hourly", "observe_ext_inventory")))
         conn = fl.connect()
         n = fl.push(conn, "nb", ar, pr, inv)

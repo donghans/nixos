@@ -1,25 +1,25 @@
-# claude-ctx — Claude 공유 컨텍스트 저장소
+# llm-ctx — Claude 공유 컨텍스트 저장소
 
 여러 머신(데스크톱·노트북)·프로젝트에서 Claude Code 로 한 대화·사용량을 Postgres 한 곳에 모아 조회한다. handoff/resume 도 이 저장소를 따라간다.
 
 ## 구성
 | 부분 | 위치 | 역할 |
 |---|---|---|
-| 서버 | `mods/sys/services/claude-ctx.nix` (호스트 toml 에 `claude-ctx = true`) | Postgres 17 + pgvector, DB `claude_ctx`, 역할 `claude_ctx`. localhost 와 tailnet(100.64.0.0/10) 에서만 scram 비밀번호로 접속 |
-| 스키마 | `mods/_tools/claude-ctx/schema.sql` | 멱등. 서비스 `claude-ctx-schema` 가 적용 |
-| 클라이언트 | `mods/_tools/claude-ctx/claude_ctx.py` → `donghans` 명령 (`donghans ctx …`, `donghans handoff put|get`) (`mods/devel/apps/llm-cli.nix`) | 훅 적재 · 백필 · 조회 · handoff 업/다운 |
+| 서버 | `mods/sys/services/llm-ctx.nix` (호스트 toml 에 `llm-ctx = true`) | Postgres 17 + pgvector, DB `claude_ctx`, 역할 `claude_ctx`. localhost 와 tailnet(100.64.0.0/10) 에서만 scram 비밀번호로 접속 |
+| 스키마 | `mods/_tools/llm-ctx/schema.sql` | 멱등. 서비스 `claude-ctx-schema` 가 적용 |
+| 클라이언트 | `mods/_tools/llm-ctx/llm_ctx.py` → `donghans` 명령 (`donghans ctx …`, `donghans handoff put|get`) (`mods/devel/apps/llm-cli.nix`) | 훅 적재 · 백필 · 조회 · handoff 업/다운 |
 | 훅 | 같은 파일의 `claude` 래퍼가 `--settings` 로 주입 | UserPromptSubmit/Stop/SubagentStop/SessionStart/SessionEnd/PreCompact (async) |
 | 안전망 | user 타이머 `claude-ctx-ingest` (10분) | 훅이 놓친 것을 오프셋 기준으로 따라잡음 |
 
 ## 새 머신 연결
 nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 1. 서버 머신(beelink-ser7-co)은 unix 소켓 peer 인증이라 아무 설정이 없다.
-2. 원격 머신(노트북 등): `mods/sys/services/claude-ctx.nix` 의 `allowedClients` 에 그 기기의 tailnet IP 를 넣고 서버를 `nixup`, 클라이언트 머신은 `nixup`. 클라이언트는 MagicDNS 이름 `beelink-ser7-co:5432` 로 붙고, 서버가 출발지 IP 로 허용 여부를 판단한다(trust).
+2. 원격 머신(노트북 등): `mods/sys/services/llm-ctx.nix` 의 `allowedClients` 에 그 기기의 tailnet IP 를 넣고 서버를 `nixup`, 클라이언트 머신은 `nixup`. 클라이언트는 MagicDNS 이름 `beelink-ser7-co:5432` 로 붙고, 서버가 출발지 IP 로 허용 여부를 판단한다(trust).
 3. **과거 대화를 일괄 이전하지 않는다.** 지금부터 쌓이는 대화만 올라가고(훅 + 10분 타이머, 최근 2일 활동 파일), 옛 세션은 `claude --resume` 으로 들어가 그 세션에서 handoff(→ 그 세션의 대화가 그때 적재됨)하는 방식으로 필요한 것만 끌어온다. 전체 백필이 필요하면 `donghans ctx ingest --days N` 을 명시적으로 실행.
 - 신뢰 모델: tailnet 출발지 IP(WireGuard 인증) + 방화벽의 tailscale0 외 차단. 남는 위험은 허용된 기기 안의 다른 프로그램. 이를 받아들이지 않으면 pg_hba 의 `trust` 를 `scram-sha-256` 으로 바꾸고 비밀번호를 설정해야 한다(그때는 비밀 파일이 생긴다).
 
 ## 다른 서버로 이관 (클라우드·온프레미스)
-`pg_dump claude_ctx` → 새 서버에 `psql` 복원 → 클라이언트의 서버 이름(`CLAUDE_CTX_SERVER`, 기본 beelink-ser7-co)만 교체. 서버 호스트의 `claude-ctx` 모드(toml)를 끄면 된다.
+`pg_dump claude_ctx` → 새 서버에 `psql` 복원 → 클라이언트의 서버 이름(`CLAUDE_CTX_SERVER`, 기본 beelink-ser7-co)만 교체. 서버 호스트의 `llm-ctx` 모드(toml)를 끄면 된다.
 
 ## 멱등성 (여러 머신이 올려도 안 깨지는 이유)
 - 자연키 `ON CONFLICT DO NOTHING`: 메시지 uuid · 사용 요청 request_id · 훅 (host,session,event,payload md5).
@@ -30,7 +30,7 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 - **계정별 한도(2026-10-23~)**: 한도 %는 계정 단위인데 상태줄 입력에 계정이 없어, 상태줄 스크립트(`claude-usage-statusline`)가 `~/.claude.json`(`CLAUDE_CONFIG_DIR` 우선)의 `oauthAccount` 에서 `accountUuid`·이메일·플랜(`userRateLimitTier`, 없으면 `seatTier`)을 읽어 `limit_samples`(`account_id`·`account_email`·`account_plan`)에 같이 남긴다. 5h·7d 창의 리셋 시각(`*_resets_at`)도 저장해 창마다 최고 %를 낸다(`donghans ctx limits`, ctxui 대시보드 상단 그래프 — 색 = 계정). **그 이전 행은 계정·리셋 시각이 NULL** 이라 집계에서 빠진다(계정을 사후에 알 수 없음). 계정 전환 직후 상태줄이 갱신되기 전 샘플은 이전 계정으로 찍힐 수 있다.
 
 ## 접속 허용 목록 · 백업 · 초안
-- **허용 목록:** `claude-ctx.nix` 의 `allowedClients` (tailnet IP, trust). 새 기기는 IP 를 추가한다. headscale 이 IP 를 재할당하면 그 기기는 접속이 막힌다(fail-closed).
+- **허용 목록:** `llm-ctx.nix` 의 `allowedClients` (tailnet IP, trust). 새 기기는 IP 를 추가한다. headscale 이 IP 를 재할당하면 그 기기는 접속이 막힌다(fail-closed).
 - **백업:** 매일 03:30 `pg_dump`(zstd) → `/var/backup/postgresql/claude_ctx.sql.zstd` (최신 1개만, 같은 디스크). Claude Code 가 오래된 로컬 트랜스크립트를 정리하면 이 DB 가 옛 대화의 유일한 사본이 된다.
 - **초안:** `donghans handoff draft --session <ID> [--focus "…"] [--model haiku] [--dry-run]` — DB 의 사용자 발언·최근 응답만 작은 모델이 읽고 `.claude/handoffs/DRAFT-<ID>.md` 를 만든다(예: 사용자 발언 6개·약 3천 토큰 입력, 74초). 검증 전 자료이므로 본 세션이 사실 칸을 확인하고 보강한다.
 
@@ -61,7 +61,7 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 
 **안전장치**: 올릴 때 본문에 등록된 비밀 값이 있으면 거부(`secrets` 등록표) · 올리기는 `WHERE rev = 읽은 값` 낙관적 잠금(다른 기기가 먼저 바꿨으면 거부) · 실행 파일(`qa-extra`·`resume-extra`)은 동기화하지 않는다(DB 에서 받은 코드를 실행하게 되므로) · 훅은 프롬프트에 **본문을 주입하지 않고**, 파일이 바뀌었거나 앞섬·충돌일 때만 한 줄 알림을 `additionalContext` 로 낸다 · 훅 실패는 입력을 막지 않는다(기존 규칙).
 
-**시험**: `claude-ctx/tests/test_instr.py` — 판정표 9행 · 워크트리 루트 · exclude 멱등 · 두 기기 시나리오(채택→갱신→앞섬→충돌→강제) · 비밀 거부 · 낙관적 잠금 · 훅 end-to-end. 변이(앞섬을 덮어쓰기로 / 비밀 검사 제거)로 시험이 실제로 실패함을 확인했다. **한계**: 실제 `beelink-ser7-co` DB 에서의 실행은 스키마 적용(`nixup`) 뒤 한 번 확인해야 한다.
+**시험**: `llm-ctx/tests/test_instr.py` — 판정표 9행 · 워크트리 루트 · exclude 멱등 · 두 기기 시나리오(채택→갱신→앞섬→충돌→강제) · 비밀 거부 · 낙관적 잠금 · 훅 end-to-end. 변이(앞섬을 덮어쓰기로 / 비밀 검사 제거)로 시험이 실제로 실패함을 확인했다. **한계**: 실제 `beelink-ser7-co` DB 에서의 실행은 스키마 적용(`nixup`) 뒤 한 번 확인해야 한다.
 
 ### 명령 경유 — 읽을 때 최신화, 쓸 때 DB 먼저 (2026-10-23, 사용자 결정)
 
@@ -90,14 +90,14 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 
 | 부분 | 위치 | 역할 |
 |---|---|---|
-| 핵심 | `mods/_tools/claude-ctx/ctx_secrets.py` | 등록표 DDL·치환 엔진(`Masker`)·후보 탐지(`PATTERNS`)·주입 래퍼(`run_masked`)·jsonl 치환(`scrub_bytes`/`scrub_local`). DB 없이 시험 가능한 순수 함수 중심 |
-| 명령 | `claude_ctx.py` 의 `donghans secret …` | `add`(숨겨 입력, `--stdin`) · `list` · `rm/enable/disable` · `show`(TTY) · `run` · `scan` · `adopt` · `ignore` · `scrub` |
+| 핵심 | `mods/_tools/llm-ctx/ctx_secrets.py` | 등록표 DDL·치환 엔진(`Masker`)·후보 탐지(`PATTERNS`)·주입 래퍼(`run_masked`)·jsonl 치환(`scrub_bytes`/`scrub_local`). DB 없이 시험 가능한 순수 함수 중심 |
+| 명령 | `llm_ctx.py` 의 `donghans secret …` | `add`(숨겨 입력, `--stdin`) · `list` · `rm/enable/disable` · `show`(TTY) · `run` · `scan` · `adopt` · `ignore` · `scrub` |
 | 치환 지점 | `ctx search/recent/session/sql` · `handoff get/draft` | 출력 직전에 치환. `--raw` 는 TTY + `CLAUDECODE` 없음일 때만 |
 | 조회 계층 | `ctxdata.py` | 개요 집계 · 검색 · 저장소별 발언 대조 · 세션 맥락 · 비밀·후보 관리(화면과 분리) |
 | 화면 | `ctxui.py` (`ctxui` 명령, Textual) | 1 대시보드(저장소별 개수·용량·DB 크기 + 한도·통계, 아래 「ctxui 통계·대화 보기」) · 2 검색(세션 기준 목록 — 전체 대화에서 찾아 세션으로 묶음, Space 로 일치 메시지 펼침·F6 제목만, 키워드/정규식·저장소·기간·역할) · 3 대조(같은 문구를 저장소별로 묶어 「내가 그렇게 말했나」) · 4 비밀(추가·끄기·삭제·값 보기) · 5 후보(승인·무시) · 6 지침(아래 「명령 경유」) |
 | 스키마 | `schema.sql` 의 `secrets` · `secret_ignores` (v2) | `ctx_secrets.SCHEMA_STATEMENTS` 와 같은 DDL(시험이 확인). 클라이언트도 쓰기 전에 `CREATE TABLE IF NOT EXISTS` 로 보장 |
 | 자동화 | `claude-ctx-ingest` 서비스의 `ExecStartPost` | 10분마다 `secret scrub --apply --quiet --idle-min 180`. 등록표가 비면 아무 일도 안 한다 |
-| 시험 | `claude-ctx/tests/` (`mods/_tools/run-tests.sh` 에 등록) | `test_secrets`(순수) · `test_ctx_db`(임시 Postgres 통합) · `test_ctxdata` · `test_ctxui`(Pilot) |
+| 시험 | `llm-ctx/tests/` (`mods/_tools/run-tests.sh` 에 등록) | `test_secrets`(순수) · `test_ctx_db`(임시 Postgres 통합) · `test_ctxdata` · `test_ctxui`(Pilot) |
 
 ### 치환이 걸리는 곳과 규칙
 - 치환 형식은 `[protected]`. literal 은 값 그대로 **와 JSON 이스케이프 형태**(따옴표·역슬래시·`\uXXXX`)를, regex 는 패턴을 가린다. 값 4자 미만은 등록을 거부한다(일반 단어까지 지워지므로; `--force`).

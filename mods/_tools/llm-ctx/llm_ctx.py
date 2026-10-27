@@ -409,7 +409,7 @@ def cmd_hook(a):
                 ingest_otel(conn)
     except Exception as e:  # 훅은 절대 입력을 막지 않는다 — 놓친 것은 ingest 가 따라잡는다
         try:
-            open(os.path.join(OTEL, "claude-ctx-hook.err"), "a").write(f"{time.strftime('%F %T')} {a.event} {type(e).__name__}: {e}\n")
+            open(os.path.join(OTEL, "llm-ctx-hook.err"), "a").write(f"{time.strftime('%F %T')} {a.event} {type(e).__name__}: {e}\n")
         except Exception:
             pass
     return 0
@@ -1120,6 +1120,8 @@ def cmd_secret_ignore(a):
     return 0
 
 
+# 사용자 디스크의 저장 경로·서비스 이름·DB 이름은 개명(2026-10-27 claude-ctx → llm-ctx) 때 일부러 옛 이름을 유지한다 — 바꾸면 점검 캐시(트랜스크립트 GB 단위)를 다시 만들고,
+# ~/.config/claude-ctx/dsn·DB `claude_ctx`·유닛 `claude-ctx-*` 는 각 머신의 데이터·설정과 묶여 있어 마이그레이션이 필요하기 때문이다.
 SCRUB_STATE = os.path.join(HOME, ".local/state/claude-ctx/scrub-state.json")
 
 

@@ -10,7 +10,7 @@ description: 성능·자원·전력 문제를 추측하지 말고 observectl(관
 - 수집 기본값: **노트북은 꺼짐**(전력 측정에 변수를 섞지 않으려고; 켜기 `observectl on`, 끄기 `observectl off`), 그 밖(데스크톱·서버)은 켜짐. 노트북에서 켜거나 수준(L1)·eBPF 를 올릴 때는 측정에 영향을 주니 먼저 사용자에게 말한다.
 - 호스트 종류별 방향(`hostname` 으로 어느 쪽인지 확인): 노트북은 **전력→배터리 사용량 관리·개선**, 데스크톱은 **비효율 프로세스 관리와 집중할 곳에 자원 쓰기**(배터리·psys·Intel C-state 지표는 없거나 비어 있을 수 있음 — 값이 `None`/없음이면 없는 것이지 0 이 아님).
 
-용어: **psys**=플랫폼 전체 전력(RAPL, W) · **PSR**=패널 자체 화면 절전 · **flip/s**=화면 갱신 횟수/초 · **ABAB**=조건 A·B 를 번갈아 재는 방식 · **L0/L1**=수집 수준(30초/5초 간격) · **V×I**=배터리의 순간 전압×전류 전력 · **claude-ctx**=여러 호스트가 공유하는 Postgres(`donghans ctx`). 수집 보존은 14일·1GiB, `observectl status` 가 「수집 꺼짐」이면 조회할 기록이 없으니 사용자에게 켤지 묻는다.
+용어: **psys**=플랫폼 전체 전력(RAPL, W) · **PSR**=패널 자체 화면 절전 · **flip/s**=화면 갱신 횟수/초 · **ABAB**=조건 A·B 를 번갈아 재는 방식 · **L0/L1**=수집 수준(30초/5초 간격) · **V×I**=배터리의 순간 전압×전류 전력 · **llm-ctx**=여러 호스트가 공유하는 Postgres(`donghans ctx`). 수집 보존은 14일·1GiB, `observectl status` 가 「수집 꺼짐」이면 조회할 기록이 없으니 사용자에게 켤지 묻는다.
 
 ## 자주 쓰는 조회 (sudo 불필요, 개별 조건은 `observectl <명령> --help`)
 - 상위 프로세스: `observectl top --by cpu|ctxsw|app --since 1h -n 15`(cpu 는 코어 1개=100%, ctxsw 는 자발적 문맥 전환/s)
@@ -27,7 +27,7 @@ description: 성능·자원·전력 문제를 추측하지 말고 observectl(관
 - **verify 는 조건을 건 API 의 응답이 아니라 효과를 보는 독립 신호로 한다**(예: 브라우저 확장을 껐다는 응답 대신 `observectl browser sw` 로 서비스 워커가 실제로 멈췄는지 본다 — 사례 장부 #133).
 - 상태 지표(PSR 잔류·flip/s·깨움/s·C-state)를 먼저, 와트는 확인용. 시험 중에는 노트북에 ssh 폴링을 하지 않는다. 전력 시험 절차 전체는 이 저장소의 호스트 로컬 스킬 `power-test`(`~/nixos/.claude/skills/power-test/SKILL.md`)에 있다 — **그 파일이 없으면**(다른 저장소·호스트) `abab_lib.sh` 머리말과 `observectl ab --help` 를 따른다. 「ssh 폴링 금지」는 원격 노트북 전력 시험 중에만 해당한다(데스크톱 점검에는 해당 없음).
 - 시험이 중간에 실패·중단돼도 `abab_lib.sh` 가 `abab_restore`(원래 상태 복구)를 정확히 한 번 실행하고 구간 기록·부분 분석을 남긴다.
-- 한계: `browser periodic` 은 15초 폴이라 그보다 짧은 주기는 못 본다. `fleet` 은 서버(`claude-ctx`)에 표가 있어야 하고(서버 `nixup`) 호스트가 `allowedClients` 에 있어야 접속된다. 호스트 간 전력(W) 절댓값 비교는 하드웨어가 달라 하지 않는다.
+- 한계: `browser periodic` 은 15초 폴이라 그보다 짧은 주기는 못 본다. `fleet` 은 서버(`llm-ctx`)에 표가 있어야 하고(서버 `nixup`) 호스트가 `allowedClients` 에 있어야 접속된다. 호스트 간 전력(W) 절댓값 비교는 하드웨어가 달라 하지 않는다.
 
 ## 출력은 `--json` 으로 (LLM·스크립트용 — 표 모양은 무시)
 모든 `observectl` 하위 명령이 `--json` 을 받는다(`<명령> --help` 에 보인다)(`observectl top --by app --json`). 사람이 보는 표의 정렬·모양에는 신경 쓰지 말고 **JSON 을 읽는다.** 봉투: `{"command", "ok", "structured", "exit_code", "data"|"text", "notes", "error"}`.

@@ -41,5 +41,5 @@ description: 여러 머신·프로젝트의 지난 에이전트(현재는 Claude
 - **로컬 트랜스크립트**: `donghans secret scrub`(기본 dry-run, `--apply` 로 적용)가 DB 에 적재가 끝난 한가한 `~/.claude/projects/**/*.jsonl` 에서 등록된 값을 `[protected]` 로 바꾼다(원문은 DB 에 있다). 10분 적재 타이머가 3시간 넘게 한가한 파일에 자동 적용한다.
 - **사람만 되는 것**: `--raw`(치환 해제), `secret show`, `secret scan --reveal`, `secret add`(숨겨 입력), 등록표(`secrets`) 직접 SQL 조회. 에이전트의 셸 도구는 TTY 가 아니라서 거부된다(**TTY 검사가 본체**이고, 에이전트가 설정하는 환경변수 `CLAUDECODE`·`GEMINI_CLI`·`DONGHANS_AGENT` 는 보조 표식) — **우회하지 말 것**(DB 직접 접속, 트랜스크립트 파일 직접 읽기 포함).
 - **한계**: 막는 것은 `donghans` 경로뿐이다. 이미 대화에 입력된 값, DB 에 직접 붙는 도구, 치환 전 파일은 막지 못한다. 설계상 ctx DB 는 허용된 tailnet 기기만 접속한다(사용자 결정). `ctx sql` 로 `substring()` 같은 함수를 써서 조각을 빼내려는 시도도 하지 않는다.
-- **적재되는 에이전트**: 지금은 Claude Code 의 트랜스크립트·훅 형식(`~/.claude/projects/**/*.jsonl`)만 읽는다. 다른 에이전트의 대화를 같은 저장소에 담으려면 그 에이전트용 파서(`claude_ctx.py` 의 `parse_line`·`cmd_hook`, `ctx_secrets.py` 의 `transcript_files`)를 추가해야 한다. 조회·비밀 치환·주입 래퍼·`ctxui` 는 에이전트와 무관하다(DB 표의 role/kind 만 본다).
+- **적재되는 에이전트**: 지금은 Claude Code 의 트랜스크립트·훅 형식(`~/.claude/projects/**/*.jsonl`)만 읽는다. 다른 에이전트의 대화를 같은 저장소에 담으려면 그 에이전트용 파서(`llm_ctx.py` 의 `parse_line`·`cmd_hook`, `ctx_secrets.py` 의 `transcript_files`)를 추가해야 한다. 조회·비밀 치환·주입 래퍼·`ctxui` 는 에이전트와 무관하다(DB 표의 role/kind 만 본다).
 - 구조·시험·운영: `~/nixos/_docs/content/explanation/claude-ctx.md` 의 「비밀번호 관리」.

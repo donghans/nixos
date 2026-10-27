@@ -8,7 +8,7 @@
 - 감시기는 시작할 때 과거 기록을 전부 재생해 "급증" 알림을 쏟아내는데, 이것은 설계된 동작이라 무시하면 된다(§3-3).
 
 ## 2. 용어
-- **`claude-limit-watch`**: Claude Code 구독의 5시간·7일 사용 한도(`limits.jsonl`)를 지켜보다가 사용량이 튀면 한 줄을 출력하는 파이썬 스크립트. 출력 한 줄이 곧 알림이라 Monitor 도구로 걸어 둔다. 소스 `mods/_tools/claude-usage/claude-limit-watch`.
+- **`claude-limit-watch`**: Claude Code 구독의 5시간·7일 사용 한도(`limits.jsonl`)를 지켜보다가 사용량이 튀면 한 줄을 출력하는 파이썬 스크립트. 출력 한 줄이 곧 알림이라 Monitor 도구로 걸어 둔다. 소스 `mods/_tools/llm-usage/claude-limit-watch`.
 - **Monitor**: Claude Code 의 도구. 백그라운드 명령의 표준출력 한 줄마다 대화에 알림을 보낸다.
 - **home-manager(`home.file`)**: 이 저장소가 NixOS 사용자 환경에 파일·링크를 만드는 방식. `nixup` 으로 배포하면 반영된다.
 - **세션 ID 접두**: `echo $CLAUDE_CODE_SESSION_ID` 의 앞 8자. 감시기의 필수 인자(`--own` 일 때만 필터로 쓰이고, 기본은 모든 세션의 기록을 본다).

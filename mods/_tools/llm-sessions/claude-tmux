@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-tmux — claude 를 전용 tmux 세션(`tmux -L claude`) 안에서 실행해, ssh·다른 kitty 에서 `claude-sessions` 로 이어 붙을 수 있게 한다.
+# claude-tmux — claude 를 전용 tmux 세션(`tmux -L claude`) 안에서 실행해, ssh·다른 kitty 에서 `llm-sessions` 로 이어 붙을 수 있게 한다.
 #   claude-tmux [claude 인자…]           새 세션을 만들고 붙는다(분리하면 세션은 계속 돈다, claude 를 끝내면 세션도 끝난다)
 #   claude-tmux --wants [claude 인자…]   tmux 로 감싸야 하는 호출이면 종료 코드 0, 아니면 1 (셸 함수 claude 가 먼저 묻는다)
 # 감싸지 않는 경우: CLAUDE_TMUX=0 · 이미 tmux 안 · 터미널이 아님 · -p/--print/--help/--version 등 비대화형 · 서브커맨드(mcp, config, update …)

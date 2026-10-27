@@ -15,7 +15,7 @@ pg = pgscratch.start()
 if not pg:
     print("postgres 바이너리를 못 찾아 건너뜀"); sys.exit(0)
 os.environ.update(pg.env())
-import ctx_secrets as cs, ctxdata as cd, claude_ctx as cc, ctxui
+import ctx_secrets as cs, ctxdata as cd, llm_ctx as cc, ctxui
 
 A, B = "https://github.com/x/alpha", "https://github.com/x/beta"
 PW, KEY = "hunter2-pass", "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUV"

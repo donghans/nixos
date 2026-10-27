@@ -48,7 +48,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
     - 다른 프로젝트 QA 세션의 파일(`~/qa-playwright` 의 다른 디렉터리·package.json)은 건드리지 말고, 쓰기 전에 상대 QA 세션에 시작과 예상 시간을 알리세요.
     - 사용자에게 현재 가상 데스크톱 번호를 묻지 마세요(화면에 안 보입니다). 스킬의 도구로 직접 확인합니다.
   '';
-  # 훅(claude-ctx)은 항상 --settings 로 주입한다 — ~/.claude/settings.json 은 Claude 가 직접 쓰는 가변 파일이라 nix 로 소유하지 않는다.
+  # 훅(llm-ctx)은 항상 --settings 로 주입한다 — ~/.claude/settings.json 은 Claude 가 직접 쓰는 가변 파일이라 nix 로 소유하지 않는다.
   # --settings 를 두 번 주면 어떻게 합쳐지는지 확인하지 않아서(미확인) 모션 감소 키는 같은 파일에 넣어 한 번만 준다.
   settingsSnippet =
     if reduceMotion
@@ -114,27 +114,27 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
     inherit (claudeBase) meta;
   };
 
-  # (목적: 여러 머신·프로젝트의 대화·사용량을 공유 저장소(Postgres, mods.sys.services.claude-ctx)에 이벤트 시점에 적재)
+  # (목적: 여러 머신·프로젝트의 대화·사용량을 공유 저장소(Postgres, mods.sys.services.llm-ctx)에 이벤트 시점에 적재)
   # 클라이언트 CLI `donghans`: `donghans ctx hook|ingest|search|recent|session|usage|sql` / `donghans handoff put|get`.
   # 접속 문자열은 ~/.config/claude-ctx/dsn (nix 밖, 권한 600 — 비밀번호가 스토어에 남지 않게). 서버 위치는 거기서만 바꾼다.
-  # 여러 파일(claude_ctx: 명령, ctx_secrets: 비밀 등록표·치환·주입·후보 탐지·로컬 치환, ctx_instr: 프로젝트별 지침 공유 동기화, ctx_docs: 계획·QA 기록 같은 프로젝트 문서 정본, ctxdata/ctxui: 관리 TUI, uikit: TUI 공통 틀)을 한 디렉터리에 모아 실행한다
+  # 여러 파일(llm_ctx: 명령, ctx_secrets: 비밀 등록표·치환·주입·후보 탐지·로컬 치환, ctx_instr: 프로젝트별 지침 공유 동기화, ctx_docs: 계획·QA 기록 같은 프로젝트 문서 정본, ctxdata/ctxui: 관리 TUI, uikit: TUI 공통 틀)을 한 디렉터리에 모아 실행한다
   # (observe 의 usageui 와 같은 방식). 훅·타이머·사용자가 부르는 `donghans` 는 모두 이 래퍼다.
-  ctxSrc = pkgs.runCommand "claude-ctx-src" {} ''
+  ctxSrc = pkgs.runCommand "llm-ctx-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/claude-ctx + "/${f}"} $out/${f}") ["claude_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_docs.py" "ctxdata.py" "ctxchart.py" "ctxui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_docs.py" "ctxdata.py" "ctxchart.py" "ctxui.py"]}
     cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
   '';
-  claudeCtx = pkgs.writeShellScriptBin "donghans" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg])}/bin/python3 ${ctxSrc}/claude_ctx.py "$@"'';
+  claudeCtx = pkgs.writeShellScriptBin "donghans" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg])}/bin/python3 ${ctxSrc}/llm_ctx.py "$@"'';
   # ctx 관리 TUI(Textual): 저장소별 용량·검색·발언 대조·비밀 등록표·후보 탐지. 사람이 터미널에서 쓰는 도구(`ctxui`).
   ctxui = pkgs.writeShellScriptBin "ctxui" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg ps.textual])}/bin/python3 ${ctxSrc}/ctxui.py "$@"'';
 
   # (목적: ssh 와 kitty 에서 같은 claude 세션을 이어 쓰기) claude 를 전용 tmux 서버(`tmux -L claude`, 일반 tmux 와 분리) 안에서 돌리고,
-  # `claude-sessions`(목록 UI)로 어디서든 붙는다. 한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다(tmux 기본 동작).
+  # `llm-sessions`(목록 UI)로 어디서든 붙는다. 한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다(tmux 기본 동작).
   # 대화형 `claude` 셸 함수만 이 경로를 타고(아래 initContent), `claude -p`·서브커맨드·스크립트가 부르는 claude 는 그대로다. 끄기: CLAUDE_TMUX=0 claude.
   # 설계·시험 기록: _docs/content/explanation/claude-sessions.md
-  sessionsSrc = pkgs.runCommand "claude-sessions-src" {} ''
+  sessionsSrc = pkgs.runCommand "llm-sessions-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/claude-sessions + "/${f}"} $out/${f}") ["claude_sessions.py" "tmuxsess.py" "claude-tmux" "claude-tmux.conf"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm-sessions + "/${f}"} $out/${f}") ["llm_sessions.py" "tmuxsess.py" "claude-tmux" "claude-tmux.conf"]}
     chmod +x $out/claude-tmux
     cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
   '';
@@ -152,7 +152,9 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
     ${claude}/bin/claude "$@"
   '';
   claudeTmux = pkgs.writeShellScriptBin "claude-tmux" ''${tmuxEnv}exec ${pkgs.bash}/bin/bash ${sessionsSrc}/claude-tmux "$@"'';
-  claudeSessions = pkgs.writeShellScriptBin "claude-sessions" ''${tmuxEnv}exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${sessionsSrc}/claude_sessions.py "$@"'';
+  claudeSessions = pkgs.writeShellScriptBin "llm-sessions" ''${tmuxEnv}exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${sessionsSrc}/llm_sessions.py "$@"'';
+  # 옛 이름 호환(2026-10-27 개명 llm-sessions) — 습관·옛 문서가 쓰는 `claude-sessions` 가 그대로 열리게 하는 별칭. 필요 없어지면 이 줄과 packages 항목을 지운다.
+  claudeSessionsAlias = pkgs.writeShellScriptBin "claude-sessions" ''exec ${claudeSessions}/bin/llm-sessions "$@"'';
   # 훅은 비동기(입력을 막지 않음)이고 실패해도 조용히 끝난다. 놓친 것은 ingest 타이머가 따라잡는다.
   ctxHook = event: [
     {
@@ -171,7 +173,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
       # 상태 표시줄(5시간·주간 한도 % 표시 + limits.jsonl 기록)도 훅과 같은 --settings 로 주입해, 이 모듈을 쓰는 모든 호스트에 적용한다(스크립트는 스토어 경로).
       statusLine = {
         type = "command";
-        command = "${../../_tools/claude-usage/claude-usage-statusline}";
+        command = "${../../_tools/llm-usage/claude-usage-statusline}";
       };
       hooks = lib.genAttrs ["UserPromptSubmit" "Stop" "SubagentStop" "SessionStart" "SessionEnd" "PreCompact"] ctxHook;
     }
@@ -182,8 +184,8 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
         ask = ["Bash(procctl apply:*)" "Bash(procctl escalate:*)"];
       };
     };
-  hooksFile = pkgs.writeText "claude-ctx-hooks.json" (builtins.toJSON hooksSettings);
-  hooksReducedFile = pkgs.writeText "claude-ctx-hooks-reduced.json" (builtins.toJSON (hooksSettings
+  hooksFile = pkgs.writeText "llm-ctx-hooks.json" (builtins.toJSON hooksSettings);
+  hooksReducedFile = pkgs.writeText "llm-ctx-hooks-reduced.json" (builtins.toJSON (hooksSettings
     // {
       prefersReducedMotion = true;
       # 창 제목 갱신(스피너)도 끈다 — 화면 갱신 3→2/s·PSR 유지 57→69%·psys 약 −0.5 W(power-evidence.md #101). 제목 정보는 쓰지 않는다(사용자 결정 2026-10-25). `CLAUDE_MOTION=normal claude` 로 함께 풀린다.
@@ -211,7 +213,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   '';
 in {
   hm = {
-    home.packages = [claude unstable.antigravity-cli claudeCtx ctxui claudeTmux claudeSessions];
+    home.packages = [claude unstable.antigravity-cli claudeCtx ctxui claudeTmux claudeSessions claudeSessionsAlias];
 
     # 앱 런처(SUPER+Space)에서도 열리도록 등록(터미널 앱이라 uwsm 이 xdg-terminal-exec 로 kitty 에 띄움; usageui 와 같은 방식).
     # (런처에 보이는 이름은 다른 앱들처럼 영어로 통일)
@@ -225,11 +227,11 @@ in {
       icon = "utilities-terminal";
     };
 
-    xdg.desktopEntries.claude-sessions = {
+    xdg.desktopEntries.llm-sessions = {
       name = "Claude Sessions";
       genericName = "claude tmux sessions";
       comment = "List claude sessions running in tmux, attach from this terminal, or start a new one";
-      exec = "${claudeSessions}/bin/claude-sessions";
+      exec = "${claudeSessions}/bin/llm-sessions";
       terminal = true;
       categories = ["Utility"];
       icon = "utilities-terminal";
@@ -237,7 +239,7 @@ in {
 
     # 훅이 놓친 대화·사용량을 따라잡는 안전망(오프셋 기반, 여러 번 돌아도 안전). 서버에 못 붙으면 다음 주기에 재시도.
     systemd.user.services.claude-ctx-ingest = {
-      Unit.Description = "claude-ctx 백필(최근 2일)";
+      Unit.Description = "llm-ctx 백필(최근 2일)";
       Service = {
         Type = "oneshot";
         ExecStart = "${claudeCtx}/bin/donghans ctx ingest --days 2";
@@ -247,7 +249,7 @@ in {
       };
     };
     systemd.user.timers.claude-ctx-ingest = {
-      Unit.Description = "claude-ctx 백필 주기";
+      Unit.Description = "llm-ctx 백필 주기";
       Timer = {
         OnBootSec = "2min";
         OnUnitActiveSec = "10min";
@@ -395,7 +397,7 @@ in {
     # 사용량 도구: 상태 표시줄 기록기(한도 감시기는 donghans-limit-watch 스킬).
     # 상태 표시줄 연결은 위 hooksSettings.statusLine 이 --settings 로 주입한다(`claude` 셸 함수로 실행할 때). ~/.claude/settings.json 에 같은 항목이 수동으로 있어도 충돌하지 않는다.
     home.file.".local/bin/claude-usage-statusline" = {
-      source = ../../_tools/claude-usage/claude-usage-statusline;
+      source = ../../_tools/llm-usage/claude-usage-statusline;
       executable = true;
       force = true;
     };
@@ -405,7 +407,7 @@ in {
     # -> sudoers를 NOPASSWD로 여는 대신, 최초 1회 인증 후 셸이 살아있는 동안만 캐시를 유지하는 방식.
     programs.zsh.initContent = ''
       claude() {
-        # 대화형 호출은 전용 tmux 세션 안에서 실행한다(ssh·다른 kitty 에서 claude-sessions 로 이어 붙기). sudo 인증은 세션 안(claude-run)에서 받는다.
+        # 대화형 호출은 전용 tmux 세션 안에서 실행한다(ssh·다른 kitty 에서 llm-sessions 로 이어 붙기). sudo 인증은 세션 안(claude-run)에서 받는다.
         if claude-tmux --wants "$@"; then
           claude-tmux "$@"
           return

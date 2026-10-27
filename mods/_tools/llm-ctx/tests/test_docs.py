@@ -41,7 +41,7 @@ if not pg:
     print("psycopg/postgres 가 없어 2부(DB)를 건너뜀"); finish("docs(순수)")
 try:
     os.environ.update(pg.env())
-    import claude_ctx as cc
+    import llm_ctx as cc
     URL = "https://github.com/test/proj"
     class Mask:
         def text(self, s): return s.replace("hunter2", "[protected]")
@@ -105,7 +105,7 @@ try:
     # CLI(별도 프로세스)
     REPO = os.path.join(TMP, "repo"); os.makedirs(REPO)
     subprocess.run(["git", "init", "-q", REPO]); subprocess.run(["git", "-C", REPO, "remote", "add", "origin", "git@github.com:test/cli.git"])
-    CLI = lambda *a, **kw: subprocess.run([sys.executable, os.path.join(ROOT, "claude_ctx.py"), "doc", *a], capture_output=True, text=True, cwd=kw.pop("cwd", REPO), env=pg.env(), **kw)
+    CLI = lambda *a, **kw: subprocess.run([sys.executable, os.path.join(ROOT, "llm_ctx.py"), "doc", *a], capture_output=True, text=True, cwd=kw.pop("cwd", REPO), env=pg.env(), **kw)
     p = CLI("set", "note", "n1", "--stdin", input="CLI 본문\n")
     check("CLI set: 현재 저장소(ssh URL 정규화)에 만든다", p.returncode == 0 and "만들었다" in p.stdout and cd.get(conn, "https://github.com/test/cli", "note", "n1") is not None, p.stdout + p.stderr)
     p = CLI("show", "note", "n1")

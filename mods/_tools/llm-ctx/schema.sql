@@ -1,4 +1,4 @@
--- claude-ctx 스키마: 여러 머신·프로젝트의 Claude Code 대화/사용량을 한곳에 모은다. 멱등(여러 번 실행해도 안전).
+-- llm-ctx 스키마: 여러 머신·프로젝트의 Claude Code 대화/사용량을 한곳에 모은다. 멱등(여러 번 실행해도 안전).
 -- 원문의 정본은 각 머신의 트랜스크립트(jsonl)이고, 여기는 조회용 사본이다(uuid 로 중복 방지).
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;

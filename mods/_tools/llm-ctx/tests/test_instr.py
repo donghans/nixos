@@ -77,7 +77,7 @@ if not pg:
     print("psycopg/postgres 가 없어 2부(DB)를 건너뜀"); finish("instr(순수)")
 try:
     os.environ.update(pg.env())
-    import claude_ctx as cc
+    import llm_ctx as cc
     URL = "https://github.com/test/proj"
     class Mask:   # 등록된 비밀 값 하나를 가정한 치환기
         def text(self, s): return s.replace("hunter2", "[protected]")
@@ -129,19 +129,19 @@ try:
 
     # 훅 end-to-end: 같은 URL 의 세 번째 체크아웃, 파일 없음 → SessionStart 가 채우고 additionalContext 를 낸다
     m3 = mkrepo("m3"); conn.commit()
-    p = subprocess.run([sys.executable, os.path.join(ROOT, "claude_ctx.py"), "ctx", "hook", "SessionStart"], capture_output=True, text=True,
+    p = subprocess.run([sys.executable, os.path.join(ROOT, "llm_ctx.py"), "ctx", "hook", "SessionStart"], capture_output=True, text=True,
                        input=json.dumps({"session_id": "s-instr-1", "cwd": m3, "hook_event_name": "SessionStart"}), env=pg.env())
     out = json.loads(p.stdout.strip().splitlines()[-1]) if p.stdout.strip() else {}
     check("훅: 지침 파일을 만들고 짧은 알림만 낸다(본문 주입 없음)",
           p.returncode == 0 and open(ci.local_path(m3, "instructions")).read() == "v4-local-A\n"
           and "공유 저장소" in out.get("hookSpecificOutput", {}).get("additionalContext", "") and "v4-local-A" not in p.stdout, p.stdout + p.stderr)
-    p = subprocess.run([sys.executable, os.path.join(ROOT, "claude_ctx.py"), "ctx", "hook", "SessionStart"], capture_output=True, text=True,
+    p = subprocess.run([sys.executable, os.path.join(ROOT, "llm_ctx.py"), "ctx", "hook", "SessionStart"], capture_output=True, text=True,
                        input=json.dumps({"session_id": "s-instr-2", "cwd": m3, "hook_event_name": "SessionStart"}), env=pg.env())
     check("훅: 바뀐 것이 없으면 아무것도 출력하지 않는다", p.returncode == 0 and p.stdout.strip() == "", p.stdout + p.stderr)
-    p = subprocess.run([sys.executable, os.path.join(ROOT, "claude_ctx.py"), "ctx", "hook", "SessionStart"], capture_output=True, text=True,
+    p = subprocess.run([sys.executable, os.path.join(ROOT, "llm_ctx.py"), "ctx", "hook", "SessionStart"], capture_output=True, text=True,
                        input=json.dumps({"session_id": "s-instr-3", "cwd": tempfile.gettempdir()}), env=pg.env())
     check("훅: git 저장소가 아닌 cwd 는 조용히 통과", p.returncode == 0 and p.stdout.strip() == "", p.stdout + p.stderr)
-    p = subprocess.run([sys.executable, os.path.join(ROOT, "claude_ctx.py"), "instr", "list"], capture_output=True, text=True, cwd=m3, env=pg.env())
+    p = subprocess.run([sys.executable, os.path.join(ROOT, "llm_ctx.py"), "instr", "list"], capture_output=True, text=True, cwd=m3, env=pg.env())
     check("CLI instr list", "instructions: rev 4" in p.stdout, p.stdout + p.stderr)
 
     # ------------------------------------------------ 명령 경유(읽기 최신화 · 쓰기 DB 먼저 · 캐시 읽기 전용)
@@ -173,7 +173,7 @@ try:
 
     conn.commit()   # 아래 CLI 는 별도 프로세스(다른 연결) — 이 연결의 열린 트랜잭션이 행 잠금을 쥐고 있으면 기다리다 멈춘다
     # CLI: set → show(절 고르기·생략 안내) → show(접속 실패) → edit(비대화 거부)
-    CLI = lambda *args, **kw: subprocess.run([sys.executable, os.path.join(ROOT, "claude_ctx.py"), "instr", *args], capture_output=True, text=True, cwd=m3, env=kw.pop("env", pg.env()), **kw)
+    CLI = lambda *args, **kw: subprocess.run([sys.executable, os.path.join(ROOT, "llm_ctx.py"), "instr", *args], capture_output=True, text=True, cwd=m3, env=kw.pop("env", pg.env()), **kw)
     DOC2 = "# 프로젝트 지침 제목\n\n## QA 할 때\nqa-안내\n\n## resume 할 때\nresume-안내\n"
     p = CLI("set", "instructions", "--stdin", input=DOC2)
     check("CLI set --stdin", p.returncode == 0 and "rev 7" in p.stdout, p.stdout + p.stderr)
@@ -212,7 +212,7 @@ try:
     conn.commit()
 
     NOGIT = tempfile.mkdtemp(prefix="nogit-", dir=TMP)    # git 저장소가 아닌 cwd
-    CLI2 = lambda *args, **kw: subprocess.run([sys.executable, os.path.join(ROOT, "claude_ctx.py"), "instr", *args], capture_output=True, text=True, cwd=NOGIT, env=kw.pop("env", pg.env()), **kw)
+    CLI2 = lambda *args, **kw: subprocess.run([sys.executable, os.path.join(ROOT, "llm_ctx.py"), "instr", *args], capture_output=True, text=True, cwd=NOGIT, env=kw.pop("env", pg.env()), **kw)
     p = CLI2("show", "--repo", URL, "instructions")
     check("CLI show --repo: git 밖에서도 DB 본문을 보인다(저장소·rev·DB 표시)", p.returncode == 0 and "v-db-only" in p.stdout and f"rev {rev_now}" in p.stdout and "공유 저장소(DB)" in p.stdout, p.stdout + p.stderr)
     p = CLI2("show", "--repo", URL + "-none")

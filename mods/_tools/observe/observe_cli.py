@@ -380,7 +380,7 @@ def cmd_fleet(a):
         if a.what in ("push", "sync"):
             fl.write_state(fl.record(st, now, False, error=str(e)))
         tail = " — 올리지 못한 표본은 다음에 같이 올립니다" if a.what in ("push", "sync") else ""
-        sys.exit(f"공유 저장소 접속 실패: {str(e)[:200]} (서버 beelink-ser7-co 가 켜져 있고 이 기기가 claude-ctx allowedClients 에 있어야 합니다{tail})")
+        sys.exit(f"공유 저장소 접속 실패: {str(e)[:200]} (서버 beelink-ser7-co 가 켜져 있고 이 기기가 llm-ctx allowedClients 에 있어야 합니다{tail})")
     if a.what in ("push", "sync"):
         if a.since:
             since, pending = core.parse_when(a.since), None

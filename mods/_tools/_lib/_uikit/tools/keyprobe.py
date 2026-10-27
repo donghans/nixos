@@ -1,6 +1,6 @@
 import asyncio, os, sys, time, tempfile
 R="/home/donghans/nixos/mods/_tools"
-for p in ("observe","_lib/_uikit","procui","claude-sessions","notif","clipboard","display","../_data/claude-skills/donghans-host-resources/scripts"): sys.path.insert(0, f"{R}/{p}")
+for p in ("observe","_lib/_uikit","procui","llm-sessions","notif","clipboard","display","../_data/claude-skills/donghans-host-resources/scripts"): sys.path.insert(0, f"{R}/{p}")
 which=sys.argv[1]
 def make():
     if which=="usageui":
@@ -10,7 +10,7 @@ def make():
     if which=="procui":
         import procui; return procui.ProcUI(log_path="/tmp/x.jsonl")
     if which=="sessions":
-        import claude_sessions as cs; return cs.SessionsUI()
+        import llm_sessions as cs; return cs.SessionsUI()
     if which=="notif":
         import notif_ui; return notif_ui.NotifUI()
     if which=="clip":
