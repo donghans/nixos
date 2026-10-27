@@ -126,7 +126,7 @@ Netdata(1초/10초 시스템 지표, 7일)는 그대로 쓰고, observectl 는 N
 
 ## `procui` — 프로세스 관리 TUI (2026-10-26)
 
-`procui`(앱 런처 "Process Manager")는 프로세스를 **그룹으로 묶어 보고, 필터하고, 골라서 안전하게 종료**하며 세부 사용량을 보는 Textual 앱이다. usageui 는 읽기 전용 모니터, procui 는 **조치 도구**이고 둘을 섞지 않는다(되돌릴 수 없는 동작을 한곳에 모으려고). 계획·배경은 `_plan/procui.md`, 본체는 `mods/_data/procui/`(`procscan.py` 스냅샷 · `procgroups.py` 뷰·규칙·필터 · `procactions.py` 보호·계획·pidfd 종료·기록 · `procui.py` 화면). 설치는 이 파일 위쪽 `observe.nix` 의 같은 디렉터리(observe_apps·hostmetrics·uikit 를 import).
+`procui`(앱 런처 "Process Manager")는 프로세스를 **그룹으로 묶어 보고, 필터하고, 골라서 안전하게 종료**하며 세부 사용량을 보는 Textual 앱이다. usageui 는 읽기 전용 모니터, procui 는 **조치 도구**이고 둘을 섞지 않는다(되돌릴 수 없는 동작을 한곳에 모으려고). 계획·배경은 `donghans doc show plan procui`, 본체는 `mods/_data/procui/`(`procscan.py` 스냅샷 · `procgroups.py` 뷰·규칙·필터 · `procactions.py` 보호·계획·pidfd 종료·기록 · `procui.py` 화면). 설치는 이 파일 위쪽 `observe.nix` 의 같은 디렉터리(observe_apps·hostmetrics·uikit 를 import).
 
 - **뷰(`g` 로 순환)**: 소유(커널 / 컨테이너·VM / 시스템 / 내 환경 / 내 작업) · 앱(observe 앱 규칙) · 서비스(cgroup 유닛) · 세션(LLM 세션과 그 자식 트리). 모든 프로세스는 뷰마다 정확히 한 그룹에 들어간다. 「내 작업」 = 내 UID 인 프로세스에서 데스크톱 환경(컴포지터·패널·오디오·세션 버스 등)을 뺀 것.
 - **확장(`~/.config/procui/groups.toml`)**: `[[view]]` 로 새 뷰를 만들거나 같은 이름의 내장 뷰 **앞**에 규칙(`[[view.rule]]`)을 끼운다. 조건: `kernel·uid·app·comm·exe·cgroup·session·ancestor_app·cpu_gt·rss_gt`(이름은 글롭, 명령 인자는 쓰지 않음), 그룹 이름 치환 `@app @comm @unit @session`. `[protect]` 의 `app`/`comm` 은 보호 이름을 더한다. 잘못된 항목은 버리고 상태줄에 경고한다.

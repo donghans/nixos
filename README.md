@@ -91,10 +91,9 @@ nixos/
 │   ├── <hostname>.nix  # 호스트 전용 NixOS + Home Manager 설정
 │   └── _deploy/        # 호스트별 부속 자료 (pub 키, hardware.nix, secrets). 여기 있다고 rnixup 대상은 아님 — 판별은 호스트 toml 의 [deploy] 섹션 (CLAUDE.md 참고)
 ├── .locks/             # Flake lock 파일 (Rolling/Stable 전략)
-├── _docs/              # 문서 인프라
-│   ├── content/        # Markdown 소스 (Diátaxis 구조)
-│   └── site/           # Starlight 사이트 생성기
-└── _plan/              # 개발 계획 문서 (빌드 비포함)
+└── _docs/              # 문서 인프라
+    ├── content/        # Markdown 소스 (Diátaxis 구조)
+    └── site/           # Starlight 사이트 생성기
 ```
 
 </details>

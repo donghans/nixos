@@ -137,7 +137,7 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 - **시험은 합성 데이터로만**: 예전에는 에이전트 세션·비-TTY 에서 실행을 거부했다(원문 대화가 화면에 나오므로) — 지금은 위 제한 모드다. 화면 시험(`test_ctxui` Pilot)은 임시 Postgres 에 합성 대화를 넣어 클래스를 직접 띄운다. 실제 DB 로는 `donghans ctx sql` 집계(원문 제외)만 확인했다.
 
 ### 자동 메시지 분류 (2026-10-26) — 사람 발언과 `<태그>` 자동 메시지 구분
-Claude Code 는 사람이 치지 않은 것(작업 알림 `<task-notification>`, 명령 출력 `<local-command-stdout>` 등)과 스킬 호출(`<command-name>`)을 `user`·`prompt` 로 저장한다(실측: 사용자 프롬프트의 약 1/3). 이전에는 이것이 세션 제목(42%가 태그 조각)·통계 프롬프트 수·「사용자 발언」 검색/대조를 오염시켰다. 설계·결정·검증 이력: `_plan/ctx-message-kinds.md`.
+Claude Code 는 사람이 치지 않은 것(작업 알림 `<task-notification>`, 명령 출력 `<local-command-stdout>` 등)과 스킬 호출(`<command-name>`)을 `user`·`prompt` 로 저장한다(실측: 사용자 프롬프트의 약 1/3). 이전에는 이것이 세션 제목(42%가 태그 조각)·통계 프롬프트 수·「사용자 발언」 검색/대조를 오염시켰다. 설계·결정·검증 이력: `donghans doc show plan ctx-message-kinds`.
 - **정의**(`ctxdata.py` 의 `AUTO_TAGS`·`classify`): 행 단위, **메시지의 첫 태그 기준**. 자동(작업 알림·명령 출력·시스템 알림·meta)은 통계 프롬프트 수·`role=user` 검색(ctxui F2·대조·`donghans ctx search --role user`)에서 빠지고, 스킬 호출·셸 입력·붙여넣기는 사람이 한 것이라 포함. 모르는 태그는 사람으로 두되 대시보드 요약에 「알 수 없는 태그 N건」으로 보인다. SQL(`~`)과 파이썬(`re`)이 **같은 패턴 문자열**을 쓴다(시험이 개행·탭 케이스와 실제 DB 전체 건수를 대조).
 - **표시**: 대화 화면은 자동 메시지를 흐린 배지+한 줄 요약으로 접고(Enter 로 원문), `i` 로 숨김/표시. 스킬 호출은 `/이름 인자`. 세션 제목은 첫 **순수 사람** 프롬프트(없으면 첫 스킬 호출), 치환 후 자름. `donghans ctx recent/session/search` 도 같은 정의(자동은 `[작업 알림]` 같은 표시·한 줄 요약, `session --full` 은 원문).
 - **바꾸지 않은 곳(의도)**: `handoff draft`·`donghans-resume` 의 사용자 메시지 수집은 이미 `<` 로 시작하는 모든 메시지를 빼서 더 엄격하다. 비밀 후보 탐지(`_scan_rows`)는 종류를 가리지 않는 것이 맞다. `hostmetrics.ctx_last_chat`(사용자 입력 시각)은 같은 자동 태그 집합으로 거르도록 고쳤다(패턴 복제, 정본은 `ctxdata.py`).
@@ -147,7 +147,7 @@ Claude Code 는 사람이 치지 않은 것(작업 알림 `<task-notification>`,
 OTel `claude_code.api_request` 이벤트에는 요청마다 `user.account_uuid`·`user.email` 이 항상 있다(실측: 15,341건 중 누락 0). 수집(`ingest_otel`)이 이를 `usage_events.account_id`·`account_email` 에 남기고, 대시보드 「분류별」에서 `g` 로 「계정」을 고르면 이메일별 비용이 나온다(세션 도중 계정이 바뀌어도 요청 단위라 맞다). **세션→계정 추정(`limit_samples` 최빈 계정)은 쓰지 않는다** — 세션 중 계정이 바뀐 사례가 있어 틀린 합계를 만든다.
 - **과거 행 백필**: `donghans ctx backfill-accounts`(기본 dry-run — 원본 건수·DB 에서 비어 있던 일치 행 수만 보임) → `--apply` 로 `usage_events` 에서 `account_id IS NULL` 인 행만 채운다(이미 계정이 있는 행·원본에 없는 요청은 그대로, 재실행해도 멱등). 원본(`~/.local/share/claude-otel/events.jsonl`)은 **그 호스트의 것**이라 다른 호스트(노트북 등)의 과거분은 그 호스트에서 따로 돌려야 하고, 못 채운 행은 「(계정 불명)」으로 따로 보이며 분류별 제목에 그 비율이 적힌다.
 - 한도 그래프는 계정 단위라 저장소·모델 필터가 걸리지 않는다. 비용은 Claude Code 가 보고한 `cost_usd` 의 합이며 구독에서 실제 청구액과 같은지는 확인하지 못했다(화면 도움말 「비용」).
-- 설계·검증 이력과 남은 제안(저장소별 표 비용 열 등): `_plan/ctxui-cost-dashboard.md`.
+- 설계·검증 이력과 남은 제안(저장소별 표 비용 열 등): `donghans doc show plan ctxui-cost-dashboard`.
 
 ### 쓰는 법
 ```bash

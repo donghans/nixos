@@ -5,7 +5,7 @@ description: 프로세스를 종료·정리할 때 pkill·killall·kill 대신 �
 
 # donghans-procctl — 안전한 프로세스 정리 (LLM·사람용 비대화형 CLI)
 
-`procctl` 은 사람용 TUI `procui` 와 **같은 코어**(스냅샷·그룹·보호·pidfd 종료·기록)를 명령줄로 연다. **프로세스를 종료할 때 `pkill`·`killall`·`kill`(이름·패턴·PID 직접 지정)을 쓰지 않는다.** 설계·배경: `_plan/procctl.md`, 구현 설명: `_docs/content/explanation/observe.md` 의 procctl 절.
+`procctl` 은 사람용 TUI `procui` 와 **같은 코어**(스냅샷·그룹·보호·pidfd 종료·기록)를 명령줄로 연다. **프로세스를 종료할 때 `pkill`·`killall`·`kill`(이름·패턴·PID 직접 지정)을 쓰지 않는다.** 설계·배경: `donghans doc show plan procctl`, 구현 설명: `_docs/content/explanation/observe.md` 의 procctl 절.
 
 ## 순서 (반드시 plan → 확인 → apply)
 ```
