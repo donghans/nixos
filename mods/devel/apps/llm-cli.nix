@@ -27,7 +27,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   procctlInstructions = lib.optionalString config.mods.sys.services.observe.enable (builtins.readFile ./llm-cli/procctl.md);
 
   # incus VM `qa-desktop`(화면 확인용 QA 데스크톱)이 있는 호스트에서만 지침에 넣는다(호스트 toml 의 qa-desktop = true; 프리셋 기본 꺼짐).
-  # 여러 프로젝트의 QA 세션이 VM 하나를 공유한다. 절차 본문: donghans-qa-desktop 스킬, 설명·검증 기록: mods/_tools/qa-desktop/README.md.
+  # 여러 프로젝트의 QA 세션이 VM 하나를 공유한다. 절차 본문: donghans-qa-desktop 스킬, 설명·검증 기록: mods/_tools/services/qa-desktop/README.md.
   qaDesktopInstructions = lib.optionalString config.mods.sys.services.qa-desktop.enable (builtins.readFile ./llm-cli/qa-desktop.md);
   # 훅(llm-ctx)은 항상 --settings 로 주입한다 — ~/.claude/settings.json 은 Claude 가 직접 쓰는 가변 파일이라 nix 로 소유하지 않는다.
   # --settings 를 두 번 주면 어떻게 합쳐지는지 확인하지 않아서(미확인) 모션 감소 키는 같은 파일에 넣어 한 번만 준다.
@@ -102,10 +102,10 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # (observe 의 usageui 와 같은 방식). 훅·타이머·사용자가 부르는 `donghans` 는 모두 이 래퍼다.
   ctxSrc = pkgs.runCommand "llm-ctx-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_docs.py" "ctxdata.py" "ctxchart.py" "ctxui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_docs.py" "ctxdata.py" "ctxchart.py" "ctxui.py"]}
     cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
     mkdir -p $out/agents
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm-ctx/agents + "/${f}"} $out/agents/${f}") ["__init__.py" "claude.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx/agents + "/${f}"} $out/agents/${f}") ["__init__.py" "claude.py"]}
   '';
   claudeCtx = pkgs.writeShellScriptBin "donghans" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg])}/bin/python3 ${ctxSrc}/llm_ctx.py "$@"'';
   # ctx 관리 TUI(Textual): 저장소별 용량·검색·발언 대조·비밀 등록표·후보 탐지. 사람이 터미널에서 쓰는 도구(`ctxui`).
@@ -114,10 +114,10 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # (목적: ssh 와 kitty 에서 같은 claude 세션을 이어 쓰기) claude 를 전용 tmux 서버(`tmux -L claude`, 일반 tmux 와 분리) 안에서 돌리고,
   # `llm-sessions`(목록 UI)로 어디서든 붙는다. 한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다(tmux 기본 동작).
   # 대화형 `claude` 셸 함수만 이 경로를 타고(아래 initContent), `claude -p`·서브커맨드·스크립트가 부르는 claude 는 그대로다. 끄기: CLAUDE_TMUX=0 claude.
-  # 설계·시험 기록: mods/_tools/llm-sessions/README.md
+  # 설계·시험 기록: mods/_tools/llm/llm-sessions/README.md
   sessionsSrc = pkgs.runCommand "llm-sessions-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm-sessions + "/${f}"} $out/${f}") ["llm_sessions.py" "tmuxsess.py" "claude-tmux" "claude-tmux.conf"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-sessions + "/${f}"} $out/${f}") ["llm_sessions.py" "tmuxsess.py" "claude-tmux" "claude-tmux.conf"]}
     chmod +x $out/claude-tmux
     cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
   '';
@@ -156,7 +156,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
       # 상태 표시줄(5시간·주간 한도 % 표시 + limits.jsonl 기록)도 훅과 같은 --settings 로 주입해, 이 모듈을 쓰는 모든 호스트에 적용한다(스크립트는 스토어 경로).
       statusLine = {
         type = "command";
-        command = "${../../_tools/llm-usage/claude-usage-statusline}";
+        command = "${../../_tools/llm/llm-usage/claude-usage-statusline}";
       };
       hooks = lib.genAttrs ["UserPromptSubmit" "Stop" "SubagentStop" "SessionStart" "SessionEnd" "PreCompact"] ctxHook;
     }
@@ -312,7 +312,7 @@ in {
     # 사용량 도구: 상태 표시줄 기록기(한도 감시기는 donghans-limit-watch 스킬).
     # 상태 표시줄 연결은 위 hooksSettings.statusLine 이 --settings 로 주입한다(`claude` 셸 함수로 실행할 때). ~/.claude/settings.json 에 같은 항목이 수동으로 있어도 충돌하지 않는다.
     home.file.".local/bin/claude-usage-statusline" = {
-      source = ../../_tools/llm-usage/claude-usage-statusline;
+      source = ../../_tools/llm/llm-usage/claude-usage-statusline;
       executable = true;
       force = true;
     };

@@ -66,7 +66,7 @@ in {
       #  (initrd 에서 이미 바인딩), `boot.blacklistedKernelModules`(= modprobe blacklist)도 **효과가 없었다**: intel_lpss 가 `softdep pre: platform:idma64` 를 가져서
       #  initrd 안에서(부팅 2초) 블랙리스트가 있는데도 로드됨(실제로 확인). 그래서 커널이 직접 로드를 거부하는 module_blacklist 를 쓴다(누가 요청하든, initrd 포함).
       #  기대 상태(런타임 실험으로 확인): idma64.0 장치만 있고 드라이버 없음 → i2c_designware 가 IRQ 27 단독(PIO), 터치패드 정상.
-      #  재부팅 뒤 `lsmod | grep idma64` 가 비고 IRQ 27 이 i2c_designware.0 단독이면 성공 → 위 udev unbind 규칙은 지워도 됨. mods/_tools/posture/README.md 참고.)
+      #  재부팅 뒤 `lsmod | grep idma64` 가 비고 IRQ 27 이 i2c_designware.0 단독이면 성공 → 위 udev unbind 규칙은 지워도 됨. mods/_tools/desktop/posture/README.md 참고.)
       kernelParams = lib.mkForce kernelBase;
 
       blacklistedKernelModules = [
@@ -249,7 +249,7 @@ in {
     };
 
     # Wi-Fi 절전은 **배터리에서만** 켠다(2026-10-20; 예전 목적은 "절전 방지"=연결 끊김 방지였다). 공통 노트북 설정(core.power.nix)은 AC/배터리 모두 끄고
-    # NetworkManager 도 `wifi.powersave=false` 로 강제하는데, 덮개를 닫은 쉬는 상태에서 켜면 배터리 약 −0.6 W(+패키지가 pc10 까지 진입)였다(ABAB 시험, mods/_tools/posture/README.md).
+    # NetworkManager 도 `wifi.powersave=false` 로 강제하는데, 덮개를 닫은 쉬는 상태에서 켜면 배터리 약 −0.6 W(+패키지가 pc10 까지 진입)였다(ABAB 시험, mods/_tools/desktop/posture/README.md).
     # NM 이 TLP 값을 덮어쓰지 못하도록 NM 쪽 강제를 풀고(null) TLP 가 AC=off, 배터리=on 으로 정한다. 대가: 지연이 늘 수 있음(핫스팟에서 가장 조심).
     # 되돌리려면 이 블록을 `networking.networkmanager.wifi.powersave = false;` 한 줄로 바꾸면 된다(TLP 배터리 값은 공통 설정의 off 로 돌아감).
     services.tlp.settings.WIFI_PWR_ON_BAT = lib.mkForce "on";

@@ -2,5 +2,5 @@
 .env
 __pycache__/
 
-# tailpass .deb — 빌드 산출물(수십MB), mods/_data/tailpass/에 로컬로만 cp해서 씀
-mods/_data/tailpass/*.deb
+# tailpass .deb — 빌드 산출물(수십MB), mods/_tools/services/tailpass/에 로컬로만 cp해서 씀
+mods/_tools/services/tailpass/*.deb

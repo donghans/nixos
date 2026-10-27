@@ -5,7 +5,7 @@
 #                                                          └ /run/posture/telemetry.json (힌지 각도: 자주 바뀌지만 소비자를 깨우지 않음)
 #
 # 설계 원칙(유지보수/버그 최소화):
-#  - 센서는 한 프로세스만 읽고 값을 한 번만 해석한다(경계값/디바운스는 mods/_tools/posture/posture_daemon.py 한 곳).
+#  - 센서는 한 프로세스만 읽고 값을 한 번만 해석한다(경계값/디바운스는 mods/_tools/desktop/posture/posture_daemon.py 한 곳).
 #  - 상태는 하나의 스냅샷(JSON, 원자적 교체)이고 **변할 때만** 갱신한다. 가져가기는 `posture get mode|lid|rotation|angle`, 알림은 state.json 변경을 보는 경로 유닛.
 #  - 소비자는 "수준 기반 + 멱등" 조정기: 이벤트를 놓쳐도 아무 때나 실행하면 현재 상태에 맞춰짐(로그인/reload 때도 같은 코드).
 #  - 안전한 기본값(서비스 정지/파일 없음 → laptop, 덮개 열림)은 `posture` CLI 한 곳에서 처리 → 키보드가 꺼지거나 화면이 꺼진 채 남지 않음.
@@ -26,11 +26,11 @@
   }: let
     isLaptop = config.workspace.type == "laptop";
     postureCli = pkgs.writeShellScriptBin "posture" ''
-      exec ${pkgs.python3}/bin/python3 -I ${../../_tools/posture/posture} "$@"
+      exec ${pkgs.python3}/bin/python3 -I ${../../_tools/desktop/posture/posture} "$@"
     '';
     # 허브와 소비자들이 제대로 이어져 있는지 점검(서비스 환경의 Hyprland 변수, 데몬/센서/덮개, 소비자 실패, 화면 상태): `posture-doctor`
     doctorCli = pkgs.writeShellScriptBin "posture-doctor" ''
-      exec ${pkgs.python3}/bin/python3 -I ${../../_tools/posture/doctor.py} "$@"
+      exec ${pkgs.python3}/bin/python3 -I ${../../_tools/desktop/posture/doctor.py} "$@"
     '';
 
     # 소비자들을 차례로 실행. 하나가 실패해도 나머지는 실행하고 기록만 남김(소비자끼리 서로 영향 없음)
@@ -58,7 +58,7 @@
         description = "Posture hub: hinge angle to laptop/tent/tablet";
         wantedBy = ["multi-user.target"];
         serviceConfig = {
-          ExecStart = "${pkgs.python3}/bin/python3 -I ${../../_tools/posture/posture_daemon.py}";
+          ExecStart = "${pkgs.python3}/bin/python3 -I ${../../_tools/desktop/posture/posture_daemon.py}";
           Restart = "on-failure";
           RestartSec = 5;
           RuntimeDirectory = "posture";

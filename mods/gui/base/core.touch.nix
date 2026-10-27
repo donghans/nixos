@@ -1,5 +1,5 @@
 # 터치스크린 제스처(hyprgrass 플러그인) — Hyprland 자체의 터치 제스처는 워크스페이스 스와이프 하나뿐이고 `Super`+드래그(bindm)는 터치에 적용되지 않아서,
-# 터치로 창을 옮기고 크기를 조절하고 워크스페이스를 넘기려면 플러그인이 필요하다. (조사/시험 기록: mods/_tools/posture/README.md)
+# 터치로 창을 옮기고 크기를 조절하고 워크스페이스를 넘기려면 플러그인이 필요하다. (조사/시험 기록: mods/_tools/desktop/posture/README.md)
 #
 # 버전 선택(2026-10-19, 중첩 Hyprland 로 시험): Hyprland 는 stable(0.55.2)을 유지하고 hyprgrass 는 **Lua 지원 커밋 d094a3e6**(업스트림 hyprpm 이 0.55.1/0.55.4 에 고정)을 쓴다.
 #  - 0.55.2 에 고정된 3236fbb1 은 Hyprlang 시절 코드(getConfigValue 16곳)라 Lua 설정에서 SEGV → 쓰면 안 됨(바로 다음 날 커밋 d094a3e6 부터 Lua 방식).
@@ -16,7 +16,7 @@ mkPartOf "mods.gui" ({
   ...
 }: let
   convertible = config.workspace.convertible; # 2-in-1 호스트만(host.toml `convertible = true`)
-  # 켬(2026-10-19, 사용자 승인, 실제 터치로 확인됨: 결과는 mods/_tools/posture/README.md 의 "터치 제스처 실기 시험 결과")
+  # 켬(2026-10-19, 사용자 승인, 실제 터치로 확인됨: 결과는 mods/_tools/desktop/posture/README.md 의 "터치 제스처 실기 시험 결과")
   # (중첩 Hyprland 는 바깥 창의 터치를 받지 못해 터치 시험이 불가능: aquamarine 의 Wayland 백엔드는 키보드/포인터만 구현).
   # 터치스크린이 꺼져 있으면(노트북 모드의 마지막 수동 상태) 제스처도 안 들어온다 — 텐트/태블릿에서는 강제로 켜지고, 노트북 모드에서는 입력 장치 메뉴로 켠다.
   # **로그인 때마다 Hyprland 가 죽으면**(이 플러그인이 원인일 때) tty 에서 이 줄을 false 로 되돌리고 `nixup home`:

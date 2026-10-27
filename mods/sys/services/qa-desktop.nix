@@ -8,7 +8,7 @@
 #  - incus-win11 과의 차이: win11 은 프로필·설치 ISO 만 선언하고 인스턴스는 사람이 만든다. 이 mod 는 서버의 incus-*-lxc.nix 처럼 「없으면 만든다」까지 하되,
 #    OS 재빌드 없이 `nixup home` 만으로 배포되도록 사용자 서비스로 둔다(사용자는 incus-admin 그룹).
 #  - 선언은 아래 `decl` 한 곳. 새 프로젝트의 창 배치 규칙은 `projects` 에 「이름 = 가상 데스크톱 번호」를 추가하고 `nixup home` 뒤 `qa-desktop-ctl provision`.
-#  - 설명·검증 기록·되돌리는 방법: mods/_tools/qa-desktop/README.md  ·  도구: mods/_tools/qa-desktop/ · mods/_data/claude-skills/donghans-qa-desktop/scripts/
+#  - 설명·검증 기록·되돌리는 방법: mods/_tools/services/qa-desktop/README.md  ·  도구: mods/_tools/services/qa-desktop/ · mods/_data/claude-skills/donghans-qa-desktop/scripts/
 {mkMod, ...}:
 mkMod __curPos "QA 데스크톱 VM(incus) 선언·생성·사용 지침" ({
   config,
@@ -33,14 +33,14 @@ mkMod __curPos "QA 데스크톱 VM(incus) 선언·생성·사용 지침" ({
   };
   configJson = pkgs.writeText "qa-desktop.json" (builtins.toJSON (decl
     // {
-      provision = "${../../_tools/qa-desktop/provision.sh}";
+      provision = "${../../_tools/services/qa-desktop/provision.sh}";
       tools_dir = "${../../_data/claude-skills/donghans-qa-desktop/scripts}";
     }));
   ctl = pkgs.writeShellScriptBin "qa-desktop-ctl" ''
     export QA_DESKTOP_CONFIG=${configJson}
     # incus 는 데몬과 버전이 맞는 시스템 것을 쓴다(virtualisation.incus 가 설치)
     export PATH=/run/current-system/sw/bin:${lib.makeBinPath [pkgs.openssh pkgs.coreutils pkgs.gnugrep]}:$PATH
-    exec ${pkgs.python3}/bin/python3 ${../../_tools/qa-desktop/qa_desktop_ctl.py} "$@"
+    exec ${pkgs.python3}/bin/python3 ${../../_tools/services/qa-desktop/qa_desktop_ctl.py} "$@"
   '';
 in {
   os.assertions = [

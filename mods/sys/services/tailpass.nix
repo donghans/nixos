@@ -1,12 +1,12 @@
 /*
 Tailpass(Headscale 전용 팀 비밀 관리자, /home/donghans/tailpass) daemon/authagent/App.
 
-flake input이 아니라 mods/_data/tailpass/에 vendoring된 사본을 쓴다 — nixup은 nix를
+flake input이 아니라 mods/_tools/services/tailpass/에 vendoring된 사본을 쓴다 — nixup은 nix를
 --impure 없이 path:$BUILD_DIR로 호출하는데, tailpass 저장소를 flake input으로 끌어오면
 (a) 순정 절대경로 참조는 pure eval에서 거부되고 (b) git+file:로 끌어와도 target/(39GB)
 때문에 별도 처리가 필요해서, 코드+`.deb`를 그냥 로컬로 복사해 mods/ 트리 안에 두는 쪽을
 택했다(mods/_data 컨벤션과 동일). tailpass 쪽 deploy/nix/*.nix가 바뀌면
-mods/_data/tailpass/를 수동으로 다시 복사해야 한다 — .deb는 .gitignore 처리됨.
+mods/_tools/services/tailpass/를 수동으로 다시 복사해야 한다 — .deb는 .gitignore 처리됨.
 */
 {
   mkMod,
@@ -15,8 +15,8 @@ mods/_data/tailpass/를 수동으로 다시 복사해야 한다 — .deb는 .git
   pkgs,
   ...
 }: let
-  tailpassApp = pkgs.callPackage ../../_data/tailpass/package.nix {
-    debSrc = ../../_data/tailpass/tailpass.deb;
+  tailpassApp = pkgs.callPackage ../../_tools/services/tailpass/package.nix {
+    debSrc = ../../_tools/services/tailpass/tailpass.deb;
   };
 
   # mods/는 NixOS·Home Manager 양쪽 트리에 공용으로 imports되므로(recursiveImportDir),
@@ -57,5 +57,5 @@ mods/_data/tailpass/를 수동으로 다시 복사해야 한다 — .deb는 .git
 in {
   imports =
     baseMod.imports
-    ++ lib.optional forOS (import ../../_data/tailpass/modules {tailpassPackage = tailpassApp;});
+    ++ lib.optional forOS (import ../../_tools/services/tailpass/modules {tailpassPackage = tailpassApp;});
 }

@@ -25,7 +25,7 @@
 - 미확인(남은 것): 어댑터를 다시 꽂을 때(AC 로 돌아가 1초 간격이 되는 쪽)의 동작, 로컬 웹 화면이 nixpkgs 빌드에서 어떻게 나오는지.
 
 ### 전력 / 배터리 / CPU 를 그래프로 — `power-report`
-`mods/sys/services/netdata.nix` 가 설치하는 명령(스크립트 `mods/_tools/netdata/power_report.py`, matplotlib). Netdata API 의 기록을 읽어 **같은 시간축** 그래프(PNG)와 요약 표를 만든다.
+`mods/sys/services/netdata.nix` 가 설치하는 명령(스크립트 `mods/_tools/observe/netdata/power_report.py`, matplotlib). Netdata API 의 기록을 읽어 **같은 시간축** 그래프(PNG)와 요약 표를 만든다.
 ```
 power-report                    # 최근 6시간, ~/Pictures/power-report/<시각>.png 로 저장
 power-report --hours 1

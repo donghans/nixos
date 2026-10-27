@@ -95,11 +95,11 @@
       lockedMsg = "텐트/태블릿 모드에서는 켜짐으로 고정돼 있습니다 (힌지를 열면 직접 조절 가능)";
     };
 
-    # 외부 키보드 판정/감시 CLI (mods/_tools/extkbd/extkbd.py). 도구 경로를 고정해 서비스 PATH 에 기대지 않는다.
+    # 외부 키보드 판정/감시 CLI (mods/_tools/desktop/extkbd/extkbd.py). 도구 경로를 고정해 서비스 PATH 에 기대지 않는다.
     # (감시가 다시 실행할 정책 경로는 정책이 이 CLI 를 참조하므로 순환을 피하려 서비스 쪽 환경 변수 EXTKBD_POLICY 로 준다)
     extkbdCli = pkgs.writeShellScriptBin "extkbd" ''
       export EXTKBD_UDEVADM=${pkgs.systemd}/bin/udevadm EXTKBD_BUSCTL=${pkgs.systemd}/bin/busctl EXTKBD_GDBUS=${lib.getExe' pkgs.glib "gdbus"}
-      exec ${pkgs.python3}/bin/python3 -I ${../../_tools/extkbd/extkbd.py} "$@"
+      exec ${pkgs.python3}/bin/python3 -I ${../../_tools/desktop/extkbd/extkbd.py} "$@"
     '';
 
     # 내장 키보드 이름(호스트가 지정). 비어 있으면 정책이 키보드를 건드리지 않는다(알려지지 않은 기기에서 키보드를 잘못 끄지 않도록).
@@ -112,7 +112,7 @@
     #                   노트북 모드로 돌아오면 원래 상태로 복원됨.
     #   안전장치: 사용 모드 서비스가 멈췄거나 파일이 없으면 posture CLI 가 laptop 을 돌려줌 → 키보드가 꺼진 채 남지 않음. 복구는 힌지를 190° 미만으로 여는 것.
     #   **외부 키보드(USB/2.4G/블루투스)가 연결돼 있으면 노트북 모드에서도 내장 키보드를 끔**(`extkbd present`; 키보드를 내장 키보드 위에 얹어 쓸 때의 오입력 방지).
-    #   판정이 불확실하거나 `extkbd` 가 실패하면 "없음"(내장 키보드 켬)으로 본다. 설계/근거: mods/_tools/extkbd/README.md
+    #   판정이 불확실하거나 `extkbd` 가 실패하면 "없음"(내장 키보드 켬)으로 본다. 설계/근거: mods/_tools/desktop/extkbd/README.md
     #   `--print` 는 판정만 출력("모드 각도 키보드 터치패드 터치스크린"), 장치는 건드리지 않음. 3번째 필드(키보드)가 곧 "내장 키보드가 켜져야 하는가"(외부 키보드 반영 후).
     #   장치를 건드리는 실행은 서로 겹치지 않게 잠금(flock)으로 직렬화한다: 힌지/로그인/reload(posture-apply)와 외부 키보드 감시(extkbd-watch)가 동시에 돌아도 낡은 판정이 나중에 덮어쓰지 않도록.
     # (장치 켜기/끄기(hl.device enabled)는 런타임 설정이라 hyprctl reload 때 초기화되므로 로그인/reload 때도 다시 적용 — posture-apply)
@@ -145,7 +145,7 @@
       }
       # 터치스크린 USB 런타임 절전: 켜기 전에 깨우고(on), 끈 뒤에 재운다(auto). 끈 동안에는 터치로 깨울 일이 없어서 안전하다
       # (켜진 채 재우면 터치가 안 먹을 수 있어 그렇게는 하지 않음). **덮개를 닫았을 때도 재운다**: 닫으면 힌지가 359° 로 읽혀 tablet(터치 강제 켜짐)으로
-      # 분류되지만 화면이 꺼져 터치할 수 없다. 덮개 스위치는 360° 로 접어도 open 그대로라 닫힘(closed)이면 실제로 닫은 것이다(mods/_tools/posture/README.md).
+      # 분류되지만 화면이 꺼져 터치할 수 없다. 덮개 스위치는 360° 로 접어도 open 그대로라 닫힘(closed)이면 실제로 닫은 것이다(mods/_tools/desktop/posture/README.md).
       # 쓸 수 없으면(권한/장치 없음) 조용히 넘어간다.
       usb_touch_power() {
         ${lib.optionalString (tsUsb != null) ''

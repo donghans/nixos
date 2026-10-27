@@ -1,0 +1,634 @@
+#!/usr/bin/env python3
+"""ctxui 시험(Textual Pilot + 임시 Postgres): 5개 탭 · 검색/필터 · 대화 보기 · 치환 켬/끔 · 대조 · 비밀 추가/끄기/삭제/값 보기 · 후보 승인/무시.
+필요: psycopg + textual 이 있는 python 과 postgres 17 바이너리. 없으면 건너뛴다."""
+import asyncio, json, os, sys, time
+HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "_testkit"))
+from harness import checker
+check, finish = checker()
+try:
+    import psycopg, textual  # noqa: F401
+except ImportError:
+    print("psycopg/textual 이 없어 건너뜀"); sys.exit(0)
+import pgscratch
+pg = pgscratch.start()
+if not pg:
+    print("postgres 바이너리를 못 찾아 건너뜀"); sys.exit(0)
+os.environ.update(pg.env())
+import ctx_secrets as cs, ctxdata as cd, llm_ctx as cc, ctxui
+
+A, B = "https://github.com/x/alpha", "https://github.com/x/beta"
+PW, KEY = "hunter2-pass", "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUV"
+KEY2 = "sk-ant-api03-ZYXWVUTSRQPONMLKJIHGFEDCBA9876"          # 제한 모드 시험용: 등록하지 않은 새 키(후보로만 잡히는 것)
+
+
+def seed():
+    conn = cc.connect()
+    def one(sid, repo, host, msgs):
+        conn.execute("INSERT INTO sessions (session_id, host, hosts, repo_url, first_ts, last_ts) VALUES (%s,%s,%s,%s,%s,%s)", (sid, host, [host], repo, msgs[0][2], msgs[-1][2]))
+        for i, (role, kind, ts, text) in enumerate(msgs):
+            conn.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (f"{sid[:4]}-{i:04d}", sid, host, ts, role, kind, text, json.dumps({"i": i})))
+    one("aaaa0001", A, "h1", [("user", "prompt", "2026-10-01T01:00:00Z", "alpha 배포는 금요일에 한다고 했다"), ("assistant", "response", "2026-10-01T01:00:10Z", "알겠습니다 금요일 배포"),
+                              ("user", "prompt", "2026-10-02T01:00:00Z", f"비번은 {PW} 로 해줘 그리고 키는 {KEY}"), ("assistant", "response", "2026-10-02T01:00:10Z", f"{PW} 로 설정")])
+    one("bbbb0001", B, "h2", [("user", "prompt", "2026-10-03T01:00:00Z", "beta 는 월요일에 배포한다"), ("assistant", "response", "2026-10-03T01:00:10Z", "배포 일정 확인"),
+                              ("user", "prompt", "2026-10-04T01:00:00Z", "배포 금요일로 바꾸자")])
+    one("cccc0001", None, "h1", [("user", "prompt", "2026-10-05T01:00:00Z", "저장소 없는 세션의 배포 이야기")])
+    for rid, sid, host, ts, model, cost in [("u1", "aaaa0001", "h1", "2026-10-01T01:00:00Z", "claude-sonnet-5-5", 1.0), ("u2", "aaaa0001", "h1", "2026-10-02T01:00:00Z", "claude-haiku-5-5", 0.5),
+                                            ("u3", "bbbb0001", "h2", "2026-10-03T01:00:00Z", "claude-sonnet-5-5", 2.0)]:
+        conn.execute("INSERT INTO usage_events (request_id, host, ts, session_id, model, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens) VALUES (%s,%s,%s,%s,%s,%s,100,10,1000,50)",
+                     (rid, host, ts, sid, model, cost))
+    for n, (acct, email, plan, f, w) in enumerate([("A", "a@x.test", "max_5x", 30, 10), ("A", "a@x.test", "max_5x", 60, 12), ("B", "b@x.test", "pro", 90, 70)]):
+        conn.execute("INSERT INTO limit_samples (host, ts, session_id, five_hour_pct, seven_day_pct, account_id, account_email, account_plan, five_hour_resets_at, seven_day_resets_at)"
+                     " VALUES ('h1', now() - make_interval(mins => %s), %s, %s, %s, %s, %s, %s, now() + make_interval(hours => %s), now() + interval '3 days')",
+                     (n, f"ls{n}", f, w, acct, email, plan, 5 * (n + 1)))
+    conn.commit(); conn.close()
+
+
+def txt(w):
+    r = w.render()
+    return getattr(r, "plain", None) or str(r)
+
+
+def all_open_ok(scr):
+    return scr.all_open
+
+
+def sess_txt(scr):
+    """대화 화면의 머리글 + 모든 메시지 + 상태줄 글자."""
+    return "\n".join([txt(scr.query_one("#sess-head"))] + [txt(v) for v in scr.query(ctxui.MsgView)] + [txt(scr.query_one("#sess-state"))])
+
+
+async def settle(pilot, cond, timeout=8.0):
+    t = time.time()
+    while time.time() - t < timeout:
+        if cond():
+            return True
+        await pilot.pause(0.15)
+    return cond()
+
+
+def risky_cells(app):
+    """DataTable 의 **문자열** 셀 중 대괄호 마크업처럼 보이는 것(`[protected]` 등) — 문자열로 넣으면 Rich 마크업으로 해석돼 화면에서 글자가 사라진다(Text 로 넣어야 한다)."""
+    import re
+    from textual.widgets import DataTable
+    out = []
+    for t in app.query(DataTable):
+        for key in t.rows:
+            for c in t.get_row(key):
+                if isinstance(c, str) and re.search(r"\[(?!\d+\])[A-Za-z/#@][^\]]*\]", c):
+                    out.append((t.id, c[:60]))
+    return out
+
+
+def rows(app, sel):
+    return app.query_one(sel).row_count
+
+
+async def submit(pilot, widget):
+    """위젯에 포커스를 주고 반영될 때까지 기다린 뒤 Enter(포커스 직후 바로 누르면 이전 위젯이 받는다)."""
+    widget.focus(); await pilot.pause(0.25); await pilot.press("enter")
+
+
+def hits(app):
+    """검색 결과의 일치 메시지 수(세션 행 수가 아니라) — 결과 표는 세션 단위 행이다."""
+    return sum(g["count"] for g in app.groups)
+
+
+async def type_text(pilot, s):
+    for ch in s:
+        await pilot.press(ch)
+
+
+async def run():
+    app = ctxui.CtxUI()
+    async with app.run_test(size=(160, 50)) as pilot:
+        await settle(pilot, lambda: rows(app, "#projects") == 3)
+        # --- 개요
+        head = txt(app.query_one("#ovhead"))
+        check("개요: 합계(세션 3 · 메시지 8)와 DB 크기", "세션 3" in head and "메시지 8" in head and "DB" in head, head)
+        check("개요: 저장소 3곳(저장소 없음 포함)", rows(app, "#projects") == 3)
+        check("개요: 표별 용량 표시", "messages" in head)
+        # Enter → 그 저장소 검색
+        pt = app.query_one("#projects")
+        pt.focus(); await pilot.pause(0.2)
+        await pilot.press("enter"); await pilot.pause(0.8)
+        check("개요 Enter: 검색 탭으로 이동하고 저장소 칸이 채워짐", app.current_tab() == "search" and app.query_one("#repo").value != "", f"{app.current_tab()!r} {app.query_one('#repo').value!r}")
+        check("개요 Enter: 그 저장소 메시지만 검색(최대 4건)", 1 <= hits(app) <= 4, str(hits(app)))
+
+        # --- 검색
+        await pilot.press("2"); await pilot.pause(0.3)
+        app.query_one("#repo").value = ""
+        q = app.query_one("#q"); q.value = "배포"; q.focus(); await pilot.pause(0.2)
+        await pilot.press("enter"); await settle(pilot, lambda: hits(app) == 6)
+        check("검색: '배포' 6건(프롬프트·응답)", hits(app) == 6, str(hits(app)))
+        await pilot.press("f2"); await pilot.pause(0.2)
+        await submit(pilot, q); await settle(pilot, lambda: hits(app) == 4)
+        check("F2: 사용자 발언만 4건", hits(app) == 4 and "사용자만" in txt(app.query_one("#sstate")), str(hits(app)))
+        await pilot.press("f2"); await pilot.pause(0.1)
+        q.value = "금요일|월요일"; await pilot.press("f3"); await submit(pilot, q); await settle(pilot, lambda: hits(app) == 4)
+        check("F3: 정규식 검색", hits(app) == 4 and "정규식: 켜짐" in txt(app.query_one("#sstate")), str(hits(app)))
+        q.value = "([a-"; await submit(pilot, q); await pilot.pause(0.5)
+        check("잘못된 정규식은 앱이 죽지 않고 이전 결과 유지, 대화 화면이 열리지 않음", app.is_running and hits(app) == 4 and not isinstance(app.screen, ctxui.SessionScreen))
+        await pilot.press("f3"); q.value = "금요일"; await submit(pilot, q); await settle(pilot, lambda: hits(app) >= 1)
+        # 일수 필터
+        app.query_one("#days").value = "1"; await submit(pilot, q); await pilot.pause(0.6)
+        check("기간(일) 필터: 오래된 데이터는 제외", hits(app) == 0, str(hits(app)))
+        app.query_one("#days").value = ""
+        # 대화 보기
+        q.value = "금요일"; await submit(pilot, q); await settle(pilot, lambda: hits(app) >= 1)
+        await submit(pilot, app.query_one("#results")); await pilot.pause(0.8)
+        check("Enter: 앞뒤 대화 화면이 열림", isinstance(app.screen, ctxui.SessionScreen))
+        body = sess_txt(app.screen)
+        check("대화 화면: 세션 정보와 메시지", "@h" in body and "금요일" in body, body[:200])
+        await pilot.press("escape"); await pilot.pause(0.3)
+        check("Esc: 대화 화면이 닫힘", not isinstance(app.screen, ctxui.SessionScreen))
+
+        # --- 치환
+        with cc.connect() as c:
+            cs.add_secret(c, "NAS_PW", "literal", PW)
+        q.value = "설정"; await submit(pilot, q); await settle(pilot, lambda: hits(app) >= 1)
+        first = app.query_one("#results").get_row_at(0)
+        check("치환 켜짐: 결과에 비밀이 [protected]", PW not in str(first[-1]) and "[protected]" in str(first[-1]), str(first))
+        await submit(pilot, app.query_one("#results")); await pilot.pause(0.8)
+        check("치환 켜짐: 대화 화면에도 [protected]", PW not in sess_txt(app.screen) and "[protected]" in sess_txt(app.screen))
+        await pilot.press("m"); await pilot.pause(0.6)
+        check("대화 화면 m: 치환 끄면 원문이 보임(경고 표시)", PW in sess_txt(app.screen) and "꺼짐" in sess_txt(app.screen))
+        await pilot.press("m"); await pilot.pause(0.3); await pilot.press("escape"); await pilot.pause(0.3)
+        check("m 으로 다시 켬", app.mask)
+
+        # --- 대조
+        await pilot.press("3"); await pilot.pause(0.3)
+        ph = app.query_one("#phrase"); ph.value = "배포"; await submit(pilot, ph); await settle(pilot, lambda: rows(app, "#vrepos") == 3)
+        check("대조: 사용자 발언을 저장소 3곳으로 묶음(4건)", rows(app, "#vrepos") == 3 and "4건" in app.query_one("#vrepos").border_title, app.query_one("#vrepos").border_title)
+        check("대조: 첫 저장소(가장 많은 beta)의 발언 2건이 오른쪽에", rows(app, "#vhits") == 2, str(rows(app, "#vhits")))
+        await pilot.press("down"); await pilot.pause(0.4)
+        check("대조: 저장소를 옮기면 발언 목록이 바뀜", rows(app, "#vhits") == 1)
+        await submit(pilot, app.query_one("#vhits")); await pilot.pause(0.8)
+        check("대조: 발언 Enter → 대화 보기", isinstance(app.screen, ctxui.SessionScreen)); await pilot.press("escape"); await pilot.pause(0.3)
+
+        # --- 비밀
+        await pilot.press("4"); await settle(pilot, lambda: rows(app, "#secrets-table") == 1)
+        check("비밀: 등록된 1개가 표에 있고 값은 표에 없음", rows(app, "#secrets-table") == 1 and PW not in str(app.query_one("#secrets-table").get_row_at(0)), str(app.query_one("#secrets-table").get_row_at(0)))
+        check("비밀: 원문에 들어 있는 메시지 수(2)", app.query_one("#secrets-table").get_row_at(0)[-1] == 2, str(app.query_one("#secrets-table").get_row_at(0)))
+        app.query_one("#secrets-table").focus(); await pilot.press("v"); await pilot.pause(0.3)
+        check("v: 선택한 비밀 값이 아래에 표시", PW in txt(app.query_one("#sdetail")))
+        await pilot.press("v"); await pilot.pause(0.2)
+        check("v 다시: 숨김", txt(app.query_one("#sdetail")).strip() == "")
+        await pilot.press("e"); await settle(pilot, lambda: app.query_one("#secrets-table").get_row_at(0)[2] == "꺼짐")
+        check("e: 끄기", app.query_one("#secrets-table").get_row_at(0)[2] == "꺼짐")
+        with cc.connect(readonly=True) as c:
+            check("e: 끄면 치환 대상에서 빠짐", cs.load_secrets(c) == [])
+        await pilot.press("e"); await settle(pilot, lambda: app.query_one("#secrets-table").get_row_at(0)[2] == "켜짐")
+        # 추가
+        await pilot.press("a"); await pilot.pause(0.4)
+        check("a: 이름 입력 대화상자", isinstance(app.screen, ctxui.PromptScreen))
+        check("비밀 이름 입력: 대화상자가 화면 가운데에 뜸(좌우 ±1칸 — 예전엔 왼쪽 위 구석)", abs(app.screen.query_one("#dialog").region.x + app.screen.query_one("#dialog").region.width / 2 - app.size.width / 2) <= 1)
+        await type_text(pilot, "newpw"); await pilot.press("enter"); await pilot.pause(0.4)
+        check("a: 값 입력 대화상자는 가려서 표시(password)", isinstance(app.screen, ctxui.PromptScreen) and app.screen.query_one("#prompt-input").password)
+        await type_text(pilot, "secretvalue99"); await pilot.press("enter"); await settle(pilot, lambda: rows(app, "#secrets-table") == 2)
+        check("a: 새 비밀이 등록됨", rows(app, "#secrets-table") == 2)
+        with cc.connect(readonly=True) as c:
+            check("a: DB 에 평문으로 저장(설계 결정)", any(s["label"] == "newpw" and s["value"] == "secretvalue99" for s in cs.load_secrets(c)))
+        # 삭제(확인)
+        app.query_one("#secrets-table").focus(); await pilot.press("d"); await pilot.pause(0.4)
+        check("d: 확인 대화상자", isinstance(app.screen, ctxui.ConfirmScreen))
+        await pilot.press("n"); await pilot.pause(0.3)
+        check("d → n: 취소하면 그대로", rows(app, "#secrets-table") == 2)
+        await pilot.press("d"); await pilot.pause(0.3); await pilot.press("y"); await settle(pilot, lambda: rows(app, "#secrets-table") == 1)
+        check("d → y: 삭제됨", rows(app, "#secrets-table") == 1)
+
+        # --- 후보
+        await pilot.press("5"); await settle(pilot, lambda: rows(app, "#cands-table") >= 1)
+        ct = app.query_one("#cands-table")
+        check("후보: 탐지됨(키 + 이미 등록된 비밀번호는 제외)", rows(app, "#cands-table") >= 1 and all(PW not in str(ct.get_row_at(i)) for i in range(rows(app, "#cands-table"))))
+        check("후보: 값은 흐린 미리보기만", all(KEY not in str(ct.get_row_at(i)) for i in range(rows(app, "#cands-table"))) and any("자)" in str(ct.get_row_at(i)) for i in range(rows(app, "#cands-table"))))
+        fp_key = cs.fingerprint(KEY)
+        idx = next(i for i in range(rows(app, "#cands-table")) if ct.get_row_at(i)[0] == fp_key)
+        ct.focus(); ct.move_cursor(row=idx); await pilot.pause(0.3)
+        await pilot.press("v"); await pilot.pause(0.3)
+        check("후보 v: 값 보기(승인 판단용)", KEY in txt(app.query_one("#cdetail")))
+        await pilot.press("enter"); await pilot.pause(0.4)
+        check("후보 Enter: 이름 입력", isinstance(app.screen, ctxui.PromptScreen))
+        await type_text(pilot, "anthkey"); await pilot.press("enter")
+        await settle(pilot, lambda: all(ct.get_row_at(i)[0] != fp_key for i in range(rows(app, "#cands-table"))) )
+        check("후보 승인: 목록에서 사라지고 등록됨", all(ct.get_row_at(i)[0] != fp_key for i in range(rows(app, "#cands-table"))))
+        with cc.connect(readonly=True) as c:
+            check("후보 승인: 등록표에 들어감", any(s["label"] == "anthkey" and s["value"] == KEY for s in cs.load_secrets(c)))
+        n_before = rows(app, "#cands-table")
+        if n_before:
+            ct.focus(); ct.move_cursor(row=0); await pilot.pause(0.3)
+            fp0 = ct.get_row_at(0)[0]
+            await pilot.press("i"); await settle(pilot, lambda: rows(app, "#cands-table") < n_before)
+            check("후보 i: 무시하면 사라짐", rows(app, "#cands-table") == n_before - 1)
+            with cc.connect(readonly=True) as c:
+                check("후보 i: 무시 목록에 기록", fp0 in cd.ignored_fps(c))
+        # --- 통계
+        await pilot.press("1"); await settle(pilot, lambda: rows(app, "#stat-sessions") == 3)
+        check("대시보드: 1 키로 이동(통계 칸 포함)", app.current_tab() == "dashboard")
+        lt = txt(app.query_one("#stat-limits"))
+        check("통계: 계정별 한도 그래프에 계정·플랜·최고 %가 계정마다 따로 나온다", all(k in lt for k in ("a@x.test", "max_5x", "b@x.test", "pro", "최고 60%", "최고 90%")), lt)
+        st = txt(app.query_one("#stat-state"))
+        check("통계: 상태줄에 기간·단위·분류·정렬과 비용 수집 시작일", all(k in st for k in ("기간: 30일", "단위: 일", "분류: 모델", "정렬: 비용", "10-01 이후")), st)
+        check("통계: 기본 30일 필터(합성 데이터는 2026-10 초라 오늘 기준으로는 이미 밖일 수 있음)", "기간: 30일" in st)
+        await pilot.press("p")      # 기간 순환: 30일 → 전체
+        await settle(pilot, lambda: rows(app, "#stat-trend") == 3)
+        check("통계 p: 기간 순환(30일 → 전체)", "기간: 전체" in txt(app.query_one("#stat-state")) and rows(app, "#stat-trend") == 3, txt(app.query_one("#stat-state")))
+        tt = app.query_one("#stat-trend")
+        check("통계: 추이 표(일 단위 3행, 최근이 위·합계 제목)", rows(app, "#stat-trend") == 3 and "10-03" in str(tt.get_row_at(0)[0]) and "$3.50" in app.query_one("#stat-trend").border_title, app.query_one("#stat-trend").border_title)
+        check("통계: 비용 막대 그려짐", any("█" in str(tt.get_row_at(i)[3]) for i in range(3)))
+        cc_ = app.query_one("#stat-trend-chart")
+        check("통계: 비용 그래프(점자)가 위쪽에 그려지고 부제에 합계·최대·평균", any("\u2800" < ch <= "\u28ff" for ch in txt(cc_)) and "$3.50" in (cc_.border_subtitle or ""), (txt(cc_)[:80], cc_.border_subtitle))
+        check("통계: 분류별(모델) 비용순", app.query_one("#stat-break").get_row_at(0)[0] == "claude-sonnet-5-5" and "$3.00" in str(app.query_one("#stat-break").get_row_at(0)))
+        sm = txt(app.query_one("#stat-summary"))
+        check("통계: 세션 요약(세션·프롬프트·비용·시간대·요일)", all(k in sm for k in ("세션 3개", "프롬프트 5", "시간대별", "요일별")) , sm)
+        await pilot.press("g"); await settle(pilot, lambda: "분류: 저장소" in txt(app.query_one("#stat-state")))
+        check("통계 g: 분류 순환(모델 → 저장소)", app.query_one("#stat-break").border_title.startswith("저장소별") and rows(app, "#stat-break") == 2)
+        check("통계 g: 분류 드롭다운도 키 상태(저장소)를 따라간다", app.query_one("#sel-by").value == "repo", app.query_one("#sel-by").value)
+        app.query_one("#sel-by").value = "host"; await settle(pilot, lambda: app.query_one("#stat-break").border_title.startswith("머신별"))
+        check("통계: 분류 드롭다운으로 고르면 상태·표·제목이 바뀐다(머신별)", app.stat_by == "host" and app.query_one("#stat-break").border_title.startswith("머신별") and rows(app, "#stat-break") >= 1, (app.stat_by, app.query_one("#stat-break").border_title))
+        app.query_one("#sel-period").value = 1; await settle(pilot, lambda: "기간: 1일" in txt(app.query_one("#stat-state")))
+        check("통계: 기간 드롭다운으로 고르면 상태가 바뀐다(1일)", app.stat_period == 1, app.stat_period)
+        app.query_one("#sel-period").value = 0; await settle(pilot, lambda: "기간: 전체" in txt(app.query_one("#stat-state")))
+        app.query_one("#sel-by").value = "repo"; await settle(pilot, lambda: "분류: 저장소" in txt(app.query_one("#stat-state")))
+        await pilot.press("g"); await settle(pilot, lambda: "분류: 계정" in txt(app.query_one("#stat-state")))
+        check("통계 g: 다음 분류는 계정(제목에 계정 불명 비율, 행에 (계정 불명))", app.query_one("#stat-break").border_title.startswith("계정별") and "계정 불명" in app.query_one("#stat-break").border_title and "(계정 불명)" in str(app.query_one("#stat-break").get_row_at(0)), app.query_one("#stat-break").border_title)
+        await pilot.press("g"); await settle(pilot, lambda: "분류: 머신" in txt(app.query_one("#stat-state"))); await pilot.press("g"); await pilot.press("g"); await pilot.press("g")
+        await settle(pilot, lambda: "분류: 모델" in txt(app.query_one("#stat-state"))); await pilot.press("g"); await settle(pilot, lambda: "분류: 저장소" in txt(app.query_one("#stat-state")))
+        await pilot.press("b"); await settle(pilot, lambda: "단위: 주" in txt(app.query_one("#stat-state")))
+        check("통계 b: 단위 순환(일 → 주)", "단위: 주" in txt(app.query_one("#stat-state")) and rows(app, "#stat-trend") == 1)
+        await pilot.press("o"); await settle(pilot, lambda: "정렬: 최근" in txt(app.query_one("#stat-state")))
+        check("통계 o: 세션 정렬 순환(비용 → 최근)", "정렬: 최근" in txt(app.query_one("#stat-state")))
+        fr = app.query_one("#f-repo")
+        fr.value = "alpha"; await submit(pilot, fr)
+        await settle(pilot, lambda: rows(app, "#stat-sessions") == 1)
+        check("통계 필터(저장소 alpha): 세션·추이·분류가 함께 줄어듦", rows(app, "#stat-sessions") == 1 and "$1.50" in app.query_one("#stat-trend").border_title, app.query_one("#stat-trend").border_title)
+        await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("c")
+        await settle(pilot, lambda: rows(app, "#stat-sessions") == 3)
+        check("통계 c: 필터 지움", app.query_one("#f-repo").value == "" and rows(app, "#stat-sessions") == 3)
+        fm = app.query_one("#f-model")
+        fm.value = "haiku"; await submit(pilot, fm)
+        await settle(pilot, lambda: rows(app, "#stat-sessions") == 1)
+        check("통계 필터(모델 haiku): 그 모델을 쓴 세션만", rows(app, "#stat-sessions") == 1 and "$0.50" in app.query_one("#stat-trend").border_title)
+        await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("c"); await settle(pilot, lambda: rows(app, "#stat-sessions") == 3)
+        sess_t = app.query_one("#stat-sessions")
+        sess_t.focus(); sess_t.move_cursor(row=0); await pilot.pause(0.3); await pilot.press("enter"); await pilot.pause(0.8)
+        check("통계 세션 Enter: 그 세션 대화 열림", app.screen.__class__.__name__ == "SessionScreen")
+        await pilot.press("escape"); await pilot.pause(0.3)
+        check("통계: 대화 닫으면 대시보드로 복귀", app.current_tab() == "dashboard" and app.screen.__class__.__name__ != "SessionScreen")
+        # --- 대화 보기(깊게): 펼침 · 검색어 이동 · 도구/서브에이전트 · 복사 · 이어진 세션 · 생략 한도 · 검색 제목 · F4
+        long_text = "A" * 1000 + "마지막NEEDLE_X끝"
+        with cc.connect() as c:
+            c.execute("INSERT INTO sessions (session_id, host, hosts, repo_url, branch, first_ts, last_ts) VALUES ('gggg0001','h2','{h2}',%s,'dev','2026-10-10T01:00:00Z','2026-10-10T02:00:00Z')", (B,))
+            for i, (uid, kind, role, side, par, text) in enumerate([
+                    ("gggg-p0", "prompt", "user", False, None, "긴 응답을 읽자 NEEDLE_X"), ("gggg-r0", "response", "assistant", False, "gggg-p0", long_text),
+                    ("gggg-t0", "tool_use", "assistant", False, "gggg-r0", "[tool_use Bash] echo hi"), ("gggg-t1", "tool_result", "user", False, "gggg-t0", "hi"),
+                    ("gggg-s0", "prompt", "user", True, None, "서브 작업 지시")]):
+                c.execute("INSERT INTO messages (uuid, session_id, host, parent_uuid, ts, role, kind, is_sidechain, text, raw) VALUES (%s,'gggg0001','h2',%s,%s::timestamptz + %s * interval '1 minute',%s,%s,%s,%s,'{}')",
+                          (uid, par, "2026-10-10T01:00:00Z", i, role, kind, side, text))
+            c.execute("INSERT INTO sessions (session_id, host, hosts, repo_url, first_ts, last_ts) VALUES ('gggg0002','h2','{h2}',%s,'2026-10-11T01:00:00Z','2026-10-11T02:00:00Z')", (B,))
+            c.execute("INSERT INTO messages (uuid, session_id, host, parent_uuid, ts, role, kind, text, raw) VALUES ('gggg-q0','gggg0002','h2','gggg-r0','2026-10-11T01:00:00Z','user','prompt','다음 세션의 첫 말','{}')")
+        scr = ctxui.SessionScreen(app, "gggg0001", None, "NEEDLE_X", False)
+        await app.push_screen(scr); await settle(pilot, lambda: len(list(scr.query(ctxui.MsgView))) == 2)
+        head = txt(scr.query_one("#sess-head"))
+        check("대화 화면: 머리글에 제목(첫 프롬프트)·저장소#브랜치·프롬프트/도구 수", "긴 응답을 읽자" in head and "#dev" in head and "프롬프트 1" in head and "도구 1" in head, head)
+        check("대화 화면: 이어진 세션 안내(] 다음 세션)", "] 다음 세션: gggg0002" in head, head)
+        check("대화 화면: 기본은 프롬프트·응답만(도구·서브에이전트 숨김)", len(scr.msgs) == 2 and "서브 작업" not in sess_txt(scr) and "echo hi" not in sess_txt(scr))
+        check("대화 화면: 긴 메시지는 접히고 펼치는 방법 안내", "더 — Enter: 펼치기" in txt(scr.views[1]) and "끝" not in txt(scr.views[1]).replace("더 — Enter: 펼치기", ""))
+        check("대화 화면: 검색어 강조(스타일 span)", any("on #b8a46a" in str(sp.style) for sp in scr.render_msg(scr.msgs[0]).spans))
+        await pilot.press("n"); await pilot.pause(0.3)
+        check("n: 다음 검색어 메시지로 이동", scr.sel == 1 and "msg-sel" in scr.views[1].classes, str(scr.sel))
+        check("n: 검색어가 접힌 뒷부분에 있으면 자동으로 펼쳐서 보여 줌", "마지막NEEDLE_X끝" in txt(scr.views[1]))
+        await pilot.press("enter"); await pilot.pause(0.3)
+        check("Enter: 펼친 메시지는 다시 접힘", "더 — Enter: 펼치기" in txt(scr.views[1]))
+        await pilot.press("enter"); await pilot.pause(0.3)
+        check("Enter: 다시 펼침(끝 글자가 보임)", "마지막NEEDLE_X끝" in txt(scr.views[1]))
+        await pilot.press("N"); await pilot.pause(0.3)
+        check("N: 이전 검색어 메시지(첫 프롬프트)로 이동", scr.sel == 0)
+        await pilot.press("y"); await pilot.pause(0.3)
+        check("y: 선택한 메시지를 클립보드로 복사", app.clipboard == "긴 응답을 읽자 NEEDLE_X", repr(app.clipboard))
+        await pilot.press("down"); await pilot.press("y"); await pilot.pause(0.3)
+        check("↓ 이동 후 y: 그 메시지 전체 복사", app.clipboard == long_text and scr.sel == 1)
+        await pilot.press("t"); await settle(pilot, lambda: len(scr.msgs) == 4)
+        check("t: 도구 호출·결과 보기(4개), 보던 메시지 위치 유지", len(scr.msgs) == 4 and "echo hi" in sess_txt(scr) and scr.msgs[scr.sel]["uuid"] == "gggg-r0", str(scr.sel))
+        await pilot.press("s"); await pilot.pause(0.5)
+        check("s: 서브에이전트 메시지도 보기(5개)", len(scr.msgs) == 5 and "서브 작업 지시" in sess_txt(scr) and "(서브에이전트)" in sess_txt(scr))
+        await pilot.press("s"); await pilot.press("t"); await settle(pilot, lambda: len(scr.msgs) == 2)
+        await pilot.press("f"); await pilot.pause(0.4)
+        check("f: 전체 펼침", all_open_ok(scr) and "마지막NEEDLE_X끝" in txt(scr.views[1]))
+        await pilot.press("f"); await pilot.pause(0.3)
+        await pilot.press("end"); await pilot.pause(0.2)
+        check("End/Home: 처음·끝 이동", scr.sel == 1)
+        await pilot.press("home"); await pilot.pause(0.2)
+        check("Home", scr.sel == 0)
+        await pilot.press("right_square_bracket"); await settle(pilot, lambda: scr.session_id == "gggg0002")
+        check("]: 이어진 다음 세션으로 이동(머리글·메시지 교체)", scr.session_id == "gggg0002" and "다음 세션의 첫 말" in sess_txt(scr) and "[ 이전 세션: gggg0001" in txt(scr.query_one("#sess-head")), txt(scr.query_one("#sess-head")))
+        await pilot.press("right_square_bracket"); await pilot.pause(0.4)
+        check("] : 더 이어진 세션이 없으면 알림만(그대로)", scr.session_id == "gggg0002" and app.is_running)
+        await pilot.press("left_square_bracket"); await settle(pilot, lambda: scr.session_id == "gggg0001")
+        check("[: 이전 세션으로 돌아옴", scr.session_id == "gggg0001")
+        scr.limit = 1; scr.rebuild(None); await pilot.pause(0.4)
+        check("메시지 수 상한: 넘으면 생략 개수를 알리고 마지막 쪽을 보여줌", len(scr.msgs) == 1 and "생략" in txt(scr.query_one("#sess-state")) and scr.hidden_before == 1, txt(scr.query_one("#sess-state")))
+        await pilot.press("a"); await pilot.pause(0.5)
+        check("a: 전부 불러오기", len(scr.msgs) == 2 and "생략" not in txt(scr.query_one("#sess-state")))
+        await pilot.press("escape"); await pilot.pause(0.3)
+        check("대화 화면 닫힘", not isinstance(app.screen, ctxui.SessionScreen))
+        await pilot.press("2"); await pilot.pause(0.3)
+        q.value = "NEEDLE_X"; await submit(pilot, q); await settle(pilot, lambda: hits(app) == 2)
+        r0 = app.query_one("#results").get_row_at(0)
+        check("검색: 결과에 세션 제목 열", hits(app) == 2 and "긴 응답을 읽자" in str(r0[4]), str(r0))
+        q.value = "echo hi"; await submit(pilot, q); await pilot.pause(0.6)
+        check("검색: 기본은 도구 메시지 제외", hits(app) == 0)
+        await pilot.press("f4"); await submit(pilot, q); await settle(pilot, lambda: hits(app) == 1)
+        check("F4: 도구 메시지 포함하면 찾아짐(종류가 역할 칸에 표시)", hits(app) == 1 and app.groups[0]["hits"][0]["kind"] == "tool_use" and "도구 메시지: 포함" in txt(app.query_one("#sstate")))
+        await pilot.press("f4")
+        # --- 세션 기준 검색: 펼침·모두 펼침·제목만
+        q.value = "배포"; await submit(pilot, q); await settle(pilot, lambda: hits(app) == 6)
+        rt = app.query_one("#results")
+        check("세션 기준: 일치 6건이 세션 행 3개로 묶임(접힌 상태)", rt.row_count == len(app.groups) == 3 and "세션 3개 · 일치 6건" in rt.border_title, rt.border_title)
+        await pilot.press("space"); await pilot.pause(0.3)
+        check("Space: 선택한 세션의 일치 메시지가 아래에 펼쳐짐(▾)", rt.row_count == 3 + app.groups[0]["count"] and "▾" in str(rt.get_row_at(0)[1]), str(rt.row_count))
+        await pilot.press("space"); await pilot.pause(0.3)
+        check("Space 다시: 접힘, 커서는 그 세션 행", rt.row_count == 3 and rt.cursor_row == 0)
+        await pilot.press("x"); await pilot.pause(0.3)
+        check("x: 모든 세션 펼침(세션 3 + 메시지 6)", rt.row_count == 9)
+        await pilot.press("down"); await pilot.pause(0.2)
+        await submit(pilot, rt); await pilot.pause(0.6)
+        check("펼친 메시지 행에서 Enter: 그 메시지에 맞춰 대화가 열림", isinstance(app.screen, ctxui.SessionScreen))
+        await pilot.press("escape"); await pilot.pause(0.3)
+        await pilot.press("x"); await pilot.pause(0.2)
+        await pilot.press("f6"); await settle(pilot, lambda: "제목만: 켜짐" in txt(app.query_one("#sstate")))
+        check("F6: 제목만 — 제목(첫 프롬프트)에 '배포' 가 없는 세션은 빠짐", all("배포" in g["title"] for g in app.groups) and "제목만" in rt.border_title, [g["title"] for g in app.groups])
+        await pilot.press("f6"); await settle(pilot, lambda: "제목만: 꺼짐" in txt(app.query_one("#sstate")))
+
+        # --- 자동 메시지(작업 알림·스킬 호출) 배지·접기·숨김 토글
+        _msgs = [("user", "prompt", "<command-message>donghans-resume</command-message>\n<command-name>/donghans-resume</command-name>\n<command-args>c9bf</command-args>"),
+                 ("user", "prompt", "<task-notification>\n<task-id>x1</task-id>\n<status>completed</status>\n<summary>배포 끝났다</summary>\n</task-notification>"),
+                 ("user", "prompt", "진짜 사람의 말")]
+        with cc.connect() as c:
+            c.execute("INSERT INTO sessions (session_id, host, hosts, repo_url, first_ts, last_ts) VALUES (%s,%s,%s,%s,%s,%s)", ("iiii0001", "h1", ["h1"], A, "2026-10-11T01:00:00Z", "2026-10-11T01:05:00Z"))
+            for i, (r_, k_, t_) in enumerate(_msgs):
+                c.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (f"iiii-{i:04d}", "iiii0001", "h1", f"2026-10-11T01:0{i}:00Z", r_, k_, t_, json.dumps({"i": i})))
+        app.push_screen(ctxui.SessionScreen(app, "iiii0001", None)); await pilot.pause(0.8)
+        scr = app.screen
+        body = sess_txt(scr)
+        check("자동 메시지: 작업 알림은 [작업 알림] 배지+한 줄 요약(원문 태그는 접힘)", "[작업 알림]" in body and "[completed] 배포 끝났다" in body and "<task-id>" not in body, body[:300])
+        check("스킬 호출은 [스킬 호출] 배지와 /이름 인자", "[스킬 호출]" in body and "/donghans-resume c9bf" in body and "<command-name>" not in body)
+        check("대화 화면 제목: 첫 사람 프롬프트", "진짜 사람의 말" in txt(scr.query_one("#sess-head")), txt(scr.query_one("#sess-head"))[:120])
+        await pilot.press("down"); await pilot.press("enter"); await pilot.pause(0.3)
+        check("Enter: 작업 알림 원문 펼침", "<task-id>x1</task-id>" in sess_txt(scr))
+        await pilot.press("i"); await pilot.pause(0.4)
+        hid = sess_txt(scr)
+        check("i: 자동 메시지 숨김(작업 알림 사라지고 스킬 호출·사람 말은 남음)", "[작업 알림]" not in hid and "<task-id>" not in hid and "진짜 사람의 말" in hid and "/donghans-resume" in hid and "자동 메시지 숨김" in txt(scr.query_one("#sess-state")), txt(scr.query_one("#sess-state")))
+        await pilot.press("i"); await pilot.pause(0.4)
+        check("i 다시: 자동 메시지 보임", "[작업 알림]" in sess_txt(scr))
+        await pilot.press("escape"); await pilot.pause(0.3)
+        check("자동 메시지 시험 후 대화 화면 닫힘", not isinstance(app.screen, ctxui.SessionScreen))
+        # --- 지침 탭(공유 정본 · DB 만 · 사람 전용 편집)
+        import contextlib, stat
+        with cc.connect() as c:
+            for repo, nm, body, host in [(A, "instructions", "# 알파 지침\n\n## QA 할 때\nqa 본문\n\n## 배포\n배포 본문\n", "h1"), (A, "override", "알파 오버라이드\n", "h2"), (B, "instructions", f"베타 지침 비번은 {PW}\n", "h2")]:
+                c.execute("INSERT INTO project_instructions (repo_url, name, body, rev, updated_host) VALUES (%s,%s,%s,1,%s)", (repo, nm, body, host))
+        with cc.connect() as c:
+            cs.add_secret(c, "INSTR_PW", "literal", PW)          # 앞선 비밀 탭 시험이 등록표를 비웠으므로 이 구간용으로 다시 등록
+        fake = os.path.join(os.environ["XDG_RUNTIME_DIR"] if os.environ.get("XDG_RUNTIME_DIR") else tempfile.gettempdir(), "fake-editor-%d.sh" % os.getpid())
+        EDITLOG = fake + ".log"
+        def make_editor(script_body):
+            open(fake, "w").write("#!/bin/sh\n" + script_body); os.chmod(fake, 0o755); os.environ["EDITOR"] = fake; os.environ.pop("VISUAL", None)
+        await pilot.press("6"); await settle(pilot, lambda: rows(app, "#instr-table") == 3)
+        it = app.query_one("#instr-table")
+        check("지침: 6 키로 이동, 모든 저장소의 지침이 목록에(저장소·이름·rev·수정 머신·길이)", app.current_tab() == "instr" and rows(app, "#instr-table") == 3 and it.get_row_at(0)[1] == "instructions" and it.get_row_at(0)[2] == 1 and it.get_row_at(0)[3] == "h1", str(it.get_row_at(0)))
+        it.focus(); it.move_cursor(row=0); await pilot.pause(0.3); await pilot.press("enter"); await pilot.pause(0.8)
+        check("지침 Enter: 본문 보기 화면이 열림", isinstance(app.screen, ctxui.InstrScreen))
+        body = txt(app.screen.query_one("#instr-body"))
+        check("지침 본문: 저장소·이름·rev·절 목록과 본문", "알파 지침" in body and "rev 1" in body and "절 2개: QA 할 때 · 배포" in body and "qa 본문" in body, body[:200])
+        await pilot.press("escape"); await pilot.pause(0.3)
+        it.move_cursor(row=2); await pilot.pause(0.3); await pilot.press("enter"); await pilot.pause(0.8)
+        shown = txt(app.screen.query_one("#instr-body"))
+        check("지침 본문: 등록된 비밀은 [protected] 로 치환해 보인다", PW not in shown and "[protected]" in shown, shown[:160])
+        await pilot.press("m"); await pilot.pause(0.6)
+        check("지침 본문 m: 치환을 끄면 원문(경고 표시)", PW in txt(app.screen.query_one("#instr-body")) and "꺼짐" in txt(app.screen.query_one("#instr-body")))
+        await pilot.press("m"); await pilot.pause(0.4); await pilot.press("escape"); await pilot.pause(0.3)
+        check("m 으로 다시 켬", app.mask)
+
+        # 편집: 가짜 편집기(실행 파일)로 대체 — suspend 는 헤드리스에서 못 쓰므로 빈 컨텍스트로 바꾼다
+        app.suspend = lambda: contextlib.nullcontext()
+        cache_marker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "no-such-cache")      # 캐시 파일 경로를 쓰지 않는다는 것을 아래에서 확인
+        make_editor(f'cp "$1" {EDITLOG}.mode_probe 2>/dev/null; stat -c %a "$1" > {EDITLOG}.perm; printf "\\n## 추가 절\\n새 내용\\n" >> "$1"\n')
+        it.move_cursor(row=0); await pilot.pause(0.3)
+        await pilot.press("e"); await settle(pilot, lambda: it.get_row_at(0)[2] == 2)
+        with cc.connect(readonly=True) as c:
+            raw = cd.instr_raw(c, A, "instructions")
+        check("지침 e: 편집기로 고치면 DB 에 올라가고 rev 가 오른다", raw[0] == 2 and "## 추가 절" in raw[1] and "새 내용" in raw[1] and it.get_row_at(0)[2] == 2, str(raw))
+        check("지침 e: 임시 파일은 0600 이었고 편집 뒤 지워진다", open(EDITLOG + ".perm").read().strip() == "600" and not any(f.startswith("instr-") for f in os.listdir(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir())))
+        with cc.connect(readonly=True) as c:
+            row = next(r for r in cd.instr_rows(c) if (r["repo"], r["name"]) == (A, "instructions"))
+        check("지침 e: 수정 머신은 이 기기(CLAUDE_CTX_HOST)로 기록", row["host"] == "testhost", str(row))
+        # 변경 없음
+        make_editor("exit 0\n")
+        it.move_cursor(row=1); await pilot.pause(0.3); await pilot.press("e"); await pilot.pause(0.8)
+        with cc.connect(readonly=True) as c:
+            check("지침 e: 바꾸지 않으면 저장하지 않는다(rev 그대로)", cd.instr_raw(c, A, "override")[0] == 1)
+        # 낡은 rev: 편집기가 도는 사이 다른 기기가 먼저 고침
+        make_editor(f'python3 -c "import sys; open(sys.argv[1],\'a\').write(\'\\n내 편집\\n\')" "$1"\n')
+        orig_edit = app.edit_instr
+        def race(repo, name):
+            if (repo, name) == (A, "override"):
+                with cc.connect() as c:
+                    c.execute("UPDATE project_instructions SET body='다른 기기가 먼저 씀\n', rev=rev+1, updated_host='other' WHERE repo_url=%s AND name='override'", (repo,))
+            return orig_edit(repo, name)
+        # 편집기가 뜨기 직전(읽은 뒤)에 끼어들도록 subprocess.run 을 감싼다
+        import subprocess as _sp
+        real_run = _sp.run
+        def run_with_race(cmd, *a, **k):
+            with cc.connect() as c:
+                c.execute("UPDATE project_instructions SET body='다른 기기가 먼저 씀\n', rev=rev+1, updated_host='other' WHERE repo_url=%s AND name='override'", (A,))
+            return real_run(cmd, *a, **k)
+        ctxui.subprocess.run = run_with_race
+        it.move_cursor(row=1); await pilot.pause(0.3); await pilot.press("e"); await pilot.pause(1.0)
+        ctxui.subprocess.run = real_run
+        with cc.connect(readonly=True) as c:
+            raw = cd.instr_raw(c, A, "override")
+        check("지침 e: 편집 중 다른 기기가 먼저 고쳤으면(낡은 rev) 거부하고 상대 본문을 덮지 않는다", raw == (2, "다른 기기가 먼저 씀\n"), str(raw))
+        # 비밀이 든 본문
+        make_editor(f'printf "비번 {PW}\\n" >> "$1"\n')
+        it.move_cursor(row=0); await pilot.pause(0.3); await pilot.press("e"); await pilot.pause(1.0)
+        with cc.connect(readonly=True) as c:
+            raw = cd.instr_raw(c, A, "instructions")
+        check("지침 e: 등록된 비밀이 든 본문은 거부(저장 안 됨)", PW not in raw[1] and raw[0] == 2, str(raw[0]))
+        # 빈 본문
+        make_editor(': > "$1"\n')
+        it.move_cursor(row=0); await pilot.pause(0.3); await pilot.press("e"); await pilot.pause(1.0)
+        with cc.connect(readonly=True) as c:
+            check("지침 e: 빈 본문은 거부(저장 안 됨)", cd.instr_raw(c, A, "instructions")[0] == 2 and cd.instr_raw(c, A, "instructions")[1].strip() != "")
+        # 본문 보기 화면 안에서 편집하면 화면이 새 내용으로 갱신된다
+        make_editor('printf "\\n## 화면 안에서 추가\\n" >> "$1"\n')
+        it.move_cursor(row=0); await pilot.pause(0.3); await pilot.press("enter"); await pilot.pause(0.8)
+        await pilot.press("e"); await settle(pilot, lambda: "화면 안에서 추가" in txt(app.screen.query_one("#instr-body")))
+        check("지침 본문 e: 보기 화면에서 고치면 화면이 새 rev·내용으로 바뀜", "rev 3" in txt(app.screen.query_one("#instr-body")) and "화면 안에서 추가" in txt(app.screen.query_one("#instr-body")))
+        await pilot.press("escape"); await pilot.pause(0.3)
+        # 목록 새로고침·에이전트용 경로는 그대로(사람 전용 화면이 DB 를 지우지 않는다)
+        await pilot.press("r"); await pilot.pause(0.6)
+        check("지침: r 새로고침, 행 삭제 기능은 없다(범위 밖)", rows(app, "#instr-table") == 3 and not any(b.key == "d" and "지침" in str(b.description) for b in app.BINDINGS))
+        for f in (fake, EDITLOG + ".perm", EDITLOG + ".mode_probe"):
+            try: os.unlink(f)
+            except OSError: pass
+
+        # --- 도움말·종료
+        await pilot.press("f1"); await pilot.pause(0.3)
+        check("F1: 도움말", app.screen.__class__.__name__ == "HelpScreen"); await pilot.press("escape"); await pilot.pause(0.2)
+        await pilot.press("1"); await pilot.pause(0.5)
+        check("1: 대시보드로 돌아옴", app.current_tab() == "dashboard")
+
+
+async def run_wrap():
+    """대시보드 줄바꿈 → 1열 전환: 폭에 따라 글 칸이 줄바꿈되지 않아야 한다(2열이면 줄바꿈 없음, 아니면 1열). 그래프·막대는 칸 폭에 맞고 박스는 겹치지 않는다."""
+    barw = {}
+    for cols in (100, 150, 400):
+        app = ctxui.CtxUI()
+        async with app.run_test(size=(cols, 50)) as pilot:
+            await settle(pilot, lambda: rows(app, "#stat-sessions") >= 1)
+            await pilot.pause(1.5)
+            box = app.query_one("#dash-scroll")
+            narrow = box.has_class("narrow")
+            check(f"대시보드 {cols}칸: 2열이면 글이 줄바꿈되지 않고, 줄바꿈이 생기면 1열", narrow or not app._wrapping(), (narrow, app._wrapping()))
+            tt = app.query_one("#stat-trend")
+            barw[cols] = max((len(tt.get_row_at(i)[3].plain) for i in range(tt.row_count)), default=0)
+            lt = txt(app.query_one("#stat-limits"))
+            check(f"대시보드 {cols}칸: 한도는 점자 그래프(시간축 날짜 포함)이고 시간대별도 점자 그래프", any("\u2800" <= ch <= "\u28ff" and ch != "\u2800" for ch in lt) and "10-" in lt and any("\u2800" <= ch <= "\u28ff" for ch in txt(app.query_one("#stat-summary"))), lt[:300])
+            tops = [app.query_one("#" + k) for kids in app.DASH_ROWS.values() for k in kids]
+            bad = [(a.id, b.id) for i, a in enumerate(tops) for b in tops[i + 1:] if a.region.overlaps(b.region)]
+            check(f"대시보드 {cols}칸: 박스끼리 겹치지 않는다", not bad, bad)
+            check(f"대시보드 {cols}칸: 추이·분류 표 박스 높이가 내용(행 3개 안팎)에 맞아 예전 고정 14줄보다 낮다", all(app.query_one("#" + k).region.height < 14 for k in ("stat-trend", "stat-break")), [(k, app.query_one("#" + k).region.height) for k in ("stat-trend", "stat-break")])
+            if cols == 100:
+                check("대시보드 100칸: 최소 폭 규칙으로 1열", narrow)
+            if cols == 400:
+                check("대시보드 아주 넓은 폭(400칸): 2열 유지", not narrow and not app._wrapping(), (narrow, app._wrapping(), app._wrap_at))
+    check("대시보드: 비용 막대는 박스가 넓을수록 길다(150칸 < 400칸, 18칸 고정 아님)", barw[400] > barw[150] > 0 and barw[400] > 18, barw)
+
+
+async def run_restricted():
+    """제한 모드(LLM 세션): 모든 탭을 볼 수 있되 비밀 값은 추출·조회할 수 없다 — 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열을 [protected] 로 치환(끌 수 없음),
+    값 보기·비밀 추가/삭제/끄기·후보 무시·지침 편집은 막고, 후보 승인은 허용한다."""
+    pass
+    with cc.connect() as c:
+        cs.add_secret(c, "RESTRICT_PW", "literal", PW, replace=True)
+        c.execute("INSERT INTO sessions (session_id, host, hosts, repo_url, first_ts, last_ts) VALUES (%s,%s,%s,%s,%s,%s)", ("dddd0001", "h1", ["h1"], A, "2026-10-06T01:00:00Z", "2026-10-06T01:00:10Z"))
+        for i, (role, text) in enumerate([("user", f"새 키는 {KEY2} 이고 비밀번호는 Zq9!kd82Lm 이다"), ("assistant", "받았다")]):
+            c.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (f"dddd-{i:04d}", "dddd0001", "h1", f"2026-10-06T01:00:{i * 10:02d}Z", role, "prompt" if role == "user" else "response", text, json.dumps({"i": i})))
+        n_secrets = len(cs.load_secrets(c, only_enabled=False))
+    app = ctxui.CtxUI(restricted=True)
+    async with app.run_test(size=(160, 50)) as pilot:
+        await settle(pilot, lambda: rows(app, "#projects") == 3)
+        check("제한: 개요는 정상 로드(저장소 3곳)", rows(app, "#projects") == 3 and app.restricted)
+        check("제한: 상태줄에 제한 모드 안내", "제한 모드" in txt(app.query_one("#sstate")))
+        check("제한: 막힌 동작(m·v·비밀 추가/삭제/끄기·후보 무시)은 푸터에서 숨기고 탭 이동·새로고침은 보임", all(app.check_action(a, ()) is False for a in ("toggle_mask", "reveal", "secret_add", "secret_delete", "secret_toggle", "cand_ignore")) and app.check_action("reload", ()) is True and app.check_action("tab", ("secrets",)) is True)
+        # --- 비밀 탭: 열린다, 값은 어디에도 없다
+        await pilot.press("4"); await settle(pilot, lambda: app.current_tab() == "secrets" and rows(app, "#secrets-table") >= 1)
+        st = app.query_one("#secrets-table")
+        cells = " ".join(str(st.get_row_at(i)) for i in range(st.row_count))
+        check("제한: 비밀 탭이 열리고 등록된 비밀의 이름·종류·길이·fp 는 보이지만 값은 없음", app.current_tab() == "secrets" and "RESTRICT_PW" in cells and PW not in cells, cells[:200])
+        await pilot.press("v"); await pilot.pause(0.3)
+        check("제한: v(값 보기)는 막혀 값이 표시되지 않음", PW not in txt(app.query_one("#sdetail")) and app._reveal is False)
+        # --- 후보 탭: 열린다, 미리보기는 [protected]
+        _calls = []
+        _orig = cd.scan_candidates
+        cd.scan_candidates = lambda c: (_calls.append(1), _orig(c))[1]
+        await pilot.press("5"); await settle(pilot, lambda: app.current_tab() == "cands" and rows(app, "#cands-table") >= 1, timeout=15)
+        await pilot.pause(1.0)
+        cd.scan_candidates = _orig
+        check("탭을 한 번 열면 후보 탐지는 한 번만 돈다(예전엔 action_tab 과 TabActivated 가 둘 다 불러 두 번 돌고 알림이 겹쳤다)", len(_calls) == 1, len(_calls))
+        ct = app.query_one("#cands-table")
+        ccells = " ".join(str(ct.get_row_at(i)) for i in range(ct.row_count))
+        check("제한: 후보 탭이 열리고 후보가 탐지되며 미리보기는 [protected](N자)이고 값(키)은 어디에도 없음", ct.row_count >= 1 and "[protected] (" in ccells and KEY2 not in ccells and cs.preview(KEY2) not in ccells, ccells[:240])
+        await pilot.press("v"); await pilot.pause(0.3)
+        check("제한: 후보 v(값 보기)도 막혀 값이 표시되지 않음", KEY2 not in txt(app.query_one("#cdetail")))
+        await pilot.press("i"); await pilot.pause(0.3)
+        with cc.connect() as c:
+            ign = len(cd.ignored_fps(c))
+        check("제한: 후보 무시(i)는 막힘(무시 목록 불변)", ign == 0, ign)
+        ct.move_cursor(row=0); await pilot.pause(0.2); await pilot.press("enter"); await pilot.pause(0.5)
+        check("제한: 후보 승인(Enter)은 허용 — 값을 보여 주지 않는 이름 입력 대화상자가 열림", isinstance(app.screen, ctxui.PromptScreen) and KEY2 not in txt(app.screen))
+        await pilot.press("escape"); await pilot.pause(0.3)
+        # --- 치환 고정·후보 패턴 치환
+        await pilot.press("m"); await pilot.pause(0.3)
+        mk = app.masker()
+        probe = f"등록한 {PW} 와 미등록 키 {KEY2} 그리고 password=hunter99xyzQ 와 비밀번호는 Zq9!kd82Lm 입니다"
+        out = mk.text(probe)
+        check("제한: m 으로 치환을 끌 수 없고 마스커가 등록한 비밀 + 후보 패턴(키·password=·한글 비밀번호)을 모두 [protected] 로", app.mask is True and all(x not in out for x in (PW, KEY2, "hunter99xyzQ", "Zq9!kd82Lm")) and out.count("[protected]") >= 4, out)
+        # --- 검색·대화 화면에서도
+        await pilot.press("2"); await pilot.pause(0.3)
+        app.query_one("#repo").value = ""; q = app.query_one("#q"); q.value = "새 키는"; q.focus(); await pilot.pause(0.2)
+        await pilot.press("enter"); await settle(pilot, lambda: hits(app) >= 1)
+        rc = " ".join(str(app.query_one("#results").get_row_at(i)) for i in range(app.query_one("#results").row_count))
+        check("제한: 검색 결과 목록에 후보 패턴의 키가 [protected] 로만 보임", hits(app) >= 1 and KEY2 not in rc and PW not in rc and "[protected]" in rc, rc[:200])
+        await submit(pilot, app.query_one("#results")); await pilot.pause(0.8)
+        sb = sess_txt(app.screen) if isinstance(app.screen, ctxui.SessionScreen) else ""
+        check("제한: 대화 화면에서도 키·비밀번호는 [protected]", isinstance(app.screen, ctxui.SessionScreen) and KEY2 not in sb and PW not in sb and "[protected]" in sb, sb[:200])
+        await pilot.press("m"); await pilot.pause(0.3)
+        check("제한: 대화 화면에서 m 을 눌러도 원문이 나오지 않음", PW not in sess_txt(app.screen) and KEY2 not in sess_txt(app.screen))
+        await pilot.press("escape"); await pilot.pause(0.3)
+        # --- 막힌 동작
+        for fn in ("action_secret_add", "action_secret_delete", "action_secret_toggle", "action_reveal", "action_cand_ignore"):
+            getattr(app, fn)(); await pilot.pause(0.15)
+        with cc.connect() as c:
+            after = len(cs.load_secrets(c, only_enabled=False))
+        check("제한: 비밀 추가·삭제·끄기·값 보기·후보 무시가 모두 막힘(대화상자 없음, 등록 수 불변, 값 미표시)", not isinstance(app.screen, ctxui.PromptScreen) and not isinstance(app.screen, ctxui.ConfirmScreen) and after == n_secrets and not app._reveal, (after, n_secrets))
+        # --- 대화 화면은 세션 전체가 아니라 보일 창만 치환한다(메시지 수만 개짜리 세션이 느리던 문제)
+        with cc.connect() as c:
+            c.execute("INSERT INTO sessions (session_id, host, hosts, repo_url, first_ts, last_ts) VALUES (%s,%s,%s,%s,%s,%s)", ("eeee0001", "h1", ["h1"], A, "2026-10-07T01:00:00Z", "2026-10-07T04:00:00Z"))
+            for i in range(200):
+                c.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (f"eeee-{i:04d}", "eeee0001", "h1", f"2026-10-07T{1 + i // 60:02d}:{i % 60:02d}:00Z", "user" if i % 2 == 0 else "assistant", "prompt" if i % 2 == 0 else "response", f"긴 세션 {i}번째 메시지", json.dumps({"i": i})))
+        _n = []
+        _t = cs.Masker.text
+        cs.Masker.text = lambda self, x: (_n.append(1), _t(self, x))[1]
+        _mm = ctxui.MSG_MAX
+        ctxui.MSG_MAX = 50
+        try:
+            app.push_screen(ctxui.SessionScreen(app, "eeee0001", "eeee-0100")); await settle(pilot, lambda: isinstance(app.screen, ctxui.SessionScreen) and len(app.screen.msgs) > 0)
+            await pilot.pause(0.5)
+            n_open = len(_n)
+            shown = len(app.screen.msgs)
+            hb, ha = app.screen.hidden_before, app.screen.hidden_after
+        finally:
+            ctxui.MSG_MAX = _mm
+            cs.Masker.text = _t
+        check("대화 화면: 200개 메시지 세션에서 창(50개)만 그리고 앞 75·뒤 75 생략 표시", shown == 50 and hb + ha == 150 and hb == 75, (shown, hb, ha))
+        check("대화 화면: 치환 호출이 세션 전체(200)가 아니라 창 크기 안팎(<110)이라 큰 세션이 느려지지 않음", n_open < 110, n_open)
+        await pilot.press("escape"); await pilot.pause(0.3)
+        await pilot.press("1"); await pilot.pause(0.5)
+        check("제한: 대시보드(통계 포함)는 그대로 열림", app.current_tab() == "dashboard")
+        await pilot.press("3"); await pilot.pause(0.4)
+        vq = app.query_one("#phrase"); vq.value = "새 키는"; await submit(pilot, vq); await pilot.pause(1.0)
+        check("표 셀: 모든 DataTable 의 문자열 셀에 마크업으로 해석될 대괄호(예: [protected])가 없음 — 화면에서 글자가 사라지지 않게 Text 로 넣었는지", risky_cells(app) == [], risky_cells(app))
+        app.action_tab("instr")       # 입력칸에 포커스가 있으면 숫자 키가 글자로 들어가므로 동작을 직접 호출
+        await settle(pilot, lambda: app.query_one("#instr-table").row_count >= 1, timeout=6)
+        check("지침 탭으로 가면 지침 표에 포커스(Enter·↑↓ 가 바로 동작)", app.focused is not None and app.focused.id == "instr-table")
+        app.action_tab("dashboard"); await pilot.pause(0.5)
+        check("대시보드로 가면 표에 포커스", app.focused is not None and app.focused.id == "projects")
+        await pilot.press("f1"); await pilot.pause(0.4)
+        hd = " ".join(d for _, d in app.screen._rows) if type(app.screen).__name__ == "HelpScreen" else ""
+        check("제한: 도움말 키 목록에서도 막힌 동작(치환 켬/끔·비밀 추가·삭제·켬/끔·값 보기·무시)이 빠지고 열린 동작(검색·대시보드·새로고침)은 있음", hd and not any(x in hd for x in ("치환 켬/끔", "비밀 추가", "값 보기", "무시", "삭제")) and "새로고침" in hd and "대시보드" in hd, hd[:200])
+        _terms = " ".join(d for _, d in ctxui.CtxUI.HELP_TERMS)
+        check("도움말 용어(제한 모드)가 현재 정책을 설명(모든 탭 열람·값 조회 불가)하고 낡은 「탭이 열리지 않음」 문구가 없음", "모든 탭을 볼 수 있" in _terms and "열리지 않고" not in _terms and "[protected]" in _terms, _terms[:100])
+        await pilot.press("escape"); await pilot.pause(0.3)
+        app.action_tab("instr"); await settle(pilot, lambda: app.current_tab() == "instr" and app.query_one("#instr-table").row_count >= 1, timeout=6)
+        check("제한: 지침 탭 보기는 가능(목록이 보임), 편집(edit_instr)은 편집기를 열지 않고 False", app.current_tab() == "instr" and app.query_one("#instr-table").row_count >= 1 and app.edit_instr("x", "y") is False)
+    # 사람(제한 없음)은 이전과 같다 — 후보 미리보기가 흐린 미리보기, 값 보기 가능
+    app2 = ctxui.CtxUI()
+    async with app2.run_test(size=(160, 50)) as pilot:
+        await settle(pilot, lambda: rows(app2, "#projects") == 3)
+        await pilot.press("5"); await settle(pilot, lambda: rows(app2, "#cands-table") >= 1, timeout=15)
+        c2 = " ".join(str(app2.query_one("#cands-table").get_row_at(i)) for i in range(rows(app2, "#cands-table")))
+        check("사람(제한 없음): 후보 미리보기는 [protected] 가 아니라 흐린 미리보기", not app2.restricted and "[protected] (" not in c2 and cs.preview(KEY2) in c2, c2[:200])
+        await pilot.press("m"); await pilot.pause(0.3)
+        check("사람(제한 없음): m 으로 치환을 끌 수 있음", app2.mask is False)
+
+
+try:
+    seed()
+    asyncio.run(run())
+    asyncio.run(run_wrap())
+    asyncio.run(run_restricted())
+finally:
+    pg.stop()
+finish("ctxui")

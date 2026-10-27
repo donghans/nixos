@@ -13,7 +13,7 @@ mkPartOf "mods.gui" ({
 
   hyprctl = "${pkgs.hyprland}/bin/hyprctl";
   py = pkgs.python3.withPackages (ps: [ps.textual]);
-  src = name: builtins.readFile (../../_tools/clipboard + "/${name}");
+  src = name: builtins.readFile (../../_tools/desktop/clipboard + "/${name}");
 
   # 부가 정보(시각·출처 앱·복사/사용 횟수) 사이드카 — clipmeta.py (cliphist DB 형식은 그대로 두고 옆에 sqlite 로 기록)
   # 파이썬 import 가 되도록 세 스크립트(clipmeta/clipstore/clipui)는 같은 디렉터리에 둔다
@@ -27,7 +27,7 @@ mkPartOf "mods.gui" ({
   # wl-paste --watch 가 클립보드가 바뀔 때마다 호출: cliphist 에 저장(기존 동작) + 부가 정보 기록
   clipstore = pkgs.writeShellScriptBin "clipstore" ''exec ${py}/bin/python3 ${clipmetaDir}/clipstore.py "$@"'';
 
-  # 고급 관리 CLI (키워드/크기 기준 삭제, 통계, DB 최적화) — 본체는 mods/_tools/clipboard/clipctl.sh
+  # 고급 관리 CLI (키워드/크기 기준 삭제, 통계, DB 최적화) — 본체는 mods/_tools/desktop/clipboard/clipctl.sh
   clipctl = pkgs.writeShellScriptBin "clipctl" (
     builtins.replaceStrings
     ["@path@" "@cliphist@" "@clipmeta@"]
@@ -39,7 +39,7 @@ mkPartOf "mods.gui" ({
     (src "clipctl.sh")
   );
 
-  # 클립보드 관리 TUI (Textual) — 본체는 mods/_tools/clipboard/clipui.py
+  # 클립보드 관리 TUI (Textual) — 본체는 mods/_tools/desktop/clipboard/clipui.py
   # 검색(퍼지 + 내용 전체 + 필터), 전문 미리보기·부분 복사, 체크 후 일괄 삭제, 풍부한 통계, DB 최적화. 창 크기에 반응
   # clipmeta.py 를 import 하므로 clipmetaDir 와 같은 디렉터리에 복사해 둔다
   clipuiDir = pkgs.runCommand "clipui-py" {} ''

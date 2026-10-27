@@ -1,5 +1,5 @@
 # observectl / observe — 관측 시스템: 전력/프로세스/C-state 수집기(root), 우리 유틸리티의 구조화 이벤트 로그, 프로파일·타임라인·A/B 통계 CLI
-#  - 본체는 mods/_tools/observe/ (설명은 파일 머리말과 mods/_tools/observe/README.md).
+#  - 본체는 mods/_tools/observe/observe/ (설명은 파일 머리말과 mods/_tools/observe/observe/README.md).
 #  - 켜고 끄기: `observectl on [L0|L1]` / `observectl off` — 제어 파일(/var/lib/observe/control.json, 그룹 users 쓰기 가능)만 바꾼다.
 #    수집기는 systemd **path 유닛**이 제어 파일 변경/요청 디렉터리에 파일이 생길 때만 띄우고, 꺼져 있고 할 일이 없으면 15초 뒤 스스로 종료한다
 #    (꺼져 있는 동안 프로세스가 없으므로 측정에 영향을 주지 않는다. 켜져 있을 때의 오버헤드는 `observectl ab` 로 직접 재서 power-evidence.md 에 기록).
@@ -15,10 +15,10 @@ mkMod __curPos "observectl (관측: 수집기 · 이벤트 로그 · 프로파�
   py = pkgs.python3;
   dir = pkgs.runCommand "observe-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_tiers.py" "observe_apps.py" "observe_query.py" "observe_focus.py" "observe_browser.py" "observe_fleet.py" "usagegraph.py" "usagechart.py" "usagefleet.py" "usagedata.py" "usagespikes.py" "usageview.py" "usagelive.py" "diskbench.py" "usageui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/observe/observe + "/${f}"} $out/${f}") ["observe_core.py" "observe_events.py" "observe_stats.py" "observe_collector.py" "observe_cli.py" "observe_emit.py" "observe_trace.py" "observe_bpf.py" "observe_netdata.py" "observe_explain.py" "observe_tiers.py" "observe_apps.py" "observe_query.py" "observe_focus.py" "observe_browser.py" "observe_fleet.py" "usagegraph.py" "usagechart.py" "usagefleet.py" "usagedata.py" "usagespikes.py" "usageview.py" "usagelive.py" "diskbench.py" "usageui.py"]}
     # procui(프로세스 관리 TUI) — 같은 디렉터리의 observe_apps·hostmetrics·uikit 을 import 하므로 한 디렉터리에 둔다
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/procui + "/${f}"} $out/${f}") ["procscan.py" "procgroups.py" "procactions.py" "procplan.py" "procui.py" "procctl.py"]}
-    cp ${../../_tools/observe/examples/power_knobs.py} $out/power_knobs.py
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/observe/procui + "/${f}"} $out/${f}") ["procscan.py" "procgroups.py" "procactions.py" "procplan.py" "procui.py" "procctl.py"]}
+    cp ${../../_tools/observe/observe/power_knobs.py} $out/power_knobs.py
     cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
     cp ${../../_tools/_lib/_ctlkit/ctlkit.py} $out/ctlkit.py   # ctl 공통 --json 봉투(observectl·procctl)
     # 호스트 측정·판정 모듈의 정본은 donghans-host-resources 스킬 폴더(복제본을 따로 두지 않는다). usageui 실시간 탭·procui 가 import 한다

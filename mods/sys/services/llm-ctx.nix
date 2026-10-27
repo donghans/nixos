@@ -3,7 +3,7 @@
 #  - 접속: localhost 와 허용 목록의 tailnet 기기(MagicDNS `<호스트>:5432`)만. 방화벽은 열지 않는다(tailscale0 는 trustedInterfaces, 그 밖의 인터페이스는 기본 drop).
 #    tailnet 에는 다른 사용자 기기도 있어서 허용 목록(IP)에 있는 기기만 받는다. **비밀번호·dsn 파일 없음** — 전부 이 파일(nix)로만 관리된다.
 #  - 나중에 클라우드/온프레미스로 옮기면: pg_dump → 새 서버 → 각 머신의 dsn 파일만 교체. 이 모듈은 서버 호스트에서만 끄면 된다.
-#  - pgvector 는 설치만 해 둔다(벡터 검색은 필요가 확인될 때). 스키마는 mods/_tools/llm-ctx/schema.sql (멱등, 서비스 시작마다 적용).
+#  - pgvector 는 설치만 해 둔다(벡터 검색은 필요가 확인될 때). 스키마는 mods/_tools/llm/llm-ctx/schema.sql (멱등, 서비스 시작마다 적용).
 {mkMod, ...}:
 mkMod __curPos "Claude 공유 컨텍스트 저장소 (Postgres)" ({
   cfg,
@@ -67,7 +67,7 @@ in {
         Type = "oneshot";
         RemainAfterExit = true;
         User = "postgres";
-        ExecStart = "${config.services.postgresql.package}/bin/psql -v ON_ERROR_STOP=1 -d claude_ctx -f ${../../_tools/llm-ctx/schema.sql}";
+        ExecStart = "${config.services.postgresql.package}/bin/psql -v ON_ERROR_STOP=1 -d claude_ctx -f ${../../_tools/llm/llm-ctx/schema.sql}";
       };
     };
   };

@@ -5,7 +5,7 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 
 # donghans-qa-desktop — 화면 확인용 QA 데스크톱 (incus VM)
 
-> 이 스킬은 사용자의 워크스테이션 전용이다(프로젝트 저장소에는 없고 `~/nixos` 에서 배포). 스킬 형식(SKILL.md)과 경로(`~/.claude/skills/`)는 Claude Code 기준이고 본문은 에이전트에 중립적으로 썼다(세션 간 메시지 도구처럼 에이전트 전용인 부분은 괄호로 표시하고 기본 수단을 따로 둔다). 설명·측정 근거·되돌리는 법은 `~/nixos/mods/_tools/qa-desktop/README.md`.
+> 이 스킬은 사용자의 워크스테이션 전용이다(프로젝트 저장소에는 없고 `~/nixos` 에서 배포). 스킬 형식(SKILL.md)과 경로(`~/.claude/skills/`)는 Claude Code 기준이고 본문은 에이전트에 중립적으로 썼다(세션 간 메시지 도구처럼 에이전트 전용인 부분은 괄호로 표시하고 기본 수단을 따로 둔다). 설명·측정 근거·되돌리는 법은 `~/nixos/mods/_tools/services/qa-desktop/README.md`.
 
 ## 언제 쓰나
 - **쓴다**: 사용자와 같이 화면을 보는 headed 브라우저 확인, Flutter 웹처럼 접근성 트리가 필요한 확인.
@@ -21,7 +21,7 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 
 ## 접속·실행
 - 접속: `ssh -i ~/.ssh/qa_desktop_ed25519 qa@10.100.0.84`(비밀번호 없음). 살아 있는지: `timeout 6 ssh … echo alive`.
-- RUNNING 인데 ssh 가 `No route to host` → VM 크래시(원인 미확정, 조건은 `mods/_tools/qa-desktop/README.md`). VM 안에서 `journalctl -b -1` 로 직전 로그를 본 뒤 호스트에서 `incus restart qa-desktop --force`. **`incus exec` 는 VM 에이전트가 없어 안 된다.**
+- RUNNING 인데 ssh 가 `No route to host` → VM 크래시(원인 미확정, 조건은 `mods/_tools/services/qa-desktop/README.md`). VM 안에서 `journalctl -b -1` 로 직전 로그를 본 뒤 호스트에서 `incus restart qa-desktop --force`. **`incus exec` 는 VM 에이전트가 없어 안 된다.**
 - 실행: `~/qa-playwright/run.sh <스크립트.js>` — GUI 환경변수(Xwayland 인증 파일 등)를 매번 동적으로 잡는다. Playwright 1.63·node 22 를 **모든 프로젝트가 공유**한다.
 - 이름 규칙: 스크립트 `~/qa-playwright/flow_<프로젝트>/`, 산출물 `~/qa-shots/<프로젝트>/`, 임시 `/tmp/<프로젝트>-*`, 변경 전 값 기록 `~/<프로젝트>-qa-state/`. VM 안에서 띄우는 정적 서버 포트도 프로젝트별로 나눈다(쓰는 포트는 VM 에서 `ss -ltn` 으로 확인해 겹치지 않는 번호를 고른다). `~/qa-playwright/login.js` 같은 기존 로그인 헬퍼는 먼저 만든 프로젝트 전용이니 가져다 쓰지 말고 프로젝트별로 만든다.
 - 다른 프로젝트의 디렉터리·`package.json`·`node_modules` 는 고치지 않는다. apt·npm 업그레이드 금지(필요하면 사용자와 상대 QA 세션 합의 후).
@@ -34,7 +34,7 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 ## 화면 분리 (가상 데스크톱 + 창 자동 배치)
 - 사용자는 가상 데스크톱을 오가며 본다. 창은 Chromium `--class=<프로젝트>-qa`(+ `--ozone-platform=wayland --start-maximized`)로 띄운다.
 - GNOME 확장 **Auto Move Windows** 가 `~/.local/share/applications/<프로젝트>-qa.desktop`(`StartupWMClass=<프로젝트>-qa`)을 규칙 `<프로젝트>-qa.desktop:<데스크톱 번호>` 로 보낸다(`gsettings get|set org.gnome.shell.extensions.auto-move-windows application-list`, 번호는 1부터).
-- 현재 규칙은 위 `gsettings get` 으로 확인한다(예: `<프로젝트>-qa.desktop:2`). 규칙이 없는 프로젝트의 창은 **지금 보고 있는 데스크톱에 뜬다**(그대로 둔다). 새 프로젝트는 기존 항목을 유지한 채 추가한다. `focus-new-windows`(`smart`) 는 바꾸지 않는다(규칙 없는 프로젝트에 미치는 영향 미확인). 시험 결과는 `mods/_tools/qa-desktop/README.md`.
+- 현재 규칙은 위 `gsettings get` 으로 확인한다(예: `<프로젝트>-qa.desktop:2`). 규칙이 없는 프로젝트의 창은 **지금 보고 있는 데스크톱에 뜬다**(그대로 둔다). 새 프로젝트는 기존 항목을 유지한 채 추가한다. `focus-new-windows`(`smart`) 는 바꾸지 않는다(규칙 없는 프로젝트에 미치는 영향 미확인). 시험 결과는 `mods/_tools/services/qa-desktop/README.md`.
 - 이 확장은 Wayland 라서 **로그아웃·재로그인 후에야** 새로 인식된다.
 
 ## 사람 없이 확인하기 (사용자에게 데스크톱 번호를 묻지 않는다)

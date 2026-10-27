@@ -25,7 +25,7 @@ Mods 프레임워크의 구현 상세와 핵심 메커니즘을 설명합니다.
 
 | 패턴 | 이유 |
 |------|------|
-| `_` prefix 디렉터리 | `_data/`(비-Nix 데이터)·`_tools/`(실행 도구·앱) 등 모듈이 아닌 디렉터리 |
+| `_` prefix 디렉터리 | `_data/`(비-Nix 데이터)·`_tools/`(실행 도구·앱)·`_patches/`(패치)·`_experiments/`(수동 실험 도구) 등 모듈이 아닌 디렉터리 |
 | `_` prefix 파일 | `_template.nix` 등 내부 유틸 |
 | `*.home.nix` | 호스트별 조건부 로드 파일 — `host.nix`에서 별도 처리 |
 | `*.overlay.nix` | 오버레이 전용 — `flake.outputs.nix`가 별도로 수집하여 `customOverlays`에 등록 |
@@ -48,7 +48,7 @@ mods/
 ├── _data/                     ← 전체 제외 (_ prefix)
 │   └── zsh/init.zsh
 ├── _tools/                    ← 전체 제외 (_ prefix)
-│   └── observe/observe_cli.py
+│   └── observe/observe/observe_cli.py
 └── _template.nix              ← 제외 (_ prefix)
 ```
 

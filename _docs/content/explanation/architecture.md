@@ -125,7 +125,7 @@ CLI Engine  →  Metadata  →  Logic Core  →  Mods
   - `mods/gui/`: GUI 환경 — `base`(Hyprland 번들: core/waybar/greeter/lock/clip), `apps`(vivaldi/slack/bitwarden 등)
   - `mods/devel/`: 개발 도구 — `base`(공통 설정), `toolchains`(node/python/fvm/devbox/jetbrains), `apps`(llm-cli/zed)
 - **Shared Data (`mods/_data/`)**: `builtins.readFile`로 Nix 모듈에서 읽는 비-Nix 파일을 분리 관리합니다 — `zsh/`, `waybar/`, `incus/`, `devbox/` 등.
-- **Tools (`mods/_tools/`)**: Nix 모듈이 설치해 실행하는 도구·앱(Python·쉘)과 그 시험을 둡니다 — `observe/`, `llm-ctx/`, `procui/` 등. 여러 앱이 공유하는 라이브러리(TUI 틀 `uikit`, CLI 봉투 `ctlkit`, 시험 도구 `testkit`)는 `_lib/` 에 둡니다. `_data` 는 「읽는 데이터」, `_tools` 는 「실행하는 코드」입니다(2026-10-27 분리 — 그 전에는 둘 다 `_data` 에 있었다).
+- **Tools (`mods/_tools/`)**: Nix 모듈이 설치해 실행하는 도구·앱(Python·쉘)과 그 시험을 둡니다 — 기능별 카테고리(`llm/`·`observe/`·`desktop/`·`services/`) 아래에 앱마다 폴더 하나(`observe/observe/`, `llm/llm-ctx/` 등). 여러 앱이 공유하는 라이브러리(TUI 틀 `uikit`, CLI 봉투 `ctlkit`, 시험 도구 `testkit`)는 `_lib/` 에 둡니다. `_data` 는 「읽는 데이터」, `_tools` 는 「실행하는 코드」입니다(2026-10-27 분리 — 그 전에는 둘 다 `_data` 에 있었다). 외부 소스에 얹는 `.patch` 는 `mods/_patches/`, Nix 가 설치하지 않는 수동 진단·실험 도구는 `mods/_experiments/` 에 둡니다.
 
 **데이터 흐름:**
 
@@ -221,7 +221,9 @@ Rolling 기기와 stable 기기가 lock 파일을 공유하면 한쪽이 항상 
 │   ├── gui/                 # GUI 환경
 │   ├── devel/               # 개발 도구
 │   ├── _data/               # 비-Nix 데이터 파일
-│   └── _tools/              # 실행되는 도구·앱과 시험 (_lib/ 공용 라이브러리)
+│   ├── _tools/              # 실행되는 도구·앱과 시험 (카테고리별, _lib/ 공용 라이브러리)
+│   ├── _patches/            # 외부 소스에 적용하는 .patch
+│   └── _experiments/        # 수동 진단·실험 도구 (Nix 가 설치하지 않음)
 ├── _docs/                   # 문서 저장소
 └── .locks/                  # 시스템 안정성을 위한 락 파일 관리
 ```

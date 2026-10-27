@@ -1,4 +1,4 @@
-# 화면 관리: displayctl(CLI) + displayui(TUI, Textual) — 본체는 mods/_tools/display/
+# 화면 관리: displayctl(CLI) + displayui(TUI, Textual) — 본체는 mods/_tools/desktop/display/
 #  - 화면 모드(확장/미러/노트북만/외부만), 프리젠테이션 등 프리셋(해상도 고정, 이전 구성 복귀)
 #  - 모니터별 해상도·주사율·배율·상대 위치. 모니터가 알려 주는 모드 외의 값도 시도하고 적용 뒤 실제 값을 검증
 #  - 해상도/주사율 변경은 확인이 없으면 되돌림: TUI 확인 창과 별개로 systemd 사용자 타이머가 예약돼서 TUI/터미널이 죽어도 되돌려짐
@@ -18,7 +18,7 @@ mkPartOf "mods.gui" ({
   jq = "${pkgs.jq}/bin/jq";
   hyprctl = "${pkgs.hyprland}/bin/hyprctl";
   py = pkgs.python3.withPackages (ps: [ps.textual]);
-  src = name: builtins.readFile (../../_tools/display + "/${name}");
+  src = name: builtins.readFile (../../_tools/desktop/display + "/${name}");
 
   # displayctl.py(얇은 진입점)와 displayui.py, 본체 패키지 dispctl/ 를 한 디렉터리에 둔다(displayui.py 가 `import displayctl` 하므로 같은 디렉터리여야 함).
   # Nix 자리표시자(@hyprctl@, @notify_send@)는 dispctl/config.py 한 곳에만 있다.
@@ -28,8 +28,8 @@ mkPartOf "mods.gui" ({
     cp ${pkgs.writeText "displayctl.py" (src "displayctl.py")} $out/displayctl.py
     cp ${pkgs.writeText "displayui.py" (src "displayui.py")} $out/displayui.py
     cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
-    cp ${../../_tools/observe/observe_core.py} $out/observe_core.py   # 이벤트 로그(observe_events). 못 찾아도 dispctl/observelog.py 가 무동작 대체를 씀
-    cp ${../../_tools/observe/observe_events.py} $out/observe_events.py
+    cp ${../../_tools/observe/observe/observe_core.py} $out/observe_core.py   # 이벤트 로그(observe_events). 못 찾아도 dispctl/observelog.py 가 무동작 대체를 씀
+    cp ${../../_tools/observe/observe/observe_events.py} $out/observe_events.py
     cp ${pkgs.writeText "config.py" (builtins.replaceStrings ["@hyprctl@" "@notify_send@"] [hyprctl "${pkgs.libnotify}/bin/notify-send"] (src "dispctl/config.py"))} $out/dispctl/config.py
     ${lib.concatMapStrings (n: "cp ${pkgs.writeText "${n}.py" (src "dispctl/${n}.py")} $out/dispctl/${n}.py\n") dispctlModules}
   '';

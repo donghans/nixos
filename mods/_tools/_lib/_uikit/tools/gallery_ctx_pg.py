@@ -1,5 +1,5 @@
 import json, os, sys, time, random
-R="/home/donghans/nixos/mods/_tools/llm-ctx"
+R="/home/donghans/nixos/mods/_tools/llm/llm-ctx"
 sys.path.insert(0,R); sys.path.insert(0,R+"/tests")
 import pgscratch
 pg=pgscratch.start(); assert pg
