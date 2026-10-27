@@ -17,7 +17,7 @@ out=$(cd "$D/display" && PYTHON=${PY:-python3} sh tests/run.sh 2>&1); r=$?
 printf '%-9s %s\n' display "$(echo "$out" | grep -E '코어|TUI' | tr '\n' ' ')"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep -E "FAIL|Traceback"; }
 # ctx(DB 통합·화면): psycopg + textual 이 모두 있는 python 이 필요하다 — CTX_PYTHON 으로 지정하거나(없으면 nix 로 한 번 만든다), postgres 17 이 없으면 시험 파일이 알아서 건너뛴다.
 CTXPY=${CTX_PYTHON:-$(nix build --no-link --print-out-paths --impure --expr '(builtins.getFlake "nixpkgs").legacyPackages.x86_64-linux.python3.withPackages (ps: [ps.psycopg ps.textual])' 2>/dev/null | tail -1)/bin/python3}
-for t in "ctxchart:test_ctxchart.py" "ctx-db:test_ctx_db.py" "ctx-instr:test_instr.py" "ctx-docs:test_docs.py" "ctxdata:test_ctxdata.py" "ctxui:test_ctxui.py"; do
+for t in "ctxchart:test_ctxchart.py" "ctx-db:test_ctx_db.py" "ctx-instr:test_instr.py" "ctx-docs:test_docs.py" "agents:test_agents.py" "ctxdata:test_ctxdata.py" "ctxui:test_ctxui.py"; do
   name=${t%%:*}; f=${t#*:}
   [ -x "$CTXPY" ] && { out=$(cd "$D/llm-ctx" && PYTHONDONTWRITEBYTECODE=1 timeout 300 "$CTXPY" -I "tests/$f" 2>&1); r=$?; printf '%-9s %s\n' "$name" "$(echo "$out" | tail -1)"; [ $r -eq 0 ] || { rc=1; echo "$out" | grep FAIL; }; }
 done

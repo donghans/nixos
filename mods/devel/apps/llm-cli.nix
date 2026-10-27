@@ -117,12 +117,14 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # (목적: 여러 머신·프로젝트의 대화·사용량을 공유 저장소(Postgres, mods.sys.services.llm-ctx)에 이벤트 시점에 적재)
   # 클라이언트 CLI `donghans`: `donghans ctx hook|ingest|search|recent|session|usage|sql` / `donghans handoff put|get`.
   # 접속 문자열은 ~/.config/claude-ctx/dsn (nix 밖, 권한 600 — 비밀번호가 스토어에 남지 않게). 서버 위치는 거기서만 바꾼다.
-  # 여러 파일(llm_ctx: 명령, ctx_secrets: 비밀 등록표·치환·주입·후보 탐지·로컬 치환, ctx_instr: 프로젝트별 지침 공유 동기화, ctx_docs: 계획·QA 기록 같은 프로젝트 문서 정본, ctxdata/ctxui: 관리 TUI, uikit: TUI 공통 틀)을 한 디렉터리에 모아 실행한다
+  # 여러 파일(llm_ctx: 명령, ctx_secrets: 비밀 등록표·치환·주입·후보 탐지·로컬 치환, ctx_instr: 프로젝트별 지침 공유 동기화, ctx_docs: 계획·QA 기록 같은 프로젝트 문서 정본, agents/: 에이전트별(Claude Code 등) 대화 형식 어댑터, ctxdata/ctxui: 관리 TUI, uikit: TUI 공통 틀)을 한 디렉터리에 모아 실행한다
   # (observe 의 usageui 와 같은 방식). 훅·타이머·사용자가 부르는 `donghans` 는 모두 이 래퍼다.
   ctxSrc = pkgs.runCommand "llm-ctx-src" {} ''
     mkdir -p $out
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_docs.py" "ctxdata.py" "ctxchart.py" "ctxui.py"]}
     cp ${../../_tools/_lib/_uikit/uikit.py} $out/uikit.py
+    mkdir -p $out/agents
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm-ctx/agents + "/${f}"} $out/agents/${f}") ["__init__.py" "claude.py"]}
   '';
   claudeCtx = pkgs.writeShellScriptBin "donghans" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg])}/bin/python3 ${ctxSrc}/llm_ctx.py "$@"'';
   # ctx 관리 TUI(Textual): 저장소별 용량·검색·발언 대조·비밀 등록표·후보 탐지. 사람이 터미널에서 쓰는 도구(`ctxui`).

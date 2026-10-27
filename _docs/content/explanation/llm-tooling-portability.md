@@ -33,7 +33,7 @@ donghans 워크스테이션의 스킬·ctx·QA 도구는 지금 Claude Code 위�
 | 기능 | 어디서 쓰나 | 대체/완화 |
 |---|---|---|
 | **세션 간 메시지**(`SendMessage`·`ListAgents`) | QA↔수정 세션 요청·회신, VM 점유 알림 | 점유 알림은 파일 기반 `occupy.py` 가 기본 수단(메시지는 가속 수단). 요청·회신은 인계 문서 + 사용자 중계로 대체 가능하나 자동 왕복은 불가 |
-| **대화 적재 형식**(훅 JSON·`~/.claude/projects/**/*.jsonl`·OTel) | `llm-ctx` 적재·`secret scrub` | 에이전트별 파서가 필요(`llm_ctx.py` 의 `parse_line`·`transcript_files`·`cmd_hook`; `scrub` 대상 경로도). DB 표·조회·치환은 그대로 |
+| **대화 적재 형식**(훅 JSON·`~/.claude/projects/**/*.jsonl`·OTel) | `llm-ctx` 적재·`secret scrub` | 에이전트별 어댑터가 필요(`mods/_tools/llm-ctx/agents/<이름>.py` — 대화 파일 위치·`parse_line`·환경 표식; `scrub` 대상 경로도 같은 어댑터에서 나온다. 인터페이스는 `agents/__init__.py` 머리말). 아직 어댑터 밖: 훅 입력 JSON·OTel·한도 기록(`llm_ctx.py`). DB 표·조회·치환은 그대로 |
 | **스킬 자동 발견·`Skill` 도구** | 모든 스킬 | SKILL.md 본문은 그대로 쓰되 호출 경로가 다르다(위 B) |
 | **한도·사용량 도구**(상태 표시줄·`donghans-limit-watch` 스킬·`Monitor`) | 세션 사용량 지침, 사용량 TUI | Claude 구독 한도 모델 전용 — 다른 에이전트는 별도 도구 필요 |
 | **하위 에이전트·권한 분류기**(`Agent` 도구·`/permissions`·`AskUserQuestion`) | 전역 지침의 비용 규칙, ToT QA 문서의 분류기 절 | 지침 문구만 바꾸면 되는 부분과 기능 자체가 없는 부분이 섞여 있다 |

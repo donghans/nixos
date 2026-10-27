@@ -401,9 +401,8 @@ def registry_hash(secrets) -> str:
 
 
 def transcript_files(home):
-    import glob
-    return (sorted(glob.glob(os.path.join(home, ".claude/projects/*/*.jsonl")))
-            + sorted(glob.glob(os.path.join(home, ".claude/projects/*/*/subagents/*.jsonl"))))
+    import agents      # 대화 파일의 위치는 에이전트마다 다르다 — 어댑터가 안다
+    return agents.all_transcript_files(home)
 
 
 def scrub_local(cc, conn, files, secrets, apply=False, idle_secs=3600, log=print, state=None):

@@ -24,6 +24,7 @@ import argparse, glob, hashlib, json, os, re, socket, subprocess, sys, tempfile,
 import psycopg
 from psycopg.types.json import Jsonb
 
+import agents
 import ctx_docs as cd
 import ctx_instr as ci
 import ctx_secrets as cs
@@ -43,8 +44,7 @@ def _machine_tag():
 INGEST_HOST = f"{HOST}#{_machine_tag()}"  # ingest_state 의 host 칸과 락 키에만 쓴다(표시용 host 는 HOST 그대로)
 HOME = os.path.expanduser("~")
 OTEL = os.path.join(HOME, ".local/share/claude-otel")
-MAX_RAW = 100_000      # 원본 한 줄이 이보다 크면 잘라서 보관(정본은 트랜스크립트)
-MAX_TEXT = 20_000      # 검색용 평문 상한
+MAX_RAW, MAX_TEXT = agents.MAX_RAW, agents.MAX_TEXT      # 원본 한 줄·검색용 평문 상한(agents/__init__.py)
 
 
 def dsn():
@@ -125,57 +125,7 @@ def upsert_session(cur, sid, cwd, transcript=None, ver=None, first=None, last=No
                                      ver=ver, first=first, last=last))
 
 
-# ---------------------------------------------------------------- 트랜스크립트 파싱
-def blocks_text(content):
-    """메시지 content → (kind 후보, 평문)."""
-    if isinstance(content, str):
-        return "text", content
-    parts, kinds = [], set()
-    for b in content or []:
-        if not isinstance(b, dict):
-            continue
-        t = b.get("type")
-        if t == "text":
-            kinds.add("text"); parts.append(b.get("text", ""))
-        elif t == "tool_use":
-            kinds.add("tool_use"); parts.append(f"[tool_use {b.get('name')}] " + json.dumps(b.get("input"), ensure_ascii=False)[:1500])
-        elif t == "tool_result":
-            kinds.add("tool_result")
-            c = b.get("content")
-            if isinstance(c, list):
-                c = " ".join(x.get("text", "") for x in c if isinstance(x, dict))
-            parts.append("[tool_result] " + str(c or "")[:4000])
-    k = "text" if "text" in kinds else ("tool_use" if "tool_use" in kinds else ("tool_result" if "tool_result" in kinds else "other"))
-    return k, "\n".join(p for p in parts if p)
-
-
-def parse_line(line, agent_id):
-    line = line.replace("\\u0000", "")  # Postgres jsonb/text 는 NUL 을 못 담는다
-    try:
-        d = json.loads(line)
-    except Exception:
-        return None
-    if not isinstance(d, dict) or not d.get("uuid") or d.get("type") not in ("user", "assistant", "system"):
-        return None
-    msg = d.get("message") or {}
-    role = d["type"]
-    k, text = blocks_text(msg.get("content")) if msg else ("other", d.get("content") if isinstance(d.get("content"), str) else "")
-    if role == "user":
-        kind = "meta" if d.get("isMeta") else ("tool_result" if k == "tool_result" else "prompt")
-    elif role == "assistant":
-        kind = "response" if k == "text" else ("tool_use" if k == "tool_use" else "other")
-    else:
-        kind = "other"
-    u = msg.get("usage") or {}
-    raw = line if len(line) <= MAX_RAW else None
-    return dict(uuid=d["uuid"], sid=d.get("sessionId"), parent=d.get("parentUuid"), ts=d.get("timestamp"), role=role, kind=kind,
-                side=bool(d.get("isSidechain")), agent=agent_id or d.get("agentId"), pid=d.get("promptId") or d.get("requestId"),
-                cwd=d.get("cwd"), branch=d.get("gitBranch"), model=msg.get("model"), ver=d.get("version"),
-                it=u.get("input_tokens"), ot=u.get("output_tokens"), cr=u.get("cache_read_input_tokens"), cc=u.get("cache_creation_input_tokens"),
-                text=(text or "")[:MAX_TEXT].replace("\x00", ""),
-                raw=Jsonb(json.loads(raw)) if raw else Jsonb({"truncated": True, "size": len(line), "head": line[:2000]}))
-
-
+# ---------------------------------------------------------------- 트랜스크립트 파싱 — 에이전트별 형식은 agents/ 어댑터가 맡는다(여기는 DB 에 넣는 쪽)
 INSERT_MSG = """
 INSERT INTO messages (uuid, session_id, host, parent_uuid, ts, role, kind, is_sidechain, agent_id, prompt_id, cwd, branch, model,
                       input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, text, raw, source)
@@ -211,17 +161,17 @@ def read_new(cur, path):
 
 def ingest_transcript(conn, path):
     """한 트랜스크립트 파일의 새 줄을 넣는다. 반환: 넣으려 한 메시지 수(-1 = 다른 프로세스가 처리 중이라 건너뜀)."""
-    agent = None
-    m = re.search(r"/subagents/(?:agent-)?([^/]+)\.jsonl$", path)
-    if m:
-        agent = m.group(1)
+    prov = agents.provider_for_path(path)
+    agent = prov.subagent_id(path)
     with conn.transaction():
         cur = conn.cursor()
         cur.execute("SELECT pg_try_advisory_xact_lock(%s)", (lock_key(path),))
         if not cur.fetchone()[0]:
             return -1
         old, new, lines = read_new(cur, path)
-        rows = [r for r in (parse_line(l, agent) for l in lines) if r]
+        rows = [r for r in (prov.parse_line(l, agent) for l in lines) if r]
+        for r in rows:
+            r["raw"] = Jsonb(r["raw"])      # 어댑터는 DB 를 몰라 dict 를 주고, 여기서 jsonb 로 감싼다
         by_sid = {}
         for r in rows:
             r["host"] = HOST
@@ -296,12 +246,6 @@ def cmd_backfill_accounts(a):
     for k, v in sorted(r["accounts"].items(), key=lambda kv: -kv[1]):
         print(f"  계정 {k[:8]}…  {v:,}건")
     return 0
-
-
-def transcript_family(path):
-    """본 트랜스크립트 + 서브에이전트 기록."""
-    base = path[:-6] if path.endswith(".jsonl") else path
-    return [path] + sorted(glob.glob(base + "/subagents/*.jsonl"))
 
 
 # ---------------------------------------------------------------- OTel / 한도
@@ -403,7 +347,7 @@ def cmd_hook(a):
                     print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": msg}}, ensure_ascii=False))
             tp = p.get("transcript_path")
             if tp and os.path.isfile(tp) and a.event in ("Stop", "SubagentStop", "SessionEnd", "PreCompact", "UserPromptSubmit"):
-                for f in transcript_family(tp):
+                for f in agents.family(tp):
                     ingest_transcript(conn, f)
             if a.event in ("Stop", "SessionEnd"):
                 ingest_otel(conn)
@@ -417,7 +361,7 @@ def cmd_hook(a):
 
 def cmd_ingest(a):
     conn = connect(timeout=10)
-    files = glob.glob(os.path.join(HOME, ".claude/projects/*/*.jsonl")) + glob.glob(os.path.join(HOME, ".claude/projects/*/*/subagents/*.jsonl"))
+    files = agents.all_transcript_files(HOME)
     if not a.all:
         cut = time.time() - a.days * 86400
         files = [f for f in files if os.path.getmtime(f) >= cut]
@@ -448,7 +392,7 @@ def _masker(a, c):
     return cs.load_masker(c)
 
 
-AGENT_ENV_MARKERS = ("CLAUDECODE", "GEMINI_CLI", "DONGHANS_AGENT")   # 에이전트 셸 도구가 설정하는 환경변수(보조 표식)
+AGENT_ENV_MARKERS = agents.ENV_MARKERS   # 에이전트 셸 도구가 설정하는 환경변수(보조 표식) — 어댑터별 표식 + DONGHANS_AGENT(래퍼가 설정)
 
 
 def is_agent_session():
@@ -457,7 +401,7 @@ def is_agent_session():
 
 def _human_only(what):
     """TTY 검사가 본체다: 에이전트의 셸 도구는 TTY 가 아니다. 환경변수 표식은 TTY 를 흉내 낸 실행(script·pty)까지 막는 보조 장치이고,
-    다른 에이전트를 쓰게 되면 그 에이전트의 표식을 AGENT_ENV_MARKERS 에 추가하거나 래퍼에서 DONGHANS_AGENT=1 을 설정한다."""
+    다른 에이전트를 쓰게 되면 그 어댑터(agents/<이름>.py)의 ENV_MARKERS 에 표식을 두거나 래퍼에서 DONGHANS_AGENT=1 을 설정한다."""
     if not (sys.stdin.isatty() and sys.stdout.isatty()) or is_agent_session():
         sys.exit(f"{what} 은(는) 사람이 터미널에서 직접 실행할 때만 쓸 수 있다")
 
@@ -820,9 +764,8 @@ def cmd_handoff_draft(a):
     if not sid:
         sys.exit("세션 ID 가 필요하다(--session 또는 CLAUDE_CODE_SESSION_ID)")
     conn = connect(timeout=10)
-    for f in glob.glob(os.path.join(HOME, f".claude/projects/*/{sid}.jsonl")):  # 가장 최근 대화까지 반영
-        for g in transcript_family(f):
-            ingest_transcript(conn, g)
+    for g in agents.session_family(HOME, sid):  # 가장 최근 대화까지 반영
+        ingest_transcript(conn, g)
     conn.commit()
     sess = conn.execute("SELECT session_id, repo_url, cwd FROM sessions WHERE session_id LIKE %s", (sid + "%",)).fetchall()
     if len(sess) != 1:
