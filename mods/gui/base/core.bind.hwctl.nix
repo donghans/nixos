@@ -10,53 +10,31 @@
     ...
   }: let
     # == Hardware Control Scripts ==
-    # 볼륨 조절 및 알림 스크립트
-    volumeControl = pkgs.writeShellScriptBin "vol-control" ''
-      case $1 in
-        up) ${pkgs.wireplumber}/bin/wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+ ;;
-        down) ${pkgs.wireplumber}/bin/wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- ;;
-        mute) ${pkgs.wireplumber}/bin/wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle ;;
-        mic)
-          ${pkgs.wireplumber}/bin/wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle
-          if ${pkgs.wireplumber}/bin/wpctl get-volume @DEFAULT_AUDIO_SOURCE@ | grep -q "MUTED"; then STATE="Muted"; else STATE="On"; fi
-          ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:microphone -u low "Microphone" "$STATE"
-          exit 0 ;;
-      esac
+    # 순수 쉘 스크립트 본문은 mods/_tools/desktop/hwctl/*.sh (자리표시자 목록은 그 폴더의 README.md).
+    # `@이름@` 만 치환한다(replaceVars 는 wpctl 예약어 @DEFAULT_AUDIO_SINK@ 때문에 못 씀).
+    hwctlDir = ../../_tools/desktop/hwctl;
+    hwctlSh = name: subst: builtins.replaceStrings (builtins.attrNames subst) (builtins.attrValues subst) (builtins.readFile (hwctlDir + "/${name}.sh"));
+    notifySend = "${pkgs.libnotify}/bin/notify-send";
 
-      VOL=$(${pkgs.wireplumber}/bin/wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print int($2*100)}')
-      MUTE=$(${pkgs.wireplumber}/bin/wpctl get-volume @DEFAULT_AUDIO_SINK@ | grep -q "MUTED" && echo " (Muted)" || echo "")
-      ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:volume -h int:value:"$VOL" -u low "Volume" "$VOL%$MUTE"
-    '';
+    # 볼륨 조절 및 알림 스크립트
+    volumeControl = pkgs.writeShellScriptBin "vol-control" (hwctlSh "vol-control" {
+      "@wpctl@" = "${pkgs.wireplumber}/bin/wpctl";
+      "@notify_send@" = notifySend;
+    });
 
     # 밝기 조절 및 알림 스크립트
-    brightnessControl = pkgs.writeShellScriptBin "brt-control" ''
-      case $1 in
-        up) ${pkgs.brightnessctl}/bin/brightnessctl set 5%+ ;;
-        down) ${pkgs.brightnessctl}/bin/brightnessctl set 5%- ;;
-      esac
-
-      BRT=$(${pkgs.brightnessctl}/bin/brightnessctl -m | cut -d, -f4 | tr -d '%')
-      ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:brightness -h int:value:"$BRT" -u low "Brightness" "$BRT%"
-    '';
+    brightnessControl = pkgs.writeShellScriptBin "brt-control" (hwctlSh "brt-control" {
+      "@brightnessctl@" = "${pkgs.brightnessctl}/bin/brightnessctl";
+      "@notify_send@" = notifySend;
+    });
 
     # 덮개를 닫으면 화면을 끄고(백라이트 0), 열면 원래 밝기로 복원. dpms(화면 출력 끄기/켜기)는 쓰지 않는다:
     # 이 기기(i915 + Hyprland 0.55)에서 `dpms enable` 뒤에 화면이 다시 켜지지 않고 까맣게 남아(커널은 On, 백라이트 정상) hyprlock 이 떠 있어도 안 보였고
     # tty 를 옮겼다 와야 복구됐다(2026-10-17 잠금 없이도 재현). 백라이트만 쓰면 모드 재설정이 없다.
     # 밝기는 닫을 때 한 번만 저장(이미 0 이면 덮어쓰지 않음 → 닫힘이 두 번 와도 원래 밝기를 잃지 않음).
-    lidScreen = pkgs.writeShellScriptBin "lid-screen" ''
-      f="''${XDG_RUNTIME_DIR:-/tmp}/lid_brightness"
-      b=${pkgs.brightnessctl}/bin/brightnessctl
-      case $1 in
-        off)
-          cur=$($b get)
-          if [ "$cur" -gt 0 ] 2>/dev/null; then echo "$cur" > "$f"; fi
-          $b -q set 0
-          ;;
-        on)
-          if [ -s "$f" ]; then $b -q set "$(cat "$f")" && rm -f "$f"; fi
-          ;;
-      esac
-    '';
+    lidScreen = pkgs.writeShellScriptBin "lid-screen" (hwctlSh "lid-screen" {
+      "@brightnessctl@" = "${pkgs.brightnessctl}/bin/brightnessctl";
+    });
 
     # 덮개 정책(사용 모드 허브의 소비자): 허브가 발행한 `posture get lid` 가 바뀌면 화면(백라이트)을 끄고 켜고, 호스트의 추가 명령(전원 프로필 등)을 실행한다.
     # 덮개 상태의 출처가 허브 한 곳이라 로그인/reload 후에도, 힌지 이벤트와 겹쳐도 같은 코드로 맞춰진다(마지막으로 적용한 값은 $XDG_RUNTIME_DIR/lid_applied 에 기록해 바뀔 때만 실행).
@@ -91,18 +69,16 @@
       field,
       lockedMsg,
     }:
-      pkgs.writeShellScriptBin bin ''
-        if [ "$(${config.posture.cli}/bin/posture get mode)" != laptop ]; then
-          ${pkgs.libnotify}/bin/notify-send -u low "${label}" "${lockedMsg}"
-          exit 0
-        fi
-        cur=$(${inputPolicy}/bin/hypr-input-policy --print | cut -d' ' -f${toString field})
-        if [ "$cur" = true ]; then new=false; shown=Disabled; else new=true; shown=Enabled; fi
-        mkdir -p "$HOME/.local/state/hypr"
-        echo "$new" > "$HOME/.local/state/hypr/${file}"
-        ${inputPolicy}/bin/hypr-input-policy
-        ${pkgs.libnotify}/bin/notify-send -h string:x-canonical-private-synchronous:${bin} -u low "${label}" "$shown"
-      '';
+      pkgs.writeShellScriptBin bin (hwctlSh "toggle" {
+        "@posture@" = "${config.posture.cli}/bin/posture";
+        "@notify_send@" = notifySend;
+        "@input_policy@" = "${inputPolicy}/bin/hypr-input-policy";
+        "@bin@" = bin;
+        "@label@" = label;
+        "@file@" = file;
+        "@field@" = toString field;
+        "@locked_msg@" = lockedMsg;
+      });
     toggleTouchpad = mkToggle {
       bin = "hypr-toggle-touchpad";
       label = "Touchpad";
