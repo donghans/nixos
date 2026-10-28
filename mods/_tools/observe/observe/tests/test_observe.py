@@ -12,6 +12,19 @@ from harness import checker
 check, finish = checker()
 os.makedirs(core.DATA_DIR, exist_ok=True)
 
+# --- 열 센서(공변량용): 가짜 sysfs 로 type 별 최댓값·NVMe·읽기 실패 건너뜀
+_fs = os.path.join(TMP, "fakesys"); _old_sys = col.SYS; col.SYS = _fs
+for _i, (_t, _v) in enumerate((("x86_pkg_temp", "41000"), ("acpitz", "30500"), ("acpitz", "35000"), ("bad", "없음"))):
+    _d = os.path.join(_fs, "class", "thermal", f"thermal_zone{_i}"); os.makedirs(_d)
+    open(os.path.join(_d, "type"), "w").write(_t + "\n"); open(os.path.join(_d, "temp"), "w").write(_v + "\n")
+_h = os.path.join(_fs, "class", "hwmon", "hwmon3"); os.makedirs(_h)
+open(os.path.join(_h, "name"), "w").write("nvme\n"); open(os.path.join(_h, "temp1_input"), "w").write("38900\n")
+_th = col.thermal_info()
+check("열 센서: type 별 °C, 같은 type 은 최댓값, 읽기 실패 type 은 빠짐", _th == {"x86_pkg_temp": 41.0, "acpitz": 35.0, "nvme": 38.9}, str(_th))
+col.SYS = os.path.join(TMP, "nosys")
+check("열 센서: 센서가 없으면 None", col.thermal_info() is None)
+col.SYS = _old_sys
+
 # --- 제어 파일
 ctl = core.read_control()
 check("제어 파일이 없으면 기본값(꺼짐, L0)", ctl["enabled"] is False and ctl["level"] == "L0" and ctl["interval_s"]["L0"] == 30)

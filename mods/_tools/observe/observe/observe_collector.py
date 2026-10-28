@@ -447,9 +447,25 @@ class Sampler:
                       "boot": rd(f"{PROC}/sys/kernel/random/boot_id")[:8], "quirks": quirks_tag(rd(f"{PROC}/cmdline")),
                       "gpu_rpm": next((rd(f) for f in glob.glob(f"{SYS}/class/drm/card*/device/power/runtime_status")), None),
                       "audio_rpm": rd(f"{SYS}/bus/pci/devices/0000:00:1f.3/power/runtime_status") or None,
-                      "psr": psr_info()}
+                      "psr": psr_info(), "temp": thermal_info()}
         self.prev = cur
         return out
+
+
+def thermal_info():
+    """열 센서(°C): thermal_zone 의 type 별 값(같은 type 이 여러 개면 최댓값)과 NVMe hwmon. 없으면 None.
+    전력 해석에서 온도를 공변량으로 쓰려고(R2) 표본마다 남긴다 — 센서가 안 읽히면 그 키만 빠진다."""
+    out = {}
+    for z in glob.glob(f"{SYS}/class/thermal/thermal_zone*"):
+        try: c = round(int(rd(z + "/temp")) / 1000, 1)
+        except ValueError: continue
+        k = rd(z + "/type") or os.path.basename(z)
+        out[k] = max(out.get(k, c), c)
+    for h in glob.glob(f"{SYS}/class/hwmon/hwmon*"):
+        if rd(h + "/name") != "nvme": continue
+        try: out["nvme"] = max(out.get("nvme", -1000), round(int(rd(h + "/temp1_input")) / 1000, 1))
+        except ValueError: pass
+    return out or None
 
 
 def psr_info():
