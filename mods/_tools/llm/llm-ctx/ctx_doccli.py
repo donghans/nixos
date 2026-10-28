@@ -11,6 +11,10 @@
   watch     이 세션의 뷰를 지켜보다 직접 수정되면 한 줄로 알린다(Monitor 로 띄운다).
   sync      (동기화 담당) 인박스의 제안을 검사해 반영한다. 세션 밖에서 서비스로 돈다.
   cleanup   끝난 세션의 낡은 뷰를 지운다.
+  import-docs   폴더의 .md 를 문서로 반입한다(제안 경로 — 동기화 담당이 검사해 반영). 원본은 건드리지 않는다.
+  import-files  폴더의 비 md 자료(json·log·html·스크립트 등)를 `files` 영역에 복사한다(서버 호스트에서만; 스크린샷·비밀은 건너뜀).
+  files     `files` 영역의 목록을 보인다. 읽기만 한다.
+  audit     프로젝트 폴더에서 git 이 무시하는데 ctx 에 없는 작업 자료를 찾는다. 읽기만 한다.
   init      (사람만) 프로젝트를 매니페스트에 등록하고 저장소를 만든다.
 """
 import argparse
@@ -257,6 +261,150 @@ def cmd_sync(a):
     return 0
 
 
+# ---------------------------------------------------------------- 반입·탐지(파편화 정리)
+def _writer_host() -> bool:
+    """자료 영역(files)은 서버 호스트(동기화 담당이 있는 곳)에서만 쓴다 — 노트북에서 쓰면 두 호스트의 files 저장소가 갈라진다."""
+    forced = os.environ.get("CTX_ALLOW_FILES_WRITE")   # "1" 허용 · "0" 금지(시험) · 없으면 호스트 판별
+    if forced in ("0", "1"):
+        return forced == "1"
+    return subprocess.run(["systemctl", "--user", "cat", "ctx-doc-sync.service"], capture_output=True).returncode == 0
+
+
+def _need_masker():
+    try:
+        with H.connect(timeout=3, readonly=True) as c:
+            return H.load_masker(c)
+    except Exception as e:
+        sys.exit(f"비밀 검사기를 못 써서(DB 연결 실패 — {type(e).__name__}) 반입하지 않는다(fail-closed)")
+
+
+def _doc_name(prefix: str, rel: str) -> str | None:
+    parts = [x.lstrip(".") for x in rel[:-3].split("/")]
+    if any(not x for x in parts):
+        return None
+    return "/".join(([prefix.strip("/")] if prefix else []) + parts)
+
+
+def cmd_import_docs(a):
+    store, proj = _project(a)
+    sid = _need_session(a)
+    src = os.path.abspath(a.src)
+    if not os.path.isdir(src):
+        sys.exit(f"폴더가 아니다: {src}")
+    masker = None if a.dry_run else _need_masker()
+    bodies = st.ctx_body_hashes(store, proj)
+    label = a.origin_label or os.path.basename(src)
+    rows = {"same": [], "proposed": [], "held": [], "name-bad": [], "skip-nonmd": 0}
+    queued = []
+    for p, rel in st.walk_files(src):
+        if not rel.endswith(".md"):
+            rows["skip-nonmd"] += 1
+            continue
+        kind, why = st.classify_file(p, masker)
+        if kind == "held":
+            rows["held"].append((rel, why)); continue
+        if kind != "ok":
+            continue
+        text = open(p, encoding="utf-8", errors="replace").read()
+        if st.sha(text) in bodies:
+            rows["same"].append((rel, "본문이 이미 ctx 에 있다")); continue
+        name = _doc_name(a.prefix, rel)
+        if not name or st.valid_name(name):
+            rows["name-bad"].append((rel, st.valid_name(name or "") or "이름을 만들 수 없다")); continue
+        kd = a.kind or ("qa" if rel.startswith("qa/") else "note")
+        if os.path.exists(st.doc_path(store, proj, kd, name)):
+            rows["same"].append((rel, f"{kd}/{name} 이 이미 있다")); continue
+        meta = {"provenance": f"이관 {time.strftime('%F')} — {label}/{rel}", "origin_path": f"{label}/{rel}", "source_of_truth": "file"}
+        queued.append((rel, kd, name, st.compose(meta, text)))
+    if a.dry_run:
+        rows["proposed"] = [(r, f"{k}/{n}") for r, k, n, _ in queued]
+    else:
+        pids = []
+        for rel, kd, name, body in queued:
+            code, msg, pid = st.propose(store, sid, H.HOST, proj, kd, name, body, None)
+            if code:
+                rows["held"].append((rel, msg)); continue
+            pids.append((rel, f"{kd}/{name}", pid))
+        if os.environ.get("CTX_SYNC_INLINE"):
+            _inline_sync(store)
+        else:
+            _wake_worker()
+        end = time.time() + float(a.wait)
+        for rel, tgt, pid in pids:
+            r = st.wait_result(store, pid, max(0.2, end - time.time()))
+            if r and r["status"] in ("applied", "same"):
+                rows["proposed"].append((rel, tgt))
+            else:
+                rows["held"].append((rel, f"{tgt}: " + (r["msg"] if r else "시간 안에 처리되지 않음(대기 중일 수 있다 — `ctx doc status`)")))
+    print(f"프로젝트 {proj} · 원본 {src}" + (" · (dry-run)" if a.dry_run else ""))
+    print(f"반영{'할 것' if a.dry_run else ''} {len(rows['proposed'])} · 이미 있음 {len(rows['same'])} · 보류 {len(rows['held'])} · 이름 불가 {len(rows['name-bad'])} · md 아님(건너뜀) {rows['skip-nonmd']}")
+    for k in ("held", "name-bad"):
+        for rel, why in rows[k]:
+            print(f"  {k}: {rel} — {why}")
+    if a.manifest:
+        with open(a.manifest, "w") as f:
+            for k in ("proposed", "same", "held", "name-bad"):
+                for rel, why in rows[k]:
+                    f.write(f"{k}\t{rel}\t{why}\t{st.file_hash(os.path.join(src, rel)) or '-'}\n")
+        print(f"목록: {a.manifest}")
+    return 0
+
+
+def cmd_import_files(a):
+    store, proj = _project(a)
+    if not a.dry_run and not _writer_host():
+        sys.exit("자료 영역(files)은 서버 호스트(동기화 담당이 있는 곳)에서만 쓴다 — 이 호스트에는 `ctx-doc-sync` 가 없다")
+    src = os.path.abspath(a.src)
+    if not os.path.isdir(src):
+        sys.exit(f"폴더가 아니다: {src}")
+    masker = _need_masker()
+    rep = st.import_files(store, proj, src, a.dest or "", masker, a.dry_run)
+    print(f"프로젝트 {proj} · 원본 {src} → files/{a.dest or ''}" + (" · (dry-run)" if a.dry_run else ""))
+    print(f"복사{'할 것' if a.dry_run else ''} {len(rep['imported'])} · 이미 같음 {len(rep['same'])} · 스크린샷(저장 안 함) {len(rep['images'])} · 보류 {len(rep['held'])}"
+          + (f" · 커밋 {rep['commit']}" if rep["commit"] else ""))
+    for rel, why in rep["held"][: a.limit]:
+        print(f"  보류: {rel} — {why}")
+    if len(rep["held"]) > a.limit:
+        print(f"  … 보류 {len(rep['held']) - a.limit}개 더(--limit 로 늘린다)")
+    if a.manifest:
+        with open(a.manifest, "w") as f:
+            for k in ("imported", "same", "images", "held"):
+                for rel, why in rep[k]:
+                    f.write(f"{k}\t{rel}\t{why}\t{st.file_hash(os.path.join(src, rel)) or '-'}\n")
+        print(f"목록: {a.manifest}")
+    return 0
+
+
+def cmd_files(a):
+    store, proj = _project(a)
+    rows = st.list_files(store, proj, a.prefix or "")
+    print(f"프로젝트 {proj} ({st.files_dir(store, proj)}) — 자료 {len(rows)}개 · {sum(s for _, s in rows) / 1e6:.2f}MB")
+    for rel, size in rows[: a.limit]:
+        print(f"- {rel} ({size:,}B)")
+    if len(rows) > a.limit:
+        print(f"… {len(rows) - a.limit}개 더(--limit)")
+    return 0
+
+
+def cmd_audit(a):
+    store, proj = _project(a)
+    root = a.root or H.git_meta(os.getcwd()).get("repo_root")
+    if not root or not os.path.isdir(root):
+        sys.exit("프로젝트 폴더를 알 수 없다 — `--root <경로>` 를 준다")
+    res = st.audit_project(store, proj, root, tuple(os.path.expanduser(p) for p in (a.paths or [])))
+    print(f"프로젝트 {proj} · 폴더 {root}")
+    print(f"ctx 에 있음 {res['present']} · **없음 {len(res['missing'])}** · 보류(비밀 후보·검사 불가) {len(res['held'])} · 스크린샷 {res['images']} · 재생성물·캐시 건너뜀 {res['skipped']}")
+    for rel in res["missing"][: a.limit]:
+        print(f"  없음: {rel}")
+    for rel in res["held"][: a.limit]:
+        print(f"  보류: {rel}")
+    if len(res["missing"]) > a.limit:
+        print(f"  … 없음 {len(res['missing']) - a.limit}개 더(--limit)")
+    if res["missing"]:
+        print("→ 문서(.md)는 `donghans ctx doc import-docs`, 자료는 `import-files` 로 ctx 에 둔다(노트북↔데스크톱 파편화 방지).")
+    return 0 if not res["missing"] else 2
+
+
 # ---------------------------------------------------------------- 사람 전용
 def cmd_init(a):
     H.human_only("ctx doc init(매니페스트 등록)")
@@ -302,3 +450,14 @@ def register(ctx_sub, helpers):
     p.add_argument("--watch", action="store_true", help="서비스로: 인박스를 지켜보며 반복"); p.add_argument("--push", action="store_true", help="remote 가 있는 프로젝트는 push(직전 비밀 검사)"); p.add_argument("--interval", type=float, default=30, help="--watch 의 주기 점검(초)"); p.set_defaults(f=cmd_sync)
     p = doc.add_parser("cleanup", help="끝난 세션의 낡은 뷰를 지운다"); p.add_argument("--days", type=float, default=7); p.set_defaults(f=cmd_cleanup)
     p = doc.add_parser("init", help="(사람만) 프로젝트를 매니페스트에 등록하고 저장소를 만든다"); p.add_argument("project"); p.add_argument("--repo-url"); p.add_argument("--owner", default="personal"); p.add_argument("--remote"); p.set_defaults(f=cmd_init)
+
+    p = doc.add_parser("import-docs", help="폴더의 .md 를 문서로 반입한다(제안 경로 — 동기화 담당이 검사해 반영; 원본은 건드리지 않는다)"); p.add_argument("src"); P(p); S(p)
+    p.add_argument("--prefix", default="local", help="문서 이름 앞에 붙일 경로(기본 local)"); p.add_argument("--kind", choices=st.KINDS, help="종류(기본: qa/ 로 시작하면 qa, 아니면 note)")
+    p.add_argument("--origin-label", help="머리말 origin_path 의 앞부분(기본: 폴더 이름)"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--wait", type=float, default=300, help="처리 결과를 기다리는 최대 초")
+    p.add_argument("--manifest", help="결과 목록(상태·경로·해시)을 이 파일에 쓴다"); p.set_defaults(f=cmd_import_docs)
+    p = doc.add_parser("import-files", help="폴더의 비 md 자료를 files 영역에 복사한다(서버 호스트 전용; 스크린샷·비밀·검사 불가 파일은 건너뛰고 보고)"); p.add_argument("src"); P(p)
+    p.add_argument("--to", dest="dest", default="", help="files 안의 하위 경로(기본: 폴더 바로 아래)"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--manifest", help="결과 목록(상태·경로·해시)을 이 파일에 쓴다"); p.set_defaults(f=cmd_import_files)
+    p = doc.add_parser("files", help="files 영역의 자료 목록(읽기만)"); P(p); p.add_argument("prefix", nargs="?"); p.add_argument("--limit", type=int, default=50); p.set_defaults(f=cmd_files)
+    p = doc.add_parser("audit", help="프로젝트 폴더에서 git 이 무시하는데 ctx 에 없는 작업 자료를 찾는다(읽기만)"); P(p); p.add_argument("--root", help="프로젝트 폴더(기본: 현재 git 저장소)")
+    p.add_argument("--paths", nargs="*", help="폴더 밖 추가 경로(예: ~/qa-shots)"); p.add_argument("--limit", type=int, default=30); p.set_defaults(f=cmd_audit)

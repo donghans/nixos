@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ctx_store 시험 — 작업 문서의 파일 저장소·읽기 뷰·제안(인박스)·동기화 담당. DB·네트워크 없이 임시 폴더와 git 만 쓴다.
 1부 순수(이름·머리말·매니페스트) 2부 제안→커밋·충돌·비밀·머리말 검사 3부 읽기 뷰(복사·직접 수정 감지·정리) 4부 push 검사 5부 inotify 감시."""
-import os, subprocess, sys, tempfile, threading, time
+import os, shutil, subprocess, sys, tempfile, threading, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker
@@ -215,6 +215,61 @@ os.remove(f"{STORE}/pushy/note/leak.md"); subprocess.run(["git", "-C", f"{STORE}
 subprocess.run(["git", "-C", f"{STORE}/pushy", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "rm leak"], check=True)
 ok, msg = cs.push_project(STORE, "pushy", FakeMasker())
 check("push: 현재 파일이 깨끗하면 push 한다(이력의 비밀은 별개 — 이 검사는 현재 추적 파일)", ok is True, msg)
+open(f"{STORE}/pushy/note/bin.dat", "wb").write(b"\x00\x01\x02png")
+cs.commit_file(STORE, "pushy", "note/bin.dat", "binary")
+ok, msg = cs.push_project(STORE, "pushy", FakeMasker())
+check("push: 비밀 검사를 할 수 없는 추적 파일(이진)이 있으면 거부 — 검사 없이 통과시키지 않는다", ok is False and "bin.dat" in msg and "검사를 할 수 없는" in msg, msg)
+subprocess.run(["git", "-C", f"{STORE}/pushy", "rm", "-q", "-f", "note/bin.dat"], check=True)
+subprocess.run(["git", "-C", f"{STORE}/pushy", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "rm bin"], check=True)
+open(f"{STORE}/pushy/note/big.md", "w").write("x" * (cs.MAX_BYTES + 10))
+cs.commit_file(STORE, "pushy", "note/big.md", "big")
+ok, msg = cs.push_project(STORE, "pushy", FakeMasker())
+check("push: 한도를 넘는 큰 추적 파일도 거부", ok is False and "big.md" in msg, msg)
+
+# ---------------------------------------------------------------- 4-2부: 자료 영역(files)·탐지기
+SRC = f"{TMP}/src"; os.makedirs(f"{SRC}/sub/node_modules/x"); os.makedirs(f"{SRC}/shots")
+w = lambda rel, data, mode="w": (os.makedirs(os.path.dirname(f"{SRC}/{rel}"), exist_ok=True), open(f"{SRC}/{rel}", mode).write(data))
+w("a.json", '{"ok": 1}\n'); w("sub/run.log", "정상 로그\n"); w("sub/node_modules/x/i.js", "skip\n"); w("shots/s.png", b"\x89PNG", "wb")
+w(".env", "A=1\n"); w("leak.json", '{"password": "hunter2hunter"}\n'); w("kr.txt", "비밀번호는 별도\n"); w("deck.pptx", b"PK\x03", "wb"); w("big.json", "x" * (cs.FILE_MAX_BYTES + 1))
+w("reg.json", "SECRET123\n"); os.symlink(f"{SRC}/a.json", f"{SRC}/ln.json")
+check("분류: 정상 json", cs.classify_file(f"{SRC}/a.json", FakeMasker())[0] == "ok")
+check("분류: 이미지는 저장하지 않는다", cs.classify_file(f"{SRC}/shots/s.png")[0] == "image")
+for rel, why in ((".env", "비밀·키 이름"), ("leak.json", "비밀 패턴"), ("kr.txt", "비밀 패턴"), ("deck.pptx", "검사할 수 없는"), ("big.json", "한도"), ("ln.json", "심볼릭"), ("reg.json", "등록된 비밀")):
+    k, r = cs.classify_file(f"{SRC}/{rel}", FakeMasker())
+    check(f"분류: {rel} 는 보류({why})", k == "held" and why in r, (k, r))
+rep = cs.import_files(STORE, "nixos", SRC, "proj", FakeMasker(), dry_run=True)
+check("files: dry-run 은 쓰지 않는다", not os.path.exists(cs.files_dir(STORE, "nixos")) and len(rep["imported"]) == 2, rep["imported"])
+rep = cs.import_files(STORE, "nixos", SRC, "proj", FakeMasker())
+check("files: 정상 2개만 복사(재생성 폴더·이미지·비밀·검사 불가는 제외)", sorted(r for r, _ in rep["imported"]) == ["a.json", "sub/run.log"], rep)
+check("files: 이미지 1개는 저장 안 함으로 센다", [r for r, _ in rep["images"]] == ["shots/s.png"])
+check("files: 보류 7개", len(rep["held"]) == 7, rep["held"])
+check("files: 바이트 동일", cs.file_hash(f"{STORE}/nixos/files/proj/a.json") == cs.file_hash(f"{SRC}/a.json"))
+check("files: 별도 저장소로 커밋", rep["commit"] and subprocess.run(["git", "-C", cs.files_dir(STORE, "nixos"), "log", "--oneline"], capture_output=True, text=True).stdout.count("\n") == 1)
+check("files: 바깥 저장소가 files/ 를 무시한다", "/files/" in open(f"{STORE}/nixos/.gitignore").read().splitlines() and subprocess.run(["git", "-C", f"{STORE}/nixos", "check-ignore", "-q", "files/proj/a.json"]).returncode == 0)
+check("files: 바깥 저장소 추적 목록에 자료가 없다", "files/" not in subprocess.run(["git", "-C", f"{STORE}/nixos", "ls-files"], capture_output=True, text=True).stdout)
+check("files: 다시 하면 전부 같음(멱등)", len(cs.import_files(STORE, "nixos", SRC, "proj", FakeMasker())["same"]) == 2)
+check("files: 원본은 그대로", os.path.exists(f"{SRC}/a.json") and os.path.exists(f"{SRC}/shots/s.png"))
+try:
+    cs.import_files(STORE, "nixos", SRC, "../x", FakeMasker()); bad = False
+except ValueError:
+    bad = True
+check("files: dest 에 .. 불가", bad)
+check("files: 목록", sorted(r for r, _ in cs.list_files(STORE, "nixos", "proj")) == ["proj/a.json", "proj/sub/run.log"])
+
+# 탐지기: 무시되는 비재생성 파일 중 ctx 에 없는 것
+PR = f"{TMP}/projroot"; os.makedirs(f"{PR}/docs"); os.makedirs(f"{PR}/node_modules/q"); os.makedirs(f"{PR}/.claude/handoffs")
+subprocess.run(["git", "init", "-q", PR], check=True)
+open(f"{PR}/.gitignore", "w").write("/docs/\nnode_modules/\n/.claude/handoffs/\n/out.json\n")
+open(f"{PR}/docs/n1.md", "w").write("문서 하나\n"); open(f"{PR}/docs/n2.md", "w").write("이미 ctx 에 있는 문서\n"); open(f"{PR}/docs/shot.png", "wb").write(b"\x89PNG")
+open(f"{PR}/docs/data.json", "w").write("{}\n"); open(f"{PR}/node_modules/q/i.js", "w").write("x"); open(f"{PR}/.claude/handoffs/h.md", "w").write("캐시\n"); open(f"{PR}/out.json", "w").write("[]\n")
+cs.propose(STORE, "sess-aud", "hostA", "nixos", "note", "aud/n2", cs.compose({"origin_path": "docs/n2.md"}, "이미 ctx 에 있는 문서\n"), None)
+cs.process_inbox(STORE, FakeMasker())
+res = cs.audit_project(STORE, "nixos", PR)
+check("탐지: ctx 에 없는 문서·자료만 「없음」", sorted(res["missing"]) == ["docs/data.json", "docs/n1.md", "out.json"], res)
+check("탐지: ctx 에 본문이 있는 문서는 「있음」, 이미지는 따로, 재생성물·캐시는 건너뜀", res["present"] == 1 and res["images"] == 1 and res["skipped"] >= 2, res)
+shutil.copy(f"{PR}/docs/data.json", f"{STORE}/nixos/files/data.json") if False else None
+os.makedirs(f"{STORE}/nixos/files/docs"); shutil.copy(f"{PR}/docs/data.json", f"{STORE}/nixos/files/docs/data.json")
+check("탐지: files 에 같은 바이트가 있으면 「있음」", "docs/data.json" not in cs.audit_project(STORE, "nixos", PR)["missing"])
 
 # ---------------------------------------------------------------- 5부: inotify 감시
 VR = f"{VIEWS}/sess-watch"

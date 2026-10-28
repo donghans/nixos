@@ -73,6 +73,15 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 
 **문서 파일 형식**: 맨 앞 HTML 주석 머리말(`<!-- ctx` … `-->`)에 `status`(active|done|dropped|unknown)·`scope`·`state`(draft|reviewed|adopted)·`adopted_to`·`provenance`·`env_dependent`·`source_of_truth`·`origin_path`·`updated_host`·`updated_at`. 값이 없으면 `unknown`. 본문(자기 `---` 머리말 포함)은 한 바이트도 바꾸지 않는다. base_hash 는 머리말을 포함한 파일 전체의 sha256.
 
+**자료 영역 `files` · 반입 · 탐지 (2026-10-28)** — 문서(`.md`)가 아닌 증거·데이터(json·log·html·스크립트 등)와 이미 프로젝트 폴더에 흩어진 작업 문서를 ctx 로 모으는 도구다(노트북↔데스크톱 파편화 방지). 규칙 한 문장: **git 이 추적하지 않는 작업 문서는 `ctx doc`(문서)·`import-files`(자료)로 ctx 에, 팀이 봐야 하는 문서만 저장소에 둔다.**
+- `ctx doc import-docs <폴더>`: 폴더의 `.md` 를 **제안 경로**로 반입(동기화 담당이 검사). 이름은 `local/<상대경로>`(숨김 폴더의 점은 뗀다), `qa/` 로 시작하면 qa 종류, 머리말 `origin_path`·`provenance` 에 원본 경로. 본문이 이미 ctx 에 있거나 같은 이름이 있으면 건너뛴다(멱등). 비밀 패턴이 걸리면 **보류**(건드리지 않음). 원본은 지우지 않는다. `--dry-run`·`--manifest`.
+- `ctx doc import-files <폴더> --to <하위경로>`: 비 md 자료를 `<프로젝트>/files/` 에 복사. **`files/` 는 별도 git 저장소(중첩)이고 바깥 저장소가 무시**하므로 remote 가 있는 프로젝트(nixos → GitHub)의 push 에 실릴 수 없다. files 저장소에는 remote 를 두지 않는다. **서버 호스트(동기화 담당이 있는 곳)에서만** 쓴다.
+  - 건너뜀: 스크린샷(png·jpg 등, 저장하지 않는다) · 이름이 비밀·키꼴(`.env*` `*.har` `storageState.json` `*.jks` `*.pem` `*.key` …) · 5MB 초과 · 검사할 수 없는 형식(pptx 등) · 심볼릭 링크 · 재생성 폴더(`node_modules` 등).
+  - 비밀 검사: 등록된 비밀 값 + 패턴(`ghp_`·`AKIA`·`BEGIN … PRIVATE`·`Bearer`·`eyJ`·`://user:pw@`·`password/token/secret/api_key :=`·`비밀번호`). 걸리면 그 파일만 보류. **한계**: 이미지는 검사할 수 없어 저장하지 않고, 등록 안 된 쿠키·JWT 가 든 json·로그는 패턴이 못 잡을 수 있다(사람이 훑는 선).
+- `ctx doc files [접두]`: 자료 목록. `ctx doc audit [--root 폴더] [--paths …]`: 프로젝트 폴더에서 **git 이 무시하는 비재생성 파일 중 ctx 에 없는 것**을 찾는다(md 는 본문 해시, 그 밖은 `files/<경로>` 바이트 비교; 없으면 종료 코드 2). 재생성물·캐시·비밀 이름은 세지 않는다.
+- 훅: 무시되는 프로젝트 경로에 `Write` 로 문서·자료꼴 새 파일을 만들면 PostToolUse 가 「ctx 로 두라」고 폴더당 한 번 안내한다(차단하지 않는다; Bash 로 쓰는 것은 못 잡으니 `audit` 가 보완).
+- 이번에 고친 기존 결함: push 직전 비밀 검사가 이진·한도 초과 추적 파일을 **검사 없이 통과**시켰다 → 이제 검사할 수 없는 추적 파일이 있으면 push 를 거부한다.
+
 **노트북**: 이번 범위는 읽기 뷰까지(`~/ctx` 를 `git pull` 로 받으면 된다). 노트북에는 동기화 담당을 깔지 않는다 — `propose` 는 대기 상태로 남고 처리되지 않는다.
 
 시험: `tests/test_ctx_store.py`(저장소·뷰·제안·충돌·비밀·push 검사·inotify — DB 없음), `tests/test_ctx_doccli.py`(임시 Postgres: CLI·훅). 구현: `ctx_store.py`(본체)·`ctx_doccli.py`(명령)·`ctx_toolhook.py`(도구 훅).

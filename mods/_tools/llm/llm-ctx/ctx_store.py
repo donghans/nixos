@@ -671,13 +671,196 @@ def push_project(store: str, project: str, masker=None, manifest: dict | None = 
     pd = os.path.join(store, project)
     files = _git(pd, "ls-files", check=False).stdout.splitlines()
     for rel in files:
-        text, _ = read_text(os.path.join(pd, rel))
-        if text is not None and masker.text(text) != text:
+        text, why = read_text(os.path.join(pd, rel))
+        if text is None:
+            if why != "빈 파일":   # 이진·너무 큰·UTF-8 이 아닌 파일은 검사할 수 없다 — 통과시키지 않는다(fail-closed)
+                return False, f"{project}/{rel}: 비밀 검사를 할 수 없는 파일이라({why}) push 하지 않는다"
+            continue
+        if masker.text(text) != text:
             return False, f"{project}/{rel}: 등록된 비밀 값이 들어 있어 push 하지 않는다"
     if _git(pd, "remote", "get-url", "origin", check=False).returncode != 0:
         _git(pd, "remote", "add", "origin", remote)
     r = _git(pd, "push", "-q", "origin", "HEAD", check=False)
     return (r.returncode == 0), (r.stderr.strip() or "push 했다")
+
+
+# ---------------------------------------------------------------- 자료 영역(files) — 문서(.md)가 아닌 증거·데이터
+# `<store>/<프로젝트>/files/` 는 **별도 git 저장소**(중첩)다. 바깥 저장소는 `/files/` 를 무시하므로 바깥 저장소의 push(예: nixos → GitHub)가 자료를 보낼 수 없다.
+# files 저장소에는 remote 를 두지 않는다. 문서 흐름(제안·동기화 담당)과 무관하게 서버 호스트에서 `import-files` 로만 들어온다.
+FILES_DIR = "files"
+FILE_MAX_BYTES = 5_000_000
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico")
+TEXT_EXTS = (".md", ".txt", ".json", ".jsonl", ".log", ".html", ".htm", ".css", ".js", ".mjs", ".cjs", ".ts", ".mts", ".tsx", ".jsx", ".py", ".sh",
+             ".tsv", ".csv", ".yml", ".yaml", ".toml", ".xml", ".svg", ".out", ".b64", ".diff", ".patch", ".sql", ".ini", ".conf")
+# 이름으로 거부(비밀·키·세션 상태) — 내용은 열지 않는다.
+DENY_NAME = re.compile(r"(^\.env($|\.)|\.har$|^storageState\.json$|\.jks$|\.pem$|\.key$|\.p12$|\.keystore$|^\.npmrc$|^\.netrc$|\.sqlite3?$|\.db$|^oidc_client_secret$|"
+                       r"^conversation\.log$|^client_secret.*\.json$|^id_(rsa|ed25519)|\.age$|^secrets?\.(json|ya?ml|toml)$|^key\.properties$)", re.I)
+# 재생성물·도구 관리 폴더 — 이관·탐지 대상이 아니다.
+REGEN_DIRS = frozenset({"node_modules", "build", "dist", ".dart_tool", ".gradle", ".next", ".nuxt", "target", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".idea",
+                        ".cache", ".astro", "model-cache", ".cxx", ".build", "worktrees", ".git", ".pytest_cache", ".mypy_cache", ".flutter-plugins-dependencies"})
+CACHE_NAMES = frozenset({"handoffs", "donghans-instructions.md", "donghans-override.md", ".donghans-instr-state.json", "settings.local.json", "scheduled_tasks.lock",
+                         "qa-extra", "resume-extra"})
+SECRET_PATTERNS = re.compile(r"(ghp_[A-Za-z0-9]{20}|AKIA[0-9A-Z]{12}|BEGIN [A-Z ]*PRIVATE|xox[bp]-|\bsk-[A-Za-z0-9]{20}|AIza[0-9A-Za-z_-]{20}|Bearer\s+[A-Za-z0-9._-]{12}|"
+                             r"eyJ[A-Za-z0-9_-]{10}|://[^/\s:@]+:[^@\s/]+@|(password|passwd|token|secret|api[_-]?key)[\x22']?\s*[:=]\s*[\x22']?\S{6}|비밀번호|비번)", re.I)
+
+
+def files_dir(store: str, project: str) -> str:
+    return os.path.join(store, project, FILES_DIR)
+
+
+def ensure_files_repo(store: str, project: str) -> str:
+    """files 저장소를 만들고 바깥 저장소가 무시하게 한다. 경로를 돌려준다."""
+    fd = files_dir(store, project)
+    os.makedirs(fd, exist_ok=True)
+    if not os.path.isdir(os.path.join(fd, ".git")):
+        _git(fd, "init", "-q", "-b", "main")
+    pd = os.path.join(store, project)
+    ensure_repo(pd)
+    gi = os.path.join(pd, ".gitignore")
+    cur = open(gi).read() if os.path.exists(gi) else ""
+    if "/files/" not in cur.splitlines():
+        open(gi, "w").write(cur + ("" if not cur or cur.endswith("\n") else "\n") + "/files/\n")
+        commit_file(store, project, ".gitignore", "ctx: files/ 는 별도 저장소(바깥 저장소가 무시)")
+    return fd
+
+
+def scan_text(text: str, masker=None) -> str | None:
+    """텍스트에서 비밀 후보를 찾는다. 없으면 None, 있으면 이유."""
+    if masker is not None and masker.text(text) != text:
+        return "등록된 비밀 값이 들어 있다"
+    m = SECRET_PATTERNS.search(text)
+    if m:
+        return f"비밀 패턴({m.group(0)[:3]}…)"
+    return None
+
+
+def classify_file(path: str, masker=None, max_bytes: int = FILE_MAX_BYTES) -> tuple[str, str]:
+    """('ok'|'image'|'held', 이유). image 는 저장하지 않는 스크린샷, held 는 사람이 봐야 해서 건드리지 않는 파일."""
+    name = os.path.basename(path)
+    ext = os.path.splitext(name)[1].lower()
+    if os.path.islink(path):
+        return "held", "심볼릭 링크"
+    if DENY_NAME.search(name):
+        return "held", "비밀·키 이름"
+    if ext in IMAGE_EXTS:
+        return "image", "스크린샷(저장하지 않는다)"
+    try:
+        size = os.path.getsize(path)
+    except OSError as e:
+        return "held", f"읽을 수 없음({e.strerror})"
+    if size > max_bytes:
+        return "held", f"{size:,}바이트 > 한도 {max_bytes:,}"
+    if ext not in TEXT_EXTS:
+        return "held", f"검사할 수 없는 형식({ext or '확장자 없음'})"
+    raw = open(path, "rb").read()
+    if b"\x00" in raw:
+        return "held", "이진 내용"
+    why = scan_text(raw.decode("utf-8", "replace"), masker)
+    return ("held", why) if why else ("ok", "")
+
+
+def walk_files(src: str):
+    """src 아래 일반 파일의 (절대 경로, 상대 경로). 재생성 폴더·.git 은 들어가지 않는다."""
+    for root, dirs, files in os.walk(src):
+        dirs[:] = sorted(d for d in dirs if d not in REGEN_DIRS)
+        for f in sorted(files):
+            p = os.path.join(root, f)
+            yield p, os.path.relpath(p, src).replace(os.sep, "/")
+
+
+def import_files(store: str, project: str, src: str, dest: str = "", masker=None, dry_run: bool = False, max_bytes: int = FILE_MAX_BYTES) -> dict:
+    """src 폴더의 파일을 `<project>/files/<dest>/<상대경로>` 로 복사하고 files 저장소에 한 번 커밋한다. 원본은 건드리지 않는다.
+    반환: imported · same · images · held(각 [(상대경로, 이유)]) · commit. dry_run 이면 쓰지 않는다."""
+    if dest and (dest.startswith("/") or any(p in ("", "..", ".") for p in dest.split("/"))):
+        raise ValueError("dest 는 `..`·절대 경로·빈 칸을 쓸 수 없다")
+    rep = {"imported": [], "same": [], "images": [], "held": [], "commit": None}
+    fd = files_dir(store, project)
+    plan = []
+    for p, rel in walk_files(src):
+        kind, why = classify_file(p, masker, max_bytes)
+        if kind == "image":
+            rep["images"].append((rel, why)); continue
+        if kind == "held":
+            rep["held"].append((rel, why)); continue
+        tgt = os.path.join(fd, dest, rel) if dest else os.path.join(fd, rel)
+        if os.path.exists(tgt) and file_hash(tgt) == file_hash(p):
+            rep["same"].append((rel, "")); continue
+        rep["imported"].append((rel, "")); plan.append((p, tgt))
+    if dry_run or not plan:
+        return rep
+    with _Lock(store):
+        ensure_files_repo(store, project)
+        for p, tgt in plan:
+            os.makedirs(os.path.dirname(tgt), exist_ok=True)
+            shutil.copyfile(p, tgt)
+        _git(fd, "add", "-A")
+        r = _git(fd, "commit", "-q", "-m", f"ctx files: {dest or '.'} 에서 {len(plan)}개 가져옴", check=False)
+        if r.returncode != 0 and "nothing to commit" not in (r.stdout + r.stderr):
+            raise RuntimeError(f"git commit 실패: {r.stderr.strip() or r.stdout.strip()}")
+        rep["commit"] = _git(fd, "rev-parse", "--short", "HEAD").stdout.strip() or None
+    return rep
+
+
+def list_files(store: str, project: str, prefix: str = "") -> list[tuple[str, int]]:
+    fd = files_dir(store, project)
+    out = []
+    for p, rel in walk_files(fd):
+        if rel.startswith(prefix):
+            out.append((rel, os.path.getsize(p)))
+    return out
+
+
+def ctx_body_hashes(store: str, project: str) -> set[str]:
+    """ctx 문서(모든 종류)의 본문 해시(머리말 제외) — 원본 파일이 이미 ctx 에 있는지 대조하는 열쇠."""
+    out = set()
+    for _k, _n, p in iter_docs(store, project):
+        text, _ = read_text(p)
+        if text is not None:
+            out.add(sha(split_header(text)[1]))
+    return out
+
+
+def audit_project(store: str, project: str, root: str, extra: tuple[str, ...] = ()) -> dict:
+    """프로젝트 폴더(root)의 **git 이 무시하는 비재생성 파일** 중 ctx 에 없는 것을 찾는다(읽기 전용).
+    md 는 본문 해시가 ctx 문서에 있으면, 그 밖은 `files/<root 기준 경로>` 가 같은 바이트로 있으면 「있음」. 스크린샷(이미지)은 따로 센다."""
+    bodies = ctx_body_hashes(store, project)
+    fd = files_dir(store, project)
+    r = subprocess.run(["git", "-C", root, "status", "--ignored=traditional", "--porcelain", "-z"], capture_output=True, text=True)
+    cands = []
+    for rec in r.stdout.split("\0"):
+        if rec.startswith("!! "):
+            cands.append(rec[3:])
+    res = {"present": 0, "missing": [], "images": 0, "held": [], "skipped": 0}
+
+    def visit(abs_p: str, rel: str):
+        name = os.path.basename(rel.rstrip("/"))
+        if name in REGEN_DIRS or name in CACHE_NAMES:
+            res["skipped"] += 1; return
+        if os.path.isdir(abs_p) and not os.path.islink(abs_p):
+            for e in sorted(os.listdir(abs_p)):
+                visit(os.path.join(abs_p, e), rel.rstrip("/") + "/" + e)
+            return
+        kind, why = classify_file(abs_p, None)
+        if kind == "image":
+            res["images"] += 1; return
+        if kind == "held" and (DENY_NAME.search(name) or why == "심볼릭 링크"):
+            res["skipped"] += 1; return
+        if name.endswith(".md"):
+            text, _ = read_text(abs_p)
+            if text is not None and sha(text) in bodies:
+                res["present"] += 1; return
+        else:
+            tgt = os.path.join(fd, rel)
+            if os.path.exists(tgt) and file_hash(tgt) == file_hash(abs_p):
+                res["present"] += 1; return
+        (res["held"] if kind == "held" else res["missing"]).append(rel if kind != "held" else f"{rel} ({why})")
+
+    for c in cands:
+        visit(os.path.join(root, c), c)
+    for e in extra:
+        if os.path.exists(e):
+            visit(e, os.path.relpath(e, root) if e.startswith(root) else e)
+    return res
 
 
 # ---------------------------------------------------------------- inotify (ctypes — 외부 의존성 없이)
