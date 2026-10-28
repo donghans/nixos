@@ -697,11 +697,13 @@ DENY_NAME = re.compile(r"(^\.env($|\.)|\.har$|^storageState\.json$|\.jks$|\.pem$
                        r"^conversation\.log$|^client_secret.*\.json$|^id_(rsa|ed25519)|\.age$|^secrets?\.(json|ya?ml|toml)$|^key\.properties$)", re.I)
 # 재생성물·도구 관리 폴더 — 이관·탐지 대상이 아니다.
 REGEN_DIRS = frozenset({"node_modules", "build", "dist", ".dart_tool", ".gradle", ".next", ".nuxt", "target", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".idea",
-                        ".cache", ".astro", "model-cache", ".cxx", ".build", "worktrees", ".git", ".pytest_cache", ".mypy_cache", ".flutter-plugins-dependencies"})
-CACHE_NAMES = frozenset({"handoffs", "donghans-instructions.md", "donghans-override.md", ".donghans-instr-state.json", "settings.local.json", "scheduled_tasks.lock",
+                        ".cache", ".astro", "model-cache", ".cxx", ".build", "worktrees", ".git", ".pytest_cache", ".mypy_cache", "dist-server", "ephemeral", "Pods", "DerivedData", ".symlinks", ".fvm"})
+CACHE_NAMES = frozenset({"gradlew", "gradlew.bat", "gradle-wrapper.jar", "local.properties", "Generated.xcconfig", "GeneratedPluginRegistrant.h", "GeneratedPluginRegistrant.m",
+                         "GeneratedPluginRegistrant.java", "flutter_export_environment.sh", ".flutter-plugins-dependencies", ".flutter-plugins",   # 도구가 만드는 파일
+                         "handoffs", "donghans-instructions.md", "donghans-override.md", ".donghans-instr-state.json", "settings.local.json", "scheduled_tasks.lock",
                          "qa-extra", "resume-extra"})
 SECRET_PATTERNS = re.compile(r"(ghp_[A-Za-z0-9]{20}|AKIA[0-9A-Z]{12}|BEGIN [A-Z ]*PRIVATE|xox[bp]-|\bsk-[A-Za-z0-9]{20}|AIza[0-9A-Za-z_-]{20}|Bearer\s+[A-Za-z0-9._-]{12}|"
-                             r"eyJ[A-Za-z0-9_-]{10}|://[^/\s:@]+:[^@\s/]+@|(password|passwd|token|secret|api[_-]?key)[\x22']?\s*[:=]\s*[\x22']?\S{6}|비밀번호|비번)", re.I)
+                             r"eyJ[A-Za-z0-9_-]{10}|://[^/\s:@]+:[^@\s/]+@|(password|passwd|token|secret|api[_-]?key)[\x22']?\s*[:=]\s*[\x22']?\S{6}|(비밀번호|비번)\s*[:=]\s*\S|(비밀번호|비번)\s*[`'\x22]\S)", re.I)
 
 
 def files_dir(store: str, project: str) -> str:
@@ -837,10 +839,17 @@ def audit_project(store: str, project: str, root: str, extra: tuple[str, ...] = 
         if name in REGEN_DIRS or name in CACHE_NAMES:
             res["skipped"] += 1; return
         if os.path.isdir(abs_p) and not os.path.islink(abs_p):
-            for e in sorted(os.listdir(abs_p)):
+            try:
+                entries = sorted(os.listdir(abs_p))
+            except OSError:   # 권한이 없는 폴더(예: 컨테이너 데이터)는 건너뛴다
+                res["skipped"] += 1; return
+            for e in entries:
                 visit(os.path.join(abs_p, e), rel.rstrip("/") + "/" + e)
             return
-        kind, why = classify_file(abs_p, None)
+        try:
+            kind, why = classify_file(abs_p, None)
+        except OSError:
+            res["skipped"] += 1; return
         if kind == "image":
             res["images"] += 1; return
         if kind == "held" and (DENY_NAME.search(name) or why == "심볼릭 링크"):

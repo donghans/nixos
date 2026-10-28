@@ -230,7 +230,7 @@ check("push: 한도를 넘는 큰 추적 파일도 거부", ok is False and "big
 SRC = f"{TMP}/src"; os.makedirs(f"{SRC}/sub/node_modules/x"); os.makedirs(f"{SRC}/shots")
 w = lambda rel, data, mode="w": (os.makedirs(os.path.dirname(f"{SRC}/{rel}"), exist_ok=True), open(f"{SRC}/{rel}", mode).write(data))
 w("a.json", '{"ok": 1}\n'); w("sub/run.log", "정상 로그\n"); w("sub/node_modules/x/i.js", "skip\n"); w("shots/s.png", b"\x89PNG", "wb")
-w(".env", "A=1\n"); w("leak.json", '{"password": "hunter2hunter"}\n'); w("kr.txt", "비밀번호는 별도\n"); w("deck.pptx", b"PK\x03", "wb"); w("big.json", "x" * (cs.FILE_MAX_BYTES + 1))
+w(".env", "A=1\n"); w("leak.json", '{"password": "hunter2hunter"}\n'); w("kr.txt", "비밀번호: abc12345\n"); w("deck.pptx", b"PK\x03", "wb"); w("big.json", "x" * (cs.FILE_MAX_BYTES + 1))
 w("reg.json", "SECRET123\n"); os.symlink(f"{SRC}/a.json", f"{SRC}/ln.json")
 check("분류: 정상 json", cs.classify_file(f"{SRC}/a.json", FakeMasker())[0] == "ok")
 check("분류: 이미지는 저장하지 않는다", cs.classify_file(f"{SRC}/shots/s.png")[0] == "image")
@@ -267,6 +267,12 @@ cs.process_inbox(STORE, FakeMasker())
 res = cs.audit_project(STORE, "nixos", PR)
 check("탐지: ctx 에 없는 문서·자료만 「없음」", sorted(res["missing"]) == ["docs/data.json", "docs/n1.md", "out.json"], res)
 check("탐지: ctx 에 본문이 있는 문서는 「있음」, 이미지는 따로, 재생성물·캐시는 건너뜀", res["present"] == 1 and res["images"] == 1 and res["skipped"] >= 2, res)
+os.makedirs(f"{PR}/docs/locked"); open(f"{PR}/docs/locked/x.json", "w").write("{}"); os.chmod(f"{PR}/docs/locked", 0)
+try:
+    res2 = cs.audit_project(STORE, "nixos", PR); ok_locked = res2["skipped"] >= 3
+finally:
+    os.chmod(f"{PR}/docs/locked", 0o755)
+check("탐지: 권한이 없는 폴더에서 죽지 않고 건너뛴다", ok_locked)
 shutil.copy(f"{PR}/docs/data.json", f"{STORE}/nixos/files/data.json") if False else None
 os.makedirs(f"{STORE}/nixos/files/docs"); shutil.copy(f"{PR}/docs/data.json", f"{STORE}/nixos/files/docs/data.json")
 check("탐지: files 에 같은 바이트가 있으면 「있음」", "docs/data.json" not in cs.audit_project(STORE, "nixos", PR)["missing"])

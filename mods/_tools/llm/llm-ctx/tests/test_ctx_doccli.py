@@ -182,7 +182,7 @@ check("push: 거부됐으니 원격은 그대로", subprocess.run(["git", "-C", 
 # 파편화 정리: import-docs · import-files · files · audit · 무시 경로 Write 안내
 IMP = f"{TMP}/imp"; os.makedirs(f"{IMP}/qa/e"); os.makedirs(f"{IMP}/.draft")
 open(f"{IMP}/a.md", "w").write("반입할 문서 A\n"); open(f"{IMP}/qa/e/b.md", "w").write("QA 문서 B\n"); open(f"{IMP}/.draft/c.md", "w").write("숨김 폴더 문서\n")
-open(f"{IMP}/sec.md", "w").write("계정 비밀번호 적힘\n"); open(f"{IMP}/data.json", "w").write('{"v": 1}\n'); open(f"{IMP}/shot.png", "wb").write(b"\x89PNG")
+open(f"{IMP}/sec.md", "w").write("계정 비밀번호: abc12345\n"); open(f"{IMP}/data.json", "w").write('{"v": 1}\n'); open(f"{IMP}/shot.png", "wb").write(b"\x89PNG")
 rc, out, err = run("import-docs", IMP, "--origin-label", "docs", "--dry-run", sid=A)
 check("import-docs: dry-run 은 쓰지 않고 목록만(비밀 패턴 문서는 보류)", rc == 0 and "반영할 것 3" in out and "보류 1" in out and "sec.md" in out and not os.path.exists(f"{STORE}/proj/note/local/a.md"), out + err)
 rc, out, err = run("import-docs", IMP, "--origin-label", "docs", "--manifest", f"{TMP}/m.tsv", sid=A)
