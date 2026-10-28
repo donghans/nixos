@@ -282,6 +282,9 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                         b = uikit.box(Panel(lambda w, h, key=key: self._ndchart(key, w, h), id=f"nd{i}"), title)
                         b.add_class("mid")
                         yield b
+                    b = uikit.box(Static(Text(" 이 범위에 Netdata 값이 없습니다 — Netdata 가 꺼져 있었거나 응답이 없어(관측 공백) 신호 표와 그래프 칸을 접었습니다.", style="grey50"), id="ndoff"), "Netdata")
+                    b.styles.height, b.styles.display = 4, "none"
+                    yield b
             with TabPane("호스트 [5]", id="fleet"):
                 with VerticalScroll():
                     yield uikit.box(Panel(lambda w, h: self._fstat(), id="fstat"), "호스트 비교 — 공유 저장소(claude_ctx)에 올라온 요약")
@@ -497,7 +500,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     def reload(self):
         self._busy = True
         self.call_from_thread(self._status, "불러오는 중…")
-        view = ud.load(self.rng, self.baseline)
+        view = ud.load(self.rng, self.baseline, usual=self._back)
         self.view = view
         self.cause = None
         self.sysdata = None
@@ -526,8 +529,8 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             self.cause = True                      # 데스크톱형은 ex.build(전력 설명)를 쓰지 않고 화면 쪽에서 view 로 비교한다
             self.call_from_thread(self.redraw)
         elif tab == "cause" and self.cause is None:
-            base = view["baseline"]
-            res = ex.build(view["all_rows"], view["spans"], view["range"].t0, view["range"].t1, base, lambda a, b: ndmod.snapshot(a, b)) if view["rows"] else False
+            t0, t1, base, _ = ud.cause_window(view)
+            res = ex.build(view["all_rows"], view["spans"], t0, t1, base, lambda a, b: ndmod.snapshot(a, b)) if view["rows"] else False
             self.cause = res
             self.call_from_thread(self.redraw)
         if tab == "system" and self.sysdata is None:
@@ -625,6 +628,12 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         fill("tnd", uv.nd_signal_rows(sysd, v), "이 탭을 열면 읽어 옵니다 / Netdata 응답 없음")
         if sysd is not None and sysd.get("snap"):
             self._box("tnd").border_subtitle = f"Netdata 데이터 {sysd['snap']['coverage'] * 100:.0f}% 있음"
+        # Netdata 가 없으면 빈 상자 여러 개 대신 한 줄 안내만 보인다(값이 한 번이라도 읽힌 뒤에만 판단 — 읽기 전에는 자리표시 그대로)
+        off = sysd is not None and not sysd.get("snap") and not any((sysd.get("series") or {}).values())
+        self._box("tnd").display = not off
+        for i in range(len(uv.nd_charts(self.prof))):
+            self.query_one(f"#nd{i}").display = not off
+        self.query_one("#ndoff").display = off
 
     def _box(self, tid):
         return self.query_one(f"#{tid}", DataTable).parent
@@ -636,11 +645,12 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             if view and res is not None:
                 self.query_one("#causehead", Static).update(uv.desktop_cause_head(view))
                 self.query_one("#causechg", Static).update(uv.desktop_cause_changes(view))
-                base = view["baseline"]
+                base = ud.cause_window(view)[2]
                 if base:
                     self.query_one("#causehead").parent.border_subtitle = "비교 기준 " + time.strftime("%H:%M", time.localtime(base[0])) + "~" + time.strftime("%H:%M", time.localtime(base[1])) + " (v 로 바꿈)"
             return
-        self.query_one("#causehead", Static).update(uv.cause_headline(res))
+        head, note = uv.cause_headline(res), (ud.cause_window(view)[3] if view else None)
+        self.query_one("#causehead", Static).update(Text(" " + note + "\n", style="grey70") + head if note and res else head)
         self.query_one("#causechg", Static).update(uv.cause_changes(res) if res else Text(""))
         secs = ex.sections(res, core.hms) if res else None
         for i, title in enumerate(ex.SECTION_TITLES):
@@ -648,7 +658,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                 continue
             w = self.query_one(f"#ex{i}", Static)
             w.update(Text("\n".join(secs[i][1])) if secs else Text(""))
-        base = view["baseline"] if view else None
+        base = ud.cause_window(view)[2] if view else None
         if base:
             self.query_one("#causehead").parent.border_subtitle = "비교 기준 " + time.strftime("%H:%M", time.localtime(base[0])) + "~" + time.strftime("%H:%M", time.localtime(base[1])) + " (v 로 바꿈)"
 

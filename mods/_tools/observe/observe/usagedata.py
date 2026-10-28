@@ -354,14 +354,15 @@ def collector_status(now=None):
 
 
 # ------------------------------------------------------------------ 조회
-def load(rng, baseline="prev", now=None):
+def load(rng, baseline="prev", now=None, usual=None):
     """범위를 읽어 보기 모델(dict)을 만든다. 표본이 없으면 rows=[] 로 돌려준다(오류 아님). 네트워크 조회는 하지 않는다(Netdata 는 탭에서 따로).
-    rng.follows_now 이면 끝을 지금으로 옮긴 범위로 읽는다."""
+    rng.follows_now 이면 끝을 지금으로 옮긴 범위로 읽는다. usual(Range)이 있으면 튄 순간 순위의 「평소」를 그 범위 표본으로 구한다(튄 순간으로 이동해 범위가 좁아져도 같은 기준)."""
     now = now if now is not None else time.time()
     rng = rng.at(now)
+    ur = usual.at(now) if usual else None
     base = baseline_for(rng, baseline)
-    lo = min(rng.t0, base[0] if base else rng.t0) - 120
-    all_rows = list(core.iter_jsonl(core.SAMPLE_DIR, "samples", lo, rng.t1 + 120))
+    lo = min(rng.t0, base[0] if base else rng.t0, ur.t0 if ur else rng.t0) - 120
+    all_rows = list(core.iter_jsonl(core.SAMPLE_DIR, "samples", lo, max(rng.t1, ur.t1 if ur else rng.t1) + 120))
     rows = [r for r in all_rows if rng.t0 <= r["t"] <= rng.t1]
     base_rows = [r for r in all_rows if base and base[0] <= r["t"] < base[1]]
     spans = tr.build_spans(list(core.iter_jsonl(core.state_dir(), "events", lo - 3600, rng.t1 + 120)))
@@ -372,7 +373,24 @@ def load(rng, baseline="prev", now=None):
             "all_rows": all_rows, "recs": recs, "spans": spans, "summary": summarize(rows, recs, spans, rng, now),
             "apps": ex.apps_table(rows), "procs": ex.proc_table(rows), "ebpf": ex.ebpf_table(rows),
             "span_rows": ex.span_table(spans, rows, rng.t0, rng.t1),
-            "spikes": sp.find_spikes(rows, spans, prof["psys"], all_rows=all_rows)}
+            "spikes": sp.find_spikes(rows, spans, prof["psys"], all_rows=all_rows, usual_rows=[r for r in all_rows if ur.t0 <= r["t"] <= ur.t1] if ur else None)}
+
+
+def _span_text(sec):
+    return f"{sec / 3600:.1f}시간" if sec >= 5400 else f"{max(1, round(sec / 60))}분"
+
+
+def cause_window(view):
+    """원인 탭이 비교할 (t0, t1, 기준 구간, 안내문). 비교 기준이 「바로 앞의 같은 길이」인데 그 구간에 표본이 하나도 없으면(수집이 막 시작돼 기록이 범위보다 짧음)
+    수집된 길이의 절반씩으로 줄여 「최근 L 대 그 앞 L」을 비교한다 — 범위 전체가 아니므로 안내문을 돌려준다. 줄일 수 없으면(10분 미만) 원래 범위·기준 그대로, 안내문 None."""
+    rng, base = view["range"], view["baseline"]
+    if view.get("baseline_kind") != "prev" or not view["rows"] or view["base_rows"]:
+        return rng.t0, rng.t1, base, None
+    half = (rng.t1 - min(r["t"] for r in view["rows"])) / 2
+    if half < 600:
+        return rng.t0, rng.t1, base, None
+    t0 = rng.t1 - half
+    return t0, rng.t1, (t0 - half, t0), f"수집이 {_span_text(half * 2)}뿐이라 범위 앞쪽에 비교할 표본이 없어, 최근 {_span_text(half)}을 그 앞 {_span_text(half)}과 비교합니다(범위 전체가 아님)."
 
 
 def stale(view, now=None):

@@ -41,8 +41,21 @@ def _window_mean(ts, p, lo, hi):
     return sum(vals) / len(vals) if len(vals) >= MIN_SAMPLES else None
 
 
-def find_spikes(rows, spans, psys, n=8, all_rows=None):
-    """rows(범위 안 표본)에서 가장 많이 튄 사건 n 개. all_rows(범위 밖 기준 구간까지 읽은 표본)가 있으면 앞뒤 이웃·다른 날 비교에 쓴다. 각 항목:
+def _bucket_means(rows, psys):
+    """(그룹, 5분 창 번호) → 평균 전력. 표본이 MIN_SAMPLES 보다 적은 창은 뺀다. 그룹은 노트북에서 AC 여부."""
+    acc = {}
+    for r in rows:
+        v = power_of(r, psys)
+        if v is None:
+            continue
+        g = bool((r.get("pw") or {}).get("ac")) if psys else 0
+        acc.setdefault((g, int(r["t"] // BUCKET_S)), []).append(v)
+    return {k: sum(v) / len(v) for k, v in acc.items() if len(v) >= MIN_SAMPLES}
+
+
+def find_spikes(rows, spans, psys, n=8, all_rows=None, usual_rows=None):
+    """rows(범위 안 표본)에서 가장 많이 튄 사건 n 개. all_rows(범위 밖 기준 구간까지 읽은 표본)가 있으면 앞뒤 이웃·다른 날 비교에 쓴다.
+    usual_rows 가 있으면 「평소(중앙값)·p90」을 그 표본으로 구한다 — 튄 순간 근처로 범위를 좁혀 봐도 같은 사건이 같은 기준으로 보이게(없으면 rows 자체). 각 항목:
     {rank, t0, t1, dur_s, power, peak, median, p90, excess_wh, before, after, other_days, other_n, cpu, apps[(앱, CPU%)], focus, ac}
     표본이 부족하거나 튄 곳이 없으면 []."""
     rows = sorted(rows, key=lambda r: r["t"])
@@ -58,12 +71,15 @@ def find_spikes(rows, spans, psys, n=8, all_rows=None):
         g = bool((r.get("pw") or {}).get("ac")) if psys else 0     # 노트북은 AC/방전을 따로 본다(전력 기준이 다름)
         buckets.setdefault((g, int(r["t"] // BUCKET_S)), []).append(i)
     means = {k: sum(p[i] for i in v) / len(v) for k, v in buckets.items() if len(v) >= MIN_SAMPLES}
+    smeans = _bucket_means(usual_rows, psys) if usual_rows else means
     stat = {}
-    for g in {k[0] for k in means}:
-        vals = sorted(m for k, m in means.items() if k[0] == g)
+    for g in {k[0] for k in smeans}:
+        vals = sorted(m for k, m in smeans.items() if k[0] == g)
         stat[g] = (statistics.median(vals), vals[min(len(vals) - 1, int(len(vals) * 0.9))])
     hot = {}
     for k, m in means.items():
+        if k[0] not in stat:
+            continue
         med = stat[k[0]][0]
         if m > med + max(MIN_ABOVE_W, MIN_ABOVE_FRAC * med):
             hot[k] = (m - med) * BUCKET_S / 3600

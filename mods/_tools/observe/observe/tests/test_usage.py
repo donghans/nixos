@@ -99,6 +99,29 @@ check("원인 결론: 기준이 없으면 변화를 말하지 않음", "기준�
 ch = uv.cause_changes(fake_res(1, 1, changes=[{"kind": "프로세스 CPU", "name": "vivaldi-bin", "cur": 4.3, "base": 1.8, "rel": 1.38, "unit": "코어%"}, {"kind": "시스템", "name": "프로세스 생성", "cur": 11.0, "base": 17.0, "rel": -0.35, "unit": "/s"}]))
 check("원인 변화표: 늘면 ▲ 빨강, 줄면 ▼ 초록, ABAB 안내", "▲" in ch.plain and "▼" in ch.plain and "ABAB" in ch.plain and any("red" in str(sp.style) for sp in ch.spans) and any("green" in str(sp.style) for sp in ch.spans))
 
+# --- 원인 탭: 앞 구간이 비면 수집된 길이의 절반씩으로 줄여 비교(범위 전체가 아님을 안내)
+def _cv(rows_t, kind="prev", base_rows=None, rng=None):
+    r = rng or ud.Range(1000.0, 1000.0 + 7 * 86400, "7일", True)
+    return {"range": r, "baseline": ud.baseline_for(r, kind), "baseline_kind": kind, "rows": [{"t": t} for t in rows_t], "base_rows": base_rows or []}
+_r = ud.Range(0.0, 7 * 86400.0, "7일", True)
+t0_, t1_, b_, n_ = ud.cause_window(_cv([5 * 86400 + 60 * i for i in range(0, 2 * 86400 // 60, 10)], rng=_r))
+check("원인 기준: 앞 구간이 비면 수집 길이의 절반씩(최근 L 대 그 앞 L)으로 줄임", n_ and abs((t1_ - t0_) - (b_[1] - b_[0])) < 1 and b_[1] == t0_ and t1_ == _r.t1 and t0_ > _r.t0, str((t0_, t1_, b_, n_)))
+check("원인 기준: 안내문에 수집 길이와 「범위 전체가 아님」", "수집이 48.0시간뿐" in (n_ or "") and "범위 전체가 아님" in n_ and "시간을" in n_ and "시간과" in n_, str(n_))
+check("원인 기준: 앞 구간에 표본이 있으면 그대로(안내 없음)", ud.cause_window(_cv([100.0, 200.0], base_rows=[{"t": 50.0}], rng=_r))[3] is None)
+check("원인 기준: 수집이 20분 미만이면 줄이지 않음(기존 안내)", ud.cause_window(_cv([_r.t1 - 600, _r.t1 - 10], rng=_r))[3] is None)
+check("원인 기준: 기준이 prev 가 아니면(어제·비교 안 함) 건드리지 않음", ud.cause_window(_cv([_r.t1 - 90000], kind="yday", rng=_r))[3] is None and ud.cause_window(_cv([_r.t1 - 90000], kind="none", rng=_r))[3] is None)
+
+# --- 튄 순간: usual_rows 가 있으면 평소를 그 표본으로(범위를 좁혀도 같은 사건이 같은 기준으로 보임)
+import usagespikes as _sp
+def _row(t, w): return {"t": float(t), "pw": {"pkg_w": w}}
+_wide = [_row(i * 60, 10.0) for i in range(0, 600)] + [_row(i * 60, 40.0) for i in range(600, 660)] + [_row(i * 60, 10.0) for i in range(660, 1200)]
+_zoom = [r for r in _wide if 30000 <= r["t"] <= 46000]
+_a = _sp.find_spikes(_zoom, [], False)
+_b = _sp.find_spikes(_zoom, [], False, usual_rows=_wide)
+check("튄 순간: usual_rows 로 평소를 넓은 범위에서 구하면 좁힌 범위에서도 사건이 같은 평소(10 W)로 보임", _b and abs(_b[0]["median"] - 10.0) < 0.01 and abs(_b[0]["power"] - 40.0) < 0.01, str(_b[:1]))
+check("튄 순간: usual_rows 없이 좁힌 범위만 보면 평소가 달라질 수 있음(기존 동작 유지)", _a is not None)
+check("튄 순간: usual_rows 에 해당 그룹 표본이 없어도 오류 없이 건너뜀", _sp.find_spikes(_zoom, [], False, usual_rows=[_row(0, 5.0)]) == [])
+
 # --- Textual 앱
 import usageui
 from textual.widgets import DataTable, TabbedContent, Input

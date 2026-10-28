@@ -457,7 +457,9 @@ def _avg(rows, f):
 def desktop_compare(view):
     """이 구간과 기준 구간의 전체 CPU·문맥 전환·패키지 전력 평균과, 앱별 CPU 변화(큰 순). 기준 구간이 없거나 표본이 없으면 None.
     반환 {"metrics": [(이름, 지금, 기준, 단위)], "apps": [(앱, 지금 CPU, 기준 CPU, 차이)]}. CPU 는 앱 표는 코어 1개=100%, 전체 CPU 는 전체 대비 %."""
-    rows, base = view["rows"], view["base_rows"]
+    t0, t1, bwin, _ = ud.cause_window(view)
+    rows = [r for r in view["rows"] if t0 <= r["t"] <= t1]
+    base = [r for r in view["rows"] if bwin and bwin[0] <= r["t"] < bwin[1]] if bwin != view["baseline"] else view["base_rows"]
     if not rows or not base:
         return None
     pk = lambda r: (r.get("pw") or {}).get("pkg_w")
@@ -596,6 +598,9 @@ def desktop_ctxsw(view, w, n=5):
 def desktop_cause_head(view):
     cmp = desktop_compare(view)
     t = Text()
+    note = ud.cause_window(view)[3]
+    if note and cmp is not None:
+        t.append(" " + note + "\n", style="grey70")
     if cmp is None:
         t.append(" 비교할 표본이 부족합니다 — 이 구간과 기준 구간(v 로 바꿈) 모두에 수집된 표본이 있어야 합니다.", style="grey50")
         return t
