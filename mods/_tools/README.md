@@ -13,7 +13,6 @@ Nix 모듈(`mods/sys|gui|devel`)이 설치해 실행하는 도구(Python·쉘)�
 | `llm/llm-usage/` | 5h·7d 한도 기록을 남기는 상태줄 스크립트(Claude Code 전용) | `llm/llm-usage/README.md` |
 | `observe/observe/` | 관측(observectl)·usageui(실시간·시계열·호스트 비교), `ab/` 에 번갈아(ABAB) 측정 틀과 시나리오 | `observe/observe/README.md` |
 | `observe/process-manager/` | 프로세스 정리 TUI(procui)와 LLM 용 CLI(procctl) | `observe/observe/README.md` 의 procui 절 |
-| `observe/power-ab/` | 전력 A/B 시험 실행기(`power_ab.py`) | 코드 머리말 주석 |
 | `observe/power-report/` | Netdata API 로 전력 그래프를 그리는 `power_report.py` | `_docs/content/how-to/monitoring.md` |
 | `desktop/notification-center/` | 알림 센터 | `desktop/notification-center/README.md` |
 | `desktop/posture/` | 힌지 각도로 laptop/tent/tablet 판정하는 자세 허브 | `desktop/posture/README.md` |

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """power-ab — 배터리로 방전 중일 때 설정(화면 주사율)별 소비 전력을 번갈아 재서 비교한다.
 
-  power-ab [--seconds 90] [--settle 15] [--rounds 2] [--scenarios 165,60,48] [--mouse] [--containers]
+  python3 mods/_experiments/power-ab/power_ab.py [--seconds 90] [--settle 15] [--rounds 2] [--scenarios 165,60,48] [--mouse] [--containers]
 
 - **전원 어댑터를 뽑은 상태(방전 중)에서만** 잴 수 있다(어댑터가 연결돼 있으면 배터리 전류가 0 이라 잴 게 없다).
 - 소비 전력 = 배터리 전압 × 전류(sysfs). 시나리오를 번갈아(165 → 60 → 48 → 165 → …) 여러 바퀴 재서 배터리 온도/잔량에 따른 느린 변화가 한 설정에 몰리지 않게 한다.
