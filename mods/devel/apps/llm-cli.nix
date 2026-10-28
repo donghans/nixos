@@ -12,7 +12,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
 }: let
   # 노트북에서는 Claude Code TUI 의 애니메이션(스피너 등)을 줄여서 켠다(`--settings` 로 한 키만 덧씌움; 사용자 settings.json 은 Claude 가 직접 쓰는 가변 파일이라 건드리지 않음).
   # 목적: (1) **측정 위생** — 이 저장소의 목적은 Wayland 세션 사용 시 배터리 최적화이고 Claude 를 VT2(kmscon)에 두는 것도 그 측정에 변수를 섞지 않으려는 것인데,
-  # VT2 가 활성일 때 TUI 가 화면을 갱신하면 약 +1.3 W 가 섞인다(2026-10-20 측정, power-evidence.md #34). (2) 화면 갱신이 줄면 PSR 등 모니터 출력 최적화가 더 잘 걸리므로
+  # VT2 가 활성일 때 TUI 가 화면을 갱신하면 약 +1.3 W 가 섞인다(2026-10-20 측정, ctx 장부 #34). (2) 화면 갱신이 줄면 PSR 등 모니터 출력 최적화가 더 잘 걸리므로
   # 모션 감소는 효과 측정 결과와 무관하게 유지한다(사용자 결정). `CLAUDE_MOTION=normal claude` 로 끌 수 있다.
   reduceMotion = config.workspace.type == "laptop";
 
@@ -189,7 +189,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   hooksReducedFile = pkgs.writeText "llm-ctx-hooks-reduced.json" (builtins.toJSON (hooksSettings
     // {
       prefersReducedMotion = true;
-      # 창 제목 갱신(스피너)도 끈다 — 화면 갱신 3→2/s·PSR 유지 57→69%·psys 약 −0.5 W(power-evidence.md #101). 제목 정보는 쓰지 않는다(사용자 결정 2026-10-25). `CLAUDE_MOTION=normal claude` 로 함께 풀린다.
+      # 창 제목 갱신(스피너)도 끈다 — 화면 갱신 3→2/s·PSR 유지 57→69%·psys 약 −0.5 W(ctx 장부 #101). 제목 정보는 쓰지 않는다(사용자 결정 2026-10-25). `CLAUDE_MOTION=normal claude` 로 함께 풀린다.
       env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE = "1";
     }));
 

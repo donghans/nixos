@@ -25,7 +25,7 @@
 | F8 | 그 정책은 이벤트를 놓쳐도 아무 때나 실행하면 현재 상태에 맞춰지는 **수준 기반·멱등** 소비자다(상태 파일과 `posture` CLI 값만 읽어 장치를 맞추는 코드를 읽고 낸 판단이며, `mods/_tools/desktop/posture/README.md` 에 그렇게 명시돼 있지는 않다). 힌지 모드 변화(`posture-apply`), 로그인, Hyprland reload 때 실행된다(`core.posture.nix`: `hyprland.start`, `config.reloaded`, `posture-apply.path`). | 직접확인(실행 시점) / 코드 읽고 추론(멱등성) |
 | F9 | 사용자 서비스 환경에는 `HYPRLAND_INSTANCE_SIGNATURE`·`WAYLAND_DISPLAY` 가 올라와 있어서(노트북 `systemctl --user show-environment`) 서비스에서 `hyprctl` 을 부를 수 있다. | 직접확인 |
 | F10 | 정책 `--print` 의 출력은 `모드 각도 키보드 터치패드 터치스크린` 5필드이고 두 곳이 파싱한다: 토글(99행, `cut -d' ' -f4/5`)과 메뉴(208행, `read -r mode angle kb tp ts`). 필드를 **뒤에 덧붙이면 208행의 마지막 변수 `ts` 에 합쳐져 깨진다**. | 직접확인 |
-| F11 | 이 노트북은 전력 시험을 자주 한다(`power-evidence.md`). 상시 폴링·주기 깨어남을 새로 넣으면 안 된다 — 이벤트 구동이어야 한다. | 미재확인 (사용자 CLAUDE.md 의 관측·전력 지침과 `power-evidence.md` 제목에서 추정. 상시 폴링 금지는 이 세션의 설계 판단) |
+| F11 | 이 노트북은 전력 시험을 자주 한다(ctx 장부 `note power-evidence-ledger`). 상시 폴링·주기 깨어남을 새로 넣으면 안 된다 — 이벤트 구동이어야 한다. | 미재확인 (사용자 CLAUDE.md 의 관측·전력 지침과 ctx 장부 제목에서 추정. 상시 폴링 금지는 이 세션의 설계 판단) |
 
 ## 3. 아직 모르는 것 (열린 질문 — 구현 후 관찰로 닫는다)
 - **Q1. 블루투스 키보드가 잠들거나(자동 절전) 전원이 꺼질 때** `uhid` 입력 장치가 사라지는가, BlueZ `Connected` 가 `no` 가 되는가? 이 세션에서 시험하려 했으나 사용자가 관찰 중 키보드를 써서 **시험하지 못했다.** 계획은 어느 쪽이어도 안전하도록 짰다(§4 의 판정은 `Connected` 를 본다). 구현 후 사용자가 일상에서 (1) 전원 끄기, (2) 방치로 자동 절전을 겪으며 `extkbd status` 와 저널로 확인한다.

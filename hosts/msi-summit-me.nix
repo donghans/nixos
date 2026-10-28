@@ -6,7 +6,7 @@ mkHostConfiguration ({
 }: let
   # 기본 커널 인자(2026-10-20 변경). 이전에는 공통 설정(core.optimize.nix)이 `pcie_aspm=off`·`acpi_osi=Linux` 를, 이 호스트가 `irqpoll` 을 더 넣었으나 모두 뺐다:
   #  - 같은 조건(사무실 Wi-Fi, 덮개 닫힘, VT2)의 부팅 간 비교에서 옛 인자가 있을 때 **배터리 기준 쉬는 전력이 낮은 상태 +0.09 W(구분 안 됨)·높은 상태 +0.21 W(약 4%)**,
-  #    패키지 절전도 얕았다(pc10 47→28%, pc8 45→30%). 누적 계량기로 확인한 배터리 V×I 기준(posture 가 아닌 power-evidence.md #28, #31).
+  #    패키지 절전도 얕았다(pc10 47→28%, pc8 45→30%). 누적 계량기로 확인한 배터리 V×I 기준(posture 가 아닌 ctx 장부 #28, #31).
   #  - irqpoll 은 터치패드 먹통 대응이었으나 진짜 원인(idma64 가 IRQ 27 을 공유)을 module_blacklist 로 막아 필요가 없어졌다(3시간 정상).
   #  - pcie_aspm=off / acpi_osi=Linux 는 일반 노트북용 기본값으로 들어간 것이고 이 기기에서 검증된 적이 없다.
   # 문제가 생기면(터치패드·키보드·밝기·PCIe 장치) 부팅 메뉴의 `legacy-quirks` 로 옛 구성으로 부팅할 수 있고, `with-*` 항목으로 인자를 하나씩 되살려 원인을 가릴 수 있다.
@@ -149,7 +149,7 @@ in {
 
     # == eDP 패널 PSR1 강제 켜기 ==
     # 펌웨어 VBT 가 이 패널의 PSR 을 꺼 두어(`PSR disabled by flag`) `i915.enable_psr=1` 이 무시된다. debugfs `i915_edp_psr_debug`=2 는 VBT 를 무시하게 하며
-    # 다음 모드셋부터 적용되므로 링크 재훈련으로 모드셋을 한 번 일으킨다(부팅 중 화면이 잠깐 깜빡임). 측정: psys −0.35 W·배터리 −0.44 W(_docs/…/power-evidence.md #54, #56).
+    # 다음 모드셋부터 적용되므로 링크 재훈련으로 모드셋을 한 번 일으킨다(부팅 중 화면이 잠깐 깜빡임). 측정: psys −0.35 W·배터리 −0.44 W(ctx 장부 #54, #56).
     # 화면 이상(깜빡임·잔상)이 보이면 이 서비스를 끄면 된다: `sudo systemctl disable --now psr-force`(끄면 다음 부팅부터 원래대로).
     systemd.services.psr-force = {
       description = "Force eDP PSR1 on (override VBT disable)";

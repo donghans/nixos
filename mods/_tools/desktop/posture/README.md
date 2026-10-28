@@ -1,6 +1,6 @@
 # 사용 모드(posture) — 힌지 각도로 laptop/tent/tablet 판정, 입력 장치 자동 전환
 
-> **용어 주의 (2026-10-21)**: 이 문서의 "깨어남/s"·"CPU %" 는 시기별로 도구가 달라(powertop · boot_settle/thread_top · 수집기) 서로 다른 양이다. 해당 수치에 `〔구표기 Ln〕` 를 붙였고 정의는 `power-evidence.md` 의 "용어·단위 정정표" 에 있다.
+> **용어 주의 (2026-10-21)**: 이 문서의 "깨어남/s"·"CPU %" 는 시기별로 도구가 달라(powertop · boot_settle/thread_top · 수집기) 서로 다른 양이다. 해당 수치에 `〔구표기 Ln〕` 를 붙였고 정의는 ctx 노트 `power-evidence`(`donghans ctx doc read --project nixos note power-evidence`)의 "용어·단위 정정표" 에 있다.
 
 MSI Summit E16 Flip(360도 힌지)에서 **힌지 각도 → 사용 모드(laptop / tent / tablet)** 를 판정해 한 곳에 발행하고, 소비자들이 그 값에 맞춰 동작한다. 2026-10-17 작업.
 

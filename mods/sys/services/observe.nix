@@ -2,7 +2,7 @@
 #  - 본체는 mods/_tools/observe/observe/ (설명은 파일 머리말과 mods/_tools/observe/observe/README.md).
 #  - 켜고 끄기: `observectl on [L0|L1]` / `observectl off` — 제어 파일(/var/lib/observe/control.json, 그룹 users 쓰기 가능)만 바꾼다.
 #    수집기는 systemd **path 유닛**이 제어 파일 변경/요청 디렉터리에 파일이 생길 때만 띄우고, 꺼져 있고 할 일이 없으면 15초 뒤 스스로 종료한다
-#    (꺼져 있는 동안 프로세스가 없으므로 측정에 영향을 주지 않는다. 켜져 있을 때의 오버헤드는 `observectl ab` 로 직접 재서 power-evidence.md 에 기록).
+#    (꺼져 있는 동안 프로세스가 없으므로 측정에 영향을 주지 않는다. 켜져 있을 때의 오버헤드는 `observectl ab` 로 직접 재서 ctx 장부에 기록).
 #  - 개인정보: 프로세스는 comm 과 exe 이름만, 명령 인자·URL·입력한 글자는 기록하지 않는다.
 #  - Netdata(1초/10초 간격 시스템 지표, 7일)는 그대로 둔다. observectl 는 Netdata 가 못 보는 것(스레드·깨움 원인·패키지 C-state·유틸리티 이벤트·실험 표지)을 맡는다.
 {mkMod, ...}:

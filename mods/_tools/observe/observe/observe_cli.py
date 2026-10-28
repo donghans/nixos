@@ -224,7 +224,7 @@ def cmd_window(a):
     print(f"{core.hms(rows[0]['t'])} ~ {core.hms(rows[-1]['t'])} · 표본 {len(rows)}개 · 그룹 기준 {a.by}")
     legacy = sum(1 for r in rows if r.get("legacy"))
     if legacy:
-        print(f"(옛 형식 표본 {legacy}개 포함 — 이름만 바뀐 값은 같게 읽음. 단 옛 표본의 프로세스별 자발적 전환은 메인 스레드만이라 멀티스레드 프로세스를 크게 과소 집계해서 '상위전환/s' 열에서 제외함. 용어는 power-evidence.md 정정표)")
+        print(f"(옛 형식 표본 {legacy}개 포함 — 이름만 바뀐 값은 같게 읽음. 단 옛 표본의 프로세스별 자발적 전환은 메인 스레드만이라 멀티스레드 프로세스를 크게 과소 집계해서 '상위전환/s' 열에서 제외함. 용어는 ctx 노트 power-evidence 정정표)")
     print("(상위전환/s 는 저장된 상위 프로세스(최대 16행)의 모든 스레드 자발적 문맥 전환 합으로 시스템 전체가 아님 · 전체CPU% 는 전체 CPU 대비(코어 1개=100% 가 아님) · pkg 는 CPU+GPU 패키지 전력)" if desk else "(V×I 열은 방전 중인 표본만 평균: 충전 중의 전류는 방전 전력이 아님 · 상위전환/s 는 저장된 상위 프로세스(최대 16행)의 모든 스레드 자발적 문맥 전환 합으로 시스템 전체가 아님 · 전체CPU% 는 전체 CPU 대비(코어 1개=100% 가 아님))")
     desk = not core.host_profile()["battery"]   # 데스크톱: V×I·psys·core·pc8/pc10 은 센서가 없어 열을 뺀다
     if desk:
