@@ -170,6 +170,10 @@ check("RAPL 계산: 10초에 20 J → 2 W, 패키지 0.5 W", abs(seg[0]["psys"] 
 seg = abab_rapl.parse("A\tx\t0 262143328000 0\t1000000000 262143328000 0\t2000000000 1000 0\n")
 check("RAPL 계산: 카운터 한 바퀴 돌아도 양수", abs(seg[0]["psys"] - 1850e-6) < 1e-6 and seg[0]["psys"] > 0, str(seg))
 check("RAPL 계산: 읽기 실패(빈 값) 줄은 건너뜀", abab_rapl.parse("A\tx\t1 \t2 \t3 \n") == [], "")
+seg = abab_rapl.parse("A\ta\t0 0 0\t10000000000 0 0\t20000000000 20000000 5000000\nB\tb\t20000000000 0 0\t30000000000 0 0\t40000000000 10000000 4000000\n")
+rep = abab_rapl.report(seg, 2.5)
+check("RAPL 분해: b=2.5 에서 psys +1.0 = 패키지 몫 +0.25 + 밖 몫 +0.75", "패키지 몫 +0.250 W" in rep and "밖(화면·Wi-Fi·SSD) 몫 +0.750 W" in rep, rep)
+check("RAPL 분해: b 를 주지 않으면 분해 줄이 없음", "분해" not in abab_rapl.report(seg), "")
 
 # --- 예제 스크립트가 문법·함수 계약을 지킴
 r = subprocess.run(["sh", "-n", os.path.join(ROOT, "ab", "netdata_abab.sh")])
