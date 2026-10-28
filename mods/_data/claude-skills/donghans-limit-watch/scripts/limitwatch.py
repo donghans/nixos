@@ -79,9 +79,11 @@ def status(a):
     try:
         recs = tail_records(a.file)
     except OSError as e:
-        print(f'못 쟀음: {a.file} 을 읽지 못함 ({e})'); return 1
+        msg = f'못 쟀음: {a.file} 을 읽지 못함 ({e})'
+        print(json.dumps({'error': msg}, ensure_ascii=False) if a.json else msg); return 1
     if not recs:
-        print('못 쟀음: 기록에 5h 값이 있는 레코드가 없음'); return 1
+        msg = '못 쟀음: 기록에 5h 값이 있는 레코드가 없음'
+        print(json.dumps({'error': msg}, ensure_ascii=False) if a.json else msg); return 1
     last = recs[-1]
     age = time.time() - last['t']
     win = [r for r in recs if r['fr'] == last['fr'] and r['t'] >= last['t'] - a.recent * 60]
