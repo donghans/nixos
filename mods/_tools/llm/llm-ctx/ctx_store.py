@@ -822,7 +822,7 @@ def ctx_body_hashes(store: str, project: str) -> set[str]:
     return out
 
 
-def audit_project(store: str, project: str, root: str, extra: tuple[str, ...] = ()) -> dict:
+def audit_project(store: str, project: str, root: str, extra: tuple[str, ...] = (), skip: tuple[str, ...] = ()) -> dict:
     """프로젝트 폴더(root)의 **git 이 무시하는 비재생성 파일** 중 ctx 에 없는 것을 찾는다(읽기 전용).
     md 는 본문 해시가 ctx 문서에 있으면, 그 밖은 `files/<root 기준 경로>` 가 같은 바이트로 있으면 「있음」. 스크린샷(이미지)은 따로 센다."""
     bodies = ctx_body_hashes(store, project)
@@ -836,7 +836,7 @@ def audit_project(store: str, project: str, root: str, extra: tuple[str, ...] = 
 
     def visit(abs_p: str, rel: str):
         name = os.path.basename(rel.rstrip("/"))
-        if name in REGEN_DIRS or name in CACHE_NAMES:
+        if name in REGEN_DIRS or name in CACHE_NAMES or any(rel.rstrip("/") == sk or rel.startswith(sk.rstrip("/") + "/") for sk in skip):
             res["skipped"] += 1; return
         if os.path.isdir(abs_p) and not os.path.islink(abs_p):
             try:

@@ -23,7 +23,7 @@ description: incus VM `qa-desktop`(Ubuntu GNOME Wayland)에서 사용자와 같�
 - 접속: `ssh -i ~/.ssh/qa_desktop_ed25519 qa@10.100.0.84`(비밀번호 없음). 살아 있는지: `timeout 6 ssh … echo alive`.
 - RUNNING 인데 ssh 가 `No route to host` → VM 크래시(원인 미확정, 조건은 `mods/_tools/services/qa-desktop/README.md`). VM 안에서 `journalctl -b -1` 로 직전 로그를 본 뒤 호스트에서 `incus restart qa-desktop --force`. **`incus exec` 는 VM 에이전트가 없어 안 된다.**
 - 실행: `~/qa-playwright/run.sh <스크립트.js>` — GUI 환경변수(Xwayland 인증 파일 등)를 매번 동적으로 잡는다. Playwright 1.63·node 22 를 **모든 프로젝트가 공유**한다.
-- 이름 규칙: 스크립트 `~/qa-playwright/flow_<프로젝트>/`, 산출물 `~/qa-shots/<프로젝트>/`, 임시 `/tmp/<프로젝트>-*`, 변경 전 값 기록 `~/<프로젝트>-qa-state/`. VM 안에서 띄우는 정적 서버 포트도 프로젝트별로 나눈다(쓰는 포트는 VM 에서 `ss -ltn` 으로 확인해 겹치지 않는 번호를 고른다). `~/qa-playwright/login.js` 같은 기존 로그인 헬퍼는 먼저 만든 프로젝트 전용이니 가져다 쓰지 말고 프로젝트별로 만든다.
+- 이름 규칙: 스크립트 `~/qa-playwright/flow_<프로젝트>/`, 산출물(임시) `~/qa-shots/<프로젝트>/`(**남길 가치가 있는 증거는 보고서에 설명하고 스크린샷은 보관하지 않는다 — 문서·로그는 ctx `import-files`, 홈에 계속 쌓지 않는다**), 임시 `/tmp/<프로젝트>-*`, 변경 전 값 기록 `~/<프로젝트>-qa-state/`. VM 안에서 띄우는 정적 서버 포트도 프로젝트별로 나눈다(쓰는 포트는 VM 에서 `ss -ltn` 으로 확인해 겹치지 않는 번호를 고른다). `~/qa-playwright/login.js` 같은 기존 로그인 헬퍼는 먼저 만든 프로젝트 전용이니 가져다 쓰지 말고 프로젝트별로 만든다.
 - 다른 프로젝트의 디렉터리·`package.json`·`node_modules` 는 고치지 않는다. apt·npm 업그레이드 금지(필요하면 사용자와 상대 QA 세션 합의 후).
 - **ssh 로 백그라운드 프로세스를 띄울 땐** `(cd <디렉터리>; setsid nohup <명령> > log 2>&1 < /dev/null &)` 형태로 한다. 표준 입출력을 물고 있으면 ssh 연결이 안 닫혀 명령이 멈춘다.
   흔한 실수: `cd … && setsid nohup … &` 는 `&&` 체인 전체가 백그라운드 서브셸이 되어 출력을 잡고 있으니 쓰지 않는다. 끝날 때까지 기다릴 땐 같은 ssh 안에서 `until grep -q DONE log; do sleep 2; done`.

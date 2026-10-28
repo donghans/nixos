@@ -391,7 +391,7 @@ def cmd_audit(a):
     root = a.root or H.git_meta(os.getcwd()).get("repo_root")
     if not root or not os.path.isdir(root):
         sys.exit("프로젝트 폴더를 알 수 없다 — `--root <경로>` 를 준다")
-    res = st.audit_project(store, proj, root, tuple(os.path.expanduser(p) for p in (a.paths or [])))
+    res = st.audit_project(store, proj, root, tuple(os.path.expanduser(p) for p in (a.paths or [])), tuple(a.skip or []))
     print(f"프로젝트 {proj} · 폴더 {root}")
     print(f"ctx 에 있음 {res['present']} · **없음 {len(res['missing'])}** · 보류(비밀 후보·검사 불가) {len(res['held'])} · 스크린샷 {res['images']} · 재생성물·캐시 건너뜀 {res['skipped']}")
     for rel in res["missing"][: a.limit]:
@@ -460,4 +460,4 @@ def register(ctx_sub, helpers):
     p.add_argument("--manifest", help="결과 목록(상태·경로·해시)을 이 파일에 쓴다"); p.set_defaults(f=cmd_import_files)
     p = doc.add_parser("files", help="files 영역의 자료 목록(읽기만)"); P(p); p.add_argument("prefix", nargs="?"); p.add_argument("--limit", type=int, default=50); p.set_defaults(f=cmd_files)
     p = doc.add_parser("audit", help="프로젝트 폴더에서 git 이 무시하는데 ctx 에 없는 작업 자료를 찾는다(읽기만)"); P(p); p.add_argument("--root", help="프로젝트 폴더(기본: 현재 git 저장소)")
-    p.add_argument("--paths", nargs="*", help="폴더 밖 추가 경로(예: ~/qa-shots)"); p.add_argument("--limit", type=int, default=30); p.set_defaults(f=cmd_audit)
+    p.add_argument("--paths", nargs="*", help="폴더 밖 추가 경로(예: ~/qa-shots)"); p.add_argument("--skip", nargs="*", help="세지 않을 하위 경로(예: librechat-original — 앱 실행 데이터)"); p.add_argument("--limit", type=int, default=30); p.set_defaults(f=cmd_audit)

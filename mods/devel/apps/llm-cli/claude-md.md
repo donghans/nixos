@@ -14,12 +14,15 @@
   (예: `mcr.microsoft.com/playwright` 이미지). 호스트에는 브라우저 바이너리를 받지 않도록
   `PUPPETEER_SKIP_DOWNLOAD`/`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`가 설정되어 있으니 해제하지 마세요.
 - `/tmp` 는 tmpfs 라 재부팅하면 지워집니다. 나중에 필요한 데이터(측정 결과, 작업 중간 산출물 등)는
-  재부팅이 필요한 작업(`nixup` 의 재부팅, `reboot` 등)을 사용자에게 요청하기 전에 먼저 디스크(저장소 문서나 `~/` 아래)로 백업해 두세요.
+  재부팅이 필요한 작업(`nixup` 의 재부팅, `reboot` 등)을 사용자에게 요청하기 전에 먼저 디스크로 백업해 두세요 — 팀이 읽을 문서는 저장소 문서로, **개인 작업 문서·증거는 `~/ctx`**(`donghans ctx doc propose`·`import-files`)로 두고 `~/` 의 임의 폴더에 새로 만들지 마세요.
 
 # 기록 원칙
 - 진행한 작업, 원인 파악 결과, 삽질 기록 등 project/domain 성격의 정보는
   Claude Code의 자동 메모리 시스템(`~/.claude/projects/.../memory/`)에 남기지 마세요.
-  대신 작업 중인 프로젝트 저장소 내 git 추적 가능한 문서(`_docs/`, README 등)로 남기세요.
+  대신 **팀이 읽어야 하는 것**(제품·명세·결함·결정)은 작업 중인 프로젝트 저장소 내 git 추적 가능한 문서(`_docs/`, README 등)로 남기고,
+  **git 이 추적하지 않는 개인 작업 문서**(계획·QA 기록·메모·조사·측정 결과·증거)는 프로젝트 폴더나 `~/` 임의 경로가 아니라 `~/ctx` 에 두세요
+  (`donghans-ctx` 스킬: 문서는 `donghans ctx doc propose`, md 가 아닌 증거·데이터는 `ctx doc import-files`). 노트북↔데스크톱 맥락 파편화를 막기 위한 규칙입니다.
+  `.gitignore`·`.git/info/exclude` 로 가려진 폴더에 문서를 새로 쌓지 마세요(이미 생긴 것은 `donghans ctx doc audit` 로 찾습니다). 노트북에서는 동기화 담당이 없어 `propose` 가 처리되지 않으니 `donghans-ctx` 스킬의 「노트북」 절을 따르세요.
 - 긴 조사·논의 끝에 나온 의도·이력·근거를 다음 세션·팀원도 읽을 문서로 남겨야 할 때는
   임의로 쓰지 말고 `donghans-doc-rigor` 스킬을 호출하세요(작성 시 고려사항·무맥락 검증 절차가 그 안에 있습니다).
 

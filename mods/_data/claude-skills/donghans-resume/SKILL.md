@@ -18,7 +18,7 @@ description: 새(또는 /clear 한) 세션에서 `/donghans-resume <고유번호
 5. **한국어 브리핑:** ① 한 줄 상태 ② 상시 지시(출처) ③ 미병합·미완 작업 ④ 열린 결정(추천 답, 사용자 결정 대기 vs 진행 중 방침 구분) ⑤ 다음 단계(순서·예상 비용·위험) ⑥ 확인하지 못한 것. 결정이 필요한 것은 한 메시지에 모아 추천 답과 함께.
 
 ## 공유 저장소 (donghans ctx)
-`resume.py` 는 로컬에 인수인계 기록이 없으면 공유 저장소(Postgres)에서 받아 온다(다른 머신에서 만든 인수인계). 더 파고들 때는 추측하기 전에 `donghans ctx search "<키워드>" --here --role user`, `donghans ctx session <세션ID> --from <uuid8> --to <uuid8>` (인수인계 인덱스의 「근거 대화 범위」) 로 *필요한 구간만* 조회한다. 결과의 `repo_url` 이 현재 저장소와 같은지 확인한다. 접속 실패는 조용히 넘기지 말고 보고한다.
+`resume.py` 는 로컬에 인수인계 기록이 없으면 공유 저장소(Postgres)에서 받아 온다(다른 머신에서 만든 인수인계). **정본은 DB 이고 프로젝트의 `.claude/handoffs/` 는 이 호스트의 캐시**다 — 로컬 `HANDOFF-*.md` 로 대체하는 것은 DB 에 없을 때의 마지막 수단이다. 더 파고들 때는 추측하기 전에 `donghans ctx search "<키워드>" --here --role user`, `donghans ctx session <세션ID> --from <uuid8> --to <uuid8>` (인수인계 인덱스의 「근거 대화 범위」) 로 *필요한 구간만* 조회한다. 결과의 `repo_url` 이 현재 저장소와 같은지 확인한다. 접속 실패는 조용히 넘기지 말고 보고한다.
 
 ## 프로젝트별 지침 (선택, 보통 `.git/info/exclude` 로 추적 제외)
 저장소 루트의 `.claude/donghans-instructions.md`(기본 절차에 **추가 적용**)와 `.claude/donghans-override.md`(기본 절차와 **충돌하면 이쪽이 우선**)가 있으면 따른다. `resume.py` 가 `donghans instr show --section "resume 할 때"` 로 최신화한 뒤 해당 절을 보이므로 따로 읽을 필요 없다(출력에 지침이 없으면 지침이 없는 것). 「생략된 절」 안내(예: 수정 세션용 절)가 나오고 그 내용이 필요하면 `donghans instr show` 로 전체를 본다. 사실 수집 스크립트를 더하고 싶으면 실행 파일 `.claude/resume-extra`.
