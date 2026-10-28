@@ -7,12 +7,38 @@
                        --forecast 150,200 --forecast-min-elapsed 30 --forecast-min-used 10]
                                                   임계값에서만 한 줄 출력(Monitor 용). 시작 때 과거를 알림으로 재생하지 않는다.
                                                   --forecast: 창 평균 속도로 리셋까지 외삽한 예측 도달치(%)가 단계에 닿으면 알림. 빈 값이면 끔.
+묻는 선(새 큰 작업 전 확인)은 플랜별: max_5x·max_20x 는 5h 80%·7d 90%, 그 밖(pro·불명)은 70%. 상태 줄에 플랜과 판정이 나온다.
 표준 라이브러리만 쓴다. 5h/7d 는 계정 전체 값이라 모든 세션의 기록을 본다.
 """
 import argparse, datetime as dt, json, os, sys, time
 
 FILE = os.path.expanduser('~/.local/share/claude-otel/limits.jsonl')
 TAIL = 512 * 1024
+
+# 「새 큰 작업을 시작하기 전에 사용자에게 묻는」 사용률(%) — 플랜별. max 플랜은 5h 80%·7d 90% 까지 안전하다(사용자 지시 2026-10-28).
+# pro·알 수 없는 플랜은 보수적으로 70%. 알림 수준(--levels)은 이것과 별개로 그대로 50/70/80/90 이다.
+ASK = {'max_5x': (80, 90), 'max_20x': (80, 90)}
+ASK_DEFAULT = (70, 70)
+
+
+def plan():
+    """현재 계정의 플랜(max_5x·max_20x·pro …). LIMITWATCH_PLAN 이 있으면 그 값. 상태 표시줄(claude-usage-statusline)과 같은 방식으로 ~/.claude.json 에서 읽는다."""
+    if os.environ.get('LIMITWATCH_PLAN'):
+        return os.environ['LIMITWATCH_PLAN']
+    for p in (os.path.join(os.environ.get('CLAUDE_CONFIG_DIR', ''), '.claude.json'), os.path.expanduser('~/.claude.json')):
+        try:
+            a = json.load(open(p)).get('oauthAccount') or {}
+            t = (a.get('userRateLimitTier') or a.get('seatTier') or '').replace('default_claude_', '').replace('default_', '')
+            if t:
+                return t
+        except Exception:
+            pass
+    return None
+
+
+def ask_levels():
+    pl = plan()
+    return pl, ASK.get(pl, ASK_DEFAULT)
 
 
 def parse_ts(s):
@@ -65,7 +91,10 @@ def status(a):
         lo, hi = per.get(r['sid'], (r['cost'], r['cost']))
         per[r['sid']] = (min(lo, r['cost']), max(hi, r['cost']))
     top = sorted(((hi - lo, s) for s, (lo, hi) in per.items() if hi > lo), reverse=True)[:3]
-    out = dict(five_hour=last['f'], five_hour_resets=last['fr'], seven_day=last['s'], seven_day_resets=last['sr'],
+    pl, (ask5, ask7) = ask_levels()
+    over = [n for n, v, lim in (('5h', last['f'], ask5), ('7d', last['s'], ask7)) if v is not None and v >= lim]
+    out = dict(plan=pl, ask_five_hour=ask5, ask_seven_day=ask7, ask_now=bool(over),
+               five_hour=last['f'], five_hour_resets=last['fr'], seven_day=last['s'], seven_day_resets=last['sr'],
                record_age_s=round(age), recent_min=a.recent, recent_delta=delta,
                recent_top_sessions=[dict(session=s, cost_usd=round(c, 2)) for c, s in top], account=last['acct'])
     if a.json:
@@ -73,6 +102,8 @@ def status(a):
     left = f"리셋 {hhmm(last['fr'])}" if last['fr'] else '리셋 시각 불명'
     s7 = f"{last['s']:.0f}%" if last['s'] is not None else '?'
     print(f"5h {last['f']:.0f}% ({left}) · 7d {s7} · 최근 {a.recent}분 5h {delta:+.0f}p · 마지막 기록 {age/60:.0f}분 전({hhmm(last['t'])})")
+    print(f"  플랜 {pl or '알 수 없음(보수적으로 70%)'} — 새 큰 작업 전 확인선 5h {ask5}%·7d {ask7}%: "
+          + (f"{'·'.join(over)} 가 확인선 이상이다 — 새 큰 작업을 시작하지 말고 사용자에게 묻는다" if over else '둘 다 아래라 진행해도 된다(알림 수준 50/70/80/90 은 별개)'))
     if top:
         print('  최근 구간 비용 상위(세션 앞 8자): ' + ', '.join(f'{s} ${c:.2f}' for c, s in top))
     if age > 600:
@@ -96,6 +127,8 @@ def forecast(t, used, resets_at):
 
 def watch(a):
     levels = sorted(float(x) for x in a.levels.split(','))
+    pl, (ask5, ask7) = ask_levels()
+    warned7 = None
     try:
         pos = os.path.getsize(a.file)   # 시작 때 파일 끝부터 — 과거는 알림으로 재생하지 않는다
         recs = tail_records(a.file)
@@ -114,7 +147,7 @@ def watch(a):
         base7, sr7 = last['s'], last['sr']
         s7 = f"{last['s']:.0f}%" if last['s'] is not None else '?'
         print(f"[watch] 시작 5h {last['f']:.0f}% (리셋 {hhmm(last['fr'])}) · 7d {s7} · 기록 {(time.time()-last['t'])/60:.0f}분 전 "
-              f"— 이 값이 현재 기준. 알림 조건: {a.window:.0f}분 내 +{a.spike:g}p, 5h {','.join(f'{l:.0f}' for l in levels)}%"
+              f"— 이 값이 현재 기준(플랜 {pl or '?'}: 묻는 선 5h {ask5}%·7d {ask7}%). 알림 조건: {a.window:.0f}분 내 +{a.spike:g}p, 5h {','.join(f'{l:.0f}' for l in levels)}%"
               + (f", 소진 예측 {','.join(f'{l:.0f}' for l in fc_levels)}%" if fc_levels else ''), flush=True)
     else:
         print('[watch] 시작 — 5h 기록 없음(상태 표시줄이 기록하면 시작)', flush=True)
@@ -140,7 +173,7 @@ def watch(a):
                 for lv in levels:
                     if r['f'] >= lv and lv not in fired:
                         fired.add(lv)
-                        act = '새 작업을 시작하지 말고 사용자에게 묻습니다' if lv >= 70 else '사용자에게 알리세요'
+                        act = '새 작업을 시작하지 말고 사용자에게 묻습니다' if lv >= ask5 else '사용자에게 알리세요'
                         print(f"[watch] 5h {lv:.0f}% 도달(현재 {r['f']:.0f}%, 리셋 {hhmm(r['fr'])}) — {act}", flush=True)
                 if fc_levels and r['fr'] and r['t'] - fc_last >= GRID:
                     fc_last = r['t']
@@ -156,6 +189,9 @@ def watch(a):
                                   f"리셋까지 {left:.0f}분 — 사용량을 줄일지 사용자에게 알리세요", flush=True)
                 if r['s'] is not None:
                     if base7 is None or r['sr'] != sr7: base7, sr7 = r['s'], r['sr']   # 주간 창이 바뀌면 기준 재설정
+                    if r['s'] >= ask7 and warned7 != r['sr']:
+                        warned7 = r['sr']
+                        print(f"[watch] 주간 {r['s']:.0f}% 도달(플랜 {pl or '?'} 확인선 {ask7}%) — 새 작업을 시작하지 말고 사용자에게 묻습니다", flush=True)
                     if r['s'] - base7 >= 3:
                         print(f"[watch] 주간 {base7:.0f}%→{r['s']:.0f}%", flush=True); base7 = r['s']
         time.sleep(a.poll)
