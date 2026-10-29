@@ -709,16 +709,19 @@ def cmd_ebpf(a):
             sys.exit(f"단계는 {'|'.join(tiers.TIERS)} 중 하나")
         if not ctl.get("enabled"):
             sys.exit("수집이 꺼져 있습니다 — 먼저 `observectl on` 으로 켜세요(정밀 모드는 수집 표본에 합쳐집니다)")
+        if a.period_us is not None and (a.tier != "sample" or not tiers.valid_period(a.period_us)):
+            sys.exit(f"--period-us 는 sample 단계에서만, {tiers.PERIOD_MIN_US}~{tiers.PERIOD_MAX_US} 사이 정수(µs)")
         secs = min(_dur_seconds(a.for_), tiers.MAX_MINUTES * 60)
         until = time.time() + secs
-        core.write_control({"ebpf": {"tier": a.tier, "until": until}})
+        core.write_control({"ebpf": {"tier": a.tier, "until": until, "period_us": a.period_us}})      # 주기가 없으면 null — write_control 이 중첩을 합치므로 명시해야 이전 주기가 안 남는다
         t = tiers.TIERS[a.tier]
-        print(f"정밀 모드 {a.tier}({t['label']}) 를 {secs / 60:.0f}분 동안 켭니다 — 비용 {t['cost']}, 정확성 {t['accuracy']}. {core.hms(until)} 에 자동으로 꺼집니다.")
+        per = f"(주기 {a.period_us}µs ≈ {1e6 / a.period_us:.2f}Hz) " if a.period_us is not None else ""
+        print(f"정밀 모드 {a.tier}({t['label']}) {per}를 {secs / 60:.0f}분 동안 켭니다 — 비용 {t['cost']}, 정확성 {t['accuracy']}. {core.hms(until)} 에 자동으로 꺼집니다.")
         return
     e = ctl.get("ebpf")
     now = time.time()
     if e and float(e.get("until", 0)) > now:
-        print(f"켜짐: {e['tier']} — {(float(e['until']) - now) / 60:.1f}분 남음 ({core.hms(float(e['until']))} 까지)")
+        print(f"켜짐: {e['tier']}" + (f" 주기 {e['period_us']}µs" if e.get("period_us") else "") + f" — {(float(e['until']) - now) / 60:.1f}분 남음 ({core.hms(float(e['until']))} 까지)")
     else:
         print("꺼짐")
     last = [r for r in samples(now - 600) if r.get("ebpf")]
@@ -1220,7 +1223,7 @@ def main(argv=None):
     s = sub.add_parser("events"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--level", default="trace", choices=list(core.LEVELS)); s.add_argument("--grep"); s.set_defaults(f=cmd_events)
     s = sub.add_parser("trace", help="스팬(구간) 폭포 · 구간별 에너지 · 이름별 요약"); s.add_argument("--since", default="-1h"); s.add_argument("--until"); s.add_argument("--comp"); s.add_argument("--name", help="이름에 포함된 글자"); s.add_argument("--min-ms", type=float, default=0); s.add_argument("--trace", help="트레이스 id 앞부분"); s.add_argument("-n", type=int, default=5, help="폭포로 보여 줄 최근 트레이스 수"); s.add_argument("--width", type=int, default=110); s.add_argument("--by", action="store_true", help="폭포 대신 이름별 요약표(횟수·소요·에너지)"); s.set_defaults(f=cmd_trace)
     s = sub.add_parser("explain", help="한 구간을 여러 출처(전력·상태·시스템·Netdata·프로세스·포커스·스팬)로 묶어 설명하고 기준 구간과 비교"); s.add_argument("--since", default="30m"); s.add_argument("--until"); s.add_argument("--at", help="중심 시각(HH:MM 등) — --span 초 만큼의 구간"); s.add_argument("--span", type=float, default=300); s.add_argument("--baseline", default="prev", help="none | prev(바로 앞의 같은 길이, 기본) | 시작..끝"); s.add_argument("--no-netdata", action="store_true"); s.add_argument("--json", action="store_true"); s.set_defaults(f=cmd_explain)
-    s = sub.add_parser("ebpf", help="시간 제한형 eBPF 정밀 모드: tiers(단계·비용) | on <sample|counts|full> [--for 10m] | off | status"); s.add_argument("action", choices=["tiers", "on", "off", "status"]); s.add_argument("tier", nargs="?"); s.add_argument("--for", dest="for_", default="10m", help="제한 시간(기본 10m, 최대 60분)"); s.set_defaults(f=cmd_ebpf)
+    s = sub.add_parser("ebpf", help="시간 제한형 eBPF 정밀 모드: tiers(단계·비용) | on <sample|counts|full> [--for 10m] | off | status"); s.add_argument("action", choices=["tiers", "on", "off", "status"]); s.add_argument("tier", nargs="?"); s.add_argument("--for", dest="for_", default="10m", help="제한 시간(기본 10m, 최대 60분)"); s.add_argument("--period-us", dest="period_us", type=int, default=None, help="sample 단계의 샘플링 주기(µs, 기본 53711≈18.6Hz) — 낮은 주파수로 전력 비용을 줄여 보는 시험용"); s.set_defaults(f=cmd_ebpf)
     s = sub.add_parser("query", help="범용 조회: 신호 여러 개를 시간 간격(--step)이나 그룹(--by)으로 묶어 집계(--agg). 신호 = 별칭(psys pkg vi core uncore pc8 pc10 cpu_all) · 표본 경로(pw.psys_w) · app:<앱>.cpu|ctxsw · proc:<comm>.cpu|ctxsw · nd:<Netdata 신호>"); s.add_argument("signal", nargs="+"); s.add_argument("--since", default="1h"); s.add_argument("--until"); s.add_argument("--step", help="시간 간격(예: 5m). 없으면 --by 로 묶음"); s.add_argument("--by", default="none", choices=["state", "vt", "ssid", "mark", "lid", "ac", "wifips", "psr", "boot", "quirks", "flag", "none"]); s.add_argument("--agg", default="mean", choices=list(qy.AGGS)); s.add_argument("--digits", type=int, default=2); s.set_defaults(f=cmd_query)
     s = sub.add_parser("browser", help="브라우저(Vivaldi) 탭·확장별 CPU(top) 또는 감시기가 잡은 폭주 기록(bursts)"); s.add_argument("what", nargs="?", default="top", choices=["top", "bursts", "periodic", "sw"], help="top=탭·확장별 CPU · bursts=폭주 기록 · periodic=규칙적 반복 활동 기록 · sw=확장 서비스 워커(스레드 CPU, 포트가 있으면 시작 횟수)"); s.add_argument("--seconds", type=float, default=5.0); s.add_argument("-n", type=int, default=12); s.add_argument("--since", default="24h"); s.set_defaults(f=cmd_browser)
     s = sub.add_parser("fleet", help="여러 호스트 교차 확인(공유 저장소 claude_ctx): push|sync=이 호스트 요약 올리기(실패하면 쌓아 뒀다 다음에 같이) · status=올리기 상태 · compare <호스트>=앱 CPU 비교 · inventory=확장 목록 비교 · hosts · export=usageui 용 JSON · changes=nixup 전후 변화(대조군 비교) · priority <기준호스트>=포커스 비중×초과 CPU 우선순위 · periodic=주기 활동 감지 모음 · units=한 호스트에만 있는 상시 유닛"); s.add_argument("what", choices=["push", "sync", "status", "compare", "inventory", "hosts", "export", "changes", "priority", "periodic", "units"]); s.add_argument("other", nargs="?", help="compare: 비교할 호스트"); s.add_argument("--host", help="compare: 기준 호스트(기본 이 호스트)"); s.add_argument("--usage-from", dest="usage_from", help="priority: 사용자가 실제로 쓰는(포커스 기록을 볼) 호스트, 기본 기준 호스트"); s.add_argument("--days", type=int, default=3); s.add_argument("--since", default=None, help="push·sync: 이 기간의 표본을 올림(기본: 마지막 성공 시각 2시간 전부터 — 실패한 동안 밀린 것 포함, 처음엔 26시간)"); s.add_argument("-n", type=int, default=15); s.set_defaults(f=cmd_fleet)

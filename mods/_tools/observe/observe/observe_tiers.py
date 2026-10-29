@@ -20,6 +20,13 @@ MAX_MINUTES = 60
 # 1/(18+0.618…)초 = 53,711µs 로 잡으면 1초마다 위상이 0.618 주기씩 이동해 골고루(저불일치 수열) 찍힌다.
 SAMPLE_PERIOD_US = 53711
 SAMPLE_HZ = 1e6 / SAMPLE_PERIOD_US          # 실효 주파수(약 18.62Hz) — 점유율 계산에 쓴다
+# 주기를 바꿔 쓸 수 있다(`observectl ebpf on sample --period-us N`): 샘플링이 한가한 CPU 를 깨우는 전력 비용을 줄여 보려는 시험용(장부 #71). 범위 밖이면 거부한다.
+PERIOD_MIN_US, PERIOD_MAX_US = 10_000, 2_000_000
+
+
+def valid_period(p):
+    """주기(µs)가 정수이고 허용 범위 안이면 True. 정수 Hz(1초의 약수)는 1초 주기 작업과 위상이 고정돼 편향되므로 거부하지는 않고 호출 쪽이 비조화 값을 고른다."""
+    return isinstance(p, int) and not isinstance(p, bool) and PERIOD_MIN_US <= p <= PERIOD_MAX_US
 
 TIERS = {
     "sample": {"label": "샘플링(E1)", "cost": "코어 약 0.12% (부하와 무관)", "accuracy": "통계적 추정(1초 주기 에일리어싱을 피하는 비조화 주기, 작은 프로세스는 오차 큼)", "gives": "프로세스별 CPU 점유 추정"},
@@ -31,10 +38,10 @@ _HDR = "#include <linux/sched.h>\n"
 _TICK = 'printf("TICK %llu\\n", nsecs);'
 
 
-def script(tier, interval=INTERVAL):
-    """tier 의 bpftrace 프로그램. 맵은 interval 초마다 출력하고 비운다."""
+def script(tier, interval=INTERVAL, period_us=None):
+    """tier 의 bpftrace 프로그램. 맵은 interval 초마다 출력하고 비운다. period_us 는 sample 단계만(없으면 SAMPLE_PERIOD_US)."""
     if tier == "sample":
-        return (_HDR + f"profile:us:{SAMPLE_PERIOD_US} {{ @cpu[((struct task_struct *)curtask)->tgid] = count(); }}\n"
+        return (_HDR + f"profile:us:{period_us or SAMPLE_PERIOD_US} {{ @cpu[((struct task_struct *)curtask)->tgid] = count(); }}\n"
                 f"interval:s:{interval} {{ print(@cpu); clear(@cpu); {_TICK} }}\n")
     if tier == "counts":
         return f"tracepoint:sched:sched_switch {{ @sw[pid] = count(); }}\ninterval:s:{interval} {{ print(@sw); clear(@sw); {_TICK} }}\n"
@@ -68,15 +75,20 @@ def parse_stream(lines):
             cur = {}
 
 
-def summarize(tier, rec, dt, resolve, top=16):
-    """한 간격의 집계 → 표본에 넣을 dict. resolve(pid)→프로세스 이름. pid 0(idle)은 뺀다. 반환 {"tier","dt","procs":[…],"sw_total_s"(counts·full), "samples"(sample)}."""
+def summarize(tier, rec, dt, resolve, top=16, period_us=None):
+    """한 간격의 집계 → 표본에 넣을 dict. resolve(pid)→프로세스 이름. pid 0(idle)은 procs 에서 뺀다. 반환 {"tier","dt","procs":[…],"sw_total_s"(counts·full), "samples"·"samples_all"·"period_us"(sample)}.
+    samples_all 은 idle(pid 0)까지 센 전체 표본 수 — 코어 수×실효 주파수×dt 와 같아야 하므로 적용된 주기를 독립으로 확인하는 값이다."""
     m = rec["maps"]
     dt = max(dt, 1e-6)
     out = {"tier": tier, "dt": round(dt, 1), "procs": []}
     if tier == "sample":
+        p_us = period_us or SAMPLE_PERIOD_US
+        hz = 1e6 / p_us
         cpu = {p: v for p, v in (m.get("cpu") or {}).items() if p != "0"}
         out["samples"] = sum(cpu.values())
-        rows = [{"pid": int(p), "comm": resolve(int(p)), "cpu_core_pct": round(v / (SAMPLE_HZ * dt) * 100, 2)} for p, v in cpu.items()]
+        out["samples_all"] = sum((m.get("cpu") or {}).values())
+        out["period_us"] = p_us
+        rows = [{"pid": int(p), "comm": resolve(int(p)), "cpu_core_pct": round(v / (hz * dt) * 100, 2)} for p, v in cpu.items()]
         out["procs"] = sorted(rows, key=lambda r: -r["cpu_core_pct"])[:top]
     elif tier == "counts":
         sw = {p: v for p, v in (m.get("sw") or {}).items() if p != "0"}
@@ -110,7 +122,7 @@ class Runner:
 
     def __init__(self, bpftrace, popen=subprocess.Popen, resolve=_comm_of, clock=time.time, interval=INTERVAL):
         self.bpftrace, self.popen, self.resolve, self.clock, self.interval = bpftrace, popen, resolve, clock, interval
-        self.proc, self.tier, self.until = None, None, 0.0
+        self.proc, self.tier, self.until, self.period_us = None, None, 0.0, None
         self._lock = threading.Lock()
         self._latest = None
         self.stopped_reason = None
@@ -121,33 +133,39 @@ class Runner:
         return self.proc is not None and self.proc.poll() is None
 
     def ensure(self, want):
-        """want = {"tier": …, "until": epoch} 또는 None. 요구와 현재가 다르면 맞춘다. 반환: 지금 실행 중이면 True."""
+        """want = {"tier": …, "until": epoch[, "period_us": µs(sample 만)]} 또는 None. 요구와 현재가 다르면 맞춘다(단계·주기가 바뀌면 다시 띄움). 반환: 지금 실행 중이면 True."""
         now = self.clock()
         if not want or not self.bpftrace or want.get("tier") not in TIERS or float(want.get("until", 0)) <= now:
             if self.proc is not None:
                 self.stop("제한 시간 끝" if want and float(want.get("until", 0)) <= now else "꺼짐")
             return False
-        if self.running and self.tier == want["tier"]:
+        period = want.get("period_us") if want["tier"] == "sample" else None
+        if period is not None and not valid_period(period):
+            if self.proc is not None:
+                self.stop("주기 값이 범위 밖")
+            self.stopped_reason = f"주기 {period!r} µs 가 허용 범위({PERIOD_MIN_US}~{PERIOD_MAX_US}) 밖이라 켜지 않음"
+            return False
+        if self.running and self.tier == want["tier"] and self.period_us == period:
             return True
         if self.proc is not None:
-            self.stop("단계 변경")
+            self.stop("단계 변경" if self.tier != want["tier"] else "주기 변경")
         until = min(float(want["until"]), now + MAX_MINUTES * 60)
         try:
-            self.proc = self.popen([self.bpftrace, "-f", "json", "-e", script(want["tier"], self.interval)], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            self.proc = self.popen([self.bpftrace, "-f", "json", "-e", script(want["tier"], self.interval, period)], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         except OSError as e:
             self.proc, self.stopped_reason = None, f"실행 실패: {e}"
             return False
-        self.tier, self.until, self.stopped_reason, self._latest = want["tier"], until, None, None
-        self._thread = threading.Thread(target=self._read, args=(self.proc, self.tier), daemon=True)
+        self.tier, self.until, self.period_us, self.stopped_reason, self._latest = want["tier"], until, period, None, None
+        self._thread = threading.Thread(target=self._read, args=(self.proc, self.tier, period), daemon=True)
         self._thread.start()
         return True
 
-    def _read(self, proc, tier):
+    def _read(self, proc, tier, period=None):
         last = time.monotonic()
         for rec in parse_stream(proc.stdout):
             now = time.monotonic()
             dt, last = now - last, now
-            s = summarize(tier, rec, dt, self.resolve)
+            s = summarize(tier, rec, dt, self.resolve, period_us=period)
             s["tick_t"] = round(self.clock(), 1)
             with self._lock:
                 self._latest = s
