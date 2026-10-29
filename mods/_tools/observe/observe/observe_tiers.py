@@ -29,7 +29,7 @@ def valid_period(p):
     return isinstance(p, int) and not isinstance(p, bool) and PERIOD_MIN_US <= p <= PERIOD_MAX_US
 
 TIERS = {
-    "sample": {"label": "샘플링(E1)", "cost": "코어 약 0.12% (부하와 무관)", "accuracy": "통계적 추정(1초 주기 에일리어싱을 피하는 비조화 주기, 작은 프로세스는 오차 큼)", "gives": "프로세스별 CPU 점유 추정"},
+    "sample": {"label": "샘플링(E1)", "cost": "코어 약 0.12% (부하와 무관) · 한가한 노트북에서는 방전 약 +0.6 W(장부 #148 — 모든 코어를 깨움; --period-us 로 주기를 4배 늘리면 약 +0.3 W, 점유 추정 오차는 약 2배)", "accuracy": "통계적 추정(1초 주기 에일리어싱을 피하는 비조화 주기, 작은 프로세스는 오차 큼)", "gives": "프로세스별 CPU 점유 추정"},
     "counts": {"label": "전환 합계(E2)", "cost": "코어 약 0.6% (전환 3천/s 기준, 부하에 비례)", "accuracy": "프로세스별 총 전환 98%", "gives": "프로세스별 총 문맥 전환/s(자발+비자발, 짧게 사는 스레드 포함)"},
     "full": {"label": "전체(E3)", "cost": "코어 약 1.8% (전환 3천/s 기준, 부하에 비례)", "accuracy": "자발 전환 99%, CPU 시간 101%", "gives": "프로세스별 자발/비자발 전환/s·on-CPU 시간(코어 1개=100%)"},
 }
