@@ -457,17 +457,26 @@ def pending_proposals(store: str, session: str | None = None, target: str | None
     return out
 
 
-def propose(store: str, session: str, host: str, project: str, kind: str, name: str, body: str, base_hash: str | None) -> tuple[int, str, str | None]:
+def propose(store: str, session: str, host: str, project: str, kind: str, name: str, body: str, base_hash: str | None, op: str = "write") -> tuple[int, str, str | None]:
     """제안을 인박스에 남긴다. (결과코드, 메시지, 제안 id). 저장소 문서는 건드리지 않는다.
-    base_hash: 에이전트가 읽은 판의 해시(뷰의 .ctx-base.json), 새 문서면 None. 문서가 이미 있는데 base 가 없으면 거부한다(먼저 읽어야 한다)."""
+    base_hash: 에이전트가 읽은 판의 해시(뷰의 .ctx-base.json), 새 문서면 None. 문서가 이미 있는데 base 가 없으면 거부한다(먼저 읽어야 한다).
+    op="delete": 문서 삭제 제안(본문 없음). 읽은 판이 지금과 같을 때만 git 에서 지운다(이력에 남아 복구할 수 있다)."""
     why = check_target(project, kind, name)
     if why:
         return 1, why, None
-    if not body.strip():
-        return 1, "빈 본문은 제안하지 않는다", None
-    if len(body.encode()) > MAX_BYTES:
-        return 1, f"본문이 한도({MAX_BYTES:,}바이트)를 넘는다", None
+    if op not in ("write", "delete"):
+        return 1, f"알 수 없는 op: {op}", None
+    if op == "write":
+        if not body.strip():
+            return 1, "빈 본문은 제안하지 않는다", None
+        if len(body.encode()) > MAX_BYTES:
+            return 1, f"본문이 한도({MAX_BYTES:,}바이트)를 넘는다", None
     exists = os.path.exists(doc_path(store, project, kind, name))
+    if op == "delete":
+        if not exists:
+            return 1, f"{kind}/{name}: 없는 문서라 지울 수 없다", None
+        if not base_hash:
+            return 1, f"{kind}/{name}: 먼저 `donghans ctx doc read|path` 로 읽어 판을 기록한다(읽지 않은 문서는 지우지 않는다)", None
     if exists and not base_hash:
         return 1, f"{kind}/{name}: 이미 있는 문서다 — 먼저 `donghans ctx doc read|path` 로 읽어 판을 기록한다(읽지 않은 판에 덮어쓰지 않는다)", None
     if not exists and base_hash:
@@ -478,7 +487,7 @@ def propose(store: str, session: str, host: str, project: str, kind: str, name: 
     pid = f"{_stamp()}-{project}-{kind}-{name.replace('/', '__')}"
     d = os.path.join(inbox_dir(store), session)
     os.makedirs(d, exist_ok=True)
-    head = PROP_OPEN + f"target: {target}\nbase_hash: {base_hash or 'none'}\nsession: {session}\nhost: {host}\ncreated: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n" + HDR_CLOSE
+    head = PROP_OPEN + f"target: {target}\nop: {op}\nbase_hash: {base_hash or 'none'}\nsession: {session}\nhost: {host}\ncreated: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n" + HDR_CLOSE
     tmp = os.path.join(d, f".{pid}.tmp")
     open(tmp, "w").write(head + body)
     os.replace(tmp, os.path.join(d, pid + ".proposal.md"))   # 완성된 파일만 보이게(감시가 반쯤 쓴 파일을 읽지 않게)
@@ -614,6 +623,24 @@ def process_proposal(store: str, path: str, masker=None, manifest: dict | None =
             return done("rejected", f"{meta['target']}: 현재 문서를 읽을 수 없다(이진·빈 파일)", aside="_rejected")
         if (cur is None) != (base == "none") or (cur is not None and cur["hash"] != base):
             return done("conflict", f"{meta['target']}: 읽은 뒤 문서가 바뀌었다(읽은 판 {base[:8]}, 지금 {(cur or {}).get('hash', '없음')[:8]}) — 최신본을 다시 읽고 고친다", aside="_conflicts")
+        if meta.get("op", "write") == "delete":
+            if cur is None:
+                return done("rejected", f"{meta['target']}: 없는 문서라 지울 수 없다", aside="_rejected")
+            try:
+                _git(os.path.join(store, project), "rm", "-q", "--", f"{kind}/{name}.md")
+                r = _git(os.path.join(store, project), "commit", "-q", "-m", f"ctx: 삭제 {meta['target']} ({session[:8]}@{meta.get('host', '')})", "--", f"{kind}/{name}.md", check=False)
+                if r.returncode != 0:
+                    raise RuntimeError(r.stderr.strip() or r.stdout.strip())
+            except Exception as e:  # 추적 전 파일이거나 커밋 실패 — 파일을 원래대로 두고 거부
+                if not os.path.exists(p):
+                    open(p, "w").write(cur["text"])
+                return done("rejected", f"{meta['target']}: 삭제 커밋 실패 — {e}", aside="_rejected")
+            d = os.path.dirname(p)
+            while d != os.path.join(store, project) and os.path.isdir(d) and not os.listdir(d):   # 비게 된 하위 폴더 정리(프로젝트 폴더까지는 올라가지 않는다)
+                os.rmdir(d)
+                d = os.path.dirname(d)
+            sha1 = _git(os.path.join(store, project), "rev-parse", "--short", "HEAD").stdout.strip() or None
+            return done("applied", f"{meta['target']}: 삭제했다(git 이력에 남아 복구할 수 있다)", sha1)
         new_meta, new_body = split_header(body)
         if new_meta is None:
             new_meta = dict(cur["meta"]) if cur else default_meta()

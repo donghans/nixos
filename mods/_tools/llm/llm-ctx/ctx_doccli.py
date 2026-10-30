@@ -167,6 +167,10 @@ def cmd_propose(a):
     if code:
         print(msg, file=sys.stderr)
         return 1
+    return _finish_proposal(store, pid, msg, sid, proj, a.kind, a.name)
+
+
+def _finish_proposal(store, pid, msg, sid=None, proj=None, kind=None, name=None):
     if os.environ.get("CTX_SYNC_INLINE"):
         _inline_sync(store)
         worker = True
@@ -178,9 +182,21 @@ def cmd_propose(a):
         return 0
     print(r["msg"] + (f" (커밋 {r['commit']})" if r.get("commit") else ""))
     if r["status"] in ("applied", "same"):
-        st.ensure_in_view(store, st.views_dir(), sid, proj, a.kind, a.name)   # 자기 제안 반영분을 직접 수정으로 오인하지 않게 읽은 판을 새로 기록
+        if sid:
+            st.ensure_in_view(store, st.views_dir(), sid, proj, kind, name)   # 자기 제안 반영분을 직접 수정으로 오인하지 않게 읽은 판을 새로 기록
         return 0
     return 1
+
+
+def cmd_delete(a):
+    store, proj = _project(a)
+    sid = _need_session(a)
+    base = st.base_hash_for(st.views_dir(), sid, proj, a.kind, a.name)
+    code, msg, pid = st.propose(store, sid, H.HOST, proj, a.kind, a.name, "", base, op="delete")
+    if code:
+        print(msg, file=sys.stderr)
+        return 1
+    return _finish_proposal(store, pid, msg)
 
 
 def cmd_status(a):
@@ -444,6 +460,7 @@ def register(ctx_sub, helpers):
     p = doc.add_parser("find", help="문서 본문·이름을 검색한다(대화 이력은 `donghans ctx search`)"); p.add_argument("term"); K(p, True); p.add_argument("--limit", type=int, default=20); P(p); p.set_defaults(f=cmd_find)
     p = doc.add_parser("propose", help="새 본문을 제안으로 남긴다(저장소에 직접 쓰지 않는다 — 동기화 담당이 검사해 반영)"); K(p); p.add_argument("name")
     p.add_argument("--file"); p.add_argument("--stdin", action="store_true"); P(p); S(p); p.set_defaults(f=cmd_propose)
+    p = doc.add_parser("delete", help="문서 삭제를 제안으로 남긴다(먼저 read|path 로 읽어야 한다 — 동기화 담당이 읽은 판이 같을 때만 git 에서 지운다; 이력에 남아 복구 가능)"); K(p); p.add_argument("name"); P(p); S(p); p.set_defaults(f=cmd_delete)
     p = doc.add_parser("status", help="이 세션의 대기·충돌·거부 제안과 동기화 담당 상태(읽기만)"); P(p); S(p); p.set_defaults(f=cmd_status)
     p = doc.add_parser("watch", help="이 세션의 뷰가 직접 수정되면 한 줄로 알린다(Monitor 로 띄운다; 저장소는 고치지 않는다)"); S(p); p.add_argument("--pid", type=int, help="이 프로세스가 죽으면 끝낸다(기본: CLAUDE_PID)"); p.set_defaults(f=cmd_watch)
     p = doc.add_parser("sync", help="(동기화 담당) 인박스의 제안을 검사해 반영한다 — 세션 안에서 부르는 명령이 아니다")

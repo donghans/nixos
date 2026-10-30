@@ -317,5 +317,20 @@ check("동기화 담당: 제안이 오면 곧바로 처리해 결과를 남긴�
 check("동기화 담당: 반영된 본문", cs.read_doc(STORE, "nixos", "note", "m/new")["body"] == "감시 중 제안\n")
 stop["v"] = True; w.join(3)
 
+# ---------------------------------------------------------------- 6부: 삭제 제안
+code, msg, _ = cs.propose(STORE, "sess-del", "hostD", "nixos", "note", "m/new", "", None, op="delete")
+check("삭제: 읽지 않은 문서는 거부", code == 1 and "읽어" in msg, msg)
+check("삭제: 없는 문서는 거부", cs.propose(STORE, "sess-del", "hostD", "nixos", "note", "m/none", "", "abc", op="delete")[0] == 1)
+code, msg, pid = cs.propose(STORE, "sess-del", "hostD", "nixos", "note", "m/new", "", "0" * 64, op="delete")
+check("삭제: 오래된 판이면 충돌(지우지 않음)", code == 0 and cs.process_inbox(STORE, FakeMasker())[-1][1] == "conflict" and os.path.exists(cs.doc_path(STORE, "nixos", "note", "m/new")))
+hh = cs.read_doc(STORE, "nixos", "note", "m/new")["hash"]
+code, msg, pid = cs.propose(STORE, "sess-del", "hostD", "nixos", "note", "m/new", "", hh, op="delete")
+res = cs.process_inbox(STORE, FakeMasker())[-1]
+check("삭제: 읽은 판이 같으면 지우고 커밋", res[1] == "applied" and res[3] and not os.path.exists(cs.doc_path(STORE, "nixos", "note", "m/new")), res)
+check("삭제: 비게 된 폴더 정리·프로젝트 폴더는 유지", not os.path.exists(f"{STORE}/nixos/note/m") and os.path.isdir(f"{STORE}/nixos"))
+log = subprocess.run(["git", "-C", f"{STORE}/nixos", "log", "--oneline", "-1"], capture_output=True, text=True).stdout
+check("삭제: git 이력에 삭제 커밋", "삭제 nixos/note/m/new" in log, log)
+check("삭제: 이력에서 복구 가능", "감시 중 제안" in subprocess.run(["git", "-C", f"{STORE}/nixos", "show", "HEAD~1:note/m/new.md"], capture_output=True, text=True).stdout)
+
 import shutil; shutil.rmtree(TMP, ignore_errors=True)
 sys.exit(finish("ctx_store"))
