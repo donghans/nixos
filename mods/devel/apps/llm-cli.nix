@@ -122,7 +122,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
     cp ${../../_tools/_lib/uikit/uikit.py} $out/uikit.py
   '';
   tmuxEnv = ''
-    export CLAUDE_TMUX_BIN=${pkgs.tmux}/bin/tmux CLAUDE_TMUX_CONF=${sessionsSrc}/claude-tmux.conf CLAUDE_RUN_BIN=${claudeRun}
+    export CLAUDE_TMUX_BIN=${pkgs.tmux}/bin/tmux CLAUDE_TMUX_CONF=${sessionsSrc}/claude-tmux.conf CLAUDE_RUN_BIN=${claudeRun} CLAUDE_CTX_BIN=${claudeCtx}/bin/donghans
   '';
   # tmux 안에서 실제로 claude 를 실행하는 쪽. sudo 인증 캐시는 tty 별이라(셸 함수의 `sudo -v` 는 pane 의 tty 에 효과가 없다) 여기서 다시 받고,
   # 이 프로세스(=claude 부모)가 살아 있는 동안만 60초마다 갱신한다. exec 하지 않는 이유: 끝난 뒤 갱신 루프도 같이 끝나게 하려고.

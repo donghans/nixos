@@ -4,8 +4,10 @@
   llm-sessions                 목록 UI(Textual)
   llm-sessions ls              목록을 글자로 출력
   llm-sessions attach <이름|접두|번호>
-  llm-sessions new [디렉터리] [-- claude 인자…]   새 세션을 만들고 붙는다
+  llm-sessions new [--safe] [디렉터리] [-- claude 인자…]   새 세션을 만들고 붙는다
 
+새 세션에는 기본으로 `--dangerously-skip-permissions` 가 붙는다(세션 간 통신·root 작업 때마다 승인을 묻지 않게). 끄기: UI 에서 「claude 인자」 칸 비우기 · CLI `new --safe` ·
+환경 변수 CLAUDE_SESSIONS_DEFAULT_ARGS= . `--permission-mode` 등 권한 인자를 직접 주면 기본값은 붙지 않는다. 디렉터리는 UI 에서 현재 위치·ctx 의 저장소 목록 중에서 고른다.
 UI 키: Enter 붙기 · n 새 세션 · x 정리(세션 종료) · d 붙은 곳 모두 떼기 · r 새로고침 · ? 도움말 · q 종료.
 붙은 뒤 분리(F12 또는 Ctrl+] d)하면 이 목록으로 돌아온다. 한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다.
 세션 이름·tmux 설정·종료 규칙은 tmuxsess.py 와 claude-tmux 머리말 참고. 사람이 터미널에서 직접 쓰는 도구라 UI 는 TTY 가 아니면 실행하지 않는다.
@@ -13,6 +15,7 @@ UI 키: Enter 붙기 · n 새 세션 · x 정리(세션 종료) · d 붙은 곳 
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -23,7 +26,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Input, Static
+from textual.widgets import DataTable, Footer, Input, OptionList, Static
+from textual.widgets.option_list import Option
 
 try:
     import uikit                                   # 배포: 같은 디렉터리에 복사됨
@@ -57,28 +61,51 @@ def attached_label(s: tm.Session) -> str:
 
 
 class NewScreen(ModalScreen):
-    """새 세션: 작업 디렉터리와 claude 인자(선택)."""
+    """새 세션: 작업 디렉터리(현재 위치·ctx 에 있는 저장소 중에서 고르거나 직접 입력)와 claude 인자(기본값 채워짐)."""
     BINDINGS = [Binding("escape", "cancel", "취소")]
 
     def __init__(self, default_dir: str):
         super().__init__()
         self.default_dir = default_dir
+        self.choices = tm.dir_choices(default_dir, [])     # 저장소 목록은 열린 뒤 따로 읽는다(DB 가 느려도 대화상자가 바로 뜨게)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
             yield Static("새 claude 세션", id="dialog-title")
-            yield uikit.box(Input(value=self.default_dir, id="new-dir"), "작업 디렉터리")
-            yield uikit.box(Input(placeholder="예: --resume  (비워도 됨)", id="new-args"), "claude 인자")
-            yield Static("Enter: 만들고 붙기 · Esc: 취소", id="dialog-hint")
+            yield uikit.box(OptionList(*self._options(), id="new-choices"), "디렉터리 고르기 — ↑↓ · Enter")
+            yield uikit.box(Input(value=self.default_dir, id="new-dir"), "작업 디렉터리 (직접 고치려면 Tab)")
+            yield uikit.box(Input(value=shlex.join(tm.default_args()), placeholder="비우면 권한 확인을 건너뛰지 않음", id="new-args"), "claude 인자")
+            yield Static("Enter: 고르기/만들고 붙기 · Tab: 칸 이동 · Esc: 취소", id="dialog-hint")
+
+    def _options(self):
+        return [Option(f"{short_path(p)}  [dim]{d}[/]", id=str(i)) for i, (p, d) in enumerate(self.choices)]
 
     def on_mount(self):
-        self.query_one("#new-dir", Input).focus()
+        self.query_one("#new-choices", OptionList).highlighted = 0
+        self.query_one("#new-choices", OptionList).focus()
+        self.run_worker(self._load_repos, thread=True)
+
+    def _load_repos(self):
+        repos = tm.repo_dirs()
+        self.app.call_from_thread(self._set_repos, repos)
+
+    def _set_repos(self, repos):
+        self.choices = tm.dir_choices(self.default_dir, repos)
+        ol = self.query_one("#new-choices", OptionList)
+        ol.clear_options(); ol.add_options(self._options())
+        ol.highlighted = 0
+
+    def on_option_list_option_highlighted(self, ev: OptionList.OptionHighlighted):
+        if ev.option_index is not None and ev.option_index < len(self.choices):
+            self.query_one("#new-dir", Input).value = self.choices[ev.option_index][0]
+
+    def on_option_list_option_selected(self, _ev):
+        self.query_one("#new-args", Input).focus()
 
     def on_input_submitted(self, ev: Input.Submitted):
         if ev.input.id == "new-dir":
             self.query_one("#new-args", Input).focus()
             return
-        import shlex
         d = os.path.expanduser(self.query_one("#new-dir", Input).value.strip())
         try:
             args = shlex.split(self.query_one("#new-args", Input).value)
@@ -262,12 +289,12 @@ def cmd_attach(spec: str) -> int:
 
 
 def cmd_new(argv: list[str]) -> int:
-    directory, args = (argv[0] if argv and argv[0] != "--" else os.getcwd()), []
-    if "--" in argv:
-        args = argv[argv.index("--") + 1:]
-        directory = argv[0] if argv[0] != "--" else os.getcwd()
+    pre, args = (argv[:argv.index("--")], argv[argv.index("--") + 1:]) if "--" in argv else (argv, [])
+    safe = "--safe" in pre
+    pre = [a for a in pre if a != "--safe"]
+    directory = pre[0] if pre else os.getcwd()
     try:
-        name = tm.create(os.path.expanduser(directory), args)
+        name = tm.create(os.path.expanduser(directory), args if safe else tm.with_defaults(args))
     except RuntimeError as e:
         print(e, file=sys.stderr); return 1
     return subprocess.run(tm.attach_cmd(name)).returncode

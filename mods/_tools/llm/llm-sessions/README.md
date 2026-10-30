@@ -18,6 +18,10 @@
 | 설정 | `claude-tmux.conf` | 전용 소켓 `tmux -L claude` 에서만 읽힌다 — 일반 tmux 에 영향 없음 |
 | 실행기 | nix 의 `claude-run` | tmux 안에서 `--settings`(훅·모션) 주입 후 claude 실행. **sudo 인증도 여기서 받는다** |
 
+## 새 세션 기본값(2026-10-30 추가)
+- **권한 확인 건너뛰기가 기본**: `llm-sessions` 로 만드는 새 세션(UI `n`·CLI `new`)에는 `--dangerously-skip-permissions` 가 붙는다. 이유: 세션 간 통신(SendMessage)과 root 작업(sudo)마다 승인을 물으면 흐름이 끊긴다는 사용자 경험. 끄기: UI 의 「claude 인자」 칸 비우기 · `llm-sessions new --safe` · `CLAUDE_SESSIONS_DEFAULT_ARGS=`(빈 값). `--permission-mode` 등을 직접 주면 기본값은 붙지 않는다. 셸의 `claude` 함수·`claude-tmux` 직접 호출은 바뀌지 않았다(llm-sessions 만 해당).
+- **디렉터리 고르기**: UI `n` 대화상자 맨 위가 현재 위치(ctx 에 없는 곳이면 「새 위치」), 아래는 ctx DB(ctxui 에 보이는 저장소)의 이 호스트 작업 저장소 루트(최근 사용 순, 실제로 있는 디렉터리만, /tmp 아래·git worktree 사본 제외). 직접 입력도 가능(Tab). DB 에 못 붙으면 현재 위치만 보인다. 조회는 `donghans ctx sql`(nix 가 `CLAUDE_CTX_BIN` 으로 알려 줌).
+
 ## 결정과 근거
 - **전용 소켓·전용 설정**: 사용자의 일반 tmux 와 섞이지 않고, 목록은 `claude-` 접두 세션만 보인다.
 - **접두 키는 Ctrl+]**: tmux 기본 Ctrl+B 는 Claude Code 의 백그라운드 키, Ctrl+A 는 줄 처음 이동과 겹친다. 분리는 **F12** 한 번 또는 Ctrl+] d. 붙을 때 3초 안내가 뜬다.

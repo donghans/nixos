@@ -18,6 +18,12 @@ open(FAKE, "w").write('#!/bin/sh\necho "FAKE-READY args=$*"\nif [ "$FAKE_EXIT" =
 os.chmod(FAKE, 0o755)
 WORK = os.path.join(TMP, "my.proj")          # 이름에 '.' 가 있어 정리(sanitize)가 필요
 os.makedirs(WORK)
+HOMETMP = tempfile.mkdtemp(prefix=".clsess-repo-", dir=os.path.expanduser("~"))   # /tmp 아래는 후보에서 빠지므로 홈 아래에 만든다
+REPO = os.path.join(HOMETMP, "known-repo"); os.makedirs(REPO)
+FAKECTX = os.path.join(TMP, "fake-donghans")      # `donghans ctx sql` 흉내: 머리줄 + (경로, URL) 줄. 없는 디렉터리·/tmp 아래·worktree 는 걸러져야 한다
+open(FAKECTX, "w").write(f'#!/bin/sh\nprintf "repo_root\\trepo_url\\n{REPO}\\thttps://github.com/o/known\\n{TMP}/gone\\thttps://github.com/o/gone\\n/tmp/x\\thttps://github.com/o/t\\n"\n')
+os.chmod(FAKECTX, 0o755)
+os.environ.update(CLAUDE_SESSIONS_DEFAULT_ARGS="", CLAUDE_CTX_BIN=FAKECTX)   # 기본 인자는 아래에서 따로 시험 — 나머지 시험은 인자가 그대로 전달되는지 본다
 os.environ.update(CLAUDE_TMUX_BIN=TMUX, CLAUDE_TMUX_SOCKET=SOCK, CLAUDE_RUN_BIN=FAKE, TERM="xterm-256color", PYTHONDONTWRITEBYTECODE="1")
 os.environ.pop("TMUX", None); os.environ.pop("CLAUDE_TMUX", None)
 import tmuxsess as ts
@@ -248,6 +254,14 @@ try:
                 check("UI: 없는 디렉터리는 세션을 만들지 않고 화면이 유지됨", len(ts.list_sessions()) == 3 and app.is_running)
                 await pilot.press("escape"); await pilot.pause(0.3)
                 check("UI: Esc 로 대화상자 닫힘", not isinstance(app.screen, cu.NewScreen))
+                os.environ["CLAUDE_SESSIONS_DEFAULT_ARGS"] = "--dangerously-skip-permissions"
+                await pilot.press("n"); await pilot.pause(1.0)
+                ol = app.screen.query_one("#new-choices")
+                check("UI: 대화상자에 현재 위치 + ctx 저장소 후보가 뜸", ol.option_count == 2 and app.screen.query_one("#new-dir").value == WORK, f"{ol.option_count}")
+                await pilot.press("down"); await pilot.pause(0.2)
+                check("UI: 후보를 고르면 디렉터리 칸이 바뀜", app.screen.query_one("#new-dir").value == REPO)
+                check("UI: 인자 칸에 기본 인자가 채워짐", app.screen.query_one("#new-args").value == "--dangerously-skip-permissions")
+                await pilot.press("escape"); await pilot.pause(0.2); os.environ["CLAUDE_SESSIONS_DEFAULT_ARGS"] = ""
                 # 정리
                 app.query_one("#list").move_cursor(row=[s.name for s in ts.list_sessions()].index(newn)); await pilot.pause(0.3)
                 await pilot.press("x"); await pilot.pause(0.3)
@@ -261,6 +275,21 @@ try:
                 ts.kill(s1); ts.kill(s2); await pilot.press("r"); await settle(pilot, lambda: rows(app) == 0)
                 check("UI: 세션이 모두 없어지면 빈 목록과 안내", rows(app) == 0 and "없음" in app.query_one("#list").border_title and ptxt(app).strip())
         asyncio.run(ui_run())
+
+        # 기본 인자·디렉터리 후보
+        os.environ.pop("CLAUDE_SESSIONS_DEFAULT_ARGS")
+        check("기본 인자: 권한 확인 건너뛰기가 앞에 붙음", ts.with_defaults(["--model", "x"]) == ["--dangerously-skip-permissions", "--model", "x"])
+        check("기본 인자: 권한 인자를 직접 주면 덧붙이지 않음", ts.with_defaults(["--permission-mode", "plan"]) == ["--permission-mode", "plan"] and ts.with_defaults(["--permission-mode=plan"]) == ["--permission-mode=plan"])
+        os.environ["CLAUDE_SESSIONS_DEFAULT_ARGS"] = ""
+        check("기본 인자: 환경 변수가 빈 값이면 아무것도 붙이지 않음", ts.with_defaults(["a"]) == ["a"])
+        repos = ts.repo_dirs()
+        check("저장소 후보: 있는 디렉터리만(없는 곳·/tmp 아래 제외)", repos == [(REPO, "https://github.com/o/known")], str(repos))
+        ch = ts.dir_choices(WORK, repos)
+        check("디렉터리 후보: 현재 위치가 맨 위 + 새 위치 표시, 그 아래 저장소", ch[0][0] == WORK and "새 위치" in ch[0][1] and ch[1][0] == REPO, str(ch))
+        check("디렉터리 후보: 현재 위치가 이미 저장소면 중복·새 위치 표시 없음", ts.dir_choices(REPO, repos) == [(REPO, "현재 위치")])
+        os.environ["CLAUDE_CTX_BIN"] = "/없는/명령"
+        check("저장소 후보: 조회 명령이 없으면 빈 목록(오류 없이)", ts.repo_dirs() == [])
+        os.environ["CLAUDE_CTX_BIN"] = FAKECTX
 
         # CLI
         s1 = ts.create(WORK, name="claude-cli-a")
@@ -277,8 +306,17 @@ try:
         n = Term([sys.executable, os.path.join(ROOT, "llm_sessions.py"), "new", WORK, "--", "--model", "x"])
         check("CLI new: 새 세션을 만들고 붙음(인자 전달)", n.wait_for("FAKE-READY args=--model x") and len(names()) == 1, n.buf[-200:].decode(errors="replace"))
         n.send(b"\x1b[24~"); n.exited(); n.close()
+        os.environ.pop("CLAUDE_SESSIONS_DEFAULT_ARGS", None)
+        for k in names(): ts.kill(k)
+        n = Term([sys.executable, os.path.join(ROOT, "llm_sessions.py"), "new", WORK, "--", "--model", "x"])
+        check("CLI new: 기본으로 --dangerously-skip-permissions 가 붙음", n.wait_for("FAKE-READY args=--dangerously-skip-permissions --model x"), n.buf[-200:].decode(errors="replace"))
+        n.send(b"\x1b[24~"); n.exited(); n.close()
+        for k in names(): ts.kill(k)
+        n = Term([sys.executable, os.path.join(ROOT, "llm_sessions.py"), "new", "--safe", WORK, "--", "--model", "x"])
+        check("CLI new --safe: 기본 인자를 붙이지 않음", n.wait_for("FAKE-READY args=--model x"), n.buf[-200:].decode(errors="replace"))
+        n.send(b"\x1b[24~"); n.exited(); n.close()
 finally:
     kill_server()
     import shutil
-    shutil.rmtree(TMP, ignore_errors=True)
+    shutil.rmtree(TMP, ignore_errors=True); shutil.rmtree(HOMETMP, ignore_errors=True)
 finish("llm-sessions 코어")

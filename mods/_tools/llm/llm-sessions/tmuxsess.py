@@ -3,12 +3,15 @@
 
 전용 소켓(`tmux -L <소켓>`)과 전용 설정 파일(claude-tmux.conf)만 쓰므로 사용자의 일반 tmux 에는 손대지 않는다. 환경 변수:
   CLAUDE_TMUX_BIN(tmux 실행 파일) · CLAUDE_TMUX_SOCKET(기본 claude) · CLAUDE_TMUX_CONF(기본: 이 파일 옆 claude-tmux.conf) · CLAUDE_RUN_BIN(세션 안에서 실행할 것, 기본 claude-run)
+  CLAUDE_SESSIONS_DEFAULT_ARGS(llm-sessions 로 만드는 새 세션에 기본으로 붙일 claude 인자, 기본 `--dangerously-skip-permissions`; 빈 값이면 아무것도 붙이지 않음) · CLAUDE_CTX_BIN(ctx 조회 명령, 기본 donghans)
 세션 이름은 `claude-<작업 디렉터리 이름>-<시작 시각>` — 이 접두사가 붙은 세션만 목록에 나온다.
 """
 from __future__ import annotations
 
 import os
 import re
+import shlex
+import socket as _socket
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -132,6 +135,53 @@ def create(directory: str, args: list[str] | None = None, name: str | None = Non
     if r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout).strip() or "tmux new-session 실패")
     return name
+
+
+# 세션 간 통신(SendMessage 등)·root 작업(sudo)마다 승인을 묻지 않게, llm-sessions 가 만드는 세션은 권한 확인을 건너뛰는 것이 기본이다(사용자 결정 2026-10-30).
+# 이미 권한 관련 인자를 직접 준 경우(`--permission-mode …` 등)에는 덧붙이지 않는다. 끄기: UI 에서 인자 칸을 비우거나, CLI `new --safe`, 또는 CLAUDE_SESSIONS_DEFAULT_ARGS= (빈 값).
+PERMISSION_FLAGS = ("--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--permission-mode")
+
+
+def default_args() -> list[str]:
+    return shlex.split(os.environ.get("CLAUDE_SESSIONS_DEFAULT_ARGS", "--dangerously-skip-permissions"))
+
+
+def with_defaults(args: list[str] | None) -> list[str]:
+    args = list(args or [])
+    if any(a == f or a.startswith(f + "=") for a in args for f in PERMISSION_FLAGS):
+        return args
+    return [*default_args(), *args]
+
+
+def repo_dirs(limit: int = 30, timeout: float = 5) -> list[tuple[str, str]]:
+    """ctx DB(ctxui 가 보여 주는 저장소)에서 이 호스트의 작업 저장소 루트를 최근 사용 순으로 [(경로, 저장소 URL)]. 실제로 있는 디렉터리만.
+    DB·명령에 못 붙으면 빈 목록(새 세션 대화상자는 현재 위치만으로도 쓸 수 있다). /tmp 아래(시험 산출물)·git worktree 사본은 뺀다."""
+    host = re.sub(r"[^A-Za-z0-9._-]", "", _socket.gethostname())
+    q = (f"SELECT repo_root, max(repo_url) FROM sessions WHERE host = '{host}' AND repo_root IS NOT NULL "
+         "GROUP BY repo_root ORDER BY max(last_ts) DESC")
+    try:
+        r = subprocess.run([os.environ.get("CLAUDE_CTX_BIN", "donghans"), "ctx", "sql", "--limit", str(limit * 3), q],
+                           capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if r.returncode != 0:
+        return []
+    out = []
+    for line in r.stdout.splitlines()[1:]:
+        p = line.split("\t")
+        path = p[0].strip()
+        if not path.startswith("/") or path.startswith("/tmp/") or "/.claude/worktrees/" in path or not os.path.isdir(path):
+            continue
+        out.append((path, p[1].strip() if len(p) > 1 else ""))
+    return out[:limit]
+
+
+def dir_choices(cwd: str, repos: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """새 세션 디렉터리 후보 [(경로, 설명)] — 현재 위치가 맨 위(아직 모르는 곳이면 새로 등록되는 셈), 그 아래 ctx 에 있는 저장소."""
+    known = {p: u for p, u in repos}
+    out = [(cwd, "현재 위치" + ("" if cwd in known else " (새 위치)"))]
+    out += [(p, u.removeprefix("https://github.com/") or "저장소") for p, u in repos if p != cwd]
+    return out
 
 
 def attach_cmd(name: str) -> list[str]:
