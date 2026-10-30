@@ -658,12 +658,13 @@ class CtxUI(uikit.HelpMixin, App):
                 out.append((sel, avail, need))
         return out
 
-    def _fit_dash(self):
+    def _fit_dash(self, width=None):
+        """width: 리사이즈 이벤트가 알려 준 새 폭(on_resize 시점의 self.size 는 아직 직전 크기라 1열 판정이 한 단계 늦었다)."""
         try:
             box = self.query_one("#dash-scroll")
         except Exception:
             return
-        w = self.size.width
+        w = width or self.size.width
         narrow = w < self.DASH_NARROW_COLS
         if not narrow and box.has_class("narrow"):
             narrow = w < self._wrap_at + self.WRAP_RETRY_COLS      # 줄바꿈으로 좁혔던 폭보다 충분히 넓어지기 전엔 1열 유지
@@ -683,13 +684,35 @@ class CtxUI(uikit.HelpMixin, App):
             self._wrap_at = self.size.width
             box.add_class("narrow")
             self.call_after_refresh(self._paint_dash)
+            self.set_timer(self.REPAINT_DELAY, self._repaint_if_stale)      # 1열로 바뀐 레이아웃이 자리 잡은 뒤의 폭으로 다시
         else:
             self._wrap_pending = True
             self.set_timer(0.35, self._check_wrap)
 
-    def on_resize(self, event):
+    PAINT_BOXES = ("stat-trend-chart", "stat-limits-box", "stat-summary-box", "stat-trend")      # _paint_dash·_paint_trend 가 폭을 읽는 박스
+    REPAINT_DELAY, REPAINT_TRIES = 0.05, 3
+
+    def _box_widths(self):
+        try:
+            return tuple(self.query_one("#" + i).size.width for i in self.PAINT_BOXES)
+        except Exception:
+            return None
+
+    def _repaint_if_stale(self, tries=None):
+        """리사이즈 직후 on_resize 시점에는 자식 박스가 아직 이전 레이아웃의 폭이라 그래프가 한 단계 전 폭으로 그려진다(실측: 170→120 에서 박스 68 인데 본문 94칸).
+        그릴 때 읽은 폭(_painted_w)과 지금 폭이 다르면 다시 그린다. 폭이 같아지면 멈추고, 흔들려도 최대 REPAINT_TRIES 번."""
+        tries = self.REPAINT_TRIES if tries is None else tries
+        if not getattr(self, "_st", None) or self._box_widths() == getattr(self, "_painted_w", None):
+            return
         self._fit_dash()
+        self._paint_dash()
+        if tries > 1:
+            self.set_timer(self.REPAINT_DELAY, lambda: self._repaint_if_stale(tries - 1))
+
+    def on_resize(self, event):
+        self._fit_dash(event.size.width)
         self.call_after_refresh(self._paint_dash)
+        self.set_timer(self.REPAINT_DELAY, self._repaint_if_stale)
         self.call_after_refresh(self._check_wrap)
 
     # --- 공통
@@ -1013,6 +1036,7 @@ class CtxUI(uikit.HelpMixin, App):
         st = getattr(self, "_st", None)
         if not st:
             return
+        self._painted_w = self._box_widths()
         lim_w = self.query_one("#stat-limits-box").size.width - 6 or 60      # 테두리 2 + 글 여백 2 + 세로 스크롤바 2(내용이 길어 생겨도 줄바꿈되지 않게 늘 비워 둔다)
         lt = limits_text(st["lim"], max(30, lim_w))
         self.query_one("#stat-limits", Static).update(lt)

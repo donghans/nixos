@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ctxui 시험(Textual Pilot + 임시 Postgres): 5개 탭 · 검색/필터 · 대화 보기 · 치환 켬/끔 · 대조 · 비밀 추가/끄기/삭제/값 보기 · 후보 승인/무시.
 필요: psycopg + textual 이 있는 python 과 postgres 17 바이너리. 없으면 건너뛴다."""
-import asyncio, json, os, sys, time
+import asyncio, json, os, re, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker
@@ -494,7 +494,7 @@ async def run_wrap():
             tt = app.query_one("#stat-trend")
             barw[cols] = max((len(tt.get_row_at(i)[3].plain) for i in range(tt.row_count)), default=0)
             lt = txt(app.query_one("#stat-limits"))
-            check(f"대시보드 {cols}칸: 한도는 점자 그래프(시간축 날짜 포함)이고 시간대별도 점자 그래프", any("\u2800" <= ch <= "\u28ff" and ch != "\u2800" for ch in lt) and "10-" in lt and any("\u2800" <= ch <= "\u28ff" for ch in txt(app.query_one("#stat-summary"))), lt[:300])
+            check(f"대시보드 {cols}칸: 한도는 점자 그래프(시간축 날짜 포함)이고 시간대별도 점자 그래프", any("\u2800" <= ch <= "\u28ff" and ch != "\u2800" for ch in lt) and re.search(r"\d\d-\d\d", lt) and any("\u2800" <= ch <= "\u28ff" for ch in txt(app.query_one("#stat-summary"))), lt[:300])
             tops = [app.query_one("#" + k) for kids in app.DASH_ROWS.values() for k in kids]
             bad = [(a.id, b.id) for i, a in enumerate(tops) for b in tops[i + 1:] if a.region.overlaps(b.region)]
             check(f"대시보드 {cols}칸: 박스끼리 겹치지 않는다", not bad, bad)
@@ -504,6 +504,29 @@ async def run_wrap():
             if cols == 400:
                 check("대시보드 아주 넓은 폭(400칸): 2열 유지", not narrow and not app._wrapping(), (narrow, app._wrapping(), app._wrap_at))
     check("대시보드: 비용 막대는 박스가 넓을수록 길다(150칸 < 400칸, 18칸 고정 아님)", barw[400] > barw[150] > 0 and barw[400] > 18, barw)
+
+
+async def run_resize():
+    """창 크기를 바꾸면 그래프·막대가 새 폭으로 다시 그려진다: 그릴 때 박스 폭이 아직 이전 레이아웃의 값이라 한 단계 전 폭으로 남던 결함(170→120 에서 박스 68 인데 본문 94칸).
+    각 칸의 본문 최대 줄 폭이 칸 폭을 넘지 않고(잘림·줄바꿈 없음) 칸 폭 − 8 보다 좁지 않다(너무 좁게 남지 않음)."""
+    from rich.cells import cell_len
+    app = ctxui.CtxUI()
+    async with app.run_test(size=(170, 50)) as pilot:
+        await settle(pilot, lambda: rows(app, "#stat-sessions") >= 1)
+        await pilot.pause(1.0)
+        for cols in (120, 220, 170, 100, 200, 90, 300):
+            await pilot.resize_terminal(cols, 50)
+            await pilot.pause(0.8)
+            bad = []
+            for wid in ("stat-trend-chart", "stat-limits", "stat-summary"):
+                w = app.query_one("#" + wid)
+                need = max((cell_len(l) for l in txt(w).split("\n")), default=0)
+                if not (w.size.width - 8 <= need <= w.size.width):
+                    bad.append((wid, w.size.width, need))
+            check(f"리사이즈 → {cols}칸: 그래프·글 칸의 본문 폭이 칸 폭에 맞는다(칸 폭−8 ≤ 본문 ≤ 칸 폭)", not bad, bad)
+            tt = app.query_one("#stat-trend")
+            bw = max((len(tt.get_row_at(i)[3].plain) for i in range(tt.row_count)), default=0)
+            check(f"리사이즈 → {cols}칸: 추이 표의 막대가 표 폭 안에 있다", bw <= tt.size.width, (bw, tt.size.width))
 
 
 async def run_restricted():
@@ -628,6 +651,7 @@ try:
     seed()
     asyncio.run(run())
     asyncio.run(run_wrap())
+    asyncio.run(run_resize())
     asyncio.run(run_restricted())
 finally:
     pg.stop()
