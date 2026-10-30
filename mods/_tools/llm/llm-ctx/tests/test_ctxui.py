@@ -669,6 +669,11 @@ def check_limits_text():
     old5, old7 = acct("C", "c@x.test", 30, 300)
     old = ctxui.limits_text({"5h": [old5], "7d": [old7]}, 80, days=7, now=now).plain
     check("한도 칸: 오래된 샘플은 「마지막 샘플 N% (월-일 시:분)」", "마지막 샘플" in old and "지금 " not in old, old[:200])
+    sm = dict(sessions=2, cost=5.0, prompts=4, tools=1, autos=0, unknown_tags=0, median_prompts=2, median_duration_s=60, avg_duration_s=90, by_slot=[0] * 96, by_hour=[0] * 24, by_weekday=[0] * 7, orphan=(3, 1.25))
+    st = ctxui.summary_text(sm, 60, "7일").plain
+    check("세션 통계 칸: 기간 라벨과 「세션 기록 없는 사용」 금액·세션 길이 기준 안내", "비용 $5.00 (7일)" in st and "세션 기록 없는 사용 $1.25(3건) 별도" in st and "세션 전체 기준" in st, st[:200])
+    sm["orphan"] = (0, 0.0)
+    check("세션 통계 칸: 세션 기록 없는 사용이 없으면 그 줄이 없다", "세션 기록 없는 사용" not in ctxui.summary_text(sm, 60, "전체").plain)
     check("한도 칸: 기간 지정 때 샘플이 하나도 없으면 「이 기간에 한도 샘플 없음」", "이 기간에 한도 샘플 없음" in ctxui.limits_text({"5h": [], "7d": []}, 80, days=1, now=now).plain)
 
 

@@ -83,18 +83,21 @@ def bar(v, vmax, width=20) -> str:
 ACCT_COLORS = ["#33ccff", "#ffb347", "#b4e04e", "#ff6f91", "#c792ea", "#ffd166"]   # 계정마다 고정 색(계정 ID 순)
 
 
-def summary_text(summ, width=46) -> Text:
+def summary_text(summ, width=46, period="전체") -> Text:
     """세션 통계 칸 글. 가장 긴 줄이 1열 전환 기준(칸 폭 ≈ 화면의 1/3)보다 짧게 짧은 줄로 나누고, 그래프·막대는 width 에 맞춘다."""
     t = Text()
     n = max(summ["sessions"], 1)
-    t.append(f"세션 {summ['sessions']:,}개 · 비용 ${summ['cost']:,.2f}\n", style="bold")
+    t.append(f"세션 {summ['sessions']:,}개 · 비용 ${summ['cost']:,.2f} ({period})\n", style="bold")
+    orph = summ.get("orphan") or (0, 0.0)
+    if orph[0]:
+        t.append(f"세션 기록 없는 사용 ${orph[1]:,.2f}({orph[0]:,}건) 별도\n", style="#7a7a7a")
     t.append(f"프롬프트 {int(summ['prompts']):,} · 도구 호출 {int(summ['tools']):,}\n", style="bold")
     t.append(f"자동 메시지 {summ['autos']:,}건은 프롬프트에서 제외\n", style="#7a7a7a")
     if summ["unknown_tags"]:
         t.append(f"알 수 없는 태그 {summ['unknown_tags']:,}건(AUTO_TAGS 점검)\n", style="#7a7a7a")
     t.append(f"세션당  프롬프트 {summ['prompts'] / n:.1f} (중앙값 {summ['median_prompts']:.0f}) · ${summ['cost'] / n:.2f}\n", style="#cfcfcf")
     t.append(f"세션 길이  중앙값 {fmt_dur(summ['median_duration_s'])} · 평균 {fmt_dur(summ['avg_duration_s'])}\n", style="#cfcfcf")
-    t.append("(resume 이어진 세션이 평균을 올림)\n\n", style="#7a7a7a")
+    t.append("(길이는 세션 전체 기준·resume 이어진\n 세션이 평균을 올림)\n\n", style="#7a7a7a")
     t.append("시간대별 프롬프트(15분 단위, 0~24시)\n", style="#9a9a9a")
     t.append_text(cch.slot_chart(summ["by_slot"], width, 4, "#33ccff"))
     top = sorted(range(24), key=lambda h: -summ["by_hour"][h])[:3]
@@ -509,7 +512,7 @@ class CtxUI(uikit.HelpMixin, App):
         ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침)'),
         ('치환(m)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
         ('제한 모드', 'LLM 세션이 실행하면: 모든 탭을 볼 수 있지만 화면의 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(키 형식·password=·한글 비밀번호)이 [protected] 로 치환되고(끌 수 없음), 후보 미리보기도 [protected](N자)로 가려지며, 값 보기(v)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용된다'),
-        ('비용', 'Claude Code(OpenTelemetry)가 요청마다 보고한 cost_usd 의 합이다. 구독에서 실제 청구액과 같은지는 확인하지 못했다(청구액이라고 단정하지 말 것). 계정별은 요청마다 찍힌 계정(OTel user.email) 기준이고, 수집 전이거나 원본이 없는 기록은 「(계정 불명)」으로 따로 보인다. 한도 그래프는 계정 단위라 저장소·모델 필터가 걸리지 않는다'),
+        ('비용', 'Claude Code(OpenTelemetry)가 요청마다 보고한 cost_usd 의 합이다. 구독에서 실제 청구액과 같은지는 확인하지 못했다(청구액이라고 단정하지 말 것). 계정별은 요청마다 찍힌 계정(OTel user.email) 기준이고, 수집 전이거나 원본이 없는 기록은 「(계정 불명)」으로 따로 보인다. 한도 그래프는 계정 단위라 저장소·모델 필터가 걸리지 않고, 모든 계정이 같은 시간 축(최근 기간, 전체는 7일)을 쓴다. 세션 통계·세션 표의 비용·프롬프트도 선택한 기간·필터 안의 값이라 필터가 없으면 세션 비용 합 + 「세션 기록 없는 사용」 = 추이 합계다(세션 길이·최근은 세션 전체)'),
         ('필터 키', '검색 탭: F2 사용자 발언만 · F3 정규식 · F4 도구 메시지 포함 · F6 제목만 · Space 세션 펼침 · x 모두 펼침. 대시보드: p 기간 · b 단위 · g 분류 · o 정렬 · c 필터 지움'),
         ('자동 메시지', 'Claude Code 가 사람 대신 남기는 메시지(작업 알림·명령 출력·시스템 알림 등, `<태그>` 로 시작)는 흐린 배지+한 줄 요약으로 접혀 보이고 통계 프롬프트 수·사용자 발언 검색·대조에서 빠진다. 스킬 호출(/이름)·셸 입력·붙여넣기는 사람이 한 것이라 포함. 대화 화면 i: 자동 메시지 숨김/표시'),
         ('세션 기준 검색', '검색은 늘 전체 대화를 대상으로 하되 결과를 세션 단위로 묶어 보여 준다(제목·일치 건수·가장 최근 일치). Enter 는 그 세션 대화를 열고, Space 로 펼치면 일치한 메시지들이 아래에 나온다. F6 제목만은 세션 제목(첫 프롬프트)에 일치한 세션만 남긴다'),
@@ -1035,7 +1038,8 @@ class CtxUI(uikit.HelpMixin, App):
             models = ",".join(sorted({m.split("-")[1] if m.startswith("claude-") and "-" in m[7:] else m for m in r["models"]}))   # claude-sonnet-5-5 → sonnet
             ts.add_row(fmt_ts(r["last"]), r["host"], short_repo(r["repo"]), r["prompts"], r["tools"], fmt_dur(r["turn_ms"] / 1000),
                        f"${r['cost']:,.2f}" if r["cost"] is not None else "-", models[:20], Text((r["title"] or "")[:60]), key=r["session_id"])
-        self.query_one("#stat-sessions").border_title = f"세션 {len(sess)}개{' (최대 300)' if len(sess) >= 300 else ''} — {dict(STAT_ORDERS)[self.stat_order]}순 (o) · Enter: 대화 보기"
+        self.query_one("#stat-sessions").border_title = (f"세션 {len(sess)}개{' (최대 300)' if len(sess) >= 300 else ''} — {dict(STAT_ORDERS)[self.stat_order]}순 (o) · Enter: 대화 보기"
+                                                         f" · 프롬프트·도구·턴시간·비용은 {STAT_PERIODS[self.stat_period][1]} 값, 최근·기간 정렬은 세션 전체")
         self._paint_dash()
         self.call_after_refresh(self._paint_dash)      # 칸 폭이 확정된 뒤 한 번 더(처음 열 때 폭을 아직 모를 수 있다)
         self.call_after_refresh(self._check_wrap)
@@ -1053,7 +1057,7 @@ class CtxUI(uikit.HelpMixin, App):
         lt = limits_text(st["lim"], max(30, lim_w), st["lim_days"])
         self.query_one("#stat-limits", Static).update(lt)
         sm_w = self.query_one("#stat-summary-box").size.width - 6 or 46
-        sm = summary_text(st["summ"], max(30, sm_w))
+        sm = summary_text(st["summ"], max(30, sm_w), STAT_PERIODS[self.stat_period][1])
         self.query_one("#stat-summary", Static).update(sm)
         self._need = {"stat-limits-box": lt.plain.count("\n") + 1, "stat-summary-box": sm.plain.count("\n") + 1}
         self._paint_trend(st["trend"])

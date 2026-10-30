@@ -163,7 +163,7 @@ try:
     check("session_stats: 저장소 필터", {x["repo"] for x in cd.session_stats(conn, repo="alpha")} == {A})
     check("session_stats: 머신 필터", {x["host"] for x in cd.session_stats(conn, host="h2")} == {"h2"})
     check("session_stats: 모델 필터(그 모델 요청이 있는 세션만)", {x["session_id"] for x in cd.session_stats(conn, model="haiku")} == {"aaaa0001"})
-    check("session_stats: 기간 필터(오래된 세션 제외)", {x["session_id"] for x in cd.session_stats(conn, days=1)} == set())
+    check("session_stats: 기간 필터(기간 안에 요청·메시지가 있는 세션만 — 마지막 활동이 오래돼도 1시간 전 요청이 있으면 포함)", {x["session_id"] for x in cd.session_stats(conn, days=1)} == {"cccc0001"})
     check("session_stats: limit", len(cd.session_stats(conn, limit=2)) == 2)
     masked = {x["session_id"]: x for x in cd.session_stats(conn, masker=cs.load_masker(conn))}
     check("session_stats: 제목도 치환(등록된 비밀은 [protected])", "hunter2-pass" not in masked["eeee0001"]["title"] and "protected" in masked["eeee0001"]["title"], masked["eeee0001"]["title"])
@@ -182,6 +182,33 @@ try:
     check("session_summary: 일치 없음", cd.session_summary(conn, repo="없는저장소")["sessions"] == 0 and sum(cd.session_summary(conn, repo="없는저장소")["by_hour"]) == 0)
     fc = cd.filter_choices(conn)
     check("filter_choices: 머신·모델 목록", fc["hosts"] == ["h1", "h2"] and "claude-haiku-5-5" in fc["models"])
+
+    # --- 기간·필터가 세션 비용·프롬프트에도 적용된다(추이·분류 합계와 같은 요청 집합): 오래된 요청과 최근 요청이 섞인 세션 하나로 확인
+    seed("ffff0001", A, "h9", [("user", "prompt", "2026-10-01T01:00:00Z", "오래된 프롬프트"), ("user", "prompt", "2026-10-01T02:00:00Z", "오래된 둘째")])
+    conn.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES ('ffff-new', 'ffff0001', 'h9', now() - interval '30 minutes', 'user', 'prompt', '최근 프롬프트', '{}')")
+    conn.execute("UPDATE sessions SET last_ts = now() - interval '30 minutes' WHERE session_id = 'ffff0001'")
+    usage("f1", "ffff0001", "h9", "2026-10-01T01:00:00Z", "claude-sonnet-5-5", 10.0)
+    conn.execute("""INSERT INTO usage_events (request_id, host, ts, session_id, model, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens)
+                    VALUES ('f2', 'h9', now() - interval '1 hour', 'ffff0001', 'claude-haiku-5-5', 3.0, 1, 1, 0, 0)""")
+    conn.execute("""INSERT INTO usage_events (request_id, host, ts, session_id, model, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens)
+                    VALUES ('f3', 'h9', now() - interval '2 hours', 'nosession-1', 'claude-sonnet-5-5', 0.5, 1, 1, 0, 0)""")        # 세션 행이 없는 최근 사용
+    all_ = {x["session_id"]: x for x in cd.session_stats(conn)}
+    day = {x["session_id"]: x for x in cd.session_stats(conn, days=1)}
+    check("session_stats: 기간을 주면 비용·요청·프롬프트가 그 기간의 것만(전체 $13 → 1일 $3, 프롬프트 3 → 1)", round(all_["ffff0001"]["cost"], 2) == 13.0 and round(day["ffff0001"]["cost"], 2) == 3.0
+          and (all_["ffff0001"]["prompts"], day["ffff0001"]["prompts"], day["ffff0001"]["requests"]) == (3, 1, 1), (day["ffff0001"]["cost"], day["ffff0001"]["prompts"]))
+    tr = sum(r["cost"] for r in cd.usage_trend(conn, days=1))
+    brk_tot = cd.usage_breakdown(conn, "model", days=1)[1]["cost"]
+    orph = cd.orphan_usage(conn, days=1)
+    check("합계 일치: 기간 1일의 세션 비용 합 + 세션 기록 없는 사용 = 추이 합 = 분류 합", abs(sum((x["cost"] or 0) for x in day.values()) + orph[1] - tr) < 1e-6 and abs(tr - brk_tot) < 1e-6 and orph == (1, 0.5), (sum((x["cost"] or 0) for x in day.values()), orph, tr))
+    sm1 = cd.session_summary(conn, days=1)
+    check("session_summary: 기간을 주면 비용도 그 기간(세션 표 합과 같다)·세션 기록 없는 사용을 알린다", abs(sm1["cost"] - sum((x["cost"] or 0) for x in day.values())) < 1e-6 and sm1["orphan"] == (1, 0.5), (sm1["cost"], sm1["orphan"]))
+    hm = {x["session_id"]: x for x in cd.session_stats(conn, days=1, model="haiku")}
+    check("필터: 모델을 주면 비용에도 같은 모델 요청만(추이와 같은 집합)", set(hm) == {"ffff0001"} and round(hm["ffff0001"]["cost"], 2) == 3.0 and abs(hm["ffff0001"]["cost"] - cd.usage_trend(conn, days=1, model="haiku")[0]["cost"]) < 1e-6)
+    check("필터: 저장소 필터가 있으면 세션 기록 없는 사용은 0(저장소를 모른다)", cd.orphan_usage(conn, days=1, repo="alpha") == (0, 0.0) and cd.orphan_usage(conn, days=None)[0] >= 2)
+    check("session_stats: session_id 지정은 기간 없이 세션 전체 누적 그대로(SessionScreen)", round(cd.session_stats(conn, session_id="ffff0001")[0]["cost"], 2) == 13.0)
+    conn.execute("DELETE FROM usage_events WHERE request_id IN ('f1','f2','f3')")
+    conn.execute("DELETE FROM messages WHERE session_id = 'ffff0001'")
+    conn.execute("DELETE FROM sessions WHERE session_id = 'ffff0001'")
 
     one = cd.session_stats(conn, session_id="aaaa0001")
     check("session_stats: session_id 로 한 세션만", len(one) == 1 and one[0]["session_id"] == "aaaa0001" and one[0]["prompts"] == 2)

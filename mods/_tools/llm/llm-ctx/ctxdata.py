@@ -237,7 +237,7 @@ def usage_breakdown(conn, by="model", *, days=None, repo=None, host=None, model=
 
 
 def _session_filters(days, repo, host, model, session_id=None):
-    """세션 통계 공통 필터. days 는 「그 기간에 활동(메시지·요청)이 있는 세션」, model 은 그 모델 요청이 있는 세션."""
+    """세션 통계 공통 필터. days 는 「그 기간에 활동(메시지·요청)이 있는 세션」(last_ts 가 비어 있는 세션도 놓치지 않게 요청·메시지의 시각으로 본다), model 은 그 모델 요청이 있는 세션."""
     where, args = [], []
     if session_id:
         where.append("s.session_id = %s"); args.append(session_id)
@@ -248,17 +248,51 @@ def _session_filters(days, repo, host, model, session_id=None):
     if model:
         where.append("EXISTS (SELECT 1 FROM usage_events x WHERE x.session_id = s.session_id AND x.model ILIKE %s)"); args.append(_like(model))
     if days:
-        where.append("s.last_ts > now() - make_interval(days => %s)"); args.append(days)
+        where.append("(EXISTS (SELECT 1 FROM usage_events x WHERE x.session_id = s.session_id AND x.ts > now() - make_interval(days => %s))"
+                     " OR EXISTS (SELECT 1 FROM messages y WHERE y.session_id = s.session_id AND y.ts > now() - make_interval(days => %s)))")
+        args += [days, days]
     return (" WHERE " + " AND ".join(where)) if where else "", args
+
+
+def _period_clauses(days, host, model):
+    """세션 표·요약의 집계(메시지 m·사용 u)를 추이·분류와 같은 요청 집합으로 맞추는 조건: days → 그 기간의 것만, model·host → 사용 기록 자체에 거는 필터(_usage_where 와 같다).
+    (messages 조건, 인자, usage_events 조건, 인자) — 조건이 없으면 빈 문자열."""
+    mw, ma, uw, ua = [], [], [], []
+    if days:
+        mw.append("ts > now() - make_interval(days => %s)"); ma.append(days)
+        uw.append("ts > now() - make_interval(days => %s)"); ua.append(days)
+    if host:
+        uw.append("host ILIKE %s"); ua.append(_like(host))
+    if model:
+        uw.append("model ILIKE %s"); ua.append(_like(model))
+    return (" WHERE " + " AND ".join(mw) if mw else ""), ma, (" WHERE " + " AND ".join(uw) if uw else ""), ua
+
+
+def orphan_usage(conn, *, days=None, repo=None, host=None, model=None):
+    """세션 행이 없는 사용 기록(세션 표에 나올 수 없는 것)의 (요청 수, 비용). 저장소 필터가 있으면 저장소를 모르므로 0."""
+    if repo:
+        return 0, 0.0
+    uw, ua = [], []
+    if days:
+        uw.append("u.ts > now() - make_interval(days => %s)"); ua.append(days)
+    if host:
+        uw.append("u.host ILIKE %s"); ua.append(_like(host))
+    if model:
+        uw.append("u.model ILIKE %s"); ua.append(_like(model))
+    r = conn.execute("SELECT count(*), coalesce(sum(u.cost_usd), 0) FROM usage_events u WHERE NOT EXISTS (SELECT 1 FROM sessions s WHERE s.session_id = u.session_id)"
+                     + "".join(" AND " + c for c in uw), ua).fetchone()
+    return int(r[0]), float(r[1])
 
 
 def session_stats(conn, *, days=None, repo=None, host=None, model=None, session_id=None, order="cost", limit=300, masker=cs.IDENTITY):
     """세션별 통계 표. order: cost|last|prompts|tools|duration. title 은 그 세션 첫 사용자 프롬프트(앞부분).
-    prompts/tools 는 서브에이전트(sidechain) 제외, subagent_msgs 는 서브에이전트 쪽 메시지 수, turn_ms 는 턴 소요 시간 합(turn_duration)."""
+    prompts/tools 는 서브에이전트(sidechain) 제외, subagent_msgs 는 서브에이전트 쪽 메시지 수, turn_ms 는 턴 소요 시간 합(turn_duration).
+    days·model·host 를 주면 prompts·tools·turn_ms·비용·요청·토큰·모델은 **그 기간·필터의 것만**(추이·분류 합계와 같은 요청 집합) 센다. 세션 길이(duration_s)·first/last 는 세션 전체 값이다."""
     orders = {"cost": "cost DESC NULLS LAST", "last": "s.last_ts DESC NULLS LAST", "prompts": "prompts DESC", "tools": "tools DESC", "duration": "duration_s DESC NULLS LAST"}
     if order not in orders:
         raise ValueError(f"order 는 {'|'.join(orders)} 중 하나")
     where, args = _session_filters(days, repo, host, model, session_id)
+    mw, ma, uw, ua = _period_clauses(days, host, model)
     sql = f"""
       WITH m AS (
         SELECT session_id,
@@ -269,11 +303,11 @@ def session_stats(conn, *, days=None, repo=None, host=None, model=None, session_
                count(*) FILTER (WHERE is_sidechain) AS subagent_msgs,
                coalesce(sum((raw->>'durationMs')::bigint) FILTER (WHERE raw->>'subtype' = 'turn_duration' AND NOT is_sidechain), 0) AS turn_ms,
                count(*) FILTER (WHERE raw->>'subtype' = 'compact_boundary') AS compacts
-        FROM messages GROUP BY session_id),
+        FROM messages{mw} GROUP BY session_id),
       u AS (
         SELECT session_id, count(*) AS requests, sum(cost_usd) AS cost, sum(input_tokens + cache_read_tokens + cache_create_tokens) AS input,
                sum(output_tokens) AS output, array_agg(DISTINCT model) FILTER (WHERE model IS NOT NULL) AS models
-        FROM usage_events GROUP BY session_id),
+        FROM usage_events{uw} GROUP BY session_id),
       t AS (
         SELECT DISTINCT ON (session_id) session_id, left(text, {TITLE_RAW}) AS text FROM messages WHERE kind = 'prompt' AND NOT is_sidechain AND coalesce(text, '') <> ''
         ORDER BY session_id, {TITLE_RANK_SQL}, ts)
@@ -285,7 +319,7 @@ def session_stats(conn, *, days=None, repo=None, host=None, model=None, session_
     keys = ("session_id", "repo", "host", "branch", "cwd", "first", "last", "duration_s", "prompts", "responses", "tools", "subagent_msgs",
             "turn_ms", "compacts", "requests", "cost", "input", "output", "models", "title", "autos")
     out = []
-    for r in conn.execute(sql, [AUTO_RE, AUTO_RE, *TITLE_RANK_ARGS, *args, limit]).fetchall():
+    for r in conn.execute(sql, [AUTO_RE, AUTO_RE, *ma, *ua, *TITLE_RANK_ARGS, *args, limit]).fetchall():
         d = dict(zip(keys, r))
         d["title"] = title_text(d["title"], masker, 200)
         out.append(d)
@@ -293,21 +327,22 @@ def session_stats(conn, *, days=None, repo=None, host=None, model=None, session_
 
 
 def session_summary(conn, *, days=None, repo=None, host=None, model=None, tz=None):
-    """세션 통계 요약: 개수·세션당 평균·중앙값, 시간대별(0~23시 by_hour, 15분 단위 96칸 by_slot)·요일별(월~일) 사용자 프롬프트 수. 필터는 session_stats 와 같다."""
+    """세션 통계 요약(비용·프롬프트·도구는 session_stats 와 같이 기간·필터 안의 값; orphan = 세션 기록 없는 사용 (요청 수, 비용)): 개수·세션당 평균·중앙값, 시간대별(0~23시 by_hour, 15분 단위 96칸 by_slot)·요일별(월~일) 사용자 프롬프트 수. 필터는 session_stats 와 같다."""
     where, args = _session_filters(days, repo, host, model)
+    mw, ma, uw, ua = _period_clauses(days, host, model)
     tz = tz or local_tz()
     row = conn.execute(f"""
       WITH base AS (SELECT s.session_id, s.first_ts, s.last_ts FROM sessions s{where}),
            m AS (SELECT session_id, count(*) FILTER (WHERE kind = 'prompt' AND NOT is_sidechain AND coalesce(text, '') !~ %s) AS prompts,
                         count(*) FILTER (WHERE kind = 'prompt' AND NOT is_sidechain AND text ~ %s) AS autos,
                         count(*) FILTER (WHERE kind = 'prompt' AND NOT is_sidechain AND text ~ %s) AS unknowns,
-                        count(*) FILTER (WHERE kind = 'tool_use' AND NOT is_sidechain) AS tools FROM messages WHERE session_id IN (SELECT session_id FROM base) GROUP BY 1),
-           u AS (SELECT session_id, sum(cost_usd) AS cost FROM usage_events WHERE session_id IN (SELECT session_id FROM base) GROUP BY 1)
+                        count(*) FILTER (WHERE kind = 'tool_use' AND NOT is_sidechain) AS tools FROM messages WHERE session_id IN (SELECT session_id FROM base){mw.replace(" WHERE ", " AND ")} GROUP BY 1),
+           u AS (SELECT session_id, sum(cost_usd) AS cost FROM usage_events WHERE session_id IN (SELECT session_id FROM base){uw.replace(" WHERE ", " AND ")} GROUP BY 1)
       SELECT count(*), coalesce(sum(m.prompts), 0), coalesce(sum(m.tools), 0), coalesce(sum(u.cost), 0),
              coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM b.last_ts - b.first_ts)), 0),
              coalesce(avg(extract(epoch FROM b.last_ts - b.first_ts)), 0), coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY m.prompts), 0),
              coalesce(sum(m.autos), 0), coalesce(sum(m.unknowns), 0)
-      FROM base b LEFT JOIN m USING (session_id) LEFT JOIN u USING (session_id)""", [*args, AUTO_RE, AUTO_RE, UNKNOWN_RE]).fetchone()
+      FROM base b LEFT JOIN m USING (session_id) LEFT JOIN u USING (session_id)""", [*args, AUTO_RE, AUTO_RE, UNKNOWN_RE, *ma, *ua]).fetchone()
     mwhere = ["m.kind = 'prompt'", "NOT m.is_sidechain", "m.ts IS NOT NULL", "m.session_id IN (SELECT session_id FROM sessions s" + where + ")"]
     margs = list(args)
     if days:
@@ -320,7 +355,8 @@ def session_summary(conn, *, days=None, repo=None, host=None, model=None, tz=Non
         hours[sl // 4] += n
         wdays[wd - 1] += n
     return dict(sessions=row[0], prompts=row[1], tools=row[2], cost=float(row[3]), median_duration_s=float(row[4]), avg_duration_s=float(row[5]),
-                median_prompts=float(row[6]), autos=int(row[7]), unknown_tags=int(row[8]), by_hour=hours, by_slot=slots, by_weekday=wdays)
+                median_prompts=float(row[6]), autos=int(row[7]), unknown_tags=int(row[8]), by_hour=hours, by_slot=slots, by_weekday=wdays,
+                orphan=orphan_usage(conn, days=days, repo=repo, host=host, model=model))
 
 
 def session_tools(conn, session_id, top=6):
