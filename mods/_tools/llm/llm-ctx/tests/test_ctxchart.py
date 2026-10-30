@@ -105,5 +105,23 @@ for sp in spans:
 left = [r for r, c in cells if c < 15]; right = [r for r, c in cells if c > 70]
 check("겹침 그래프: 7d 선이 왼쪽(10%)보다 오른쪽(70%)에서 더 위 줄에 있다", left and right and min(right) < min(left), (min(left) if left else None, min(right) if right else None))
 check("겹침 그래프: 7d 가 없으면 5h 만(limit_chart), 5h 가 없으면 7d 만, 둘 다 없으면 None", cx.limit_chart_both(s5, [], 80, 5, "cyan", now=R7.timestamp()).plain.count("\n") == 5 and cx.limit_chart_both([], s7, 80, 3, "cyan", now=R7.timestamp()) is not None and cx.limit_chart_both([], [], 80, 5, "cyan") is None)
+# --- 공통 시간 축(t0·t1): 계정마다 7d 리셋 시각이 달라도 같은 축
+NOW = R7.timestamp() + 1
+T0, T1 = NOW - 7 * 86400, NOW
+R7b = R7 - timedelta(hours=22)                                                       # 다른 계정: 7d 리셋이 22시간 빠르다
+s7b = [(R7b - timedelta(hours=168 - h), 5 + 30 * h / 168, R7b) for h in range(0, 168, 2)]
+a = cx.limit_chart_both(s5, s7, 100, 6, "#33ccff", now=NOW, t0=T0, t1=T1)
+b = cx.limit_chart_both(s5, s7b, 100, 6, "#ff9933", now=NOW, t0=T0, t1=T1)
+check("공통 축: 리셋 시각이 다른 두 계정의 시간축 눈금줄이 같다", a.plain.split("\n")[-1] == b.plain.split("\n")[-1], (a.plain.split("\n")[-1], b.plain.split("\n")[-1]))
+legacy = cx.limit_chart_both(s5, s7b, 100, 6, "#ff9933", now=NOW)
+check("공통 축: 인자가 없으면 예전처럼 계정별 마지막 7d 창(축이 다르다)", legacy.plain.split("\n")[-1] != b.plain.split("\n")[-1])
+one_day = cx.limit_chart_both(s5, s7, 100, 6, "#33ccff", now=NOW, t0=NOW - 86400, t1=NOW)
+check("공통 축: 1일 구간도 높이 6 + 시간축, 폭 이하", len(one_day.plain.split("\n")) == 7 and all(cell_len(l) <= 100 for l in one_day.plain.split("\n")))
+long_ = cx.limit_chart_both(s5, s7, 100, 6, "#33ccff", now=NOW, t0=NOW - 30 * 86400, t1=NOW)
+filled_base = [sp for sp in long_.spans if str(sp.style) == "#33ccff" and any(ch != BLANK for ch in long_.plain[sp.start:sp.end])]
+check("공통 축: 7일보다 길면 5h 면적은 그리지 않고(기본색으로 칠한 점자 없음) 7d 선(밝은 색)만 있다", not filled_base and any(str(sp.style) == cx.tint("#33ccff") for sp in long_.spans), len(filled_base))
+fb = cx.limit_chart_both([], s7b, 100, 6, "#ff9933", now=NOW, t0=T0, t1=T1)
+check("공통 축: 한쪽만 있는 폴백(limit_chart)도 같은 t0·t1 을 쓴다", fb.plain.split("\n")[-1] == b.plain.split("\n")[-1])
+check("공통 축: datetime 로 줘도 된다", cx.limit_chart_both(s5, s7, 100, 6, "#33ccff", now=NOW, t0=datetime.fromtimestamp(T0, timezone.utc), t1=datetime.fromtimestamp(T1, timezone.utc)).plain == a.plain)
 check("tint: 흰색 쪽으로 밝아진다", cx.tint("#000000", 0.5) == "#808080" and cx.tint("#ffffff") == "#ffffff")
 finish("ctxchart")

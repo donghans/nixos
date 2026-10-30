@@ -647,8 +647,34 @@ async def run_restricted():
         check("사람(제한 없음): m 으로 치환을 끌 수 있음", app2.mask is False)
 
 
+def check_limits_text():
+    """한도 칸: 모든 계정이 같은 시간 축(최근 D일)을 쓰고, 오래됐거나 이미 리셋된 샘플은 「지금」이 아니라 「마지막 샘플」로 표시한다."""
+    from datetime import datetime, timedelta, timezone
+    now = time.time()
+    n = datetime.fromtimestamp(now, timezone.utc)
+    def acct(aid, email, reset7_h, last_min_ago):
+        last = n - timedelta(minutes=last_min_ago)
+        r5, r7 = last + timedelta(hours=2), n + timedelta(hours=reset7_h)
+        ser5 = [(last - timedelta(minutes=5 * i), 20.0 - i, r5) for i in range(3)][::-1]
+        ser7 = [(last - timedelta(hours=i), 30.0 - i, r7) for i in range(3)][::-1]
+        mk = lambda ser, r: dict(account=aid, label=email, plan="pro", windows=[(r, ser[-1][1])], series=ser)
+        return mk(ser5, r5), mk(ser7, r7)
+    a5, a7 = acct("A", "a@x.test", 30, 2)
+    b5, b7 = acct("B", "b@x.test", 52, 2)
+    win = {"5h": [a5, b5], "7d": [a7, b7]}
+    t = ctxui.limits_text(win, 80, days=7, now=now).plain
+    axes = [l for l in t.split("\n") if re.search(r"\d\d-\d\d \d\d:\d\d", l)]
+    check("한도 칸: 계정이 둘이어도 시간축 눈금줄이 같다(같은 기간)", len(axes) == 2 and axes[0].strip() == axes[1].strip(), axes)
+    check("한도 칸: 최근 샘플은 「지금 N%」", "지금 " in t and "마지막 샘플" not in t, t[:200])
+    old5, old7 = acct("C", "c@x.test", 30, 300)
+    old = ctxui.limits_text({"5h": [old5], "7d": [old7]}, 80, days=7, now=now).plain
+    check("한도 칸: 오래된 샘플은 「마지막 샘플 N% (월-일 시:분)」", "마지막 샘플" in old and "지금 " not in old, old[:200])
+    check("한도 칸: 기간 지정 때 샘플이 하나도 없으면 「이 기간에 한도 샘플 없음」", "이 기간에 한도 샘플 없음" in ctxui.limits_text({"5h": [], "7d": []}, 80, days=1, now=now).plain)
+
+
 try:
     seed()
+    check_limits_text()
     asyncio.run(run())
     asyncio.run(run_wrap())
     asyncio.run(run_resize())

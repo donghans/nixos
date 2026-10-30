@@ -17,6 +17,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
+from datetime import datetime
 
 from rich.text import Text
 from textual import events, work
@@ -107,16 +109,20 @@ def summary_text(summ, width=46) -> Text:
     return t
 
 
+LIMIT_DEFAULT_DAYS = 7                                # 기간이 「전체」일 때 한도 그래프의 시간 축 길이(일)
 LIMIT_H = 6                                            # 5h·7d 겹침 그래프 높이(줄)
 
 
-def limits_text(win, width=60) -> Text:
+def limits_text(win, width=60, days=None, now=None) -> Text:
     """계정별 한도 사용률 — 한 계정 = 한 색(밝은 짝 = 7d 선). 계정마다 그래프 하나에 5h(면적, 창 안에서 0 에서 올라가다 리셋에서 떨어지는 톱니)와 7d(윗면 선)를 같은 시간 축(7일)으로 겹친다.
-    실제 샘플(5h 5분·7d 1시간 단위)로 그린다. width = 칸 폭."""
+    실제 샘플(5h 5분·7d 1시간 단위)로 그린다. width = 칸 폭.
+    days 를 주면 모든 계정이 같은 시간 축 [now − days일, now] 를 쓴다(계정마다 7d 리셋 시각이 달라 축이 어긋나던 것). 없으면 예전처럼 계정별 마지막 7d 창."""
     t = Text()
+    now = time.time() if now is None else now
+    t0, t1 = (now - days * 86400, now) if days else (None, None)
     ids = sorted({a["account"] for k in win.values() for a in k})
     if not ids:
-        t.append("한도 샘플 없음 — 계정·리셋 시각 수집은 상태줄 갱신 이후부터", style="#7a7a7a")
+        t.append("이 기간에 한도 샘플 없음" if days else "한도 샘플 없음 — 계정·리셋 시각 수집은 상태줄 갱신 이후부터", style="#7a7a7a")
         return t
     color = {i: ACCT_COLORS[n % len(ACCT_COLORS)] for n, i in enumerate(ids)}
     for n, i in enumerate(ids):
@@ -131,9 +137,13 @@ def limits_text(win, width=60) -> Text:
             a = row[k]
             if a and a["windows"]:
                 vals = [v for _, v in a["windows"]]
-                t.append(f"{k} ", style=f"bold {col}"); t.append(f"지금 {vals[-1]:.0f}% 최고 {max(vals):.0f}% ({len(vals)}창)   " if k == "5h" else f"지금 {vals[-1]:.0f}% 최고 {max(vals):.0f}%", style="#cfcfcf")
+                last_ts = cch._epoch(a["series"][-1][0]) if a["series"] else None
+                step = 300 if k == "5h" else 3600
+                stale = last_ts is not None and (now - last_ts > step + 1800 or cch._epoch(a["windows"][-1][0]) < now)      # 오래됐거나 그 창이 이미 리셋됨 → 「지금」이 아니다
+                cur = f"마지막 샘플 {vals[-1]:.0f}% ({datetime.fromtimestamp(last_ts):%m-%d %H:%M})" if stale else f"지금 {vals[-1]:.0f}%"
+                t.append(f"{k} ", style=f"bold {col}"); t.append(f"{cur} 최고 {max(vals):.0f}% (최근 {len(vals)}창)   " if k == "5h" else f"{cur} 최고 {max(vals):.0f}%", style="#cfcfcf")
         t.append("\n")
-        ch = cch.limit_chart_both(row["5h"]["series"] if row["5h"] else [], row["7d"]["series"] if row["7d"] else [], width, LIMIT_H, c5, line_style=c7)
+        ch = cch.limit_chart_both(row["5h"]["series"] if row["5h"] else [], row["7d"]["series"] if row["7d"] else [], width, LIMIT_H, c5, line_style=c7, now=now, t0=t0, t1=t1)
         if ch is not None:
             t.append_text(ch)
             t.append("\n")
@@ -999,14 +1009,16 @@ class CtxUI(uikit.HelpMixin, App):
                 brk, tot = cd.usage_breakdown(c, self.stat_by, **f)
                 summ = cd.session_summary(c, **f)
                 sess = cd.session_stats(c, order=self.stat_order, limit=300, masker=self.masker(), **f)
-                lim = cd.limit_windows(c, days=f.get("days"), host=f.get("host"))
+                lim_days = f.get("days") or LIMIT_DEFAULT_DAYS                  # 한도 그래프의 공통 시간 축 길이 — 「전체」는 7일
+                lim = cd.limit_windows(c, days=lim_days, host=f.get("host"), last=int(lim_days * 24 / 5) + 2)      # 5h 창은 하루 약 5개 — 기본 상한 48 에 걸리지 않게
         except Exception as e:
             self.call_from_thread(self.flash, f"통계 조회 실패: {e}", "error"); return
-        self.call_from_thread(self.show_stats, cov, trend, brk, tot, summ, sess, lim, (fine_b, fine))
+        self.call_from_thread(self.show_stats, cov, trend, brk, tot, summ, sess, lim, (fine_b, fine), lim_days)
 
-    def show_stats(self, cov, trend, brk, tot, summ, sess, lim, fine=("day", [])):
+    def show_stats(self, cov, trend, brk, tot, summ, sess, lim, fine=("day", []), lim_days=LIMIT_DEFAULT_DAYS):
         self._stat_loaded = True
-        self._st = dict(lim=lim, trend=trend, tot=tot, summ=summ, fine=fine)
+        self._st = dict(lim=lim, trend=trend, tot=tot, summ=summ, fine=fine, lim_days=lim_days)
+        self.query_one("#stat-limits-box").border_title = f"계정별 한도 사용률 — 최근 {lim_days}일, 모든 계정 같은 시간 축 · 5h(면적)·7d(밝은 선){' · 7일 초과라 5h 면적은 생략' if lim_days > 7 else ''} (색 = 계정)"
         self.update_stat_state(cov)
         self.query_one("#stat-trend").border_title = f"토큰·비용 추이 — {cd.BUCKETS[self.stat_bucket]} 단위 · 합계 ${tot['cost']:,.2f} · 요청 {tot['requests']:,} · 출력 {fmt_num(tot['output'])}"
         tb = self.query_one("#stat-break", DataTable)
@@ -1038,7 +1050,7 @@ class CtxUI(uikit.HelpMixin, App):
             return
         self._painted_w = self._box_widths()
         lim_w = self.query_one("#stat-limits-box").size.width - 6 or 60      # 테두리 2 + 글 여백 2 + 세로 스크롤바 2(내용이 길어 생겨도 줄바꿈되지 않게 늘 비워 둔다)
-        lt = limits_text(st["lim"], max(30, lim_w))
+        lt = limits_text(st["lim"], max(30, lim_w), st["lim_days"])
         self.query_one("#stat-limits", Static).update(lt)
         sm_w = self.query_one("#stat-summary-box").size.width - 6 or 46
         sm = summary_text(st["summ"], max(30, sm_w))
