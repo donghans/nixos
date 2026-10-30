@@ -20,8 +20,8 @@ def account():
         try:
             a = json.load(open(p)).get("oauthAccount") or {}
             if a.get("accountUuid"):
-                # 플랜: userRateLimitTier(default_claude_max_5x → max_5x), 없으면 seatTier
-                plan = (a.get("userRateLimitTier") or a.get("seatTier") or "").replace("default_claude_", "").replace("default_", "") or None
+                # 플랜: userRateLimitTier(default_claude_max_5x → max_5x), 없으면 seatTier, 개인 Pro 계정은 둘 다 비어 있어 organizationType(claude_pro → pro)
+                plan = (a.get("userRateLimitTier") or a.get("seatTier") or a.get("organizationType") or "").replace("default_claude_", "").replace("default_", "").replace("claude_", "") or None
                 return a["accountUuid"], a.get("emailAddress"), plan
         except Exception:
             pass
