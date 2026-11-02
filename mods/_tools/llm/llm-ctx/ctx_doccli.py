@@ -13,9 +13,10 @@
   cleanup   끝난 세션의 낡은 뷰를 지운다.
   import-docs   폴더의 .md 를 문서로 반입한다(제안 경로 — 동기화 담당이 검사해 반영). 원본은 건드리지 않는다.
   import-files  폴더의 비 md 자료(json·log·html·스크립트 등)를 `files` 영역에 복사한다(서버 호스트에서만; 스크린샷·비밀은 건너뜀).
+  import-held   import-files 가 「검사 불가」로 보류한 파일 중 사용자가 허용한 것만 검사 없이 받는다(하네스가 실행 전에 사용자 확인을 띄운다; 비밀 후보는 허용돼도 안 받음).
   files     `files` 영역의 목록을 보인다. 읽기만 한다.
   audit     프로젝트 폴더에서 git 이 무시하는데 ctx 에 없는 작업 자료를 찾는다. 읽기만 한다.
-  init      (사람만) 프로젝트를 매니페스트에 등록하고 저장소를 만든다.
+  init      (실행 전 사용자 확인) 프로젝트를 매니페스트에 등록하고 저장소를 만든다.
 """
 import argparse
 import hashlib
@@ -366,6 +367,16 @@ def cmd_import_docs(a):
     return 0
 
 
+def cmd_import_held(a):
+    """검사만 못 한 보류 파일을 사용자 허용으로 받는다. 허용 자체는 하네스의 `ask` 규칙(실행 전 사용자 확인)이 강제한다 — 이 명령은 그 확인을 대신하지 못한다."""
+    if not a.files:
+        sys.exit("--files 로 허용할 상대경로를 준다(import-files 의 보류 목록에서 고른다)")
+    if not a.reason.strip():
+        sys.exit("--reason 이 필요하다(왜 검사 없이 받는지 — files 저장소 커밋에 남는다)")
+    a.allow, a.manifest, a.limit = a.files, None, 50
+    return cmd_import_files(a)
+
+
 def cmd_import_files(a):
     store, proj = _project(a)
     if not a.dry_run and not _writer_host():
@@ -374,10 +385,14 @@ def cmd_import_files(a):
     if not os.path.isdir(src):
         sys.exit(f"폴더가 아니다: {src}")
     masker = _need_masker()
-    rep = st.import_files(store, proj, src, a.dest or "", masker, a.dry_run)
+    rep = st.import_files(store, proj, src, a.dest or "", masker, a.dry_run, allow=tuple(getattr(a, "allow", ()) or ()), reason=getattr(a, "reason", "") or "")
     print(f"프로젝트 {proj} · 원본 {src} → files/{a.dest or ''}" + (" · (dry-run)" if a.dry_run else ""))
     print(f"복사{'할 것' if a.dry_run else ''} {len(rep['imported'])} · 이미 같음 {len(rep['same'])} · 스크린샷(저장 안 함) {len(rep['images'])} · 보류 {len(rep['held'])}"
           + (f" · 커밋 {rep['commit']}" if rep["commit"] else ""))
+    for rel, why in rep["overridden"]:
+        print(f"  사용자 허용으로 검사 없이 받음: {rel} — {why}")
+    for rel, why in rep["refused"]:
+        print(f"  허용 거부: {rel} — {why}")
     for rel, why in rep["held"][: a.limit]:
         print(f"  보류: {rel} — {why}")
     if len(rep["held"]) > a.limit:
@@ -423,7 +438,7 @@ def cmd_audit(a):
 
 # ---------------------------------------------------------------- 사람 전용
 def cmd_init(a):
-    H.human_only("ctx doc init(매니페스트 등록)")
+    # 사람 확인은 하네스의 `ask` 규칙(llm-cli.nix: Bash(donghans ctx doc init:*))이 실행 전에 강제한다 — --remote 는 외부 전송 경로라 확인창에 명령이 그대로 보인다.
     store = st.store_dir()
     why = st.valid_project(a.project)
     if why:
@@ -466,7 +481,7 @@ def register(ctx_sub, helpers):
     p = doc.add_parser("sync", help="(동기화 담당) 인박스의 제안을 검사해 반영한다 — 세션 안에서 부르는 명령이 아니다")
     p.add_argument("--watch", action="store_true", help="서비스로: 인박스를 지켜보며 반복"); p.add_argument("--push", action="store_true", help="remote 가 있는 프로젝트는 push(직전 비밀 검사)"); p.add_argument("--interval", type=float, default=30, help="--watch 의 주기 점검(초)"); p.set_defaults(f=cmd_sync)
     p = doc.add_parser("cleanup", help="끝난 세션의 낡은 뷰를 지운다"); p.add_argument("--days", type=float, default=7); p.set_defaults(f=cmd_cleanup)
-    p = doc.add_parser("init", help="(사람만) 프로젝트를 매니페스트에 등록하고 저장소를 만든다"); p.add_argument("project"); p.add_argument("--repo-url"); p.add_argument("--owner", default="personal"); p.add_argument("--remote"); p.set_defaults(f=cmd_init)
+    p = doc.add_parser("init", help="프로젝트를 매니페스트에 등록하고 저장소를 만든다(하네스가 실행 전 사용자 확인을 띄운다)"); p.add_argument("project"); p.add_argument("--repo-url"); p.add_argument("--owner", default="personal"); p.add_argument("--remote"); p.set_defaults(f=cmd_init)
 
     p = doc.add_parser("import-docs", help="폴더의 .md 를 문서로 반입한다(제안 경로 — 동기화 담당이 검사해 반영; 원본은 건드리지 않는다)"); p.add_argument("src"); P(p); S(p)
     p.add_argument("--prefix", default="local", help="문서 이름 앞에 붙일 경로(기본 local)"); p.add_argument("--kind", choices=st.KINDS, help="종류(기본: qa/ 로 시작하면 qa, 아니면 note)")
@@ -475,6 +490,9 @@ def register(ctx_sub, helpers):
     p = doc.add_parser("import-files", help="폴더의 비 md 자료를 files 영역에 복사한다(서버 호스트 전용; 스크린샷·비밀·검사 불가 파일은 건너뛰고 보고)"); p.add_argument("src"); P(p)
     p.add_argument("--to", dest="dest", default="", help="files 안의 하위 경로(기본: 폴더 바로 아래)"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--limit", type=int, default=50)
     p.add_argument("--manifest", help="결과 목록(상태·경로·해시)을 이 파일에 쓴다"); p.set_defaults(f=cmd_import_files)
+    p = doc.add_parser("import-held", help="import-files 가 검사 불가로 보류한 파일 중 사용자가 허용한 것만 검사 없이 받는다(하네스가 사용자 확인을 띄운다; 비밀 후보는 안 받음)"); p.add_argument("src"); P(p)
+    p.add_argument("--to", dest="dest", default="", help="files 안의 하위 경로(import-files 때와 같게)"); p.add_argument("--files", nargs="+", metavar="상대경로", help="허용할 보류 파일(원본 폴더 기준 상대경로)")
+    p.add_argument("--reason", default="", help="검사 없이 받는 이유(커밋에 남는다)"); p.add_argument("--dry-run", action="store_true"); p.set_defaults(f=cmd_import_held)
     p = doc.add_parser("files", help="files 영역의 자료 목록(읽기만)"); P(p); p.add_argument("prefix", nargs="?"); p.add_argument("--limit", type=int, default=50); p.set_defaults(f=cmd_files)
     p = doc.add_parser("audit", help="프로젝트 폴더에서 git 이 무시하는데 ctx 에 없는 작업 자료를 찾는다(읽기만)"); P(p); p.add_argument("--root", help="프로젝트 폴더(기본: 현재 git 저장소)")
     p.add_argument("--paths", nargs="*", help="폴더 밖 추가 경로(예: ~/qa-shots)"); p.add_argument("--skip", nargs="*", help="세지 않을 하위 경로(예: librechat-original — 앱 실행 데이터)"); p.add_argument("--limit", type=int, default=30); p.set_defaults(f=cmd_audit)

@@ -17,6 +17,8 @@ from __future__ import annotations
 import ctypes
 import fcntl
 import hashlib
+import html
+import io
 import json
 import os
 import re
@@ -27,8 +29,10 @@ import socket
 import struct
 import subprocess
 import sys
+import tarfile
 import time
 import tomllib
+import zipfile
 
 KINDS = ("plan", "qa", "note")
 STATUSES = ("active", "done", "dropped", "unknown")
@@ -763,29 +767,129 @@ def scan_text(text: str, masker=None) -> str | None:
     return None
 
 
-def classify_file(path: str, masker=None, max_bytes: int = FILE_MAX_BYTES) -> tuple[str, str]:
-    """('ok'|'image'|'held', 이유). image 는 저장하지 않는 스크린샷, held 는 사람이 봐야 해서 건드리지 않는 파일."""
+# 압축 파일(zip 계열·tar 계열)은 풀지 않고 구성원마다 같은 검사를 한다. 구성원이 하나라도 검사 불가면 파일 전체를 보류한다(fail-closed).
+ZIP_EXTS = (".zip", ".pptx", ".docx", ".xlsx", ".potx", ".dotx", ".xltx", ".odt", ".odp", ".ods")
+TAR_EXTS = (".tar", ".tgz", ".tar.gz", ".tar.bz2", ".tar.xz")
+ARCHIVE_MAX_MEMBERS = 5000
+ARCHIVE_MAX_TOTAL = 100_000_000      # 구성원 풀린 크기 합 — 압축 폭탄 방어
+ARCHIVE_MAX_DEPTH = 3                # 압축 안의 압축
+OVERRIDE_MAX_BYTES = 50_000_000      # 사용자가 허용해도 이보다 큰 파일은 받지 않는다
+XML_EXTS = (".xml", ".rels", ".vml", ".html", ".htm", ".svg")
+# 내용을 읽어 검사할 수 없지만 비밀을 담을 가능성이 낮은 구성원(이미지·글꼴·벡터 그림). 이미지 속 글자는 검사하지 못한다 — 알고 받는 것.
+OPAQUE_OK = IMAGE_EXTS + (".emf", ".wmf", ".tif", ".tiff", ".fntdata", ".ttf", ".otf", ".odttf", ".wdp")
+
+
+def is_archive(name: str) -> bool:
+    n = name.lower()
+    return n.endswith(ZIP_EXTS) or n.endswith(TAR_EXTS)
+
+
+def _scan_member_text(name: str, raw: bytes, masker) -> str | None:
+    text = raw.decode("utf-8", "replace")
+    why = scan_text(text, masker)
+    if why is None and name.lower().endswith(XML_EXTS):
+        # 오피스 문서는 글자가 <a:t> 조각으로 쪼개져 있어 태그를 걷어낸 글도 본다(pass|word 처럼 갈라진 비밀).
+        plain = html.unescape(re.sub(r"<[^>]+>", "", text))
+        why = scan_text(plain, masker) or scan_text(html.unescape(re.sub(r"<[^>]+>", "\n", text)), masker)
+    return why
+
+
+def _scan_archive(fh, name: str, masker, depth: int, budget: list) -> tuple[str, bool]:
+    """압축 파일 하나를 검사한다. ('', _) 면 통과, 아니면 (이유, 사용자가 허용할 수 있는가). budget[0] 은 남은 풀린 바이트 한도."""
+    def member(mname: str, size: int, opener, special: bool = False, encrypted: bool = False) -> tuple[str, bool] | None:
+        base = os.path.basename(mname)
+        mext = os.path.splitext(base)[1].lower()
+        if mname.startswith("/") or ".." in mname.split("/"):
+            return f"{mname}: 위험한 구성원 경로", False
+        if special:
+            return f"{mname}: 링크·장치 구성원", False
+        if DENY_NAME.search(base):
+            return f"{mname}: 비밀·키 이름", False
+        if encrypted:
+            return f"{mname}: 암호화된 구성원(검사할 수 없다)", True
+        if mext in OPAQUE_OK or (mext == ".bin" and "printerSettings" in mname):
+            return None
+        if size > FILE_MAX_BYTES:
+            return f"{mname}: 구성원 {size:,}바이트 > 한도 {FILE_MAX_BYTES:,}(검사할 수 없다)", True
+        budget[0] -= size
+        if budget[0] < 0:
+            return f"압축 풀린 크기 합이 한도 {ARCHIVE_MAX_TOTAL:,}바이트를 넘는다(압축 폭탄 의심)", True
+        raw = opener().read(FILE_MAX_BYTES + 1)
+        if len(raw) > FILE_MAX_BYTES:
+            return f"{mname}: 선언한 크기보다 크다(검사할 수 없다)", True
+        if is_archive(base):
+            if depth + 1 > ARCHIVE_MAX_DEPTH:
+                return f"{mname}: 압축 중첩이 {ARCHIVE_MAX_DEPTH}단계를 넘는다(검사할 수 없다)", True
+            r = _scan_archive(io.BytesIO(raw), base, masker, depth + 1, budget)
+            return (f"{mname} › {r[0]}", r[1]) if r[0] else None
+        if mext not in TEXT_EXTS and mext not in XML_EXTS:
+            return f"{mname}: 검사할 수 없는 구성원 형식({mext or '확장자 없음'})", True
+        if b"\x00" in raw:
+            return f"{mname}: 이진 내용(검사할 수 없다)", True
+        why = _scan_member_text(mname, raw, masker)
+        return (f"{mname}: {why}", False) if why else None
+
+    try:
+        if name.lower().endswith(ZIP_EXTS):
+            with zipfile.ZipFile(fh) as z:
+                infos = [i for i in z.infolist() if not i.is_dir()]
+                if len(infos) > ARCHIVE_MAX_MEMBERS:
+                    return f"구성원 {len(infos):,}개 > 한도 {ARCHIVE_MAX_MEMBERS:,}", True
+                for zi in infos:
+                    r = member(zi.filename, zi.file_size, lambda zi=zi: z.open(zi), encrypted=bool(zi.flag_bits & 1))
+                    if r:
+                        return r
+        else:
+            with tarfile.open(fileobj=fh, mode="r:*") as t:
+                n = 0
+                for ti in t:
+                    n += 1
+                    if n > ARCHIVE_MAX_MEMBERS:
+                        return f"구성원 > 한도 {ARCHIVE_MAX_MEMBERS:,}", True
+                    if ti.isdir():
+                        continue
+                    r = member(ti.name, ti.size, lambda ti=ti: t.extractfile(ti), special=not ti.isreg())
+                    if r:
+                        return r
+    except (zipfile.BadZipFile, tarfile.TarError, OSError, EOFError, RuntimeError, NotImplementedError) as e:
+        return f"검사할 수 없는 압축 파일(손상·지원하지 않는 방식: {type(e).__name__})", True
+    return "", False
+
+
+def classify_file_ex(path: str, masker=None, max_bytes: int = FILE_MAX_BYTES) -> tuple[str, str, bool]:
+    """('ok'|'image'|'held', 이유, 사용자가 허용할 수 있는가). 허용할 수 있는 보류는 「검사만 못 한」 경우뿐이다 —
+    비밀 패턴·등록된 비밀·비밀 이름·심볼릭 링크는 사람이 허용해도 받지 않는다."""
     name = os.path.basename(path)
     ext = os.path.splitext(name)[1].lower()
     if os.path.islink(path):
-        return "held", "심볼릭 링크"
+        return "held", "심볼릭 링크", False
     if DENY_NAME.search(name):
-        return "held", "비밀·키 이름"
+        return "held", "비밀·키 이름", False
     if ext in IMAGE_EXTS:
-        return "image", "스크린샷(저장하지 않는다)"
+        return "image", "스크린샷(저장하지 않는다)", False
     try:
         size = os.path.getsize(path)
     except OSError as e:
-        return "held", f"읽을 수 없음({e.strerror})"
+        return "held", f"읽을 수 없음({e.strerror})", False
     if size > max_bytes:
-        return "held", f"{size:,}바이트 > 한도 {max_bytes:,}"
+        return "held", f"{size:,}바이트 > 한도 {max_bytes:,}", size <= OVERRIDE_MAX_BYTES
+    if is_archive(name):
+        with open(path, "rb") as fh:
+            why, can = _scan_archive(fh, name, masker, 1, [ARCHIVE_MAX_TOTAL])
+        return ("held", why, can) if why else ("ok", "", False)
     if ext not in TEXT_EXTS:
-        return "held", f"검사할 수 없는 형식({ext or '확장자 없음'})"
+        return "held", f"검사할 수 없는 형식({ext or '확장자 없음'})", True
     raw = open(path, "rb").read()
     if b"\x00" in raw:
-        return "held", "이진 내용"
+        return "held", "이진 내용", True
     why = scan_text(raw.decode("utf-8", "replace"), masker)
-    return ("held", why) if why else ("ok", "")
+    return ("held", why, False) if why else ("ok", "", False)
+
+
+def classify_file(path: str, masker=None, max_bytes: int = FILE_MAX_BYTES) -> tuple[str, str]:
+    """('ok'|'image'|'held', 이유). image 는 저장하지 않는 스크린샷, held 는 사람이 봐야 해서 건드리지 않는 파일."""
+    k, why, _ = classify_file_ex(path, masker, max_bytes)
+    return k, why
 
 
 def walk_files(src: str):
@@ -797,24 +901,36 @@ def walk_files(src: str):
             yield p, os.path.relpath(p, src).replace(os.sep, "/")
 
 
-def import_files(store: str, project: str, src: str, dest: str = "", masker=None, dry_run: bool = False, max_bytes: int = FILE_MAX_BYTES) -> dict:
+def import_files(store: str, project: str, src: str, dest: str = "", masker=None, dry_run: bool = False, max_bytes: int = FILE_MAX_BYTES,
+                 allow: tuple = (), reason: str = "") -> dict:
     """src 폴더의 파일을 `<project>/files/<dest>/<상대경로>` 로 복사하고 files 저장소에 한 번 커밋한다. 원본은 건드리지 않는다.
-    반환: imported · same · images · held(각 [(상대경로, 이유)]) · commit. dry_run 이면 쓰지 않는다."""
+    allow 는 사용자가 허용한 상대경로 — **검사만 못 한** 보류(검사 불가 형식·이진·큰 파일·검사 불가 압축)만 풀린다(비밀 후보는 풀리지 않는다).
+    반환: imported · same · images · held · overridden · refused(각 [(상대경로, 이유)]) · commit. dry_run 이면 쓰지 않는다."""
     if dest and (dest.startswith("/") or any(p in ("", "..", ".") for p in dest.split("/"))):
         raise ValueError("dest 는 `..`·절대 경로·빈 칸을 쓸 수 없다")
-    rep = {"imported": [], "same": [], "images": [], "held": [], "commit": None}
+    rep = {"imported": [], "same": [], "images": [], "held": [], "overridden": [], "refused": [], "commit": None}
     fd = files_dir(store, project)
     plan = []
+    allow = set(allow)
+    seen = set()
     for p, rel in walk_files(src):
-        kind, why = classify_file(p, masker, max_bytes)
+        kind, why, can = classify_file_ex(p, masker, max_bytes)
+        seen.add(rel)
         if kind == "image":
             rep["images"].append((rel, why)); continue
-        if kind == "held":
+        if kind == "held" and rel in allow and can:
+            rep["overridden"].append((rel, why))
+        elif kind == "held":
+            if rel in allow:
+                rep["refused"].append((rel, f"허용해도 받지 않는다 — {why}"))
             rep["held"].append((rel, why)); continue
+        elif rel in allow:
+            rep["refused"].append((rel, "보류된 파일이 아니다(허용이 필요 없다)"))
         tgt = os.path.join(fd, dest, rel) if dest else os.path.join(fd, rel)
         if os.path.exists(tgt) and file_hash(tgt) == file_hash(p):
             rep["same"].append((rel, "")); continue
         rep["imported"].append((rel, "")); plan.append((p, tgt))
+    rep["refused"] += [(r, "원본 폴더에 없다") for r in sorted(allow - seen)]
     if dry_run or not plan:
         return rep
     with _Lock(store):
@@ -823,7 +939,8 @@ def import_files(store: str, project: str, src: str, dest: str = "", masker=None
             os.makedirs(os.path.dirname(tgt), exist_ok=True)
             shutil.copyfile(p, tgt)
         _git(fd, "add", "-A")
-        r = _git(fd, "commit", "-q", "-m", f"ctx files: {dest or '.'} 에서 {len(plan)}개 가져옴", check=False)
+        r = _git(fd, "commit", "-q", "-m", f"ctx files: {dest or '.'} 에서 {len(plan)}개 가져옴"
+                 + (f"\n\n사용자 허용으로 검사 없이 받음 {len(rep['overridden'])}개: " + ", ".join(r for r, _ in rep["overridden"]) + (f"\n사유: {reason}" if reason else "") if rep["overridden"] else ""), check=False)
         if r.returncode != 0 and "nothing to commit" not in (r.stdout + r.stderr):
             raise RuntimeError(f"git commit 실패: {r.stderr.strip() or r.stdout.strip()}")
         rep["commit"] = _git(fd, "rev-parse", "--short", "HEAD").stdout.strip() or None

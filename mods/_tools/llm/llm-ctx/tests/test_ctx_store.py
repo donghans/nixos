@@ -248,6 +248,48 @@ check("files: 별도 저장소로 커밋", rep["commit"] and subprocess.run(["gi
 check("files: 바깥 저장소가 files/ 를 무시한다", "/files/" in open(f"{STORE}/nixos/.gitignore").read().splitlines() and subprocess.run(["git", "-C", f"{STORE}/nixos", "check-ignore", "-q", "files/proj/a.json"]).returncode == 0)
 check("files: 바깥 저장소 추적 목록에 자료가 없다", "files/" not in subprocess.run(["git", "-C", f"{STORE}/nixos", "ls-files"], capture_output=True, text=True).stdout)
 check("files: 다시 하면 전부 같음(멱등)", len(cs.import_files(STORE, "nixos", SRC, "proj", FakeMasker())["same"]) == 2)
+
+# ---- 압축 파일 검사(풀지 않고 구성원마다) · 사용자 허용(import-held)
+import zipfile, tarfile, io
+AR = f"{TMP}/arch"; os.makedirs(AR)
+def mkzip(name, members):
+    with zipfile.ZipFile(f"{AR}/{name}", "w", zipfile.ZIP_DEFLATED) as z:
+        for n, d in members:
+            z.writestr(n, d)
+mkzip("good.pptx", [("[Content_Types].xml", "<a/>"), ("ppt/slides/slide1.xml", "<p><a:t>안녕</a:t></p>"), ("ppt/media/image1.png", b"\x89PNG\x00"), ("docProps/thumbnail.jpeg", b"\xff\xd8\x00")])
+mkzip("split.pptx", [("ppt/slides/slide1.xml", "<a:t>비밀번호: </a:t><a:t>abc12345</a:t>")])
+mkzip("split2.pptx", [("ppt/slides/slide1.xml", "<a:t>pass</a:t><a:t>word=hunter2hunter</a:t>")])
+mkzip("keyed.zip", [("a/.env", "A=1")])
+mkzip("binmem.zip", [("tool.exe", b"MZ\x00\x00")])
+mkzip("slip.zip", [("../evil.txt", "x")])
+inner = io.BytesIO()
+with zipfile.ZipFile(inner, "w") as z: z.writestr("k.txt", "password=hunter2hunter")
+mkzip("nest_secret.zip", [("in.zip", inner.getvalue())])
+mkzip("bomb.zip", [(f"z{i}.txt", "0" * 4_000_000) for i in range(30)])
+with tarfile.open(f"{AR}/good.tar.gz", "w:gz") as t:
+    ti = tarfile.TarInfo("d/a.txt"); data = b"fine\n"; ti.size = len(data); t.addfile(ti, io.BytesIO(data))
+with tarfile.open(f"{AR}/link.tar", "w") as t:
+    ti = tarfile.TarInfo("l"); ti.type = tarfile.SYMTYPE; ti.linkname = "/etc/passwd"; t.addfile(ti)
+open(f"{AR}/corrupt.zip", "wb").write(b"PK\x03\x04junk")
+def cls(n): return cs.classify_file_ex(f"{AR}/{n}", FakeMasker())
+check("압축: 정상 pptx(xml·이미지)는 통과", cls("good.pptx")[0] == "ok", cls("good.pptx"))
+check("압축: 태그로 쪼개진 한글 비밀번호도 잡는다(허용 불가)", cls("split.pptx")[0] == "held" and cls("split.pptx")[2] is False, cls("split.pptx"))
+check("압축: 태그로 쪼개진 password= 도 잡는다", cls("split2.pptx")[0] == "held" and cls("split2.pptx")[2] is False, cls("split2.pptx"))
+check("압축: 구성원의 비밀 이름(.env)은 허용 불가", cls("keyed.zip")[0] == "held" and cls("keyed.zip")[2] is False, cls("keyed.zip"))
+check("압축: 검사할 수 없는 구성원은 보류하되 허용 가능", cls("binmem.zip")[0] == "held" and cls("binmem.zip")[2] is True, cls("binmem.zip"))
+check("압축: 위험한 구성원 경로(..)는 허용 불가", cls("slip.zip")[0] == "held" and cls("slip.zip")[2] is False, cls("slip.zip"))
+check("압축: 중첩 압축 안의 비밀도 잡는다", cls("nest_secret.zip")[0] == "held" and cls("nest_secret.zip")[2] is False and "in.zip" in cls("nest_secret.zip")[1], cls("nest_secret.zip"))
+check("압축: 압축 폭탄(풀린 크기 합 한도)은 보류, 허용 가능", cls("bomb.zip")[0] == "held" and "폭탄" in cls("bomb.zip")[1], cls("bomb.zip"))
+check("압축: tar.gz 정상은 통과", cls("good.tar.gz")[0] == "ok", cls("good.tar.gz"))
+check("압축: tar 의 링크 구성원은 허용 불가", cls("link.tar")[0] == "held" and cls("link.tar")[2] is False, cls("link.tar"))
+check("압축: 손상 압축은 보류(검사할 수 없는)", cls("corrupt.zip")[0] == "held" and "검사할 수 없는" in cls("corrupt.zip")[1] and cls("corrupt.zip")[2] is True, cls("corrupt.zip"))
+rep = cs.import_files(STORE, "nixos", AR, "arch", FakeMasker())
+check("압축: 폴더 반입은 통과한 것만(good.pptx·good.tar.gz)", sorted(r for r, _ in rep["imported"]) == ["good.pptx", "good.tar.gz"], rep["imported"])
+rep = cs.import_files(STORE, "nixos", AR, "arch", FakeMasker(), allow=("binmem.zip", "split.pptx", "good.pptx", "nope.zip"), reason="시험")
+check("허용: 검사만 못 한 binmem.zip 만 받는다", [r for r, _ in rep["overridden"]] == ["binmem.zip"] and os.path.exists(f"{STORE}/nixos/files/arch/binmem.zip"), rep)
+check("허용: 비밀 후보(split.pptx)는 허용해도 안 받는다", any(r == "split.pptx" and "허용해도" in w for r, w in rep["refused"]) and not os.path.exists(f"{STORE}/nixos/files/arch/split.pptx"), rep["refused"])
+check("허용: 보류 아닌 파일·없는 파일 허용은 거부로 보고", {r for r, _ in rep["refused"]} >= {"good.pptx", "nope.zip"}, rep["refused"])
+check("허용: 커밋 메시지에 허용한 파일과 사유가 남는다", "binmem.zip" in subprocess.run(["git", "-C", cs.files_dir(STORE, "nixos"), "log", "-1", "--format=%B"], capture_output=True, text=True).stdout and "사유: 시험" in subprocess.run(["git", "-C", cs.files_dir(STORE, "nixos"), "log", "-1", "--format=%B"], capture_output=True, text=True).stdout)
 check("files: 원본은 그대로", os.path.exists(f"{SRC}/a.json") and os.path.exists(f"{SRC}/shots/s.png"))
 try:
     cs.import_files(STORE, "nixos", SRC, "../x", FakeMasker()); bad = False

@@ -143,10 +143,12 @@ check("PreToolUse: 심볼릭 링크로 돌아가도 막는다(realpath)", deny(s
 rc, out, err = run("path", sid=A)
 check("path: 직접 고친 뷰 파일은 원본으로 되돌리고 보관 사실을 알린다", rc == 0 and "되돌렸다" in err and "메모 0" in open(vp).read() and "직접 고침" not in open(vp).read(), err)
 
-# 사람 전용
+# init: 사람 확인은 하네스 ask 규칙이 강제하므로 CLI 자체는 TTY 를 요구하지 않는다
 rc, out, err = run("init", "newproj", sid=A)
-check("init: 사람이 아니면(TTY 없음) 거부 — 매니페스트의 remote 는 외부 전송 경로라서", rc != 0 and "사람이" in (out + err), out + err)
-check("init: 거부됐으니 매니페스트는 그대로", "newproj" not in open(f"{STORE}/manifest.toml").read())
+check("init: TTY 없이도 실행된다(확인은 하네스 ask 규칙의 몫)", rc == 0 and "newproj" in open(f"{STORE}/manifest.toml").read(), out + err)
+rc, out, err = run("init", "newproj", sid=A)
+check("init: 다시 하면 이미 등록(멱등)", rc == 0 and "이미 등록" in out, out + err)
+check("ask 규칙: init·delete·import-held 가 llm-cli.nix 에 있다", all(f'"Bash(donghans ctx doc {c}:*)"' in open(os.path.join(ROOT, "../../../devel/apps/llm-cli.nix")).read() for c in ("init", "delete", "import-held")))
 
 # 훅: SessionStart 안내·SessionEnd 표식
 HOOK_ENV = dict(BASE, CLAUDE_CTX_HOST="testhost")
@@ -196,6 +198,16 @@ rc, out, err = run("import-files", IMP, "--to", "imp", sid=A, cwd=WORK, env={"CT
 check("import-files: 서버 호스트가 아니면 거부(동기화 담당 없음)", rc != 0 and "서버 호스트" in (out + err), out + err)
 rc, out, err = run("import-files", IMP, "--to", "imp", sid=A, env={"CTX_ALLOW_FILES_WRITE": "1"})
 check("import-files: json 만 복사(md 는 .md 도 텍스트라 같이 — 이미지는 저장 안 함)", rc == 0 and os.path.isfile(f"{STORE}/proj/files/imp/data.json") and not os.path.exists(f"{STORE}/proj/files/imp/shot.png") and "스크린샷(저장 안 함) 1" in out, out + err)
+open(f"{IMP}/blob.bin", "wb").write(b"\x00\x01bin")
+rc, out, err = run("import-files", IMP, "--to", "imp", sid=A, env={"CTX_ALLOW_FILES_WRITE": "1"})
+check("import-files: 검사 불가 blob.bin 은 보류", "보류: blob.bin" in out and not os.path.exists(f"{STORE}/proj/files/imp/blob.bin"), out + err)
+rc, out, err = run("import-held", IMP, "--to", "imp", "--files", "blob.bin", sid=A, env={"CTX_ALLOW_FILES_WRITE": "1"})
+check("import-held: 사유(--reason) 없으면 거부", rc != 0 and "--reason" in (out + err), out + err)
+rc, out, err = run("import-held", IMP, "--to", "imp", "--files", "blob.bin", "--reason", "시험용 이진", sid=A, env={"CTX_ALLOW_FILES_WRITE": "0"})
+check("import-held: 서버 호스트가 아니면 거부", rc != 0 and "서버 호스트" in (out + err), out + err)
+rc, out, err = run("import-held", IMP, "--to", "imp", "--files", "blob.bin", "--reason", "시험용 이진", sid=A, env={"CTX_ALLOW_FILES_WRITE": "1"})
+check("import-held: 허용한 보류 파일만 받는다", rc == 0 and os.path.isfile(f"{STORE}/proj/files/imp/blob.bin") and "사용자 허용으로 검사 없이 받음: blob.bin" in out, out + err)
+os.remove(f"{IMP}/blob.bin")
 rc, out, err = run("files", "imp", sid=A)
 check("files: 목록", rc == 0 and "imp/data.json" in out, out + err)
 check("files: 바깥 저장소는 files 를 추적하지 않는다", "files/" not in subprocess.run(["git", "-C", f"{STORE}/proj", "ls-files"], capture_output=True, text=True).stdout)

@@ -178,11 +178,16 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
           PostToolUse = toolHook "PostToolUse" "*";
         };
     }
-    // lib.optionalAttrs config.mods.sys.services.observe.enable {
-      # procctl(observe 모듈이 설치): 조회·계획은 자동 허용, 적용(되돌릴 수 없음)은 항상 사용자 확인 — 하네스가 강제한다. 문법은 Claude Code 권한 규칙(Bash 접두 일치).
+    // {
+      # 사용자 확인을 하네스가 강제하는 명령(문법은 Claude Code 권한 규칙 — Bash 접두 일치).
+      # - ctx doc import-held·init·delete: 비밀 검사를 못 한 파일을 받거나(import-held), 매니페스트·외부 remote 를 등록하거나(init), 문서를 지우는(delete) 명령이라
+      #   실행 전 항상 확인한다. 명령 자체는 확인을 대신하지 못한다 — 확인창에 명령 문자열이 그대로 보인다.
+      # - procctl(observe 모듈이 설치): 조회·계획은 자동 허용, 적용(되돌릴 수 없음)은 항상 확인.
       permissions = {
-        allow = ["Bash(procctl groups:*)" "Bash(procctl show:*)" "Bash(procctl plan:*)" "Bash(procctl log:*)"];
-        ask = ["Bash(procctl apply:*)" "Bash(procctl escalate:*)"];
+        allow = lib.optionals config.mods.sys.services.observe.enable ["Bash(procctl groups:*)" "Bash(procctl show:*)" "Bash(procctl plan:*)" "Bash(procctl log:*)"];
+        ask =
+          ["Bash(donghans ctx doc init:*)" "Bash(donghans ctx doc delete:*)" "Bash(donghans ctx doc import-held:*)"]
+          ++ lib.optionals config.mods.sys.services.observe.enable ["Bash(procctl apply:*)" "Bash(procctl escalate:*)"];
       };
     };
   hooksFile = pkgs.writeText "llm-ctx-hooks.json" (builtins.toJSON hooksSettings);
