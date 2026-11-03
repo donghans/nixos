@@ -5,7 +5,7 @@
   왼쪽 그룹: 전체 · ‼ 시스템 문제 · 앱 이름(건수, 긴급이 있으면 ‼N) — ↑↓ 로 고르면 바로 오른쪽 목록이 바뀐다
   검색창: 글자(앱·제목·본문에 모두 포함)   app:이름   is:problem   is:urgent   since:3h|2d|1w   (그룹 건수도 검색에 맞춰 바뀜)
   Enter 현재 알림 복사 후 종료(그룹에서는 목록으로 이동)  Esc 검색 지우기 → 그룹을 '전체'로 → 종료 확인창  Tab 영역 이동  ←/→ 그룹↔목록
-  F5 새로고침  F6 그룹 패널  F7 미리보기  F9 통계(지금 그룹/검색 기준)  F10 서비스 점검      목록에서: c 본문만 복사, g 그룹, / 검색   종료: Esc(확인창) · Ctrl+Q(즉시)
+  F5 새로고침  F6 그룹 패널  F7 미리보기  F9 통계(지금 그룹/검색 기준)  F10 서비스 점검      목록에서: F2 본문만 복사, ← 그룹, / 검색   종료: Esc(확인창) · Ctrl+Q(즉시)
 """
 import datetime
 
@@ -90,16 +90,14 @@ class GroupList(OptionList):
 class NotifList(OptionList):
     BINDINGS = [
         Binding("left", "app.focus_groups", "그룹", show=False),
-        Binding("g", "app.focus_groups", "그룹", show=False),
-        Binding("c", "app.copy_body", "본문 복사", show=False),
+        Binding("f2", "app.copy_body", "본문 복사", show=False),
         Binding("slash", "app.focus_search", "검색", show=False),
     ]
 
 
 class Preview(TextArea):
     BINDINGS = [
-        Binding("c", "app.copy_selection", "선택 복사", show=False),
-        Binding("y", "app.copy_selection", "선택 복사", show=False),
+        Binding("f2", "app.copy_selection", "선택 복사", show=False),
         Binding("slash", "app.focus_search", "검색", show=False),
     ]
 
@@ -109,7 +107,7 @@ class NotifUI(uikit.QuitMixin, uikit.HelpMixin, App):
         ('그룹', '왼쪽: 전체 · ‼ 시스템 문제 · 앱 이름(건수, 긴급이 있으면 ‼N). ↑↓ 로 고르면 오른쪽 목록이 바로 바뀐다'),
         ('검색 문법', '글자(앱·제목·본문에 모두 포함) · app:이름 · is:problem · is:urgent · since:3h|2d|1w — 그룹 건수도 검색에 맞춰 바뀐다'),
         ('Enter / Esc', 'Enter = 현재 알림 복사 후 종료(그룹에서는 목록으로). Esc = 검색 지우기 → 그룹을 「전체」로 → 종료'),
-        ('영역 이동', 'Tab, ←/→ 로 그룹 ↔ 목록. 목록에서 c 본문만 복사 · g 그룹 · / 검색'),
+        ('영역 이동', 'Tab, ←/→ 로 그룹 ↔ 목록. 목록에서 F2 본문만 복사 · ← 그룹 · / 검색. 미리보기에서는 F2 가 선택한 글자(없으면 전체) 복사'),
         ('F 키', 'F5 새로고침 · F6 그룹 패널 · F7 미리보기 · F9 통계(지금 그룹/검색 기준) · F10 서비스 점검'),
     ]
     HELP_NOTES = [

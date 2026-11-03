@@ -200,8 +200,11 @@ else:
         async with app.run_test(size=(120, 30)) as pilot:
             await pilot.pause()
             await pilot.press("tab", "tab"); await pilot.pause()      # 검색창 → 그룹 → 목록
-            await pilot.press("c"); await pilot.pause()
-            check("화면: 목록에서 c 는 본문만 복사하고 종료하지 않음", app.is_running and copied[-1] == "줄1\n줄2", copied[-1])
+            await pilot.press("f2"); await pilot.pause()
+            check("화면: 목록에서 F2 는 본문만 복사하고 종료하지 않음", app.is_running and copied[-1] == "줄1\n줄2", copied[-1])
+            nc = len(copied)
+            await pilot.press("c", "g", "y"); await pilot.pause()
+            check("화면: 옛 알파벳 단축키(c g y)는 아무 일도 안 한다(복사·종료 없음)", app.is_running and len(copied) == nc and len(app.screen_stack) == 1)
         app = notif_ui.NotifUI(notif_ui.PROBLEMS)
         async with app.run_test(size=(120, 30)) as pilot:
             await pilot.pause()
