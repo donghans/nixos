@@ -374,5 +374,51 @@ log = subprocess.run(["git", "-C", f"{STORE}/nixos", "log", "--oneline", "-1"], 
 check("삭제: git 이력에 삭제 커밋", "삭제 nixos/note/m/new" in log, log)
 check("삭제: 이력에서 복구 가능", "감시 중 제안" in subprocess.run(["git", "-C", f"{STORE}/nixos", "show", "HEAD~1:note/m/new.md"], capture_output=True, text=True).stdout)
 
+# ---------------------------------------------------------------- 6부: 읽기·쓰기 앞의 최신화(git pull --ff-only)
+def _g(d, *a):
+    return subprocess.run(["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *a], capture_output=True, text=True)
+
+R = f"{TMP}/pull"; os.makedirs(R)
+BARE, SRV, LAP = f"{R}/origin.git", f"{R}/srv", f"{R}/lap"
+subprocess.run(["git", "init", "-q", "--bare", "-b", "main", BARE], check=True)
+subprocess.run(["git", "clone", "-q", BARE, SRV], capture_output=True)
+os.makedirs(f"{SRV}/note"); open(f"{SRV}/note/a.md", "w").write("v1\n")
+_g(SRV, "checkout", "-q", "-B", "main"); _g(SRV, "add", "-A"); _g(SRV, "commit", "-q", "-m", "c1"); _g(SRV, "push", "-q", "origin", "main")
+os.makedirs(f"{R}/store")
+subprocess.run(["git", "clone", "-q", BARE, f"{R}/store/proj"], capture_output=True)
+PS = f"{R}/store"
+os.environ["CTX_IS_WRITER"] = "0"; os.environ.pop("CTX_NO_PULL", None)
+
+def push_new(text, msg):
+    open(f"{SRV}/note/a.md", "w").write(text); _g(SRV, "add", "-A"); _g(SRV, "commit", "-q", "-m", msg); _g(SRV, "push", "-q", "origin", "main")
+
+check("최신화: 받을 게 없으면 조용히(None)", cs.refresh_project(PS, "proj", force=True) is None)
+push_new("v2\n", "c2")
+check("최신화: 간격 안이면 읽기 앞에서는 건너뜀(낡은 채)", cs.refresh_project(PS, "proj", now=time.time()) is None and open(f"{PS}/proj/note/a.md").read() == "v1\n")
+msg = cs.refresh_project(PS, "proj", now=time.time() + cs.PULL_INTERVAL + 1)
+check("최신화: 간격이 지나면 받고 한 줄로 알림", msg and "커밋 1개" in msg and open(f"{PS}/proj/note/a.md").read() == "v2\n", msg)
+push_new("v3\n", "c3")
+msg = cs.refresh_project(PS, "proj", force=True)
+check("최신화: force(쓰기 앞)는 간격과 무관하게 받는다", msg and open(f"{PS}/proj/note/a.md").read() == "v3\n", msg)
+os.environ["CTX_IS_WRITER"] = "1"; push_new("v4\n", "c4")
+check("최신화: 정본 호스트는 건드리지 않는다", cs.refresh_project(PS, "proj", force=True) is None and open(f"{PS}/proj/note/a.md").read() == "v3\n")
+os.environ["CTX_IS_WRITER"] = "0"; os.environ["CTX_NO_PULL"] = "1"
+check("최신화: CTX_NO_PULL=1 이면 건너뜀", cs.refresh_project(PS, "proj", force=True) is None and open(f"{PS}/proj/note/a.md").read() == "v3\n")
+os.environ.pop("CTX_NO_PULL")
+# 로컬 분기 — 덮어쓰지 않고 실패만 알림(--ff-only)
+open(f"{PS}/proj/note/local.md", "w").write("로컬\n"); _g(f"{PS}/proj", "add", "-A"); _g(f"{PS}/proj", "commit", "-q", "-m", "local")
+msg = cs.refresh_project(PS, "proj", force=True)
+check("최신화: 로컬 분기면 덮지 않고 낡았을 수 있다고 알림", msg and "로컬 커밋" in msg and open(f"{PS}/proj/note/local.md").read() == "로컬\n", msg)
+# 오프라인(원격이 사라짐) — 예외 없이 알림, 직후 읽기 앞에서는 다시 시도하지 않음
+shutil.rmtree(BARE)
+t0 = time.time(); msg = cs.refresh_project(PS, "proj", force=True)
+check("최신화: 원격에 못 닿아도 예외 없이 알림", msg and "원격에 닿지 못했다" in msg and time.time() - t0 < cs.PULL_TIMEOUT + 5, msg)
+check("최신화: 실패 직후 읽기 앞에서는 다시 기다리지 않는다", cs.refresh_project(PS, "proj", now=time.time()) is None)
+# origin 이 없거나 저장소가 아니면 아무것도 안 한다
+os.makedirs(f"{PS}/plain"); subprocess.run(["git", "init", "-q", f"{PS}/plain"], capture_output=True)
+check("최신화: origin 없는 저장소는 건너뜀", cs.refresh_project(PS, "plain", force=True) is None)
+check("최신화: 저장소가 아닌 폴더·없는 프로젝트는 건너뜀", cs.refresh_project(PS, "ghost", force=True) is None)
+os.environ.pop("CTX_IS_WRITER", None)
+
 import shutil; shutil.rmtree(TMP, ignore_errors=True)
 sys.exit(finish("ctx_store"))

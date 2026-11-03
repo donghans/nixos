@@ -545,6 +545,71 @@ def _git(proj_dir: str, *args: str, check: bool = True):
                           capture_output=True, text=True, check=check)
 
 
+# ---------------------------------------------------------------- 읽기 뷰 호스트의 최신화(git pull)
+PULL_INTERVAL = 300.0   # 읽기 앞 최신화의 최소 간격(초) — 쓰기는 force 로 늘 한다
+PULL_TIMEOUT = 20       # 네트워크 대기 상한(초) — 오프라인이어도 이 안에 돌아온다
+
+
+def is_writer_host() -> bool:
+    """이 호스트가 동기화 담당(user 서비스 ctx-doc-sync)이 있는 정본 호스트인가. CTX_IS_WRITER=1|0 으로 강제(시험)."""
+    forced = os.environ.get("CTX_IS_WRITER")
+    if forced in ("0", "1"):
+        return forced == "1"
+    try:
+        return subprocess.run(["systemctl", "--user", "cat", "ctx-doc-sync.service"], capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
+def refresh_project(store: str, project: str, force: bool = False, now: float | None = None) -> str | None:
+    """읽기·쓰기 앞에서 저장소를 origin 과 맞춘다(`git pull --ff-only`) — 노트북처럼 읽기 뷰만 쓰는 호스트에서 낡은 문서를 읽지 않게 한다.
+    하지 않는 경우: 정본 호스트(동기화 담당이 커밋·push 한다) · origin 이 없는 저장소 · CTX_NO_PULL=1 · 직전 시도 후 PULL_INTERVAL 초 안(force 가 아니면).
+    --ff-only 라서 로컬 변경·분기가 있으면 아무것도 덮지 않고 실패만 알린다. 반환: 사용자에게 보일 한 줄(받은 게 없고 정상이면 None)."""
+    if os.environ.get("CTX_NO_PULL") == "1" or is_writer_host():
+        return None
+    pd = os.path.join(store, project)
+    if not os.path.isdir(os.path.join(pd, ".git")):
+        return None
+    if _git(pd, "remote", "get-url", "origin", check=False).returncode != 0:
+        return None
+    stamp = os.path.join(pd, ".git", "ctx-last-pull")
+    now = time.time() if now is None else now
+    if not force:
+        try:
+            if now - os.path.getmtime(stamp) < PULL_INTERVAL:
+                return None
+        except OSError:
+            pass
+    try:   # 시도 시각을 먼저 남긴다 — 오프라인에서 읽을 때마다 대기하지 않게
+        with open(stamp, "w"):
+            pass
+        os.utime(stamp, (now, now))
+    except OSError:
+        pass
+    before = _git(pd, "rev-parse", "HEAD", check=False).stdout.strip()
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10")
+    try:
+        r = subprocess.run(["git", "-C", pd, "pull", "--ff-only", "--quiet"], capture_output=True, text=True, env=env, timeout=PULL_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return "(ctx 저장소 최신화 못 함 — 시간 초과, 낡은 문서일 수 있다)"
+    except OSError as e:
+        return f"(ctx 저장소 최신화 못 함 — {type(e).__name__}, 낡은 문서일 수 있다)"
+    if r.returncode != 0:
+        err = r.stderr
+        if "fast-forward" in err or "diverg" in err or "overwritten by merge" in err or "local changes" in err:
+            why = "이 호스트에 로컬 커밋·변경이 있어 덮지 않았다"
+        elif "Could not read from remote" in err or "Could not resolve" in err or "unable to access" in err or "Connection" in err:
+            why = "원격에 닿지 못했다"
+        else:
+            why = next((ln.strip() for ln in err.splitlines() if ln.startswith(("fatal:", "error:"))), "원인 불명")[:80]
+        return f"(ctx 저장소 최신화 못 함 — {why}; 낡은 문서일 수 있다)"
+    after = _git(pd, "rev-parse", "HEAD", check=False).stdout.strip()
+    if before and after and before != after:
+        n = _git(pd, "rev-list", "--count", f"{before}..{after}", check=False).stdout.strip() or "?"
+        return f"(ctx 저장소를 최신화했다 — 커밋 {n}개 받음)"
+    return None
+
+
 def ensure_repo(proj_dir: str) -> None:
     os.makedirs(proj_dir, exist_ok=True)
     if not os.path.isdir(os.path.join(proj_dir, ".git")):

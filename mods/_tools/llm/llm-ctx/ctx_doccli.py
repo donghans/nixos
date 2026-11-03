@@ -67,8 +67,16 @@ def _mask(m, text):
 
 
 # ---------------------------------------------------------------- 읽기
+def _refresh(store, proj, force=False):
+    """읽기·쓰기 앞의 최신화(노트북 등 읽기 뷰 호스트만; 정본 호스트·origin 없음·최근 시도는 건너뜀). 알릴 것이 있으면 stderr 한 줄."""
+    msg = st.refresh_project(store, proj, force=force)
+    if msg:
+        print(msg, file=sys.stderr)
+
+
 def cmd_list(a):
     store, proj = _project(a)
+    _refresh(store, proj)
     rows = st.list_docs(store, proj, a.kind, a.status, a.prefix)
     print(f"프로젝트 {proj} ({store}/{proj})")
     for r in rows:
@@ -80,6 +88,7 @@ def cmd_list(a):
 
 def cmd_read(a):
     store, proj = _project(a)
+    _refresh(store, proj)
     sid = _session(a)
     d = st.read_doc(store, proj, a.kind, a.name)
     if d is None:
@@ -100,6 +109,7 @@ def cmd_read(a):
 
 def cmd_path(a):
     store, proj = _project(a)
+    _refresh(store, proj)
     sid = _need_session(a)
     views = st.views_dir()
     pid = int(os.environ["CLAUDE_PID"]) if os.environ.get("CLAUDE_PID", "").isdigit() else None
@@ -124,6 +134,7 @@ def cmd_path(a):
 
 def cmd_find(a):
     store, proj = _project(a)
+    _refresh(store, proj)
     rows = st.find_docs(store, proj, a.term, a.kind, a.limit)
     m = _masker()
     for r in rows:
@@ -159,6 +170,7 @@ def _inline_sync(store):
 
 def cmd_propose(a):
     store, proj = _project(a)
+    _refresh(store, proj, force=True)
     sid = _need_session(a)
     if bool(a.file) == bool(a.stdin):
         sys.exit("--file <경로> 또는 --stdin 중 하나를 준다")
@@ -191,6 +203,7 @@ def _finish_proposal(store, pid, msg, sid=None, proj=None, kind=None, name=None)
 
 def cmd_delete(a):
     store, proj = _project(a)
+    _refresh(store, proj, force=True)
     sid = _need_session(a)
     base = st.base_hash_for(st.views_dir(), sid, proj, a.kind, a.name)
     code, msg, pid = st.propose(store, sid, H.HOST, proj, a.kind, a.name, "", base, op="delete")
@@ -304,6 +317,7 @@ def _doc_name(prefix: str, rel: str) -> str | None:
 
 def cmd_import_docs(a):
     store, proj = _project(a)
+    _refresh(store, proj, force=True)
     sid = _need_session(a)
     src = os.path.abspath(a.src)
     if not os.path.isdir(src):
