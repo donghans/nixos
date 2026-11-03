@@ -19,8 +19,8 @@
 | 실행기 | nix 의 `claude-run` | tmux 안에서 `--settings`(훅·모션) 주입 후 claude 실행. **sudo 인증도 여기서 받는다** |
 
 ## 새 세션 기본값(2026-10-30 추가)
-- **권한 확인 건너뛰기가 기본**: `llm-sessions` 로 만드는 새 세션(UI `n`·CLI `new`)에는 `--dangerously-skip-permissions` 가 붙는다. 이유: 세션 간 통신(SendMessage)과 root 작업(sudo)마다 승인을 물으면 흐름이 끊긴다는 사용자 경험. 끄기: UI 의 「claude 인자」 칸 비우기 · `llm-sessions new --safe` · `CLAUDE_SESSIONS_DEFAULT_ARGS=`(빈 값). `--permission-mode` 등을 직접 주면 기본값은 붙지 않는다. 셸의 `claude` 함수·`claude-tmux` 직접 호출은 바뀌지 않았다(llm-sessions 만 해당).
-- **디렉터리 고르기**: UI `n` 대화상자 맨 위가 현재 위치(ctx 에 없는 곳이면 「새 위치」), 아래는 ctx DB(ctxui 에 보이는 저장소)의 이 호스트 작업 저장소 루트(최근 사용 순, 실제로 있는 디렉터리만, /tmp 아래·git worktree 사본 제외). 직접 입력도 가능(Tab). DB 에 못 붙으면 현재 위치만 보인다. 조회는 `donghans ctx sql`(nix 가 `CLAUDE_CTX_BIN` 으로 알려 줌).
+- **권한 확인 건너뛰기가 기본**: `llm-sessions` 로 만드는 새 세션(UI `F2`·CLI `new`)에는 `--dangerously-skip-permissions` 가 붙는다. 이유: 세션 간 통신(SendMessage)과 root 작업(sudo)마다 승인을 물으면 흐름이 끊긴다는 사용자 경험. 끄기: UI 의 「claude 인자」 칸 비우기 · `llm-sessions new --safe` · `CLAUDE_SESSIONS_DEFAULT_ARGS=`(빈 값). `--permission-mode` 등을 직접 주면 기본값은 붙지 않는다. 셸의 `claude` 함수·`claude-tmux` 직접 호출은 바뀌지 않았다(llm-sessions 만 해당).
+- **디렉터리 고르기**: UI `F2` 대화상자 맨 위가 현재 위치(ctx 에 없는 곳이면 「새 위치」), 아래는 ctx DB(ctxui 에 보이는 저장소)의 이 호스트 작업 저장소 루트(최근 사용 순, 실제로 있는 디렉터리만, /tmp 아래·git worktree 사본 제외). 직접 입력도 가능(Tab). DB 에 못 붙으면 현재 위치만 보인다. 조회는 `donghans ctx sql`(nix 가 `CLAUDE_CTX_BIN` 으로 알려 줌).
 
 ## 결정과 근거
 - **전용 소켓·전용 설정**: 사용자의 일반 tmux 와 섞이지 않고, 목록은 `claude-` 접두 세션만 보인다.
@@ -35,12 +35,12 @@
   - **인증은 앞에서 한 번**: `llm-sessions` 는 UI 를 띄우기 전에, `claude-run` 은 claude 를 띄우기 전에 `sudo-claude-auth` 로 티켓이 없을 때만 비밀번호를 묻는다(nixup 의 `sudo -v` 와 같은 구조). 비밀번호는 읽어서 파이프로만 넘기고 어디에도 저장하지 않는다. UI 에서 인증하면 이후 `n` 으로 만드는 세션은 묻지 않고, 붙기 전에도 바로 시작된다.
   - **인증이 없으면** 래퍼가 항상 `sudo -n` 으로 즉시 실패하고 안내를 출력한다(프롬프트 대기 → 우회 방지). 재인증은 아무 터미널에서 `sudo-claude-auth`.
 - **감싸지 않는 호출**: `CLAUDE_TMUX=0` · 이미 tmux 안 · 터미널이 아님 · `-p/--print/--help/--version/--output-format` · 서브커맨드(한 단어: mcp, config, update …). 따라서 스크립트·`claude -p` 는 그대로다. 한 단어짜리 프롬프트(`claude hello`)는 서브커맨드로 보여 감싸지지 않는다.
-- **kitty 닫힘**: 래퍼가 SIGHUP/터미널 소실을 감지하면, 그 세션에 다른 접속이 **없을 때만** 세션을 끝낸다. 다른 곳(ssh 등)이 붙어 있으면 그쪽이 이어 쓰게 두고, 이후 고아가 되면 `llm-sessions` 에서 `x` 로 정리한다. 분리(F12)는 터미널이 살아 있으므로 정리하지 않는다. kitty 가 강제 종료(SIGKILL)되면 세션이 남을 수 있다.
-- **ssh 에서 만든 세션은 끊겨도 산다**: `llm-sessions` 의 `n` 은 분리된 세션을 만들고 붙는다. 분리하면 목록으로 돌아온다.
+- **kitty 닫힘**: 래퍼가 SIGHUP/터미널 소실을 감지하면, 그 세션에 다른 접속이 **없을 때만** 세션을 끝낸다. 다른 곳(ssh 등)이 붙어 있으면 그쪽이 이어 쓰게 두고, 이후 고아가 되면 `llm-sessions` 에서 `Delete` 로 정리한다. 분리(F12)는 터미널이 살아 있으므로 정리하지 않는다. kitty 가 강제 종료(SIGKILL)되면 세션이 남을 수 있다.
+- **ssh 에서 만든 세션은 끊겨도 산다**: `llm-sessions` 의 `F2` 는 분리된 세션을 만들고 붙는다. 분리하면 목록으로 돌아온다.
 - **이미 떠 있는 Claude 세션은 tmux 안으로 옮길 수 없다** — 새로 시작하는 세션부터 적용.
 
 ## 시험(실제 tmux 3.6a · pty · Textual Pilot, 51건)
-생성·목록·미리보기·정리, `--wants` 판단, 붙기·F12 분리·세션 유지, 동시 접속 2곳과 출처 조회, `d`(붙은 곳 떼기), **kitty 닫힘 시 정리 / 다른 접속이 있으면 유지**, claude 종료 시 세션 종료, UI(목록·미리보기·붙기·새 세션·정리·도움말)와 CLI. 변이 검사: 접속자 수 확인을 없애 항상 죽이게 하면 「다른 접속 있음 → 유지」 시험이 실패함을 확인했다.
+생성·목록·미리보기·정리, `--wants` 판단, 붙기·F12 분리·세션 유지, 동시 접속 2곳과 출처 조회, `F3`(붙은 곳 떼기), **kitty 닫힘 시 정리 / 다른 접속이 있으면 유지**, claude 종료 시 세션 종료, UI(목록·미리보기·붙기·새 세션·정리·도움말)와 CLI. 변이 검사: 접속자 수 확인을 없애 항상 죽이게 하면 「다른 접속 있음 → 유지」 시험이 실패함을 확인했다.
 실제 Claude Code 를 이 설정의 tmux 안에서 헤드리스 kitty 로 띄워 화면(신뢰 확인 대화상자)이 정상 표시되고 `llm-sessions ls` 가 세션·접속 출처를 보이는 것까지 확인했다. **키 입력(Shift+Enter 등)·알림·이미지 붙여넣기는 아직 실사용으로 확인하지 못했다** — 새 셸에서 써 보며 이상하면 `CLAUDE_TMUX=0 claude` 로 우회하고 `claude-tmux.conf` 의 `extended-keys`·`allow-passthrough` 를 조정한다.
 
 ## 아직 안 한 것

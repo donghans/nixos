@@ -8,7 +8,7 @@
 
 새 세션에는 기본으로 `--dangerously-skip-permissions` 가 붙는다(세션 간 통신·root 작업 때마다 승인을 묻지 않게). 끄기: UI 에서 「claude 인자」 칸 비우기 · CLI `new --safe` ·
 환경 변수 CLAUDE_SESSIONS_DEFAULT_ARGS= . `--permission-mode` 등 권한 인자를 직접 주면 기본값은 붙지 않는다. 디렉터리는 UI 에서 현재 위치·ctx 의 저장소 목록 중에서 고른다.
-UI 키: Enter 붙기 · n 새 세션 · x 정리(세션 종료) · d 붙은 곳 모두 떼기 · r 새로고침 · ? 도움말 · Esc 종료(확인창) · Ctrl+Q 즉시 종료.
+UI 키: Enter 붙기 · F2 새 세션 · Delete 정리(세션 종료) · F3 붙은 곳 모두 떼기 · F5 새로고침 · ? 도움말 · Esc 종료(확인창) · Ctrl+Q 즉시 종료.
 붙은 뒤 분리(F12 또는 Ctrl+] d)하면 이 목록으로 돌아온다. 한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다.
 세션 이름·tmux 설정·종료 규칙은 tmuxsess.py 와 claude-tmux 머리말 참고. 사람이 터미널에서 직접 쓰는 도구라 UI 는 TTY 가 아니면 실행하지 않는다.
 """
@@ -117,23 +117,11 @@ class NewScreen(ModalScreen):
         self.dismiss(None)
 
 
-class ConfirmScreen(ModalScreen):
-    BINDINGS = [Binding("y,enter", "yes", "예"), Binding("n,escape", "no", "아니오")]
+class ConfirmScreen(uikit.ConfirmScreen):
+    """세션 정리 같은 파괴적 동작 앞의 확인창 — 기본 포커스 「아니오」, ←/→ 로 「예」를 골라 Enter, Esc 취소(y/n 글자 키 없음)."""
 
     def __init__(self, msg: str):
-        super().__init__()
-        self.msg = msg
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="dialog"):
-            yield Static(self.msg, id="dialog-title")
-            yield Static("y/Enter: 예 · n/Esc: 아니오", id="dialog-hint")
-
-    def action_yes(self):
-        self.dismiss(True)
-
-    def action_no(self):
-        self.dismiss(False)
+        super().__init__(msg, "예", "아니오")
 
 
 class SessionsUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
@@ -149,7 +137,7 @@ class SessionsUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         'Esc: 대화상자에서는 그 대화상자만 닫고, 목록에서는 종료 확인창(기본 「아니오」, ←→ 로 「예」 선택 후 Enter). Ctrl+Q 는 확인 없이 즉시 종료',
     ]
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
-    NewScreen, ConfirmScreen { align: center middle; }
+    NewScreen { align: center middle; }
     #list { height: 1fr; }
     #preview-box { height: 16; }
     #preview { padding: 0 1; color: #cfcfcf; }
@@ -157,9 +145,9 @@ class SessionsUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     """
     BINDINGS = [
         Binding("escape", "confirm_quit", "종료"),
-        Binding("enter", "attach", "붙기"), Binding("n", "new", "새 세션"),
-        Binding("x", "kill", "정리(종료)"), Binding("d", "detach_all", "붙은 곳 떼기"),
-        Binding("r,f5", "reload", "새로고침"),
+        Binding("enter", "attach", "붙기"), Binding("f2", "new", "새 세션"),
+        Binding("delete", "kill", "정리(종료)"), Binding("f3", "detach_all", "붙은 곳 떼기"),
+        Binding("f5", "reload", "새로고침"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
@@ -169,7 +157,7 @@ class SessionsUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         self.sessions: dict[str, tm.Session] = {}
 
     def compose(self) -> ComposeResult:
-        yield uikit.box(DataTable(id="list", cursor_type="row"), "claude 세션 — Enter: 붙기 · n: 새 세션")
+        yield uikit.box(DataTable(id="list", cursor_type="row"), "claude 세션 — Enter: 붙기 · F2: 새 세션")
         yield uikit.box(VerticalScroll(Static("", id="preview"), id="preview-box"), "화면 미리보기")
         yield Static("분리: F12 또는 Ctrl+] d  ·  같은 세션에 여러 곳이 붙으면 화면이 서로 비칩니다", id="hint")
         yield Footer()
@@ -202,7 +190,7 @@ class SessionsUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                       s.command, key=s.name)
         if keep in self.sessions:
             t.move_cursor(row=list(self.sessions).index(keep))
-        self.query_one("#list").border_title = f"claude 세션 {len(ss)}개 — Enter: 붙기 · n: 새 세션" if ss else "claude 세션 없음 — n: 새 세션"
+        self.query_one("#list").border_title = f"claude 세션 {len(ss)}개 — Enter: 붙기 · F2: 새 세션" if ss else "claude 세션 없음 — F2: 새 세션"
         self.show_preview()
 
     def on_data_table_row_highlighted(self, _ev):
