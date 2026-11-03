@@ -57,8 +57,13 @@
       echo "lxc-backup: mac-studio로 백업 중 ($INSTANCE)..."
       restic backup "$SNAP_PATH/$SNAP_NAME"
 
-      # 30일 초과 원격 백업 정리
-      restic forget --keep-daily 30 --prune --quiet
+      # 30일 초과 원격 백업 정리.
+      # --group-by host 가 필수다: restic 은 기본으로 (호스트, 백업 경로) 별로 묶어 보관 정책을 적용하는데,
+      # 이 스크립트는 매일 경로가 바뀌어(.../daily-YYYY-MM-DD) 스냅샷마다 그룹이 달라진다. 그러면 모든 그룹이
+      # 1개라 --keep-daily 30 이 전부 보관해, 2026-06 부터 정리가 한 번도 안 됐다(2026-11-03 실측: 저장소마다
+      # 124개, dry-run 에서 `keep 1 snapshots`; --group-by host 로는 94개가 정리 대상).
+      # 저장소가 인스턴스 하나 전용이므로 host 로만 묶어도 섞이지 않는다.
+      restic forget --group-by host --keep-daily 30 --prune --quiet
 
       echo "lxc-backup: 완료 ($INSTANCE)"
     '';
