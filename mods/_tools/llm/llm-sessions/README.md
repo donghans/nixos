@@ -26,7 +26,7 @@
 - **전용 소켓·전용 설정**: 사용자의 일반 tmux 와 섞이지 않고, 목록은 `claude-` 접두 세션만 보인다.
 - **접두 키는 Ctrl+]**: tmux 기본 Ctrl+B 는 Claude Code 의 백그라운드 키, Ctrl+A 는 줄 처음 이동과 겹친다. 분리는 **F12** 한 번 또는 Ctrl+] d. 붙을 때 3초 안내가 뜬다.
 - **상태 줄 끔**(`status off`): 시계 같은 주기 갱신이 화면 절전(PSR)을 방해할 수 있다(ctx 장부 #57 과 같은 문제). 노트북 전력 영향은 측정하지 않았다.
-- **sudo 는 `claude-run` 에서**: sudo 인증 캐시는 tty 별이라 셸 함수의 `sudo -v`·60초 갱신 루프는 tmux pane 의 tty 에 효과가 없다. 그래서 tmux 경로에서는 pane 안(`claude-run`)에서 인증하고, claude 가 끝나면 갱신 루프도 끝난다. 처음 붙으면 sudo 인증 프롬프트가 pane 에 보일 수 있다.
+- **sudo 범위는 claude 의 sudo 로 한정**(2026-11-03): 이전에는 `timestamp_type=global`(72eaeb9)로 한 번 인증하면 모든 터미널에서 sudo 가 열렸다. 원인은 claude 의 Bash 도구가 명령마다 tty 없는 새 세션이라 tty 캐시가 쪼개지고, tty 없을 때 쓰는 부모 PID 도 명령마다 새 셸이라서다(tmux 로 옮겨도 마찬가지 — 실측: `tty` 가 `not a tty`, 명령마다 SID 가 새로 생김). 그래서 claude 쪽 PATH 의 `sudo` 래퍼가 `systemd-run --user` 로 sudo 를 띄워 부모를 `systemd --user` 로 고정한다(tty 없는 경로는 부모 PID 로 캐시). 일반 터미널의 sudo 는 tty 별 캐시 그대로. 인증(`sudo-claude-auth`)도 같은 경로로 받는다. 한계: 범위는 "이 래퍼를 거친 sudo" 라 claude 세션끼리는 캐시를 공유한다. 인증이 없으면 래퍼가 `sudo -n` 으로 즉시 실패하며 안내를 출력한다(프롬프트 대기 → 우회 방지).
 - **감싸지 않는 호출**: `CLAUDE_TMUX=0` · 이미 tmux 안 · 터미널이 아님 · `-p/--print/--help/--version/--output-format` · 서브커맨드(한 단어: mcp, config, update …). 따라서 스크립트·`claude -p` 는 그대로다. 한 단어짜리 프롬프트(`claude hello`)는 서브커맨드로 보여 감싸지지 않는다.
 - **kitty 닫힘**: 래퍼가 SIGHUP/터미널 소실을 감지하면, 그 세션에 다른 접속이 **없을 때만** 세션을 끝낸다. 다른 곳(ssh 등)이 붙어 있으면 그쪽이 이어 쓰게 두고, 이후 고아가 되면 `llm-sessions` 에서 `x` 로 정리한다. 분리(F12)는 터미널이 살아 있으므로 정리하지 않는다. kitty 가 강제 종료(SIGKILL)되면 세션이 남을 수 있다.
 - **ssh 에서 만든 세션은 끊겨도 산다**: `llm-sessions` 의 `n` 은 분리된 세션을 만들고 붙는다. 분리하면 목록으로 돌아온다.

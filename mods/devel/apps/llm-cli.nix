@@ -124,13 +124,41 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   tmuxEnv = ''
     export CLAUDE_TMUX_BIN=${pkgs.tmux}/bin/tmux CLAUDE_TMUX_CONF=${sessionsSrc}/claude-tmux.conf CLAUDE_RUN_BIN=${claudeRun} CLAUDE_CTX_BIN=${claudeCtx}/bin/donghans
   '';
-  # tmux 안에서 실제로 claude 를 실행하는 쪽. sudo 인증 캐시는 tty 별이라(셸 함수의 `sudo -v` 는 pane 의 tty 에 효과가 없다) 여기서 다시 받고,
-  # 이 프로세스(=claude 부모)가 살아 있는 동안만 60초마다 갱신한다. exec 하지 않는 이유: 끝난 뒤 갱신 루프도 같이 끝나게 하려고.
+  # (목적: sudo 인증 범위를 "이 claude 가 부르는 sudo" 로 한정 — 다른 터미널의 sudo 는 열지 않는다)
+  # (이유: claude 의 Bash 도구는 명령마다 tty 없는 새 세션이라 tty 캐시가 매번 쪼개진다. sudo 는 tty 가 없으면 부모 PID 로 캐시를 구분하는데,
+  #   그 부모가 명령마다 새 셸이다. 그래서 claude 쪽 PATH 의 `sudo` 래퍼가 `systemd-run --user` 로 sudo 를 띄워 부모를 항상 `systemd --user` 로 고정한다.
+  #   일반 터미널의 sudo 는 tty 별 캐시 그대로다. 범위는 "이 래퍼를 거친 sudo" 라 claude 세션끼리는 캐시를 공유한다.)
+  # 인증이 없으면 프롬프트를 기다리지 않고(-n) 바로 실패하며, 사용자에게 인증을 요청하라는 문구를 낸다.
+  claudeSudoBin = pkgs.writeShellScriptBin "sudo" ''
+    err=$(mktemp) || exit 1
+    trap 'rm -f "$err"' EXIT
+    ${pkgs.systemd}/bin/systemd-run --user --pipe --wait --quiet --collect --working-directory="$PWD" -- /run/wrappers/bin/sudo -n "$@" 2> >(tee "$err" >&2)
+    rc=$?
+    if [ "$rc" -ne 0 ] && grep -q "a password is required" "$err"; then
+      echo "claude-sudo: sudo 인증이 없거나 만료됨 — 우회하거나 기다리지 말고 사용자에게 아무 터미널에서 \`sudo-claude-auth\` 실행을 요청할 것" >&2
+    fi
+    exit "$rc"
+  '';
+  # 인증: 위 래퍼와 같은 경로(systemd --user 아래, tty 없음)로 받아야 같은 캐시에 기록된다. 비밀번호는 읽어서 파이프로만 넘긴다(인자·파일에 남지 않음).
+  claudeSudoAuth = pkgs.writeShellScriptBin "sudo-claude-auth" ''
+    SD="${pkgs.systemd}/bin/systemd-run --user --pipe --wait --quiet --collect --"
+    if ! $SD /run/wrappers/bin/sudo -n true 2>/dev/null; then
+      [ -t 0 ] || { echo "sudo-claude-auth: 터미널에서 실행해야 함" >&2; exit 1; }
+      printf '[sudo] %s 의 비밀번호(claude 세션 전용): ' "$USER" >&2
+      IFS= read -rs pw; echo >&2
+      printf '%s\n' "$pw" | $SD /run/wrappers/bin/sudo -S -p "" -v || { unset pw; exit 1; }
+      unset pw
+    fi
+    # 갱신 루프: 호출한 프로세스($PPID)가 살아 있는 동안만 60초마다 연장
+    ( while $SD /run/wrappers/bin/sudo -n -v 2>/dev/null; do sleep 60; kill -0 "$PPID" 2>/dev/null || exit; done & ) 2>/dev/null
+  '';
+  # tmux 안에서 실제로 claude 를 실행하는 쪽. sudo 는 위 래퍼를 PATH 앞에 둬 claude 에서만 쓰이게 하고, 인증은 여기서 한 번 받는다.
+  # 갱신 루프는 이 프로세스(=claude 부모)가 살아 있는 동안만 돈다. exec 하지 않는 이유: 끝난 뒤 갱신 루프도 같이 끝나게 하려고.
   claudeRun = pkgs.writeShellScript "claude-run" ''
     if [ -t 0 ]; then
-      sudo -v || exit 1
-      ( while sudo -n true 2>/dev/null; do sleep 60; kill -0 "$$" 2>/dev/null || exit; done & ) 2>/dev/null
+      ${claudeSudoAuth}/bin/sudo-claude-auth || exit 1
     fi
+    export PATH=${claudeSudoBin}/bin:$PATH
     ${settingsSnippet}
     ${claude}/bin/claude "$@"
   '';
@@ -202,7 +230,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   otelCollectorConfig = pkgs.writeText "claude-otel-collector.yaml" (builtins.readFile ./llm-cli/otel-collector.yaml);
 in {
   hm = {
-    home.packages = [claude unstable.antigravity-cli claudeCtx ctxui claudeTmux claudeSessions claudeSessionsAlias];
+    home.packages = [claude unstable.antigravity-cli claudeSudoAuth claudeCtx ctxui claudeTmux claudeSessions claudeSessionsAlias];
 
     # 앱 런처(SUPER+Space)에서도 열리도록 등록(터미널 앱이라 uwsm 이 xdg-terminal-exec 로 kitty 에 띄움; usageui 와 같은 방식).
     # (런처에 보이는 이름은 다른 앱들처럼 영어로 통일)
@@ -372,9 +400,9 @@ in {
       force = true;
     };
 
-    # claude 실행 전 sudo 인증을 미리 받아두고, 백그라운드에서 60초마다 타임스탬프를 갱신.
-    # (목적: 세션 도중 Claude가 sudo 필요한 명령을 실행할 때마다 비밀번호/지문 프롬프트로 막히는 것 방지)
-    # -> sudoers를 NOPASSWD로 여는 대신, 최초 1회 인증 후 셸이 살아있는 동안만 캐시를 유지하는 방식.
+    # claude 실행 전 sudo 인증을 미리 받아두고, 백그라운드에서 60초마다 갱신(claudeSudoBin·claudeSudoAuth 주석 참고).
+    # (목적: 세션 도중 Claude가 sudo 필요한 명령을 실행할 때마다 비밀번호 프롬프트로 막히는 것 방지)
+    # -> sudoers를 NOPASSWD로 여는 대신, 최초 1회 인증 후 claude 가 살아있는 동안만 캐시를 유지하고, 캐시 범위는 claude 의 sudo 로 한정.
     programs.zsh.initContent = ''
       claude() {
         # 대화형 호출은 전용 tmux 세션 안에서 실행한다(ssh·다른 kitty 에서 llm-sessions 로 이어 붙기). sudo 인증은 세션 안(claude-run)에서 받는다.
@@ -382,10 +410,9 @@ in {
           claude-tmux "$@"
           return
         fi
-        sudo -v || return 1
-        ( while sudo -n true 2>/dev/null; do sleep 60; kill -0 "$$" 2>/dev/null || exit; done & ) 2>/dev/null
+        ${claudeSudoAuth}/bin/sudo-claude-auth || return 1
         ${settingsSnippet}
-        command claude "$@"
+        PATH=${claudeSudoBin}/bin:$PATH command claude "$@"
       }
     '';
   };
