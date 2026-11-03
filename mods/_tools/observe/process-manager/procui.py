@@ -2,10 +2,10 @@
 """procui — 프로세스 관리 TUI(Textual). 그룹(뷰)으로 묶어 보고, 필터하고, 골라서 안전하게 종료하고, 세부 사용량을 본다.
 
 usageui 는 읽기 전용 모니터이고 procui 는 **조치 도구**다(둘을 섞지 않는다). 되돌릴 수 없는 동작이므로 무확인·자동화 모드는 없다.
-- 뷰(g): 소유(시스템/내 작업/내 환경/컨테이너·VM) · 앱 · 서비스 · 세션 — `~/.config/procui/groups.toml` 로 규칙·뷰·보호 이름을 더할 수 있다(procgroups.py 머리말).
-- 선택(Space/A/c) → 종료(k): 미리보기 → 확인(y) → SIGTERM 후 3초 기다림 → 살아남으면 다시 물은 뒤 SIGKILL. 보호된 항목은 자물쇠, 일괄 선택에서 제외.
+- 뷰(F2): 소유(시스템/내 작업/내 환경/컨테이너·VM) · 앱 · 서비스 · 세션 — `~/.config/procui/groups.toml` 로 규칙·뷰·보호 이름을 더할 수 있다(procgroups.py 머리말).
+- 선택(Space/F6/F7) → 종료(Delete): 미리보기 → 확인(←/→ 로 「실행」 선택 후 Enter, 기본은 취소) → SIGTERM 후 3초 기다림 → 살아남으면 다시 물은 뒤 SIGKILL. 보호된 항목은 자물쇠, 일괄 선택에서 제외.
 - 기록: `~/.local/state/procui/actions.jsonl`(시각·그룹·이름·PID·신호·결과만 — 명령 인자 없음).
-갱신은 기본 수동(r). a 로 2초 자동 갱신(선택 중 줄이 움직이는 것을 피하려고 기본은 꺼 둠).
+갱신은 기본 수동(F5). F9 로 2초 자동 갱신(선택 중 줄이 움직이는 것을 피하려고 기본은 꺼 둠).
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Input, Select, Static
+from textual.widgets import Button, DataTable, Footer, Input, Select, Static
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 for _p in (HERE, os.path.join(HERE, "..", "observe"), os.path.join(HERE, "..", "..", "_lib", "uikit"),
@@ -101,25 +101,21 @@ def preview_text(plan, view_name, ctx, view):
     return t
 
 
-class ConfirmScreen(ModalScreen):
-    """미리보기 후 확인(y/Enter) 또는 취소(Esc/n). 결과는 dismiss(True|False)."""
-    BINDINGS = [Binding("y,enter", "yes", "실행"), Binding("n,escape", "no", "취소")]
+class ConfirmScreen(uikit.QuitConfirmScreen):
+    """미리보기 후 확인. 기본 포커스는 「취소」 — ←/→ 로 「실행」을 골라 Enter, Esc = 취소(y/n 글자 키 없음). 결과는 dismiss(True|False)."""
 
-    def __init__(self, title, body, hint):
-        super().__init__()
+    def __init__(self, title, body, hint, yes="실행", no="취소"):
+        super().__init__(title, yes, no)
         self._title, self._body, self._hint = title, body, hint
 
     def compose(self):
         with VerticalScroll(id="dialog"):
             yield Static(self._title, id="dialog-title")
             yield Static(self._body)
+            with Horizontal():
+                yield Button(self._yes, id="quit-yes")
+                yield Button(self._no, id="quit-no")
             yield Static(self._hint, id="dialog-hint")
-
-    def action_yes(self):
-        self.dismiss(True)
-
-    def action_no(self):
-        self.dismiss(False)
 
 
 class OverrideScreen(ModalScreen):
@@ -148,7 +144,7 @@ class OverrideScreen(ModalScreen):
 
 
 class InfoScreen(ModalScreen):
-    BINDINGS = [Binding("escape,enter,d", "close", "닫기")]
+    BINDINGS = [Binding("escape,enter", "close", "닫기")]
 
     def __init__(self, title, body):
         super().__init__()
@@ -171,7 +167,7 @@ class ProcUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         ('소유 뷰', '커널 / 컨테이너·VM / 시스템(다른 UID) / 내 환경(컴포지터·패널·오디오·세션 버스 등) / 내 작업(내 UID 의 나머지)'),
         ('그룹 행', 'Space = 보호되지 않은 구성원 전체 선택, Enter = 펼침/접음, d = 합계와 상위 12'),
         ('보호', '하드 보호(PID 1·procui 자신과 조상·커널 스레드·다른 UID)는 풀 수 없다. 소프트 보호(데스크톱 환경·VM·컨테이너 데몬·nix 빌드·세션 인프라·LLM 세션)는 프로세스 이름을 다시 입력하면 개별로만 풀린다'),
-        ('종료 순서', 'k 미리보기 → y 실행(SIGTERM, 3초 대기) → 살아남으면 다시 확인한 뒤 SIGKILL. 되돌릴 수 없고 무확인·자동 모드는 없다'),
+        ('종료 순서', 'Delete 미리보기 → 확인창에서 「실행」 선택(SIGTERM, 3초 대기) → 살아남으면 다시 확인한 뒤 SIGKILL. 되돌릴 수 없고 무확인·자동 모드는 없다'),
         ('필터 식', '단어 · app:이름 · group:이름 · user:me|root|UID · cpu>50 · mem>500M · pid:N — 공백은 AND'),
         ('RSS / PSS', 'RSS 는 공유 메모리까지 센 값(과대), PSS 는 공유 페이지를 나눠 센 값(상세·미리보기에서만 읽음, 권한이 없으면 못 쟀음)'),
         ('설정·기록', '~/.config/procui/groups.toml 로 뷰·규칙·보호 이름을 추가한다. 종료 기록은 ~/.local/state/procui/actions.jsonl(시각·이름·PID·신호·결과만)'),
@@ -188,9 +184,9 @@ class ProcUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     """
     BINDINGS = [
         Binding("escape", "escape_back", "뒤로/종료"),
-        Binding("g", "cycle_view", "뷰"), Binding("slash", "focus_filter", "필터"), Binding("s", "cycle_sort", "정렬"),
-        Binding("space", "toggle_select", "선택"), Binding("A", "select_all", "전체 선택"), Binding("c", "clear_select", "선택 해제"),
-        Binding("k", "kill", "종료(미리보기)"), Binding("d", "detail", "상세"), Binding("r,f5", "refresh_now", "새로고침"), Binding("a", "toggle_auto", "자동 갱신"),
+        Binding("f2", "cycle_view", "뷰"), Binding("slash", "focus_filter", "필터"), Binding("f3", "cycle_sort", "정렬"),
+        Binding("space", "toggle_select", "선택"), Binding("f6", "select_all", "전체 선택"), Binding("f7", "clear_select", "선택 해제"),
+        Binding("delete", "kill", "종료(미리보기)"), Binding("f4", "detail", "상세"), Binding("f5", "refresh_now", "새로고침"), Binding("f9", "toggle_auto", "자동 갱신"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
@@ -216,8 +212,8 @@ class ProcUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         yield Static("", id="head")
         with Horizontal(id="topbar", classes="selects"):      # g·s 키와 같은 상태를 고르는 드롭다운(키로 바꾸면 따라 바뀐다). 고른 뒤엔 표로 포커스를 돌려 Space·k 가 표에 먹게 한다
             yield uikit.box(Input(value=self.filter_text, placeholder="필터: 이름·app:이름·group:이름·user:me|root·cpu>50·mem>500M·pid:123 (공백=AND)", id="filter"), "필터 ( / 키 )")
-            yield uikit.select_box([(v["name"], i) for i, v in enumerate(self.views)], self.view_i, "sel-view", "뷰 (g)")
-            yield uikit.select_box([(SORT_NAMES[k], k) for k in SORT_ORDER], self.sort, "sel-sort", "정렬 (s)")
+            yield uikit.select_box([(v["name"], i) for i, v in enumerate(self.views)], self.view_i, "sel-view", "뷰 (F2)")
+            yield uikit.select_box([(SORT_NAMES[k], k) for k in SORT_ORDER], self.sort, "sel-sort", "정렬 (F3)")
         t = DataTable(id="tbl", cursor_type="row", zebra_stripes=True)
         # 폭을 고정한다 — 자동 폭은 첫 표시 때 값 폭으로 굳어 「앱」·「보호」 칸이 잘려 보였다(실제 터미널 촬영에서 확인)
         for label, w in (("", 3), ("이름 / 그룹", 30), ("앱", 18), ("PID", 8), ("CPU %", 7), ("RSS MiB", 9), ("보호", 34)):
@@ -289,7 +285,7 @@ class ProcUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         head.append(f"뷰 {self.view['name']} ", style="bold #33ccff")
         head.append(f"({self.view_i + 1}/{len(self.views)}, g 로 바꿈) · 정렬 {SORT_NAMES[self.sort]} · 그룹 {len(self.groups)}개 · 프로세스 {n}/{len(self.procs)}개 · 선택 {len(self.sel)}개"
                     f" · 자동 갱신 {'켜짐' if self._timer else '꺼짐'}\n", style="default")
-        head.append("Space 선택 · A 전체 선택 · c 해제 · k 종료 미리보기 · Enter 펼침/상세 · d 상세 · / 필터 · s 정렬 · r 새로고침 · ? 도움말", style="grey50")
+        head.append("Space 선택 · F6 전체 선택 · F7 해제 · Delete 종료 미리보기 · Enter 펼침/상세 · F4 상세 · / 필터 · F3 정렬 · F5 새로고침 · ? 도움말", style="grey50")
         self.query_one("#head", Static).update(head)
         if fw:
             self.status("필터 경고: " + " / ".join(fw))
@@ -483,7 +479,7 @@ class ProcUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                 self.run_kill(plan["targets"], sorted(self.override))
             else:
                 self.status("종료 취소")
-        self.push_screen(ConfirmScreen("종료 미리보기", body, "y/Enter 실행(SIGTERM) · Esc/n 취소 — 되돌릴 수 없습니다"), go)
+        self.push_screen(ConfirmScreen("종료 미리보기", body, "←/→ 로 「실행」(SIGTERM)을 골라 Enter · Esc 취소(기본) — 되돌릴 수 없습니다"), go)
 
     @work(thread=True, exclusive=True, group="kill")
     def run_kill(self, targets, override):
@@ -512,7 +508,7 @@ class ProcUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                 self.run_kill9(alive, ov)
             else:
                 self.status(msg + f" · 살아남은 {len(alive)}개는 그대로 둠")
-        self.push_screen(ConfirmScreen("SIGTERM 에 응답하지 않음", body, "y/Enter 로 SIGKILL(강제 종료) · Esc/n 그대로 둠"), go)
+        self.push_screen(ConfirmScreen("SIGTERM 에 응답하지 않음", body, "←/→ 로 「강제 종료」(SIGKILL)를 골라 Enter · Esc 그대로 둠(기본)"), go)
 
     @work(thread=True, exclusive=True, group="kill")
     def run_kill9(self, alive, ov):
