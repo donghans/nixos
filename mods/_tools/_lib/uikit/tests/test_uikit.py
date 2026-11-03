@@ -131,6 +131,27 @@ async def quit_cases():
         await pilot.pause(0.2); await pilot.press("escape"); await pilot.pause(0.2)
         check("quit_confirm=False 면 Esc 로 바로 종료(팝업형 모드)", bool(a._exit))
 asyncio.run(quit_cases())
+
+# ---- 일반 확인창(ConfirmScreen): 문구·버튼 이름을 받고, 기본 포커스는 취소, y/n 글자 키는 무반응
+class CS(App):
+    res = "미정"
+    def compose(self): yield Static("본문")
+    def on_mount(self): self.push_screen(uikit.ConfirmScreen("삭제할까요?", "삭제", "취소"), lambda r: setattr(self, "res", r))
+
+async def confirm_cases():
+    a = CS()
+    async with a.run_test(size=(80, 20)) as pilot:
+        await pilot.pause(0.2)
+        check("ConfirmScreen: 문구·버튼 이름을 쓰고 기본 포커스는 취소쪽", a.focused.id == "quit-no" and str(a.screen.query_one("#quit-yes").label) == "삭제")
+        await pilot.press("y", "n", "ㅛ"); await pilot.pause(0.2)
+        check("ConfirmScreen: y/n/ㅛ 글자 키는 무반응", type(a.screen).__name__ == "ConfirmScreen" and a.res == "미정")
+        await pilot.press("left", "enter"); await pilot.pause(0.2)
+        check("ConfirmScreen: ← 로 「삭제」를 골라 Enter 하면 True", a.res is True)
+    a = CS()
+    async with a.run_test(size=(80, 20)) as pilot:
+        await pilot.pause(0.2); await pilot.press("enter"); await pilot.pause(0.2)
+        check("ConfirmScreen: 바로 Enter = False(오발 방지)", a.res is False)
+asyncio.run(confirm_cases())
 from rich.cells import cell_len
 check("wrap_cells: 칸 폭(한글 2칸) 기준 줄바꿈, 모든 줄이 폭 이하", all(cell_len(x) <= 10 for x in uikit.wrap_cells("한글로 된 긴 문장을 열 칸 폭으로 줄바꿈 합니다", 10)))
 tt = uikit.terms_text([("용어", "설명 " * 30), ("English", "x")], 50).plain.splitlines()

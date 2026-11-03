@@ -196,12 +196,16 @@ class QuitConfirmScreen(ModalScreen[bool]):
     QuitConfirmScreen #quit-hint { color: #7a7a7a; padding-top: 1; text-align: center; }
     """
 
+    def __init__(self, question: str = "종료할까요?", yes: str = "예", no: str = "아니오"):
+        super().__init__()
+        self._question, self._yes, self._no = question, yes, no
+
     def compose(self):
         with Vertical():
-            yield Label("종료할까요?")
+            yield Label(self._question)
             with Horizontal():
-                yield Button("예", id="quit-yes")
-                yield Button("아니오", id="quit-no")
+                yield Button(self._yes, id="quit-yes")
+                yield Button(self._no, id="quit-no")
             yield Static("←→/Tab 선택 · Enter 확인 · Esc 취소", id="quit-hint")
 
     def on_mount(self):
@@ -221,6 +225,11 @@ class QuitConfirmScreen(ModalScreen[bool]):
 
     def action_no(self):
         self.dismiss(False)
+
+
+class ConfirmScreen(QuitConfirmScreen):
+    """일반 확인창(삭제·종료 실행 같은 파괴적 동작 앞). 사용: `push_screen(ConfirmScreen("삭제할까요?", "삭제", "취소"), done)` — done(True) 일 때만 실행.
+    기본 포커스는 취소쪽이고 y/n 글자 키는 쓰지 않는다(한영 전환 무관): ←→/Tab 으로 고르고 Enter, Esc = 취소."""
 
 
 class QuitMixin:
