@@ -124,41 +124,50 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   tmuxEnv = ''
     export CLAUDE_TMUX_BIN=${pkgs.tmux}/bin/tmux CLAUDE_TMUX_CONF=${sessionsSrc}/claude-tmux.conf CLAUDE_RUN_BIN=${claudeRun} CLAUDE_CTX_BIN=${claudeCtx}/bin/donghans
   '';
-  # (목적: sudo 인증 범위를 "이 claude 가 부르는 sudo" 로 한정 — 다른 터미널의 sudo 는 열지 않는다)
-  # (이유: claude 의 Bash 도구는 명령마다 tty 없는 새 세션이라 tty 캐시가 매번 쪼개진다. sudo 는 tty 가 없으면 부모 PID 로 캐시를 구분하는데,
-  #   그 부모가 명령마다 새 셸이다. 그래서 claude 쪽 PATH 의 `sudo` 래퍼가 `systemd-run --user` 로 sudo 를 띄워 부모를 항상 `systemd --user` 로 고정한다.
-  #   일반 터미널의 sudo 는 tty 별 캐시 그대로다. 범위는 "이 래퍼를 거친 sudo" 라 claude 세션끼리는 캐시를 공유한다.)
-  # 인증이 없으면 프롬프트를 기다리지 않고(-n) 바로 실패하며, 사용자에게 인증을 요청하라는 문구를 낸다.
+  # (목적: sudo 인증 범위를 "이 claude 세션이 부르는 sudo" 로 한정 — 다른 터미널·다른 claude 세션의 sudo 는 열지 않는다)
+  # (이유: claude 의 Bash 도구는 명령마다 tty 없는 새 세션·새 셸이라 sudo 의 캐시 키(tty 또는 부모 PID·세션)가 매번 달라진다.
+  #   그래서 한때 timestamp_type=global(72eaeb9)로 풀었는데 그러면 모든 터미널이 열린다. `systemd-run --user` 로 부모를 고정하는 방법도 시험했으나
+  #   유닛마다 새 세션이라 캐시가 공유되지 않았다(2026-11-03 실측). 세션마다 오래 사는 중계 프로세스(sudo_broker.py)가 모든 sudo 를 자기 자식으로 실행하면 키가 고정된다.)
+  # claude 쪽 PATH 의 `sudo` 는 이 중계에 붙는 래퍼(항상 -n: 프롬프트를 기다리다 우회하는 일을 막으려고 인증이 없으면 즉시 실패하며 안내를 출력).
+  # 일반 터미널의 sudo 는 손대지 않아 tty 별 캐시 그대로다. 설계·시험 기록: mods/_tools/llm/llm-sessions/README.md
+  sudoBrokerPy = pkgs.writeShellScriptBin "sudo-broker" ''exec ${pkgs.python3}/bin/python3 -I ${../../_tools/llm/llm-sessions/sudo_broker.py} "$@"'';
   claudeSudoBin = pkgs.writeShellScriptBin "sudo" ''
-    err=$(mktemp) || exit 1
-    trap 'rm -f "$err"' EXIT
-    ${pkgs.systemd}/bin/systemd-run --user --pipe --wait --quiet --collect --working-directory="$PWD" -- /run/wrappers/bin/sudo -n "$@" 2> >(tee "$err" >&2)
-    rc=$?
-    if [ "$rc" -ne 0 ] && grep -q "a password is required" "$err"; then
-      echo "claude-sudo: sudo 인증이 없거나 만료됨 — 우회하거나 기다리지 말고 사용자에게 아무 터미널에서 \`sudo-claude-auth\` 실행을 요청할 것" >&2
+    if [ -z "''${CLAUDE_SUDO_SOCK:-}" ] || [ ! -S "$CLAUDE_SUDO_SOCK" ]; then
+      echo "claude-sudo: 이 세션에는 sudo 중계가 없음(터미널에서 띄운 claude 가 아님) — 사용자에게 알릴 것" >&2
+      exit 1
     fi
-    exit "$rc"
+    exec ${sudoBrokerPy}/bin/sudo-broker run "$CLAUDE_SUDO_SOCK" -n "$@"
   '';
-  # 인증: 위 래퍼와 같은 경로(systemd --user 아래, tty 없음)로 받아야 같은 캐시에 기록된다. 비밀번호는 읽어서 파이프로만 넘긴다(인자·파일에 남지 않음).
+  # 인증: 비밀번호는 읽어서 파이프로만 중계에 넘긴다(인자·파일에 남지 않음). CLAUDE_SUDO_SOCK 이 있으면 그 세션만, 없으면(다른 터미널에서 재인증) 열려 있는 모든 claude 세션에.
   claudeSudoAuth = pkgs.writeShellScriptBin "sudo-claude-auth" ''
-    SD="${pkgs.systemd}/bin/systemd-run --user --pipe --wait --quiet --collect --"
-    if ! $SD /run/wrappers/bin/sudo -n true 2>/dev/null; then
-      [ -t 0 ] || { echo "sudo-claude-auth: 터미널에서 실행해야 함" >&2; exit 1; }
-      printf '[sudo] %s 의 비밀번호(claude 세션 전용): ' "$USER" >&2
-      IFS= read -rs pw; echo >&2
-      printf '%s\n' "$pw" | $SD /run/wrappers/bin/sudo -S -p "" -v || { unset pw; exit 1; }
-      unset pw
-    fi
-    # 갱신 루프: 호출한 프로세스($PPID)가 살아 있는 동안만 60초마다 연장
-    ( while $SD /run/wrappers/bin/sudo -n -v 2>/dev/null; do sleep 60; kill -0 "$PPID" 2>/dev/null || exit; done & ) 2>/dev/null
+    B=${sudoBrokerPy}/bin/sudo-broker
+    if [ -n "''${CLAUDE_SUDO_SOCK:-}" ]; then socks=("$CLAUDE_SUDO_SOCK"); else socks=("''${XDG_RUNTIME_DIR:-/tmp}"/claude-sudo-*.sock); fi
+    # 연결되지 않는 소켓(중계가 비정상 종료하며 남긴 것)은 건너뛴다. rc 255 = 연결 실패.
+    live=(); need=0
+    for s in "''${socks[@]}"; do
+      [ -S "$s" ] || continue
+      $B run "$s" -n true 2>/dev/null; rc=$?
+      [ "$rc" = 255 ] && continue
+      live+=("$s"); [ "$rc" = 0 ] || need=1
+    done
+    [ ''${#live[@]} -gt 0 ] || { echo "sudo-claude-auth: 열려 있는 claude sudo 세션이 없음" >&2; exit 1; }
+    [ "$need" = 1 ] || exit 0
+    [ -t 0 ] || { echo "sudo-claude-auth: 터미널에서 실행해야 함" >&2; exit 1; }
+    printf '[sudo] %s 의 비밀번호(claude 세션 전용): ' "$USER" >&2
+    IFS= read -rs pw; echo >&2
+    for s in "''${live[@]}"; do printf '%s\n' "$pw" | $B run "$s" -S -p "" -v || { unset pw; exit 1; }; done
+    unset pw
   '';
-  # tmux 안에서 실제로 claude 를 실행하는 쪽. sudo 는 위 래퍼를 PATH 앞에 둬 claude 에서만 쓰이게 하고, 인증은 여기서 한 번 받는다.
-  # 갱신 루프는 이 프로세스(=claude 부모)가 살아 있는 동안만 돈다. exec 하지 않는 이유: 끝난 뒤 갱신 루프도 같이 끝나게 하려고.
+  # tmux 안에서 실제로 claude 를 실행하는 쪽. 중계는 이 프로세스($$)가 살아 있는 동안만 산다(끝나면 중계도 소켓을 지우고 끝남).
+  # exec 하지 않는 이유: 끝난 뒤 중계도 같이 끝나게 하려고.
   claudeRun = pkgs.writeShellScript "claude-run" ''
     if [ -t 0 ]; then
+      export CLAUDE_SUDO_SOCK="''${XDG_RUNTIME_DIR:-/tmp}/claude-sudo-$$.sock"
+      ( ${sudoBrokerPy}/bin/sudo-broker serve "$CLAUDE_SUDO_SOCK" "$$" & ) >/dev/null 2>&1
+      for _ in $(seq 30); do [ -S "$CLAUDE_SUDO_SOCK" ] && break; sleep 0.1; done
       ${claudeSudoAuth}/bin/sudo-claude-auth || exit 1
+      export PATH=${claudeSudoBin}/bin:$PATH
     fi
-    export PATH=${claudeSudoBin}/bin:$PATH
     ${settingsSnippet}
     ${claude}/bin/claude "$@"
   '';
@@ -400,9 +409,9 @@ in {
       force = true;
     };
 
-    # claude 실행 전 sudo 인증을 미리 받아두고, 백그라운드에서 60초마다 갱신(claudeSudoBin·claudeSudoAuth 주석 참고).
+    # claude 실행 전 sudo 중계를 띄우고 인증을 미리 받아둔다(claudeSudoBin 주석 참고).
     # (목적: 세션 도중 Claude가 sudo 필요한 명령을 실행할 때마다 비밀번호 프롬프트로 막히는 것 방지)
-    # -> sudoers를 NOPASSWD로 여는 대신, 최초 1회 인증 후 claude 가 살아있는 동안만 캐시를 유지하고, 캐시 범위는 claude 의 sudo 로 한정.
+    # -> sudoers를 NOPASSWD로 여는 대신, 최초 1회 인증 후 claude 가 살아있는 동안만 캐시를 유지하고, 캐시 범위는 이 claude 세션의 sudo 로 한정.
     programs.zsh.initContent = ''
       claude() {
         # 대화형 호출은 전용 tmux 세션 안에서 실행한다(ssh·다른 kitty 에서 llm-sessions 로 이어 붙기). sudo 인증은 세션 안(claude-run)에서 받는다.
@@ -410,6 +419,9 @@ in {
           claude-tmux "$@"
           return
         fi
+        local -x CLAUDE_SUDO_SOCK="''${XDG_RUNTIME_DIR:-/tmp}/claude-sudo-$$.sock"
+        ( ${sudoBrokerPy}/bin/sudo-broker serve "$CLAUDE_SUDO_SOCK" "$$" & ) >/dev/null 2>&1
+        for _ in {1..30}; do [[ -S $CLAUDE_SUDO_SOCK ]] && break; sleep 0.1; done
         ${claudeSudoAuth}/bin/sudo-claude-auth || return 1
         ${settingsSnippet}
         PATH=${claudeSudoBin}/bin:$PATH command claude "$@"
