@@ -10,9 +10,9 @@ mkModOf "mods.gui" __curPos "Incus VM" ({
     entries=$(${pkgs.incus}/bin/incus list --format=json 2>/dev/null \
       | ${pkgs.jq}/bin/jq -r '.[] | select((.type | ascii_downcase) == "virtual-machine") | "\(.name) (\(.status))"')
 
-    # 다른 머신의 VM 을 SSH 터널로 보는 항목(mods.gui.apps.qa-desktop-view 를 켠 호스트에만 명령이 있다)
+    # 다른 머신의 VM 을 SSH 터널로 보는 항목(mods.gui.apps.incus-remote-view 를 켠 호스트에만 명령이 있다)
     remote_label="qa-desktop 원격 (뷰어)"
-    if command -v qa-desktop-view >/dev/null 2>&1; then
+    if command -v incus-remote-view >/dev/null 2>&1; then
       entries=$(printf '%s\n%s' "$entries" "$remote_label" | sed '/^$/d')
     fi
 
@@ -27,7 +27,7 @@ mkModOf "mods.gui" __curPos "Incus VM" ({
     [ -z "$selected" ] && exit
 
     if [ "$selected" = "$remote_label" ]; then
-      exec qa-desktop-view
+      exec incus-remote-view
     fi
 
     vm_name=$(echo "$selected" | awk '{print $1}')
