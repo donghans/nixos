@@ -133,7 +133,7 @@ async def drive():
         check("앱: 실시간 탭 밖에서는 타이머 없음(수동 갱신만)", app._timer is None)
         check("앱: 첫 조회 후 상태줄에 데이터 기준 시각·새로고침 안내", "데이터 기준" in str(app.query_one("#status").render()) and "r 새로고침" in str(app.query_one("#status").render()))
         n0 = app.view["loaded_at"]
-        await pilot.press("r"); await pilot.pause(1.0)
+        await pilot.press("f5"); await pilot.pause(1.0)
         check("앱: r 로 새로고침하면 데이터 기준 시각이 갱신", app.view["loaded_at"] > n0)
         for key, tab in (("2", "apps"), ("3", "cause"), ("4", "system"), ("1", "dashboard")):
             await pilot.press(key); await pilot.pause(0.5)
@@ -141,9 +141,9 @@ async def drive():
         await pilot.press("2"); await pilot.pause(0.5)
         t = app.query_one("#tapps", DataTable)
         check("앱: 앱 표에 claude 행, 열 7개", t.row_count >= 1 and len(t.columns) == 7 and str(t.get_row_at(0)[0]) == "claude")
-        await pilot.press("v"); await pilot.pause(1.0)
+        await pilot.press("f4"); await pilot.pause(1.0)
         check("앱: v 로 비교 기준 순환(prev → yday)", app.baseline == "yday")
-        await pilot.press("t"); await pilot.pause(0.5)
+        await pilot.press("f2"); await pilot.pause(0.5)
         check("앱: t 로 범위 대화상자", isinstance(app.screen, usageui.RangeScreen))
         check("범위: 대화상자가 화면 가운데에 뜸(좌우 ±1칸 — 예전엔 왼쪽 위 구석)", abs(app.screen.query_one("#dialog").region.x + app.screen.query_one("#dialog").region.width / 2 - app.size.width / 2) <= 1)
         inp = app.screen.query_one("#range-input", Input)
@@ -158,7 +158,7 @@ async def dropdowns():
         await pilot.pause(1.0)
         rs, bs = app.query_one("#sel-range"), app.query_one("#sel-base")
         check("앱: 범위 드롭다운은 현재 프리셋(7일), 비교 기준 드롭다운은 현재 기준(prev)", rs.value == "7일" and bs.value == "prev", (rs.value, bs.value))
-        await pilot.press("v"); await pilot.pause(1.0)
+        await pilot.press("f4"); await pilot.pause(1.0)
         check("앱: v 키로 비교 기준을 바꾸면 드롭다운이 따라간다", bs.value == app.baseline and app.baseline != "prev", (bs.value, app.baseline))
         rs.value = "1시간"; await pilot.pause(1.5)
         check("앱: 범위 드롭다운으로 1시간을 고르면 범위가 바뀐다", app.rng.label == "1시간" and rs.value == "1시간", (app.rng.label, rs.value))
@@ -307,7 +307,7 @@ async def spk():
         await pilot.pause(1.0)
         check("대시보드에 '튀었던 순간' 박스(dspk)", len(app.query("#dspk")) == 1)
         app.view["spikes"] = got
-        await pilot.press("s"); await pilot.pause(0.5)
+        await pilot.press("f3"); await pilot.pause(0.5)
         check("s: 튄 순간 순위 대화상자가 열리고 행이 있음", isinstance(app.screen, SpikesScreen) and app.screen.query_one("#spk", DataTable).row_count == len(got), str(type(app.screen)))
         before = app.rng
         await pilot.press("enter"); await pilot.pause(1.0)
@@ -322,14 +322,16 @@ async def spk():
         check("확인창에서 Enter(기본 아니오) = 취소, 앱 유지", app.is_running and len(app.screen_stack) == 1)
         await pilot.press("q"); await pilot.pause(0.3)
         check("q 는 더 이상 종료 키가 아님", app.is_running and len(app.screen_stack) == 1)
-        await pilot.press("s"); await pilot.pause(0.5); await pilot.press("enter"); await pilot.pause(1.0)
-        await pilot.press("s"); await pilot.pause(0.5); await pilot.press("enter"); await pilot.pause(1.0)
+        await pilot.press("t", "v", "b", "e", "d", "y", "o", "r"); await pilot.pause(0.4)
+        check("옛 알파벳 단축키(t v b e d y o r)는 아무 일도 안 한다(대화상자·종료 없음)", app.is_running and len(app.screen_stack) == 1)
+        await pilot.press("f3"); await pilot.pause(0.5); await pilot.press("enter"); await pilot.pause(1.0)
+        await pilot.press("f3"); await pilot.pause(0.5); await pilot.press("enter"); await pilot.pause(1.0)
         await pilot.press("escape"); await pilot.pause(1.0)
         check("튄 순간에서 다시 다른 순간으로 가도 Esc 한 번에 처음 범위로", app.rng is before)
 asyncio.run(spk())
 check("기본 범위: 센서와 무관하게 7일", ud.preset("7일", now).secs == 7 * 86400 and "7일" in ud.PRESETS)
 # --- y 키: observectl fleet sync 를 별도 프로세스로 부르고 결과 마지막 줄을 알림으로 보임(실패는 error)
-check("y 키가 호스트 동기화에 연결됨", any(getattr(b, "key", "") == "y" and b.action == "fleet_sync" for b in usageui.UsageUI.BINDINGS))
+check("F8 키가 호스트 동기화에 연결됨(y 는 아님)", any(getattr(b, "key", "") == "f8" and b.action == "fleet_sync" for b in usageui.UsageUI.BINDINGS) and not any(getattr(b, "key", "") == "y" for b in usageui.UsageUI.BINDINGS))
 async def fsync():
     calls, notes = [], []
     class R:
@@ -342,8 +344,8 @@ async def fsync():
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause(0.3)
             app.notify = lambda m, **k: notes.append((m, k.get("severity")))
-            await pilot.press("y"); await pilot.pause(0.6)
-        check("y: observectl fleet sync 를 호출하고 결과를 알림으로 보임", [c for c in calls if c[0] != "nmcli"] == [["/fake/observectl", "fleet", "sync"]] and any("올림" in m for m, _ in notes), str((calls, notes)))
+            await pilot.press("f8"); await pilot.pause(0.6)
+        check("F8: observectl fleet sync 를 호출하고 결과를 알림으로 보임", [c for c in calls if c[0] != "nmcli"] == [["/fake/observectl", "fleet", "sync"]] and any("올림" in m for m, _ in notes), str((calls, notes)))
     finally:
         usageui.subprocess.run, usageui.shutil.which = real_run, real_which
 asyncio.run(fsync())
@@ -368,7 +370,7 @@ async def fleet_tab():
             check("호스트 탭: 앱 비교 표에 vivaldi-bin(3배↑)·tailscaled(한쪽에만)", rows == ["vivaldi-bin", "tailscaled"], str(rows))
             check("호스트 탭: 확장 차이 표에 ★ 확장 1개", app.query_one("#tfinv", DataTable).row_count == 1)
             check("호스트 탭: 상태 글에 호스트 3개와 비교 대상 표시", "dt(표본" in app._fstat().plain and "nb ↔ dt" in app._fstat().plain)
-            await pilot.press("o"); await pilot.pause(0.4)
+            await pilot.press("f10"); await pilot.pause(0.4)
             cmp_ = app.query_one("#tfcmp", DataTable)
             rows2 = [cmp_.get_row_at(i)[0] for i in range(cmp_.row_count)]
             check("o 키: 상대 호스트가 srv 로 바뀌고 비교 표가 달라짐(vivaldi 는 비슷해져 빠짐)", "nb ↔ srv" in app._fstat().plain and rows2 == ["tailscaled"], f"{app._fstat().plain[:120]} {rows2}")
@@ -384,7 +386,7 @@ async def fleet_none():
             await pilot.pause(0.5)
             await pilot.press("5"); await pilot.pause(1.0)
             check("호스트 탭: 데이터를 못 받으면 사유와 올리는 방법을 안내(예외 없음)", "접속 실패 시험" in app._fstat().plain and app.query_one("#tfcmp", DataTable).row_count == 1)
-            await pilot.press("o"); await pilot.pause(0.2)
+            await pilot.press("f10"); await pilot.pause(0.2)
     finally:
         ufl_.load = real
 asyncio.run(fleet_none())

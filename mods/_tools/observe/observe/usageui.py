@@ -40,28 +40,19 @@ Panel = uikit.Panel
 BASELINES = [("prev", "바로 앞의 같은 길이"), ("yday", "어제 같은 시간대"), ("none", "비교 안 함")]
 
 
-class BenchScreen(ModalScreen):
-    """디스크 벤치마크 확인 대화상자 — 임시 파일을 쓰고 지우는 일이라 실행 전에 묻는다. y/Enter 실행, n/Esc 취소."""
-    BINDINGS = [Binding("y,enter", "yes", "실행"), Binding("n,escape", "no", "취소")]
+class BenchScreen(uikit.ConfirmScreen):
+    """디스크 벤치마크 확인 대화상자 — 임시 파일을 쓰고 지우는 일이라 실행 전에 묻는다. 기본 포커스는 「취소」, ←/→ 로 「실행」을 골라 Enter, Esc 취소(y/n 글자 키 없음)."""
+    DEFAULT_CSS = """
+    BenchScreen > Vertical { width: 90%; max-width: 110; }
+    """
 
     def __init__(self, size_mib):
-        super().__init__()
         self.size_mib = size_mib
-
-    def compose(self):
-        with Vertical(id="dialog"):
-            yield Static("디스크 벤치마크", id="dialog-title")
-            yield Static(f"이 시스템의 순차 읽기·쓰기 속도를 재서 디스크 사용률(%)의 기준으로 씁니다.\n"
-                         f"· 홈 아래 {diskbench.bench_dir()} 에 임시 파일 {self.size_mib} MiB 를 쓰고 읽고 지웁니다(몇 초, 그동안 다른 측정·화면에 영향).\n"
+        super().__init__("디스크 벤치마크\n\n"
+                         f"이 시스템의 순차 읽기·쓰기 속도를 재서 디스크 사용률(%)의 기준으로 씁니다.\n"
+                         f"· 홈 아래 {diskbench.bench_dir()} 에 임시 파일 {size_mib} MiB 를 쓰고 읽고 지웁니다(몇 초, 그동안 다른 측정·화면에 영향).\n"
                          f"· 그 파일이 놓인 디스크만 잽니다. 네트워크는 재지 않습니다(링크 속도는 하드웨어가 알려 줌).\n"
-                         f"· 짧은 순차 측정이라 캐시가 찬 뒤의 지속 쓰기·4K 랜덤은 재지 않습니다.")
-            yield Static("y / Enter 실행 · n / Esc 취소", id="dialog-hint")
-
-    def action_yes(self):
-        self.dismiss(True)
-
-    def action_no(self):
-        self.dismiss(False)
+                         f"· 짧은 순차 측정이라 캐시가 찬 뒤의 지속 쓰기·4K 랜덤은 재지 않습니다.", "실행", "취소")
 
 
 class RangeScreen(ModalScreen):
@@ -188,9 +179,9 @@ class UsageUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     """
     BINDINGS = [
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('apps')", "앱"), Binding("3", "tab('cause')", "원인"),
-        Binding("4", "tab('system')", "시스템"), Binding("5", "tab('fleet')", "호스트"), Binding("o", "fleet_other", "상대 호스트"), Binding("6", "tab('live')", "실시간 화면(별칭)", show=False), Binding("tab", "sub_toggle", "기록↔실시간", priority=True),
-        Binding("t", "set_range", "범위"), Binding("s", "spikes", "튄 순간"), Binding("escape", "restore", "뒤로/종료", show=False), Binding("v", "cycle_baseline", "비교 기준"),
-        Binding("r,f5", "reload", "새로고침"), Binding("b", "btop", "btop"), Binding("e", "export", "저장"), Binding("y", "fleet_sync", "호스트 동기화"), Binding("d", "disk_bench", "디스크 실측"),
+        Binding("4", "tab('system')", "시스템"), Binding("5", "tab('fleet')", "호스트"), Binding("f10", "fleet_other", "상대 호스트"), Binding("6", "tab('live')", "실시간 화면(별칭)", show=False), Binding("tab", "sub_toggle", "기록↔실시간", priority=True),
+        Binding("f2", "set_range", "범위"), Binding("f3", "spikes", "튄 순간"), Binding("escape", "restore", "뒤로/종료", show=False), Binding("f4", "cycle_baseline", "비교 기준"),
+        Binding("f5", "reload", "새로고침"), Binding("f6", "btop", "btop"), Binding("f7", "export", "저장"), Binding("f8", "fleet_sync", "호스트 동기화"), Binding("f2", "disk_bench", "디스크 실측"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
@@ -243,8 +234,8 @@ class UsageUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                             yield uikit.box(Panel(lambda w, h: self._live(live.render_sessions), id="lsess"), "LLM 세션")
                     with TabPane("기록", id="dash-hist"):
                         with Horizontal(classes="selects"):          # t·v 키와 같은 상태를 고르는 드롭다운(키로 바꾸면 따라 바뀐다)
-                            yield uikit.select_box(self._range_options(), self._range_value(), "sel-range", "범위 (t)")
-                            yield uikit.select_box([(l, k) for k, l in BASELINES], self.baseline, "sel-base", "비교 기준 (v)")
+                            yield uikit.select_box(self._range_options(), self._range_value(), "sel-range", "범위 (F2)")
+                            yield uikit.select_box([(l, k) for k, l in BASELINES], self.baseline, "sel-base", "비교 기준 (F4)")
                         with VerticalScroll(id="dashscroll"):
                             with Horizontal(id="dash"):
                                 if self.desktop:
@@ -472,7 +463,7 @@ class UsageUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     # --- 데이터: 수동 갱신만(타이머 없음)
     def action_reload(self):
         if self._live_visible():
-            self._live_tick()               # 실시간 화면에서 r = 지금 한 번 더 재기(기록 재조회가 아님)
+            self._live_tick()               # 실시간 화면에서 F5 = 지금 한 번 더 재기(기록 재조회가 아님)
         else:
             self.reload()
 
