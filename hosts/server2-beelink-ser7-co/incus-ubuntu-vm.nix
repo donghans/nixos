@@ -217,7 +217,9 @@ in {
       export RESTIC_PASSWORD_FILE=/root/.backup/restic-password
       # systemd 서비스에는 HOME 이 없어 restic 캐시를 못 열고 매번 느려진다.
       export XDG_CACHE_HOME=/var/cache
-      SSH_ARGS="-i /root/.backup/ssh-key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+      # ServerAlive: mac-studio 와 연결이 끊긴 채 무한 대기하는 사고(2026-10-24 lxc-backup 이 10일간 멈춤)를
+      # 막는다 — 응답 없는 연결은 약 2분(30초×4) 안에 끊긴다. ConnectTimeout 은 접속 대기 상한.
+      SSH_ARGS="-i /root/.backup/ssh-key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -o ConnectTimeout=30"
       restic() { /usr/bin/restic -o "sftp.args=$SSH_ARGS" "$@"; }
 
       DUMP_DIR=/srv/b2g24/backup
@@ -251,6 +253,8 @@ in {
       [Service]
       Type=oneshot
       ExecStart=/usr/local/sbin/backup-to-macstudio
+      # oneshot 의 기본 시작 제한은 무제한이라 멈추면 영원히 activating 이다. 평소 약 12분(2026-10-26 실측).
+      TimeoutStartSec=6h
       Nice=10
       IOSchedulingClass=idle
       UNIT
