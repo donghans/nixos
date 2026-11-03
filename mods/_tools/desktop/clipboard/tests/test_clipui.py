@@ -49,5 +49,23 @@ async def drive():
         check("Esc → → → Enter = 종료", not app.is_running and len(COPIED) == n)
 
 
+async def drive_keys():
+    app = clipui.ClipUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause(0.8)
+        app.query_one(clipui.ClipList).focus(); await pilot.pause(0.2)
+        await pilot.press("a", "u", "d", "c", "y", "n"); await pilot.pause(0.3)
+        check("옛 알파벳 단축키(a u d c y n)는 아무 일도 안 한다(체크·삭제·종료 없음)", app.is_running and len(app.screen_stack) == 1 and not app.marked)
+        await pilot.press("f2"); await pilot.pause(0.2)
+        check("F2: 체크(알파벳 a 가 아닌 F키로 동작)", len(app.marked) == 1)
+        await pilot.press("f8"); await pilot.pause(0.3)
+        check("F8: 삭제 확인창, 기본 포커스는 「아니오」", type(app.screen).__name__ == "ConfirmScreen" and app.focused.id == "quit-no")
+        await pilot.press("y", "n"); await pilot.pause(0.2)
+        check("확인창에서 y/n 글자 키는 무반응", type(app.screen).__name__ == "ConfirmScreen")
+        await pilot.press("enter"); await pilot.pause(0.3)
+        check("확인창 위의 priority Enter = 포커스 버튼(아니오) → 취소, 체크 유지", type(app.screen).__name__ != "ConfirmScreen" and len(app.marked) == 1)
+
+
 asyncio.run(drive())
+asyncio.run(drive_keys())
 finish("clipui")

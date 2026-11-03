@@ -206,25 +206,11 @@ def copy_bytes(data: bytes) -> None:
     subprocess.run(shlex.split(COPY_CMD), input=data, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-class ConfirmScreen(ModalScreen[bool]):
-    BINDINGS = [
-        Binding("y", "answer(True)", "예"),
-        Binding("enter", "answer(True)", "예", show=False),
-        Binding("n", "answer(False)", "아니오"),
-        Binding("escape", "answer(False)", "취소", show=False),
-    ]
+class ConfirmScreen(uikit.ConfirmScreen):
+    """삭제·최적화 앞의 확인창 — 기본 포커스 「아니오」, ←/→ 로 「예」를 골라 Enter, Esc 취소(y/n 글자 키 없음)."""
 
     def __init__(self, message: str) -> None:
-        super().__init__()
-        self.message = message
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="dialog"):
-            yield Label(self.message, id="dialog-text")
-            yield Label("[y/Enter] 예   [n/Esc] 아니오", id="dialog-hint")
-
-    def action_answer(self, value: bool) -> None:
-        self.dismiss(value)
+        super().__init__(message, "예", "아니오")
 
 
 class InfoScreen(ModalScreen[None]):
@@ -285,17 +271,13 @@ class BusyScreen(ModalScreen[None]):
 class ClipList(OptionList):
     BINDINGS = [
         Binding("space", "app.toggle_mark", "체크", show=False),
-        Binding("a", "app.mark_all", "전체체크", show=False),
-        Binding("u", "app.clear_marks", "체크해제", show=False),
-        Binding("d", "app.delete", "삭제", show=False),
         Binding("slash", "app.focus_search", "검색", show=False),
     ]
 
 
 class Preview(TextArea):
     BINDINGS = [
-        Binding("c", "app.copy_selection", "선택 복사", show=False),
-        Binding("y", "app.copy_selection", "선택 복사", show=False),
+        Binding("f2", "app.copy_selection", "선택 복사", show=False),
         Binding("slash", "app.focus_search", "검색", show=False),
     ]
 
@@ -304,7 +286,7 @@ class ClipUI(uikit.QuitMixin, uikit.HelpMixin, App):
     TITLE = "클립보드"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
         ('검색', '퍼지 + 항목 내용 전체. 필터: app:이름 · >10k(크기) · is:sensitive · is:dup. Enter = 복사(창은 그대로 둔다)'),
-        ('체크·삭제', 'F2/Space 체크 · F3 전체 체크 · F4 해제 · F8(d) 삭제 — 체크한 항목을 일괄 삭제'),
+        ('체크·삭제', 'F2/Space 체크 · F3 전체 체크 · F4 해제 · F8/Delete 삭제 — 체크한 항목을 일괄 삭제'),
         ('정렬', 'F6 으로 순환하거나 검색창 옆 「정렬」 드롭다운에서 고른다: 최신순 · 크기순 · 많이 쓴 순 · 많이 복사된 순 · 오래된 순'),
         ('미리보기', '전문 미리보기와 부분 복사. F7 로 켬/끔(창이 낮으면 자동으로 숨김)'),
         ('부가 정보', '저장 시점의 시각·출처 앱·복사/사용 횟수(clipmeta 사이드카) — 기록을 시작하기 전에 복사된 항목은 「부가 정보 없음」'),
@@ -659,9 +641,6 @@ class ClipUI(uikit.QuitMixin, uikit.HelpMixin, App):
         screen = self.screen
         if isinstance(screen, uikit.QuitConfirmScreen):      # 종료 확인창: Enter = 포커스된 버튼(기본 「아니오」)
             screen.press_focused()
-            return
-        if isinstance(screen, ConfirmScreen):
-            screen.dismiss(True)
             return
         if isinstance(screen, (InfoScreen, StatsScreen, uikit.HelpScreen)):       # 도움말도 Enter 로 닫힌다(예전엔 우선순위 Enter 가 도움말에서 아무 일도 안 했다)
             screen.dismiss(None)
