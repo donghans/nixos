@@ -13,7 +13,7 @@ APPS = {
     "llm-sessions": "llm/llm-sessions/llm_sessions.py", "notif": "desktop/notification-center/notif_ui.py",
     "clipui": "desktop/clipboard/clipui.py",
 }
-PENDING = set(APPS) - {"ctxui", "usageui", "procui"}  # 변환 끝난 앱은 여기서 뺀다
+PENDING = set(APPS) - {"ctxui", "usageui", "procui", "displayui"}  # 변환 끝난 앱은 여기서 뺀다
 
 
 def violations(path):

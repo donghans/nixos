@@ -87,7 +87,7 @@ async def t_focus():
     app = ui.DisplayUI(focus="mode")
     async with app.run_test(size=(140, 42)) as pilot:
         await settle(pilot, 10)
-        for key, wid in (("r", "hz"), ("s", "res"), ("c", "scale"), ("p", "rel"), ("m", "modes")):
+        for key, wid in (("3", "hz"), ("2", "res"), ("4", "scale"), ("5", "rel"), ("1", "modes")):
             await pilot.press(key); await settle(pilot, 3); check(f"키 {key} → #{wid}", app.focused.id == wid)
 
 async def t_cursor():
@@ -122,15 +122,15 @@ async def t_apply_confirm():
         await settle(pilot)
         app.query_one("#res", Select).value = "1920x1080"; await settle(pilot, 5)
         check("해상도 변경 시 주사율 목록 갱신", "60" in [v for _, v in app.query_one("#hz", Select)._options])
-        app.query_one("#hz", Select).value = "60"; await pilot.press("a"); await settle(pilot, 10)
+        app.query_one("#hz", Select).value = "60"; await pilot.press("f2"); await settle(pilot, 10)
         check("적용 직후 외장 1920x1080 + 확인 창", mons()["DP-4"].width == 1920 and app.screen.__class__.__name__ == "Confirm")
         check("확인 창이 떠 있는 동안 별도 타이머가 예약됨(pending 기록)", os.path.exists(dc.PENDING_FILE))
         await pilot.press("enter"); await settle(pilot, 10)
         check("유지 → 저장 + 예약 취소(pending 없음)", dc.load_state()["monitors"]["DP-4"]["mode"].startswith("1920x1080") and not os.path.exists(dc.PENDING_FILE))
-        app.query_one("#res", Select).value = "1280x720"; await settle(pilot, 3); await pilot.press("a"); await settle(pilot, 10)
+        app.query_one("#res", Select).value = "1280x720"; await settle(pilot, 3); await pilot.press("f2"); await settle(pilot, 10)
         check("적용(1280x720)", mons()["DP-4"].width == 1280)
         await pilot.press("escape"); await settle(pilot, 10); check("Esc → 이전(1920x1080) 복귀", mons()["DP-4"].width == 1920)
-        app.query_one("#res", Select).value = "1600x900"; await settle(pilot, 3); await pilot.press("a"); await settle(pilot, 10)
+        app.query_one("#res", Select).value = "1600x900"; await settle(pilot, 3); await pilot.press("f2"); await settle(pilot, 10)
         check("적용(1600x900)", mons()["DP-4"].width == 1600)
         await pilot.pause(3.6); await settle(pilot, 20); check("시간 초과 → 자동 되돌림 + pending 정리", mons()["DP-4"].width == 1920 and not os.path.exists(dc.PENDING_FILE))
 
@@ -138,7 +138,7 @@ async def t_misc():
     reset(); app = ui.DisplayUI(focus="refresh")
     async with app.run_test(size=(140, 42)) as pilot:
         await settle(pilot); app.sel = "eDP-1"; app.fill_form(); await settle(pilot, 5)
-        app.query_one("#hz", Select).value = "45"; await pilot.press("a"); await settle(pilot, 10)
+        app.query_one("#hz", Select).value = "45"; await pilot.press("f2"); await settle(pilot, 10)
         txt = str(app.screen.query_one("#cmsg").render()) if app.screen.__class__.__name__ == "Confirm" else ""
         check("내장 45Hz: 확인 창에 거부 경고", "45" in txt and "받아들이지" in txt, txt); await pilot.press("enter"); await settle(pilot, 10)
     reset(); app = ui.DisplayUI(focus="monitors")
@@ -150,7 +150,7 @@ async def t_misc():
         await settle(pilot)
         app.query_one("#res", Select).value = "1920x1080"; await settle(pilot, 3); app.query_one("#hz", Select).value = "60"
         app.query_one("#rel", Select).value = "right"; app.query_one("#of", Select).value = "eDP-1"; app.query_one("#align", Select).value = "center"
-        await pilot.press("a"); await settle(pilot, 10); await pilot.press("enter"); await settle(pilot, 10)
+        await pilot.press("f2"); await settle(pilot, 10); await pilot.press("enter"); await settle(pilot, 10)
         m = mons(); check("위치: 내장 오른쪽·가운데 (2560,260)", (m["DP-4"].x, m["DP-4"].y) == (2560, 260))
     app2 = ui.DisplayUI(focus="position")
     async with app2.run_test(size=(140, 42)) as pilot:
@@ -162,7 +162,7 @@ async def t_misc():
         m = mons(); check("프리젠테이션 1080p(외장 1920x1080 + 미러)", m["DP-4"].width == 1920 and m["eDP-1"].mirror_of == "DP-4")
         check("복귀 항목 생김", "back" in opt_ids(app)); pick(app, "back"); await settle(pilot, 15)
         m = mons(); check("복귀: 3840x2560 + 확장", m["DP-4"].width == 3840 and m["eDP-1"].mirror_of is None)
-        await pilot.press("S"); await settle(pilot, 5); check("프리셋 저장 입력창", app.screen.__class__.__name__ == "NameInput")
+        await pilot.press("f3"); await settle(pilot, 5); check("프리셋 저장 입력창", app.screen.__class__.__name__ == "NameInput")
         await pilot.press(*"mine"); await pilot.press("enter"); await settle(pilot, 10)
         check("사용자 프리셋 저장·표시", "mine" in dc.load_presets() and "preset:mine" in opt_ids(app))
     for w, narrow in ((80, True), (150, False)):
@@ -186,9 +186,9 @@ async def t_obs():
         await settle(pilot, 10)
         titles = {w: app.query_one(w).border_title or "" for w in ("#left", "#mons", "#form")}
         check("시작 포커스가 주사율 칸이면 '선택한 모니터 설정' 제목에만 ▶", titles["#form"].startswith("▶") and not titles["#left"].startswith("▶") and not titles["#mons"].startswith("▶"), str(titles))
-        await pilot.press("m"); await settle(pilot, 5)
+        await pilot.press("1"); await settle(pilot, 5)
         titles = {w: app.query_one(w).border_title or "" for w in ("#left", "#mons", "#form")}
-        check("m 로 모드 목록에 포커스하면 ▶ 가 '화면 모드' 쪽으로 이동", titles["#left"].startswith("▶") and not titles["#form"].startswith("▶"), str(titles))
+        check("1 로 모드 목록에 포커스하면 ▶ 가 '화면 모드' 쪽으로 이동", titles["#left"].startswith("▶") and not titles["#form"].startswith("▶"), str(titles))
         await pilot.press("down"); await pilot.press("enter"); await settle(pilot, 20)
     ev = events()
     names = [e["ev"] for e in ev]
@@ -202,7 +202,7 @@ async def t_obs():
     app = ui.DisplayUI(focus="mode")
     async with app.run_test(size=(140, 42)) as pilot:
         await settle(pilot, 10)
-        await pilot.press("S"); await settle(pilot, 5)
+        await pilot.press("f3"); await settle(pilot, 5)
         await pilot.press(*"비밀글자abc"); await settle(pilot, 3)
         await pilot.press("escape"); await settle(pilot, 3)
     dump = json.dumps(events(), ensure_ascii=False)
@@ -217,6 +217,8 @@ async def t_quit():
         check("확인창 Enter = 취소, 앱 유지", app.is_running and len(app.screen_stack) == 1)
         await pilot.press("q"); await settle(pilot, 5)
         check("q 는 종료 키가 아님", app.is_running and len(app.screen_stack) == 1)
+        await pilot.press("m", "s", "r", "c", "p", "a", "S", "d"); await settle(pilot, 5)
+        check("옛 알파벳 단축키(m s r c p a S d)는 아무 일도 안 한다(대화상자·종료 없음)", app.is_running and len(app.screen_stack) == 1)
         await pilot.press("escape"); await settle(pilot, 5); await pilot.press("right"); await settle(pilot, 3); await pilot.press("enter"); await settle(pilot, 5)
         check("Esc → → → Enter = 종료", not app.is_running)
     reset(); app = ui.DisplayUI(focus="mode", quick=True)

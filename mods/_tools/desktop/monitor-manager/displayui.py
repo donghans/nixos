@@ -50,8 +50,8 @@ class Confirm(ModalScreen[bool]):
     """적용 결과를 확인하는 창. 시간 안에 '유지'하지 않으면 False(되돌림)"""
 
     BINDINGS = [
-        Binding("enter,y", "keep", "유지"),
-        Binding("escape,n", "undo", "되돌리기"),
+        Binding("enter", "keep", "유지"),
+        Binding("escape", "undo", "되돌리기"),
     ]
     DEFAULT_CSS = """
     Confirm { align: center middle; }
@@ -123,13 +123,13 @@ class NameInput(ModalScreen[str]):
 class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
     TITLE = "화면 관리"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
-        ('화면 모드', '확장 / 미러 / 내장만 / 외부만 — Enter 로 바로 적용. m 으로 목록에 포커스'),
-        ('프리셋', '프리젠테이션 등 해상도 조합 — Enter 적용, S 저장, d 삭제'),
+        ('화면 모드', '확장 / 미러 / 내장만 / 외부만 — Enter 로 바로 적용. 1 로 목록에 포커스'),
+        ('프리셋', '프리젠테이션 등 해상도 조합 — Enter 적용, F3 저장, Delete 삭제'),
         ('확인 시간', '적용하면 정해진 시간(기본 10초) 안에 확인하지 않으면 이전 구성으로 되돌린다 — 되지 않는 모드로 화면이 안 나와도 스스로 복구된다'),
-        ('모니터별 설정', 's 해상도 · r 주사율 · c 배율 · p 위치 · a 적용. 위치는 기준 모니터에 대한 상대 위치와 정렬'),
+        ('모니터별 설정', '2 해상도 · 3 주사율 · 4 배율 · 5 위치 · F2 적용. 위치는 기준 모니터에 대한 상대 위치와 정렬'),
     ]
     HELP_NOTES = [
-        '종료는 Esc(확인창 — 기본 「아니오」, ←→ 로 「예」 선택 후 Enter; --quick 은 확인 없이 바로 종료) 또는 Ctrl+Q(즉시). r 은 새로고침이 아니라 주사율이다(새로고침은 F5)',
+        '종료는 Esc(확인창 — 기본 「아니오」, ←→ 로 「예」 선택 후 Enter; --quick 은 확인 없이 바로 종료) 또는 Ctrl+Q(즉시). 새로고침은 F5',
     ]
     ENABLE_COMMAND_PALETTE = False  # 푸터의 ^p palette 안내 숨김 (clipui 와 같음, 쓰지 않음)
     # 색은 lazygit(mods/sys/utils/lazygit.nix) / clipui 와 같음: 비활성 테두리 #595959, 포커스 #33ccff, 선택 줄 #268bd2, 배경 검정.
@@ -166,14 +166,14 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
     """
     BINDINGS = [
         *uikit.HelpMixin.HELP_BINDINGS,
-        Binding("m", "focus_to('modes')", "모드"),
-        Binding("s", "focus_to('res')", "해상도"),
-        Binding("r", "focus_to('hz')", "주사율"),
-        Binding("c", "focus_to('scale')", "배율"),
-        Binding("p", "focus_to('rel')", "위치"),
-        Binding("a", "apply", "적용"),
-        Binding("S", "save_preset", "프리셋 저장"),
-        Binding("d", "delete_preset", "프리셋 삭제"),
+        Binding("1", "focus_to('modes')", "모드"),
+        Binding("2", "focus_to('res')", "해상도"),
+        Binding("3", "focus_to('hz')", "주사율"),
+        Binding("4", "focus_to('scale')", "배율"),
+        Binding("5", "focus_to('rel')", "위치"),
+        Binding("f2", "apply", "적용"),
+        Binding("f3", "save_preset", "프리셋 저장"),
+        Binding("delete", "delete_preset", "프리셋 삭제"),
         Binding("f5", "reload", "새로고침"),
         Binding("escape", "confirm_quit", "종료"),
     ]
@@ -196,16 +196,16 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
                 yield DataTable(id="mons", cursor_type="row")
                 with Vertical(id="form"):
                     with Horizontal(classes="row"):
-                        yield Label("해상도 (s)")
+                        yield Label("해상도 (2)")
                         yield Select([("-", "-")], id="res", allow_blank=False)
                     with Horizontal(classes="row"):
-                        yield Label("주사율 (r)")
+                        yield Label("주사율 (3)")
                         yield Select([("-", "-")], id="hz", allow_blank=False)
                     with Horizontal(classes="row"):
-                        yield Label("배율 (c)")
+                        yield Label("배율 (4)")
                         yield Select([("-", "-")], id="scale", allow_blank=False)
                     with Horizontal(classes="row"):
-                        yield Label("위치 (p)")
+                        yield Label("위치 (5)")
                         yield Select([("-", "-")], id="rel", allow_blank=False)
                     with Horizontal(classes="row"):
                         yield Label("기준 모니터")
@@ -214,7 +214,7 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
                         yield Label("정렬")
                         yield Select([("-", "-")], id="align", allow_blank=False)
                     with Horizontal(id="buttons"):
-                        yield Button("적용 (a)", id="apply", variant="primary")
+                        yield Button("적용 (F2)", id="apply", variant="primary")
                         yield Button("기본 구성으로 초기화", id="reset")
                 yield Static("", id="msg")
         yield Footer()
