@@ -137,4 +137,7 @@ tt = uikit.terms_text([("용어", "설명 " * 30), ("English", "x")], 50).plain.
 cc = lambda l, t: cell_len(l[:l.index(t)])
 check("terms_text: 이름 칸이 같고 줄바꿈 줄은 이름 칸만큼 들여씀, 폭 이하", all(cell_len(l) <= 50 for l in tt) and cc(tt[0], "설명") == cc(tt[1], "설명") and cc(tt[-1], "x") == cc(tt[0], "설명"), tt[:3])
 check("pad: 한글 칸 폭 기준이고 넘치면 한 칸만 둠", cell_len(uikit.pad("한글", 8)) == 8 and uikit.pad("가나다라마", 4) == "가나다라마 ")
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import lint_keys
+check("lint_keys: 변환을 마친 앱에 단일 알파벳 Binding 키가 없다(남은 앱: %s)" % sorted(lint_keys.PENDING), not lint_keys.check_apps(), lint_keys.check_apps())
 finish("uikit")
