@@ -4,8 +4,8 @@
 
   왼쪽 그룹: 전체 · ‼ 시스템 문제 · 앱 이름(건수, 긴급이 있으면 ‼N) — ↑↓ 로 고르면 바로 오른쪽 목록이 바뀐다
   검색창: 글자(앱·제목·본문에 모두 포함)   app:이름   is:problem   is:urgent   since:3h|2d|1w   (그룹 건수도 검색에 맞춰 바뀜)
-  Enter 현재 알림 복사 후 종료(그룹에서는 목록으로 이동)  Esc 검색 지우기 → 그룹을 '전체'로 → 종료  Tab 영역 이동  ←/→ 그룹↔목록
-  F5 새로고침  F6 그룹 패널  F7 미리보기  F9 통계(지금 그룹/검색 기준)  F10 서비스 점검      목록에서: c 본문만 복사, g 그룹, / 검색, q 종료
+  Enter 현재 알림 복사 후 종료(그룹에서는 목록으로 이동)  Esc 검색 지우기 → 그룹을 '전체'로 → 종료 확인창  Tab 영역 이동  ←/→ 그룹↔목록
+  F5 새로고침  F6 그룹 패널  F7 미리보기  F9 통계(지금 그룹/검색 기준)  F10 서비스 점검      목록에서: c 본문만 복사, g 그룹, / 검색   종료: Esc(확인창) · Ctrl+Q(즉시)
 """
 import datetime
 
@@ -45,7 +45,7 @@ def pad(text: str, width: int) -> str:
 
 
 class InfoScreen(ModalScreen[None]):
-    BINDINGS = [Binding("escape", "close", "닫기"), Binding("q", "close", "닫기", show=False), Binding("enter", "close", "닫기", show=False)]
+    BINDINGS = [Binding("escape", "close", "닫기"), Binding("enter", "close", "닫기", show=False)]
 
     def __init__(self, title: str, body) -> None:
         super().__init__()
@@ -84,7 +84,6 @@ class GroupList(OptionList):
     BINDINGS = [
         Binding("right", "app.focus_list", "목록", show=False),
         Binding("slash", "app.focus_search", "검색", show=False),
-        Binding("q", "app.quit", "종료", show=False),
     ]
 
 
@@ -94,7 +93,6 @@ class NotifList(OptionList):
         Binding("g", "app.focus_groups", "그룹", show=False),
         Binding("c", "app.copy_body", "본문 복사", show=False),
         Binding("slash", "app.focus_search", "검색", show=False),
-        Binding("q", "app.quit", "종료", show=False),
     ]
 
 
@@ -103,11 +101,10 @@ class Preview(TextArea):
         Binding("c", "app.copy_selection", "선택 복사", show=False),
         Binding("y", "app.copy_selection", "선택 복사", show=False),
         Binding("slash", "app.focus_search", "검색", show=False),
-        Binding("q", "app.quit", "종료", show=False),
     ]
 
 
-class NotifUI(uikit.HelpMixin, App):
+class NotifUI(uikit.QuitMixin, uikit.HelpMixin, App):
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
         ('그룹', '왼쪽: 전체 · ‼ 시스템 문제 · 앱 이름(건수, 긴급이 있으면 ‼N). ↑↓ 로 고르면 오른쪽 목록이 바로 바뀐다'),
         ('검색 문법', '글자(앱·제목·본문에 모두 포함) · app:이름 · is:problem · is:urgent · since:3h|2d|1w — 그룹 건수도 검색에 맞춰 바뀐다'),
@@ -116,7 +113,7 @@ class NotifUI(uikit.HelpMixin, App):
         ('F 키', 'F5 새로고침 · F6 그룹 패널 · F7 미리보기 · F9 통계(지금 그룹/검색 기준) · F10 서비스 점검'),
     ]
     HELP_NOTES = [
-        '검색창이 기본 포커스라 q 는 글자로 들어간다 — 종료는 Esc(여러 번) 또는 목록에서 q',
+        '종료는 Esc: 검색어 지우기 → 그룹을 「전체」로 → 종료 확인창(기본 「아니오」, ←→ 로 「예」 선택 후 Enter). Ctrl+Q 는 확인 없이 즉시 종료',
     ]
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
     #search { background: #000000; border: round #595959; }
@@ -359,10 +356,13 @@ class NotifUI(uikit.HelpMixin, App):
             self.group = ALL
             self.refresh_all()
         else:
-            self.exit()
+            self.action_confirm_quit()
 
     def action_copy_quit(self) -> None:
         screen = self.screen                                # Enter 는 우선순위 바인딩이라 대화상자에서도 여기로 옴
+        if isinstance(screen, uikit.QuitConfirmScreen):     # 종료 확인창: Enter = 포커스된 버튼(기본 「아니오」)
+            screen.press_focused()
+            return
         if isinstance(screen, ModalScreen):
             screen.dismiss(None)
             return

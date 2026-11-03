@@ -39,6 +39,14 @@ async def drive():
         check("드롭다운에 포커스가 있을 때 Enter 는 복사하지 않고 드롭다운을 연다", len(COPIED) == n, (n, len(COPIED)))
         await pilot.press("escape"); await pilot.pause(0.3)
         check("(여전히) 앱이 살아 있다", app.is_running)
+        app.query_one("#search", Input).focus(); await pilot.pause(0.2)
+        n = len(COPIED)
+        await pilot.press("escape"); await pilot.pause(0.3)
+        check("검색어·체크가 없으면 Esc → 종료 확인창(기본 「아니오」)", type(app.screen).__name__ == "QuitConfirmScreen" and app.focused.id == "quit-no")
+        await pilot.press("enter"); await pilot.pause(0.3)
+        check("확인창 위의 priority Enter 는 복사하지 않고 확인창의 포커스 버튼(아니오=취소)", app.is_running and len(app.screen_stack) == 1 and len(COPIED) == n)
+        await pilot.press("escape"); await pilot.pause(0.3); await pilot.press("right"); await pilot.pause(0.2); await pilot.press("enter"); await pilot.pause(0.3)
+        check("Esc → → → Enter = 종료", not app.is_running and len(COPIED) == n)
 
 
 asyncio.run(drive())

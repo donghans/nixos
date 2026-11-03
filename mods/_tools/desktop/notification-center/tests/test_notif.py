@@ -185,6 +185,20 @@ else:
         app = notif_ui.NotifUI()
         async with app.run_test(size=(120, 30)) as pilot:
             await pilot.pause()
+            ncopy = len(copied)
+            await pilot.press("escape"); await pilot.pause()
+            check("화면: 검색어·그룹이 이미 기본이면 Esc → 종료 확인창(기본 「아니오」)", type(app.screen).__name__ == "QuitConfirmScreen" and app.focused.id == "quit-no")
+            await pilot.press("enter"); await pilot.pause()
+            check("화면: 확인창 위의 priority Enter 는 복사·종료가 아니라 확인창의 포커스 버튼(아니오=취소)", app.is_running and len(app.screen_stack) == 1 and len(copied) == ncopy)
+            await pilot.press("q"); await pilot.pause()
+            check("화면: q 는 종료 키가 아님(검색창에서는 그냥 글자)", app.is_running and app.query_one("#search", Input).value == "q")
+            await pilot.press("escape"); await pilot.pause()
+            check("화면: Esc 는 먼저 그 검색어를 지움(확인창 안 뜸)", app.query_one("#search", Input).value == "" and len(app.screen_stack) == 1)
+            await pilot.press("escape"); await pilot.pause(); await pilot.press("right"); await pilot.pause(); await pilot.press("enter"); await pilot.pause()
+            check("화면: Esc → → → Enter = 종료(복사 없음)", not app.is_running and len(copied) == ncopy)
+        app = notif_ui.NotifUI()
+        async with app.run_test(size=(120, 30)) as pilot:
+            await pilot.pause()
             await pilot.press("tab", "tab"); await pilot.pause()      # 검색창 → 그룹 → 목록
             await pilot.press("c"); await pilot.pause()
             check("화면: 목록에서 c 는 본문만 복사하고 종료하지 않음", app.is_running and copied[-1] == "줄1\n줄2", copied[-1])

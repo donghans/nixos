@@ -208,9 +208,25 @@ async def t_obs():
     dump = json.dumps(events(), ensure_ascii=False)
     check("입력창에 친 글자는 이벤트 로그에 남지 않음", "비밀" not in dump and '"key":"a"' not in dump.replace(" ", "") and "abc" not in dump, dump[:200])
 
+async def t_quit():
+    reset(); app = ui.DisplayUI(focus="mode")
+    async with app.run_test(size=(140, 42)) as pilot:
+        await settle(pilot, 10); await pilot.press("escape"); await settle(pilot, 5)
+        check("Esc → 종료 확인창(기본 「아니오」)", app.screen.__class__.__name__ == "QuitConfirmScreen" and app.focused.id == "quit-no")
+        await pilot.press("enter"); await settle(pilot, 5)
+        check("확인창 Enter = 취소, 앱 유지", app.is_running and len(app.screen_stack) == 1)
+        await pilot.press("q"); await settle(pilot, 5)
+        check("q 는 종료 키가 아님", app.is_running and len(app.screen_stack) == 1)
+        await pilot.press("escape"); await settle(pilot, 5); await pilot.press("right"); await settle(pilot, 3); await pilot.press("enter"); await settle(pilot, 5)
+        check("Esc → → → Enter = 종료", not app.is_running)
+    reset(); app = ui.DisplayUI(focus="mode", quick=True)
+    async with app.run_test(size=(140, 42)) as pilot:
+        await settle(pilot, 10); await pilot.press("escape"); await settle(pilot, 5)
+        check("--quick 은 Esc 로 확인 없이 바로 종료", not app.is_running)
+
 async def main():
     only = os.environ.get("ONLY")
-    for t in [x for x in (t_basic, t_arrange, t_focus, t_cursor, t_layout_quick, t_apply_confirm, t_misc, t_obs) if not only or x.__name__ == only]:
+    for t in [x for x in (t_basic, t_arrange, t_focus, t_cursor, t_layout_quick, t_apply_confirm, t_misc, t_quit, t_obs) if not only or x.__name__ == only]:
         try: await t()
         except Exception:
             import traceback; traceback.print_exc(); results.append(False); print("FAIL (예외)", t.__name__)

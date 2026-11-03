@@ -8,7 +8,7 @@
 
 새 세션에는 기본으로 `--dangerously-skip-permissions` 가 붙는다(세션 간 통신·root 작업 때마다 승인을 묻지 않게). 끄기: UI 에서 「claude 인자」 칸 비우기 · CLI `new --safe` ·
 환경 변수 CLAUDE_SESSIONS_DEFAULT_ARGS= . `--permission-mode` 등 권한 인자를 직접 주면 기본값은 붙지 않는다. 디렉터리는 UI 에서 현재 위치·ctx 의 저장소 목록 중에서 고른다.
-UI 키: Enter 붙기 · n 새 세션 · x 정리(세션 종료) · d 붙은 곳 모두 떼기 · r 새로고침 · ? 도움말 · q 종료.
+UI 키: Enter 붙기 · n 새 세션 · x 정리(세션 종료) · d 붙은 곳 모두 떼기 · r 새로고침 · ? 도움말 · Esc 종료(확인창) · Ctrl+Q 즉시 종료.
 붙은 뒤 분리(F12 또는 Ctrl+] d)하면 이 목록으로 돌아온다. 한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다.
 세션 이름·tmux 설정·종료 규칙은 tmuxsess.py 와 claude-tmux 머리말 참고. 사람이 터미널에서 직접 쓰는 도구라 UI 는 TTY 가 아니면 실행하지 않는다.
 """
@@ -136,7 +136,7 @@ class ConfirmScreen(ModalScreen):
         self.dismiss(False)
 
 
-class SessionsUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
+class SessionsUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     TITLE = "llm-sessions — tmux 세션"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
         ('세션', 'claude 가 도는 tmux 세션 목록 — ssh 에서도 다른 터미널에서도 같은 화면이다'),
@@ -146,7 +146,7 @@ class SessionsUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         ('화면 미리보기', '선택한 세션의 지금 화면 일부를 아래에 보인다(그 세션의 내용이므로 어깨너머 노출에 주의)'),
     ]
     HELP_NOTES = [
-        '종료는 q. Esc 는 대화상자만 닫는다',
+        'Esc: 대화상자에서는 그 대화상자만 닫고, 목록에서는 종료 확인창(기본 「아니오」, ←→ 로 「예」 선택 후 Enter). Ctrl+Q 는 확인 없이 즉시 종료',
     ]
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
     NewScreen, ConfirmScreen { align: center middle; }
@@ -156,7 +156,7 @@ class SessionsUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     #hint { height: 1; color: #7a7a7a; padding: 0 1; }
     """
     BINDINGS = [
-        Binding("q", "quit", "종료"),
+        Binding("escape", "confirm_quit", "종료"),
         Binding("enter", "attach", "붙기"), Binding("n", "new", "새 세션"),
         Binding("x", "kill", "정리(종료)"), Binding("d", "detach_all", "붙은 곳 떼기"),
         Binding("r,f5", "reload", "새로고침"),

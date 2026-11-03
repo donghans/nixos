@@ -120,7 +120,7 @@ class NameInput(ModalScreen[str]):
         self.dismiss("")
 
 
-class DisplayUI(uikit.HelpMixin, App):
+class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
     TITLE = "화면 관리"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
         ('화면 모드', '확장 / 미러 / 내장만 / 외부만 — Enter 로 바로 적용. m 으로 목록에 포커스'),
@@ -129,7 +129,7 @@ class DisplayUI(uikit.HelpMixin, App):
         ('모니터별 설정', 's 해상도 · r 주사율 · c 배율 · p 위치 · a 적용. 위치는 기준 모니터에 대한 상대 위치와 정렬'),
     ]
     HELP_NOTES = [
-        'q·Esc 로 종료. r 은 새로고침이 아니라 주사율이다(새로고침은 F5)',
+        '종료는 Esc(확인창 — 기본 「아니오」, ←→ 로 「예」 선택 후 Enter; --quick 은 확인 없이 바로 종료) 또는 Ctrl+Q(즉시). r 은 새로고침이 아니라 주사율이다(새로고침은 F5)',
     ]
     ENABLE_COMMAND_PALETTE = False  # 푸터의 ^p palette 안내 숨김 (clipui 와 같음, 쓰지 않음)
     # 색은 lazygit(mods/sys/utils/lazygit.nix) / clipui 와 같음: 비활성 테두리 #595959, 포커스 #33ccff, 선택 줄 #268bd2, 배경 검정.
@@ -175,13 +175,14 @@ class DisplayUI(uikit.HelpMixin, App):
         Binding("S", "save_preset", "프리셋 저장"),
         Binding("d", "delete_preset", "프리셋 삭제"),
         Binding("f5", "reload", "새로고침"),
-        Binding("q,escape", "quit", "종료"),
+        Binding("escape", "confirm_quit", "종료"),
     ]
 
     def __init__(self, focus: str = "mode", quick: bool = False) -> None:
         super().__init__()
         self.focus_target = FOCUS_IDS.get(focus, "modes")
         self.quick = quick
+        self.quit_confirm = not quick       # --quick 은 팝업처럼 잠깐 쓰는 모드라 Esc 로 바로 종료
         self.sel: str | None = None
         self._updating = False
         self.mons: list[dc.Mon] = []

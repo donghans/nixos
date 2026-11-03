@@ -148,7 +148,7 @@ class OverrideScreen(ModalScreen):
 
 
 class InfoScreen(ModalScreen):
-    BINDINGS = [Binding("escape,q,enter,d", "close", "닫기")]
+    BINDINGS = [Binding("escape,enter,d", "close", "닫기")]
 
     def __init__(self, title, body):
         super().__init__()
@@ -164,7 +164,7 @@ class InfoScreen(ModalScreen):
         self.dismiss()
 
 
-class ProcUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
+class ProcUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     TITLE = "procui"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
         ('뷰', '프로세스를 묶는 방식. g 로 순환: 소유 · 앱 · 서비스 · 세션(+ groups.toml 의 사용자 뷰). 모든 프로세스는 뷰마다 정확히 한 그룹에 들어간다'),
@@ -177,7 +177,7 @@ class ProcUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         ('설정·기록', '~/.config/procui/groups.toml 로 뷰·규칙·보호 이름을 추가한다. 종료 기록은 ~/.local/state/procui/actions.jsonl(시각·이름·PID·신호·결과만)'),
     ]
     HELP_NOTES = [
-        '종료는 q. Esc 는 대화상자만 닫는다(목록에서는 아무 일 없음). 갱신은 수동 r, a 로 2초 자동 갱신',
+        'Esc: 필터 입력칸에서는 표로 포커스를 돌리고, 표에서는 종료 확인창(기본 「아니오」, ←→ 로 「예」 선택 후 Enter). 대화상자에서는 그 대화상자만 닫는다. Ctrl+Q 는 확인 없이 즉시 종료. 갱신은 수동 r, a 로 2초 자동 갱신',
     ]
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
     #head { height: 3; padding: 0 1; }
@@ -187,7 +187,7 @@ class ProcUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     #dialog { width: 90%; max-width: 110; max-height: 90%; }
     """
     BINDINGS = [
-        Binding("q", "quit", "종료"),
+        Binding("escape", "escape_back", "뒤로/종료"),
         Binding("g", "cycle_view", "뷰"), Binding("slash", "focus_filter", "필터"), Binding("s", "cycle_sort", "정렬"),
         Binding("space", "toggle_select", "선택"), Binding("A", "select_all", "전체 선택"), Binding("c", "clear_select", "선택 해제"),
         Binding("k", "kill", "종료(미리보기)"), Binding("d", "detail", "상세"), Binding("r,f5", "refresh_now", "새로고침"), Binding("a", "toggle_auto", "자동 갱신"),
@@ -341,6 +341,13 @@ class ProcUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
 
     def action_focus_filter(self):
         self.query_one("#filter", Input).focus()
+
+    def action_escape_back(self):
+        """Esc: 필터 입력칸이면 표로 포커스, 표(그 밖)이면 종료 확인창. 대화상자 위에서는 대화상자 자신의 Esc 가 먼저 처리한다."""
+        if isinstance(self.focused, Input):
+            self.query_one("#tbl").focus()
+        else:
+            self.action_confirm_quit()
 
     def on_input_changed(self, ev):
         if ev.input.id == "filter":

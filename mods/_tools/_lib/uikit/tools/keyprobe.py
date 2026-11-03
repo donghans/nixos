@@ -1,6 +1,6 @@
 import asyncio, os, sys, time, tempfile
 R="/home/donghans/nixos/mods/_tools"
-for p in ("observe","_lib/uikit","procui","llm-sessions","notif","clipboard","display","../_data/claude-skills/donghans-host-resources/scripts"): sys.path.insert(0, f"{R}/{p}")
+for p in ("observe/observe","_lib/uikit","observe/process-manager","llm/llm-sessions","desktop/notification-center","desktop/clipboard","desktop/monitor-manager","llm/llm-ctx","../_data/claude-skills/donghans-host-resources/scripts"): sys.path.insert(0, f"{R}/{p}")
 which=sys.argv[1]
 def make():
     if which=="usageui":
@@ -18,7 +18,7 @@ def make():
     if which=="display":
         import displayui; return displayui.DisplayUI()
 KEYS=["q","escape","ctrl+c","ctrl+q"]
-HELP_CLOSE=["escape","q","question_mark","f1","enter","x","space"]
+HELP_CLOSE=["escape","question_mark","f1","enter","q","x","space"]        # q·x·space 는 닫히면 안 된다(2026-11-03 q 제거)
 async def one(key):
     app=make()
     async with app.run_test(size=(140,42)) as pilot:
@@ -26,7 +26,15 @@ async def one(key):
         before=len(app.screen_stack)
         await pilot.press(key); await pilot.pause(0.6)
         notes=[str(n.message)[:40] for n in getattr(app,"_notifications",[])] if hasattr(app,"_notifications") else []
-        return dict(exited=bool(getattr(app,"_exit",False)), stack=len(app.screen_stack), notes=notes)
+        res=dict(exited=bool(getattr(app,"_exit",False)), stack=len(app.screen_stack), notes=notes)
+        if key=="escape" and res["stack"]>1:      # 종료 확인창이 떴으면 Enter(기본 아니오=취소) 와 y(종료) 도 확인
+            top=type(app.screen).__name__
+            await pilot.press("enter"); await pilot.pause(0.4)
+            res["confirm"]=f"{top}; Enter→{'종료' if getattr(app,'_exit',False) else '취소'}"
+            if not getattr(app,"_exit",False):
+                await pilot.press("escape"); await pilot.pause(0.4); await pilot.press("y"); await pilot.pause(0.4)
+                res["confirm"]+=f"; Esc→y→{'종료' if getattr(app,'_exit',False) else '안 꺼짐'}"
+        return res
 async def helptest(open_key, close_key):
     app=make()
     async with app.run_test(size=(140,42)) as pilot:

@@ -125,7 +125,7 @@ class SpikesScreen(ModalScreen):
         self.dismiss(None)
 
 
-class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
+class UsageUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     TITLE = "usageui"
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
     TabbedContent { height: 1fr; }
@@ -187,10 +187,9 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     #dialog.wide DataTable { height: auto; max-height: 14; }
     """
     BINDINGS = [
-        Binding("q", "quit", "종료"),
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('apps')", "앱"), Binding("3", "tab('cause')", "원인"),
         Binding("4", "tab('system')", "시스템"), Binding("5", "tab('fleet')", "호스트"), Binding("o", "fleet_other", "상대 호스트"), Binding("6", "tab('live')", "실시간 화면(별칭)", show=False), Binding("tab", "sub_toggle", "기록↔실시간", priority=True),
-        Binding("t", "set_range", "범위"), Binding("s", "spikes", "튄 순간"), Binding("escape", "restore", "원래 범위", show=False), Binding("v", "cycle_baseline", "비교 기준"),
+        Binding("t", "set_range", "범위"), Binding("s", "spikes", "튄 순간"), Binding("escape", "restore", "뒤로/종료", show=False), Binding("v", "cycle_baseline", "비교 기준"),
         Binding("r,f5", "reload", "새로고침"), Binding("b", "btop", "btop"), Binding("e", "export", "저장"), Binding("y", "fleet_sync", "호스트 동기화"), Binding("d", "disk_bench", "디스크 실측"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
@@ -468,7 +467,7 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         return uv.nd_chart(self.sysdata, key, self.view["range"], w, h)
 
     HELP_TERMS = uv.GLOSSARY          # 값의 뜻은 별도 「용어」 탭 대신 ? 도움말에 키 목록과 함께 보인다
-    HELP_NOTES = ["1 대시보드는 Tab 으로 기록 ↔ 실시간. 종료는 q · Esc 는 튄 순간으로 옮겼을 때 원래 범위로 되돌림(종료 아님)"]
+    HELP_NOTES = ["1 대시보드는 Tab 으로 기록 ↔ 실시간. Esc 는 튄 순간으로 옮겼을 때 원래 범위로 되돌리고, 아니면 종료 확인창(기본 「아니오」, ←→ 로 「예」 선택 후 Enter). Ctrl+Q 는 확인 없이 즉시 종료"]
 
     # --- 데이터: 수동 갱신만(타이머 없음)
     def action_reload(self):
@@ -767,10 +766,12 @@ class UsageUI(uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
         self.push_screen(SpikesScreen(self.view), done)
 
     def action_restore(self):
-        """튄 순간을 보는 중이면 원래 범위로 되돌린다. 아니면 아무 일 없음."""
+        """튄 순간을 보는 중이면 원래 범위로 되돌린다. 아니면(더 뒤로 갈 곳이 없으면) 종료 확인창."""
         if self._back is not None:
             self.rng, self._back = self._back, None
             self.reload()
+        else:
+            self.action_confirm_quit()
 
     def action_cycle_baseline(self):
         kinds = [k for k, _ in BASELINES]

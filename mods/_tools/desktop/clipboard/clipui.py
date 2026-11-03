@@ -230,7 +230,6 @@ class ConfirmScreen(ModalScreen[bool]):
 class InfoScreen(ModalScreen[None]):
     BINDINGS = [
         Binding("escape", "close", "닫기"),
-        Binding("q", "close", "닫기", show=False),
         Binding("enter", "close", "닫기", show=False),
     ]
 
@@ -254,7 +253,6 @@ class StatsScreen(ModalScreen[None]):
 
     BINDINGS = [
         Binding("escape", "close", "닫기"),
-        Binding("q", "close", "닫기", show=False),
         Binding("enter", "close", "닫기", show=False),
     ]
 
@@ -291,7 +289,6 @@ class ClipList(OptionList):
         Binding("u", "app.clear_marks", "체크해제", show=False),
         Binding("d", "app.delete", "삭제", show=False),
         Binding("slash", "app.focus_search", "검색", show=False),
-        Binding("q", "app.quit", "종료", show=False),
     ]
 
 
@@ -300,11 +297,10 @@ class Preview(TextArea):
         Binding("c", "app.copy_selection", "선택 복사", show=False),
         Binding("y", "app.copy_selection", "선택 복사", show=False),
         Binding("slash", "app.focus_search", "검색", show=False),
-        Binding("q", "app.quit", "종료", show=False),
     ]
 
 
-class ClipUI(uikit.HelpMixin, App):
+class ClipUI(uikit.QuitMixin, uikit.HelpMixin, App):
     TITLE = "클립보드"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
         ('검색', '퍼지 + 항목 내용 전체. 필터: app:이름 · >10k(크기) · is:sensitive · is:dup. Enter = 복사(창은 그대로 둔다)'),
@@ -315,8 +311,8 @@ class ClipUI(uikit.HelpMixin, App):
         ('통계·최적화', 'F9 통계, F10 DB 최적화'),
     ]
     HELP_NOTES = [
-        '검색창이 기본 포커스라 q 는 글자로 들어간다 — 종료는 Esc(검색 지운 뒤) 또는 목록에서 q',
-        '빠른 붙여넣기는 Super+V(wofi). 이 창은 관리용이라 Enter 로 복사해도 닫히지 않는다 — 복사 후 닫으려면 Esc / Ctrl+Q',
+        '종료는 Esc: 검색어 지우기 → 체크 해제 → 종료 확인창(기본 「아니오」, ←→ 로 「예」 선택 후 Enter). Ctrl+Q 는 확인 없이 즉시 종료',
+        '빠른 붙여넣기는 Super+V(wofi). 이 창은 관리용이라 Enter 로 복사해도 닫히지 않는다 — 복사 후 닫으려면 Esc(→ 확인창) / Ctrl+Q',
     ]
     ENABLE_COMMAND_PALETTE = False  # 푸터의 ^p palette 안내 숨김 (쓰지 않음)
 
@@ -650,7 +646,7 @@ class ClipUI(uikit.HelpMixin, App):
         elif self.marked:
             self.action_clear_marks()
         else:
-            self.exit()
+            self.action_confirm_quit()
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         """정렬 드롭다운에 포커스가 있으면 Enter 는 드롭다운을 여는 데 쓰이도록 복사 바인딩(우선순위)을 끈다."""
@@ -661,6 +657,9 @@ class ClipUI(uikit.HelpMixin, App):
     def action_copy(self) -> None:
         # Enter 는 우선순위 바인딩이라 대화상자에서도 여기로 오므로, 대화상자에서는 그 화면의 동작으로 넘긴다
         screen = self.screen
+        if isinstance(screen, uikit.QuitConfirmScreen):      # 종료 확인창: Enter = 포커스된 버튼(기본 「아니오」)
+            screen.press_focused()
+            return
         if isinstance(screen, ConfirmScreen):
             screen.dismiss(True)
             return

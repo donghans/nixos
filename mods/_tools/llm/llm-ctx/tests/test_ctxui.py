@@ -478,6 +478,21 @@ async def run():
         check("F1: 도움말", app.screen.__class__.__name__ == "HelpScreen"); await pilot.press("escape"); await pilot.pause(0.2)
         await pilot.press("1"); await pilot.pause(0.5)
         check("1: 대시보드로 돌아옴", app.current_tab() == "dashboard")
+        await pilot.press("2"); await pilot.pause(0.5)
+        check("2: 탭 전환은 종료 확인창을 띄우지 않음(표로 포커스만 이동)", app.current_tab() == "search" and len(app.screen_stack) == 1)
+        await pilot.press("1"); await pilot.pause(0.5)
+        check("1: 이미 표에 있어도 탭 키는 확인창을 띄우지 않음", app.current_tab() == "dashboard" and len(app.screen_stack) == 1)
+        await pilot.press("2"); await pilot.pause(0.5)
+        tbl = app.query_one(app.TAB_TABLES["search"])
+        app.query_one("#q").focus(); await pilot.pause(0.2)
+        check("(준비) 검색 탭의 검색칸에 포커스", app.focused is app.query_one("#q"))
+        await pilot.press("escape"); await pilot.pause(0.3)
+        check("Esc: 표가 아닌 곳(검색칸)에서는 표로 포커스 이동(확인창 안 뜸)", app.focused is tbl and len(app.screen_stack) == 1)
+        await pilot.press("escape"); await pilot.pause(0.3)
+        check("Esc: 이미 표에 있으면 종료 확인창(기본 「아니오」)", type(app.screen).__name__ == "QuitConfirmScreen" and app.focused.id == "quit-no")
+        await pilot.press("enter"); await pilot.pause(0.3)
+        await pilot.press("q"); await pilot.pause(0.3)
+        check("확인창 Enter = 취소, q 는 종료 키가 아님", app.is_running and len(app.screen_stack) == 1)
 
 
 async def run_wrap():

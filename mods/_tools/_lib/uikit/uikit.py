@@ -8,6 +8,8 @@
                              앱마다 따로 두던 「용어」 탭은 여기로 합친다(모든 uikit 앱 공통 규칙)
   - select_box / sync_select : 값을 키로 순환하던 설정(정렬·단위·뷰…)을 제목 달린 드롭다운 칸으로 보여 주는 도우미(`.selects` 줄에 넣는다). 키는 그대로 두고 드롭다운이 같이 따라간다
   - pad / wrap_cells / terms_text : 한글(2칸 폭) 기준 칸 맞춤·줄바꿈(f-string 의 :<n 은 글자 수라 한글 표가 어긋남)
+  - QuitConfirmScreen / QuitMixin : 종료 규칙 — 앱은 `Esc` 로 「한 단계 뒤로」(대화상자 닫기·검색어 지우기 …)를 먼저 하고, 더 뒤로 갈 곳이 없을 때만 `self.action_confirm_quit()` 로
+                             종료 확인창을 띄운다(기본 선택 「아니오」, ←→/Tab 으로 「예」). `q` 는 종료 키로 쓰지 않는다(한글 입력 상태에서 안 먹음). Ctrl+Q 는 확인 없이 즉시 종료
   - PauseOnBlurMixin   : 창이 포커스를 잃으면 주기 갱신을 멈춘다(보이지 않는 화면 갱신이 PSR 을 방해하지 않도록). 앱이 pause_on_blur() 로 조건을 바꿀 수 있다
 각 앱은 `CSS = uikit.BASE_CSS + (앱 고유 규칙 문자열)` 로 쓰고 같은 디렉터리(배포 시) 또는 ../uikit(소스)에서 이 파일을 가져온다.
 """
@@ -17,9 +19,9 @@ from rich.cells import cell_len
 from rich.text import Text
 from textual import events
 from textual.binding import Binding
-from textual.containers import VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Select, Static
+from textual.widgets import Button, Label, Select, Static
 
 PALETTE = {
     "bg": "#000000", "border": "#595959", "focus": "#33ccff", "select": "#268bd2", "select_dim": "#1b2a38",
@@ -134,13 +136,14 @@ def terms_text(terms, width, key_style="#33ccff"):
     return t
 
 
-COMMON_HELP = ("Ctrl+Q 어디서나 종료 · Ctrl+C 는 복사일 뿐 종료가 아님(누르면 안내만 뜸) · Ctrl+P 명령 팔레트 · "
-               "도움말 닫기: Esc · q · ? · F1 · Enter, 긴 도움말은 ↑↓ PgUp/PgDn 으로 스크롤")
+COMMON_HELP = ("종료: Esc(뒤로 갈 곳이 없을 때 확인창 — 기본 「아니오」, ←→ 로 「예」를 골라 Enter) · Ctrl+Q 는 어디서나 즉시 종료 · "
+               "Ctrl+C 는 복사일 뿐 종료가 아님(누르면 안내만 뜸) · Ctrl+P 명령 팔레트 · "
+               "도움말 닫기: Esc · ? · F1 · Enter, 긴 도움말은 ↑↓ PgUp/PgDn 으로 스크롤")
 
 
 class HelpScreen(ModalScreen):
-    """도움말 대화상자: 키 목록 + (있으면) 앱별 메모·용어·사용법 + 공통 안내. Esc·q·?·F1·Enter 로 닫고 ↑↓ PgUp/PgDn 으로 스크롤한다(다른 키는 닫지 않는다)."""
-    BINDINGS = [Binding("escape,q,enter,question_mark,f1", "close", "닫기")]
+    """도움말 대화상자: 키 목록 + (있으면) 앱별 메모·용어·사용법 + 공통 안내. Esc·?·F1·Enter 로 닫고 ↑↓ PgUp/PgDn 으로 스크롤한다(다른 키는 닫지 않는다)."""
+    BINDINGS = [Binding("escape,enter,question_mark,f1", "close", "닫기")]
 
     def __init__(self, title: str, rows, terms=None, notes=None):
         super().__init__()
@@ -152,7 +155,7 @@ class HelpScreen(ModalScreen):
             yield Static("", id="help-keys")
             yield Static("", id="help-terms")
             yield Static("", id="help-common")
-            yield Static("Esc · q · ? · F1 · Enter 로 닫기  ·  ↑↓ PgUp/PgDn 스크롤", id="dialog-hint")
+            yield Static("Esc · ? · F1 · Enter 로 닫기  ·  ↑↓ PgUp/PgDn 스크롤", id="dialog-hint")
 
     def on_mount(self):
         width = max(50, min(114, int(self.app.size.width * 0.9) - 8))
@@ -177,6 +180,68 @@ class HelpScreen(ModalScreen):
 
     def action_close(self):
         self.dismiss()
+
+
+class QuitConfirmScreen(ModalScreen[bool]):
+    """종료 확인창. 기본 포커스는 「아니오」 — Esc 후 바로 Enter 를 쳐도 취소다. ←/→/Tab 으로 「예」를 골라 Enter, 보조키 y/ㅛ = 종료, n/ㅜ/Esc = 취소.
+    결과는 True(종료)일 때만 종료로 취급할 것(None·False = 취소). 앱에 priority Enter 바인딩이 있으면 이 화면 위에서도 앱으로 오므로 `press_focused()` 로 넘긴다."""
+    BINDINGS = [Binding("escape,n,ㅜ", "no", "취소"), Binding("y,ㅛ", "yes", "종료"),
+                Binding("left", "app.focus_previous", "", show=False), Binding("right", "app.focus_next", "", show=False)]
+    DEFAULT_CSS = """
+    QuitConfirmScreen { align: center middle; }
+    QuitConfirmScreen > Vertical { width: 44; height: auto; border: round #33ccff; background: #101010; padding: 1 2; }
+    QuitConfirmScreen Horizontal { height: 1; margin-top: 1; align-horizontal: center; }
+    QuitConfirmScreen Button { margin: 0 2; border: none; height: 1; min-width: 10; padding: 0 2; background: #141414; color: #cfcfcf; text-style: none; }
+    QuitConfirmScreen Button:hover, QuitConfirmScreen Button:focus { background: #268bd2; color: #ffffff; text-style: none; }
+    QuitConfirmScreen #quit-hint { color: #7a7a7a; padding-top: 1; text-align: center; }
+    """
+
+    def compose(self):
+        with Vertical():
+            yield Label("종료할까요?")
+            with Horizontal():
+                yield Button("예", id="quit-yes")
+                yield Button("아니오", id="quit-no")
+            yield Static("←→/Tab 선택 · Enter 확인 · Esc 취소 · y/n", id="quit-hint")
+
+    def on_mount(self):
+        self.query_one("#quit-no", Button).focus()
+
+    def on_button_pressed(self, ev: Button.Pressed):
+        ev.stop()
+        self.dismiss(ev.button.id == "quit-yes")
+
+    def press_focused(self):
+        """포커스된 버튼을 누른다(없으면 취소). priority Enter 를 가진 앱이 이 화면 위에서 Enter 를 넘겨줄 때 쓴다."""
+        f = self.focused
+        if isinstance(f, Button):
+            f.press()
+        else:
+            self.dismiss(False)
+
+    def action_no(self):
+        self.dismiss(False)
+
+    def action_yes(self):
+        self.dismiss(True)
+
+
+class QuitMixin:
+    """앱에 섞어 쓴다(`class X(uikit.QuitMixin, uikit.HelpMixin, App)`). `action_confirm_quit()` = 종료 확인창을 띄우고 「예」면 종료.
+    대화상자가 떠 있으면(screen_stack > 1) 아무것도 하지 않는다. `quit_confirm = False` 면 확인 없이 바로 종료(팝업형으로 잠깐 쓰는 모드용)."""
+    quit_confirm = True
+
+    def action_confirm_quit(self):
+        if len(self.screen_stack) > 1:
+            return
+        if not self.quit_confirm:
+            self.exit()
+            return
+
+        def done(result):
+            if result is True:
+                self.exit()
+        self.push_screen(QuitConfirmScreen(), done)
 
 
 class HelpMixin:

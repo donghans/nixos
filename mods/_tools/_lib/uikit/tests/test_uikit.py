@@ -50,10 +50,13 @@ async def drive():
         check("스크롤 키는 도움말을 닫지 않음", type(app.screen).__name__ == "HelpScreen")
         await pilot.press("escape"); await pilot.pause(0.2)
         check("Esc 로 닫힘", type(app.screen).__name__ != "HelpScreen")
-        for k in ("q", "enter", "question_mark"):
+        for k in ("enter", "question_mark"):
             await pilot.press("f1"); await pilot.pause(0.15)
             await pilot.press(k); await pilot.pause(0.15)
             check(f"{k} 로도 닫힘", type(app.screen).__name__ != "HelpScreen")
+        await pilot.press("f1"); await pilot.pause(0.15); await pilot.press("q"); await pilot.pause(0.15)
+        check("q 로는 도움말이 닫히지 않음(q 는 종료·닫기 키가 아니다)", type(app.screen).__name__ == "HelpScreen")
+        await pilot.press("escape"); await pilot.pause(0.15)
         from textual.screen import ModalScreen as _MS
         from textual.containers import Vertical as _V
         class WhateverScreen(_MS):          # DIALOG_CSS 예전 이름 목록에 없던 이름
@@ -73,6 +76,60 @@ async def drive():
         n = app.refreshed; app.on_app_focus(None)
         check("포커스 돌아오면 재개 + 한 번 갱신", app._timer.p is False and app.refreshed == n + 1)
 asyncio.run(drive())
+
+# ---- 종료 확인창(QuitConfirmScreen / QuitMixin)
+class Q(uikit.QuitMixin, uikit.HelpMixin, App):
+    BINDINGS = [Binding("escape", "confirm_quit", "종료"), *uikit.HelpMixin.HELP_BINDINGS]
+    def compose(self): yield Static("본문")
+
+async def quit_cases():
+    scr = lambda a: type(a.screen).__name__
+    async def fresh(quit_confirm=True):
+        a = Q(); a.quit_confirm = quit_confirm; return a
+    a = await fresh()
+    async with a.run_test(size=(80, 20)) as pilot:
+        await pilot.pause(0.2)
+        await pilot.press("escape"); await pilot.pause(0.2)
+        check("Esc → 종료 확인창이 뜸, 기본 포커스는 「아니오」", scr(a) == "QuitConfirmScreen" and a.focused.id == "quit-no")
+        await pilot.press("enter"); await pilot.pause(0.2)
+        check("Esc 후 바로 Enter = 취소(앱 유지)", scr(a) != "QuitConfirmScreen" and not a._exit)
+        await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("escape"); await pilot.pause(0.2)
+        check("확인창에서 Esc = 취소", scr(a) != "QuitConfirmScreen" and not a._exit)
+        await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("n"); await pilot.pause(0.2)
+        check("확인창에서 n = 취소", scr(a) != "QuitConfirmScreen" and not a._exit)
+        await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("ㅜ"); await pilot.pause(0.2)
+        check("확인창에서 ㅜ(한글 상태의 n) = 취소", scr(a) != "QuitConfirmScreen" and not a._exit)
+        await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("q"); await pilot.pause(0.2)
+        check("확인창 위에서 q 는 아무 일도 안 함", scr(a) == "QuitConfirmScreen" and not a._exit)
+        await pilot.press("right"); await pilot.pause(0.2)
+        check("→ 로 「예」에 포커스가 감", a.focused.id == "quit-yes")
+        await pilot.press("left"); await pilot.pause(0.2)
+        check("← 로 다시 「아니오」", a.focused.id == "quit-no")
+        await pilot.press("escape"); await pilot.pause(0.2)
+        await pilot.press("f1"); await pilot.pause(0.2)
+        check("도움말(모달) 위에서는 Esc 가 확인창을 띄우지 않고 도움말만 닫음", scr(a) == "HelpScreen")
+        await pilot.press("escape"); await pilot.pause(0.2)
+        check("  … 도움말이 닫히고 확인창은 안 뜸", scr(a) not in ("HelpScreen", "QuitConfirmScreen") and len(a.screen_stack) == 1)
+        a.action_confirm_quit(); a.action_confirm_quit(); await pilot.pause(0.2)
+        check("확인창이 이미 떠 있으면 중복으로 쌓이지 않음", len(a.screen_stack) == 2)
+        await pilot.press("escape"); await pilot.pause(0.2)
+        check("끝난 뒤 screen_stack 정리됨", len(a.screen_stack) == 1)
+    for label, keys in (("Esc → → → Enter", ("escape", "right", "enter")), ("Esc → Tab → Enter", ("escape", "tab", "enter")), ("Esc → y", ("escape", "y")), ("Esc → ㅛ", ("escape", "ㅛ"))):
+        a = await fresh()
+        async with a.run_test(size=(80, 20)) as pilot:
+            await pilot.pause(0.2)
+            for k in keys:
+                await pilot.press(k); await pilot.pause(0.2)
+            check(f"{label} = 종료", bool(a._exit))
+    a = await fresh()
+    async with a.run_test(size=(80, 20)) as pilot:
+        await pilot.pause(0.2); await pilot.press("ctrl+q"); await pilot.pause(0.2)
+        check("Ctrl+Q = 확인 없이 즉시 종료", bool(a._exit))
+    a = await fresh(False)
+    async with a.run_test(size=(80, 20)) as pilot:
+        await pilot.pause(0.2); await pilot.press("escape"); await pilot.pause(0.2)
+        check("quit_confirm=False 면 Esc 로 바로 종료(팝업형 모드)", bool(a._exit))
+asyncio.run(quit_cases())
 from rich.cells import cell_len
 check("wrap_cells: 칸 폭(한글 2칸) 기준 줄바꿈, 모든 줄이 폭 이하", all(cell_len(x) <= 10 for x in uikit.wrap_cells("한글로 된 긴 문장을 열 칸 폭으로 줄바꿈 합니다", 10)))
 tt = uikit.terms_text([("용어", "설명 " * 30), ("English", "x")], 50).plain.splitlines()

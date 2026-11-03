@@ -145,6 +145,13 @@ async def views():
         check("필터에 일치 없으면 그룹 0개", len(app.groups) == 0 and "프로세스 0/" in head(app))
         await pilot.press("enter"); await settle(pilot)
         check("Enter: 표로 포커스 복귀", app.focused is app.query_one("#tbl", DataTable))
+        await pilot.press("slash"); await settle(pilot); await pilot.press("escape"); await settle(pilot)
+        check("필터 입력칸에서 Esc = 표로 포커스만 옮김(확인창 안 뜸)", app.focused is app.query_one("#tbl", DataTable) and len(app.screen_stack) == 1)
+        await pilot.press("escape"); await settle(pilot)
+        check("표에서 Esc = 종료 확인창(기본 「아니오」)", type(app.screen).__name__ == "QuitConfirmScreen" and app.focused.id == "quit-no")
+        await pilot.press("n"); await settle(pilot)
+        await pilot.press("q"); await settle(pilot)
+        check("확인창 n = 취소, q 는 종료 키가 아님", app.is_running and len(app.screen_stack) == 1)
         await pilot.press("question_mark"); await settle(pilot)
         check("?: 도움말에 종료·선택 키가 보임", "종료(미리보기)" in str([r for r in app.screen._rows]))
 

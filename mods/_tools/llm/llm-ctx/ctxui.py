@@ -216,7 +216,7 @@ class MsgView(Static):
 class SessionScreen(ModalScreen):
     """한 세션의 대화. ↑↓ 로 메시지 이동 · Enter 펼침 · f 전체 펼침 · t 도구 · s 서브에이전트 · n/N 검색어 이동 · y 복사 · [ ] 이어진 세션 · m 치환 켬/끔."""
     BINDINGS = [
-        Binding("escape,q", "close", "닫기"),
+        Binding("escape", "close", "닫기"),
         Binding("up,k", "move(-1)", "이전 메시지", show=False), Binding("down,j", "move(1)", "다음 메시지", show=False),
         Binding("pageup", "move(-8)", "8개 앞", show=False), Binding("pagedown", "move(8)", "8개 뒤", show=False),
         Binding("home", "jump(0)", "처음", show=False), Binding("end", "jump(-1)", "끝", show=False),
@@ -463,7 +463,7 @@ class SessionScreen(ModalScreen):
 
 class InstrScreen(ModalScreen):
     """지침 한 건의 본문(공유 정본 그대로 — 로컬 캐시 아님). `## ` 절 목록을 위에, 본문을 아래에 보인다. e 편집 · m 치환 켬/끔."""
-    BINDINGS = [Binding("escape,q", "close", "닫기"), Binding("e", "edit", "편집기로 고치기"), Binding("m", "toggle_mask", "치환 켬/끔")]
+    BINDINGS = [Binding("escape", "close", "닫기"), Binding("e", "edit", "편집기로 고치기"), Binding("m", "toggle_mask", "치환 켬/끔")]
 
     def __init__(self, app_ref, repo: str, name: str):
         super().__init__()
@@ -506,7 +506,7 @@ class InstrScreen(ModalScreen):
 
 
 # ---------------------------------------------------------------- 앱
-class CtxUI(uikit.HelpMixin, App):
+class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
     TITLE = "ctxui — 공유 컨텍스트 관리"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
         ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침)'),
@@ -518,7 +518,7 @@ class CtxUI(uikit.HelpMixin, App):
         ('세션 기준 검색', '검색은 늘 전체 대화를 대상으로 하되 결과를 세션 단위로 묶어 보여 준다(제목·일치 건수·가장 최근 일치). Enter 는 그 세션 대화를 열고, Space 로 펼치면 일치한 메시지들이 아래에 나온다. F6 제목만은 세션 제목(첫 프롬프트)에 일치한 세션만 남긴다'),
     ]
     HELP_NOTES = [
-        '종료는 q. Esc 는 목록으로 포커스를 돌린다',
+        'Esc: 표가 아닌 곳에서는 표로 포커스를 돌리고, 이미 표에 있으면 종료 확인창(기본 「아니오」, ←→ 로 「예」 선택 후 Enter). Ctrl+Q 는 확인 없이 즉시 종료',
     ]
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
     PromptScreen, ConfirmScreen, SessionScreen { align: center middle; }
@@ -552,12 +552,11 @@ class CtxUI(uikit.HelpMixin, App):
     #ovhead { height: auto; }
     """
     BINDINGS = [
-        Binding("q", "quit", "종료"),
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('search')", "검색"), Binding("3", "tab('verify')", "대조"),
         Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"), Binding("6", "tab('instr')", "지침"),
         Binding("p", "stat_period", "기간", show=False), Binding("b", "stat_bucket", "단위", show=False), Binding("g", "stat_by", "분류", show=False),
         Binding("o", "stat_order", "정렬", show=False), Binding("c", "stat_clear", "필터 지움", show=False),
-        Binding("escape", "focus_table", "목록으로", show=False),
+        Binding("escape", "escape_back", "뒤로/종료", show=False),
         Binding("m", "toggle_mask", "치환 켬/끔"), Binding("r,f5", "reload", "새로고침"),
         Binding("f2", "toggle_role", "역할(사용자만)", show=False), Binding("f3", "toggle_regex", "정규식", show=False), Binding("f4", "toggle_tools", "도구 메시지 포함", show=False),
         Binding("f6", "toggle_title_only", "제목만", show=False), Binding("space", "toggle_expand", "세션 펼침", show=False), Binding("x", "expand_all", "모두 펼침", show=False),
@@ -781,13 +780,25 @@ class CtxUI(uikit.HelpMixin, App):
         elif name == "instr":
             self.reload_instr()
 
+    TAB_TABLES = {"dashboard": "#projects", "search": "#results", "verify": "#vrepos", "secrets": "#secrets-table", "cands": "#cands-table",
+                  "instr": "#instr-table"}      # 표가 있는 탭은 모두 표에 포커스 — 없으면 탭 키 뒤 Enter·↑↓ 가 아무 일도 안 했다
+
     def action_focus_table(self):
-        ids = {"dashboard": "#projects", "search": "#results", "verify": "#vrepos", "secrets": "#secrets-table", "cands": "#cands-table",
-               "instr": "#instr-table"}      # 표가 있는 탭은 모두 표에 포커스 — 없으면 탭 키 뒤 Enter·↑↓ 가 아무 일도 안 했다
         try:
-            self.query_one(ids[self.current_tab()]).focus()
+            self.query_one(self.TAB_TABLES[self.current_tab()]).focus()
         except Exception:
             pass
+
+    def action_escape_back(self):
+        """Esc: 표가 아닌 곳(검색칸 등)에 있으면 그 탭의 표로, 이미 표에 있으면 종료 확인창. 탭 전환(action_tab)은 action_focus_table 을 그대로 쓴다 — 거기엔 확인창이 없다."""
+        try:
+            table = self.query_one(self.TAB_TABLES[self.current_tab()])
+        except Exception:
+            table = None
+        if table is not None and self.focused is not table:
+            table.focus()
+        else:
+            self.action_confirm_quit()
 
     def action_toggle_mask(self):
         if self.deny("치환 끄기(원문 보기)"):
