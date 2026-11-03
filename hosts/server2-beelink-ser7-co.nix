@@ -24,8 +24,6 @@ in
         ./server2-beelink-ser7-co/incus-genple-lxc.nix
         ./server2-beelink-ser7-co/incus-genple-demo-lxc.nix
         ./server2-beelink-ser7-co/incus-genple-demo-tls.nix
-        ./server2-beelink-ser7-co/incus-genple-demo-mil-lxc.nix
-        ./server2-beelink-ser7-co/incus-genple-demo-mil-tls.nix
         ./server2-beelink-ser7-co/incus-genple-dev-lxc.nix
         ./server2-beelink-ser7-co/incus-genple-dev-tls.nix
         ./server2-beelink-ser7-co/incus-shopify-dk-sync-lxc.nix
