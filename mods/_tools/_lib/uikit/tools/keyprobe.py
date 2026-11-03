@@ -32,8 +32,8 @@ async def one(key):
             await pilot.press("enter"); await pilot.pause(0.4)
             res["confirm"]=f"{top}; Enter→{'종료' if getattr(app,'_exit',False) else '취소'}"
             if not getattr(app,"_exit",False):
-                await pilot.press("escape"); await pilot.pause(0.4); await pilot.press("y"); await pilot.pause(0.4)
-                res["confirm"]+=f"; Esc→y→{'종료' if getattr(app,'_exit',False) else '안 꺼짐'}"
+                await pilot.press("escape"); await pilot.pause(0.4); await pilot.press("right"); await pilot.pause(0.2); await pilot.press("enter"); await pilot.pause(0.4)
+                res["confirm"]+=f"; Esc→→→Enter→{'종료' if getattr(app,'_exit',False) else '안 꺼짐'}"
         return res
 async def helptest(open_key, close_key):
     app=make()

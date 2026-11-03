@@ -96,9 +96,10 @@ async def quit_cases():
         await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("escape"); await pilot.pause(0.2)
         check("확인창에서 Esc = 취소", scr(a) != "QuitConfirmScreen" and not a._exit)
         await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("n"); await pilot.pause(0.2)
-        check("확인창에서 n = 취소", scr(a) != "QuitConfirmScreen" and not a._exit)
-        await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("ㅜ"); await pilot.pause(0.2)
-        check("확인창에서 ㅜ(한글 상태의 n) = 취소", scr(a) != "QuitConfirmScreen" and not a._exit)
+        check("확인창에서 n/y 같은 글자 키는 아무 일도 안 함(한영 전환에 영향받는 키는 쓰지 않는다)", scr(a) == "QuitConfirmScreen" and not a._exit)
+        await pilot.press("y"); await pilot.pause(0.2); await pilot.press("ㅛ"); await pilot.pause(0.2)
+        check("  … y·ㅛ 도 마찬가지", scr(a) == "QuitConfirmScreen" and not a._exit)
+        await pilot.press("escape"); await pilot.pause(0.2)
         await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("q"); await pilot.pause(0.2)
         check("확인창 위에서 q 는 아무 일도 안 함", scr(a) == "QuitConfirmScreen" and not a._exit)
         await pilot.press("right"); await pilot.pause(0.2)
@@ -114,7 +115,7 @@ async def quit_cases():
         check("확인창이 이미 떠 있으면 중복으로 쌓이지 않음", len(a.screen_stack) == 2)
         await pilot.press("escape"); await pilot.pause(0.2)
         check("끝난 뒤 screen_stack 정리됨", len(a.screen_stack) == 1)
-    for label, keys in (("Esc → → → Enter", ("escape", "right", "enter")), ("Esc → Tab → Enter", ("escape", "tab", "enter")), ("Esc → y", ("escape", "y")), ("Esc → ㅛ", ("escape", "ㅛ"))):
+    for label, keys in (("Esc → → → Enter", ("escape", "right", "enter")), ("Esc → Tab → Enter", ("escape", "tab", "enter")), ("Esc → ← → Enter", ("escape", "left", "enter"))):
         a = await fresh()
         async with a.run_test(size=(80, 20)) as pilot:
             await pilot.pause(0.2)

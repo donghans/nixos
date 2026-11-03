@@ -183,9 +183,9 @@ class HelpScreen(ModalScreen):
 
 
 class QuitConfirmScreen(ModalScreen[bool]):
-    """종료 확인창. 기본 포커스는 「아니오」 — Esc 후 바로 Enter 를 쳐도 취소다. ←/→/Tab 으로 「예」를 골라 Enter, 보조키 y/ㅛ = 종료, n/ㅜ/Esc = 취소.
+    """종료 확인창. 기본 포커스는 「아니오」 — Esc 후 바로 Enter 를 쳐도 취소다. ←/→/Tab 으로 「예」를 골라 Enter, Esc = 취소. 글자 키(y/n 등 한영 전환에 영향받는 키)는 쓰지 않는다.
     결과는 True(종료)일 때만 종료로 취급할 것(None·False = 취소). 앱에 priority Enter 바인딩이 있으면 이 화면 위에서도 앱으로 오므로 `press_focused()` 로 넘긴다."""
-    BINDINGS = [Binding("escape,n,ㅜ", "no", "취소"), Binding("y,ㅛ", "yes", "종료"),
+    BINDINGS = [Binding("escape", "no", "취소"),
                 Binding("left", "app.focus_previous", "", show=False), Binding("right", "app.focus_next", "", show=False)]
     DEFAULT_CSS = """
     QuitConfirmScreen { align: center middle; }
@@ -202,7 +202,7 @@ class QuitConfirmScreen(ModalScreen[bool]):
             with Horizontal():
                 yield Button("예", id="quit-yes")
                 yield Button("아니오", id="quit-no")
-            yield Static("←→/Tab 선택 · Enter 확인 · Esc 취소 · y/n", id="quit-hint")
+            yield Static("←→/Tab 선택 · Enter 확인 · Esc 취소", id="quit-hint")
 
     def on_mount(self):
         self.query_one("#quit-no", Button).focus()
@@ -221,9 +221,6 @@ class QuitConfirmScreen(ModalScreen[bool]):
 
     def action_no(self):
         self.dismiss(False)
-
-    def action_yes(self):
-        self.dismiss(True)
 
 
 class QuitMixin:
