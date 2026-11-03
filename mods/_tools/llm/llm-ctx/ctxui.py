@@ -8,8 +8,8 @@
   5 후보   키·비밀번호처럼 보이는 문자열 자동 탐지 → 승인(등록)·무시
   6 지침   프로젝트별 지침(공유 정본 project_instructions)을 모든 저장소에 대해 보고 고친다 — 로컬 캐시 없이 DB 만 대상   (Enter: 본문 · e: 편집기)
 
-원문(DB)은 바꾸지 않는다. 화면의 치환(m)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. TTY 가 없으면 실행하지 않는다.
-**제한 모드**: LLM 세션이 실행한 경우(환경 표식 — llm_ctx.AGENT_ENV_MARKERS) 모든 탭을 볼 수 있되 비밀 값은 추출·조회할 수 없다 — 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(후보 패턴)을 [protected] 로 치환하고(끌 수 없음), 후보 표의 미리보기도 [protected](길이)로 보이며, 값 보기(v)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용.
+원문(DB)은 바꾸지 않는다. 화면의 치환(F10)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. TTY 가 없으면 실행하지 않는다.
+**제한 모드**: LLM 세션이 실행한 경우(환경 표식 — llm_ctx.AGENT_ENV_MARKERS) 모든 탭을 볼 수 있되 비밀 값은 추출·조회할 수 없다 — 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(후보 패턴)을 [protected] 로 치환하고(끌 수 없음), 후보 표의 미리보기도 [protected](길이)로 보이며, 값 보기(F4)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용.
 """
 from __future__ import annotations
 
@@ -183,23 +183,7 @@ class PromptScreen(ModalScreen):
         self.dismiss(None)
 
 
-class ConfirmScreen(ModalScreen):
-    BINDINGS = [Binding("y,enter", "yes", "예"), Binding("n,escape", "no", "아니오")]
-
-    def __init__(self, message: str):
-        super().__init__()
-        self._message = message
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="dialog"):
-            yield Static(self._message, id="dialog-title")
-            yield Static("y / Enter 확인 · n / Esc 취소", id="dialog-hint")
-
-    def action_yes(self):
-        self.dismiss(True)
-
-    def action_no(self):
-        self.dismiss(False)
+ConfirmScreen = uikit.ConfirmScreen      # 기본 포커스 취소, ←/→ 로 고르고 Enter (y/n 글자 키 없음)
 
 
 MSG_PREVIEW = 700      # 접힌 메시지에 보이는 글자 수(Enter 로 펼치면 전체)
@@ -214,20 +198,25 @@ class MsgView(Static):
 
 
 class SessionScreen(ModalScreen):
-    """한 세션의 대화. ↑↓ 로 메시지 이동 · Enter 펼침 · f 전체 펼침 · t 도구 · s 서브에이전트 · n/N 검색어 이동 · y 복사 · [ ] 이어진 세션 · m 치환 켬/끔."""
+    """한 세션의 대화. ↑↓ 로 메시지 이동 · Enter 펼침 · F2 전체 펼침 · F3 도구 · F4 서브에이전트 · ←/→ 검색어 이동 · F6 복사 · [ ] 이어진 세션 · F10 치환 켬/끔."""
     BINDINGS = [
         Binding("escape", "close", "닫기"),
-        Binding("up,k", "move(-1)", "이전 메시지", show=False), Binding("down,j", "move(1)", "다음 메시지", show=False),
+        Binding("up", "move(-1)", "이전 메시지", show=False), Binding("down", "move(1)", "다음 메시지", show=False),
         Binding("pageup", "move(-8)", "8개 앞", show=False), Binding("pagedown", "move(8)", "8개 뒤", show=False),
         Binding("home", "jump(0)", "처음", show=False), Binding("end", "jump(-1)", "끝", show=False),
-        Binding("enter,space", "toggle_one", "펼침/접음"), Binding("f", "toggle_all", "전체 펼침/접음"),
-        Binding("t", "toggle_tools", "도구 호출·결과 보기"), Binding("s", "toggle_side", "서브에이전트 보기"),
-        Binding("n", "hit(1)", "다음 검색어"), Binding("N", "hit(-1)", "이전 검색어", show=False),
-        Binding("y", "copy", "복사"), Binding("m", "toggle_mask", "치환 켬/끔"),
+        Binding("enter,space", "toggle_one", "펼침/접음"), Binding("f2", "toggle_all", "전체 펼침/접음"),
+        Binding("f3", "toggle_tools", "도구 호출·결과 보기"), Binding("f4", "toggle_side", "서브에이전트 보기"),
+        Binding("right", "hit(1)", "다음 검색어"), Binding("left", "hit(-1)", "이전 검색어"),
+        Binding("f6", "copy", "복사"), Binding("f10", "toggle_mask", "치환 켬/끔"),
         Binding("left_square_bracket", "link('parents')", "앞 세션", show=False), Binding("right_square_bracket", "link('children')", "뒤 세션", show=False),
-        Binding("a", "load_all", "전부 불러오기", show=False),
-        Binding("i", "toggle_auto", "자동 메시지 숨김/표시"),
+        Binding("f7", "load_all", "전부 불러오기", show=False),
+        Binding("f8", "toggle_auto", "자동 메시지 숨김/표시"),
     ]
+
+    def check_action(self, action, parameters):
+        if action == "hit":
+            return bool(self.needle)         # 검색어가 없으면 ←/→ 는 쓰지 않는다(푸터에서도 숨김)
+        return True
 
     def __init__(self, app_ref, session_id: str, uuid: str | None, needle: str = "", regex: bool = False):
         super().__init__()
@@ -247,7 +236,7 @@ class SessionScreen(ModalScreen):
             yield Static("", id="sess-head")
             yield VerticalScroll(id="msgs")
             yield Static("", id="sess-state", classes="state")
-            yield Static("↑↓ 이동 · Enter 펼침 · f 전체 펼침 · n/N 검색어 · y 복사 · t 도구 · s 서브에이전트 · i 자동 메시지 · [ ] 이어진 세션 · m 치환 · Esc 닫기", id="sess-keys", classes="state")
+            yield Static("↑↓ 이동 · Enter 펼침 · F2 전체 펼침 · ←/→ 검색어 · F6 복사 · F3 도구 · F4 서브에이전트 · F8 자동 메시지 · [ ] 이어진 세션 · F10 치환 · Esc 닫기", id="sess-keys", classes="state")
 
     def on_mount(self):
         self.load(focus_uuid=self.uuid)
@@ -359,12 +348,12 @@ class SessionScreen(ModalScreen):
 
     def update_state(self):
         n = len(self.msgs)
-        bits = [f"메시지 {self.sel + 1 if n else 0}/{n}" + (f" (앞 {self.hidden_before} · 뒤 {self.hidden_after} 생략 — a: 전부)" if self.hidden_before or self.hidden_after else ""),
-                "도구 " + ("보임" if self.tools else "숨김") + " (t)", "서브에이전트 " + ("보임" if self.side else "숨김") + " (s)",
-                "자동 메시지 " + ("숨김" if self.hide_auto else "보임") + " (i)",
-                "치환 " + ("켜짐" if self.ctx_app.mask else "꺼짐 — 원문 표시 중") + " (m)"]
+        bits = [f"메시지 {self.sel + 1 if n else 0}/{n}" + (f" (앞 {self.hidden_before} · 뒤 {self.hidden_after} 생략 — F7: 전부)" if self.hidden_before or self.hidden_after else ""),
+                "도구 " + ("보임" if self.tools else "숨김") + " (F3)", "서브에이전트 " + ("보임" if self.side else "숨김") + " (F4)",
+                "자동 메시지 " + ("숨김" if self.hide_auto else "보임") + " (F8)",
+                "치환 " + ("켜짐" if self.ctx_app.mask else "꺼짐 — 원문 표시 중") + " (F10)"]
         if self.needle:
-            bits.append(f"검색어 '{self.needle}' (n/N 이동)")
+            bits.append(f"검색어 '{self.needle}' (←/→ 이동)")
         self.query_one("#sess-state", Static).update("   ·   ".join(bits))
 
     # --- 동작
@@ -462,8 +451,8 @@ class SessionScreen(ModalScreen):
 
 
 class InstrScreen(ModalScreen):
-    """지침 한 건의 본문(공유 정본 그대로 — 로컬 캐시 아님). `## ` 절 목록을 위에, 본문을 아래에 보인다. e 편집 · m 치환 켬/끔."""
-    BINDINGS = [Binding("escape", "close", "닫기"), Binding("e", "edit", "편집기로 고치기"), Binding("m", "toggle_mask", "치환 켬/끔")]
+    """지침 한 건의 본문(공유 정본 그대로 — 로컬 캐시 아님). `## ` 절 목록을 위에, 본문을 아래에 보인다. F2 편집 · F10 치환 켬/끔."""
+    BINDINGS = [Binding("escape", "close", "닫기"), Binding("f2", "edit", "편집기로 고치기"), Binding("f10", "toggle_mask", "치환 켬/끔")]
 
     def __init__(self, app_ref, repo: str, name: str):
         super().__init__()
@@ -510,10 +499,10 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
     TITLE = "ctxui — 공유 컨텍스트 관리"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
         ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침)'),
-        ('치환(m)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
-        ('제한 모드', 'LLM 세션이 실행하면: 모든 탭을 볼 수 있지만 화면의 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(키 형식·password=·한글 비밀번호)이 [protected] 로 치환되고(끌 수 없음), 후보 미리보기도 [protected](N자)로 가려지며, 값 보기(v)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용된다'),
+        ('치환(F10)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
+        ('제한 모드', 'LLM 세션이 실행하면: 모든 탭을 볼 수 있지만 화면의 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(키 형식·password=·한글 비밀번호)이 [protected] 로 치환되고(끌 수 없음), 후보 미리보기도 [protected](N자)로 가려지며, 값 보기(F4)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용된다'),
         ('비용', 'Claude Code(OpenTelemetry)가 요청마다 보고한 cost_usd 의 합이다. 구독에서 실제 청구액과 같은지는 확인하지 못했다(청구액이라고 단정하지 말 것). 계정별은 요청마다 찍힌 계정(OTel user.email) 기준이고, 수집 전이거나 원본이 없는 기록은 「(계정 불명)」으로 따로 보인다. 한도 그래프는 계정 단위라 저장소·모델 필터가 걸리지 않고, 모든 계정이 같은 시간 축(최근 기간, 전체는 7일)을 쓴다. 세션 통계·세션 표의 비용·프롬프트도 선택한 기간·필터 안의 값이라 필터가 없으면 세션 비용 합 + 「세션 기록 없는 사용」 = 추이 합계다(세션 길이·최근은 세션 전체)'),
-        ('필터 키', '검색 탭: F2 사용자 발언만 · F3 정규식 · F4 도구 메시지 포함 · F6 제목만 · Space 세션 펼침 · x 모두 펼침. 대시보드: p 기간 · b 단위 · g 분류 · o 정렬 · c 필터 지움'),
+        ('필터 키', '검색 탭: F2 사용자 발언만 · F3 정규식 · F4 도구 메시지 포함 · F6 제목만 · Space 세션 펼침 · F7 모두 펼침. 대시보드: F2 기간 · F3 단위 · F4 분류 · F6 정렬 · F7 필터 지움. 비밀 탭: F2 추가 · F3 켬/끔 · F4 값 보기 · Delete 삭제. 후보 탭: F2 무시 · F4 값 보기'),
         ('자동 메시지', 'Claude Code 가 사람 대신 남기는 메시지(작업 알림·명령 출력·시스템 알림 등, `<태그>` 로 시작)는 흐린 배지+한 줄 요약으로 접혀 보이고 통계 프롬프트 수·사용자 발언 검색·대조에서 빠진다. 스킬 호출(/이름)·셸 입력·붙여넣기는 사람이 한 것이라 포함. 대화 화면 i: 자동 메시지 숨김/표시'),
         ('세션 기준 검색', '검색은 늘 전체 대화를 대상으로 하되 결과를 세션 단위로 묶어 보여 준다(제목·일치 건수·가장 최근 일치). Enter 는 그 세션 대화를 열고, Space 로 펼치면 일치한 메시지들이 아래에 나온다. F6 제목만은 세션 제목(첫 프롬프트)에 일치한 세션만 남긴다'),
     ]
@@ -521,7 +510,7 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
         'Esc: 표가 아닌 곳에서는 표로 포커스를 돌리고, 이미 표에 있으면 종료 확인창(기본 「아니오」, ←→ 로 「예」 선택 후 Enter). Ctrl+Q 는 확인 없이 즉시 종료',
     ]
     CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
-    PromptScreen, ConfirmScreen, SessionScreen { align: center middle; }
+    PromptScreen, SessionScreen { align: center middle; }
     TabbedContent { height: 1fr; }
     TabPane { padding: 0; }
     DataTable { height: 1fr; }
@@ -554,20 +543,21 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
     BINDINGS = [
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('search')", "검색"), Binding("3", "tab('verify')", "대조"),
         Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"), Binding("6", "tab('instr')", "지침"),
-        Binding("p", "stat_period", "기간", show=False), Binding("b", "stat_bucket", "단위", show=False), Binding("g", "stat_by", "분류", show=False),
-        Binding("o", "stat_order", "정렬", show=False), Binding("c", "stat_clear", "필터 지움", show=False),
         Binding("escape", "escape_back", "뒤로/종료", show=False),
-        Binding("m", "toggle_mask", "치환 켬/끔"), Binding("r,f5", "reload", "새로고침"),
-        Binding("f2", "toggle_role", "역할(사용자만)", show=False), Binding("f3", "toggle_regex", "정규식", show=False), Binding("f4", "toggle_tools", "도구 메시지 포함", show=False),
-        Binding("f6", "toggle_title_only", "제목만", show=False), Binding("space", "toggle_expand", "세션 펼침", show=False), Binding("x", "expand_all", "모두 펼침", show=False),
-        Binding("a", "secret_add", "비밀 추가", show=False), Binding("d", "secret_delete", "삭제", show=False), Binding("e", "secret_toggle", "켬/끔", show=False),
-        Binding("v", "reveal", "값 보기", show=False), Binding("i", "cand_ignore", "무시", show=False),
+        Binding("f10", "toggle_mask", "치환 켬/끔"), Binding("f5", "reload", "새로고침"),
+        # 같은 F키를 탭마다 다른 동작에 쓴다 — check_action 이 현재 탭의 것만 켠다(TAB_ACTIONS)
+        Binding("f2", "stat_period", "기간"), Binding("f3", "stat_bucket", "단위"), Binding("f4", "stat_by", "분류"),
+        Binding("f6", "stat_order", "정렬"), Binding("f7", "stat_clear", "필터 지움"),
+        Binding("f2", "toggle_role", "역할(사용자만)"), Binding("f3", "toggle_regex", "정규식"), Binding("f4", "toggle_tools", "도구 메시지 포함"),
+        Binding("f6", "toggle_title_only", "제목만"), Binding("space", "toggle_expand", "세션 펼침", show=False), Binding("f7", "expand_all", "모두 펼침"),
+        Binding("f2", "secret_add", "비밀 추가"), Binding("f3", "secret_toggle", "켬/끔"), Binding("f4", "reveal", "값 보기"),
+        Binding("delete", "secret_delete", "삭제"), Binding("f2", "cand_ignore", "무시"), Binding("f2", "instr_edit", "지침 편집"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
     def __init__(self, restricted=False):
         """restricted=True 는 LLM 세션이 실행한 경우: **모든 탭을 볼 수 있되** 비밀 값은 추출·조회할 수 없다 — 화면의 모든 텍스트는 등록한 비밀 + 비밀처럼 보이는 문자열(후보 패턴)을
-        [protected] 로 치환하고(끌 수 없음), 값 보기(v)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막는다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용한다."""
+        [protected] 로 치환하고(끌 수 없음), 값 보기(F4)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막는다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용한다."""
         super().__init__()
         self.restricted = restricted
         self.mask = True
@@ -594,11 +584,11 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
                     yield uikit.box(Input(placeholder="저장소 일부", id="f-repo"), "저장소(통계)")
                     yield uikit.box(Input(placeholder="머신 일부", id="f-host"), "머신(통계)")
                     yield uikit.box(Input(placeholder="모델 일부 (예: sonnet)", id="f-model"), "모델(통계)")
-                with Horizontal(classes="selects"):      # p/b/g/o 키와 같은 상태를 고르는 드롭다운(키로 바꾸면 여기도 따라 바뀐다)
-                    yield uikit.select_box([(l, i) for i, (_, l) in enumerate(STAT_PERIODS)], self.stat_period, "sel-period", "기간 (p)")
-                    yield uikit.select_box([(l, k) for k, l in cd.BUCKETS.items()], self.stat_bucket, "sel-bucket", "단위 (b)")
-                    yield uikit.select_box([(l, k) for k, l in cd.BREAKDOWNS.items()], self.stat_by, "sel-by", "분류 (g)")
-                    yield uikit.select_box([(l, k) for k, l in STAT_ORDERS], self.stat_order, "sel-order", "세션 정렬 (o)")
+                with Horizontal(classes="selects"):      # F2/F3/F4/F6 키와 같은 상태를 고르는 드롭다운(키로 바꾸면 여기도 따라 바뀐다)
+                    yield uikit.select_box([(l, i) for i, (_, l) in enumerate(STAT_PERIODS)], self.stat_period, "sel-period", "기간 (F2)")
+                    yield uikit.select_box([(l, k) for k, l in cd.BUCKETS.items()], self.stat_bucket, "sel-bucket", "단위 (F3)")
+                    yield uikit.select_box([(l, k) for k, l in cd.BREAKDOWNS.items()], self.stat_by, "sel-by", "분류 (F4)")
+                    yield uikit.select_box([(l, k) for k, l in STAT_ORDERS], self.stat_order, "sel-order", "세션 정렬 (F6)")
                 yield Static("", id="stat-state", classes="state")
                 with VerticalScroll(id="dash-scroll"):
                     yield uikit.box(Static("", id="ovhead"), "전체 · 표별 용량")
@@ -627,10 +617,10 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
                     yield uikit.box(DataTable(id="vrepos", cursor_type="row"), "저장소별")
                     yield uikit.box(DataTable(id="vhits", cursor_type="row"), "발언 — Enter: 앞뒤 대화")
             with TabPane("4 비밀", id="secrets"):
-                yield uikit.box(DataTable(id="secrets-table", cursor_type="row"), "등록된 비밀 — a 추가 · e 켬/끔 · d 삭제 · v 값 보기")
+                yield uikit.box(DataTable(id="secrets-table", cursor_type="row"), "등록된 비밀 — F2 추가 · F3 켬/끔 · Delete 삭제 · F4 값 보기")
                 yield Static("", id="sdetail")
             with TabPane("5 후보", id="cands"):
-                yield uikit.box(DataTable(id="cands-table", cursor_type="row"), "자동 탐지 후보 — Enter 승인(등록) · i 무시 · v 값 보기 · r 다시 탐지")
+                yield uikit.box(DataTable(id="cands-table", cursor_type="row"), "자동 탐지 후보 — Enter 승인(등록) · F2 무시 · F4 값 보기 · F5 다시 탐지")
                 yield Static("", id="cdetail")
             with TabPane("6 지침", id="instr"):
                 yield uikit.box(DataTable(id="instr-table", cursor_type="row"), "프로젝트 지침(공유 정본) — Enter: 본문 · e: 편집기로 고치기")
@@ -745,10 +735,20 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
     def flash(self, msg: str, severity="information"):
         self.notify(msg, severity=severity, timeout=5)
 
+    TAB_ACTIONS = {"stat_period": {"dashboard"}, "stat_bucket": {"dashboard"}, "stat_by": {"dashboard"}, "stat_order": {"dashboard"}, "stat_clear": {"dashboard"},
+                   "toggle_role": {"search"}, "toggle_regex": {"search"}, "toggle_tools": {"search"}, "toggle_title_only": {"search"}, "expand_all": {"search"},
+                   "secret_add": {"secrets"}, "secret_toggle": {"secrets"}, "secret_delete": {"secrets"}, "reveal": {"secrets", "cands"}, "cand_ignore": {"cands"}, "instr_edit": {"instr"}}
+
     def check_action(self, action, parameters):
-        """제한 모드에서는 막힌 동작(치환 끄기·값 보기·비밀 추가/삭제/끄기·후보 무시)을 푸터·도움말에서 숨긴다(눌러도 deny 가 막는다)."""
-        if self.restricted and action in ("toggle_mask", "secret_add", "secret_delete", "secret_toggle", "reveal", "cand_ignore"):
+        """탭 전용 동작은 그 탭에서만 켠다(같은 F키를 탭마다 다른 동작에 재사용). 제한 모드에서는 막힌 동작(치환 끄기·값 보기·비밀 추가/삭제/끄기·후보 무시)을 푸터·도움말에서 숨긴다(눌러도 deny 가 막는다)."""
+        if self.restricted and action in ("toggle_mask", "secret_add", "secret_delete", "secret_toggle", "reveal", "cand_ignore", "instr_edit"):
             return False
+        tabs = self.TAB_ACTIONS.get(action)
+        if tabs is not None:
+            try:
+                return self.current_tab() in tabs
+            except Exception:
+                return False                 # 아직 화면이 없을 때(조립 중)
         return True
 
     def deny(self, what="이 동작") -> bool:
@@ -769,6 +769,7 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
         self.on_tab_shown(ev.pane.id)
 
     def on_tab_shown(self, name: str):
+        self.refresh_bindings()              # 탭 전용 F키 — 푸터·도움말을 현재 탭 것으로
         if name == "secrets":
             self.reload_secrets()
         elif name == "cands" and not self.cand_rows:
@@ -1003,8 +1004,8 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
 
     def update_stat_state(self, cov=None):
         f = self.stat_filters()
-        txt = (f"기간: {STAT_PERIODS[self.stat_period][1]} (p)   ·   단위: {cd.BUCKETS[self.stat_bucket]} (b)   ·   분류: {cd.BREAKDOWNS[self.stat_by]} (g)   ·   "
-               f"세션 정렬: {dict(STAT_ORDERS)[self.stat_order]} (o)   ·   필터 지움 (c)")
+        txt = (f"기간: {STAT_PERIODS[self.stat_period][1]} (F2)   ·   단위: {cd.BUCKETS[self.stat_bucket]} (F3)   ·   분류: {cd.BREAKDOWNS[self.stat_by]} (F4)   ·   "
+               f"세션 정렬: {dict(STAT_ORDERS)[self.stat_order]} (F6)   ·   필터 지움 (F7)")
         if cov and cov.get("usage_first"):
             txt += f"   ·   비용은 {cov['usage_first'].astimezone():%m-%d} 이후만 수집됨"
         self.query_one("#stat-state", Static).update(txt)
@@ -1049,7 +1050,7 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
             models = ",".join(sorted({m.split("-")[1] if m.startswith("claude-") and "-" in m[7:] else m for m in r["models"]}))   # claude-sonnet-5-5 → sonnet
             ts.add_row(fmt_ts(r["last"]), r["host"], short_repo(r["repo"]), r["prompts"], r["tools"], fmt_dur(r["turn_ms"] / 1000),
                        f"${r['cost']:,.2f}" if r["cost"] is not None else "-", models[:20], Text((r["title"] or "")[:60]), key=r["session_id"])
-        self.query_one("#stat-sessions").border_title = (f"세션 {len(sess)}개{' (최대 300)' if len(sess) >= 300 else ''} — {dict(STAT_ORDERS)[self.stat_order]}순 (o) · Enter: 대화 보기"
+        self.query_one("#stat-sessions").border_title = (f"세션 {len(sess)}개{' (최대 300)' if len(sess) >= 300 else ''} — {dict(STAT_ORDERS)[self.stat_order]}순 (F6) · Enter: 대화 보기"
                                                          f" · 프롬프트·도구·턴시간·비용은 {STAT_PERIODS[self.stat_period][1]} 값, 최근·기간 정렬은 세션 전체")
         self._paint_dash()
         self.call_after_refresh(self._paint_dash)      # 칸 폭이 확정된 뒤 한 번 더(처음 열 때 폭을 아직 모를 수 있다)
@@ -1251,7 +1252,7 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
         self.sec_rows = {r["label"]: r for r in rows}
         for r in rows:
             tb.add_row(r["label"], r["kind"], "켜짐" if r["enabled"] else "꺼짐", r["length"], r["fp"], counts[r["label"]], key=r["label"])
-        self.query_one("#secrets-table").border_title = f"등록된 비밀 {len(rows)}개 — a 추가 · e 켬/끔 · d 삭제 · v 값 보기"
+        self.query_one("#secrets-table").border_title = f"등록된 비밀 {len(rows)}개 — F2 추가 · F3 켬/끔 · Delete 삭제 · F4 값 보기"
 
     def selected_key(self, table_id):
         tb = self.query_one(table_id, DataTable)
@@ -1296,16 +1297,19 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
                     cd.delete_secret(c, key)
                 self.flash(f"삭제: {key}")
                 self.reload_secrets()
-        self.push_screen(ConfirmScreen(f"'{key}' 을(를) 등록표에서 삭제할까요? (DB 원문은 그대로)"), done)
+        self.push_screen(ConfirmScreen(f"'{key}' 을(를) 등록표에서 삭제할까요? (DB 원문은 그대로)", "삭제", "취소"), done)
 
-    def action_secret_toggle(self):
-        if self.deny("비밀 값 조회·추가·삭제·끄기, 후보 무시"):
+    def action_instr_edit(self):
+        if self.deny("비밀 값 조회·추가·삭제·끄기, 후보 무시, 지침 편집"):
             return
         if self.current_tab() == "instr" and len(self.screen_stack) == 1:
             key = self.selected_key("#instr-table")
             if key:
                 repo, _, name = key.rpartition("|")
                 self.edit_instr(repo, name)
+
+    def action_secret_toggle(self):
+        if self.deny("비밀 값 조회·추가·삭제·끄기, 후보 무시"):
             return
         key = self.selected_key("#secrets-table") if self.current_tab() == "secrets" else None
         if not key:
@@ -1347,7 +1351,7 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
         for d in found:
             tb.add_row(d["fp"], d["pattern"], Text(f"{cs.MASK} ({len(d['value'])}자)" if self.restricted else cs.preview(d["value"])), d["count"], len(d["sessions"]), ",".join(sorted(short_repo(r) for r in d["repos"]))[:50] or "-",
                        fmt_ts(d["last"]), key=d["fp"])
-        self.query_one("#cands-table").border_title = f"자동 탐지 후보 {len(found)}개 — Enter 승인 · i 무시 · v 값 보기 · r 다시 탐지"
+        self.query_one("#cands-table").border_title = f"자동 탐지 후보 {len(found)}개 — Enter 승인 · F2 무시 · F4 값 보기 · F5 다시 탐지"
         self.flash(f"후보 {len(found)}개")
 
     def adopt_selected(self):
