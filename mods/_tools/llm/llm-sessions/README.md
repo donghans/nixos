@@ -25,6 +25,7 @@
 ## 결정과 근거
 - **전용 소켓·전용 설정**: 사용자의 일반 tmux 와 섞이지 않고, 목록은 `claude-` 접두 세션만 보인다.
 - **접두 키는 Ctrl+]**: tmux 기본 Ctrl+B 는 Claude Code 의 백그라운드 키, Ctrl+A 는 줄 처음 이동과 겹친다. 분리는 **F12** 한 번 또는 Ctrl+] d. 붙을 때 3초 안내가 뜬다.
+- **Ctrl+Z 차단**(2026-11-03): 실수로 누르면 claude 와 `claude-run`(비대화형 스크립트라 `fg` 가 없음)이 통째로 멈춰 되돌릴 방법이 없다. 그래서 tmux 가 Ctrl+Z 를 가로채 안내만 띄우고, 접두 키 뒤 Ctrl+Z(기본값 `suspend-client`)도 풀었다. 일부러 보내야 하면 **Ctrl+] z**. 이미 떠 있는 서버에는 `tmux -L claude source-file <새 claude-tmux.conf>` 로 적용(새 서버는 자동). 이미 멈춘 pane 은 멈춘 claude 프로세스에 `SIGCONT`(`kill -CONT`)를 보내면 이어진다.
 - **상태 줄 끔**(`status off`): 시계 같은 주기 갱신이 화면 절전(PSR)을 방해할 수 있다(ctx 장부 #57 과 같은 문제). 노트북 전력 영향은 측정하지 않았다.
 - **sudo 는 claude 쪽으로만 열린다**(2026-11-03): 이전에는 `timestamp_type=global`(72eaeb9)로 한 번 인증하면 모든 터미널에서 sudo 가 열렸다. 원인은 claude 의 Bash 도구가 명령마다 tty 없는 새 세션·새 셸이라 sudo 의 캐시 키(tty, tty 가 없으면 부모 PID, 거기에 세션)가 매번 달라서다(tmux 로 옮겨도 마찬가지 — 실측: `tty` 가 `not a tty`, 명령마다 SID 가 새로 생김).
   - **안 된 방법**: `systemd-run --user` 로 sudo 를 띄워 부모 PID 를 `systemd --user` 로 고정 — 인증 직후에도 다음 유닛에서 `a password is required`(유닛마다 새 세션이라 캐시가 공유되지 않음, 같은 날 실측).
