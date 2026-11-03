@@ -53,10 +53,26 @@ in {
       incus launch ubuntu:24.04 ubuntu-2404 --vm \
         -c limits.cpu=4 \
         -c limits.memory=16GiB \
-        -d root,size=256GiB \
+        -d root,size=450GiB \
         -d eth0,type=nic,nictype=bridged,parent=br-lan,mtu=1400
     '';
   };
+
+  # ubuntu-2404 root.img 는 nodatacow(+C) 파일이어야 한다 — 쿼터(qgroup) 한도는 두지 않는다.
+  #
+  # 이 VM 의 디스크는 읽기/쓰기가 매우 잦다. btrfs 는 CoW 라서 게스트가 작은 블록을 덮어쓸 때마다
+  # 새 extent 가 생기고, 큰 extent 의 일부만 참조되면 나머지도 물리 공간을 계속 차지한다.
+  # 2026-11-03 실측(compsize): 참조 341GiB 인데 디스크 사용 436GiB(약 95GiB 낭비), extent 약 453만 개
+  # (평균 약 75KB). 이 낭비는 스냅샷이 없어도 생기고, qgroup referenced 에도 그대로 잡혀
+  # 2026-09-28·10-21 에 한도(EDQUOT)를, 10-30 에는 호스트 디스크(ENOSPC)를 채워 VM 이 멈췄다.
+  # 한도를 올리는 건 미봉책이었다(256 → 400 → 450 → 520GiB).
+  #
+  # 근본 해결: root.img 를 +C(nodatacow)로 다시 만들어 덮어쓰기를 제자리에서 하게 한다 → 쪼개짐·낭비가 안 생긴다.
+  # 게스트에는 같은 virtio 디스크로 보이므로 게스트 안 동작은 바뀌지 않는다(대가: 이 파일에 한해
+  # btrfs 체크섬·압축이 없다. 스냅샷을 쓰지 않으므로 문제 없음). +C 는 "빈 파일"에서만 켤 수 있어서
+  # 이미 데이터가 있는 파일에는 못 건다 — VM 을 새로 만들 땐 root.img 를 비운 채 chattr +C 후 채워야 한다
+  # (확인: lsattr .../virtual-machines/ubuntu-2404/root.img 에 C 가 있어야 함).
+  # 수동 한도는 `btrfs qgroup limit none` 으로 해제했다(2026-11-03).
 
   # VM 생성 후 openssh 설치 (incus exec 방식 — cloud-init 불필요)
   # tailscale은 ubuntu-2404-proxy LXC가 대신 담당
