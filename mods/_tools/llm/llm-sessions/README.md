@@ -26,10 +26,13 @@
 - **전용 소켓·전용 설정**: 사용자의 일반 tmux 와 섞이지 않고, 목록은 `claude-` 접두 세션만 보인다.
 - **접두 키는 Ctrl+]**: tmux 기본 Ctrl+B 는 Claude Code 의 백그라운드 키, Ctrl+A 는 줄 처음 이동과 겹친다. 분리는 **F12** 한 번 또는 Ctrl+] d. 붙을 때 3초 안내가 뜬다.
 - **상태 줄 끔**(`status off`): 시계 같은 주기 갱신이 화면 절전(PSR)을 방해할 수 있다(ctx 장부 #57 과 같은 문제). 노트북 전력 영향은 측정하지 않았다.
-- **sudo 범위는 이 claude 세션의 sudo 로 한정**(2026-11-03): 이전에는 `timestamp_type=global`(72eaeb9)로 한 번 인증하면 모든 터미널에서 sudo 가 열렸다. 원인은 claude 의 Bash 도구가 명령마다 tty 없는 새 세션·새 셸이라 sudo 의 캐시 키(tty, tty 가 없으면 부모 PID, 거기에 세션)가 매번 달라서다(tmux 로 옮겨도 마찬가지 — 실측: `tty` 가 `not a tty`, 명령마다 SID 가 새로 생김).
+- **sudo 는 claude 쪽으로만 열린다**(2026-11-03): 이전에는 `timestamp_type=global`(72eaeb9)로 한 번 인증하면 모든 터미널에서 sudo 가 열렸다. 원인은 claude 의 Bash 도구가 명령마다 tty 없는 새 세션·새 셸이라 sudo 의 캐시 키(tty, tty 가 없으면 부모 PID, 거기에 세션)가 매번 달라서다(tmux 로 옮겨도 마찬가지 — 실측: `tty` 가 `not a tty`, 명령마다 SID 가 새로 생김).
   - **안 된 방법**: `systemd-run --user` 로 sudo 를 띄워 부모 PID 를 `systemd --user` 로 고정 — 인증 직후에도 다음 유닛에서 `a password is required`(유닛마다 새 세션이라 캐시가 공유되지 않음, 같은 날 실측).
-  - **지금 방식**: 세션마다 중계 프로세스(`sudo_broker.py`, `claude-run` 이 띄움)가 모든 sudo 를 자기 자식으로 실행해 키를 고정한다. claude 쪽 PATH 의 `sudo` 래퍼가 0600 유닉스 소켓(`$XDG_RUNTIME_DIR/claude-sudo-<claude-run PID>.sock`)으로 stdin/stdout/stderr(SCM_RIGHTS)·cwd·환경을 넘기고 종료 코드를 그대로 받는다. 일반 터미널의 sudo 는 tty 별 캐시 그대로, 다른 claude 세션과도 캐시를 공유하지 않는다. 중계는 60초마다 `sudo -n -v` 로 연장하고 `claude-run` 이 끝나면 같이 끝난다.
-  - **인증이 없으면** 래퍼가 항상 `sudo -n` 으로 즉시 실패하고 안내를 출력한다(프롬프트 대기 → 우회 방지). 재인증은 아무 터미널에서 `sudo-claude-auth`(열려 있는 모든 claude 세션에 적용).
+  - **지금 방식**: 중계 프로세스(`sudo_broker.py`)가 모든 sudo 를 자기 자식으로 실행해 키를 고정한다. claude 쪽 PATH 의 `sudo` 래퍼가 0600 유닉스 소켓(`$XDG_RUNTIME_DIR/claude-sudo.sock`)으로 stdin/stdout/stderr(SCM_RIGHTS)·cwd·환경을 넘기고 종료 코드를 그대로 받는다. 일반 터미널의 sudo 는 tty 별 캐시 그대로다.
+  - **중계는 머신에 하나**, `setsid` 로 터미널과 무관하게 산다. `llm-sessions` UI 와 모든 tmux claude 세션이 같이 쓴다(세션끼리는 sudo 캐시를 공유; 처음에는 세션별 중계였으나 UI 에서 만든 새 세션이 붙기 전까지 pane 에서 비밀번호를 기다리는 문제가 있어 바꿈).
+  - **수명은 임대**: UI(`llm-sessions`)와 `claude-run` 이 시작할 때 자기 PID 를 등록하고, 등록된 PID 가 하나라도 살아 있는 동안 산다. UI 를 닫아도 claude 가 남아 있으면 유지되고 마지막이 끝나면 15초 뒤 정리된다(여러 UI 중 하나를 닫아도 영향 없음). 60초마다 `sudo -n -v` 로 티켓을 연장한다.
+  - **인증은 앞에서 한 번**: `llm-sessions` 는 UI 를 띄우기 전에, `claude-run` 은 claude 를 띄우기 전에 `sudo-claude-auth` 로 티켓이 없을 때만 비밀번호를 묻는다(nixup 의 `sudo -v` 와 같은 구조). 비밀번호는 읽어서 파이프로만 넘기고 어디에도 저장하지 않는다. UI 에서 인증하면 이후 `n` 으로 만드는 세션은 묻지 않고, 붙기 전에도 바로 시작된다.
+  - **인증이 없으면** 래퍼가 항상 `sudo -n` 으로 즉시 실패하고 안내를 출력한다(프롬프트 대기 → 우회 방지). 재인증은 아무 터미널에서 `sudo-claude-auth`.
 - **감싸지 않는 호출**: `CLAUDE_TMUX=0` · 이미 tmux 안 · 터미널이 아님 · `-p/--print/--help/--version/--output-format` · 서브커맨드(한 단어: mcp, config, update …). 따라서 스크립트·`claude -p` 는 그대로다. 한 단어짜리 프롬프트(`claude hello`)는 서브커맨드로 보여 감싸지지 않는다.
 - **kitty 닫힘**: 래퍼가 SIGHUP/터미널 소실을 감지하면, 그 세션에 다른 접속이 **없을 때만** 세션을 끝낸다. 다른 곳(ssh 등)이 붙어 있으면 그쪽이 이어 쓰게 두고, 이후 고아가 되면 `llm-sessions` 에서 `x` 로 정리한다. 분리(F12)는 터미널이 살아 있으므로 정리하지 않는다. kitty 가 강제 종료(SIGKILL)되면 세션이 남을 수 있다.
 - **ssh 에서 만든 세션은 끊겨도 산다**: `llm-sessions` 의 `n` 은 분리된 세션을 만들고 붙는다. 분리하면 목록으로 돌아온다.

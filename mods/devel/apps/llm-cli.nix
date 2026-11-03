@@ -124,12 +124,15 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   tmuxEnv = ''
     export CLAUDE_TMUX_BIN=${pkgs.tmux}/bin/tmux CLAUDE_TMUX_CONF=${sessionsSrc}/claude-tmux.conf CLAUDE_RUN_BIN=${claudeRun} CLAUDE_CTX_BIN=${claudeCtx}/bin/donghans
   '';
-  # (목적: sudo 인증 범위를 "이 claude 세션이 부르는 sudo" 로 한정 — 다른 터미널·다른 claude 세션의 sudo 는 열지 않는다)
+  # (목적: sudo 인증 범위를 "claude 쪽" 으로 한정 — 일반 터미널의 sudo 는 열지 않는다)
   # (이유: claude 의 Bash 도구는 명령마다 tty 없는 새 세션·새 셸이라 sudo 의 캐시 키(tty 또는 부모 PID·세션)가 매번 달라진다.
   #   그래서 한때 timestamp_type=global(72eaeb9)로 풀었는데 그러면 모든 터미널이 열린다. `systemd-run --user` 로 부모를 고정하는 방법도 시험했으나
-  #   유닛마다 새 세션이라 캐시가 공유되지 않았다(2026-11-03 실측). 세션마다 오래 사는 중계 프로세스(sudo_broker.py)가 모든 sudo 를 자기 자식으로 실행하면 키가 고정된다.)
+  #   유닛마다 새 세션이라 캐시가 공유되지 않았다(2026-11-03 실측). 오래 사는 중계 프로세스(sudo_broker.py)가 모든 sudo 를 자기 자식으로 실행하면 키가 고정된다.)
+  # 중계는 머신에 하나(`$XDG_RUNTIME_DIR/claude-sudo.sock`, setsid 로 터미널과 무관하게 산다). llm-sessions UI 와 claude 세션들이 함께 쓰고,
+  # 수명은 "임대": UI·claude-run 이 자기 PID 를 등록해 하나라도 살아 있는 동안 산다(UI 를 닫아도 claude 가 남아 있으면 유지, 마지막이 끝나면 정리).
+  # 비밀번호는 저장하지 않는다 — 인증은 UI(또는 첫 claude-run)가 시작될 때 앞에서 한 번 받아 티켓만 유지한다(nixup 의 sudo -v 와 같은 구조).
   # claude 쪽 PATH 의 `sudo` 는 이 중계에 붙는 래퍼(항상 -n: 프롬프트를 기다리다 우회하는 일을 막으려고 인증이 없으면 즉시 실패하며 안내를 출력).
-  # 일반 터미널의 sudo 는 손대지 않아 tty 별 캐시 그대로다. 설계·시험 기록: mods/_tools/llm/llm-sessions/README.md
+  # 설계·시험 기록: mods/_tools/llm/llm-sessions/README.md
   sudoBrokerPy = pkgs.writeShellScriptBin "sudo-broker" ''exec ${pkgs.python3}/bin/python3 -I ${../../_tools/llm/llm-sessions/sudo_broker.py} "$@"'';
   claudeSudoBin = pkgs.writeShellScriptBin "sudo" ''
     if [ -z "''${CLAUDE_SUDO_SOCK:-}" ] || [ ! -S "$CLAUDE_SUDO_SOCK" ]; then
@@ -138,41 +141,41 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
     fi
     exec ${sudoBrokerPy}/bin/sudo-broker run "$CLAUDE_SUDO_SOCK" -n "$@"
   '';
-  # 인증: 비밀번호는 읽어서 파이프로만 중계에 넘긴다(인자·파일에 남지 않음). CLAUDE_SUDO_SOCK 이 있으면 그 세션만, 없으면(다른 터미널에서 재인증) 열려 있는 모든 claude 세션에.
+  # sudo-claude-auth [--lease PID]: 중계가 없으면 띄우고, PID 를 임대로 등록하고, 티켓이 없으면 비밀번호를 한 번 묻는다.
+  # 비밀번호는 읽어서 파이프로만 중계에 넘기고 곧 버린다(인자·파일에 남지 않음). 이미 인증돼 있으면 아무것도 묻지 않는다.
   claudeSudoAuth = pkgs.writeShellScriptBin "sudo-claude-auth" ''
     B=${sudoBrokerPy}/bin/sudo-broker
-    if [ -n "''${CLAUDE_SUDO_SOCK:-}" ]; then socks=("$CLAUDE_SUDO_SOCK"); else socks=("''${XDG_RUNTIME_DIR:-/tmp}"/claude-sudo-*.sock); fi
-    # 연결되지 않는 소켓(중계가 비정상 종료하며 남긴 것)은 건너뛴다. rc 255 = 연결 실패.
-    live=(); need=0
-    for s in "''${socks[@]}"; do
-      [ -S "$s" ] || continue
-      $B run "$s" -n true 2>/dev/null; rc=$?
-      [ "$rc" = 255 ] && continue
-      live+=("$s"); [ "$rc" = 0 ] || need=1
-    done
-    [ ''${#live[@]} -gt 0 ] || { echo "sudo-claude-auth: 열려 있는 claude sudo 세션이 없음" >&2; exit 1; }
-    [ "$need" = 1 ] || exit 0
+    SOCK="''${CLAUDE_SUDO_SOCK:-''${XDG_RUNTIME_DIR:-/tmp}/claude-sudo.sock}"
+    LEASE=0; [ "''${1:-}" = --lease ] && LEASE=''${2:-0}
+    if ! $B lease "$SOCK" "$LEASE" 2>/dev/null; then   # 중계가 없음(또는 비정상 종료로 소켓만 남음) → 띄운다
+      ${pkgs.util-linux}/bin/setsid -f $B serve "$SOCK" </dev/null >/dev/null 2>&1
+      for _ in $(seq 50); do $B lease "$SOCK" "$LEASE" 2>/dev/null && break; sleep 0.1; done
+    fi
+    $B lease "$SOCK" "$LEASE" 2>/dev/null || { echo "sudo-claude-auth: sudo 중계를 띄우지 못함" >&2; exit 1; }
+    $B run "$SOCK" -n true 2>/dev/null && exit 0
     [ -t 0 ] || { echo "sudo-claude-auth: 터미널에서 실행해야 함" >&2; exit 1; }
-    printf '[sudo] %s 의 비밀번호(claude 세션 전용): ' "$USER" >&2
+    printf '[sudo] %s 의 비밀번호(claude 전용): ' "$USER" >&2
     IFS= read -rs pw; echo >&2
-    for s in "''${live[@]}"; do printf '%s\n' "$pw" | $B run "$s" -S -p "" -v || { unset pw; exit 1; }; done
+    printf '%s\n' "$pw" | $B run "$SOCK" -S -p "" -v || { unset pw; exit 1; }
     unset pw
   '';
-  # tmux 안에서 실제로 claude 를 실행하는 쪽. 중계는 이 프로세스($$)가 살아 있는 동안만 산다(끝나면 중계도 소켓을 지우고 끝남).
-  # exec 하지 않는 이유: 끝난 뒤 중계도 같이 끝나게 하려고.
+  # tmux 안에서 실제로 claude 를 실행하는 쪽. 중계에 이 프로세스($$)를 임대하므로 claude 가 살아 있는 동안 중계도 산다.
   claudeRun = pkgs.writeShellScript "claude-run" ''
     if [ -t 0 ]; then
-      export CLAUDE_SUDO_SOCK="''${XDG_RUNTIME_DIR:-/tmp}/claude-sudo-$$.sock"
-      ( ${sudoBrokerPy}/bin/sudo-broker serve "$CLAUDE_SUDO_SOCK" "$$" & ) >/dev/null 2>&1
-      for _ in $(seq 30); do [ -S "$CLAUDE_SUDO_SOCK" ] && break; sleep 0.1; done
-      ${claudeSudoAuth}/bin/sudo-claude-auth || exit 1
+      export CLAUDE_SUDO_SOCK="''${XDG_RUNTIME_DIR:-/tmp}/claude-sudo.sock"
+      ${claudeSudoAuth}/bin/sudo-claude-auth --lease $$ || exit 1
       export PATH=${claudeSudoBin}/bin:$PATH
     fi
     ${settingsSnippet}
     ${claude}/bin/claude "$@"
   '';
   claudeTmux = pkgs.writeShellScriptBin "claude-tmux" ''${tmuxEnv}exec ${pkgs.bash}/bin/bash ${sessionsSrc}/claude-tmux "$@"'';
-  claudeSessions = pkgs.writeShellScriptBin "llm-sessions" ''${tmuxEnv}exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${sessionsSrc}/llm_sessions.py "$@"'';
+  # UI 를 띄우기 전에 sudo 인증을 앞당겨 받는다(실패해도 UI 는 연다 — 그 경우 새 세션이 pane 에서 묻는다). 서브커맨드·비대화형 호출은 건너뛴다.
+  claudeSessions = pkgs.writeShellScriptBin "llm-sessions" ''    ${tmuxEnv}if [ -t 0 ] && [ $# -eq 0 ]; then
+        export CLAUDE_SUDO_SOCK="''${XDG_RUNTIME_DIR:-/tmp}/claude-sudo.sock"
+        ${claudeSudoAuth}/bin/sudo-claude-auth --lease $$ || echo "llm-sessions: sudo 인증 없이 시작함(새 세션이 pane 에서 물어봄)" >&2
+      fi
+      exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${sessionsSrc}/llm_sessions.py "$@"'';
   # 옛 이름 호환(2026-10-27 개명 llm-sessions) — 습관·옛 문서가 쓰는 `claude-sessions` 가 그대로 열리게 하는 별칭. 필요 없어지면 이 줄과 packages 항목을 지운다.
   claudeSessionsAlias = pkgs.writeShellScriptBin "claude-sessions" ''exec ${claudeSessions}/bin/llm-sessions "$@"'';
   # 훅은 비동기(입력을 막지 않음)이고 실패해도 조용히 끝난다. 놓친 것은 ingest 타이머가 따라잡는다.
@@ -419,10 +422,8 @@ in {
           claude-tmux "$@"
           return
         fi
-        local -x CLAUDE_SUDO_SOCK="''${XDG_RUNTIME_DIR:-/tmp}/claude-sudo-$$.sock"
-        ( ${sudoBrokerPy}/bin/sudo-broker serve "$CLAUDE_SUDO_SOCK" "$$" & ) >/dev/null 2>&1
-        for _ in {1..30}; do [[ -S $CLAUDE_SUDO_SOCK ]] && break; sleep 0.1; done
-        ${claudeSudoAuth}/bin/sudo-claude-auth || return 1
+        local -x CLAUDE_SUDO_SOCK="''${XDG_RUNTIME_DIR:-/tmp}/claude-sudo.sock"
+        ${claudeSudoAuth}/bin/sudo-claude-auth --lease $$ || return 1
         ${settingsSnippet}
         PATH=${claudeSudoBin}/bin:$PATH command claude "$@"
       }
