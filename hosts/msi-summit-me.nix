@@ -171,17 +171,53 @@ in {
     };
 
     # == 터치패드 재인식 (장치 메뉴의 "터치패드 재인식" 항목) ==
-    # 터치패드(ELAN0305, I2C HID)가 먹통이 될 때 드라이버를 unbind/bind 해서 다시 인식시킴.
+    # 터치패드(I2C HID)가 먹통이 될 때 드라이버를 unbind/bind 해서 다시 인식시킴.
     # sysfs 쓰기는 root 만 가능하므로 root 서비스로 두고, 로컬 활성 세션 사용자가 비밀번호 없이 이 유닛만 시작하게 허용.
+    # (2026-11-04: 이 기기의 터치패드 ACPI ID 가 부팅마다 ELAN0305 / MSNB0001 로 갈린다 — 같은 커널·BIOS·커널 인자에서도 확인.
+    #  이름을 하나로 고정하면 `No such device` 로 재인식이 통째로 실패하므로 두 이름을 모두 찾는다.)
+    # 재인식을 누른 시점이 먹통 상태를 가장 정확히 잡는 때라, 전·후 상태를 /var/log/touchpad-watchdog/reset-*.log 에 남긴다(원인 분석용).
     systemd.services.touchpad-reset = {
-      description = "Re-probe ELAN0305 touchpad (i2c_hid_acpi unbind/bind)";
-      serviceConfig.Type = "oneshot";
+      description = "Re-probe I2C HID touchpad (ELAN0305/MSNB0001, i2c_hid_acpi unbind/bind)";
+      serviceConfig = {
+        Type = "oneshot";
+        LogsDirectory = "touchpad-watchdog"; # touchpad-watchdog 와 같은 디렉터리(/var/log/touchpad-watchdog)를 공유
+      };
       script = ''
         drv=/sys/bus/i2c/drivers/i2c_hid_acpi
-        dev=i2c-ELAN0305:00
-        [ -e "$drv/$dev" ] && echo "$dev" > "$drv/unbind"
+        pci=/sys/bus/pci/devices/0000:00:15.0
+        log=/var/log/touchpad-watchdog/reset-$(date +%Y%m%d-%H%M%S).log
+
+        snapshot() {
+          echo "--- $1 ($(date +%T)) ---"
+          echo "i2c devices: $(ls /sys/bus/i2c/devices | grep -E 'ELAN0305|MSNB0001' | tr '\n' ' ')"
+          echo "bound to i2c_hid_acpi: $(ls $drv | grep -E 'ELAN0305|MSNB0001' | tr '\n' ' ')"
+          echo "pci 00:15.0 power/control=$(cat $pci/power/control) runtime_status=$(cat $pci/power/runtime_status)"
+          echo "touchpad input node: $(grep -cE '(ELAN0305|MSNB0001).*Touchpad' /proc/bus/input/devices)"
+          echo "kernel log (i2c/hid, last 15):"
+          journalctl -k --no-pager -n 400 | grep -iE 'i2c_designware|i2c_hid|ELAN0305|MSNB0001|intel-lpss' | tail -15
+        }
+
+        shopt -s nullglob
+        devs=()
+        for p in /sys/bus/i2c/devices/i2c-ELAN0305:* /sys/bus/i2c/devices/i2c-MSNB0001:*; do
+          devs+=("$(basename "$p")")
+        done
+
+        { snapshot before; } > "$log" 2>&1 || true
+        if [ "''${#devs[@]}" -eq 0 ]; then
+          echo "touchpad i2c device not found (ELAN0305/MSNB0001)" | tee -a "$log" >&2
+          exit 1
+        fi
+
+        for dev in "''${devs[@]}"; do
+          [ -e "$drv/$dev" ] && echo "$dev" > "$drv/unbind"
+        done
         sleep 1
-        echo "$dev" > "$drv/bind"
+        for dev in "''${devs[@]}"; do
+          echo "$dev" > "$drv/bind"
+        done
+        sleep 1
+        { snapshot after; } >> "$log" 2>&1 || true
       '';
     };
     security.polkit.extraConfig = ''

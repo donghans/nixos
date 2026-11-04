@@ -82,7 +82,8 @@
         echo "--- after recovery ---"
         echo "power/control: $(cat ${powerCtl} 2>/dev/null || echo n/a)"
         echo "runtime_status: $(cat ${runtimeStatus} 2>/dev/null || echo n/a)"
-        if grep -q "ELAN0305.*Touchpad" /proc/bus/input/devices 2>/dev/null; then
+        # 터치패드 ACPI ID 는 부팅마다 ELAN0305 / MSNB0001 로 갈린다(2026-11-04 확인) — 둘 다 인식
+        if grep -qE "(ELAN0305|MSNB0001).*Touchpad" /proc/bus/input/devices 2>/dev/null; then
           echo "touchpad input node: PRESENT"
         else
           echo "touchpad input node: MISSING"
