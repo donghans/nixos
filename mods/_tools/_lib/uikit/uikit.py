@@ -191,8 +191,8 @@ class QuitConfirmScreen(ModalScreen[bool]):
     QuitConfirmScreen { align: center middle; }
     QuitConfirmScreen > Vertical { width: 44; height: auto; border: round #33ccff; background: #101010; padding: 1 2; }
     QuitConfirmScreen Horizontal { height: 1; margin-top: 1; align-horizontal: center; }
-    QuitConfirmScreen Button { margin: 0 2; border: none; height: 1; min-width: 10; padding: 0 2; background: #141414; color: #cfcfcf; text-style: none; }
-    QuitConfirmScreen Button:hover, QuitConfirmScreen Button:focus { background: #268bd2; color: #ffffff; text-style: none; }
+    QuitConfirmScreen Button, QuitConfirmScreen Button.-style-default { margin: 0 2; border: none; border-top: none; border-bottom: none; height: 1; min-width: 10; padding: 0 2; background: #141414; color: #cfcfcf; text-style: none; }
+    QuitConfirmScreen Button:hover, QuitConfirmScreen Button:focus, QuitConfirmScreen Button.-style-default:hover, QuitConfirmScreen Button.-style-default:focus { background: #268bd2; color: #ffffff; text-style: none; border: none; border-top: none; border-bottom: none; }
     QuitConfirmScreen #quit-hint { color: #7a7a7a; padding-top: 1; text-align: center; }
     """
 

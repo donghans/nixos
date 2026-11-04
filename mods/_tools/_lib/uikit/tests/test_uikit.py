@@ -142,6 +142,7 @@ async def confirm_cases():
     a = CS()
     async with a.run_test(size=(80, 20)) as pilot:
         await pilot.pause(0.2)
+        check("확인창 버튼의 글자 영역 높이가 1 이상(Textual 8 의 Button tall 테두리에 눌려 글자가 사라지지 않음)", all(b.size.height >= 1 for b in a.screen.query("Button")))
         check("ConfirmScreen: 문구·버튼 이름을 쓰고 기본 포커스는 취소쪽", a.focused.id == "quit-no" and str(a.screen.query_one("#quit-yes").label) == "삭제")
         await pilot.press("y", "n", "ㅛ"); await pilot.pause(0.2)
         check("ConfirmScreen: y/n/ㅛ 글자 키는 무반응", type(a.screen).__name__ == "ConfirmScreen" and a.res == "미정")
