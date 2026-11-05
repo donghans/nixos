@@ -53,7 +53,7 @@ in {
       incus launch ubuntu:24.04 ubuntu-2404 --vm \
         -c limits.cpu=4 \
         -c limits.memory=16GiB \
-        -d root,size=450GiB \
+        -d root,size=330GiB \
         -d eth0,type=nic,nictype=bridged,parent=br-lan,mtu=1400
     '';
   };
@@ -73,6 +73,12 @@ in {
   # 이미 데이터가 있는 파일에는 못 건다 — VM 을 새로 만들 땐 root.img 를 비운 채 chattr +C 후 채워야 한다
   # (확인: lsattr .../virtual-machines/ubuntu-2404/root.img 에 C 가 있어야 함).
   # 수동 한도는 `btrfs qgroup limit none` 으로 해제했다(2026-11-03).
+  #
+  # 2026-11-05 디스크를 450GiB → 330GiB 로 줄였다(사용자 결정: 담당자가 Docker/로그를 직접 정리하게 하려는 상한 축소).
+  # 방식: 새 VM 을 정식 330GiB 로 만들고 정지한 원본에서 사용 블록만 복제·축소한 뒤 이름을 맞바꿨다(설정=실제 크기).
+  # 게스트 df 320G(사용 약 273G, 여유 약 48G). 이전 VM 은 ubuntu-2404-old 로 남겼고 mac-studio 에도 보관했다.
+  # 주의: `incus config device set ubuntu-2404 root size=…` 는 쓰지 말 것 — 값이 바뀌면 incus 가 qgroup 한도(referenced)를
+  # 다시 걸어 게스트 여유가 남아도 EDQUOT 로 VM 이 멈춘다(위 9-28·10-21 과 같은 함정). 크기를 또 바꿀 때는 새 VM 복제 방식으로.
 
   # VM 생성 후 openssh 설치 (incus exec 방식 — cloud-init 불필요)
   # tailscale은 ubuntu-2404-proxy LXC가 대신 담당
