@@ -16,7 +16,15 @@
 # (src/main.c: prefer_unzip 꺼지고 7z/unar 중 하나라도 있으면 unzip 안 씀).
 # → 이 덕분에 mods.sys.utils.archive는 zip/unzip 없이 p7zip만 둠.
 #
-# 위 두 값은 xarchiver 가 종료할 때마다 자기 설정 파일을 통째로 다시 쓰고, 설정 파일이 없거나 읽히지
+# 참고 3: 한글 Windows(CP949)가 만든 zip 은 파일명에 UTF-8 표시가 없어 7z/7zz 가 이름을 깨뜨림
+# (7zz 26.01 의 -mcp=949 도 목록 조회에서는 효과 없음을 확인함). unar/lsar 는 인코딩을 자동 감지해 정상 표시함.
+# Xarchiver 는 7z 가 있으면 zip 을 무조건 7z 로만 처리하므로, mods/_data/xarchiver/zip-unar.patch 로
+# "7z + lsar + unar 가 다 있으면 zip 의 목록·테스트·풀기는 lsar/unar, 추가·삭제·새로 만들기는 7z" 로 나눔
+# (program[2] 슬롯 추가). 새로 만드는 zip 은 7zz 가 UTF-8 이름으로 써서 표준을 지킴.
+# 주의: 이름이 깨지는(구형 인코딩) 기존 zip 에 Xarchiver 로 파일을 추가·삭제하면 7zz 가 기존 항목 이름을
+# 잘못 읽은 채 다시 쓸 수 있음(확인은 안 함) → 그런 zip 은 풀기만 할 것.
+#
+# 참고 1·2 의 두 값(preferred_extract_dir, prefer_unzip)은 xarchiver 가 종료할 때마다 자기 설정 파일을 통째로 다시 쓰고, 설정 파일이 없거나 읽히지
 # 않으면 기본값(/tmp, prefer_unzip=true)으로 새로 만들기 때문에 한 번 손으로 고쳐 두면 되돌아간다.
 # 파일 전체를 선언(읽기 전용 링크)하면 앱이 저장하지 못하므로, 아래 home.activation 이
 # 홈 활성화(nixup)마다 이 두 키만 맞춘다 (파일이 없으면 기본 세트에서 두 값만 바꿔 생성).
@@ -54,6 +62,9 @@ in {
     # (원본은 설정이 비어 있으면 /tmp 로 하드코딩 — 설정 파일로는 못 바꿈)
     home.packages = [
       (pkgs.xarchiver.overrideAttrs (old: {
+        # zip: 목록·테스트·풀기는 unar(파일명 인코딩 자동 감지), 추가·삭제·새로 만들기는 7zz(표준 UTF-8 이름).
+        # 위 "참고 3" 참고.
+        patches = (old.patches or []) ++ [../../_data/xarchiver/zip-unar.patch];
         postPatch =
           (old.postPatch or "")
           + ''

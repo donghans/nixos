@@ -1,0 +1,83 @@
+diff -ru a/src/7zip.c b/src/7zip.c
+--- a/src/7zip.c	2026-11-05 18:45:28.981455329 +0900
++++ b/src/7zip.c	2026-11-05 18:45:28.986079670 +0900
+@@ -30,6 +30,7 @@
+ #include "support.h"
+ #include "window.h"
+ 
++#define WRITER (archiver[archive->type].program[2] ? archiver[archive->type].program[2] : archiver[archive->type].program[0])
+ #define INDEX (archive->type == XARCHIVETYPE_RAR ? (TAGTYPE(archive->tag) == 4 ? 0 : 1) : 0)
+ #define READ_ONLY (TAGTYPE(archive->tag) == 'x')   // exe
+ 
+@@ -508,7 +509,7 @@
+ 	files = xa_quote_filenames(file_list, NULL, DIR_WITH_SLASH);
+ 	password_str = xa_7zip_password_str(archive);
+ 	solid = g_strconcat(" -ms=", archive->do_solid ? "on" : "off", NULL);
+-	command = g_strconcat(archiver[archive->type].program[0],
++	command = g_strconcat(WRITER,
+ 	                      archive->do_update ? " u" : (archive->do_freshen ? " u -ur0" : " a"),
+ 	                      archive->do_remove ? " -sdel" : "",
+ 	                      archive->type == XARCHIVETYPE_7ZIP ? solid : "",
+@@ -537,7 +538,7 @@
+ 
+ 	files = xa_quote_filenames(file_list, NULL, DIR_WITH_SLASH);
+ 	password_str = xa_7zip_password_str(archive);
+-	command = g_strconcat(archiver[archive->type].program[0], " d", password_str, " -bd -spd -y ", archive->path[1], " --", files->str, NULL);
++	command = g_strconcat(WRITER, " d", password_str, " -bd -spd -y ", archive->path[1], " --", files->str, NULL);
+ 	g_free(password_str);
+ 	g_string_free(files,TRUE);
+ 
+diff -ru a/src/archive.h b/src/archive.h
+--- a/src/archive.h	2026-11-05 18:45:28.981676791 +0900
++++ b/src/archive.h	2026-11-05 18:45:28.984910145 +0900
+@@ -105,7 +105,7 @@
+ 
+ typedef struct
+ {
+-	gchar *program[2];
++	gchar *program[3];   /* [2]: ZIP only - writer (add/delete) when [0]/[1] are lsar/unar */
+ 	gboolean is_compressor;
+ 	GSList *type;
+ 	GSList *glob;
+diff -ru a/src/main.c b/src/main.c
+--- a/src/main.c	2026-11-05 18:45:28.981991997 +0900
++++ b/src/main.c	2026-11-05 18:45:28.985205655 +0900
+@@ -1011,6 +1011,8 @@
+ 
+ 	type = XARCHIVETYPE_ZIP;
+ 
++	gboolean zip_unar = FALSE;
++
+ 	if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(prefs_window->prefer_unzip)) ||
+ 	    (!is7za && !lsar))
+ 	{
+@@ -1040,6 +1042,16 @@
+ 			/* alternative compressor */
+ 			path = g_strconcat(sevenz, " -tzip", NULL);
+ 			archiver[type].is_compressor = TRUE;
++
++			/* legacy (non-UTF-8) file names in ZIPs: 7z can't detect the code page, unar can.
++			   List/test/extract with lsar/unar, add/delete (-> standard UTF-8 names) with 7z */
++			if (lsar && unar)
++			{
++				archiver[type].program[2] = path;
++				path = g_strdup(lsar);
++				archiver[type].program[1] = g_strdup(unar);
++				zip_unar = TRUE;
++			}
+ 		}
+ 		else if (!path)
+ 		{
+@@ -1106,9 +1118,9 @@
+ 		archiver[type].tags = g_slist_append(archiver[type].tags, g_slist_last(archiver[type].type)->data);
+ 
+ 		archiver[type].ask = FUNC(standard, xa_zip_ask, is7za, xa_7zip_ask, lsar, xa_unar_ask);
+-		archiver[type].list = FUNC(standard, xa_zip_list, is7za, xa_7zip_list, lsar, xa_unar_list);
+-		archiver[type].test = FUNC(standard, xa_zip_test, is7za, xa_7zip_test, lsar, xa_unar_test);
+-		archiver[type].extract = FUNC(standard, xa_zip_extract, is7za, xa_7zip_extract, unar, xa_unar_extract);
++		archiver[type].list = zip_unar ? xa_unar_list : FUNC(standard, xa_zip_list, is7za, xa_7zip_list, lsar, xa_unar_list);
++		archiver[type].test = zip_unar ? xa_unar_test : FUNC(standard, xa_zip_test, is7za, xa_7zip_test, lsar, xa_unar_test);
++		archiver[type].extract = zip_unar ? xa_unar_extract : FUNC(standard, xa_zip_extract, is7za, xa_7zip_extract, unar, xa_unar_extract);
+ 		archiver[type].add = FUNC(standard, xa_zip_add, is7za, xa_7zip_add, lsar, NULL);
+ 		archiver[type].delete = FUNC(standard, xa_zip_delete, is7za, xa_7zip_delete, lsar, NULL);
+ 	}
