@@ -135,4 +135,15 @@ for p in $QA_PROJECTS; do su - "$QA_USER" -c "mkdir -p ~/qa-playwright/flow_${p%
 # 8) 세션을 새로 시작해 자동 로그인·확장·dconf 를 적용
 log "GDM 재시작"
 systemctl restart gdm3
+# 이미 로그인돼 있던 VM(채택한 기존 VM)에서는 첫 재시작이 자동 로그인을 적용하지 못하고 greeter 에서 멈춘 적이 있다(2026-11-05 확인).
+# 그래픽 세션(Type=wayland/x11)이 안 생기면 한 번 더 재시작한다(재시작만으로 복구되는 것은 README 「재로그인 주의」와 같다).
+qa_session() { loginctl list-sessions --no-legend | awk -v u="$QA_USER" '$3==u{print $1}' | while read -r s; do
+  case "$(loginctl show-session "$s" -p Type --value)" in wayland|x11) echo "$s";; esac; done | grep -q .; }
+for _ in $(seq 1 15); do qa_session && break; sleep 2; done
+if ! qa_session; then
+  log "자동 로그인이 적용되지 않아 GDM 을 한 번 더 재시작"
+  systemctl restart gdm3
+  for _ in $(seq 1 15); do qa_session && break; sleep 2; done
+  qa_session || log "경고: $QA_USER 그래픽 세션이 없다 — 부팅 직후가 아니면 자동 로그인이 안 될 수 있다(README 「재로그인 주의」)"
+fi
 log "완료(uid $UID_N, 규칙: ${QA_PROJECTS:-없음})"

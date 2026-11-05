@@ -46,7 +46,7 @@
 - **`incus-win11` 과의 차이**: win11 은 프로필·설치 ISO(autounattend 포함)만 선언하고 **인스턴스는 사람이 만든다**(Windows ISO·라이선스를 선언할 수 없어 자동 생성 불가). qa-desktop 은 서버의 `incus-*-lxc.nix` 관례(「없으면 만든다」)를 따른다.
 - **측정(이 호스트, 이미지 캐시됨)**: 없는 상태에서 `ensure` 235초(생성 12초 + 프로비저닝 약 4분) · 재프로비저닝 11~120초(Playwright 재설치 여부에 따라) · 멈춘 VM 복구 · 선언 변경 감지 · `status`. 검증은 임시 VM(`qa-desktop-test`, 3GiB)로 했고 운영 VM 은 변하지 않음(설정 해시 동일).
 - **시험이 잡아낸 것**: ① 완료 파일(`gnome-initial-setup-done`)이 오히려 **업그레이드 마법사**를 켠다(조건: done 이 있고 `upgrade-<버전>-done` 이 없을 때) → 사용자 유닛을 마스크 ② 세션을 강제 종료하며 생긴 gnome-shell 크래시 보고가 새 세션에 apport 대화상자로 뜸 → 보고 삭제 + apport 끔 ③ `incus list <이름>` 은 접두 일치라 `qa-desktop-test` 가 `qa-desktop` 을 오염 → `^이름$` 정확 일치 ④ **실행 중인 VM 의 스냅샷이 프로비저닝 직후 수 분 막힘**(수동 재시도는 0.2초; 원인 미확정) → 최초 생성 때만 껐다(1초)·오프라인 스냅샷(0초)·켜기(10초) ⑤ Playwright `^1.63.0` 이 1.64 로 올라감 → `~1.63.0`.
-- **한계**: 새 VM 은 기존 운영 VM 과 **완전히 같지는 않다**(기존은 설치 ISO 로 설치, 새것은 이미지 기반; 한 세대 차이 — Playwright Chromium 리비전·패키지 버전). 운영 VM 에는 `incus-agent` 가 없어 `incus exec` 프로비저닝이 불가해서 **채택만** 하고, 갈아타려면 새 VM 을 만들어 옮긴다(사용자 결정). 다른 호스트(노트북)에서의 서비스 동작은 이 호스트의 임시 VM 으로만 검증했다(같은 프리셋).
+- **한계**: 새 VM 은 기존 운영 VM 과 **완전히 같지는 않다**(기존은 설치 ISO 로 설치, 새것은 이미지 기반; 한 세대 차이 — Playwright Chromium 리비전·패키지 버전). 운영 VM 은 ISO 로 설치해 `incus-agent` 가 없었으나 **2026-11-05 에 수동으로 설치**했다(아래 「기존 VM 에 에이전트 설치」). 그래서 `provision --yes` 로 선언을 적용할 수 있고 신규 VM 과 도구 경로가 같다. 설치 방식 차이(위)는 남으므로 완전히 같게 하려면 새 VM 을 만들어 옮긴다(사용자 결정). 다른 호스트(노트북)에서의 서비스 동작은 이 호스트의 임시 VM 으로만 검증했다(같은 프리셋).
 
 ## 처음 보는 세션·프로젝트가 막히지 않게 (2026-10-23 감사)
 - 스킬 `donghans-qa-desktop` 에 **사전 점검**(VM·키·접속·프로젝트 규칙·점유 확인)을 넣었다. 어긋나면 임의로 만들거나 고치지 않고 사용자에게 알린다(VM 생성·설정은 승인 필요 작업).
@@ -55,7 +55,7 @@
 - 프로젝트 지침 파일 규약·`context.py --init`·worktree 처리는 스킬 `donghans-qa` §0-A, 에이전트 결합 분석은 `mods/_tools/llm/llm-ctx/portability.md`.
 
 ## 운영 사실 (VM)
-- 접속은 SSH 키만(`~/.ssh/qa_desktop_ed25519`, 계정 `qa`, 비밀번호 없음). `incus exec` 는 VM 에이전트가 없어 안 된다.
+- 접속은 SSH 키만(`~/.ssh/qa_desktop_ed25519`, 계정 `qa`, 비밀번호 없음). `incus exec` 도 된다(2026-11-05 에 에이전트 설치, 재부팅 뒤 자동 시작 확인).
 - 화면 잠금 해제·절전 끔(`lock-enabled false`, `idle-delay 0`)이 전제다. 계정에 비밀번호가 없어 잠기면 GUI 로 못 푼다.
 - **재로그인 주의**: `gnome-session-quit` 으로 로그아웃하면 GDM 자동 로그인이 적용되지 않고 greeter 에서 멈춘다(자동 로그인은 부팅 직후에만). `sudo systemctl restart gdm3` 으로 복구(2026-10-23 실제로 이렇게 복구, VM 재시작·스냅샷 복원 불필요). 복구 후 자동 로그인·`lock-enabled`·`run.sh` 의 Xwayland 인증 파일명(재로그인마다 바뀜)을 확인한다.
 - 크래시: incus 상태 RUNNING 인데 ssh 가 `No route to host`. 원인 미확정(2026-09-08 이후 `raw.qemu=-cpu host` 와 메모리 16→8GiB 로 재현 안 됨). 복구는 `journalctl -b -1` → `incus restart qa-desktop --force`.
@@ -89,3 +89,15 @@ genple·ToT QA 가 `--shared` 로 겹쳐 돌 때 남은 의심(상대 창 종료
 - **시도한 것(모두 효과 없음, 원복함)**: ① `org.gnome.desktop.wm.preferences focus-new-windows strict`(smart 와 동일하게 끌림) ② 새 창이 끌어올 때 3초 안에 이전 데스크톱으로 되돌리는 GNOME 확장 — 되돌려도 GNOME 이 8ms 간격으로 다시 따라가는 왕복이 3초간 이어지고 결국 끌린 상태로 끝남(깜박임만 생김) ③ 포커스 해제(`unset_input_focus`) 병행: 효과 없음 ④ 창이 보이기 전(`window-created`)에 확장이 먼저 전용 데스크톱으로 옮기기: 효과 없음. 확장·설정은 모두 제거·원복했다(VM 의 enabled-extensions 는 Auto Move 하나, focus-new-windows=smart).
 - **원인 범위**: Playwright 때문이 아니다(플래그 없이 직접 띄운 chrome 도 같은 끌림이 보였으나, 그 시험은 직접 띄운 chrome 이 키링 생성 대화상자를 띄워 화면이 오염돼 증거로 약하다). 포커스 정책·Auto Move 의 이동 시점도 원인이 아님을 위 ①④로 배제 — 남는 후보는 Mutter 가 「새 창이 비활성 데스크톱에 열리면 그 창을 활성화하며 전환」하는 내부 동작이나 chrome 의 활성화 요청이다. 설정·확장 수준에서는 못 막는다고 보고 **운용으로 완화**한다: 창은 시험 시작 때 한 번만 띄우고, 그 순간 사용자가 보던 화면이 바뀔 수 있음을 시작 알림에 포함한다.
 - **노이즈 내성(통과)**: 두 headed 창(genple-qa·tot-qa)이 70초간 클릭 없는 입력(focus+keyboard.type 30자)·`page.screenshot`·하트비트를 반복하는 동안 사용자 조작을 흉내 낸 노이즈를 55초 걸었다 — Super+휠 18회, Super 탭(개요)+휠+Esc 8회, 개요 열었다 닫기 5회, Ctrl+Alt+방향키 11회(총 42). 결과: 라운드 genple 80·tot 81 회에서 **입력 오류 0, 빈 캡처 0, 창 닫힘 0, 예외 0**(라운드 최대 간격 약 970ms, 평시 약 700ms). 한계: 캡처는 크기만 확인했고 내용 일치는 보지 않았다. 클릭 계열 입력(`locator.click`)은 노이즈 시험에 넣지 않았다(창을 끌어오는 별도 문제).
+
+## 기존 VM 에 에이전트 설치 (2026-11-05)
+ISO 로 직접 만든 VM 은 `incus-agent` 가 없어 `qa-desktop-ctl provision` 이 「에이전트 없음」으로 멈춘다. 새로 만들지 않고 VM 안에서 incus 가 주는 설정 공유로 설치했다(VM 에 SSH 접속 + sudo 가 전제).
+```bash
+sudo mkdir -p /mnt/incus-cfg && sudo mount -t 9p config /mnt/incus-cfg
+sudo sh -c 'cd /mnt/incus-cfg && sh ./install.sh'   # 마운트 디렉터리는 root 전용이라 sudo 셸 안에서 cd 해야 한다
+sudo umount /mnt/incus-cfg && sudo rmdir /mnt/incus-cfg
+sudo systemctl start incus-agent                     # 서비스는 udev 룰로 기동되는 static 유닛(재부팅 시 자동)
+```
+- 순서: 점유 확인 → 스냅샷(`pre-agent-20261105`) → 설치 → `qa-desktop-ctl provision --yes`. 설치는 유닛·udev 룰 복사와 `daemon-reload` 뿐이라 GUI 세션에 영향이 없다.
+- 결과: `incus exec` 동작, 재부팅 뒤 에이전트 자동 시작·부팅 직후 자동 로그인 확인, `status` 선언 일치. 프로비저닝이 새로 넣은 것은 시스템 dconf 기본값·`~/qa-tools`·동적 `run.sh`(이미 있던 계정·자동 로그인·창 배치 규칙·Playwright 1.63.0 은 그대로).
+- **프로비저닝 끝의 GDM 재시작이 greeter 에서 멈춘 적이 있다**(이미 로그인된 VM). 한 번 더 재시작하면 복구됐고, `provision.sh` 가 그래픽 세션이 없으면 한 번 더 재시작하도록 고쳤다(저장소 반영 후 `nixup home` 으로 배포해야 선언 지문이 바뀌고 `provision` 으로 적용된다).
