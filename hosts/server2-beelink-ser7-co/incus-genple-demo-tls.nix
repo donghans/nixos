@@ -1,21 +1,28 @@
 # demo.genple.ai는 공인 IP가 아니라 Tailscale CGNAT IP(100.64.x.x)를 A 레코드로
 # 직접 가리킨다(외부 노출 없이 Tailscale 사용자만 접근시키려는 의도) → Let's Encrypt가
 # 80/443으로 직접 접근할 수 없어 HTTP-01/TLS-ALPN-01 챌린지가 원천적으로 불가능하다.
-# 그래서 DNS-01 챌린지가 필수인데, genple.ai의 DNS는 Squarespace가 관리하고
-# Squarespace는 Caddy/lego용 DNS-01 API 플러그인이 없다 → acme.sh의 dns_manual 모드로
-# 매 발급/갱신 시 TXT 레코드를 사람이 직접 Squarespace에 추가해야 한다(완전 자동화 불가).
+# 그래서 DNS-01 챌린지가 필수다.
+#
+# genple.ai 의 네임서버는 2026-11-05 Squarespace(googledomains) → AWS Route53 으로
+# 위임했다(도메인 등록·결제는 Squarespace 에 그대로, 바뀐 것은 NS 뿐). Route53 호스티드
+# 존은 Z10223562GL0655J868CH, 인증서 갱신용 IAM 사용자는 acme-genple-ai 이며
+# 그 존의 TXT 만 고칠 수 있는 최소 권한이다(route53:ChangeResourceRecordSets,
+# ListResourceRecordSets, GetChange, ListHostedZones*). 그래서 acme.sh 의 dns_aws 로
+# 발급/갱신이 완전 자동이다(예전 dns_manual 은 90일마다 사람이 TXT 를 넣어야 해서
+# 2026-10-20 에 만료 사고가 났다).
 #
 # 이 파일은 genple-demo LXC(Alpine) 안에 caddy + acme.sh를 설치하고 Caddyfile을
-# 준비하는 것까지만 한다. 실제 인증서 발급(DNS TXT 수동 등록)은 대화형 작업이라
-# 이 systemd 서비스가 대신할 수 없다 — 최초 1회는 아래 "발급 절차" 안내를 따라
-# 사람이 직접 실행해야 한다.
+# 준비하며, IAM 키를 컨테이너로 밀어 넣는다. 키는 호스트의
+# /var/lib/nix-secrets/route53/acme.env (root 600, AWS_ACCESS_KEY_ID=…/AWS_SECRET_ACCESS_KEY=…)
+# 에 사람이 둔다(저장소에 없음). 최초 발급과 키 교체 때는 아래 "발급 절차"를 한 번 실행한다 —
+# acme.sh 가 환경변수로 받은 키를 account.conf 에 스스로 저장해 이후 cron 갱신은 자동이다.
 {
   pkgs,
   lib,
   ...
 }: {
   systemd.services.incus-setup-genple-demo-tls = {
-    description = "Install Caddy + acme.sh in genple-demo LXC for demo.genple.ai TLS (DNS-01 manual)";
+    description = "Install Caddy + acme.sh in genple-demo LXC for demo.genple.ai TLS (DNS-01 via Route53)";
     after = ["incus-setup-genple-demo.service"];
     requires = ["incus-setup-genple-demo.service"];
     partOf = ["incus-setup-genple-demo.service"];
@@ -27,14 +34,22 @@
       TimeoutStartSec = "120";
     };
     script = ''
+      # IAM 키 주입은 caddy 가 이미 설치돼 있어도(아래 early-exit) 매번 수행한다 — 키 교체 반영용.
+      if [ -f /var/lib/nix-secrets/route53/acme.env ]; then
+        incus file push --mode 0600 /var/lib/nix-secrets/route53/acme.env genple-demo/root/.acme-route53.env \
+          || echo "genple-demo: Route53 키 주입 실패(컨테이너 미기동?)" >&2
+      else
+        echo "genple-demo: /var/lib/nix-secrets/route53/acme.env 없음 — Route53 키 미주입" >&2
+      fi
+
       if incus exec genple-demo -- which caddy &>/dev/null; then
         exit 0
       fi
 
       incus exec genple-demo -- apk add --no-cache caddy curl openssl
 
-      # acme.sh는 apk 패키지가 없어 공식 설치 스크립트 사용 (cron 자동 등록은 되지만
-      # dns_manual 모드라 실제 갱신 시엔 사람이 TXT를 다시 넣어야 동작함)
+      # acme.sh는 apk 패키지가 없어 공식 설치 스크립트 사용 (cron 이 자동 갱신하며
+      # dns_aws 로 Route53 에 TXT 를 직접 넣고 지운다)
       incus exec genple-demo -- sh -c '[ -x /root/.acme.sh/acme.sh ] || curl -s https://get.acme.sh | sh -s email=donghans@bitstep.it'
 
       # 인증서는 /root(700, root 전용) 아래가 아니라 /etc/caddy/certs 아래 caddy
@@ -60,19 +75,19 @@
       incus exec genple-demo -- rc-update add caddy default
 
       echo "genple-demo: caddy + acme.sh 설치 완료." >&2
-      echo "인증서 발급은 아직 안 됨 — 아래 절차를 genple-demo 컨테이너 안에서 직접 실행:" >&2
+      echo "인증서 발급 절차(최초 1회·키 교체 때) — genple-demo 컨테이너 안에서:" >&2
       echo "" >&2
-      echo "1) incus exec genple-demo -- /root/.acme.sh/acme.sh --issue --dns dns_manual -d demo.genple.ai --yes-I-know-dns-manual-mode-enough-go-ahead-please" >&2
-      echo "   → 출력된 TXT 레코드(_acme-challenge.demo.genple.ai)를 Squarespace DNS에 추가" >&2
-      echo "2) TXT 전파 확인 후 (dig TXT _acme-challenge.demo.genple.ai) 같은 명령 다시 실행" >&2
-      echo "3) incus exec genple-demo -- /root/.acme.sh/acme.sh --install-cert -d demo.genple.ai \\" >&2
+      echo "1) incus exec genple-demo -- sh -c 'set -a; . /root/.acme-route53.env; set +a; \\" >&2
+      echo "     /root/.acme.sh/acme.sh --issue --dns dns_aws -d demo.genple.ai --keylength ec-256 --server letsencrypt'" >&2
+      echo "   (acme.sh 가 키를 account.conf 에 저장 → 이후 갱신은 cron 이 자동)" >&2
+      echo "2) incus exec genple-demo -- /root/.acme.sh/acme.sh --install-cert --ecc -d demo.genple.ai \\" >&2
       echo "     --cert-file /etc/caddy/certs/demo.genple.ai/cert.cer \\" >&2
       echo "     --key-file /etc/caddy/certs/demo.genple.ai/demo.genple.ai.key \\" >&2
       echo "     --fullchain-file /etc/caddy/certs/demo.genple.ai/fullchain.cer \\" >&2
       echo "     --reloadcmd 'chown -R caddy:caddy /etc/caddy/certs && rc-service caddy restart'" >&2
-      echo "4) incus exec genple-demo -- rc-service caddy start" >&2
+      echo "3) incus exec genple-demo -- rc-service caddy start" >&2
       echo "" >&2
-      echo "90일 인증서 → 만료 전(약 60일차) 같은 1~3 절차 반복 필요 (Squarespace TXT 자동화 불가)" >&2
+      echo "90일 인증서 → acme.sh cron 이 만료 전에 자동 갱신(Route53 TXT 자동)." >&2
     '';
   };
 }
