@@ -226,9 +226,27 @@ async def t_quit():
         await settle(pilot, 10); await pilot.press("escape"); await settle(pilot, 5)
         check("--quick 은 Esc 로 확인 없이 바로 종료", not app.is_running)
 
+async def t_dim():
+    from dispctl import brightness as b
+    app = ui.DisplayUI(focus="dim")
+    async with app.run_test(size=(140, 46)) as pilot:
+        await settle(pilot, 10)
+        check("절전 밝기 칸: 6 으로 포커스, 기본 5%/1분", app.focused.id == "dimlevel" and app.query_one("#dimlevel", Select).value == "5" and app.query_one("#dimdelay", Select).value == "60")
+        check("절전 밝기 칸이 보임(전원·백라이트 정보 있음)", app.query_one("#dimbox").display)
+        app.query_one("#dimlevel", Select).value = "15"; await settle(pilot, 5); app.query_one("#dimdelay", Select).value = "120"; await settle(pilot, 5)
+        c = b.load_conf(); check("밝기·시간 선택이 설정 파일에 저장", c["dim_level"] == 15 and c["dim_delay"] == 120, str(c))
+        app.query_one("#dimpause", Select).value = "off"; await settle(pilot, 5)
+        check("이번 배터리 끄기 선택 → 런타임 상태에 기록", b.status()["paused"] is True)
+        app.query_one("#dimpause", Select).value = "on"; await settle(pilot, 5)
+        check("다시 켜기", b.status()["paused"] is False)
+    app = ui.DisplayUI(focus="mode")
+    async with app.run_test(size=(140, 46)) as pilot:
+        await settle(pilot, 10); await pilot.press("6"); await settle(pilot, 3)
+        check("숫자 6 → 절전 밝기 포커스, 저장값 복원", app.focused.id == "dimlevel" and app.query_one("#dimlevel", Select).value == "15")
+
 async def main():
     only = os.environ.get("ONLY")
-    for t in [x for x in (t_basic, t_arrange, t_focus, t_cursor, t_layout_quick, t_apply_confirm, t_misc, t_quit, t_obs) if not only or x.__name__ == only]:
+    for t in [x for x in (t_basic, t_arrange, t_focus, t_cursor, t_layout_quick, t_apply_confirm, t_misc, t_dim, t_quit, t_obs) if not only or x.__name__ == only]:
         try: await t()
         except Exception:
             import traceback; traceback.print_exc(); results.append(False); print("FAIL (예외)", t.__name__)

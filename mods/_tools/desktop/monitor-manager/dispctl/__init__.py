@@ -23,13 +23,14 @@ systemd 사용자 타이머(displayctl-revert)가 시간이 지나면 `displayct
   apply        규칙 적용(겹침 방지 순서), 검증, 창 이동, 회전/터치 동기화
   transaction  되돌리기(pending.json, systemd 타이머, Transaction)
   ops          동작(layout/set/rotate/preset/back), go, restore
+  brightness   전원별 밝기 기억·복원, 배터리 유휴 낮춤(hypridle 연동), 감시 데몬
   cli          명령줄(argparse, cmd_*), main
 진입점은 한 단계 위의 displayctl.py(얇은 파일)이고, 이전 단일 파일의 이름을 쓰는 displayui 와 시험은 `import displayctl as dc` 로 그대로 쓴다.
 """
-from . import config, hypr, state, layout, apply, transaction, ops, cli   # noqa: F401  (아래 순서가 의존 순서)
+from . import config, hypr, state, layout, apply, transaction, ops, brightness, cli   # noqa: F401  (아래 순서가 의존 순서)
 
 # 이전 단일 파일(displayctl.py)의 이름을 그대로 쓰는 코드를 위해 모든 이름을 패키지 수준으로 올린다(밑줄 이름 포함)
-for _m in (config, hypr, state, layout, apply, transaction, ops, cli):
+for _m in (config, hypr, state, layout, apply, transaction, ops, brightness, cli):
     for _k, _v in vars(_m).items():
         if not _k.startswith("__") and _k not in globals():
             globals()[_k] = _v

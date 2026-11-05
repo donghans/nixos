@@ -22,7 +22,7 @@ mkPartOf "mods.gui" ({
 
   # displayctl.py(얇은 진입점)와 displayui.py, 본체 패키지 dispctl/ 를 한 디렉터리에 둔다(displayui.py 가 `import displayctl` 하므로 같은 디렉터리여야 함).
   # Nix 자리표시자(@hyprctl@, @notify_send@)는 dispctl/config.py 한 곳에만 있다.
-  dispctlModules = ["__init__" "hypr" "state" "layout" "apply" "transaction" "ops" "cli" "observelog"];
+  dispctlModules = ["__init__" "hypr" "state" "layout" "apply" "transaction" "ops" "brightness" "cli" "observelog"];
   dir = pkgs.runCommand "display-py" {} ''
     mkdir -p $out/dispctl
     cp ${pkgs.writeText "displayctl.py" (src "displayctl.py")} $out/displayctl.py
@@ -33,8 +33,17 @@ mkPartOf "mods.gui" ({
     cp ${pkgs.writeText "config.py" (builtins.replaceStrings ["@hyprctl@" "@notify_send@"] [hyprctl "${pkgs.libnotify}/bin/notify-send"] (src "dispctl/config.py"))} $out/dispctl/config.py
     ${lib.concatMapStrings (n: "cp ${pkgs.writeText "${n}.py" (src "dispctl/${n}.py")} $out/dispctl/${n}.py\n") dispctlModules}
   '';
-  displayctl = pkgs.writeShellScriptBin "displayctl" ''exec ${py}/bin/python3 ${dir}/displayctl.py "$@"'';
-  displayui = pkgs.writeShellScriptBin "displayui" ''exec ${py}/bin/python3 ${dir}/displayui.py "$@"'';
+  # brightnessctl 은 밝기 기억·절전 낮춤(dispctl/brightness.py)이 쓴다
+  displayctl = pkgs.writeShellScriptBin "displayctl" ''
+    export DISPLAYCTL_BRIGHTNESSCTL="''${DISPLAYCTL_BRIGHTNESSCTL:-${pkgs.brightnessctl}/bin/brightnessctl}"
+    exec ${py}/bin/python3 ${dir}/displayctl.py "$@"
+  '';
+  displayui = pkgs.writeShellScriptBin "displayui" ''
+    export DISPLAYCTL_BRIGHTNESSCTL="''${DISPLAYCTL_BRIGHTNESSCTL:-${pkgs.brightnessctl}/bin/brightnessctl}"
+    exec ${py}/bin/python3 ${dir}/displayui.py "$@"
+  '';
+  laptop = config.workspace.type == "laptop";
+  dimDelays = [30 60 120 300]; # dispctl/brightness.py 의 DELAYS 와 같아야 함(displayui 에서 고르는 값마다 hypridle 리스너가 하나씩 필요)
 
   # 전용 창(class=displayui)으로 열기.
   #  --toggle : 이미 떠 있으면 닫기 (단축키용)
@@ -71,6 +80,30 @@ in {
       categories = ["Settings" "HardwareSettings"];
       icon = "preferences-desktop-display";
     };
+
+    # 노트북: 전원(AC/배터리)별 마지막 밝기를 기억해 전원이 바뀔 때 복귀시키는 감시 서비스(2초 폴링, 변화 없으면 파일 쓰기 없음).
+    # 데스크톱은 백라이트가 없어 만들지 않는다(만들어도 즉시 종료).
+    systemd.user.services.display-brightness = lib.mkIf laptop {
+      Unit = {
+        Description = "전원별 밝기 기억·복원 (displayctl brightness watch)";
+        After = ["graphical-session.target"];
+        PartOf = ["graphical-session.target"];
+      };
+      Service = {
+        ExecStart = "${displayctl}/bin/displayctl brightness watch";
+        Restart = "on-failure";
+        RestartSec = 5;
+      };
+      Install.WantedBy = ["graphical-session.target"];
+    };
+
+    # 배터리에서 입력이 없을 때 밝기 낮춤: displayui 에서 고른 시간과 같은 리스너만 실제로 동작한다(나머지는 즉시 반환). 입력이 돌아오면 wake.
+    services.hypridle.settings.listener = lib.mkIf laptop (map (t: {
+        timeout = t;
+        on-timeout = "${displayctl}/bin/displayctl brightness idle ${toString t}";
+        on-resume = "${displayctl}/bin/displayctl brightness wake";
+      })
+      dimDelays);
 
     wayland.windowManager.hyprland.extraConfig = ''
       -- 화면 관리 TUI 창: 모니터 크기에 비례해 가운데에

@@ -25,6 +25,7 @@ from textual.widgets.option_list import Option
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import displayctl as dc  # noqa: E402
+from dispctl import brightness as dbr  # noqa: E402
 import os
 import sys
 
@@ -36,10 +37,14 @@ except ImportError:                                # 소스 트리: ../uikit
 from dispctl.observelog import events as observe_events  # noqa: E402
 
 FOCUS_IDS = {
-    "mode": "modes", "monitors": "mons", "resolution": "res", "refresh": "hz", "scale": "scale", "position": "rel",
+    "mode": "modes", "monitors": "mons", "resolution": "res", "refresh": "hz", "scale": "scale", "position": "rel", "dim": "dimlevel",
 }
 CONFIRM_SECONDS = int(os.environ.get("DISPLAYUI_CONFIRM", "10"))
 NARROW = 100  # 이 폭 미만이면 모드 목록과 설정을 위아래로
+
+
+def _delay_label(v: int) -> str:
+    return f"{v}초" if v < 60 else f"{v // 60}분"
 
 
 def hz_key(hz: float) -> str:
@@ -126,6 +131,7 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
         ('화면 모드', '확장 / 미러 / 내장만 / 외부만 — Enter 로 바로 적용. 1 로 목록에 포커스'),
         ('프리셋', '프리젠테이션 등 해상도 조합 — Enter 적용, F3 저장, Delete 삭제'),
         ('확인 시간', '적용하면 정해진 시간(기본 10초) 안에 확인하지 않으면 이전 구성으로 되돌린다 — 되지 않는 모드로 화면이 안 나와도 스스로 복구된다'),
+        ('배터리 절전 밝기', '6 — 배터리에서 정해진 시간 입력이 없으면 밝기를 낮춤(5/10/15/20/25%, 30초/1분/2분/5분). 「이번 배터리 끄기」는 AC 에 연결했다 빼거나 재부팅하면 다시 켜짐. AC·배터리 각각 마지막 밝기는 전원이 바뀔 때 자동 복귀'),
         ('모니터별 설정', '2 해상도 · 3 주사율 · 4 배율 · 5 위치 · F2 적용. 위치는 기준 모니터에 대한 상대 위치와 정렬'),
     ]
     HELP_NOTES = [
@@ -147,7 +153,10 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
     #mons > .datatable--header { background: #000000; color: #9a9a9a; text-style: none; }
     #mons > .datatable--cursor { background: #1b2a38; color: #cfcfcf; text-style: none; }
     #mons:focus > .datatable--cursor { background: #268bd2; color: #ffffff; text-style: none; }
-    #form { height: auto; padding: 0 1; }
+    #form, #dimbox { height: auto; padding: 0 1; }
+    #dimbox { background: #000000; border: round #595959; border-title-color: #9a9a9a; }
+    #dimbox:focus-within { border: round #33ccff; border-title-color: #33ccff; border-title-style: bold; }
+    #dimstat { color: #7a7a7a; }
     .row { height: 1; margin-bottom: 1; }
     .row Label { width: 12; color: #9a9a9a; }
     .row Select { width: 1fr; height: 1; }
@@ -171,6 +180,7 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
         Binding("3", "focus_to('hz')", "주사율"),
         Binding("4", "focus_to('scale')", "배율"),
         Binding("5", "focus_to('rel')", "위치"),
+        Binding("6", "focus_to('dimlevel')", "절전 밝기"),
         Binding("f2", "apply", "적용"),
         Binding("f3", "save_preset", "프리셋 저장"),
         Binding("delete", "delete_preset", "프리셋 삭제"),
@@ -216,6 +226,17 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
                     with Horizontal(id="buttons"):
                         yield Button("적용 (F2)", id="apply", variant="primary")
                         yield Button("기본 구성으로 초기화", id="reset")
+                with Vertical(id="dimbox"):
+                    with Horizontal(classes="row"):
+                        yield Label("밝기 (6)")
+                        yield Select([(f"{v}%", str(v)) for v in dbr.LEVELS], id="dimlevel", allow_blank=False)
+                    with Horizontal(classes="row"):
+                        yield Label("대기 시간")
+                        yield Select([(_delay_label(v), str(v)) for v in dbr.DELAYS], id="dimdelay", allow_blank=False)
+                    with Horizontal(classes="row"):
+                        yield Label("이번 배터리")
+                        yield Select([("자동 낮춤 사용", "on"), ("끄기 (AC 에 연결했다 빼거나 재부팅하면 다시 켜짐)", "off")], id="dimpause", allow_blank=False)
+                    yield Static("", id="dimstat")
                 yield Static("", id="msg")
         yield Footer()
 
@@ -232,7 +253,7 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
 
     def on_descendant_focus(self, event) -> None:
         w = event.widget
-        pane = next((a.id for a in [w, *w.ancestors] if a.id in ("left", "mons", "form")), None)
+        pane = next((a.id for a in [w, *w.ancestors] if a.id in ("left", "mons", "form", "dimbox")), None)
         self.ev.debug("focus", widget=w.id or type(w).__name__, pane=pane)
         for wid, title in self._pane_titles.items():
             try:
@@ -243,7 +264,8 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
     def on_mount(self) -> None:
         # lazygit 처럼 제목을 테두리 안에 둠 ("[키]-이름"). 포커스가 있는 칸은 제목 앞에 ▶ 를 붙여 Enter 가 어디로 가는지 분명히 함
         self._pane_titles = {}
-        for wid, title, sub in (("#left", "\\[m] 화면 모드 / 프리셋", "Enter 적용"), ("#mons", "모니터", ""), ("#form", "선택한 모니터 설정", "")):
+        for wid, title, sub in (("#left", "\\[m] 화면 모드 / 프리셋", "Enter 적용"), ("#mons", "모니터", ""), ("#form", "선택한 모니터 설정", ""),
+                               ("#dimbox", "\\[6] 배터리 절전 밝기 (노트북)", "")):
             box = self.query_one(wid)
             box.border_title = title
             box.border_subtitle = sub
@@ -277,6 +299,26 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
         self.fill_modes()
         self.fill_table()
         self.fill_form()
+        self.fill_dim()
+
+    def fill_dim(self) -> None:
+        if not self.screen_stack:             # 종료 중
+            return
+        base = self.screen_stack[0]           # 확인 창이 떠 있어도 기본 화면의 위젯을 찾도록
+        box = base.query_one("#dimbox")
+        st = dbr.status()
+        box.display = st["power"] is not None and dbr.backlight_dir() is not None   # 노트북(전원·백라이트 정보가 있는 기기)만
+        self._updating = True
+        try:
+            base.query_one("#dimlevel", Select).value = str(st["dim_level"])
+            base.query_one("#dimdelay", Select).value = str(st["dim_delay"])
+            base.query_one("#dimpause", Select).value = "off" if st["paused"] else "on"
+        finally:
+            self._updating = False
+        mem = st["mem"]
+        pw = {"ac": "AC", "bat": "배터리", None: "-"}[st["power"]]
+        base.query_one("#dimstat", Static).update(
+            f"지금 {pw} · 밝기 {st['pct']}%   마지막 밝기 — AC {mem.get('ac', '-')}% / 배터리 {mem.get('bat', '-')}%  (전원이 바뀌면 자동 복귀)")
 
     def fill_modes(self) -> None:
         ol = self.query_one("#modes", OptionList)
@@ -395,7 +437,24 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
             self.fill_form()
 
     def on_select_changed(self, ev: Select.Changed) -> None:
-        if self._updating or ev.select.id != "res":
+        sid = ev.select.id
+        if sid in ("dimlevel", "dimdelay", "dimpause"):
+            # (값을 채우는 동안 발생한 이벤트는 뒤늦게 도착하므로 _updating 으로는 못 거름 — 저장된 값과 같으면 무시. 확인 창이 떠 있어도 안전하게)
+            if self._updating or ev.value is Select.BLANK or ev.value != ev.select.value:   # 오래된 이벤트(위젯의 현재 값과 다름)도 무시
+                return
+            st = dbr.status()
+            cur = {"dimlevel": str(st["dim_level"]), "dimdelay": str(st["dim_delay"]), "dimpause": "off" if st["paused"] else "on"}[sid]
+            if str(ev.value) == cur:
+                return
+            self.ev.info("dim.change", id=sid, value=str(ev.value))
+            if sid == "dimpause":
+                dbr.set_paused(ev.value == "off")
+            else:
+                dbr.set_conf(level=int(ev.value) if sid == "dimlevel" else None, delay=int(ev.value) if sid == "dimdelay" else None)
+            self.fill_dim()
+            self.msg("절전 밝기 설정을 저장했습니다 (바로 적용됨)")
+            return
+        if self._updating or sid != "res":
             return
         # (값을 채우는 동안 발생한 이벤트가 뒤늦게 도착하면 오래된 값 기준으로 주사율 목록을 다시 만들어 버리므로,
         #  현재 값과 다른 이벤트는 무시)

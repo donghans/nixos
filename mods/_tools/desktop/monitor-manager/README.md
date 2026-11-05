@@ -26,6 +26,19 @@ displayctl preset list|load|save|delete <이름>
 displayctl reset                      # 저장된 구성을 지우고 설정 파일의 기본 구성으로
 ```
 
+## 밝기: 전원별 기억 + 배터리 절전 낮춤 (노트북)
+
+코어 `dispctl/brightness.py`, 명령 `displayctl brightness ...`, 설정 UI 는 displayui 의 「[6] 배터리 절전 밝기」(SUPER+P 또는 앱 런처 Display Settings 후 6).
+
+- **전원별 마지막 밝기 복귀**: 사용자 서비스 `display-brightness`(`brightness watch`, 2초 폴링)가 AC/배터리 각각의 마지막 밝기(raw)를 `~/.local/state/displayctl/brightness.json` 에 기억하고, 전원이 바뀌면 새 상태의 기억 밝기를 적용한다. 그 상태의 기억이 아직 없으면 지금 밝기가 시작점. 덮개를 닫아 밝기가 0 인 동안(`lid-screen`)은 복원을 미뤘다가 열린 뒤 적용한다.
+- **배터리 유휴 낮춤**: hypridle 리스너를 30/60/120/300초마다 하나씩 만들어 두고(`monitor-manager.nix`), 각 리스너는 `brightness idle <초>` 를 부른다. 설정한 대기 시간과 같은 것만 동작(배터리, 이번 사용에서 끄지 않음, 현재 밝기가 목표보다 밝을 때). 입력이 돌아오면(`on-resume`) `brightness wake` 가 원래 밝기로 되돌린다. 낮춘 밝기는 「마지막 밝기」로 기억하지 않는다.
+- **선택지**: 낮출 밝기 5/10/15/20/25 %, 대기 시간 30초/1분/2분/5분 (기본 5 %, 1분) — 영속.
+- **이번 배터리 사용만 끄기**: `$XDG_RUNTIME_DIR/displayctl-brightness.json`(tmpfs)에만 기록 → 재부팅하면 사라지고, AC 로 바뀌면 데몬이 지운다.
+- CLI: `displayctl brightness status|config --level 15 --delay 120|pause|unpause [--json]`
+- 시험: `tests/test_brightness.py`(가짜 sysfs + 가짜 brightnessctl), UI 는 `test_ui.py` 의 `t_dim`.
+- 낮춘 상태에서 밝기 키: `hwctl/brt-control.sh` 가 조절 전에 낮춤 상태면 `brightness wake` 를 먼저 부른다(안 하면 hypridle 의 wake 와 경쟁해 사용자의 변경이 원래 밝기로 덮어써짐).
+- 미확인: 실제 기기에서 hypridle 리스너의 on-resume 이 키 입력·터치 모두에 반응하는지, 영상 재생 중(idle inhibit) 동작.
+
 ## 동작 원리
 
 - 변경은 `hyprctl eval 'hl.monitor({...})'`. **`hyprctl reload` 없이** 명시 규칙으로 전환한다.

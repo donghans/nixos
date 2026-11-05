@@ -213,6 +213,31 @@ def cmd_restore(a) -> int:
     return restore()
 
 
+def cmd_brightness(a) -> int:
+    from . import brightness as b
+    if a.action == "watch":
+        return b.watch()
+    if a.action == "idle":
+        b.idle(a.value)                                  # hypridle 이 부르는 용도 — 조건에 안 맞아 아무것도 안 해도 성공
+        return 0
+    if a.action == "wake":
+        b.wake()
+        return 0
+    if a.action == "pause":
+        b.set_paused(True)
+    elif a.action == "unpause":
+        b.set_paused(False)
+    elif a.action == "config":
+        b.set_conf(a.level, a.delay)
+    st = b.status()
+    if a.json:
+        print(json.dumps(st, ensure_ascii=False, indent=1))
+        return 0
+    print(f"전원 {st['power']}  밝기 {st['pct']}%  기억: " + ", ".join(f"{k} {v}%" for k, v in st["mem"].items()))
+    print(f"배터리 자동 낮춤: {st['dim_level']}% / {st['dim_delay']}초 / " + ("이번 배터리 사용에서는 끔" if st["paused"] else "켜짐") + (" (지금 낮춰진 상태)" if st["dimmed"] else ""))
+    return 0
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(prog="displayctl", description="Hyprland 화면 관리")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -257,5 +282,13 @@ def main(argv: list[str]) -> int:
     s.set_defaults(fn=cmd_confirm)
     s = sub.add_parser("revert-pending", help="확인되지 않은 변경을 이전 구성으로 되돌림 (되돌리기 타이머가 부름)")
     s.set_defaults(fn=cmd_revert_pending)
+    s = sub.add_parser("brightness", help="전원별 밝기 기억·복원 + 배터리 유휴 시 밝기 낮춤")
+    s.add_argument("action", choices=["status", "config", "pause", "unpause", "watch", "idle", "wake"],
+                   help="watch=데몬, idle N=hypridle 이 부름, wake=입력 재개, pause=이번 배터리 사용만 끔, config=--level/--delay")
+    s.add_argument("value", nargs="?", type=int, help="idle 의 유휴 시간(초)")
+    s.add_argument("--level", type=int, help="낮출 밝기 %% (5/10/15/20/25)")
+    s.add_argument("--delay", type=int, help="입력 없는 시간(초) (30/60/120/300)")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_brightness)
     a = p.parse_args(argv)
     return a.fn(a)
