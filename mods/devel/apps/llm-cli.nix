@@ -387,6 +387,10 @@ in {
       source = ../../_data/claude-skills/donghans-plan;
       force = true;
     };
+    home.file.".claude/skills/donghans-llm-instruction-audit" = {
+      source = ../../_data/claude-skills/donghans-llm-instruction-audit;
+      force = true;
+    };
     home.file.".claude/skills/donghans-observe" = lib.mkIf config.mods.sys.services.observe.enable {
       source = ../../_data/claude-skills/donghans-observe;
       force = true;
