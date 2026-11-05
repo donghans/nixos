@@ -557,7 +557,7 @@ def scan_candidates(conn, days=None, min_count=1):
         q += " AND m.ts > now() - make_interval(days => %s)"; args.append(days)
 
     def rows():
-        with conn.cursor(name="ctxui_scan") as cur:
+        with conn.cursor(name="llmui_scan") as cur:
             cur.itersize = 2000
             cur.execute(q, args)
             yield from cur
@@ -574,7 +574,7 @@ def ignore_fp(conn, fp, pattern=None, note=None):
 
 
 def adopt(conn, value, label, pattern=None, note=None, force=False):
-    cs.add_secret(conn, label, "literal", value, note or (f"ctxui 후보 승인({pattern})" if pattern else "ctxui 후보 승인"), False, force)
+    cs.add_secret(conn, label, "literal", value, note or (f"llmui 후보 승인({pattern})" if pattern else "llmui 후보 승인"), False, force)
 
 
 # ---------------------------------------------------------------- 프로젝트 지침(ctx_instr) — llmui 「지침」 탭
