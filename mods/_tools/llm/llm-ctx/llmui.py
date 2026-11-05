@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""ctxui — donghans 공유 컨텍스트(ctx) 관리 TUI.
+"""llmui — donghans LLM 컨텍스트(ctx) 관리·세션 TUI.
+
+  llmui              전체 화면(1~7 탭, ctx DB 에 연결)
+  llmui --sessions   7 세션 탭만 단독으로(DB 에 연결하지 않음 — `llm-sessions` 가 이것이다)
 
   1 대시보드  합계·표별 용량·저장소별 표(Enter: 그 저장소로 검색) + 한도 그래프·토큰/비용 추이·분류별·세션 통계·세션 표(Enter: 그 세션 대화). 저장소·머신·모델·기간 필터는 통계 칸에 적용
   2 검색   세션 기준 목록(제목·일치 건수·대표 일치) — Enter: 대화 열기, Space: 그 세션의 일치 메시지 펼침, x: 모두 펼침, F6: 제목만. 키워드·정규식, 저장소·기간·역할 필터
@@ -7,6 +10,7 @@
   4 비밀   등록된 비밀(출력 시 [protected] 로 치환) 관리: 추가·끄기·삭제
   5 후보   키·비밀번호처럼 보이는 문자열 자동 탐지 → 승인(등록)·무시
   6 지침   프로젝트별 지침(공유 정본 project_instructions)을 모든 저장소에 대해 보고 고친다 — 로컬 캐시 없이 DB 만 대상   (Enter: 본문 · e: 편집기)
+  7 세션   claude 가 도는 tmux 세션 목록·화면 미리보기 — Enter 붙기 · F2 새 세션 · F3 붙은 곳 떼기 · Delete 정리 (ssh·다른 터미널에서도 같은 세션). 제한 모드에서는 목록만 보인다
 
 원문(DB)은 바꾸지 않는다. 화면의 치환(F10)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. TTY 가 없으면 실행하지 않는다.
 **제한 모드**: LLM 세션이 실행한 경우(환경 표식 — llm_ctx.AGENT_ENV_MARKERS) 모든 탭을 볼 수 있되 비밀 값은 추출·조회할 수 없다 — 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(후보 패턴)을 [protected] 로 치환하고(끌 수 없음), 후보 표의 미리보기도 [protected](길이)로 보이며, 값 보기(F4)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용.
@@ -34,12 +38,18 @@ except ImportError:                                # 소스 트리: ../uikit
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_lib", "uikit"))
     import uikit
 
+try:
+    import llm_sessions as ls                      # 배포: 같은 디렉터리에 복사됨
+except ImportError:                                # 소스 트리: ../llm-sessions
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "llm-sessions"))
+    import llm_sessions as ls
+
 import llm_ctx as cc
 import ctx_secrets as cs
 import ctxchart as cch
 import ctxdata as cd
 
-TABS = [("dashboard", "대시보드"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("instr", "지침")]
+TABS = [("dashboard", "대시보드"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("instr", "지침"), ("sessions", "세션")]
 
 
 def short_repo(url: str | None) -> str:
@@ -495,10 +505,11 @@ class InstrScreen(ModalScreen):
 
 
 # ---------------------------------------------------------------- 앱
-class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
-    TITLE = "ctxui — 공유 컨텍스트 관리"
+class LlmUI(ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
+    TITLE = "llmui — LLM 컨텍스트·세션 관리"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
-        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침)'),
+        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침) · 7 세션(claude 가 도는 tmux 세션 — 붙기·새 세션·정리, DB 없이도 `llmui --sessions` 로 이 탭만 단독 실행)'),
+        *[t for t in ls.SESSIONS_HELP_TERMS if t[0] != '제한 모드'],
         ('치환(F10)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
         ('제한 모드', 'LLM 세션이 실행하면: 모든 탭을 볼 수 있지만 화면의 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(키 형식·password=·한글 비밀번호)이 [protected] 로 치환되고(끌 수 없음), 후보 미리보기도 [protected](N자)로 가려지며, 값 보기(F4)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용된다'),
         ('비용', 'Claude Code(OpenTelemetry)가 요청마다 보고한 cost_usd 의 합이다. 구독에서 실제 청구액과 같은지는 확인하지 못했다(청구액이라고 단정하지 말 것). 계정별은 요청마다 찍힌 계정(OTel user.email) 기준이고, 수집 전이거나 원본이 없는 기록은 「(계정 불명)」으로 따로 보인다. 한도 그래프는 계정 단위라 저장소·모델 필터가 걸리지 않고, 모든 계정이 같은 시간 축(최근 기간, 전체는 7일)을 쓴다. 세션 통계·세션 표의 비용·프롬프트도 선택한 기간·필터 안의 값이라 필터가 없으면 세션 비용 합 + 「세션 기록 없는 사용」 = 추이 합계다(세션 길이·최근은 세션 전체)'),
@@ -509,7 +520,7 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
     HELP_NOTES = [
         'Esc: 표가 아닌 곳에서는 표로 포커스를 돌리고, 이미 표에 있으면 종료 확인창(기본 「아니오」, ←→ 로 「예」 선택 후 Enter). Ctrl+Q 는 확인 없이 즉시 종료',
     ]
-    CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
+    CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + ls.SESSIONS_CSS + """
     PromptScreen, SessionScreen { align: center middle; }
     TabbedContent { height: 1fr; }
     TabPane { padding: 0; }
@@ -542,7 +553,7 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
     """
     BINDINGS = [
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('search')", "검색"), Binding("3", "tab('verify')", "대조"),
-        Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"), Binding("6", "tab('instr')", "지침"),
+        Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"), Binding("6", "tab('instr')", "지침"), Binding("7", "tab('sessions')", "세션"),
         Binding("escape", "escape_back", "뒤로/종료", show=False),
         Binding("f10", "toggle_mask", "치환 켬/끔"), Binding("f5", "reload", "새로고침"),
         # 같은 F키를 탭마다 다른 동작에 쓴다 — check_action 이 현재 탭의 것만 켠다(TAB_ACTIONS)
@@ -552,6 +563,7 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
         Binding("f6", "toggle_title_only", "제목만"), Binding("space", "toggle_expand", "세션 펼침", show=False), Binding("f7", "expand_all", "모두 펼침"),
         Binding("f2", "secret_add", "비밀 추가"), Binding("f3", "secret_toggle", "켬/끔"), Binding("f4", "reveal", "값 보기"),
         Binding("delete", "secret_delete", "삭제"), Binding("f2", "cand_ignore", "무시"), Binding("f2", "instr_edit", "지침 편집"),
+        Binding("f2", "sess_new", "새 세션"), Binding("f3", "sess_detach", "붙은 곳 떼기"), Binding("delete", "sess_kill", "정리(종료)"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
@@ -560,6 +572,7 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
         [protected] 로 치환하고(끌 수 없음), 값 보기(F4)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막는다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용한다."""
         super().__init__()
         self.restricted = restricted
+        self.sess_setup()
         self.mask = True
         self.only_user = False
         self.regex = False
@@ -624,6 +637,8 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
                 yield Static("", id="cdetail")
             with TabPane("6 지침", id="instr"):
                 yield uikit.box(DataTable(id="instr-table", cursor_type="row"), "프로젝트 지침(공유 정본) — Enter: 본문 · e: 편집기로 고치기")
+            with TabPane("7 세션", id="sessions"):
+                yield from self.sess_widgets()
         yield Footer()
 
     def on_mount(self):
@@ -638,6 +653,8 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
         self.query_one("#stat-sessions", DataTable).add_columns("최근", "머신", "저장소", "프롬프트", "도구", "턴시간", "비용", "모델", "첫 프롬프트")
         self.query_one("#instr-table", DataTable).add_columns("저장소", "이름", "rev", "수정 머신", "수정 시각", "길이")
         self.update_state()
+        self.sess_mount()
+        self.set_interval(3.0, self._sess_tick)
         self.reload_overview()
 
     DASH_NARROW_COLS = 110      # 이보다 좁으면 대시보드의 2열 배치를 1열로(좁은 터미널에서 표가 잘리지 않게)
@@ -737,11 +754,12 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
 
     TAB_ACTIONS = {"stat_period": {"dashboard"}, "stat_bucket": {"dashboard"}, "stat_by": {"dashboard"}, "stat_order": {"dashboard"}, "stat_clear": {"dashboard"},
                    "toggle_role": {"search"}, "toggle_regex": {"search"}, "toggle_tools": {"search"}, "toggle_title_only": {"search"}, "expand_all": {"search"},
-                   "secret_add": {"secrets"}, "secret_toggle": {"secrets"}, "secret_delete": {"secrets"}, "reveal": {"secrets", "cands"}, "cand_ignore": {"cands"}, "instr_edit": {"instr"}}
+                   "secret_add": {"secrets"}, "secret_toggle": {"secrets"}, "secret_delete": {"secrets"}, "reveal": {"secrets", "cands"}, "cand_ignore": {"cands"}, "instr_edit": {"instr"},
+                   "sess_new": {"sessions"}, "sess_detach": {"sessions"}, "sess_kill": {"sessions"}}
 
     def check_action(self, action, parameters):
         """탭 전용 동작은 그 탭에서만 켠다(같은 F키를 탭마다 다른 동작에 재사용). 제한 모드에서는 막힌 동작(치환 끄기·값 보기·비밀 추가/삭제/끄기·후보 무시)을 푸터·도움말에서 숨긴다(눌러도 deny 가 막는다)."""
-        if self.restricted and action in ("toggle_mask", "secret_add", "secret_delete", "secret_toggle", "reveal", "cand_ignore", "instr_edit"):
+        if self.restricted and action in ("toggle_mask", "secret_add", "secret_delete", "secret_toggle", "reveal", "cand_ignore", "instr_edit", *ls.SESS_ACTIONS):
             return False
         tabs = self.TAB_ACTIONS.get(action)
         if tabs is not None:
@@ -780,9 +798,19 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
                 self.reload_stats()
         elif name == "instr":
             self.reload_instr()
+        elif name == "sessions":
+            self.refresh_data()
+
+    def _sess_tick(self):
+        """세션 탭이 보일 때만 3초마다 tmux 를 다시 읽는다(다른 탭·대화 화면이 떠 있을 땐 쉬어서 tmux 를 부르지 않는다)."""
+        try:
+            if len(self.screen_stack) == 1 and self.current_tab() == "sessions":
+                self.refresh_data()
+        except Exception:
+            pass
 
     TAB_TABLES = {"dashboard": "#projects", "search": "#results", "verify": "#vrepos", "secrets": "#secrets-table", "cands": "#cands-table",
-                  "instr": "#instr-table"}      # 표가 있는 탭은 모두 표에 포커스 — 없으면 탭 키 뒤 Enter·↑↓ 가 아무 일도 안 했다
+                  "instr": "#instr-table", "sessions": "#list"}      # 표가 있는 탭은 모두 표에 포커스 — 없으면 탭 키 뒤 Enter·↑↓ 가 아무 일도 안 했다
 
     def action_focus_table(self):
         try:
@@ -811,7 +839,7 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
 
     def action_reload(self):
         t = self.current_tab()
-        {"dashboard": self.reload_dashboard, "search": self.run_search, "verify": self.run_verify, "secrets": self.reload_secrets, "cands": self.scan_candidates, "instr": self.reload_instr}[t]()
+        {"dashboard": self.reload_dashboard, "search": self.run_search, "verify": self.run_verify, "secrets": self.reload_secrets, "cands": self.scan_candidates, "instr": self.reload_instr, "sessions": self.refresh_data}[t]()
 
     def update_state(self):
         self.query_one("#sstate", Static).update(
@@ -854,7 +882,9 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
 
     def on_data_table_row_selected(self, ev: DataTable.RowSelected):
         tid, key = ev.data_table.id, (ev.row_key.value if ev.row_key else None)
-        if tid == "projects":
+        if tid == "list":                                  # 세션 탭: Enter = 붙기(제한 모드면 sess_deny 가 막는다)
+            self.action_sess_attach()
+        elif tid == "projects":
             repo = key if key and key != "(저장소 없음)" else ""
             self.query_one("#repo", Input).value = repo.replace("https://github.com/", "") if repo else ""
             self.action_tab("search")
@@ -991,7 +1021,9 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
             vh.add_row(fmt_ts(r["ts"]), r["session_id"][:8], Text(r["snippet"][:140]), key=f"{r['session_id']}|{r['uuid']}")
 
     def on_data_table_row_highlighted(self, ev: DataTable.RowHighlighted):
-        if ev.data_table.id == "vrepos" and ev.row_key and ev.row_key.value:
+        if ev.data_table.id == "list":
+            self.show_preview()
+        elif ev.data_table.id == "vrepos" and ev.row_key and ev.row_key.value:
             self.show_verify_hits(ev.row_key.value)
         elif ev.data_table.id in ("secrets-table", "cands-table"):
             self._reveal = False
@@ -1386,10 +1418,19 @@ class CtxUI(uikit.QuitMixin, uikit.HelpMixin, App):
 
 
 def main():
+    argv = sys.argv[1:]
+    if argv[:1] in (["-h"], ["--help"]):
+        print(__doc__); return
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        sys.exit("ctxui 는 화면(TTY)이 있는 터미널에서만 실행합니다")
+        sys.exit("llmui 는 화면(TTY)이 있는 터미널에서만 실행합니다")
+    if argv[:1] == ["--sessions"] and len(argv) == 1:
+        # 세션 탭만 단독으로 — DB 에 연결하지 않는다(DB 가 없는 서버에서도 동작). LLM 세션이 실행하면 목록만 보이는 제한 모드
+        ls.SessionsUI(restricted=ls.is_agent_session()).run()
+        return
+    if argv:
+        sys.exit(f"알 수 없는 인자: {' '.join(argv)} (사용법: llmui [--sessions])")
     # LLM 세션이 실행하면(환경 표식) 제한 모드: 열람 제한 정보(비밀·후보)는 읽지도 보이지도 않고 치환을 끌 수 없다. 대시보드·검색·대조·지침 보기는 `donghans ctx` CLI 와 같은 범위라 허용
-    CtxUI(restricted=cc.is_agent_session()).run()
+    LlmUI(restricted=cc.is_agent_session()).run()
 
 
 if __name__ == "__main__":

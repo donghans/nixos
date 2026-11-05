@@ -188,7 +188,7 @@ try:
     p = CLI("edit", "instructions", stdin=subprocess.DEVNULL)
     check("CLI edit: 대화형이 아니면 거부(에이전트는 set 을 쓴다)", p.returncode != 0 and "대화형" in (p.stdout + p.stderr), p.stdout + p.stderr)
 
-    # ------------------------------------------------ --repo / main=None: 로컬 캐시 없이 DB 만(ctxui 「지침」 탭·cwd 와 무관한 편집 경로)
+    # ------------------------------------------------ --repo / main=None: 로컬 캐시 없이 DB 만(llmui 「지침」 탭·cwd 와 무관한 편집 경로)
     conn.commit()
     cur = ci.db_rows(conn, URL)["instructions"]
     cache_before = (open(F1("instructions")).read(), json.dumps(ci.load_state(r1[0]), sort_keys=True))

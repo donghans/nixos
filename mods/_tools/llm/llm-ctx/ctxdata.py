@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""ctxdata — ctxui 가 쓰는 조회·관리 함수(DB). 화면 코드(ctxui.py)와 분리해 DB 만으로 시험한다.
+"""ctxdata — llmui 가 쓰는 조회·관리 함수(DB). 화면 코드(llmui.py)와 분리해 DB 만으로 시험한다.
 
-모든 함수는 psycopg 연결(conn)을 받는다. 읽기 함수는 masker 를 받아 출력 문자열을 치환한다(기본은 치환 안 함 — ctxui 가 사람 화면이라 켜고 끄는 것은 화면이 정한다).
+모든 함수는 psycopg 연결(conn)을 받는다. 읽기 함수는 masker 를 받아 출력 문자열을 치환한다(기본은 치환 안 함 — llmui 가 사람 화면이라 켜고 끄는 것은 화면이 정한다).
 """
 from __future__ import annotations
 
@@ -577,7 +577,7 @@ def adopt(conn, value, label, pattern=None, note=None, force=False):
     cs.add_secret(conn, label, "literal", value, note or (f"ctxui 후보 승인({pattern})" if pattern else "ctxui 후보 승인"), False, force)
 
 
-# ---------------------------------------------------------------- 프로젝트 지침(ctx_instr) — ctxui 「지침」 탭
+# ---------------------------------------------------------------- 프로젝트 지침(ctx_instr) — llmui 「지침」 탭
 def instr_rows(conn):
     """공유 정본의 모든 저장소 지침 목록(저장소·이름 순). 로컬 캐시와 무관하게 DB 만 본다."""
     rows = conn.execute("SELECT repo_url, name, rev, updated_host, updated_at, length(body) FROM project_instructions ORDER BY repo_url, name").fetchall()

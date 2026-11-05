@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """llm-sessions — claude 의 tmux 세션 목록을 보고 이어 붙거나 새로 만든다(ssh 에서도, 다른 kitty 에서도 같은 화면).
 
-  llm-sessions                 목록 UI(Textual)
+  llm-sessions                 목록 UI(Textual) — 실제로는 `llmui --sessions` 가 이 UI 를 띄운다(DB 에 연결하지 않음)
   llm-sessions ls              목록을 글자로 출력
   llm-sessions attach <이름|접두|번호>
   llm-sessions new [--safe] [디렉터리] [-- claude 인자…]   새 세션을 만들고 붙는다
 
 새 세션에는 기본으로 `--dangerously-skip-permissions` 가 붙는다(세션 간 통신·root 작업 때마다 승인을 묻지 않게). 끄기: UI 에서 「claude 인자」 칸 비우기 · CLI `new --safe` ·
 환경 변수 CLAUDE_SESSIONS_DEFAULT_ARGS= . `--permission-mode` 등 권한 인자를 직접 주면 기본값은 붙지 않는다. 디렉터리는 UI 에서 현재 위치·ctx 의 저장소 목록 중에서 고른다.
+LLM 세션 안에서 실행하면 제한 모드: 목록만 보이고 미리보기·붙기·새 세션·떼기·정리는 막힌다.
 UI 키: Enter 붙기 · F2 새 세션 · Delete 정리(세션 종료) · F3 붙은 곳 모두 떼기 · F5 새로고침 · ? 도움말 · Esc 종료(확인창) · Ctrl+Q 즉시 종료.
 붙은 뒤 분리(F12 또는 Ctrl+] d)하면 이 목록으로 돌아온다. 한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다.
 세션 이름·tmux 설정·종료 규칙은 tmuxsess.py 와 claude-tmux 머리말 참고. 사람이 터미널에서 직접 쓰는 도구라 UI 는 TTY 가 아니면 실행하지 않는다.
@@ -124,49 +125,51 @@ class ConfirmScreen(uikit.ConfirmScreen):
         super().__init__(msg, "예", "아니오")
 
 
-class SessionsUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
-    TITLE = "llm-sessions — tmux 세션"
-    HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
-        ('세션', 'claude 가 도는 tmux 세션 목록 — ssh 에서도 다른 터미널에서도 같은 화면이다'),
-        ('붙기 / 분리', 'Enter 로 붙고, 분리는 F12 또는 Ctrl+] d — 분리하면 이 목록으로 돌아온다'),
-        ('여러 곳 붙음', '한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다. d 로 붙은 곳을 모두 뗀다'),
-        ('정리', 'x = 세션 종료(확인 대화상자)'),
-        ('화면 미리보기', '선택한 세션의 지금 화면 일부를 아래에 보인다(그 세션의 내용이므로 어깨너머 노출에 주의)'),
-    ]
-    HELP_NOTES = [
-        'Esc: 대화상자에서는 그 대화상자만 닫고, 목록에서는 종료 확인창(기본 「아니오」, ←→ 로 「예」 선택 후 Enter). Ctrl+Q 는 확인 없이 즉시 종료',
-    ]
-    CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + """
+SESSIONS_CSS = """
     NewScreen { align: center middle; }
     #list { height: 1fr; }
     #preview-box { height: 16; }
     #preview { padding: 0 1; color: #cfcfcf; }
     #hint { height: 1; color: #7a7a7a; padding: 0 1; }
-    """
-    BINDINGS = [
-        Binding("escape", "confirm_quit", "종료"),
-        Binding("enter", "attach", "붙기"), Binding("f2", "new", "새 세션"),
-        Binding("delete", "kill", "정리(종료)"), Binding("f3", "detach_all", "붙은 곳 떼기"),
-        Binding("f5", "reload", "새로고침"),
-        *uikit.HelpMixin.HELP_BINDINGS,
-    ]
+"""
 
-    def __init__(self, start_dir: str | None = None):
-        super().__init__()
+SESSIONS_HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙). llmui 의 세션 탭도 같이 쓴다
+    ('세션', 'claude 가 도는 tmux 세션 목록 — ssh 에서도 다른 터미널에서도 같은 화면이다'),
+    ('붙기 / 분리', 'Enter 로 붙고, 분리는 F12 또는 Ctrl+] d — 분리하면 이 목록으로 돌아온다'),
+    ('여러 곳 붙음', '한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다. F3 으로 붙은 곳을 모두 뗀다'),
+    ('정리', 'Delete = 세션 종료(확인 대화상자)'),
+    ('화면 미리보기', '선택한 세션의 지금 화면 일부를 아래에 보인다(그 세션의 내용이므로 어깨너머 노출에 주의)'),
+    ('제한 모드', 'LLM 세션이 실행하면 목록만 보인다 — 미리보기·붙기·새 세션·떼기·정리는 사람이 터미널에서 직접 실행할 때만 쓸 수 있다'),
+]
+
+SESS_ACTIONS = ("sess_attach", "sess_new", "sess_kill", "sess_detach")     # 제한 모드에서 막히는 동작
+
+
+class SessionsMixin:
+    """세션 목록·미리보기·붙기·새 세션·떼기·정리 — 단독 앱(SessionsUI)과 llmui 의 「세션」 탭이 같이 쓴다.
+    쓰는 앱은 `restricted`(LLM 세션이 실행했는지)를 정하고, 조립 때 `sess_widgets()` 를, 마운트 때 `sess_mount()` 를 부른다.
+    위젯 id: #list · #preview · #preview-box · #hint (llmui 의 다른 탭 id 와 겹치지 않음)."""
+    restricted = False
+    start_dir = ""
+    sessions: dict
+
+    def sess_setup(self, start_dir: str | None = None):
         self.start_dir = start_dir or os.getcwd()
-        self.sessions: dict[str, tm.Session] = {}
+        self.sessions = {}
 
-    def compose(self) -> ComposeResult:
+    def sess_widgets(self):
         yield uikit.box(DataTable(id="list", cursor_type="row"), "claude 세션 — Enter: 붙기 · F2: 새 세션")
         yield uikit.box(VerticalScroll(Static("", id="preview"), id="preview-box"), "화면 미리보기")
         yield Static("분리: F12 또는 Ctrl+] d  ·  같은 세션에 여러 곳이 붙으면 화면이 서로 비칩니다", id="hint")
-        yield Footer()
 
-    def on_mount(self):
+    def sess_mount(self):
         self.query_one("#list", DataTable).add_columns("이름", "작업 디렉터리", "시작", "마지막 활동", "붙은 곳", "실행 중")
-        self._timer = self.set_interval(3.0, self.refresh_data)
-        self.refresh_data()
-        self.query_one("#list", DataTable).focus()
+
+    def sess_deny(self, what: str) -> bool:
+        """제한 모드(LLM 세션)면 안내하고 True — 호출한 동작은 중단해야 한다. 키 바인딩뿐 아니라 Enter 행 선택·직접 호출 경로에서도 건다."""
+        if self.restricted:
+            self.notify(f"제한 모드(LLM 세션): {what} 은(는) 사람이 터미널에서 직접 실행할 때만 쓸 수 있습니다", severity="warning")
+        return self.restricted
 
     # --- 목록
     def selected(self) -> str | None:
@@ -190,18 +193,17 @@ class SessionsUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                       s.command, key=s.name)
         if keep in self.sessions:
             t.move_cursor(row=list(self.sessions).index(keep))
-        self.query_one("#list").border_title = f"claude 세션 {len(ss)}개 — Enter: 붙기 · F2: 새 세션" if ss else "claude 세션 없음 — F2: 새 세션"
+        self.query_one("#list").border_title = (f"claude 세션 {len(ss)}개" + ("" if self.restricted else " — Enter: 붙기 · F2: 새 세션")) if ss else \
+            ("claude 세션 없음" if self.restricted else "claude 세션 없음 — F2: 새 세션")
         self.show_preview()
-
-    def on_data_table_row_highlighted(self, _ev):
-        self.show_preview()
-
-    def on_data_table_row_selected(self, _ev):      # DataTable 이 Enter 를 먼저 받으므로 행 선택을 「붙기」로 처리
-        self.action_attach()
 
     def show_preview(self):
         name = self.selected()
         box = self.query_one("#preview-box")
+        if self.restricted:                       # 다른 세션의 화면 내용 — LLM 에게 노출하지 않는다
+            self.query_one("#preview", Static).update(Text("제한 모드(LLM 세션): 화면 미리보기는 끕니다", style="#7a7a7a"))
+            box.border_title = "화면 미리보기"
+            return
         if not name:
             self.query_one("#preview", Static).update(Text("선택한 세션이 없습니다", style="#7a7a7a"))
             box.border_title = "화면 미리보기"
@@ -212,11 +214,15 @@ class SessionsUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
     # --- 동작
     def run_attach(self, name: str):
         """UI 를 잠시 멈추고 tmux 에 붙는다. 분리하거나 claude 가 끝나면 목록으로 돌아온다."""
+        if self.sess_deny("세션 붙기"):
+            return
         with self.suspend():
             subprocess.run(tm.attach_cmd(name))
         self.refresh_data()
 
-    def action_attach(self):
+    def action_sess_attach(self):
+        if self.sess_deny("세션 붙기"):
+            return
         name = self.selected()
         if not name:
             return
@@ -224,7 +230,10 @@ class SessionsUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             self.notify("그 세션은 이미 끝났습니다", severity="warning"); self.refresh_data(); return
         self.run_attach(name)
 
-    def action_new(self):
+    def action_sess_new(self):
+        if self.sess_deny("새 세션 만들기"):
+            return
+
         def done(r):
             if not r:
                 return
@@ -236,7 +245,9 @@ class SessionsUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
             self.run_attach(name)
         self.push_screen(NewScreen(self.start_dir), done)
 
-    def action_kill(self):
+    def action_sess_kill(self):
+        if self.sess_deny("세션 정리(종료)"):
+            return
         name = self.selected()
         if not name:
             return
@@ -249,11 +260,55 @@ class SessionsUI(uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
                 self.refresh_data()
         self.push_screen(ConfirmScreen(f"'{name}' 세션을 끝낼까요?" + (f" (지금 {n}곳이 붙어 있음 — 그 화면도 닫힙니다)" if n else "") + " 안의 claude 도 종료됩니다."), done)
 
-    def action_detach_all(self):
+    def action_sess_detach(self):
+        if self.sess_deny("붙은 곳 떼기"):
+            return
         name = self.selected()
         if name and tm.detach_all(name):
             self.notify(f"붙은 곳을 모두 뗐습니다: {name}")
             self.refresh_data()
+
+
+class SessionsUI(SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, uikit.PauseOnBlurMixin, App):
+    """세션 전용 단독 앱 — `llm-sessions`(= `llmui --sessions`)가 DB 없이 띄운다."""
+    TITLE = "llm-sessions — tmux 세션"
+    HELP_TERMS = SESSIONS_HELP_TERMS
+    HELP_NOTES = [
+        'Esc: 대화상자에서는 그 대화상자만 닫고, 목록에서는 종료 확인창(기본 「아니오」, ←→ 로 「예」 선택 후 Enter). Ctrl+Q 는 확인 없이 즉시 종료',
+    ]
+    CSS = uikit.BASE_CSS + uikit.DIALOG_CSS + SESSIONS_CSS
+    BINDINGS = [
+        Binding("escape", "confirm_quit", "종료"),
+        Binding("enter", "sess_attach", "붙기"), Binding("f2", "sess_new", "새 세션"),
+        Binding("delete", "sess_kill", "정리(종료)"), Binding("f3", "sess_detach", "붙은 곳 떼기"),
+        Binding("f5", "reload", "새로고침"),
+        *uikit.HelpMixin.HELP_BINDINGS,
+    ]
+
+    def __init__(self, start_dir: str | None = None, restricted: bool = False):
+        super().__init__()
+        self.restricted = restricted
+        self.sess_setup(start_dir)
+
+    def check_action(self, action, parameters):
+        """제한 모드에서는 막힌 동작을 푸터·도움말에서 숨긴다(눌러도 sess_deny 가 막는다)."""
+        return False if self.restricted and action in SESS_ACTIONS else True
+
+    def compose(self) -> ComposeResult:
+        yield from self.sess_widgets()
+        yield Footer()
+
+    def on_mount(self):
+        self.sess_mount()
+        self._timer = self.set_interval(3.0, self.refresh_data)
+        self.refresh_data()
+        self.query_one("#list", DataTable).focus()
+
+    def on_data_table_row_highlighted(self, _ev):
+        self.show_preview()
+
+    def on_data_table_row_selected(self, _ev):      # DataTable 이 Enter 를 먼저 받으므로 행 선택을 「붙기」로 처리
+        self.action_sess_attach()
 
     def action_reload(self):
         self.refresh_data()
@@ -288,6 +343,15 @@ def cmd_new(argv: list[str]) -> int:
     return subprocess.run(tm.attach_cmd(name)).returncode
 
 
+def is_agent_session() -> bool:
+    """LLM 세션이 실행했는지(환경 표식) — 그러면 세션 UI 는 목록만 보인다. llm-ctx 의 agents 가 있으면 그 표식을, 없으면(서버 배포) 기본 표식을 쓴다."""
+    try:
+        from agents import ENV_MARKERS
+    except Exception:
+        ENV_MARKERS = ("CLAUDECODE", "GEMINI_CLI", "DONGHANS_AGENT")
+    return any(os.environ.get(k) for k in ENV_MARKERS)
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] in (["-h"], ["--help"]):
@@ -302,7 +366,7 @@ def main(argv=None) -> int:
         print(__doc__, file=sys.stderr); return 2
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         print("llm-sessions 는 터미널에서 실행하세요(목록만 보려면 `llm-sessions ls`)", file=sys.stderr); return 1
-    SessionsUI().run()
+    SessionsUI(restricted=is_agent_session()).run()
     return 0
 
 

@@ -7,7 +7,7 @@
 - ssh 에서 시작한 세션을 kitty 로 옮겨 이어 쓰기, 반대로 kitty 에서 시작한 세션을 ssh 에서 붙기.
 - 한 세션에 여러 곳이 동시에 붙어도 된다(tmux 는 기본으로 화면을 서로 비춘다) — 그래서 「한 곳에서만 attach」·「원격 접속 중 알림」은 만들지 않았다.
 - kitty 창을 닫으면 그 tmux 도 같이 끝나게 하되, 다른 곳이 붙어 있으면 유지한다(아래 「kitty 닫힘」).
-- ssh 에서는 claude 세션 목록을 보여 주고 접속·새 세션 생성을 고르는 UI(`llm-sessions`). 디자인은 usageui·ctxui 와 같은 `uikit` 틀.
+- ssh 에서는 claude 세션 목록을 보여 주고 접속·새 세션 생성을 고르는 UI(`llm-sessions` — 2026-11-05 부터 `llmui --sessions`). 디자인은 usageui·llmui 와 같은 `uikit` 틀.
 
 ## 구성
 | 부분 | 파일 | 역할 |
@@ -20,7 +20,15 @@
 
 ## 새 세션 기본값(2026-10-30 추가)
 - **권한 확인 건너뛰기가 기본**: `llm-sessions` 로 만드는 새 세션(UI `F2`·CLI `new`)에는 `--dangerously-skip-permissions` 가 붙는다. 이유: 세션 간 통신(SendMessage)과 root 작업(sudo)마다 승인을 물으면 흐름이 끊긴다는 사용자 경험. 끄기: UI 의 「claude 인자」 칸 비우기 · `llm-sessions new --safe` · `CLAUDE_SESSIONS_DEFAULT_ARGS=`(빈 값). `--permission-mode` 등을 직접 주면 기본값은 붙지 않는다. 셸의 `claude` 함수·`claude-tmux` 직접 호출은 바뀌지 않았다(llm-sessions 만 해당).
-- **디렉터리 고르기**: UI `F2` 대화상자 맨 위가 현재 위치(ctx 에 없는 곳이면 「새 위치」), 아래는 ctx DB(ctxui 에 보이는 저장소)의 이 호스트 작업 저장소 루트(최근 사용 순, 실제로 있는 디렉터리만, /tmp 아래·git worktree 사본 제외). 직접 입력도 가능(Tab). DB 에 못 붙으면 현재 위치만 보인다. 조회는 `donghans ctx sql`(nix 가 `CLAUDE_CTX_BIN` 으로 알려 줌).
+- **디렉터리 고르기**: UI `F2` 대화상자 맨 위가 현재 위치(ctx 에 없는 곳이면 「새 위치」), 아래는 ctx DB(llmui 에 보이는 저장소)의 이 호스트 작업 저장소 루트(최근 사용 순, 실제로 있는 디렉터리만, /tmp 아래·git worktree 사본 제외). 직접 입력도 가능(Tab). DB 에 못 붙으면 현재 위치만 보인다. 조회는 `donghans ctx sql`(nix 가 `CLAUDE_CTX_BIN` 으로 알려 줌).
+
+## llmui 와 합침(2026-11-05, 사용자 결정)
+- **형태**: `llm-sessions` 를 인자 없이 치면 `llmui --sessions`(세션 탭만 있는 단독 앱, **DB 에 연결하지 않음**)가 뜬다. 인자가 있으면(`ls`·`attach`·`new`·`-h`) 예전처럼 `llm_sessions.py` 글자 CLI 로 간다. 같은 세션 코드(`llm_sessions.py` 의 `SessionsMixin`)를 `llmui` 의 **7 세션 탭**이 그대로 쓴다.
+- **이름**: 런처 항목 「Claude Sessions」→「LLM Sessions」, 「LLM Context Manager」(`ctxui`)→「LLM Manager」(`llmui`). **옛 별칭(`ctxui`·`claude-sessions`)은 만들지도 남기지도 않는다**(사용자 지시 — `claude-sessions` 는 2026-10-27 개명 때 내가 호환용으로 덧붙인 것이지 요청이 아니었다).
+- **제한 모드**(LLM 세션이 실행한 경우, 사용자 확정: 이 경우가 정상이며 LLM 이 직접 쓰는 경우는 없다): 목록만 보인다. 다른 세션의 화면이 노출되지 않도록 미리보기도 끈다. 붙기·새 세션·떼기·정리는 키 바인딩·Enter 행 선택·코드 직접 호출 모두에서 막는다(`sess_deny`). 단독 앱(`--sessions`)도 같은 규칙.
+- **키(llmui 탭 7)**: Enter 붙기 · F2 새 세션 · F3 붙은 곳 떼기 · Delete 정리 · F5 새로고침. 다른 탭의 F2·F3·Delete 와는 `check_action`(TAB_ACTIONS)으로 탭별 분리.
+- **sudo 인증**: `llm-sessions` 래퍼 경로에서만 UI 앞에 `sudo-claude-auth` 를 받는다. 런처의 `llmui` 로 들어가 탭 7 에서 새 세션을 만들면 인증 없이 시작되어 pane 에서 물어본다(기존 「인증 없이 시작함」 경로와 같다).
+- 검증: 무맥락 검증 1회(높음 2·중 4 지적 반영 — psycopg import 자체는 허용하고 DB 연결만 하지 않기, `llm-sessions ls|attach|new` CLI 유지, Enter 행 선택 경로 차단, 탭별 키 분리). 시험은 `llm-ctx/tests/test_llmui.py`(세션 탭·제한 모드·`--sessions`)와 이 폴더의 `test_llm_sessions.py`.
 
 ## 결정과 근거
 - **전용 소켓·전용 설정**: 사용자의 일반 tmux 와 섞이지 않고, 목록은 `claude-` 접두 세션만 보인다.
@@ -46,4 +54,3 @@
 ## 아직 안 한 것
 - 노트북 전력(상태 줄 끔 이후 화면 갱신) ABAB 측정.
 - observectl 앱 귀속(tmux 서버의 자식이 된 claude 도 `.claude-wrapped` 로 집계되는지) 확인.
-- ctxui 에 「세션」 탭으로 붙이기(독립 도구로 먼저 만들었다 — DB 없이도 서버에서 동작).

@@ -98,18 +98,20 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # (목적: 여러 머신·프로젝트의 대화·사용량을 공유 저장소(Postgres, mods.sys.services.llm-ctx)에 이벤트 시점에 적재)
   # 클라이언트 CLI `donghans`: `donghans ctx hook|ingest|search|recent|session|usage|sql` / `donghans handoff put|get`.
   # 접속 문자열은 ~/.config/claude-ctx/dsn (nix 밖, 권한 600 — 비밀번호가 스토어에 남지 않게). 서버 위치는 거기서만 바꾼다.
-  # 여러 파일(llm_ctx: 명령, ctx_secrets: 비밀 등록표·치환·주입·후보 탐지·로컬 치환, ctx_instr: 프로젝트별 지침 공유 동기화, ctx_store·ctx_doccli: 작업 문서 파일 저장소(~/ctx)·읽기 뷰·제안·동기화 담당 / ctx_toolhook: 뷰 직접 수정 차단·알림 훅, agents/: 에이전트별(Claude Code 등) 대화 형식 어댑터, ctxdata/ctxui: 관리 TUI, uikit: TUI 공통 틀)을 한 디렉터리에 모아 실행한다
+  # 여러 파일(llm_ctx: 명령, ctx_secrets: 비밀 등록표·치환·주입·후보 탐지·로컬 치환, ctx_instr: 프로젝트별 지침 공유 동기화, ctx_store·ctx_doccli: 작업 문서 파일 저장소(~/ctx)·읽기 뷰·제안·동기화 담당 / ctx_toolhook: 뷰 직접 수정 차단·알림 훅, agents/: 에이전트별(Claude Code 등) 대화 형식 어댑터, ctxdata/llmui: 관리 TUI, uikit: TUI 공통 틀)을 한 디렉터리에 모아 실행한다
   # (observe 의 usageui 와 같은 방식). 훅·타이머·사용자가 부르는 `donghans` 는 모두 이 래퍼다.
   ctxSrc = pkgs.runCommand "llm-ctx-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_store.py" "ctx_doccli.py" "ctx_toolhook.py" "ctxdata.py" "ctxchart.py" "ctxui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_store.py" "ctx_doccli.py" "ctx_toolhook.py" "ctxdata.py" "ctxchart.py" "llmui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-sessions + "/${f}"} $out/${f}") ["llm_sessions.py" "tmuxsess.py"]}
     cp ${../../_tools/_lib/uikit/uikit.py} $out/uikit.py
     mkdir -p $out/agents
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx/agents + "/${f}"} $out/agents/${f}") ["__init__.py" "claude.py"]}
   '';
   claudeCtx = pkgs.writeShellScriptBin "donghans" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg])}/bin/python3 ${ctxSrc}/llm_ctx.py "$@"'';
-  # ctx 관리 TUI(Textual): 저장소별 용량·검색·발언 대조·비밀 등록표·후보 탐지. 사람이 터미널에서 쓰는 도구(`ctxui`).
-  ctxui = pkgs.writeShellScriptBin "ctxui" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg ps.textual])}/bin/python3 ${ctxSrc}/ctxui.py "$@"'';
+  # LLM 관리 TUI(Textual): 저장소별 용량·검색·발언 대조·비밀 등록표·후보 탐지 + 7 세션 탭(claude tmux 세션). 사람이 터미널에서 쓰는 도구(`llmui`).
+  # `llmui --sessions` 는 세션 탭만 단독으로(DB 에 연결하지 않음) — `llm-sessions` 가 이것이다. 세션 탭이 tmux·claude-run 을 찾도록 tmuxEnv 를 준다.
+  llmui = pkgs.writeShellScriptBin "llmui" ''${tmuxEnv}exec ${pkgs.python3.withPackages (ps: [ps.psycopg ps.textual])}/bin/python3 ${ctxSrc}/llmui.py "$@"'';
 
   # (목적: ssh 와 kitty 에서 같은 claude 세션을 이어 쓰기) claude 를 전용 tmux 서버(`tmux -L claude`, 일반 tmux 와 분리) 안에서 돌리고,
   # `llm-sessions`(목록 UI)로 어디서든 붙는다. 한 세션에 여러 곳이 동시에 붙으면 화면이 서로 비친다(tmux 기본 동작).
@@ -170,14 +172,16 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
     ${claude}/bin/claude "$@"
   '';
   claudeTmux = pkgs.writeShellScriptBin "claude-tmux" ''${tmuxEnv}exec ${pkgs.bash}/bin/bash ${sessionsSrc}/claude-tmux "$@"'';
-  # UI 를 띄우기 전에 sudo 인증을 앞당겨 받는다(실패해도 UI 는 연다 — 그 경우 새 세션이 pane 에서 묻는다). 서브커맨드·비대화형 호출은 건너뛴다.
-  claudeSessions = pkgs.writeShellScriptBin "llm-sessions" ''    ${tmuxEnv}if [ -t 0 ] && [ $# -eq 0 ]; then
-        export CLAUDE_SUDO_SOCK="''${XDG_RUNTIME_DIR:-/tmp}/claude-sudo.sock"
-        ${claudeSudoAuth}/bin/sudo-claude-auth --lease $$ || echo "llm-sessions: sudo 인증 없이 시작함(새 세션이 pane 에서 물어봄)" >&2
+  # 인자 없이 터미널에서 부르면 `llmui --sessions`(세션 탭 단독 UI)를 띄운다. 그 전에 sudo 인증을 앞당겨 받는다(실패해도 UI 는 연다 — 그 경우 새 세션이 pane 에서 묻는다).
+  # 인자가 있으면(ls·attach·new·-h) 글자 CLI(llm_sessions.py)로 간다. 서브커맨드·비대화형 호출은 인증을 건너뛴다.
+  claudeSessions = pkgs.writeShellScriptBin "llm-sessions" ''    ${tmuxEnv}if [ $# -eq 0 ]; then
+        if [ -t 0 ]; then
+          export CLAUDE_SUDO_SOCK="''${XDG_RUNTIME_DIR:-/tmp}/claude-sudo.sock"
+          ${claudeSudoAuth}/bin/sudo-claude-auth --lease $$ || echo "llm-sessions: sudo 인증 없이 시작함(새 세션이 pane 에서 물어봄)" >&2
+        fi
+        exec ${llmui}/bin/llmui --sessions
       fi
       exec ${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3 ${sessionsSrc}/llm_sessions.py "$@"'';
-  # 옛 이름 호환(2026-10-27 개명 llm-sessions) — 습관·옛 문서가 쓰는 `claude-sessions` 가 그대로 열리게 하는 별칭. 필요 없어지면 이 줄과 packages 항목을 지운다.
-  claudeSessionsAlias = pkgs.writeShellScriptBin "claude-sessions" ''exec ${claudeSessions}/bin/llm-sessions "$@"'';
   # 훅은 비동기(입력을 막지 않음)이고 실패해도 조용히 끝난다. 놓친 것은 ingest 타이머가 따라잡는다.
   ctxHook = event: [
     {
@@ -242,24 +246,24 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   otelCollectorConfig = pkgs.writeText "claude-otel-collector.yaml" (builtins.readFile ./llm-cli/otel-collector.yaml);
 in {
   hm = {
-    home.packages = [claude unstable.antigravity-cli claudeSudoAuth claudeCtx ctxui claudeTmux claudeSessions claudeSessionsAlias];
+    home.packages = [claude unstable.antigravity-cli claudeSudoAuth claudeCtx llmui claudeTmux claudeSessions];
 
     # 앱 런처(SUPER+Space)에서도 열리도록 등록(터미널 앱이라 uwsm 이 xdg-terminal-exec 로 kitty 에 띄움; usageui 와 같은 방식).
     # (런처에 보이는 이름은 다른 앱들처럼 영어로 통일)
-    xdg.desktopEntries.ctxui = {
-      name = "LLM Context Manager";
-      genericName = "LLM conversation store";
-      comment = "Storage per project, search, cross-check what I said, manage protected secrets — from the shared ctx database";
-      exec = "${ctxui}/bin/ctxui";
+    xdg.desktopEntries.llmui = {
+      name = "LLM Manager";
+      genericName = "LLM conversation store and sessions";
+      comment = "Storage per project, search, cross-check what I said, manage protected secrets, and claude tmux sessions — from the shared ctx database";
+      exec = "${llmui}/bin/llmui";
       terminal = true;
       categories = ["Utility"];
       icon = "utilities-terminal";
     };
 
     xdg.desktopEntries.llm-sessions = {
-      name = "Claude Sessions";
-      genericName = "claude tmux sessions";
-      comment = "List claude sessions running in tmux, attach from this terminal, or start a new one";
+      name = "LLM Sessions";
+      genericName = "LLM tmux sessions";
+      comment = "List LLM (claude) sessions running in tmux, attach from this terminal, or start a new one";
       exec = "${claudeSessions}/bin/llm-sessions";
       terminal = true;
       categories = ["Utility"];

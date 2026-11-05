@@ -8,8 +8,8 @@ Nix 모듈(`mods/sys|gui|devel`)이 설치해 실행하는 도구(Python·쉘)�
 
 | 폴더 | 무엇 | 문서 |
 |---|---|---|
-| `llm/llm-ctx/` | 여러 머신·프로젝트의 LLM 대화·사용량 공유 저장소(`donghans` 명령, ctxui) | `llm/llm-ctx/README.md`, `llm/llm-ctx/portability.md` |
-| `llm/llm-sessions/` | LLM 세션을 tmux 에서 돌리고 어디서든 이어 붙는 목록 UI(`llm-sessions`) | `llm/llm-sessions/README.md` |
+| `llm/llm-ctx/` | 여러 머신·프로젝트의 LLM 대화·사용량 공유 저장소(`donghans` 명령, llmui — 대화 저장소 관리 + 세션 탭) | `llm/llm-ctx/README.md`, `llm/llm-ctx/portability.md` |
+| `llm/llm-sessions/` | LLM 세션을 tmux 에서 돌리고 어디서든 이어 붙는 목록 UI(`llm-sessions` = `llmui --sessions`) | `llm/llm-sessions/README.md` |
 | `llm/llm-usage/` | 5h·7d 한도 기록을 남기는 상태줄 스크립트(Claude Code 전용) | `llm/llm-usage/README.md` |
 | `observe/observe/` | 관측(observectl)·usageui(실시간·시계열·호스트 비교), `ab/` 에 번갈아(ABAB) 측정 틀과 시나리오 | `observe/observe/README.md` |
 | `observe/process-manager/` | 프로세스 정리 TUI(procui)와 LLM 용 CLI(procctl) | `observe/observe/README.md` 의 procui 절 |

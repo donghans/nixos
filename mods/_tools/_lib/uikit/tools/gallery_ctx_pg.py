@@ -26,7 +26,7 @@ add("sho00001",REPOS[3],"h1",[("user","prompt","2026-10-23T01:00:00Z","짧은 �
 # 자동 메시지(스킬 호출·작업 알림·명령 출력) — 대화 화면의 배지·접기·제목 규칙 확인용
 CMDX="<command-message>donghans-resume</command-message>\n<command-name>/donghans-resume</command-name>\n<command-args>c9bf7759-e82c-4c45-9ecf-026f384f601d</command-args>"
 TASKX="<task-notification>\n<task-id>bnib4dcfr</task-id>\n<status>completed</status>\n<summary>Background command \"시험 보정 후 재실행\" completed (exit code 0)</summary>\n<output-file>/tmp/x/tasks/bnib4dcfr.output</output-file>\n</task-notification>"
-add("aut00001",REPOS[0],"h1",[("user","prompt","2026-10-24T01:00:00Z",CMDX),("user","prompt","2026-10-24T01:01:00Z","ctxui 대시보드 만들어줘 끝났다"),("assistant","response","2026-10-24T01:01:20Z","알겠습니다 작업을 시작합니다"),
+add("aut00001",REPOS[0],"h1",[("user","prompt","2026-10-24T01:00:00Z",CMDX),("user","prompt","2026-10-24T01:01:00Z","llmui 대시보드 만들어줘 끝났다"),("assistant","response","2026-10-24T01:01:20Z","알겠습니다 작업을 시작합니다"),
     ("user","prompt","2026-10-24T01:05:00Z",TASKX),("user","prompt","2026-10-24T01:06:00Z","<local-command-stdout>Compacted</local-command-stdout>"),("user","prompt","2026-10-24T01:07:00Z","<pasted_content>붙여넣은 로그 끝났다</pasted_content>"),("assistant","response","2026-10-24T01:07:30Z","확인했습니다 끝났다")])
 add("bux00002",REPOS[3],"h1",[("user","prompt","2026-10-24T02:00:00Z",CMDX),("user","prompt","2026-10-24T02:01:00Z",TASKX)])
 cs.add_secret(conn,"NAS_PW","literal","hunter2-pass",replace=True)

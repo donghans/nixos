@@ -154,7 +154,7 @@ def with_defaults(args: list[str] | None) -> list[str]:
 
 
 def repo_dirs(limit: int = 30, timeout: float = 5) -> list[tuple[str, str]]:
-    """ctx DB(ctxui 가 보여 주는 저장소)에서 이 호스트의 작업 저장소 루트를 최근 사용 순으로 [(경로, 저장소 URL)]. 실제로 있는 디렉터리만.
+    """ctx DB(llmui 가 보여 주는 저장소)에서 이 호스트의 작업 저장소 루트를 최근 사용 순으로 [(경로, 저장소 URL)]. 실제로 있는 디렉터리만.
     DB·명령에 못 붙으면 빈 목록(새 세션 대화상자는 현재 위치만으로도 쓸 수 있다). /tmp 아래(시험 산출물)·git worktree 사본은 뺀다."""
     host = re.sub(r"[^A-Za-z0-9._-]", "", _socket.gethostname())
     q = (f"SELECT repo_root, max(repo_url) FROM sessions WHERE host = '{host}' AND repo_root IS NOT NULL "

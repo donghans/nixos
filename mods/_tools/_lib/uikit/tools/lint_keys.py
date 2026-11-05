@@ -8,7 +8,7 @@ import ast, os, re, sys
 
 TOOLS = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 APPS = {
-    "ctxui": "llm/llm-ctx/ctxui.py", "usageui": "observe/observe/usageui.py",
+    "llmui": "llm/llm-ctx/llmui.py", "usageui": "observe/observe/usageui.py",
     "procui": "observe/process-manager/procui.py", "displayui": "desktop/monitor-manager/displayui.py",
     "llm-sessions": "llm/llm-sessions/llm_sessions.py", "notif": "desktop/notification-center/notif_ui.py",
     "clipui": "desktop/clipboard/clipui.py",

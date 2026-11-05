@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ctxui 시험(Textual Pilot + 임시 Postgres): 5개 탭 · 검색/필터 · 대화 보기 · 치환 켬/끔 · 대조 · 비밀 추가/끄기/삭제/값 보기 · 후보 승인/무시.
+"""llmui 시험(Textual Pilot + 임시 Postgres): 7개 탭(세션 탭 포함) · 검색/필터 · 대화 보기 · 치환 켬/끔 · 대조 · 비밀 추가/끄기/삭제/값 보기 · 후보 승인/무시.
 필요: psycopg + textual 이 있는 python 과 postgres 17 바이너리. 없으면 건너뛴다."""
 import asyncio, json, os, re, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
@@ -15,7 +15,7 @@ pg = pgscratch.start()
 if not pg:
     print("postgres 바이너리를 못 찾아 건너뜀"); sys.exit(0)
 os.environ.update(pg.env())
-import ctx_secrets as cs, ctxdata as cd, llm_ctx as cc, ctxui
+import ctx_secrets as cs, ctxdata as cd, llm_ctx as cc, llmui
 
 A, B = "https://github.com/x/alpha", "https://github.com/x/beta"
 PW, KEY = "hunter2-pass", "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUV"
@@ -55,7 +55,7 @@ def all_open_ok(scr):
 
 def sess_txt(scr):
     """대화 화면의 머리글 + 모든 메시지 + 상태줄 글자."""
-    return "\n".join([txt(scr.query_one("#sess-head"))] + [txt(v) for v in scr.query(ctxui.MsgView)] + [txt(scr.query_one("#sess-state"))])
+    return "\n".join([txt(scr.query_one("#sess-head"))] + [txt(v) for v in scr.query(llmui.MsgView)] + [txt(scr.query_one("#sess-state"))])
 
 
 async def settle(pilot, cond, timeout=8.0):
@@ -100,7 +100,7 @@ async def type_text(pilot, s):
 
 
 async def run():
-    app = ctxui.CtxUI()
+    app = llmui.LlmUI()
     async with app.run_test(size=(160, 50)) as pilot:
         await settle(pilot, lambda: rows(app, "#projects") == 3)
         # --- 개요
@@ -128,7 +128,7 @@ async def run():
         q.value = "금요일|월요일"; await pilot.press("f3"); await submit(pilot, q); await settle(pilot, lambda: hits(app) == 4)
         check("F3: 정규식 검색", hits(app) == 4 and "정규식: 켜짐" in txt(app.query_one("#sstate")), str(hits(app)))
         q.value = "([a-"; await submit(pilot, q); await pilot.pause(0.5)
-        check("잘못된 정규식은 앱이 죽지 않고 이전 결과 유지, 대화 화면이 열리지 않음", app.is_running and hits(app) == 4 and not isinstance(app.screen, ctxui.SessionScreen))
+        check("잘못된 정규식은 앱이 죽지 않고 이전 결과 유지, 대화 화면이 열리지 않음", app.is_running and hits(app) == 4 and not isinstance(app.screen, llmui.SessionScreen))
         await pilot.press("f3"); q.value = "금요일"; await submit(pilot, q); await settle(pilot, lambda: hits(app) >= 1)
         # 일수 필터
         app.query_one("#days").value = "1"; await submit(pilot, q); await pilot.pause(0.6)
@@ -137,11 +137,11 @@ async def run():
         # 대화 보기
         q.value = "금요일"; await submit(pilot, q); await settle(pilot, lambda: hits(app) >= 1)
         await submit(pilot, app.query_one("#results")); await pilot.pause(0.8)
-        check("Enter: 앞뒤 대화 화면이 열림", isinstance(app.screen, ctxui.SessionScreen))
+        check("Enter: 앞뒤 대화 화면이 열림", isinstance(app.screen, llmui.SessionScreen))
         body = sess_txt(app.screen)
         check("대화 화면: 세션 정보와 메시지", "@h" in body and "금요일" in body, body[:200])
         await pilot.press("escape"); await pilot.pause(0.3)
-        check("Esc: 대화 화면이 닫힘", not isinstance(app.screen, ctxui.SessionScreen))
+        check("Esc: 대화 화면이 닫힘", not isinstance(app.screen, llmui.SessionScreen))
 
         # --- 치환
         with cc.connect() as c:
@@ -164,7 +164,7 @@ async def run():
         await pilot.press("down"); await pilot.pause(0.4)
         check("대조: 저장소를 옮기면 발언 목록이 바뀜", rows(app, "#vhits") == 1)
         await submit(pilot, app.query_one("#vhits")); await pilot.pause(0.8)
-        check("대조: 발언 Enter → 대화 보기", isinstance(app.screen, ctxui.SessionScreen)); await pilot.press("escape"); await pilot.pause(0.3)
+        check("대조: 발언 Enter → 대화 보기", isinstance(app.screen, llmui.SessionScreen)); await pilot.press("escape"); await pilot.pause(0.3)
 
         # --- 비밀
         await pilot.press("4"); await settle(pilot, lambda: rows(app, "#secrets-table") == 1)
@@ -181,17 +181,17 @@ async def run():
         await pilot.press("f3"); await settle(pilot, lambda: app.query_one("#secrets-table").get_row_at(0)[2] == "켜짐")
         # 추가
         await pilot.press("f2"); await pilot.pause(0.4)
-        check("a: 이름 입력 대화상자", isinstance(app.screen, ctxui.PromptScreen))
+        check("a: 이름 입력 대화상자", isinstance(app.screen, llmui.PromptScreen))
         check("비밀 이름 입력: 대화상자가 화면 가운데에 뜸(좌우 ±1칸 — 예전엔 왼쪽 위 구석)", abs(app.screen.query_one("#dialog").region.x + app.screen.query_one("#dialog").region.width / 2 - app.size.width / 2) <= 1)
         await type_text(pilot, "newpw"); await pilot.press("enter"); await pilot.pause(0.4)
-        check("a: 값 입력 대화상자는 가려서 표시(password)", isinstance(app.screen, ctxui.PromptScreen) and app.screen.query_one("#prompt-input").password)
+        check("a: 값 입력 대화상자는 가려서 표시(password)", isinstance(app.screen, llmui.PromptScreen) and app.screen.query_one("#prompt-input").password)
         await type_text(pilot, "secretvalue99"); await pilot.press("enter"); await settle(pilot, lambda: rows(app, "#secrets-table") == 2)
         check("a: 새 비밀이 등록됨", rows(app, "#secrets-table") == 2)
         with cc.connect(readonly=True) as c:
             check("a: DB 에 평문으로 저장(설계 결정)", any(s["label"] == "newpw" and s["value"] == "secretvalue99" for s in cs.load_secrets(c)))
         # 삭제(확인)
         app.query_one("#secrets-table").focus(); await pilot.press("delete"); await pilot.pause(0.4)
-        check("d: 확인 대화상자", isinstance(app.screen, ctxui.ConfirmScreen))
+        check("d: 확인 대화상자", isinstance(app.screen, llmui.ConfirmScreen))
         await pilot.press("enter"); await pilot.pause(0.3)
         check("d → n: 취소하면 그대로", rows(app, "#secrets-table") == 2)
         await pilot.press("delete"); await pilot.pause(0.3); await pilot.press("left", "enter"); await settle(pilot, lambda: rows(app, "#secrets-table") == 1)
@@ -208,7 +208,7 @@ async def run():
         await pilot.press("f4"); await pilot.pause(0.3)
         check("후보 v: 값 보기(승인 판단용)", KEY in txt(app.query_one("#cdetail")))
         await pilot.press("enter"); await pilot.pause(0.4)
-        check("후보 Enter: 이름 입력", isinstance(app.screen, ctxui.PromptScreen))
+        check("후보 Enter: 이름 입력", isinstance(app.screen, llmui.PromptScreen))
         await type_text(pilot, "anthkey"); await pilot.press("enter")
         await settle(pilot, lambda: all(ct.get_row_at(i)[0] != fp_key for i in range(rows(app, "#cands-table"))) )
         check("후보 승인: 목록에서 사라지고 등록됨", all(ct.get_row_at(i)[0] != fp_key for i in range(rows(app, "#cands-table"))))
@@ -287,8 +287,8 @@ async def run():
                           (uid, par, "2026-10-10T01:00:00Z", i, role, kind, side, text))
             c.execute("INSERT INTO sessions (session_id, host, hosts, repo_url, first_ts, last_ts) VALUES ('gggg0002','h2','{h2}',%s,'2026-10-11T01:00:00Z','2026-10-11T02:00:00Z')", (B,))
             c.execute("INSERT INTO messages (uuid, session_id, host, parent_uuid, ts, role, kind, text, raw) VALUES ('gggg-q0','gggg0002','h2','gggg-r0','2026-10-11T01:00:00Z','user','prompt','다음 세션의 첫 말','{}')")
-        scr = ctxui.SessionScreen(app, "gggg0001", None, "NEEDLE_X", False)
-        await app.push_screen(scr); await settle(pilot, lambda: len(list(scr.query(ctxui.MsgView))) == 2)
+        scr = llmui.SessionScreen(app, "gggg0001", None, "NEEDLE_X", False)
+        await app.push_screen(scr); await settle(pilot, lambda: len(list(scr.query(llmui.MsgView))) == 2)
         head = txt(scr.query_one("#sess-head"))
         check("대화 화면: 머리글에 제목(첫 프롬프트)·저장소#브랜치·프롬프트/도구 수", "긴 응답을 읽자" in head and "#dev" in head and "프롬프트 1" in head and "도구 1" in head, head)
         check("대화 화면: 이어진 세션 안내(] 다음 세션)", "] 다음 세션: gggg0002" in head, head)
@@ -331,7 +331,7 @@ async def run():
         await pilot.press("f7"); await pilot.pause(0.5)
         check("a: 전부 불러오기", len(scr.msgs) == 2 and "생략" not in txt(scr.query_one("#sess-state")))
         await pilot.press("escape"); await pilot.pause(0.3)
-        check("대화 화면 닫힘", not isinstance(app.screen, ctxui.SessionScreen))
+        check("대화 화면 닫힘", not isinstance(app.screen, llmui.SessionScreen))
         await pilot.press("2"); await pilot.pause(0.3)
         q.value = "NEEDLE_X"; await submit(pilot, q); await settle(pilot, lambda: hits(app) == 2)
         r0 = app.query_one("#results").get_row_at(0)
@@ -353,7 +353,7 @@ async def run():
         check("x: 모든 세션 펼침(세션 3 + 메시지 6)", rt.row_count == 9)
         await pilot.press("down"); await pilot.pause(0.2)
         await submit(pilot, rt); await pilot.pause(0.6)
-        check("펼친 메시지 행에서 Enter: 그 메시지에 맞춰 대화가 열림", isinstance(app.screen, ctxui.SessionScreen))
+        check("펼친 메시지 행에서 Enter: 그 메시지에 맞춰 대화가 열림", isinstance(app.screen, llmui.SessionScreen))
         await pilot.press("escape"); await pilot.pause(0.3)
         await pilot.press("f7"); await pilot.pause(0.2)
         await pilot.press("f6"); await settle(pilot, lambda: "제목만: 켜짐" in txt(app.query_one("#sstate")))
@@ -368,7 +368,7 @@ async def run():
             c.execute("INSERT INTO sessions (session_id, host, hosts, repo_url, first_ts, last_ts) VALUES (%s,%s,%s,%s,%s,%s)", ("iiii0001", "h1", ["h1"], A, "2026-10-11T01:00:00Z", "2026-10-11T01:05:00Z"))
             for i, (r_, k_, t_) in enumerate(_msgs):
                 c.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (f"iiii-{i:04d}", "iiii0001", "h1", f"2026-10-11T01:0{i}:00Z", r_, k_, t_, json.dumps({"i": i})))
-        app.push_screen(ctxui.SessionScreen(app, "iiii0001", None)); await pilot.pause(0.8)
+        app.push_screen(llmui.SessionScreen(app, "iiii0001", None)); await pilot.pause(0.8)
         scr = app.screen
         body = sess_txt(scr)
         check("자동 메시지: 작업 알림은 [작업 알림] 배지+한 줄 요약(원문 태그는 접힘)", "[작업 알림]" in body and "[completed] 배포 끝났다" in body and "<task-id>" not in body, body[:300])
@@ -382,7 +382,7 @@ async def run():
         await pilot.press("f8"); await pilot.pause(0.4)
         check("i 다시: 자동 메시지 보임", "[작업 알림]" in sess_txt(scr))
         await pilot.press("escape"); await pilot.pause(0.3)
-        check("자동 메시지 시험 후 대화 화면 닫힘", not isinstance(app.screen, ctxui.SessionScreen))
+        check("자동 메시지 시험 후 대화 화면 닫힘", not isinstance(app.screen, llmui.SessionScreen))
         # --- 지침 탭(공유 정본 · DB 만 · 사람 전용 편집)
         import contextlib, stat
         with cc.connect() as c:
@@ -398,7 +398,7 @@ async def run():
         it = app.query_one("#instr-table")
         check("지침: 6 키로 이동, 모든 저장소의 지침이 목록에(저장소·이름·rev·수정 머신·길이)", app.current_tab() == "instr" and rows(app, "#instr-table") == 3 and it.get_row_at(0)[1] == "instructions" and it.get_row_at(0)[2] == 1 and it.get_row_at(0)[3] == "h1", str(it.get_row_at(0)))
         it.focus(); it.move_cursor(row=0); await pilot.pause(0.3); await pilot.press("enter"); await pilot.pause(0.8)
-        check("지침 Enter: 본문 보기 화면이 열림", isinstance(app.screen, ctxui.InstrScreen))
+        check("지침 Enter: 본문 보기 화면이 열림", isinstance(app.screen, llmui.InstrScreen))
         body = txt(app.screen.query_one("#instr-body"))
         check("지침 본문: 저장소·이름·rev·절 목록과 본문", "알파 지침" in body and "rev 1" in body and "절 2개: QA 할 때 · 배포" in body and "qa 본문" in body, body[:200])
         await pilot.press("escape"); await pilot.pause(0.3)
@@ -443,9 +443,9 @@ async def run():
             with cc.connect() as c:
                 c.execute("UPDATE project_instructions SET body='다른 기기가 먼저 씀\n', rev=rev+1, updated_host='other' WHERE repo_url=%s AND name='override'", (A,))
             return real_run(cmd, *a, **k)
-        ctxui.subprocess.run = run_with_race
+        llmui.subprocess.run = run_with_race
         it.move_cursor(row=1); await pilot.pause(0.3); await pilot.press("f2"); await pilot.pause(1.0)
-        ctxui.subprocess.run = real_run
+        llmui.subprocess.run = real_run
         with cc.connect(readonly=True) as c:
             raw = cd.instr_raw(c, A, "override")
         check("지침 e: 편집 중 다른 기기가 먼저 고쳤으면(낡은 rev) 거부하고 상대 본문을 덮지 않는다", raw == (2, "다른 기기가 먼저 씀\n"), str(raw))
@@ -522,7 +522,7 @@ async def run_wrap():
     """대시보드 줄바꿈 → 1열 전환: 폭에 따라 글 칸이 줄바꿈되지 않아야 한다(2열이면 줄바꿈 없음, 아니면 1열). 그래프·막대는 칸 폭에 맞고 박스는 겹치지 않는다."""
     barw = {}
     for cols in (100, 150, 400):
-        app = ctxui.CtxUI()
+        app = llmui.LlmUI()
         async with app.run_test(size=(cols, 50)) as pilot:
             await settle(pilot, lambda: rows(app, "#stat-sessions") >= 1)
             await pilot.pause(1.5)
@@ -548,7 +548,7 @@ async def run_resize():
     """창 크기를 바꾸면 그래프·막대가 새 폭으로 다시 그려진다: 그릴 때 박스 폭이 아직 이전 레이아웃의 값이라 한 단계 전 폭으로 남던 결함(170→120 에서 박스 68 인데 본문 94칸).
     각 칸의 본문 최대 줄 폭이 칸 폭을 넘지 않고(잘림·줄바꿈 없음) 칸 폭 − 8 보다 좁지 않다(너무 좁게 남지 않음)."""
     from rich.cells import cell_len
-    app = ctxui.CtxUI()
+    app = llmui.LlmUI()
     async with app.run_test(size=(170, 50)) as pilot:
         await settle(pilot, lambda: rows(app, "#stat-sessions") >= 1)
         await pilot.pause(1.0)
@@ -577,7 +577,7 @@ async def run_restricted():
         for i, (role, text) in enumerate([("user", f"새 키는 {KEY2} 이고 비밀번호는 Zq9!kd82Lm 이다"), ("assistant", "받았다")]):
             c.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (f"dddd-{i:04d}", "dddd0001", "h1", f"2026-10-06T01:00:{i * 10:02d}Z", role, "prompt" if role == "user" else "response", text, json.dumps({"i": i})))
         n_secrets = len(cs.load_secrets(c, only_enabled=False))
-    app = ctxui.CtxUI(restricted=True)
+    app = llmui.LlmUI(restricted=True)
     async with app.run_test(size=(160, 50)) as pilot:
         await settle(pilot, lambda: rows(app, "#projects") == 3)
         check("제한: 개요는 정상 로드(저장소 3곳)", rows(app, "#projects") == 3 and app.restricted)
@@ -608,7 +608,7 @@ async def run_restricted():
             ign = len(cd.ignored_fps(c))
         check("제한: 후보 무시(i)는 막힘(무시 목록 불변)", ign == 0, ign)
         ct.move_cursor(row=0); await pilot.pause(0.2); await pilot.press("enter"); await pilot.pause(0.5)
-        check("제한: 후보 승인(Enter)은 허용 — 값을 보여 주지 않는 이름 입력 대화상자가 열림", isinstance(app.screen, ctxui.PromptScreen) and KEY2 not in txt(app.screen))
+        check("제한: 후보 승인(Enter)은 허용 — 값을 보여 주지 않는 이름 입력 대화상자가 열림", isinstance(app.screen, llmui.PromptScreen) and KEY2 not in txt(app.screen))
         await pilot.press("escape"); await pilot.pause(0.3)
         # --- 치환 고정·후보 패턴 치환
         await pilot.press("f10"); await pilot.pause(0.3)
@@ -623,8 +623,8 @@ async def run_restricted():
         rc = " ".join(str(app.query_one("#results").get_row_at(i)) for i in range(app.query_one("#results").row_count))
         check("제한: 검색 결과 목록에 후보 패턴의 키가 [protected] 로만 보임", hits(app) >= 1 and KEY2 not in rc and PW not in rc and "[protected]" in rc, rc[:200])
         await submit(pilot, app.query_one("#results")); await pilot.pause(0.8)
-        sb = sess_txt(app.screen) if isinstance(app.screen, ctxui.SessionScreen) else ""
-        check("제한: 대화 화면에서도 키·비밀번호는 [protected]", isinstance(app.screen, ctxui.SessionScreen) and KEY2 not in sb and PW not in sb and "[protected]" in sb, sb[:200])
+        sb = sess_txt(app.screen) if isinstance(app.screen, llmui.SessionScreen) else ""
+        check("제한: 대화 화면에서도 키·비밀번호는 [protected]", isinstance(app.screen, llmui.SessionScreen) and KEY2 not in sb and PW not in sb and "[protected]" in sb, sb[:200])
         await pilot.press("f10"); await pilot.pause(0.3)
         check("제한: 대화 화면에서 m 을 눌러도 원문이 나오지 않음", PW not in sess_txt(app.screen) and KEY2 not in sess_txt(app.screen))
         await pilot.press("escape"); await pilot.pause(0.3)
@@ -633,7 +633,7 @@ async def run_restricted():
             getattr(app, fn)(); await pilot.pause(0.15)
         with cc.connect() as c:
             after = len(cs.load_secrets(c, only_enabled=False))
-        check("제한: 비밀 추가·삭제·끄기·값 보기·후보 무시가 모두 막힘(대화상자 없음, 등록 수 불변, 값 미표시)", not isinstance(app.screen, ctxui.PromptScreen) and not isinstance(app.screen, ctxui.ConfirmScreen) and after == n_secrets and not app._reveal, (after, n_secrets))
+        check("제한: 비밀 추가·삭제·끄기·값 보기·후보 무시가 모두 막힘(대화상자 없음, 등록 수 불변, 값 미표시)", not isinstance(app.screen, llmui.PromptScreen) and not isinstance(app.screen, llmui.ConfirmScreen) and after == n_secrets and not app._reveal, (after, n_secrets))
         # --- 대화 화면은 세션 전체가 아니라 보일 창만 치환한다(메시지 수만 개짜리 세션이 느리던 문제)
         with cc.connect() as c:
             c.execute("INSERT INTO sessions (session_id, host, hosts, repo_url, first_ts, last_ts) VALUES (%s,%s,%s,%s,%s,%s)", ("eeee0001", "h1", ["h1"], A, "2026-10-07T01:00:00Z", "2026-10-07T04:00:00Z"))
@@ -642,16 +642,16 @@ async def run_restricted():
         _n = []
         _t = cs.Masker.text
         cs.Masker.text = lambda self, x: (_n.append(1), _t(self, x))[1]
-        _mm = ctxui.MSG_MAX
-        ctxui.MSG_MAX = 50
+        _mm = llmui.MSG_MAX
+        llmui.MSG_MAX = 50
         try:
-            app.push_screen(ctxui.SessionScreen(app, "eeee0001", "eeee-0100")); await settle(pilot, lambda: isinstance(app.screen, ctxui.SessionScreen) and len(app.screen.msgs) > 0)
+            app.push_screen(llmui.SessionScreen(app, "eeee0001", "eeee-0100")); await settle(pilot, lambda: isinstance(app.screen, llmui.SessionScreen) and len(app.screen.msgs) > 0)
             await pilot.pause(0.5)
             n_open = len(_n)
             shown = len(app.screen.msgs)
             hb, ha = app.screen.hidden_before, app.screen.hidden_after
         finally:
-            ctxui.MSG_MAX = _mm
+            llmui.MSG_MAX = _mm
             cs.Masker.text = _t
         check("대화 화면: 200개 메시지 세션에서 창(50개)만 그리고 앞 75·뒤 75 생략 표시", shown == 50 and hb + ha == 150 and hb == 75, (shown, hb, ha))
         check("대화 화면: 치환 호출이 세션 전체(200)가 아니라 창 크기 안팎(<110)이라 큰 세션이 느려지지 않음", n_open < 110, n_open)
@@ -669,13 +669,13 @@ async def run_restricted():
         await pilot.press("f1"); await pilot.pause(0.4)
         hd = " ".join(d for _, d in app.screen._rows) if type(app.screen).__name__ == "HelpScreen" else ""
         check("제한: 도움말 키 목록에서도 막힌 동작(치환 켬/끔·비밀 추가·삭제·켬/끔·값 보기·무시)이 빠지고 열린 동작(검색·대시보드·새로고침)은 있음", hd and not any(x in hd for x in ("치환 켬/끔", "비밀 추가", "값 보기", "무시", "삭제")) and "새로고침" in hd and "대시보드" in hd, hd[:200])
-        _terms = " ".join(d for _, d in ctxui.CtxUI.HELP_TERMS)
+        _terms = " ".join(d for _, d in llmui.LlmUI.HELP_TERMS)
         check("도움말 용어(제한 모드)가 현재 정책을 설명(모든 탭 열람·값 조회 불가)하고 낡은 「탭이 열리지 않음」 문구가 없음", "모든 탭을 볼 수 있" in _terms and "열리지 않고" not in _terms and "[protected]" in _terms, _terms[:100])
         await pilot.press("escape"); await pilot.pause(0.3)
         app.action_tab("instr"); await settle(pilot, lambda: app.current_tab() == "instr" and app.query_one("#instr-table").row_count >= 1, timeout=6)
         check("제한: 지침 탭 보기는 가능(목록이 보임), 편집(edit_instr)은 편집기를 열지 않고 False", app.current_tab() == "instr" and app.query_one("#instr-table").row_count >= 1 and app.edit_instr("x", "y") is False)
     # 사람(제한 없음)은 이전과 같다 — 후보 미리보기가 흐린 미리보기, 값 보기 가능
-    app2 = ctxui.CtxUI()
+    app2 = llmui.LlmUI()
     async with app2.run_test(size=(160, 50)) as pilot:
         await settle(pilot, lambda: rows(app2, "#projects") == 3)
         await pilot.press("5"); await settle(pilot, lambda: rows(app2, "#cands-table") >= 1, timeout=15)
@@ -700,19 +700,106 @@ def check_limits_text():
     a5, a7 = acct("A", "a@x.test", 30, 2)
     b5, b7 = acct("B", "b@x.test", 52, 2)
     win = {"5h": [a5, b5], "7d": [a7, b7]}
-    t = ctxui.limits_text(win, 80, days=7, now=now).plain
+    t = llmui.limits_text(win, 80, days=7, now=now).plain
     axes = [l for l in t.split("\n") if re.search(r"\d\d-\d\d \d\d:\d\d", l)]
     check("한도 칸: 계정이 둘이어도 시간축 눈금줄이 같다(같은 기간)", len(axes) == 2 and axes[0].strip() == axes[1].strip(), axes)
     check("한도 칸: 최근 샘플은 「지금 N%」", "지금 " in t and "마지막 샘플" not in t, t[:200])
     old5, old7 = acct("C", "c@x.test", 30, 300)
-    old = ctxui.limits_text({"5h": [old5], "7d": [old7]}, 80, days=7, now=now).plain
+    old = llmui.limits_text({"5h": [old5], "7d": [old7]}, 80, days=7, now=now).plain
     check("한도 칸: 오래된 샘플은 「마지막 샘플 N% (월-일 시:분)」", "마지막 샘플" in old and "지금 " not in old, old[:200])
     sm = dict(sessions=2, cost=5.0, prompts=4, tools=1, autos=0, unknown_tags=0, median_prompts=2, median_duration_s=60, avg_duration_s=90, by_slot=[0] * 96, by_hour=[0] * 24, by_weekday=[0] * 7, orphan=(3, 1.25))
-    st = ctxui.summary_text(sm, 60, "7일").plain
+    st = llmui.summary_text(sm, 60, "7일").plain
     check("세션 통계 칸: 기간 라벨과 「세션 기록 없는 사용」 금액·세션 길이 기준 안내", "비용 $5.00 (7일)" in st and "세션 기록 없는 사용 $1.25(3건) 별도" in st and "세션 전체 기준" in st, st[:200])
     sm["orphan"] = (0, 0.0)
-    check("세션 통계 칸: 세션 기록 없는 사용이 없으면 그 줄이 없다", "세션 기록 없는 사용" not in ctxui.summary_text(sm, 60, "전체").plain)
-    check("한도 칸: 기간 지정 때 샘플이 하나도 없으면 「이 기간에 한도 샘플 없음」", "이 기간에 한도 샘플 없음" in ctxui.limits_text({"5h": [], "7d": []}, 80, days=1, now=now).plain)
+    check("세션 통계 칸: 세션 기록 없는 사용이 없으면 그 줄이 없다", "세션 기록 없는 사용" not in llmui.summary_text(sm, 60, "전체").plain)
+    check("한도 칸: 기간 지정 때 샘플이 하나도 없으면 「이 기간에 한도 샘플 없음」", "이 기간에 한도 샘플 없음" in llmui.limits_text({"5h": [], "7d": []}, 80, days=1, now=now).plain)
+
+
+async def run_sessions_tab():
+    """7 세션 탭: tmux 대신 가짜 세션 목록으로 — 목록·미리보기·붙기·새 세션·정리·떼기, 탭별 F키 분리, 제한 모드(목록만, Enter 로도 붙지 않음), `--sessions` 단독 앱."""
+    import llm_sessions as lss
+    tm = lss.tm
+    fake = [tm.Session("claude-a-1", 1.0, time.time(), 0, "/tmp/a", "claude"), tm.Session("claude-b-2", 2.0, time.time(), 1, "/tmp/b", "claude",
+                                                                                         [tm.Client("/dev/pts/9", 1, "80x24", "ssh")])]
+    log = []
+    saved = {k: getattr(tm, k) for k in ("list_sessions", "preview", "exists", "kill", "detach_all", "attach_cmd", "create")}
+    tm.list_sessions = lambda: list(fake)
+    tm.preview = lambda name, n=14: f"SCREEN-OF-{name}"
+    tm.exists = lambda name: True
+    tm.kill = lambda name: log.append(("kill", name))
+    tm.detach_all = lambda name: (log.append(("detach", name)), True)[1]
+    tm.attach_cmd = lambda name: ["true"]
+    tm.create = lambda d, args: (log.append(("create", d)), "claude-new-3")[1]
+    try:
+        app = llmui.LlmUI()
+        attached = []
+        async with app.run_test(size=(160, 50)) as pilot:
+            await settle(pilot, lambda: rows(app, "#projects") == 3)
+            app.run_attach = lambda name: attached.append(name)           # suspend 는 헤드리스에서 못 쓰므로 붙기 호출만 기록
+            check("세션 탭: 탭 이름·F키 동작은 다른 탭에서는 꺼져 있다", all(app.check_action(a, ()) is False for a in ("sess_new", "sess_detach", "sess_kill")))
+            await pilot.press("7"); await settle(pilot, lambda: app.current_tab() == "sessions" and rows(app, "#list") == 2)
+            check("세션 탭: 7 키로 열리고 세션 2개가 목록에 나옴(분리됨/붙은 곳 표시)", rows(app, "#list") == 2 and "ssh" in str(app.query_one("#list").get_row_at(1)[4]))
+            check("세션 탭: 표에 포커스, F키 동작이 켜짐", app.focused is not None and app.focused.id == "list" and all(app.check_action(a, ()) for a in ("sess_new", "sess_detach", "sess_kill")))
+            await settle(pilot, lambda: "SCREEN-OF-claude-a-1" in str(app.query_one("#preview").render()))
+            check("세션 탭: 선택한 세션의 화면 미리보기", "SCREEN-OF-claude-a-1" in str(app.query_one("#preview").render()))
+            await pilot.press("enter"); await pilot.pause(0.3)
+            check("세션 탭: Enter = 붙기", attached == ["claude-a-1"], attached)
+            await pilot.press("f3"); await pilot.pause(0.3)
+            check("세션 탭: F3 = 붙은 곳 떼기(다른 탭의 F3 이 아님)", ("detach", "claude-a-1") in log, log)
+            await pilot.press("delete"); await pilot.pause(0.3)
+            check("세션 탭: Delete = 정리 확인창(비밀 삭제가 아님)", type(app.screen).__name__ == "ConfirmScreen")
+            await pilot.press("enter"); await pilot.pause(0.3)
+            check("세션 탭: 확인창은 기본 「아니오」라 그대로 Enter 해도 정리되지 않음", not any(x[0] == "kill" for x in log) and len(app.screen_stack) == 1, log)
+            await pilot.press("delete"); await pilot.pause(0.3); await pilot.press("left", "enter"); await pilot.pause(0.3)
+            check("세션 탭: 「예」를 고르면 정리", ("kill", "claude-a-1") in log, log)
+            await pilot.press("f2"); await pilot.pause(0.5)
+            check("세션 탭: F2 = 새 세션 대화상자", type(app.screen).__name__ == "NewScreen")
+            await pilot.press("escape"); await pilot.pause(0.3)
+            await pilot.press("f1"); await pilot.pause(0.4)
+            hd = " ".join(d for _, d in app.screen._rows) if type(app.screen).__name__ == "HelpScreen" else ""
+            check("세션 탭: 도움말 키 목록에 세션 동작(새 세션·붙은 곳 떼기·정리)이 있고 비밀 삭제/추가는 없음", hd and all(x in hd for x in ("새 세션", "붙은 곳 떼기", "정리")) and "비밀 추가" not in hd, hd[:200])
+            await pilot.press("escape"); await pilot.pause(0.3)
+            await pilot.press("1"); await pilot.pause(0.4)
+            await pilot.press("f2"); await pilot.pause(0.3)
+            check("대시보드에서 F2 는 세션 새로 만들기가 아니라 기간 변경(탭별 분리)", type(app.screen).__name__ != "NewScreen")
+
+        # --- 제한 모드: 목록만
+        fake_n = len(log)
+        rapp = llmui.LlmUI(restricted=True)
+        rattached = []
+        async with rapp.run_test(size=(160, 50)) as pilot:
+            await settle(pilot, lambda: rows(rapp, "#projects") == 3)
+            rapp.run_attach = lambda name: rattached.append(name)
+            await pilot.press("7"); await settle(pilot, lambda: rapp.current_tab() == "sessions" and rows(rapp, "#list") == 2)
+            check("제한: 세션 목록은 보인다", rows(rapp, "#list") == 2)
+            check("제한: 미리보기는 꺼져 있고 다른 세션의 화면 내용이 없음", "SCREEN-OF" not in str(rapp.query_one("#preview").render()) and "제한 모드" in str(rapp.query_one("#preview").render()))
+            check("제한: 세션 동작은 푸터·도움말에서 숨김", all(rapp.check_action(a, ()) is False for a in ("sess_new", "sess_detach", "sess_kill", "sess_attach")))
+            await pilot.press("enter"); await pilot.press("f3"); await pilot.press("delete"); await pilot.press("f2"); await pilot.pause(0.5)
+            check("제한: Enter(행 선택)·F3·Delete·F2 어느 쪽으로도 붙기·떼기·정리·새 세션이 안 됨", len(log) == fake_n and not rattached and len(rapp.screen_stack) == 1, (log[fake_n:], rattached))
+            rapp.action_sess_attach(); rapp.action_sess_new(); rapp.action_sess_kill(); rapp.action_sess_detach()
+            await pilot.pause(0.3)
+            check("제한: 동작을 코드에서 직접 불러도 막힘(run_attach 포함)", len(log) == fake_n and not rattached and len(rapp.screen_stack) == 1)
+            lss.SessionsMixin.run_attach(rapp, "claude-a-1")      # 시험이 덮어쓴 run_attach 를 우회해 원래 메서드를 직접
+            check("제한: run_attach 자체도 막힘(suspend·tmux 호출 없이 반환)", True)
+
+        # --- 세션 단독 앱(`llmui --sessions`): DB 없이, 제한 모드도 같은 규칙
+        sapp = lss.SessionsUI(restricted=True)
+        async with sapp.run_test(size=(120, 40)) as pilot:
+            await settle(pilot, lambda: sapp.query_one("#list").row_count == 2)
+            await pilot.press("enter"); await pilot.press("delete"); await pilot.press("f2"); await pilot.pause(0.4)
+            check("--sessions(제한): 목록은 보이고 Enter·Delete·F2 는 아무 일도 안 함", sapp.query_one("#list").row_count == 2 and len(sapp.screen_stack) == 1 and len(log) == fake_n)
+            check("--sessions(제한): 동작은 푸터에서 숨김", all(sapp.check_action(a, ()) is False for a in lss.SESS_ACTIONS))
+    finally:
+        for k, v in saved.items():
+            setattr(tm, k, v)
+
+
+def check_sessions_only_no_db():
+    """`llmui --sessions` 는 DB 에 연결하지 않는다 — DB 접속을 막아 두고(잘못된 PG 환경) 띄워도 앱이 뜬다(main 이 SessionsUI 로 직행하는지 코드로 확인)."""
+    src = open(os.path.join(ROOT, "llmui.py"), encoding="utf-8").read()
+    body = src[src.index("def main():"):]
+    sess_branch = body[body.index('["--sessions"]'):body.index("if argv:")]
+    check("--sessions: main 의 세션 분기는 DB(cc.connect·LlmUI)를 부르지 않고 SessionsUI 만 띄운다", "SessionsUI" in sess_branch and "connect" not in sess_branch and "LlmUI" not in sess_branch, sess_branch[:200])
 
 
 try:
@@ -722,6 +809,8 @@ try:
     asyncio.run(run_wrap())
     asyncio.run(run_resize())
     asyncio.run(run_restricted())
+    asyncio.run(run_sessions_tab())
+    check_sessions_only_no_db()
 finally:
     pg.stop()
-finish("ctxui")
+finish("llmui")

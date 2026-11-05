@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """uikit 를 쓰는 모든 앱의 도움말 통합 규칙 시험: 별도 「용어」 탭 없이 ? / F1 도움말 한 화면에 키 목록 + 용어·사용법 + 공통 종료 안내가 있는지.
-정적(모든 앱 클래스의 HELP_TERMS) + 동적(Pilot: usageui · procui · notif). psycopg 가 있으면 ctxui 도 본다."""
+정적(모든 앱 클래스의 HELP_TERMS) + 동적(Pilot: usageui · procui · notif). psycopg 가 있으면 llmui 도 본다."""
 import asyncio, json, os, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); DATA = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))        # mods/_tools
 for p in ("_lib/uikit", "observe", "procui", "notif", "clipboard", "display", "llm-sessions", "llm-ctx", "_lib/testkit", "../_data/claude-skills/donghans-host-resources/scripts"):
@@ -14,13 +14,13 @@ import uikit
 from textual.widgets import Static
 
 CLASSES = []
-for mod, cls in (("usageui", "UsageUI"), ("procui", "ProcUI"), ("notif_ui", "NotifUI"), ("clipui", "ClipUI"), ("displayui", "DisplayUI"), ("llm_sessions", "SessionsUI"), ("ctxui", "CtxUI")):
+for mod, cls in (("usageui", "UsageUI"), ("procui", "ProcUI"), ("notif_ui", "NotifUI"), ("clipui", "ClipUI"), ("displayui", "DisplayUI"), ("llm_sessions", "SessionsUI"), ("llmui", "LlmUI")):
     try:
         m = __import__(mod)
         CLASSES.append((mod, getattr(m, cls)))
     except ImportError as e:
         print(f"  (건너뜀: {mod} — {e})")
-check("앱 클래스를 7개 중 6개 이상 읽음(ctxui 는 psycopg 필요)", len(CLASSES) >= 6, [m for m, _ in CLASSES])
+check("앱 클래스를 7개 중 6개 이상 읽음(llmui 는 psycopg 필요)", len(CLASSES) >= 6, [m for m, _ in CLASSES])
 for mod, cls in CLASSES:
     terms = cls.HELP_TERMS
     ok = isinstance(terms, list) and len(terms) >= 2 and all(isinstance(t, tuple) and len(t) == 2 and all(isinstance(x, str) and x.strip() for x in t) for t in terms)

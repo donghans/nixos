@@ -231,7 +231,7 @@ try:
     check("session_links: 앞 세션(parents)", [p["session_id"] for p in cd.session_links(conn, "ffff0001")["parents"]] == ["aaaa0001"] and cd.session_links(conn, "ffff0001")["children"] == [])
     check("session_links: 이어짐 없는 세션은 둘 다 빈 목록", cd.session_links(conn, "bbbb0001") == dict(parents=[], children=[]))
 
-    # --- 지침(ctxui 「지침」 탭 질의): 모든 저장소 목록 · 본문(치환) · 원문 · 절 목록 · DB 만 저장
+    # --- 지침(llmui 「지침」 탭 질의): 모든 저장소 목록 · 본문(치환) · 원문 · 절 목록 · DB 만 저장
     conn.commit()
     for repo, nm, body, host in [(A, "instructions", "# 알파 지침\n\n## QA 할 때\nqa 본문\n\n## 배포\n배포 본문 hunter2-pass 포함\n", "h1"), (A, "override", "알파 오버라이드\n", "h2"), (B, "instructions", "베타 지침\n", "h2")]:
         conn.execute("INSERT INTO project_instructions (repo_url, name, body, rev, updated_host) VALUES (%s,%s,%s,1,%s)", (repo, nm, body, host))

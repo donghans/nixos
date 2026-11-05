@@ -16,7 +16,7 @@ donghans 워크스테이션의 스킬·ctx·QA 도구는 지금 Claude Code 위�
 | 프로젝트 지침 파일 규약(`.claude/donghans-instructions.md` 의 절 제목으로 용도 구분) | 파일은 마크다운, 읽는 쪽은 `context.py`. 디렉터리 이름 `.claude/` 만 에이전트 흔적 |
 | `context.py` (점검·`--init`·worktree 처리) | git 과 파일만 사용 |
 | `ws.py` · `snap.py` · `occupy.py` | VM 의 GNOME·PipeWire·파일, 호스트의 ssh 만 사용 |
-| ctx 조회·치환·주입 래퍼·후보 탐지·`ctxui` | Postgres 표(role/kind)만 본다. 조회·치환·`secret run` 은 어떤 에이전트의 셸에서든 동작 |
+| ctx 조회·치환·주입 래퍼·후보 탐지·`llmui` | Postgres 표(role/kind)만 본다. 조회·치환·`secret run` 은 어떤 에이전트의 셸에서든 동작 |
 | QA VM(`qa-desktop`)과 창 배치 규칙 | 에이전트와 무관한 인프라 |
 
 ### B. 이름·경로만 바꾸면 되는 결합

@@ -258,7 +258,7 @@ class HelpMixin:
     HELP_NOTES: list = []
 
     def _binding_enabled(self, b):
-        """앱의 check_action 이 False 라고 한 동작(예: ctxui 제한 모드에서 막힌 키)은 도움말 키 목록에서도 뺀다."""
+        """앱의 check_action 이 False 라고 한 동작(예: llmui 제한 모드에서 막힌 키)은 도움말 키 목록에서도 뺀다."""
         if isinstance(b, tuple):
             return True
         try:

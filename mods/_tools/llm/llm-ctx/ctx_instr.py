@@ -277,7 +277,7 @@ def set_body(conn, repo_url, main, name, body, host, masker=None, expect_rev=Non
         rev = _update(conn, repo_url, name, body, host, db["rev"])
         if rev is None:
             return 1, f"{name}: 올리는 사이에 다른 기기가 먼저 바꿨다 — 다시 시도"
-    if main is not None:      # main=None 이면 로컬 캐시·상태는 건드리지 않는다(ctxui·`--repo` 경로 — 다음 `instr show`·세션 시작 동기화가 캐시를 맞춘다)
+    if main is not None:      # main=None 이면 로컬 캐시·상태는 건드리지 않는다(llmui·`--repo` 경로 — 다음 `instr show`·세션 시작 동기화가 캐시를 맞춘다)
         write_local(main, name, body)
         state = load_state(main); state[name] = {"rev": rev, "sha": sha(body)}; save_state(main, state)
     return 0, f"{name}: 공유 저장소에 올렸다(rev {rev})" + ("" if db is None or sha(body) != sha(db["body"]) else " — 이미 같은 내용")

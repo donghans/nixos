@@ -1,4 +1,4 @@
-"""시험용 임시 Postgres: unix 소켓만 열고 실제 schema.sql 을 올린다. 쓰는 곳: test_ctxdata.py · test_ctxui.py.
+"""시험용 임시 Postgres: unix 소켓만 열고 실제 schema.sql 을 올린다. 쓰는 곳: test_ctxdata.py · test_llmui.py.
     pg = pgscratch.start()   # 못 쓰면 None(시험은 건너뛴다) · pg.dsn · pg.home · pg.stop()
 """
 import glob, os, shutil, subprocess, sys, tempfile
