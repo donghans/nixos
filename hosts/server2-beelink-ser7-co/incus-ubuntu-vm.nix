@@ -195,8 +195,9 @@ in {
             incus exec ubuntu-2404 -- systemctl enable --now fstrim.timer
 
             # 게스트 → mac-studio 직접 백업 (2026-10-22). 호스트(server2) 스냅샷/중간 저장 없이
-            # 게스트 안의 restic 이 tailnet 으로 바로 보낸다. 변경분만 전송(dedup)하고 저장소엔
-            # 최신 1개만 남긴다. 호스트→tailnet 경로는 ubuntu-2404-proxy LXC 의 masquerade
+            # 게스트 안의 restic 이 tailnet 으로 바로 보낸다. 변경분만 전송(dedup)한다. 보관은
+            # 「건강한(ok) 스냅샷 기준 일 7 + 주 3」(2026-11-05; 이전엔 최신 1개뿐이라 망가진 날의
+            # 백업이 마지막 정상본을 덮어썼다). 호스트→tailnet 경로는 ubuntu-2404-proxy LXC 의 masquerade
             # (hosts/_lib/incus-tailscale-proxy.nix egressEnsure)가 열어 준다.
             # 대상 제외: docker 이미지/빌드캐시/컨테이너 로그, node_modules, 앱이 매일 만드는 DB 덤프
             # 중 최신 1개를 뺀 나머지(/srv/b2g24/backup 에 15일치 ~170GiB).
@@ -234,19 +235,48 @@ in {
       # 비정상 종료(kill/재부팅)가 남긴 오래된 잠금만 제거한다 — 잠금이 남으면 뒤의 forget 이 계속 실패한다.
       restic unlock
 
+      # 건강 신호(인프라 수준만). 하나라도 걸리면 이 스냅샷에 suspect 태그를 붙인다 — 백업은 그대로 한다.
+      # 보관 규칙이 ok 스냅샷만 세므로 나쁜 날이 좋은 스냅샷을 밀어내지 못한다. 앱이 잘못된 데이터를
+      # 정상처럼 쓴 논리적 손상은 여기서 못 잡는다(보관 기간이 대신 막는다).
+      STATE=ok
+      WHY=""
+      note() { STATE=suspect; WHY="$WHY $1"; }
+      USE=$(df --output=pcent / | tail -1 | tr -dc 0-9)
+      [ "$USE" -lt 95 ] || note "disk-$USE%"
+      systemctl is-active --quiet docker || note "docker-inactive"
+      if [ -n "$LATEST" ]; then
+        AGE=$(( $(date +%s) - $(stat -c %Y "$LATEST") ))
+        [ "$AGE" -lt 108000 ] || note "dump-age-$AGE"
+        # 직전 덤프 3개 평균의 70% 미만이면 잘린 덤프로 본다.
+        PREV=$(find "$DUMP_DIR" -maxdepth 1 -name 'jodal_insight-*.archive.gz' ! -path "$LATEST" -printf '%T@ %s\n' | sort -n | tail -3 | awk '{s+=$2;n++} END{if(n)print int(s/n)}')
+        SZ=$(stat -c %s "$LATEST")
+        if [ -n "$PREV" ] && [ "$SZ" -lt $(( PREV * 70 / 100 )) ]; then note "dump-small"; fi
+      else
+        note "dump-missing"
+      fi
+
       # 종료코드 3 = 일부 파일을 못 읽음(실행 중 사라진 파일 등) → 스냅샷은 만들어졌으니 경고로만 취급
       rc=0
-      restic backup --one-file-system --exclude-file "$EXCL" \
+      restic backup --one-file-system --tag "$STATE" --exclude-file "$EXCL" \
         --exclude node_modules --exclude /root/.backup \
         /home /root /etc /srv /var/lib/docker/volumes || rc=$?
       if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then exit "$rc"; fi
 
-      # 최신 1개만 보관. 경로 집합이 같아 한 그룹이지만 만일을 위해 host 기준으로 묶는다.
-      restic forget --keep-last 1 --group-by host --prune --quiet
+      # 보관: ok 스냅샷 기준 일 7 + 주 3, suspect 는 14일. 경로 집합이 같아 한 그룹이지만 host 기준으로 묶는다.
+      # (태그 없는 옛 스냅샷 1개는 이 규칙에 안 걸려 남는다 — 확인 후 수동 삭제.)
+      restic forget --tag ok --keep-daily 7 --keep-weekly 3 --group-by host --quiet
+      restic forget --tag suspect --keep-within 14d --group-by host --quiet
+      # prune 은 무겁고 저장소 락을 오래 잡으므로 일요일(게스트 UTC)에만 한다. 이때 저장소 일부도 읽어 점검한다.
+      if [ "$(date +%u)" = 7 ]; then
+        restic prune --quiet
+        restic check --read-data-subset=2% --quiet
+      fi
+      # suspect 면 서비스를 실패로 끝내 systemctl --failed 에 보이게 한다.
+      if [ "$STATE" != ok ]; then echo "suspect:$WHY" >&2; exit 4; fi
       SCRIPT
             incus exec ubuntu-2404 -- bash -c "cat > /etc/systemd/system/backup-to-macstudio.service" <<'UNIT'
       [Unit]
-      Description=Back up this VM directly to mac-studio (restic, keep latest 1)
+      Description=Back up this VM directly to mac-studio (restic, ok daily 7 + weekly 3)
       After=network-online.target docker.service
       Wants=network-online.target
 
