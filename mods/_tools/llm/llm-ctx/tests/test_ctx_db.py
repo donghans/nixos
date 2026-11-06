@@ -150,6 +150,62 @@ try:
     r = cli("ctx", "search", "가가가")
     check("search: 경계에서 자르기 전에 치환(비밀 조각 없음)", "hunter" not in r.stdout and "pass" not in r.stdout.replace("[protected]", ""), r.stdout[-300:])
 
+    # --- P1(llm-trust): 조용한 잘림에 표지, `ctx msg` 완전 본문, 서브에이전트 브리프 제외
+    SID2 = "22222222-aaaa-bbbb-cccc-000000000002"
+    def ln2(uid, typ, content, ts, **kw):
+        return json.dumps({"uuid": uid, "sessionId": SID2, "type": typ, "timestamp": ts, "cwd": "/tmp/proj", "message": {"role": typ, "content": content}, **kw}, ensure_ascii=False)
+    U = lambda n: f"{n:08x}-0000-0000-0000-00000000f001"
+    TU_INPUT = "가" * 3000          # tool_use 입력(적재 평문은 1,500자에서 잘린다)
+    TR_BODY = "나" * 10000         # tool_result(적재 평문은 4,000자에서 잘린다)
+    BIG = "q" * (100_000 + 50)     # raw 상한(MAX_RAW) 초과 → raw 가 잘림 표식
+    lines2 = [ln2(U(0xb1), "user", "마" * 1102, "2026-10-02T01:00:00Z"),
+              ln2(U(0xc1), "assistant", [{"type": "tool_use", "id": "t1", "name": "Write", "input": {"content": TU_INPUT, "pw": PW}}], "2026-10-02T01:00:01Z"),
+              ln2(U(0xc2), "user", [{"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": TR_BODY}]}], "2026-10-02T01:00:02Z"),
+              ln2(U(0xc3), "user", BIG, "2026-10-02T01:00:03Z"),
+              ln2(U(0xd1), "user", "사람유일문구 다음 단계 진행", "2026-10-02T01:00:04Z"),
+              ln2(U(0xd2), "user", "서브브리프유일문구 이 파일을 조사해라", "2026-10-02T01:00:05Z", isSidechain=True, agentId="ag1")]
+    t2 = os.path.join(HOME, ".claude/projects/-tmp-proj", SID2 + ".jsonl")
+    open(t2, "w").write("\n".join(lines2) + "\n"); os.utime(t2, (time.time() - 7200, time.time() - 7200))
+    check("P1 시험용 트랜스크립트 6줄 적재", cc.ingest_transcript(conn, t2) == 6); conn.commit()
+    r = cli("ctx", "sql", f"select text from messages where uuid = '{U(0xb1)}'")
+    check("sql: 셀 기본 1,000자에서 자르고 표지에 남은 글자 수와 해결책(--cell 0)", "[잘림: +102자 더 있음 → --cell 0]" in r.stdout and r.stdout.count("마") == 1000, r.stdout[-120:])
+    r = cli("ctx", "sql", f"select text from messages where uuid = '{U(0xb1)}'", "--cell", "0")
+    check("sql --cell 0: 1,102자 전부, 표지 없음", r.stdout.count("마") == 1102 and "잘림" not in r.stdout)
+    r = cli("ctx", "sql", f"select text from messages where uuid = '{U(0xb1)}'", "--cell", "300")
+    check("sql --cell N: 지정한 폭에서 자름", r.stdout.count("마") == 300 and "[잘림: +802자" in r.stdout)
+    r = cli("ctx", "sql", "select generate_series(1, 5)", "--limit", "3")
+    check("sql: 행 상한에 걸리면 표지", "[잘림: 행이 3개 넘게 있다" in r.stdout and "3" in r.stdout)
+    r = cli("ctx", "sql", "select generate_series(1, 3)", "--limit", "3")
+    check("sql: 행이 상한과 같으면 표지 없음(오탐 방지)", "잘림" not in r.stdout)
+    r = cli("ctx", "session", SID2[:8])
+    check("session: 1,500자 넘는 본문(20,000자짜리 q 줄)은 --full 안내 표지", "q" * 1500 + " [잘림: +18500자 더 있음 → --full]" in r.stdout and "q" * 1501 not in r.stdout, r.stdout[-200:])
+    r = cli("ctx", "session", SID2[:8], "--full")
+    check("session --full: 본문 전부, 도구 호출 본문은 ctx msg 안내", "마" * 1102 in r.stdout and "ctx msg" in r.stdout and "→ --full" not in r.stdout)
+    r = cli("ctx", "msg", U(0xc1)[:12])
+    check("msg: tool_use 완전 본문(3,000자) + 키 순서 안내", r.returncode == 0 and r.stdout.count("가") >= 3000 and "키 순서" in r.stdout, r.stdout[:200])
+    check("msg: 도구 입력 안의 등록된 비밀도 치환", PW not in r.stdout + r.stderr and "[protected]" in r.stdout)
+    r = cli("ctx", "msg", U(0xc2))
+    check("msg: tool_result 10,000자는 기본 상한 8,000자에서 자르고 --all 안내", r.stdout.count("나") == 8000 - len("[tool_result] ") and "[잘림: +2014자 더 있음 → --all]" in r.stdout, r.stdout[-120:])
+    r = cli("ctx", "msg", U(0xc2), "--all")
+    check("msg --all: 10,000자 전부, 표지 없음", r.stdout.count("나") == 10000 and "[잘림" not in r.stdout)
+    r = cli("ctx", "msg", U(0xc3))
+    check("msg: raw 가 잘린 줄은 원본 파일에서만 복구 가능하다고 안내", "원본 대화 파일" in r.stdout and r.returncode == 0, r.stdout[:300])
+    r = cli("ctx", "msg", "0000")
+    check("msg: 앞자리가 모호하면 후보 목록과 실패 코드", r.returncode == 1 and "더 길게" in r.stdout and U(0xb1) in r.stdout, r.stdout[:300])
+    r = cli("ctx", "msg", "zzzz")
+    check("msg: 없으면 실패 코드", r.returncode == 1 and "없음" in r.stdout)
+    r = cli("ctx", "msg", U(0xb1), "--raw")
+    check("msg --raw 는 TTY 가 아니면 거부", r.returncode != 0)
+    r = cli("ctx", "search", "유일문구", "--role", "user")
+    check("search --role user: 서브에이전트 브리프는 빠지고 사람 발언만", "사람유일문구" in r.stdout and "서브브리프" not in r.stdout, r.stdout)
+    r = cli("ctx", "search", "서브브리프유일문구")
+    check("search(역할 없음): 브리프도 검색된다(필터는 사용자 발언 검색에만)", "서브브리프유일문구" in r.stdout, r.stdout)
+    import ctxdata as cdt
+    hs = cdt.search(conn, "유일문구", role="user")
+    check("ctxdata.search(role=user): 브리프 제외(llmui 검색·대조 공용)", [h["text"] if "text" in h else h["snippet"] for h in hs] and all("서브브리프" not in h["snippet"] for h in hs) and any("사람유일문구" in h["snippet"] for h in hs), str([h["snippet"] for h in hs]))
+    check("ctxdata.search(role 없음): 브리프도 나온다", any("서브브리프" in h["snippet"] for h in cdt.search(conn, "유일문구")))
+    os.remove(t2)   # 이후 scrub 시험이 「트랜스크립트 파일 1개」를 전제로 한다(DB 의 행은 그대로 둔다)
+
     # --- 주입 래퍼
     r = cli("secret", "run", "--", sys.executable, "-c", "import sys; print('pw=' + sys.argv[1]); print('tok_abcdef')", "{{secret:NAS_PW}}")
     check("secret run: 값은 인자로 들어가고 출력은 치환", r.returncode == 0 and r.stdout == "pw=[protected]\n[protected]\n", repr(r.stdout + r.stderr))

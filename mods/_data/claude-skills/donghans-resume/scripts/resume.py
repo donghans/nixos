@@ -143,7 +143,8 @@ if sid:
     if not fs:
         print('(로컬 트랜스크립트 없음 — 공유 저장소에서 조회)')
         if re.fullmatch(r'[0-9a-f-]{6,36}', sid):
-            print(sh('donghans', 'ctx', 'sql', f"select to_char(ts at time zone 'UTC','MM-DD HH24:MI')||' UTC' ts, case when rn<=3 then left(text,1500) else left(text,500) end prompt from (select ts, text, row_number() over (order by ts desc) rn from messages where session_id like '{sid}%' and kind='prompt' and not is_sidechain and text not like '<%' and text not like '[Request interrupted%' and text not like 'This session is being continued%' order by ts desc limit {max(a.n, 0)}) q order by ts asc"))
+            # 마지막 3개는 1500자, 나머지는 500자까지. 더 길면 조용히 자르지 말고 표지와 완전 본문 조회 명령을 붙인다. 셀 폭 상한은 --cell 0 으로 끈다(자르는 것은 이 SQL 의 lim 뿐).
+            print(sh('donghans', 'ctx', 'sql', "--cell", "0", f"select to_char(ts at time zone 'UTC','MM-DD HH24:MI')||' UTC' ts, case when length(text) > lim then left(text, lim) || ' [잘림: +' || (length(text) - lim) || '자 더 있음 → donghans ctx msg ' || left(uuid, 12) || ']' else text end prompt from (select ts, uuid, text, case when rn<=3 then 1500 else 500 end lim from (select ts, uuid, text, row_number() over (order by ts desc) rn from messages where session_id like '{sid}%' and kind='prompt' and not is_sidechain and text not like '<%' and text not like '[Request interrupted%' and text not like 'This session is being continued%' order by ts desc limit {max(a.n, 0)}) q0) q order by ts asc"))
     for f in fs[:1]:
         msgs = []
         for l in open(f, errors='ignore'):

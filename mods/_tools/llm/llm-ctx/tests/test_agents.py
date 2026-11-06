@@ -66,6 +66,24 @@ check("MAX_RAW 보다 큰 줄은 raw 에 잘림 표식(size·head)", r["raw"].ge
 check("서브에이전트 id: 인자가 우선, 없으면 기록의 agentId", claude.parse_line(L(type="user", message=dict(content="s"), **base), "A1")["agent"] == "A1" and claude.parse_line(L(type="user", message=dict(content="s"), agentId="B2", **base), None)["agent"] == "B2")
 check("isSidechain → side", claude.parse_line(L(type="user", isSidechain=True, message=dict(content="s"), **base), None)["side"] is True)
 
+# ---------------------------------------------------------------- 상한과 완전 본문(full_text)
+TU = dict(type="tool_use", name="Write", input=dict(c="가" * 3000))
+k, t = claude.blocks_text([TU])
+check("tool_use 입력은 1,500자에서 자른다(적재용 평문 상한)", k == "tool_use" and len(json.dumps(dict(c="가" * 3000), ensure_ascii=False)) > 1500 and len(t) == len("[tool_use Write] ") + 1500, str(len(t)))
+k, t = claude.blocks_text([dict(type="tool_result", content="나" * 6000)])
+check("tool_result 는 4,000자에서 자른다", len(t) == len("[tool_result] ") + 4000, str(len(t)))
+check("blocks_text(caps=(None,None)) 는 자르지 않는다", len(claude.blocks_text([TU], caps=(None, None))[1]) > 3000 and len(claude.blocks_text([dict(type="tool_result", content="나" * 6000)], caps=(None, None))[1]) == len("[tool_result] ") + 6000)
+r = claude.parse_line(L(type="assistant", message=dict(content=[TU]), **base), None)
+ft = claude.full_text(r["raw"])
+check("full_text: raw 에서 tool_use 입력 전체(JSON 으로 의미 동치)를 되살린다", ft.startswith("[tool_use Write] ") and json.loads(ft[len("[tool_use Write] "):]) == dict(c="가" * 3000), str(len(ft)))
+r = claude.parse_line(L(type="user", message=dict(content=[dict(type="tool_result", content=[dict(text="나" * 6000)])]), **base), None)
+check("full_text: tool_result 6,000자 전체", len(claude.full_text(r["raw"])) == len("[tool_result] ") + 6000)
+r = claude.parse_line(L(type="user", message=dict(content="안녕 " * 8000), **base), None)
+check("full_text: 평문은 MAX_TEXT(20,000자) 를 넘는 부분도 raw 에서 되살린다", len(r["text"]) == agents.MAX_TEXT and len(claude.full_text(r["raw"])) == 3 * 8000)
+r = claude.parse_line(L(type="user", message=dict(content="q" * (agents.MAX_RAW + 10)), **base), None)
+check("full_text: raw 가 잘림 표식이면 None(원본 대화 파일에서만 복구)", claude.full_text(r["raw"]) is None and claude.full_text(None) is None and claude.full_text("x") is None)
+check("full_text: system 줄(message 없음)은 최상위 content", claude.full_text(dict(type="system", content="시스템")) == "시스템")
+
 # ---------------------------------------------------------------- 교체 가능성: 가짜 어댑터를 더하면 전체가 따라온다
 class Fake:
     NAME = "fake"; ENV_MARKERS = ("FAKE_AGENT_CLI",)

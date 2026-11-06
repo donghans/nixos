@@ -15,6 +15,8 @@
   parse_line(line, subagent_id) → dict | None
         기록 한 줄 → 메시지 행. 키: uuid sid parent ts role kind side agent pid cwd branch model ver it ot cr cc text raw
         (raw 는 JSON 으로 저장할 dict — DB 래핑은 호출하는 쪽이 한다. DB·psycopg 를 모른다: 순수 함수)
+  full_text(raw) → str | None
+        저장된 raw 로 자르지 않은 평문을 다시 만든다(`ctx msg` 가 쓴다). raw 가 잘림 표식이면 None. 없는 어댑터면 호출부가 `text` 로 대체한다(`getattr` 폴백)
   아직 이 인터페이스 밖(Claude Code 전용으로 llm_ctx.py 에 남아 있음): 훅 입력 JSON(session_id·cwd·transcript_path),
   OTel·상태줄 한도 기록(ingest_otel·backfill_accounts). 두 번째 에이전트를 실제로 붙일 때 이 목록을 어댑터로 옮긴다.
 DB 에는 아직 「어느 에이전트의 기록인가」 열이 없다(sessions·messages). 두 번째 에이전트를 적재하기 전에 `provider` 열을 더해야 한다.

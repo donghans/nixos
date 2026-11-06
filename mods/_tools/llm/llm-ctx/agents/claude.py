@@ -38,8 +38,10 @@ def subagent_id(path):
     return m.group(1) if m else None
 
 
-def blocks_text(content):
-    """메시지 content → (kind 후보, 평문)."""
+def blocks_text(content, caps=(1500, 4000)):
+    """메시지 content → (kind 후보, 평문). caps=(tool_use 입력 상한, tool_result 상한), 항목이 None 이면 자르지 않는다(`full_text` 가 쓴다)."""
+    cu, cr = caps
+    cut = lambda t, n: t if n is None else t[:n]
     if isinstance(content, str):
         return "text", content
     parts, kinds = [], set()
@@ -50,15 +52,28 @@ def blocks_text(content):
         if t == "text":
             kinds.add("text"); parts.append(b.get("text", ""))
         elif t == "tool_use":
-            kinds.add("tool_use"); parts.append(f"[tool_use {b.get('name')}] " + json.dumps(b.get("input"), ensure_ascii=False)[:1500])
+            kinds.add("tool_use"); parts.append(f"[tool_use {b.get('name')}] " + cut(json.dumps(b.get("input"), ensure_ascii=False), cu))
         elif t == "tool_result":
             kinds.add("tool_result")
             c = b.get("content")
             if isinstance(c, list):
                 c = " ".join(x.get("text", "") for x in c if isinstance(x, dict))
-            parts.append("[tool_result] " + str(c or "")[:4000])
+            parts.append("[tool_result] " + cut(str(c or ""), cr))
     k = "text" if "text" in kinds else ("tool_use" if "tool_use" in kinds else ("tool_result" if "tool_result" in kinds else "other"))
     return k, "\n".join(p for p in parts if p)
+
+
+def full_text(raw):
+    """저장된 raw(원본 줄의 dict) → 자르지 않은 평문. raw 가 잘림 표식(`{"truncated": …}`)이면 None —
+    그 줄의 완전한 본문은 원본 대화 파일(`~/.claude/projects`)에만 있다. 키 순서는 DB(jsonb) 에서 바뀌어 원본과 다를 수 있다."""
+    if not isinstance(raw, dict) or raw.get("truncated"):
+        return None
+    msg = raw.get("message") or {}
+    if msg:
+        text = blocks_text(msg.get("content"), caps=(None, None))[1]
+    else:
+        text = raw.get("content") if isinstance(raw.get("content"), str) else ""
+    return (text or "").replace("\x00", "")
 
 
 def parse_line(line, agent_id):

@@ -450,6 +450,7 @@ def cmd_search(a):
     if a.role == "user":      # 「사용자 발언」은 자동 메시지(작업 알림·명령 출력 등)를 뺀다 — LLM 이 자동 보고를 사용자 지시로 읽지 않게(donghans ctx doc read --project nixos plan ctx-message-kinds)
         import ctxdata as cd
         sql += " AND NOT (m.kind = 'prompt' AND coalesce(m.text, '') ~ %s)"; args.append(cd.AUTO_RE)
+        sql += " AND NOT m.is_sidechain"      # 서브에이전트에게 준 브리프(role=user 로 저장됨)는 사람 말이 아니다
     if a.days:
         sql += " AND m.ts > now() - make_interval(days => %s)"; args.append(a.days)
     sql += " ORDER BY m.ts DESC LIMIT %s"; args.append(a.limit)
@@ -484,6 +485,14 @@ def cmd_recent(a):
     return 0
 
 
+def cut_mark(text, width, hint):
+    """치환이 끝난 text 를 width 자(0·None 이면 무제한)에서 자르고, 잘렸으면 눈에 띄는 표지를 붙인다.
+    M(남은 글자 수)은 치환 뒤 길이 기준이라 DB 의 length(text) 와 다를 수 있다. `…(+M자)` 형태는 데이터 끝으로 오해돼 쓰지 않는다."""
+    if not width or len(text) <= width:
+        return text
+    return f"{text[:width]} [잘림: +{len(text) - width}자 더 있음 → {hint}]"
+
+
 def cmd_session(a):
     with connect(readonly=True) as c:
         r = c.execute("SELECT session_id, host, hosts, cwd, repo_url, branch, first_ts, last_ts FROM sessions WHERE session_id LIKE %s", (a.sid + "%",)).fetchall()
@@ -507,7 +516,44 @@ def cmd_session(a):
             lab = cd.CAT_LABEL.get(cat, "")
             if lab and summ and not a.full:                 # 자동·명령 메시지는 한 줄 요약(--full 이면 원문)
                 body, lab = f"[{lab}] {summ}", ""
-            print(f"\n[{ts:%m-%d %H:%M}] {uid[:8]} {role}{'(sub)' if side else ''}{' [' + lab + ']' if lab else ''}: {body[: (None if a.full else 1500)]}")
+            print(f"\n[{ts:%m-%d %H:%M}] {uid[:8]} {role}{'(sub)' if side else ''}{' [' + lab + ']' if lab else ''}: {cut_mark(body, None if a.full else 1500, '--full')}")
+        if a.full and any(r[2] == "tool_use" for r in rows):
+            print("\n# 도구 호출(tool_use) 본문은 적재 때 이미 잘려 있다 — 완전한 본문은 `donghans ctx msg <uuid 앞자리>`")
+    return 0
+
+
+def _msg_body(kind, text, raw):
+    """한 메시지의 완전한 본문과 안내(notes). 본문 렌더링은 출력 대상(화면·파일)과 분리해 둔다(후속: 뷰 파일 내보내기가 같은 함수를 쓴다)."""
+    notes = []
+    fn = getattr(agents.get(), "full_text", None)
+    full = fn(raw) if fn else None
+    if full is None:
+        if isinstance(raw, dict) and raw.get("truncated"):
+            notes.append(f"원본 줄이 {raw.get('size')}자라 raw 가 잘려 있다 — 완전한 본문은 원본 대화 파일(~/.claude/projects)에만 있다. 아래는 저장된 평문(text)")
+        return text or "", notes
+    if kind == "tool_use":
+        notes.append("도구 입력은 JSON 으로 다시 직렬화한 것이라 키 순서가 원본과 다를 수 있다")
+    return full, notes
+
+
+def cmd_msg(a):
+    with connect(readonly=True) as c:
+        rows = c.execute("SELECT uuid, session_id, ts, role, kind, is_sidechain, text, raw FROM messages WHERE uuid LIKE %s ORDER BY ts LIMIT 21", (a.uuid + "%",)).fetchall()
+        mk = _masker(a, c)
+        if not rows:
+            print("일치하는 메시지 없음"); return 1
+        if len(rows) > 1:
+            print(f"uuid 앞자리 '{a.uuid}' 가 {'20건 이상' if len(rows) > 20 else str(len(rows)) + '건'}에 일치한다 — 더 길게 적는다:")
+            for uid, sid, ts, role, kind, side, _t, _r in rows[:20]:
+                print(f"  {uid}  세션 {sid[:8]}  {ts:%m-%d %H:%M}  {role}{'(sub)' if side else ''}/{kind}")
+            return 1
+        uid, sid, ts, role, kind, side, text, raw = rows[0]
+        body, notes = _msg_body(kind, text, raw)
+        body = mk.text(body)
+        print(mk.text(f"# {uid}  세션 {sid}  {ts:%Y-%m-%d %H:%M:%S}  {role}{'(sub)' if side else ''}/{kind}  전체 {len(body)}자(치환 뒤)"))
+        for n in notes:
+            print(f"# {n}")
+        print(cut_mark(body, 0 if a.all else a.max, "--all"))
     return 0
 
 
@@ -551,8 +597,11 @@ def cmd_sql(a):
         mk = _masker(a, c)
         cur = c.execute(a.query)
         print("\t".join(d.name for d in cur.description))
-        for row in cur.fetchmany(a.limit):
-            print("\t".join("" if v is None else mk.text(str(v))[:300] for v in row))   # 치환 후 자름
+        rows = cur.fetchmany(a.limit)
+        for row in rows:
+            print("\t".join("" if v is None else cut_mark(mk.text(str(v)), a.cell, "--cell 0") for v in row))   # 치환 후 자른다
+        if len(rows) == a.limit and cur.fetchone() is not None:
+            print(f"[잘림: 행이 {a.limit}개 넘게 있다 → --limit N]")
     return 0
 
 
@@ -1023,9 +1072,10 @@ def main():
     p = ctx.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.set_defaults(f=cmd_search)
     p = ctx.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.set_defaults(f=cmd_recent)
     p = ctx.add_parser("session"); p.add_argument("sid"); p.add_argument("--n", type=int); p.add_argument("--full", action="store_true"); p.add_argument("--from", dest="from_uuid"); p.add_argument("--to", dest="to_uuid"); p.set_defaults(f=cmd_session)
+    p = ctx.add_parser("msg", help="한 메시지의 완전한 본문(도구 호출 포함)"); p.add_argument("uuid", help="메시지 uuid 앞자리(ctx session 출력의 8자 등)"); p.add_argument("--max", type=int, default=8000, help="출력 글자 수 상한(기본 8000)"); p.add_argument("--all", action="store_true", help="상한 없이 전부"); p.set_defaults(f=cmd_msg)
     p = ctx.add_parser("usage"); p.add_argument("--days", type=int, default=7); p.set_defaults(f=cmd_usage)
     p = ctx.add_parser("limits", help="계정별 한도(5h/7d) 창별 최고 사용률"); p.add_argument("--days", type=int, default=14); p.add_argument("--limit", type=int, default=20); p.set_defaults(f=cmd_limits)
-    p = ctx.add_parser("sql"); p.add_argument("query"); p.add_argument("--limit", type=int, default=50); p.set_defaults(f=cmd_sql)
+    p = ctx.add_parser("sql"); p.add_argument("query"); p.add_argument("--limit", type=int, default=50, help="출력 행 수 상한(넘으면 표지)"); p.add_argument("--cell", type=int, default=1000, help="셀 하나의 출력 글자 수 상한(0 = 무제한; 넘으면 [잘림: …] 표지)"); p.set_defaults(f=cmd_sql)
     ctx_doccli.register(ctx, argparse.Namespace(norm_repo=norm_repo, git_meta=git_meta, connect=connect, load_masker=cs.load_masker, HOST=HOST, human_only=_human_only))
     ho = top.add_parser("handoff", help="인수인계 문서 업/다운").add_subparsers(dest="cmd", required=True)
     p = ho.add_parser("put"); p.add_argument("--session", required=True); p.add_argument("--doc", required=True); p.add_argument("--note", default=""); p.set_defaults(f=cmd_handoff_put)
@@ -1055,7 +1105,7 @@ def main():
     p = se.add_parser("ignore"); p.add_argument("fp"); p.add_argument("--note"); p.add_argument("--undo", action="store_true"); p.set_defaults(f=cmd_secret_ignore)
     p = se.add_parser("scrub"); p.add_argument("--apply", action="store_true"); p.add_argument("--idle-min", type=int, default=60)
     p.add_argument("--quiet", action="store_true", help="바꾼 것이 없으면 아무것도 출력하지 않는다(타이머용)"); p.add_argument("--no-cache", action="store_true", help="점검 캐시를 쓰지 않고 모든 파일을 다시 읽는다"); p.set_defaults(f=cmd_secret_scrub)
-    for name in ("search", "recent", "session", "sql"):   # 사람이 TTY 에서만 쓸 수 있는 치환 해제
+    for name in ("search", "recent", "session", "sql", "msg"):   # 사람이 TTY 에서만 쓸 수 있는 치환 해제
         ctx.choices[name].add_argument("--raw", action="store_true", help="치환 해제(사람이 터미널에서만)")
     a = ap.parse_args()
     sys.exit(a.f(a) or 0)

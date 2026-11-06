@@ -423,6 +423,7 @@ def search(conn, query="", *, regex=False, repo=None, role=None, kinds=("prompt"
         where.append("m.role = %s"); args.append(role)
     if role == "user":      # 「사용자 발언」 검색(F2·대조·CLI --role user)은 자동 메시지(작업 알림 등)를 사람 말로 세지 않는다
         where.append("NOT (m.kind = 'prompt' AND coalesce(m.text, '') ~ %s)"); args.append(AUTO_RE)
+        where.append("NOT m.is_sidechain")      # 서브에이전트 브리프는 사람 말이 아니다
     if days:
         where.append("m.ts > now() - make_interval(days => %s)"); args.append(days)
     sql = f"""SELECT m.ts, m.session_id, m.uuid, m.role, m.kind, s.repo_url, s.host, s.branch, m.text
