@@ -22,6 +22,11 @@ PW, KEY = "hunter2-pass", "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUV"
 KEY2 = "sk-ant-api03-ZYXWVUTSRQPONMLKJIHGFEDCBA9876"          # 제한 모드 시험용: 등록하지 않은 새 키(후보로만 잡히는 것)
 
 
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+_ago = lambda d: (_dt.now(_tz.utc) - _td(days=d)).isoformat()    # 대시보드 기본 기간(30일) 안에 들도록 오늘 기준 상대 날짜(고정 날짜는 시간이 지나면 기간 밖이 돼 추이가 비었다)
+_loc = lambda d: (_dt.now(_tz.utc) - _td(days=d)).astimezone()   # 화면은 로컬 시간대 날짜로 보인다
+USAGE_FIRST, USAGE_LAST = _loc(6).strftime("%m-%d"), _loc(4).strftime("%m-%d")
+USAGE_WEEKS = len({_loc(d).isocalendar()[:2] for d in (6, 5, 4)})   # 일 단위 3행이 주 단위로 몇 줄이 되는지는 오늘의 요일에 달렸다
 def seed():
     conn = cc.connect()
     def one(sid, repo, host, msgs):
@@ -33,8 +38,8 @@ def seed():
     one("bbbb0001", B, "h2", [("user", "prompt", "2026-10-03T01:00:00Z", "beta 는 월요일에 배포한다"), ("assistant", "response", "2026-10-03T01:00:10Z", "배포 일정 확인"),
                               ("user", "prompt", "2026-10-04T01:00:00Z", "배포 금요일로 바꾸자")])
     one("cccc0001", None, "h1", [("user", "prompt", "2026-10-05T01:00:00Z", "저장소 없는 세션의 배포 이야기")])
-    for rid, sid, host, ts, model, cost in [("u1", "aaaa0001", "h1", "2026-10-01T01:00:00Z", "claude-sonnet-5-5", 1.0), ("u2", "aaaa0001", "h1", "2026-10-02T01:00:00Z", "claude-haiku-5-5", 0.5),
-                                            ("u3", "bbbb0001", "h2", "2026-10-03T01:00:00Z", "claude-sonnet-5-5", 2.0)]:
+    for rid, sid, host, ts, model, cost in [("u1", "aaaa0001", "h1", _ago(6), "claude-sonnet-5-5", 1.0), ("u2", "aaaa0001", "h1", _ago(5), "claude-haiku-5-5", 0.5),
+                                            ("u3", "bbbb0001", "h2", _ago(4), "claude-sonnet-5-5", 2.0)]:
         conn.execute("INSERT INTO usage_events (request_id, host, ts, session_id, model, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens) VALUES (%s,%s,%s,%s,%s,%s,100,10,1000,50)",
                      (rid, host, ts, sid, model, cost))
     for n, (acct, email, plan, f, w) in enumerate([("A", "a@x.test", "max_5x", 30, 10), ("A", "a@x.test", "max_5x", 60, 12), ("B", "b@x.test", "pro", 90, 70)]):
@@ -228,13 +233,13 @@ async def run():
         lt = txt(app.query_one("#stat-limits"))
         check("통계: 계정별 한도 그래프에 계정·플랜·최고 %가 계정마다 따로 나온다", all(k in lt for k in ("a@x.test", "max_5x", "b@x.test", "pro", "최고 60%", "최고 90%")), lt)
         st = txt(app.query_one("#stat-state"))
-        check("통계: 상태줄에 기간·단위·분류·정렬과 비용 수집 시작일", all(k in st for k in ("기간: 30일", "단위: 일", "분류: 모델", "정렬: 비용", "10-01 이후")), st)
+        check("통계: 상태줄에 기간·단위·분류·정렬과 비용 수집 시작일", all(k in st for k in ("기간: 30일", "단위: 일", "분류: 모델", "정렬: 비용", f"{USAGE_FIRST} 이후")), st)
         check("통계: 기본 30일 필터(합성 데이터는 2026-10 초라 오늘 기준으로는 이미 밖일 수 있음)", "기간: 30일" in st)
         await pilot.press("f2")      # 기간 순환: 30일 → 전체
         await settle(pilot, lambda: rows(app, "#stat-trend") == 3)
         check("통계 p: 기간 순환(30일 → 전체)", "기간: 전체" in txt(app.query_one("#stat-state")) and rows(app, "#stat-trend") == 3, txt(app.query_one("#stat-state")))
         tt = app.query_one("#stat-trend")
-        check("통계: 추이 표(일 단위 3행, 최근이 위·합계 제목)", rows(app, "#stat-trend") == 3 and "10-03" in str(tt.get_row_at(0)[0]) and "$3.50" in app.query_one("#stat-trend").border_title, app.query_one("#stat-trend").border_title)
+        check("통계: 추이 표(일 단위 3행, 최근이 위·합계 제목)", rows(app, "#stat-trend") == 3 and USAGE_LAST in str(tt.get_row_at(0)[0]) and "$3.50" in app.query_one("#stat-trend").border_title, app.query_one("#stat-trend").border_title)
         check("통계: 비용 막대 그려짐", any("█" in str(tt.get_row_at(i)[3]) for i in range(3)))
         cc_ = app.query_one("#stat-trend-chart")
         check("통계: 비용 그래프(점자)가 위쪽에 그려지고 부제에 합계·최대·평균", any("\u2800" < ch <= "\u28ff" for ch in txt(cc_)) and "$3.50" in (cc_.border_subtitle or ""), (txt(cc_)[:80], cc_.border_subtitle))
@@ -255,7 +260,7 @@ async def run():
         await pilot.press("f4"); await settle(pilot, lambda: "분류: 머신" in txt(app.query_one("#stat-state"))); await pilot.press("f4"); await pilot.press("f4"); await pilot.press("f4")
         await settle(pilot, lambda: "분류: 모델" in txt(app.query_one("#stat-state"))); await pilot.press("f4"); await settle(pilot, lambda: "분류: 저장소" in txt(app.query_one("#stat-state")))
         await pilot.press("f3"); await settle(pilot, lambda: "단위: 주" in txt(app.query_one("#stat-state")))
-        check("통계 b: 단위 순환(일 → 주)", "단위: 주" in txt(app.query_one("#stat-state")) and rows(app, "#stat-trend") == 1)
+        check("통계 b: 단위 순환(일 → 주)", "단위: 주" in txt(app.query_one("#stat-state")) and rows(app, "#stat-trend") == USAGE_WEEKS)
         await pilot.press("f6"); await settle(pilot, lambda: "정렬: 최근" in txt(app.query_one("#stat-state")))
         check("통계 o: 세션 정렬 순환(비용 → 최근)", "정렬: 최근" in txt(app.query_one("#stat-state")))
         fr = app.query_one("#f-repo")

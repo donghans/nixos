@@ -127,7 +127,8 @@ try:
     tk = cd.usage_trend(conn, bucket="day", tz="Asia/Seoul")
     check("usage_trend: 시간대에 따라 하루 경계가 달라짐(KST 는 10-02 가 따로 생김)", [round(r["cost"], 2) for r in tk][:3] == [1.0, 0.5, 6.0], str([(str(r["bucket"]), r["cost"]) for r in tk]))
     check("usage_trend: 토큰 합(입력 100·출력 10·캐시읽기 1000·캐시생성 50)", (tr[0]["input"], tr[0]["output"], tr[0]["cache_read"], tr[0]["cache_create"]) == (200, 20, 2000, 100))
-    check("usage_trend(월): 10월 한 구간(오늘 것 포함)", len(cd.usage_trend(conn, bucket="month", tz="UTC")) == 1)
+    from datetime import datetime as _dt
+    check("usage_trend(월): 10월 구간 + 오늘이 속한 달(오늘이 10월이면 한 구간)", len(cd.usage_trend(conn, bucket="month", tz="UTC")) == len({"2026-10", _dt.now(timezone.utc).strftime("%Y-%m")}))
     check("usage_trend: 저장소 필터(부분 일치)", round(sum(r["cost"] for r in cd.usage_trend(conn, repo="alpha")), 2) == 1.5)
     check("usage_trend: 머신 필터", round(sum(r["cost"] for r in cd.usage_trend(conn, host="h2")), 2) == 6.0)
     check("usage_trend: 모델 필터", round(sum(r["cost"] for r in cd.usage_trend(conn, model="haiku")), 2) == 0.5)
