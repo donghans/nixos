@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """llmui — donghans LLM 컨텍스트(ctx) 관리·세션 TUI.
 
-  llmui              전체 화면(1~7 탭, ctx DB 에 연결)
+  llmui              전체 화면(1~8 탭, ctx DB 에 연결)
   llmui --sessions   7 세션 탭만 단독으로(DB 에 연결하지 않음 — `llm-sessions` 가 이것이다)
 
   1 대시보드  합계·표별 용량·저장소별 표(Enter: 그 저장소로 검색) + 한도 그래프·토큰/비용 추이·분류별·세션 통계·세션 표(Enter: 그 세션 대화). 저장소·머신·모델·기간 필터는 통계 칸에 적용
@@ -10,6 +10,7 @@
   4 비밀   등록된 비밀(출력 시 [protected] 로 치환) 관리: 추가·끄기·삭제
   5 후보   키·비밀번호처럼 보이는 문자열 자동 탐지 → 승인(등록)·무시
   6 지침   프로젝트별 지침(공유 정본 project_instructions)을 모든 저장소에 대해 보고 고친다 — 로컬 캐시 없이 DB 만 대상   (Enter: 본문 · e: 편집기)
+  8 카드   결정 카드(ctx note cards/*) — Space 체크 · Enter 상세(근거 원문 대조·이력·승격) · 체크하면 하단에서 쟁점을 적고 확인 → `/donghans-card` 논의 세션 시작. 제한 모드에서는 읽기만
   7 세션   claude 가 도는 tmux 세션 목록·화면 미리보기 — Enter 붙기 · F2 새 세션 · F3 붙은 곳 떼기 · Delete 정리 (ssh·다른 터미널에서도 같은 세션). 제한 모드에서는 목록만 보인다
 
 원문(DB)은 바꾸지 않는다. 화면의 치환(F10)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. TTY 가 없으면 실행하지 않는다.
@@ -48,8 +49,9 @@ import llm_ctx as cc
 import ctx_secrets as cs
 import ctxchart as cch
 import ctxdata as cd
+import llmcards as lc
 
-TABS = [("dashboard", "대시보드"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("instr", "지침"), ("sessions", "세션")]
+TABS = [("dashboard", "대시보드"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("instr", "지침"), ("sessions", "세션"), ("cards", "카드")]
 
 
 def short_repo(url: str | None) -> str:
@@ -505,10 +507,10 @@ class InstrScreen(ModalScreen):
 
 
 # ---------------------------------------------------------------- 앱
-class LlmUI(ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
+class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
     TITLE = "llmui — LLM 컨텍스트·세션 관리"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
-        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침) · 7 세션(claude 가 도는 tmux 세션 — 붙기·새 세션·정리, DB 없이도 `llmui --sessions` 로 이 탭만 단독 실행)'),
+        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침) · 7 세션(claude 가 도는 tmux 세션 — 붙기·새 세션·정리, DB 없이도 `llmui --sessions` 로 이 탭만 단독 실행) · 8 카드(결정 카드 — Space 체크, Enter 상세·근거 대조·이력(h)·승격(F2, 사람만), 체크하면 하단에서 논의 세션 시작. F2/F3 상태·범위 필터)'),
         *[t for t in ls.SESSIONS_HELP_TERMS if t[0] != '제한 모드'],
         ('치환(F10)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
         ('제한 모드', 'LLM 세션이 실행하면: 모든 탭을 볼 수 있지만 화면의 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(키 형식·password=·한글 비밀번호)이 [protected] 로 치환되고(끌 수 없음), 후보 미리보기도 [protected](N자)로 가려지며, 값 보기(F4)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용된다'),
@@ -550,10 +552,22 @@ class LlmUI(ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
     #stat-limits { padding: 0 1; }
     #stat-summary { padding: 0 1; }
     #ovhead { height: auto; }
+    #card-bottom { height: auto; padding: 0 1; }
+    #card-buttons { height: 3; }
+    #card-buttons Button { margin-right: 2; }
+    #card-head { height: auto; max-height: 6; padding: 0 1; }
+    #card-body-box { height: 1fr; }
+    #ev-table { height: 8; }
+    #ev-head { height: auto; }
+    #ev-scroll { height: 1fr; }
+    #hist-body { height: 1fr; }
+    #hist-table { width: 40; }
+    #hist-diff-box { width: 1fr; }
+    CardScreen, EvidenceScreen, HistoryScreen { align: center middle; }
     """
     BINDINGS = [
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('search')", "검색"), Binding("3", "tab('verify')", "대조"),
-        Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"), Binding("6", "tab('instr')", "지침"), Binding("7", "tab('sessions')", "세션"),
+        Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"), Binding("6", "tab('instr')", "지침"), Binding("7", "tab('sessions')", "세션"), Binding("8", "tab('cards')", "카드"),
         Binding("escape", "escape_back", "뒤로/종료", show=False),
         Binding("f10", "toggle_mask", "치환 켬/끔"), Binding("f5", "reload", "새로고침"),
         # 같은 F키를 탭마다 다른 동작에 쓴다 — check_action 이 현재 탭의 것만 켠다(TAB_ACTIONS)
@@ -563,7 +577,7 @@ class LlmUI(ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
         Binding("f6", "toggle_title_only", "제목만"), Binding("space", "toggle_expand", "세션 펼침", show=False), Binding("f7", "expand_all", "모두 펼침"),
         Binding("f2", "secret_add", "비밀 추가"), Binding("f3", "secret_toggle", "켬/끔"), Binding("f4", "reveal", "값 보기"),
         Binding("delete", "secret_delete", "삭제"), Binding("f2", "cand_ignore", "무시"), Binding("f2", "instr_edit", "지침 편집"),
-        Binding("f2", "sess_new", "새 세션"), Binding("f3", "sess_detach", "붙은 곳 떼기"), Binding("delete", "sess_kill", "정리(종료)"),
+        Binding("f2", "card_state_cycle", "상태 필터"), Binding("f3", "card_scope_cycle", "범위 필터"), Binding("f2", "sess_new", "새 세션"), Binding("f3", "sess_detach", "붙은 곳 떼기"), Binding("delete", "sess_kill", "정리(종료)"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
@@ -573,6 +587,7 @@ class LlmUI(ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
         super().__init__()
         self.restricted = restricted
         self.sess_setup()
+        self.cards_setup()
         self.mask = True
         self.only_user = False
         self.regex = False
@@ -639,6 +654,8 @@ class LlmUI(ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
                 yield uikit.box(DataTable(id="instr-table", cursor_type="row"), "프로젝트 지침(공유 정본) — Enter: 본문 · e: 편집기로 고치기")
             with TabPane("7 세션", id="sessions"):
                 yield from self.sess_widgets()
+            with TabPane("8 카드", id="cards"):
+                yield from self.cards_widgets()
         yield Footer()
 
     def on_mount(self):
@@ -654,6 +671,7 @@ class LlmUI(ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
         self.query_one("#instr-table", DataTable).add_columns("저장소", "이름", "rev", "수정 머신", "수정 시각", "길이")
         self.update_state()
         self.sess_mount()
+        self.cards_mount()
         self.set_interval(3.0, self._sess_tick)
         self.reload_overview()
 
@@ -755,7 +773,7 @@ class LlmUI(ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
     TAB_ACTIONS = {"stat_period": {"dashboard"}, "stat_bucket": {"dashboard"}, "stat_by": {"dashboard"}, "stat_order": {"dashboard"}, "stat_clear": {"dashboard"},
                    "toggle_role": {"search"}, "toggle_regex": {"search"}, "toggle_tools": {"search"}, "toggle_title_only": {"search"}, "expand_all": {"search"},
                    "secret_add": {"secrets"}, "secret_toggle": {"secrets"}, "secret_delete": {"secrets"}, "reveal": {"secrets", "cands"}, "cand_ignore": {"cands"}, "instr_edit": {"instr"},
-                   "sess_new": {"sessions"}, "sess_detach": {"sessions"}, "sess_kill": {"sessions"}}
+                   **lc.CardsMixin.CARD_ACTIONS, "sess_new": {"sessions"}, "sess_detach": {"sessions"}, "sess_kill": {"sessions"}}
 
     def check_action(self, action, parameters):
         """탭 전용 동작은 그 탭에서만 켠다(같은 F키를 탭마다 다른 동작에 재사용). 제한 모드에서는 막힌 동작(치환 끄기·값 보기·비밀 추가/삭제/끄기·후보 무시)을 푸터·도움말에서 숨긴다(눌러도 deny 가 막는다)."""
@@ -800,6 +818,8 @@ class LlmUI(ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
             self.reload_instr()
         elif name == "sessions":
             self.refresh_data()
+        elif name == "cards":
+            self.reload_cards()
 
     def _sess_tick(self):
         """세션 탭이 보일 때만 3초마다 tmux 를 다시 읽는다(다른 탭·대화 화면이 떠 있을 땐 쉬어서 tmux 를 부르지 않는다)."""
@@ -810,7 +830,7 @@ class LlmUI(ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
             pass
 
     TAB_TABLES = {"dashboard": "#projects", "search": "#results", "verify": "#vrepos", "secrets": "#secrets-table", "cands": "#cands-table",
-                  "instr": "#instr-table", "sessions": "#list"}      # 표가 있는 탭은 모두 표에 포커스 — 없으면 탭 키 뒤 Enter·↑↓ 가 아무 일도 안 했다
+                  "instr": "#instr-table", "sessions": "#list", "cards": "#cards-table"}      # 표가 있는 탭은 모두 표에 포커스 — 없으면 탭 키 뒤 Enter·↑↓ 가 아무 일도 안 했다
 
     def action_focus_table(self):
         try:
@@ -839,7 +859,7 @@ class LlmUI(ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
 
     def action_reload(self):
         t = self.current_tab()
-        {"dashboard": self.reload_dashboard, "search": self.run_search, "verify": self.run_verify, "secrets": self.reload_secrets, "cands": self.scan_candidates, "instr": self.reload_instr, "sessions": self.refresh_data}[t]()
+        {"dashboard": self.reload_dashboard, "search": self.run_search, "verify": self.run_verify, "secrets": self.reload_secrets, "cands": self.scan_candidates, "instr": self.reload_instr, "sessions": self.refresh_data, "cards": self.reload_cards}[t]()
 
     def update_state(self):
         self.query_one("#sstate", Static).update(
@@ -901,15 +921,26 @@ class LlmUI(ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
             self.query_one("#vhits", DataTable).focus()
         elif tid == "cands-table":
             self.adopt_selected()
+        elif tid == "cards-table" and key:
+            self.open_card(key)
         elif tid == "instr-table" and key:
             repo, _, name = key.rpartition("|")
             self.push_screen(InstrScreen(self, repo, name))
         elif tid == "stat-sessions" and key:
             self.push_screen(SessionScreen(self, key, None))
 
+    def on_button_pressed(self, ev):
+        if ev.button.id == "card-go":
+            self.launch_card_session()
+        elif ev.button.id == "card-clear":
+            self.clear_card_checks()
+            self.action_focus_table()
+
     # --- 검색
     def on_input_submitted(self, ev: Input.Submitted):
-        if ev.input.id in ("q", "repo", "days"):
+        if ev.input.id == "card-issue":
+            self.launch_card_session()
+        elif ev.input.id in ("q", "repo", "days"):
             self.run_search()
         elif ev.input.id == "phrase":
             self.run_verify()
@@ -973,6 +1004,8 @@ class LlmUI(ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
         return key.partition("|")[0] if key else None
 
     def action_toggle_expand(self):
+        if self.current_tab() == "cards":
+            return self.action_card_toggle()
         if self.current_tab() != "search" or len(self.screen_stack) != 1 or not isinstance(self.focused, DataTable) or self.focused.id != "results":
             return
         sid = self.current_session_key()

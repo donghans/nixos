@@ -102,14 +102,14 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # (observe 의 usageui 와 같은 방식). 훅·타이머·사용자가 부르는 `donghans` 는 모두 이 래퍼다.
   ctxSrc = pkgs.runCommand "llm-ctx-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_store.py" "ctx_doccli.py" "ctx_toolhook.py" "ctxdata.py" "ctxchart.py" "ctxcards.py" "llmui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_store.py" "ctx_doccli.py" "ctx_toolhook.py" "ctxdata.py" "ctxchart.py" "ctxcards.py" "llmcards.py" "llmui.py"]}
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-sessions + "/${f}"} $out/${f}") ["llm_sessions.py" "tmuxsess.py"]}
     cp ${../../_tools/_lib/uikit/uikit.py} $out/uikit.py
     mkdir -p $out/agents
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx/agents + "/${f}"} $out/agents/${f}") ["__init__.py" "claude.py"]}
   '';
   claudeCtx = pkgs.writeShellScriptBin "donghans" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg])}/bin/python3 ${ctxSrc}/llm_ctx.py "$@"'';
-  # LLM 관리 TUI(Textual): 저장소별 용량·검색·발언 대조·비밀 등록표·후보 탐지 + 7 세션 탭(claude tmux 세션). 사람이 터미널에서 쓰는 도구(`llmui`).
+  # LLM 관리 TUI(Textual): 저장소별 용량·검색·발언 대조·비밀 등록표·후보 탐지 + 8 카드 탭(결정 카드·논의 세션 시작, llmcards.py) + 7 세션 탭(claude tmux 세션). 사람이 터미널에서 쓰는 도구(`llmui`).
   # `llmui --sessions` 는 세션 탭만 단독으로(DB 에 연결하지 않음) — `llm-sessions` 가 이것이다. 세션 탭이 tmux·claude-run 을 찾도록 tmuxEnv 를 준다.
   llmui = pkgs.writeShellScriptBin "llmui" ''${tmuxEnv}exec ${pkgs.python3.withPackages (ps: [ps.psycopg ps.textual])}/bin/python3 ${ctxSrc}/llmui.py "$@"'';
 

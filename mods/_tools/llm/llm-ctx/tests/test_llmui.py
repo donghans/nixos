@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""llmui 시험(Textual Pilot + 임시 Postgres): 7개 탭(세션 탭 포함) · 검색/필터 · 대화 보기 · 치환 켬/끔 · 대조 · 비밀 추가/끄기/삭제/값 보기 · 후보 승인/무시.
+"""llmui 시험(Textual Pilot + 임시 Postgres): 8개 탭(세션·카드 탭 포함) · 검색/필터 · 대화 보기 · 치환 켬/끔 · 대조 · 비밀 추가/끄기/삭제/값 보기 · 후보 승인/무시.
 필요: psycopg + textual 이 있는 python 과 postgres 17 바이너리. 없으면 건너뛴다."""
 import asyncio, json, os, re, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
@@ -799,6 +799,125 @@ async def run_sessions_tab():
             setattr(tm, k, v)
 
 
+async def run_cards_tab():
+    """8 카드 탭: 목록·건너뛴 프로젝트 표시·체크 시에만 하단 표시·논의 세션 시작 인자·상세(근거 대조·원문 팝업·이력)·승격(사람만)·제한 모드 차단."""
+    import subprocess, tempfile, ctx_store as st, llmcards as lcd
+    import llm_sessions as lss
+    tm = lss.tm
+    tmp = tempfile.mkdtemp(prefix="llmui-cards-")
+    store = f"{tmp}/ctx"; os.makedirs(store)
+    open(f"{store}/manifest.toml", "w").write('[projects.alpha]\nrepo_url = "https://github.com/x/alpha"\nowner = "personal"\nremote = ""\n\n[projects.gone]\nrepo_url = "https://github.com/x/gone"\nowner = "personal"\nremote = ""\n')
+    genv = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t", GIT_CONFIG_GLOBAL="/dev/null")
+    git = lambda *a: subprocess.run(["git", "-C", f"{store}/alpha", *a], capture_output=True, text=True, env=genv)
+    os.makedirs(f"{store}/alpha"); git("init", "-q")
+    EVU = "aaaaaaaa-0000-0000-0000-00000000f001"
+    C1, C2 = "3f2a9c1b-1111-4222-8333-444455556666", "7e7e7e7e-1111-4222-8333-444455556666"
+    def body(cid, title, quote):
+        return (f"---\nid: {cid}\ntitle: {title}\nkind: 대전제\nproposer: agent\nlast_confirmed:\n---\n## 내용\n본문 {title}\n\n## 근거 원문\n- [msg:{EVU[:8]}] \"{quote}\"\n\n## 반례·한계\n- 반례 하나\n\n## 이력\n- 만듦\n")
+    def put(cid, state, scope, title, quote, msg):
+        p = f"{store}/alpha/note/cards/{cid}.md"; os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, "w").write(st.render_header({"state": state, "scope": scope}) + body(cid, title, quote))
+        git("add", "-A"); git("commit", "-q", "-m", f"ctx: alpha/note/cards/{cid} (s@h)")
+    put(C1, "draft", "personal", "배포는 금요일", "alpha 배포는 금요일", 1)
+    put(C2, "adopted", "project", "엉뚱한 인용 카드", "이 말은 원문에 없다", 2)
+    conn = cc.connect()
+    full = "alpha 배포는 금요일에 한다고 했다 — 전체 본문 FULLTEXT-MARK"
+    conn.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                 (EVU, "aaaa0001", "h1", "2026-10-01T02:00:00Z", "user", "prompt", full, json.dumps({"uuid": EVU, "type": "user", "message": {"role": "user", "content": full}})))
+    conn.commit(); conn.close()
+    cdir = f"{tmp}/work"; os.makedirs(cdir)
+    saved_env = {k: os.environ.get(k) for k in ("CTX_STORE_DIR", "LLMUI_CARD_DIR", "CTX_SYNC_INLINE", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_CONFIG_GLOBAL", "CTX_VIEWS_DIR")}
+    os.environ.update(CTX_STORE_DIR=store, LLMUI_CARD_DIR=cdir, CTX_SYNC_INLINE="1", CTX_VIEWS_DIR=f"{tmp}/views", GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t", GIT_CONFIG_GLOBAL="/dev/null")
+    log, saved_create = [], tm.create
+    tm.create = lambda d, args=None, name=None: (log.append((d, list(args or []))), "claude-card-1")[1]
+    try:
+        app = llmui.LlmUI()
+        async with app.run_test(size=(170, 50)) as pilot:
+            await settle(pilot, lambda: rows(app, "#projects") == 3)
+            check("카드 탭: 탭 전용 동작은 다른 탭에서는 꺼져 있다", all(app.check_action(a, ()) is False for a in ("card_toggle", "card_state_cycle", "card_scope_cycle")))
+            await pilot.press("8"); await settle(pilot, lambda: app.current_tab() == "cards" and rows(app, "#cards-table") == 2)
+            check("카드 탭: 8 키로 열리고 카드 2장이 보인다(다른 탭 번호는 그대로)", rows(app, "#cards-table") == 2 and app.focused is not None and app.focused.id == "cards-table")
+            st_txt = txt(app.query_one("#card-state"))
+            check("카드 탭: 이 머신에 저장소가 없는 프로젝트(gone)를 화면에 알린다", "건너뜀: gone" in st_txt, st_txt)
+            check("카드 탭: 체크가 없으면 하단(쟁점 입력·확인)이 숨겨져 있다", app.query_one("#card-bottom").display is False)
+            await pilot.press("space"); await pilot.pause(0.3)
+            check("카드 탭: Space 로 체크하면 하단이 나타나고 「확인」이 켜진다", app.query_one("#card-bottom").display is True and len(app.card_checked) == 1 and app.query_one("#card-go").disabled is False, app.card_checked)
+            await pilot.press("space"); await pilot.pause(0.3)
+            check("카드 탭: 다시 Space 로 해제하면 하단이 다시 숨는다", app.query_one("#card-bottom").display is False and app.card_checked == [])
+            await pilot.press("f2"); await pilot.pause(0.3)
+            check("카드 탭: F2 상태 필터(전체→draft)가 목록을 줄인다", app.card_state == "draft" and rows(app, "#cards-table") == 1)
+            await pilot.press("f2", "f2", "f2"); await pilot.pause(0.3)
+            check("카드 탭: F2 를 돌면 다시 전체", app.card_state is None and rows(app, "#cards-table") == 2)
+            # 체크 → 쟁점 → 세션 시작
+            await pilot.press("space"); await pilot.pause(0.3)
+            app.query_one("#card-issue").value = "이 카드가\n맞는지"
+            first = app.card_checked[0]
+            ok = app.launch_card_session(); await pilot.pause(0.3)
+            check("카드 세션: tmuxsess.create 가 카드 디렉터리와 `/donghans-card 프로젝트:uuid8 쟁점` 초기 프롬프트로 불린다",
+                  ok and len(log) == 1 and log[0][0] == cdir and log[0][1][-1] == f"/donghans-card {first} 이 카드가 맞는지", log)
+            check("카드 세션: 권한 확인 건너뛰기 기본 인자가 앞에 붙고, 시작 뒤 체크가 풀리고 세션 탭으로 간다", log[0][1][0].startswith("--") and app.card_checked == [] and app.current_tab() == "sessions", (log, app.current_tab()))
+            await pilot.press("8"); await settle(pilot, lambda: app.current_tab() == "cards")
+            # 상세: 근거 대조
+            app.query_one("#cards-table").focus(); await pilot.pause(0.2)
+            tb = app.query_one("#cards-table"); tb.move_cursor(row=[k.value for k in tb.rows].index(f"alpha:{C1[:8]}"))
+            await pilot.press("enter"); await settle(pilot, lambda: type(app.screen).__name__ == "CardScreen")
+            scr = app.screen
+            check("카드 상세: 열리고 근거가 원문과 대조돼 「일치」", type(scr).__name__ == "CardScreen" and scr.res and scr.res[0]["status"] == "일치" and "일치" in str(scr.query_one("#ev-table").get_row_at(0)[1]), (scr.row["name"], [(r["status"], (r["text"] or "")[:40]) for r in scr.res]))
+            await pilot.press("enter"); await settle(pilot, lambda: type(app.screen).__name__ == "EvidenceScreen")
+            check("카드 상세: 근거에서 Enter → 팝업에 메시지 전체 본문(잘림 없음)", type(app.screen).__name__ == "EvidenceScreen" and "FULLTEXT-MARK" in txt(app.screen.query_one("#ev-text")))
+            await pilot.press("escape"); await pilot.pause(0.3)
+            await pilot.press("h"); await settle(pilot, lambda: type(app.screen).__name__ == "HistoryScreen")
+            check("이력 화면: 판 목록과 diff 가 보인다", type(app.screen).__name__ == "HistoryScreen" and app.screen.query_one("#hist-table").row_count == 1 and "+++" in txt(app.screen.query_one("#hist-diff")), txt(app.screen.query_one("#hist-diff"))[:120])
+            await pilot.press("escape"); await pilot.pause(0.3)
+            # 승격 (사람): draft → reviewed
+            await pilot.press("f2"); await settle(pilot, lambda: type(app.screen).__name__ == "ConfirmScreen")
+            check("승격: F2 는 확인창을 먼저 띄운다(바로 쓰지 않음)", type(app.screen).__name__ == "ConfirmScreen" and st.read_doc(store, "alpha", "note", f"cards/{C1}")["meta"]["state"] == "draft")
+            await pilot.press("left", "enter"); await settle(pilot, lambda: st.read_doc(store, "alpha", "note", f"cards/{C1}")["meta"]["state"] == "reviewed", 12)
+            d = st.read_doc(store, "alpha", "note", f"cards/{C1}")
+            import re as _re
+            check("승격: 확인하면 reviewed 로 반영되고 last_confirmed 가 오늘 날짜, 이력에 한 줄", d["meta"]["state"] == "reviewed" and _re.search(r"last_confirmed: \d{4}-\d\d-\d\d", d["body"]) and "사용자 확인(llmui): draft → reviewed" in d["body"], d["meta"])
+            await pilot.pause(0.5)
+            check("승격: 상세 화면이 새 상태로 다시 그려진다", "사용자 확인" in txt(app.screen.query_one("#card-head")), txt(app.screen.query_one("#card-head")))
+            await pilot.press("escape"); await pilot.pause(0.3)
+            # adopted 카드는 더 올릴 수 없다
+            tb.move_cursor(row=[k.value for k in tb.rows].index(f"alpha:{C2[:8]}"))
+            await pilot.press("enter"); await settle(pilot, lambda: type(app.screen).__name__ == "CardScreen")
+            check("상세: 미일치 인용을 대조 결과에서 보인다", app.screen.res and app.screen.res[0]["status"] == "미일치", [r["status"] for r in app.screen.res])
+            await pilot.press("f2"); await pilot.pause(0.4)
+            check("승격: adopted 카드는 확인창 없이 안내만", type(app.screen).__name__ == "CardScreen" and st.read_doc(store, "alpha", "note", f"cards/{C2}")["meta"]["state"] == "adopted")
+            await pilot.press("escape"); await pilot.pause(0.3)
+
+        # --- 제한 모드: 읽기만
+        n_log = len(log)
+        rapp = llmui.LlmUI(restricted=True)
+        async with rapp.run_test(size=(170, 50)) as pilot:
+            await settle(pilot, lambda: rows(rapp, "#projects") == 3)
+            await pilot.press("8"); await settle(pilot, lambda: rapp.current_tab() == "cards" and rows(rapp, "#cards-table") == 2)
+            await pilot.press("space"); await pilot.pause(0.3)
+            check("제한 모드: 카드 목록·체크는 되지만 「확인」 버튼은 꺼져 있다", len(rapp.card_checked) == 1 and rapp.query_one("#card-go").disabled is True)
+            check("제한 모드: 세션 시작을 직접 불러도 막힌다", rapp.launch_card_session() is False and len(log) == n_log)
+            before = st.read_doc(store, "alpha", "note", f"cards/{C1}")["hash"]
+            row = rapp.card_rows[f"alpha:{C1[:8]}"]
+            rapp.promote_card(row); await pilot.pause(0.3)
+            check("제한 모드: 승격은 확인창도 없이 막힌다(문서가 안 바뀐다)", type(rapp.screen).__name__ != "ConfirmScreen" and st.read_doc(store, "alpha", "note", f"cards/{C1}")["hash"] == before)
+            await pilot.press("enter"); await settle(pilot, lambda: type(rapp.screen).__name__ == "CardScreen")
+            masked = txt(rapp.screen.query_one("#card-body"))
+            check("제한 모드: 상세는 볼 수 있다", "본문" in masked, masked[:80])
+    finally:
+        tm.create = saved_create
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def check_launch_prompt():
+    import llmcards as lcd
+    check("초기 프롬프트: 슬래시로 시작, 카드 여러 장과 쟁점(줄바꿈은 공백)", lcd.launch_prompt(["a:11111111", "b:22222222"], "첫째\n  둘째") == "/donghans-card a:11111111 b:22222222 첫째 둘째")
+    check("초기 프롬프트: 쟁점이 없으면 카드만", lcd.launch_prompt(["a:11111111"]) == "/donghans-card a:11111111")
+
+
 def check_sessions_only_no_db():
     """`llmui --sessions` 는 DB 에 연결하지 않는다 — DB 접속을 막아 두고(잘못된 PG 환경) 띄워도 앱이 뜬다(main 이 SessionsUI 로 직행하는지 코드로 확인)."""
     src = open(os.path.join(ROOT, "llmui.py"), encoding="utf-8").read()
@@ -815,6 +934,8 @@ try:
     asyncio.run(run_resize())
     asyncio.run(run_restricted())
     asyncio.run(run_sessions_tab())
+    check_launch_prompt()
+    asyncio.run(run_cards_tab())
     check_sessions_only_no_db()
 finally:
     pg.stop()
