@@ -423,6 +423,11 @@ def is_agent_session():
     return any(os.environ.get(k) for k in AGENT_ENV_MARKERS)
 
 
+def is_human() -> bool:
+    """사람이 터미널에서 직접 실행했는가 — `_human_only` 와 같은 기준(TTY, 에이전트 환경변수 없음)이되 종료하지 않고 참/거짓만 돌려준다."""
+    return bool(sys.stdin.isatty() and sys.stdout.isatty() and not is_agent_session())
+
+
 def _human_only(what):
     """TTY 검사가 본체다: 에이전트의 셸 도구는 TTY 가 아니다. 환경변수 표식은 TTY 를 흉내 낸 실행(script·pty)까지 막는 보조 장치이고,
     다른 에이전트를 쓰게 되면 그 어댑터(agents/<이름>.py)의 ENV_MARKERS 에 표식을 두거나 래퍼에서 DONGHANS_AGENT=1 을 설정한다."""
@@ -554,6 +559,96 @@ def cmd_msg(a):
         for n in notes:
             print(f"# {n}")
         print(cut_mark(body, 0 if a.all else a.max, "--all"))
+    return 0
+
+
+# ---------------------------------------------------------------- 결정 카드(ctx note cards/*) — 설계: plan llm-trust/02-card-skill-ui
+def _card_fetch(c):
+    """근거 메시지 조회 콜백(ctxcards.check_evidence 용): uuid 앞자리 → 완전 본문(raw 에서 되살림)."""
+    def fetch(prefix):
+        rows = c.execute("SELECT uuid, session_id, ts, kind, text, raw FROM messages WHERE uuid LIKE %s ORDER BY ts LIMIT 6", (prefix + "%",)).fetchall()
+        if not rows:
+            return ("none",)
+        if len(rows) > 1:
+            return ("ambiguous", [r[0] for r in rows])
+        uid, sid, ts, kind, text, raw = rows[0]
+        body, _notes = _msg_body(kind, text, raw)
+        return ("ok", body, {"uuid": uid, "session": sid, "ts": ts})
+    return fetch
+
+
+def cmd_card_list(a):
+    import ctxcards as cx
+    store = ctx_store.store_dir()
+    try:
+        rows, skipped = cx.find_cards(store, projects=[a.project] if a.project else None)
+    except ValueError as e:
+        sys.exit(str(e))
+    with connect(readonly=True) as c:
+        mk = _masker(a, c)
+    n = 0
+    for r in rows:
+        st_, cm = r["meta"].get("state", "unknown"), r["card"]["meta"]
+        if a.state and st_ != a.state:
+            continue
+        n += 1
+        print(mk.text(f"{cx.ref_of(r):<18} {st_:<9} {cm.get('kind', '?'):<6} {r['meta'].get('scope', 'unknown'):<8} {cm.get('title', '(제목 없음)')}" + ("  [형식 문제]" if r["problems"] else "")))
+    print(f"# 카드 {n}장" + (f" · 이 머신에 저장소가 없어 건너뛴 프로젝트: {', '.join(skipped)}" if skipped else ""))
+    return 0
+
+
+def cmd_card_show(a):
+    import ctxcards as cx
+    store = ctx_store.store_dir()
+    picked = []
+    for ref in a.ref:
+        try:
+            rows, skipped = cx.find_cards(store, ref)
+        except ValueError as e:
+            sys.exit(str(e))
+        if len(rows) != 1:
+            print(f"`{ref}` 에 일치하는 카드: {len(rows)}건" + (f" (이 머신에 저장소가 없는 프로젝트: {', '.join(skipped)})" if skipped else ""))
+            for r in rows:
+                print(f"  {cx.ref_of(r)}  {r['card']['meta'].get('title', '')}")
+            if rows:
+                print("→ `프로젝트:uuid8` 로 더 구체적으로 적거나 uuid 를 더 길게 적는다")
+            return 1
+        picked.append(rows[0])
+    with connect(readonly=True) as c:
+        mk = _masker(a, c)
+        fetch = _card_fetch(c)
+        for r in picked:
+            card, cm = r["card"], r["card"]["meta"]
+            res = cx.check_evidence(card, fetch)
+            print(mk.text(f"# {cx.ref_of(r)}  {cm.get('kind', '?')} · {r['meta'].get('scope', 'unknown')} · {r['meta'].get('state', 'unknown')} · 제안자 {cm.get('proposer', '?')}  — {cm.get('title', '(제목 없음)')}"))
+            print(f"# 카드 uuid {r['id']} · 문서 {r['project']}/note/{r['name']}")
+            if r["problems"]:
+                print("# ⚠ 형식 문제: " + " / ".join(r["problems"]))
+            if r["meta"].get("state") != "draft" and cm.get("proposer") == "agent" and r["meta"].get("state") in ("unknown", None):
+                print("# ⚠ 상태가 unknown 이다 — 에이전트가 만든 카드는 draft 여야 한다")
+            ei = 0
+            for line in r["body"].split("\n"):
+                print(mk.text(line))
+                if cx.parse_evidence_line(line) is not None and ei < len(res):
+                    x = res[ei]; ei += 1
+                    m, u8 = x["meta"], x["uuid"][:8]
+                    where = (f" · 세션 {m['session'][:8]} · {m['ts'].astimezone():%Y-%m-%d %H:%M}") if isinstance(m, dict) else ""
+                    if x["status"] == "일치":
+                        print(f"  ↳ 일치{where} · 메시지 {m['uuid'] if isinstance(m, dict) else u8}")
+                    elif x["status"] == "미일치":
+                        print(f"  ↳ ⚠ 미일치{where} — 이 인용은 그 메시지 원문에 없다(원문 {len(x['text'])}자) → donghans ctx msg {u8}")
+                    elif x["status"] == "메시지 없음":
+                        print(f"  ↳ ⚠ 메시지 없음 — DB 에 uuid 앞자리 {u8} 가 없다")
+                    elif x["status"] == "모호":
+                        print(f"  ↳ ⚠ 모호 — 앞자리 {u8} 가 여러 메시지에 일치: {', '.join(v[:12] for v in x['meta'])}")
+                    else:                                    # 포인터·인용 없음: 읽는 쪽에서 DB 의 전체 본문을 채워 보인다(치환 뒤)
+                        print(f"  ↳ {x['status']}{where} — 전체 {len(mk.text(x['text']))}자:")
+                        print("    " + cut_mark(mk.text(x["text"]), 1500, f"donghans ctx msg {u8}").replace("\n", "\n    "))
+            if a.history:
+                print("\n## 판 이력 (git, 최신이 위)")
+                for rv in cx.history(store, r["project"], r["name"]):
+                    print(mk.text(f"{rv['short']}  {rv['date'][:16].replace('T', ' ')}  {rv['state']:<8} {rv['subject']}" + ("   ← 강등(확인된 카드가 draft 로 돌아감)" if rv["demoted"] else "")))
+            print()
     return 0
 
 
@@ -1073,10 +1168,13 @@ def main():
     p = ctx.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.set_defaults(f=cmd_recent)
     p = ctx.add_parser("session"); p.add_argument("sid"); p.add_argument("--n", type=int); p.add_argument("--full", action="store_true"); p.add_argument("--from", dest="from_uuid"); p.add_argument("--to", dest="to_uuid"); p.set_defaults(f=cmd_session)
     p = ctx.add_parser("msg", help="한 메시지의 완전한 본문(도구 호출 포함)"); p.add_argument("uuid", help="메시지 uuid 앞자리(ctx session 출력의 8자 등)"); p.add_argument("--max", type=int, default=8000, help="출력 글자 수 상한(기본 8000)"); p.add_argument("--all", action="store_true", help="상한 없이 전부"); p.set_defaults(f=cmd_msg)
+    p = ctx.add_parser("card", help="결정 카드(ctx note cards/*) 조회"); cd2 = p.add_subparsers(dest="cardcmd", required=True)
+    q = cd2.add_parser("show", help="카드 본문 + 근거 원문 대조(인용 일치 검사)"); q.add_argument("ref", nargs="+", help="`프로젝트:uuid8`(uuid 앞 8자 이상)"); q.add_argument("--history", action="store_true", help="판 이력(git, 강등 표시)"); q.set_defaults(f=cmd_card_show)
+    q = cd2.add_parser("list", help="카드 목록"); q.add_argument("--project"); q.add_argument("--state"); q.set_defaults(f=cmd_card_list)
     p = ctx.add_parser("usage"); p.add_argument("--days", type=int, default=7); p.set_defaults(f=cmd_usage)
     p = ctx.add_parser("limits", help="계정별 한도(5h/7d) 창별 최고 사용률"); p.add_argument("--days", type=int, default=14); p.add_argument("--limit", type=int, default=20); p.set_defaults(f=cmd_limits)
     p = ctx.add_parser("sql"); p.add_argument("query"); p.add_argument("--limit", type=int, default=50, help="출력 행 수 상한(넘으면 표지)"); p.add_argument("--cell", type=int, default=1000, help="셀 하나의 출력 글자 수 상한(0 = 무제한; 넘으면 [잘림: …] 표지)"); p.set_defaults(f=cmd_sql)
-    ctx_doccli.register(ctx, argparse.Namespace(norm_repo=norm_repo, git_meta=git_meta, connect=connect, load_masker=cs.load_masker, HOST=HOST, human_only=_human_only))
+    ctx_doccli.register(ctx, argparse.Namespace(norm_repo=norm_repo, git_meta=git_meta, connect=connect, load_masker=cs.load_masker, HOST=HOST, human_only=_human_only, is_human=is_human))
     ho = top.add_parser("handoff", help="인수인계 문서 업/다운").add_subparsers(dest="cmd", required=True)
     p = ho.add_parser("put"); p.add_argument("--session", required=True); p.add_argument("--doc", required=True); p.add_argument("--note", default=""); p.set_defaults(f=cmd_handoff_put)
     p = ho.add_parser("draft"); p.add_argument("--session"); p.add_argument("--focus"); p.add_argument("--model", default="haiku"); p.add_argument("--out"); p.add_argument("--dry-run", action="store_true")

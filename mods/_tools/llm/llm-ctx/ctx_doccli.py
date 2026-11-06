@@ -28,7 +28,7 @@ import time
 
 import ctx_store as st
 
-H = None   # llm_ctx 가 넘겨 주는 도우미(norm_repo·git_meta·connect·load_masker·HOST·human_only) — 순환 import 를 피한다
+H = None   # llm_ctx 가 넘겨 주는 도우미(norm_repo·git_meta·connect·load_masker·HOST·human_only·is_human) — 순환 import 를 피한다
 
 
 def _session(a):
@@ -168,6 +168,39 @@ def _inline_sync(store):
     st.process_inbox(store, m)
 
 
+def _guard_card(store, proj, name, body, sid):
+    """카드 제안을 검사·보정해 새 본문을 돌려준다. 오류가 있으면 이유를 stderr 에 보이고 종료 코드 1 로 끝낸다(제안하지 않는다)."""
+    import datetime
+    import ctxcards as cx
+    man = st.load_manifest(store)
+    conn_holder = {}
+
+    def evidence_project(u8):
+        if "c" not in conn_holder:
+            conn_holder["c"] = H.connect(readonly=True)
+        row = conn_holder["c"].execute("SELECT s.repo_url FROM messages m JOIN sessions s USING (session_id) WHERE m.uuid LIKE %s LIMIT 1", (u8 + "%",)).fetchone()
+        if not row:
+            return None, False
+        url = H.norm_repo(row[0]) if row[0] else None
+        for pname, m in man.items():
+            if url and m.get("repo_url") and H.norm_repo(m["repo_url"]) == url:
+                return pname, True
+        return None, True
+    try:
+        new_body, errors, warns = cx.guard_proposal(body, st.read_doc(store, proj, "note", name), human=bool(H.is_human()), project=proj, name=name, manifest=man,
+                                                    evidence_project=evidence_project, session=sid or "", host=H.HOST, today=datetime.date.today().isoformat())
+    finally:
+        if "c" in conn_holder:
+            conn_holder["c"].close()
+    for w in warns:
+        print(f"카드 가드: {w}", file=sys.stderr)
+    if errors:
+        for e in errors:
+            print(f"카드 가드: {e}", file=sys.stderr)
+        sys.exit(1)
+    return new_body
+
+
 def cmd_propose(a):
     store, proj = _project(a)
     _refresh(store, proj, force=True)
@@ -175,6 +208,9 @@ def cmd_propose(a):
     if bool(a.file) == bool(a.stdin):
         sys.exit("--file <경로> 또는 --stdin 중 하나를 준다")
     body = sys.stdin.read() if a.stdin else open(a.file, errors="ignore").read()
+    import ctxcards as cx
+    if cx.is_card_name(a.kind, a.name):                           # 결정 카드: 형식 검증·상태 가드·인용 출처 검사(설계: plan llm-trust/02-card-skill-ui S2)
+        body = _guard_card(store, proj, a.name, body, sid)
     base = st.base_hash_for(st.views_dir(), sid, proj, a.kind, a.name)
     code, msg, pid = st.propose(store, sid, H.HOST, proj, a.kind, a.name, body, base)
     if code:

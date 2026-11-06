@@ -138,6 +138,16 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 - **`ctx search --role user`·llmui 검색·대조 탭**(`ctxdata.search`): 서브에이전트에게 준 브리프(`is_sidechain`, `role=user` 로 저장됨)를 뺀다. 필터는 이 검색에만 — `recent` 프롬프트 수·대시보드 통계는 아직 포함한다(후속 D3).
 - 시험: `tests/test_agents.py`(상한·`full_text`), `tests/test_ctx_db.py`(표지·`--cell`·`ctx msg`·모호 접두·비밀 치환·`is_sidechain` 제외).
 
+## 결정 카드 `ctxcards.py` · `donghans ctx card` (2026-11-06, LLM 불신 완화 P2 — 구현 중: S1 완료)
+사용자의 대전제·습관·한정 결정 같은 것 하나를 근거 원문과 함께 적은 작은 문서. 「에이전트가 제안한 것」과 「사용자가 확인한 것」을 구분해 출처 세탁을 막는 것이 목적이다. 설계·결정·검증 이력: `donghans ctx doc read --project nixos plan llm-trust/02-card-skill-ui`.
+- **저장**: ctx `note` 문서 `cards/<uuid>`(카드 하나 = 문서 하나). 저장소 머리말(`<!-- ctx … -->`)의 `state`(draft 에이전트 제안 / reviewed 사용자 확인 / adopted 반영됨)·`scope`(personal 프로젝트를 아우름 / project)를 쓰고, 본문 맨 앞의 자체 머리말(`id·title·kind·proposer` 필수 + `applies_when·tags·implemented_via·related·conflicts·last_confirmed` 선택)과 `## 내용` · `## 근거 원문` · `## 반례·한계` · `## 이력` 절이 카드의 내용이다.
+- **보관 위치**: 그 카드의 **근거가 된 대화의 프로젝트 저장소**(`~/ctx/<프로젝트>`)에 둔다(새 프로젝트·remote 변경 없음 — remote 없는 프로젝트의 카드는 외부로 나가지 않는다). 여러 프로젝트에 걸친 범용 카드는 `nixos`(remote 있음)에 두고, 타 프로젝트 대화는 **인용 대신 포인터**(`- [msg:<uuid8>] (포인터 — 읽을 때 채움)`)로만 적는다. 카드를 부를 때는 항상 **`프로젝트:uuid8`**(예 `nixos:3f2a9c1b`) — `ctx doc` 가 폴더로 프로젝트를 고르기 때문에 다른 프로젝트 카드는 프로젝트를 명시해야 한다.
+- **근거 표기**(기계가 읽는다): `- [msg:<메시지 uuid 앞 8자 이상>] "원문 그대로의 인용" (시점·세션)`. `donghans ctx card show` 가 그 uuid 의 **전체 본문**(P1 `ctx msg` 와 같은 경로, 비밀 치환 뒤)을 읽어 인용이 **부분 문자열(공백 정규화, `…` 로 생략한 조각은 조각마다)** 인지 검사해 `일치 / 미일치 / 메시지 없음 / 모호 / 포인터 / 인용 없음` 을 각 줄 아래에 붙인다. 문맥을 잘라 뜻을 바꾸는 편집은 못 잡는다(한계).
+- **명령**: `ctx card show <프로젝트:uuid8…> [--history]`(카드 + 근거 대조, `--history` 는 판 이력과 강등 표시) · `ctx card list [--project P] [--state S]`(모든 프로젝트를 훑고, 이 머신에 저장소가 없는 프로젝트는 건너뛴 이름을 알린다).
+- **이력**: 카드 문서의 git 이력(`git log -- <파일>`, 읽기 전용 — `--follow` 는 같은 틀로 만든 비슷한 카드의 이력을 끌어와서 쓰지 않는다). 커밋 메시지는 `ctx: <프로젝트>/<종류>/<이름> (<세션>@<호스트>)`. **강등 표시는 연속한 두 판의 `state` 를 비교해 계산**한다(커밋 메시지에는 없다).
+- **구현 순서와 남은 것**: S1 형식·파서·`card show/list`·배포 목록(`llm-cli.nix` 의 `ctxSrc`)·시험(`tests/test_ctxcards.py`) 완료. 예정: S2 쓰기 가드(`ctx doc propose` 가 새 카드를 `draft` 로 강제·`reviewed`/`proposer: user`·타 프로젝트 인용 거부·확인된 카드를 수정하면 `draft` 로 강등), S3 `/donghans-card` 스킬, S4 llmui 「8 카드」 탭(체크박스·쟁점·세션 실행·근거 팝업·이력 화면), S5 시드 카드, S7(선택) 없는 프로젝트 가져오기. 가드가 막는 것은 **우발적 위반**뿐이다(환경변수를 지우고 TTY 를 흉내 내거나 Bash 로 파일을 직접 쓰는 우회는 막지 못한다).
+- 시험: `tests/test_ctxcards.py`(파싱·검증·인용 일치·여러 프로젝트 조회·git 이력·CLI — 임시 Postgres·임시 문서 저장소).
+
 ## 비밀번호 관리 (2026-10-23) — 등록표 · 출력 치환 · 주입 래퍼 · 후보 탐지 · 로컬 치환 · llmui
 **목적**: Claude 등이 ctx 를 불러갈 때 비밀번호·토큰·키가 대화에 실려 나가지 않게 하고(출력 치환), 비밀이 필요한 명령은 값을 대화에 적지 않고 실행하게 한다(주입 래퍼).
 **사용자 결정**: ① 등록표는 ctx DB(Postgres)에 **평문 저장** — DB 는 허용된 tailnet 기기만 접속하는 설계이고, 분산된 비밀 키 관리의 복잡도를 늘리지 않는다. ② DB 원문(messages·hook_events)은 **바꾸지 않는다**. ③ 이미 DB 에 적재된 **로컬** 트랜스크립트 사본만 치환한다. ④ 기존 데이터 일괄 치환은 별도 명령(`scrub`).

@@ -102,7 +102,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # (observe 의 usageui 와 같은 방식). 훅·타이머·사용자가 부르는 `donghans` 는 모두 이 래퍼다.
   ctxSrc = pkgs.runCommand "llm-ctx-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_store.py" "ctx_doccli.py" "ctx_toolhook.py" "ctxdata.py" "ctxchart.py" "llmui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_store.py" "ctx_doccli.py" "ctx_toolhook.py" "ctxdata.py" "ctxchart.py" "ctxcards.py" "llmui.py"]}
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-sessions + "/${f}"} $out/${f}") ["llm_sessions.py" "tmuxsess.py"]}
     cp ${../../_tools/_lib/uikit/uikit.py} $out/uikit.py
     mkdir -p $out/agents
@@ -362,6 +362,11 @@ in {
     };
     home.file.".claude/skills/donghans-resume" = {
       source = ../../_data/claude-skills/donghans-resume;
+      force = true;
+    };
+    # 결정 카드 논의 — `/donghans-card <프로젝트:uuid8…> [쟁점]`(llmui 카드 탭이 이 호출로 세션을 시작한다). 설계: ctx 문서 plan llm-trust/02-card-skill-ui
+    home.file.".claude/skills/donghans-card" = {
+      source = ../../_data/claude-skills/donghans-card;
       force = true;
     };
 
