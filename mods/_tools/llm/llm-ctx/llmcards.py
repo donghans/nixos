@@ -115,7 +115,7 @@ class HistoryScreen(ModalScreen):
         tb = self.query_one("#hist-table", DataTable)
         tb.add_columns("판", "날짜", "상태", "내용")
         for i, v in enumerate(self.revs):
-            tb.add_row(v["short"], fmt_day(v["date"]), Text(("▼ " if v["demoted"] else "") + v["state"], style=STATE_STYLE.get(v["state"], "")), v["subject"][:40], key=str(i))
+            tb.add_row(v["short"], fmt_day(v["date"]), Text(("▼ " if v["demoted"] else "") + v["state"], style=STATE_STYLE.get(v["state"], "")), v["subject"][:12], key=str(i))
         if self.revs:
             tb.focus()
             self.show(0)

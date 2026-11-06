@@ -561,7 +561,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
     #ev-head { height: auto; }
     #ev-scroll { height: 1fr; }
     #hist-body { height: 1fr; }
-    #hist-table { width: 40; }
+    #hist-table { width: 46; }
     #hist-diff-box { width: 1fr; }
     CardScreen, EvidenceScreen, HistoryScreen { align: center middle; }
     """
