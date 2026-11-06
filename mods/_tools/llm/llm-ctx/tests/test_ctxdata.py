@@ -290,13 +290,19 @@ try:
     ov2 = cd.overview(conn)
     check("요약·개요: 자동 건수(2)와 개요 합계의 프롬프트에서 제외", sm["autos"] == 2 and ov2["totals"]["auto_prompts"] == 2 and sm["unknown_tags"] == 0, str((sm["autos"], ov2["totals"])))
     # SQL(~)과 파이썬(re) 판별이 같은 패턴이라 건수가 같아야 한다 — 개행·탭·앞 공백 케이스 포함
-    for i, tx in enumerate(["\n<task-notification>a", "\t <bash-stdout>b", "<system-reminder>c", "<local-command-caveat>\nd", "  <command-name>/x</command-name>", "<foo bar>x", "\u00a0<task-notification>n", "x <task-notification>"]):
+    for i, tx in enumerate(["\n<task-notification>a", "\t <bash-stdout>b", "<system-reminder>c", "<local-command-caveat>\nd", "  <command-name>/x</command-name>", "<foo bar>x", "\u00a0<task-notification>n", "x <task-notification>",
+                              "This session is being continued from a previous conversation that ran out of context. Summary: 이어받기시험문구", "\n  This session is being continued from a previous conversation", "그런데 x This session is being continued from a previous conversation 라는 문장이 뭐야"]):
         conn.execute("INSERT INTO messages (uuid, session_id, host, ts, role, kind, text, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (f"mkf-{i}", "gggg0101", "h1", f"2026-10-10T01:0{i}:00Z", "user", "prompt", tx, "{}"))
     conn.commit()
     rows = conn.execute("SELECT text, text ~ %s, text ~ %s FROM messages WHERE kind = 'prompt'", (cd.AUTO_RE, cd.UNKNOWN_RE)).fetchall()
     import re as _re
     check("SQL 정규식과 Python 정규식 판별이 모든 프롬프트에서 일치(자동·알 수 없는 태그)", all(bool(_re.search(cd.AUTO_RE, t)) == a and bool(_re.search(cd.UNKNOWN_RE, t)) == u for t, a, u in rows) and len(rows) > 12, str(len(rows)))
     check("알 수 없는 태그 건수가 요약에 잡힘(<foo bar>)", cd.session_summary(conn)["unknown_tags"] == 1)
+    CONT = "This session is being continued from a previous conversation that ran out of context. Summary: 이어받기시험문구"
+    check("classify: 이어받기 요약 → continued·자동(통계·F2·대조에서 제외), 문장 중간에 인용한 사람 말은 사람", cd.classify("user", "prompt", CONT)[0] == "continued" and cd.is_auto("user", "prompt", CONT) and cd.classify("user", "prompt", "\n  " + CONT)[0] == "continued" and cd.classify("user", "prompt", "그런데 x " + CONT)[0] == "human" and cd.classify("assistant", "response", CONT)[0] == "human")
+    check("classify: 이어받기 요약 한 줄 요약은 접두 문장을 떼고 100자", cd.classify("user", "prompt", CONT)[1].startswith("that ran out of context") and len(cd.classify("user", "prompt", CONT)[1]) <= 100, cd.classify("user", "prompt", CONT)[1])
+    check("검색 role=user: 이어받기 요약은 사람 발언이 아니라서 제외, 전체 검색에는 cat=continued", not cd.search(conn, "이어받기시험문구", role="user") and any(x["cat"] == "continued" for x in cd.search(conn, "이어받기시험문구")))
+    check("TITLE_RANK: 이어받기 요약은 세션 제목 후보에서 밀린다(자동과 같은 순위)", conn.execute("SELECT (SELECT text ~ %s FROM messages WHERE text LIKE '%%이어받기시험문구%%' AND kind='prompt' LIMIT 1)", (cd.AUTO_RE,)).fetchone()[0] is True)
     # --- 계정별 비용(요청별 계정 열) + 백필
     base_unk = {r["key"]: r["cost"] for r in cd.usage_breakdown(conn, "account", repo="alpha")[0]}.get("(계정 불명)", 0.0)     # 앞선 시험이 남긴 계정 없는 행
     for rid, acct, email, cost in (("acc-1", "uuidA", "a@x.test", 1.0), ("acc-2", "uuidA", "a@x.test", 2.0), ("acc-3", "uuidB", "b@x.test", 4.0), ("acc-4", None, None, 8.0)):

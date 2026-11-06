@@ -20,18 +20,22 @@ SHELL_TAGS = ("bash-input",)                         # `!명령` 입력(사람)
 HUMAN_TAGS = ("pasted_content",)                     # 사람이 붙여 넣은 내용(사람)
 KNOWN_TAGS = AUTO_TAGS + CMD_TAGS + SHELL_TAGS + HUMAN_TAGS
 _AFTER = "[ >\r\n]"
+# 컨텍스트가 차서 이어받은 세션의 첫 메시지(Claude Code 가 요약을 `user`·`prompt` 로 저장 — 태그 없이 이 문장으로 시작). 사람 말이 아니라 자동 메시지다(2026-11-06 D6).
+CONT_PREFIX = "This session is being continued from a previous conversation"
 
 
-def _tag_re(tags) -> str:
-    return "^[ \t\r\n]*<(" + "|".join(tags) + ")" + _AFTER
+def _tag_re(tags, cont=False) -> str:
+    """첫 태그가 tags 에 드는 메시지. cont=True 면 「이어받기 요약」으로 시작하는 메시지도(자동 판별용)."""
+    tag = "<(" + "|".join(tags) + ")" + _AFTER
+    return "^[ \t\r\n]*" + (f"(?:{tag}|{CONT_PREFIX})" if cont else tag)
 
 
-AUTO_RE = _tag_re(AUTO_TAGS)                         # 첫 태그가 자동
-NOTPLAIN_RE = _tag_re(AUTO_TAGS + CMD_TAGS + SHELL_TAGS)   # 제목 후보에서 밀리는 것(자동·명령·셸 입력)
+AUTO_RE = _tag_re(AUTO_TAGS, cont=True)              # 첫 태그가 자동이거나 이어받기 요약
+NOTPLAIN_RE = _tag_re(AUTO_TAGS + CMD_TAGS + SHELL_TAGS, cont=True)   # 제목 후보에서 밀리는 것(자동·명령·셸 입력·이어받기 요약)
 UNKNOWN_RE = "^[ \t\r\n]*<(?!(?:" + "|".join(KNOWN_TAGS) + ")" + _AFTER + ")[a-zA-Z_][a-zA-Z0-9_-]*" + _AFTER   # 알려지지 않은 태그로 시작
 _FIRST = re.compile("^[ \t\r\n]*<([a-zA-Z_][a-zA-Z0-9_-]*)" + _AFTER)
 CAT_LABEL = {"human": "", "command": "스킬 호출", "shell": "셸 입력", "pasted": "붙여넣기", "task": "작업 알림", "localcmd": "명령 출력",
-             "reminder": "시스템 알림", "meta": "주입", "unknown": "태그"}
+             "reminder": "시스템 알림", "meta": "주입", "unknown": "태그", "continued": "이어받기 요약"}
 META_LABEL = (("Base directory", "스킬 본문"), ("Another Claude", "다른 세션 메시지"), ("[Cross-session", "교차 세션"), ("[Image", "이미지 표지"),
               ("<local-command", "명령 출력"), ("<system-remind", "시스템 알림"))
 
@@ -51,6 +55,8 @@ def classify(role: str, kind: str, text: str | None):
         return "meta", sub + (": " if sub else "") + " ".join(head.split())[:100]
     if kind != "prompt" or role != "user":
         return "human", ""
+    if t.lstrip(" \t\r\n").startswith(CONT_PREFIX):
+        return "continued", " ".join(t.split())[len(CONT_PREFIX):][:100].strip(" .")
     m = _FIRST.match(t)
     if not m:
         return "human", ""
@@ -82,7 +88,7 @@ def command_summary(text: str) -> str:
 
 def is_auto(role: str, kind: str, text: str | None) -> bool:
     """통계·F2·대조에서 사람 발언으로 세지 않는 메시지(자동 메시지·meta)."""
-    return kind == "meta" or classify(role, kind, text)[0] in ("task", "localcmd", "reminder")
+    return kind == "meta" or classify(role, kind, text)[0] in ("task", "localcmd", "reminder", "continued")
 
 
 def title_text(raw: str | None, masker=cs.IDENTITY, width=120) -> str:
