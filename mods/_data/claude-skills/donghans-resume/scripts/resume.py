@@ -75,7 +75,12 @@ if rec:
     if not os.path.isdir(repo): print('!! 저장소 경로가 없다 — 다른 머신이거나 이동됨')
     elif not os.path.isfile(rec['doc']): print('!! 문서 파일이 없다 — 삭제/이동됨 (git log 로 추적)')
     else:
-        print(f"문서 수정: {time.strftime('%m-%d %H:%M', time.localtime(os.path.getmtime(rec['doc'])))}")
+        print(f"문서 수정: {time.strftime('%m-%d %H:%M', time.localtime(os.path.getmtime(rec['doc'])))} 로컬")
+        try:   # 역할 전달형 표지(kind: role-only) — 코드가 확실히 알린다
+            fm = re.match(r'---\s*\n(.*?)\n---', open(rec['doc'], errors='ignore').read(3000), re.S)
+            if fm and re.search(r'^kind:\s*["\']?role-only["\']?\s*(#.*)?$', fm.group(1), re.M):
+                print('※ 역할 전달형 인수인계(kind: role-only) — 브리핑에 역할과 읽을 스킬을 먼저 말하고, 문서에 없는 칸은 「문서에 없음」으로 말한다.')
+        except Exception: pass
     if os.path.isdir(repo) and not a.no_git:
         print('\n## git (지금 상태)')
         print('HEAD  :', sh('git', 'log', '-1', '--format=%h %s', cwd=repo))
@@ -131,14 +136,14 @@ if os.path.isfile(lp):
 
 # 트랜스크립트의 사용자 메시지
 sid = (rec or {}).get('id') or a.id or ''
-SKIP = ('<system-reminder', '<task-notification', '<command-name>', '<local-command', '[SYSTEM NOTIFICATION', '<cross-session-message', 'This session is being continued')
+SKIP = ('<system-reminder', '<task-notification', '<command-name>', '<local-command', '<command-message>donghans-resume', '[Request interrupted', '[SYSTEM NOTIFICATION', '<cross-session-message', 'This session is being continued')
 if sid:
     fs = glob.glob(os.path.expanduser(f'~/.claude/projects/*/{sid}*.jsonl'))
     print('\n## 그 세션에서 사용자가 직접 보낸 메시지 (마지막 %d개)' % a.n)
     if not fs:
         print('(로컬 트랜스크립트 없음 — 공유 저장소에서 조회)')
         if re.fullmatch(r'[0-9a-f-]{6,36}', sid):
-            print(sh('donghans', 'ctx', 'sql', f"select to_char(ts,'MM-DD HH24:MI') ts, left(text,500) prompt from messages where session_id like '{sid}%' and kind='prompt' and text not like '<%' order by ts desc limit {a.n}"))
+            print(sh('donghans', 'ctx', 'sql', f"select to_char(ts at time zone 'UTC','MM-DD HH24:MI')||' UTC' ts, case when rn<=3 then left(text,1500) else left(text,500) end prompt from (select ts, text, row_number() over (order by ts desc) rn from messages where session_id like '{sid}%' and kind='prompt' and not is_sidechain and text not like '<%' and text not like '[Request interrupted%' and text not like 'This session is being continued%' order by ts desc limit {max(a.n, 0)}) q order by ts asc"))
     for f in fs[:1]:
         msgs = []
         for l in open(f, errors='ignore'):
@@ -149,5 +154,8 @@ if sid:
             t = (c if isinstance(c, str) else ' '.join(x.get('text', '') for x in c if isinstance(x, dict) and x.get('type') == 'text')).strip()
             if t and not any(t.startswith(s) for s in SKIP): msgs.append(((d.get('timestamp') or '')[:16], t))
         print(f'(전체 {len(msgs)}개 중 — 트랜스크립트 {os.path.basename(f)})')
-        for ts, t in msgs[-a.n:]: print(f'- [{ts}] {t[:500]}')
-print('\n※ 위는 사실 수집이다. 문서(doc)는 그 시점의 관찰이므로 git 상태와 어긋나면 어긋남을 보고하라.')
+        tail = msgs[-a.n:] if a.n > 0 else []
+        if not tail: print('(사용자 메시지 없음)')
+        for i, (ts, t) in enumerate(tail):   # 마지막 3개는 1500자, 나머지는 500자. 시각은 UTC
+            print(f'- [{ts} UTC] {t[:1500 if i >= len(tail) - 3 else 500]}')
+print('\n※ 위는 사실 수집이다. 문서(doc)는 그 시점의 관찰이므로 git 상태와 어긋나면 어긋남을 보고하라. 메시지 시각은 UTC 이다(사용자에게는 KST=+9h 로 환산해 말한다). 브리핑의 「사용자가 직접 해야 할 일」은 에이전트가 대신 하지 않는다(옛 형식 문서에는 이 구분이 없으니 추정하지 말고 「구분 기록 없음」).')
