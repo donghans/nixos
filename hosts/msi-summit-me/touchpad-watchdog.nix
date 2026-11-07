@@ -94,7 +94,129 @@
       echo "touchpad-watchdog: recovered (count=$count) -> $incident"
     '';
   };
+
+  # 부팅 직후 터치패드 상태 스냅샷 — 먹통이 되기 전에 미리 남겨 두어, 사용자가 재인식 등을 건드리기 전의 "원래 상태"를 알 수 있게 한다.
+  # (2026-11-07: 부팅마다 ACPI ID 가 ELAN0305/MSNB0001 로 갈리고, ELAN0305 일 때만 재인식이 `pin 62 cannot be used as IRQ` 로 실패하는 것으로 의심됨 — 가설 검증용)
+  snapshot = pkgs.writeShellApplication {
+    name = "touchpad-boot-snapshot";
+    runtimeInputs = [pkgs.systemd pkgs.coreutils pkgs.gnugrep pkgs.findutils];
+    text = ''
+      LOGDIR="/var/log/touchpad-watchdog"
+      out="$LOGDIR/boot-$(date +%Y%m%d-%H%M%S).log"
+      (
+        set +e +o pipefail
+        echo "==== boot snapshot @ $(date +%T) (uptime $(cut -d' ' -f1 /proc/uptime)s) ===="
+        echo "kernel: $(uname -r)   bios: $(cat /sys/class/dmi/id/bios_version 2>/dev/null) $(cat /sys/class/dmi/id/bios_date 2>/dev/null)"
+        echo "cmdline: $(cat /proc/cmdline)"
+        echo "--- 터치패드 ACPI ID / 상태 ---"
+        found=0
+        for d in /sys/bus/i2c/devices/i2c-ELAN0305:* /sys/bus/i2c/devices/i2c-MSNB0001:*; do
+          [ -e "$d" ] || continue
+          found=1
+          echo "id: $(basename "$d")"
+          echo "  acpi path: $(cat "$d/firmware_node/path" 2>/dev/null)"
+          echo "  power_state: $(cat "$d/firmware_node/power_state" 2>/dev/null)"
+          echo "  runtime_status: $(cat "$d/power/runtime_status" 2>/dev/null)"
+          echo "  driver: $(readlink -f "$d/driver" 2>/dev/null)"
+          echo "  irq: $(cat "$d/irq" 2>/dev/null)"
+        done
+        [ "$found" = 0 ] && echo "(ELAN0305/MSNB0001 i2c 장치 없음)"
+        echo "touchpad input node: $(grep -cE '(ELAN0305|MSNB0001).*Touchpad' /proc/bus/input/devices)"
+        echo "--- PCI 00:15.0 (LPSS I2C) ---"
+        echo "power/control=$(cat /sys/bus/pci/devices/0000:00:15.0/power/control 2>/dev/null) runtime_status=$(cat /sys/bus/pci/devices/0000:00:15.0/power/runtime_status 2>/dev/null)"
+        echo "--- 핀 62 (pinctrl INTC1055:00) ---"
+        grep -E "^pin 62 " /sys/kernel/debug/pinctrl/INTC1055:00/pins 2>&1
+        echo "--- 커널 로그 (이번 부팅, i2c/hid/pin/irq) ---"
+        journalctl -k -b --no-pager 2>/dev/null \
+          | grep -iE "i2c_hid|i2c_designware|intel-lpss|ELAN0305|MSNB0001|tigerlake-pinctrl|genirq" | tail -40
+        echo "--- /proc/interrupts (i2c) ---"; grep -iE "i2c|ELAN|MSNB" /proc/interrupts
+      ) > "$out" 2>&1 || true
+      # 오래된 스냅샷 정리(최근 60개만 유지)
+      find "$LOGDIR" -maxdepth 1 -name 'boot-*.log' -printf '%T@ %p\n' 2>/dev/null | sort -rn | tail -n +61 | cut -d' ' -f2- | xargs -r rm -f
+      echo "touchpad-boot-snapshot: $out"
+    '';
+  };
+
+  # 부팅 직후 첫 probe 가 `failed to fetch HID descriptor: -121`(장치가 아직 응답 안 함)로 실패하면 이후 재시도가 없어 터치패드가 안 잡힌다.
+  # 같은 장치에 늦게 bind 하면 성공하는 것을 2026-11-07 에 확인(MSNB0001) → 입력 노드가 없으면 bind 를 재시도한다.
+  # ELAN0305 로 뜬 부팅은 ACPI 가 IRQ 를 핀 62(DDSP_HPD_2, LOCKED)로 잡아 bind 가 `pin 62 cannot be used as IRQ` 로 실패(가설) → 재시도해도 소용없으니 멈추고 알린다.
+  retry = pkgs.writeShellApplication {
+    name = "touchpad-boot-retry";
+    runtimeInputs = [pkgs.systemd pkgs.coreutils pkgs.gnugrep pkgs.libnotify pkgs.util-linux];
+    text = ''
+      LOGDIR="/var/log/touchpad-watchdog"
+      log="$LOGDIR/retry-$(date +%Y%m%d-%H%M%S).log"
+      drv=/sys/bus/i2c/drivers/i2c_hid_acpi
+      has_node() { grep -qE '(ELAN0305|MSNB0001).*Touchpad' /proc/bus/input/devices; }
+      say() { echo "[$(date +%T)] $*" >> "$log"; }
+      notify() { # 로그인한 사용자 세션에 알림(실패해도 무시)
+        runuser -u donghans -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+          notify-send -u critical "터치패드" "$1" >/dev/null 2>&1 || true
+      }
+
+      if has_node; then exit 0; fi # 정상 — 로그도 남기지 않음
+
+      shopt -s nullglob
+      devs=()
+      for p in /sys/bus/i2c/devices/i2c-ELAN0305:* /sys/bus/i2c/devices/i2c-MSNB0001:*; do devs+=("$(basename "$p")"); done
+      say "터치패드 입력 노드 없음. i2c 장치: ''${devs[*]:-없음}"
+      if [ "''${#devs[@]}" -eq 0 ]; then say "i2c 장치 자체가 없음 — 재시도 불가"; exit 1; fi
+
+      for attempt in 1 2 3; do
+        start_ts=$(date '+%Y-%m-%d %H:%M:%S')
+        for dev in "''${devs[@]}"; do
+          if [ -e "$drv/$dev" ]; then echo "$dev" > "$drv/unbind" 2>>"$log" || true; fi
+          if echo "$dev" > "$drv/bind" 2>>"$log"; then say "시도 $attempt: bind $dev 성공"; else say "시도 $attempt: bind $dev 실패"; fi
+        done
+        sleep 3
+        if has_node; then
+          say "복구됨 (시도 $attempt)"
+          notify "부팅 직후 인식 실패 → 자동 재시도로 복구됨 (''${devs[*]})"
+          exit 0
+        fi
+        klog=$(journalctl -k --no-pager --since "$start_ts" | grep -iE 'cannot be used as IRQ|i2c_hid|genirq' | tail -5)
+        say "커널 로그: $klog"
+        if echo "$klog" | grep -q 'cannot be used as IRQ'; then
+          say "핀 62 IRQ 오류 — ELAN0305 ACPI 변종 가설. 재시도 중단(재부팅하면 ID 가 바뀔 수 있음)"
+          notify "터치패드 인식 실패(ELAN0305, IRQ 핀 오류). 재부팅/전원 껐다 켜기 필요"
+          exit 1
+        fi
+        sleep 10
+      done
+      say "3회 재시도 후에도 실패"
+      notify "터치패드 자동 복구 실패 — /var/log/touchpad-watchdog 참고"
+      exit 1
+    '';
+  };
 in {
+  systemd.services.touchpad-boot-retry = {
+    description = "Retry touchpad bind if boot-time probe failed (-121)";
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${retry}/bin/touchpad-boot-retry";
+      LogsDirectory = "touchpad-watchdog";
+    };
+  };
+  systemd.timers.touchpad-boot-retry = {
+    description = "Touchpad bind retry once, 30s after boot";
+    wantedBy = ["timers.target"];
+    timerConfig.OnBootSec = "30s"; # 부팅당 1회 — 주기 타이머 아님(전력 영향 없음), 부팅 완료를 막지도 않음
+  };
+
+  systemd.services.touchpad-boot-snapshot = {
+    description = "Touchpad state snapshot after boot (ELAN0305/MSNB0001 diagnosis)";
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${snapshot}/bin/touchpad-boot-snapshot";
+      LogsDirectory = "touchpad-watchdog";
+    };
+  };
+  systemd.timers.touchpad-boot-snapshot = {
+    description = "Touchpad snapshot once, 90s after boot";
+    wantedBy = ["timers.target"];
+    timerConfig.OnBootSec = "90s"; # 주기 타이머 아님(부팅당 1회) — 쉬는 전력 영향 없음
+  };
+
   systemd.services.touchpad-watchdog = {
     description = "ELAN touchpad I2C controller hang watchdog + auto-recovery";
     serviceConfig = {

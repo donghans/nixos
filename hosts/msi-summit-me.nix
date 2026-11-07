@@ -191,6 +191,7 @@ in {
           echo "--- $1 ($(date +%T)) ---"
           echo "i2c devices: $(ls /sys/bus/i2c/devices | grep -E 'ELAN0305|MSNB0001' | tr '\n' ' ')"
           echo "bound to i2c_hid_acpi: $(ls $drv | grep -E 'ELAN0305|MSNB0001' | tr '\n' ' ')"
+          for d in "''${devs[@]}"; do echo "$d power_state=$(cat /sys/bus/i2c/devices/$d/firmware_node/power_state 2>/dev/null)"; done
           echo "pci 00:15.0 power/control=$(cat $pci/power/control) runtime_status=$(cat $pci/power/runtime_status)"
           echo "touchpad input node: $(grep -cE '(ELAN0305|MSNB0001).*Touchpad' /proc/bus/input/devices)"
           echo "kernel log (i2c/hid, last 15):"
@@ -209,15 +210,23 @@ in {
           exit 1
         fi
 
+        # 실패해도 중간에 죽지 않고 이유를 로그에 남긴다(2026-11-07: echo 쓰기 실패 한 번에 스크립트가 죽어 `after` 구간이 통째로 사라졌었다)
+        start_ts=$(date '+%Y-%m-%d %H:%M:%S')
+        rc=0
         for dev in "''${devs[@]}"; do
-          [ -e "$drv/$dev" ] && echo "$dev" > "$drv/unbind"
+          if [ -e "$drv/$dev" ]; then
+            echo "$dev" > "$drv/unbind" 2>>"$log" || { echo "unbind $dev 실패" >> "$log"; rc=1; }
+          fi
         done
         sleep 1
         for dev in "''${devs[@]}"; do
-          echo "$dev" > "$drv/bind"
+          echo "$dev" > "$drv/bind" 2>>"$log" || { echo "bind $dev 실패 (쓰기 오류)" >> "$log"; rc=1; }
         done
         sleep 1
-        { snapshot after; } >> "$log" 2>&1 || true
+        { snapshot after; echo "--- 재인식 중 커널 로그 (since $start_ts) ---"
+          journalctl -k --no-pager --since "$start_ts" | grep -iE 'i2c|hid|pinctrl|genirq|ELAN0305|MSNB0001' | tail -20
+          echo "result rc=$rc  dev=''${devs[*]}"; } >> "$log" 2>&1 || true
+        exit "$rc"
       '';
     };
     security.polkit.extraConfig = ''
