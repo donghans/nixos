@@ -60,6 +60,9 @@ def _split_sections(rest: str) -> dict:
     return {k: "\n".join(v).strip("\n") for k, v in out.items()}
 
 
+POINTER_NOTE = "(포인터 — 읽을 때 채움)"
+
+
 def parse_evidence_line(line: str):
     """근거 한 줄 → {uuid, quote|None, pointer, note} 또는 None(근거 형식이 아님).
     `- [msg:<uuid8…>] "인용"  (설명)` / `- [msg:<uuid8…>] (포인터 — 읽을 때 채움)` / 인용·포인터 표기 없음(quote=None, pointer=False)."""
@@ -268,7 +271,8 @@ def guard_proposal(body: str, cur: dict | None, *, human: bool, project: str, na
         return (manifest.get(p) or {}).get("remote", "")
     if remote_of(project):
         for e in card["evidence"]:
-            if e["quote"] is None:
+            quoted = e["quote"] is not None
+            if not quoted and e["note"].strip() in ("", POINTER_NOTE):   # 정규 포인터·표기 없는 줄 — 원문이 실릴 자리가 없다
                 continue
             try:
                 ep, found = evidence_project(e["uuid"])
@@ -280,7 +284,7 @@ def guard_proposal(body: str, cur: dict | None, *, human: bool, project: str, na
             elif ep is None:
                 warns.append(f"[msg:{e['uuid']}] 의 세션이 매니페스트의 어느 프로젝트인지 알 수 없어 인용 출처 검사를 건너뛴다")
             elif ep != project and not remote_of(ep):
-                errors.append(f"[msg:{e['uuid']}] 는 remote 가 없는 프로젝트({ep})의 대화다 — {project} 저장소는 GitHub 로 올라가므로 원문 인용 대신 포인터 `- [msg:{e['uuid']}] (포인터 — 읽을 때 채움)` 로 적는다")
+                errors.append(f"[msg:{e['uuid']}] 는 remote 가 없는 프로젝트({ep})의 대화다 — {project} 저장소는 GitHub 로 올라가므로 {'원문 인용' if quoted else '따옴표 없는 글(원문일 수 있다)'} 대신 포인터 `- [msg:{e['uuid']}] (포인터 — 읽을 때 채움)` 로 적는다")
 
     new_hdr = dict(hdr) if hdr is not None else (dict(cur["meta"]) if cur else st.default_meta())
     new_text = text
