@@ -91,6 +91,17 @@ def _hold_cols(series, span_s, t0, t1, n, now):
     return vals
 
 
+def _peak_cols(series, span_s, t0, t1, n, now):
+    """_hold_cols 와 같되, 열 하나가 창 길이의 1/6 보다 길면(기간이 길어 5h 톱니가 한 열보다 가늘 때) 더 곱게 잰 뒤 열 안 최고값으로 줄인다.
+    이렇게 하지 않으면 열 끝 시점의 값만 남아 5h 가 거의 사라진다(30일 축에서 5h 면적이 비던 문제)."""
+    m = max(1, min(16, -(-((t1 - t0) / n) // (span_s / 6))))
+    m = int(m)
+    if m == 1:
+        return _hold_cols(series, span_s, t0, t1, n, now)
+    fine = _hold_cols(series, span_s, t0, t1, n * m, now)
+    return [max((v for v in fine[c * m:(c + 1) * m] if v is not None), default=None) for c in range(n)]
+
+
 def limit_chart(series, span_s, width, height, style, now=None, t0=None, t1=None):
     """한도 사용률 시계열 그래프 한 개. series=[(시각, %, 리셋 시각)…](시각 순). 창 안에서 0 에서 올라가다 리셋에서 떨어지는 모양이 그대로 나온다(규칙은 _hold_cols).
     y 는 0~100 % 고정, x 는 시간. t0·t1(epoch 또는 datetime)을 주면 그 구간(계정끼리 같은 축), 없으면 첫 창 시작 ~ 마지막 창 리셋.
@@ -104,7 +115,7 @@ def limit_chart(series, span_s, width, height, style, now=None, t0=None, t1=None
     else:
         t0, t1 = _epoch(t0), _epoch(t1)
     plot_w = max(10, width - AXIS_W)
-    vals = _hold_cols(series, span_s, t0, t1, plot_w * 2, now)
+    vals = _peak_cols(series, span_s, t0, t1, plot_w * 2, now)
     labels = {0: "100", height // 2: "50", height - 1: "0"} if height >= 3 else {0: "100", height - 1: "0"}
     return _plot(vals, width, height, 0, 100, style, labels, _time_axis(plot_w, t0, t1))
 
@@ -119,7 +130,7 @@ def limit_chart_both(s5, s7, width, height, style, now=None, line_style=None, t0
     """5시간·7일 사용률을 한 그래프에: x 는 7일 창(마지막 7d 리셋 직전 7일)으로 같고, 5h 는 면적(톱니), 7d 는 윗면을 따라가는 선으로 겹친다.
     점자 칸은 색이 하나뿐이라 7d 선이 지나는 칸은 line_style(기본: style 을 밝게), 나머지는 style 로 칠한다. 반환 Text(높이 height 줄 + 시간축 1줄).
     한쪽 시계열만 있으면 그쪽만 limit_chart 로 그린다. 둘 다 없으면 None.
-    t0·t1 을 주면 모든 계정이 같은 시간 축을 쓴다(없으면 이 계정의 마지막 7d 리셋 직전 7일). 구간이 7일보다 길면 5h 톱니가 한 열보다 가늘어 뭉개지므로 5h 면적은 그리지 않고 7d 선만 그린다."""
+    t0·t1 을 주면 모든 계정이 같은 시간 축을 쓴다(없으면 이 계정의 마지막 7d 리셋 직전 7일). 구간이 길어 5h 톱니가 한 열보다 가늘면 5h 는 열 안 최고값으로 그린다(_peak_cols)."""
     if not s7:
         return limit_chart(s5, 5 * 3600, width, height, style, now, t0, t1)
     if not s5:
@@ -132,7 +143,7 @@ def limit_chart_both(s5, s7, width, height, style, now=None, line_style=None, t0
         t0, t1 = _epoch(t0), _epoch(t1)
     plot_w = max(10, width - AXIS_W)
     n = plot_w * 2
-    v5 = [None] * n if t1 - t0 > 7 * 86400 else _hold_cols([x for x in s5 if _epoch(x[2]) > t0], 5 * 3600, t0, t1, n, now)
+    v5 = _peak_cols([x for x in s5 if _epoch(x[2]) > t0], 5 * 3600, t0, t1, n, now)
     v7 = _hold_cols(s7, 7 * 86400, t0, t1, n, now)
     span = 4 * height
     lv = lambda v: 0 if v is None else max(0, min(span, round(v / 100 * span)))

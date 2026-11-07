@@ -119,7 +119,7 @@ one_day = cx.limit_chart_both(s5, s7, 100, 6, "#33ccff", now=NOW, t0=NOW - 86400
 check("공통 축: 1일 구간도 높이 6 + 시간축, 폭 이하", len(one_day.plain.split("\n")) == 7 and all(cell_len(l) <= 100 for l in one_day.plain.split("\n")))
 long_ = cx.limit_chart_both(s5, s7, 100, 6, "#33ccff", now=NOW, t0=NOW - 30 * 86400, t1=NOW)
 filled_base = [sp for sp in long_.spans if str(sp.style) == "#33ccff" and any(ch != BLANK for ch in long_.plain[sp.start:sp.end])]
-check("공통 축: 7일보다 길면 5h 면적은 그리지 않고(기본색으로 칠한 점자 없음) 7d 선(밝은 색)만 있다", not filled_base and any(str(sp.style) == cx.tint("#33ccff") for sp in long_.spans), len(filled_base))
+check("공통 축: 7일보다 길어도 5h 면적(기본색 점자)과 7d 선(밝은 색)이 둘 다 보인다", bool(filled_base) and any(str(sp.style) == cx.tint("#33ccff") for sp in long_.spans), len(filled_base))
 fb = cx.limit_chart_both([], s7b, 100, 6, "#ff9933", now=NOW, t0=T0, t1=T1)
 check("공통 축: 한쪽만 있는 폴백(limit_chart)도 같은 t0·t1 을 쓴다", fb.plain.split("\n")[-1] == b.plain.split("\n")[-1])
 check("공통 축: datetime 로 줘도 된다", cx.limit_chart_both(s5, s7, 100, 6, "#33ccff", now=NOW, t0=datetime.fromtimestamp(T0, timezone.utc), t1=datetime.fromtimestamp(T1, timezone.utc)).plain == a.plain)

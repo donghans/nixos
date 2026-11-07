@@ -1098,7 +1098,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
     def show_stats(self, cov, trend, brk, tot, summ, sess, lim, fine=("day", []), lim_days=LIMIT_DEFAULT_DAYS):
         self._stat_loaded = True
         self._st = dict(lim=lim, trend=trend, tot=tot, summ=summ, fine=fine, lim_days=lim_days)
-        self.query_one("#stat-limits-box").border_title = f"계정별 한도 사용률 — 최근 {lim_days}일, 모든 계정 같은 시간 축 · 5h(면적)·7d(밝은 선){' · 7일 초과라 5h 면적은 생략' if lim_days > 7 else ''} (색 = 계정)"
+        self.query_one("#stat-limits-box").border_title = f"계정별 한도 사용률 — 최근 {lim_days}일, 모든 계정 같은 시간 축 · 5h(면적)·7d(밝은 선){' · 7일 초과라 5h 면적은 열별 최고값' if lim_days > 7 else ''} (색 = 계정)"
         self.update_stat_state(cov)
         self.query_one("#stat-trend").border_title = f"토큰·비용 추이 — {cd.BUCKETS[self.stat_bucket]} 단위 · 합계 ${tot['cost']:,.2f} · 요청 {tot['requests']:,} · 출력 {fmt_num(tot['output'])}"
         tb = self.query_one("#stat-break", DataTable)
