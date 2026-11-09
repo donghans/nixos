@@ -1,6 +1,6 @@
 # llm-host — LLM 세션 호스트 코어 (규격 v0)
 
-설계 근거: ctx 문서 `plan llm-trust/11-p5prime-2-session-host` (읽기: `donghans ctx doc read plan llm-trust/11-p5prime-2-session-host --project nixos`). 이 폴더는 단계 S3 까지 있다(규격 `events.py`, 어댑터 인터페이스 `adapter.py`, claude 어댑터 `claude_adapter.py` 의 읽기 `decode` 와 쓰기 `argv`·`env`·`encode`, 세션 `session.py`, 시험용 가짜 백엔드 `fake_claude.py`). 정책·다중 세션·기록 등은 계획서 §9 의 뒤 단계에서 추가된다.
+설계 근거: ctx 문서 `plan llm-trust/11-p5prime-2-session-host` (읽기: `donghans ctx doc read plan llm-trust/11-p5prime-2-session-host --project nixos`). 이 폴더는 단계 S5 까지 있다(S4 정책 `policy.py`, S5 다중 세션 `host.py`는 아래 절)(규격 `events.py`, 어댑터 인터페이스 `adapter.py`, claude 어댑터 `claude_adapter.py` 의 읽기 `decode` 와 쓰기 `argv`·`env`·`encode`, 세션 `session.py`, 시험용 가짜 백엔드 `fake_claude.py`). 정책·다중 세션·기록 등은 계획서 §9 의 뒤 단계에서 추가된다.
 시험: `tests/test_events.py`(규격)·`tests/test_claude_adapter.py`(어댑터 읽기; 녹화본 `tests/fixtures/` 전체 재생). 직접 실행: `cd mods/_tools/llm/llm-host && python3 -I tests/test_claude_adapter.py`. `tests/test_session.py`(세션·가짜 백엔드·어댑터 쓰기; 비용 0). `mods/_tools/run-tests.sh` 에 `llm-host-ev`·`llm-host-claude`·`llm-host-session` 으로 등록돼 있다.
 
 **규격은 v0 이다.** P5′-3(TUI)을 만들며 부족한 필드를 추가하고 P5′-4(두 번째 백엔드) 때 한 번 정리한다. 그때까지 `raw` 통과가 안전판이다.
@@ -105,3 +105,11 @@ nix 에는 아직 등록하지 않았다(`mods/devel/apps/llm-cli.nix` 의 `ctxS
 - `check_start(spec) -> [사유]`: bypass 계열(`permission_mode` bypass*·`--dangerously-skip-permissions`·`--permission-mode bypassPermissions` 등)은 `policy.allow_bypass=True` **이고** cwd 에 `.llm-host-sandbox` 파일이 있을 때만 통과. `--settings` 파일 안의 간접 지정은 읽지 못한다.
 - `next_auto_turn(policy, count) -> (허용, 새 count, 사유)`: 사람 메시지 없는 연속 자동 턴 상한.
 - `deny_message(kind, user_reason=, request_timeout=, question=)`·`MESSAGES`: 거부·타임아웃·세션 종료 문구. 형식은 ① 누가·왜 ② 재시도 금지 ③ 멈추고 보고. 사용자가 쓴 이유는 그대로 전달한다. 이 문구는 모델 입력이다 — 바꾸면 tests/test_policy.py 의 속성 시험과 문구 덤프 검토 기록을 갱신한다.
+
+## 다중 세션·수명 (S5, `host.py`)
+- `SessionHost(adapter_factory, max_sessions=4, registry_dir=None, term_wait=5.0)`: 세션마다 독립 프로세스·이벤트 큐. `start_session(spec)` 은 상한을 넘으면 `HostFull`, 같은 `spec["resume"]` 을 동시에 쓰면 `DuplicateResume`, 이름 중복은 `DuplicateSession`, `close_all` 뒤에는 `HostClosed`. 동시 시작도 상한을 넘지 못한다. 상한 4 는 D-9 임시값(S7 측정 뒤 조정).
+- 종료: `close_session`·`close_all`(병렬) = `Session.close` 4단계(stdin 닫기→grace→SIGTERM→term_wait→SIGKILL), `kill_all` = SIGKILL. 신호는 자기 자식의 프로세스 그룹에만 간다.
+- 자식 레지스트리 `<registry_dir>/children.jsonl`(기본 `$XDG_RUNTIME_DIR/llm-host/`): 추가 기록만(add·del), flock, 잘린 꼬리 줄 무시. add 에 pid·starttime·host_id·host_pid·host_starttime. 자식 환경에 `LLM_HOST_ID=<host_id>` 표지.
+- 고아 탐지 `scan_orphans()`: 레지스트리에 있고 pid·starttime 이 같은 채 살아 있는데 띄운 호스트가 죽은 자식만 보고한다(표지가 읽히는데 다르면 제외, 형제 호스트의 자식은 제외). **죽이지 않는다** — `host.notices` 에 procctl plan 안내만 쌓는다(D-14: 안내만). 사람이 정리한 뒤 `forget_orphan`.
+- 시험 `tests/test_host.py`(비용 0, 가짜 백엔드): 100회 시작·종료 후 자식 표지 프로세스 0개, SIGTERM·EOF 무시 가짜로 SIGKILL 경로, 호스트 흉내 프로세스 강제 종료 후 재시작·고아, 동시 세션 격리. run-tests.sh 의 `llm-host-host`.
+- 호스트 사망 시 자식 거동은 유휴 상태 EOF 만 확인됨(S0). 턴 진행 중·권한 대기 중 EOF 는 미확인(S7 항목 8, 선택).
