@@ -149,6 +149,13 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 - **구현 순서와 남은 것**: S1 형식·파서·`card show/list`·배포 목록(`llm-cli.nix` 의 `ctxSrc`)·시험(`tests/test_ctxcards.py`) 완료. S2 쓰기 가드(`ctx doc propose` 가 새 카드를 `draft` 로 강제·`reviewed`/`proposer: user`·타 프로젝트 인용 거부·확인된 카드를 수정하면 `draft` 로 강등), S3 `/donghans-card` 스킬, 완료(S1~S4). **S4 llmui 「8 카드」 탭(`llmcards.py`)**: Space 체크(1장 이상이면 하단에 쟁점 입력·확인·전체 해제), 확인 → `~/nixos`(`LLMUI_CARD_DIR`)에서 `/donghans-card 프로젝트:uuid8 … 쟁점` 으로 새 세션(권한 확인 없이 시작 — 하단에 경고 표시), Enter 상세(근거 원문 줄별 대조, 근거에서 Enter → 원문 전체 팝업), `h` 이력(판 목록+diff, 강등 ▼), F2 승격(draft→reviewed→adopted, 사람만·확인창·가드를 프로세스 안에서 직접 호출 — CLI 를 subprocess 로 부르면 TTY 가 아니라 거부된다), F2/F3 상태·범위 필터. 제한 모드는 읽기만. 예정: S5 시드 카드, S7(선택) 없는 프로젝트 가져오기. 가드가 막는 것은 **우발적 위반**뿐이다(환경변수를 지우고 TTY 를 흉내 내거나 Bash 로 파일을 직접 쓰는 우회는 막지 못한다).
 - 시험: `tests/test_ctxcards.py`(파싱·검증·인용 일치·여러 프로젝트 조회·git 이력·CLI — 임시 Postgres·임시 문서 저장소).
 
+## 전제 감사관 보고의 기계 검사·채점 `ctxaudit` (2026-11-09, LLM 불신 완화 P4)
+`donghans-plan` 점검 항목 9(사용자 원문 대조)를 맡은 검증자의 보고를 **호출자가** 검사하는 도구(`ctxaudit.py`, 배포 래퍼 `ctxaudit`). 감사관 자체는 LLM 이고 코드 변경은 이 도구뿐이다. 설계: `donghans ctx doc read --project nixos plan llm-trust/06-p4-premise-auditor`.
+- `ctxaudit check <보고서.md>`: 표 행마다 인용을 `ctx msg <uuid> --all` 본문과 대조해 위조(무효) 인용 수를 낸다. `ctxcards.quote_matches` 보다 엄격 — `…` 조각이 **보고된 순서대로** 나와야 통과하고, `<pasted_content>` 블록 안 인용은 「블록 안」으로 따로 센다(사용자 본인 말이 아님). 위조가 있으면 종료 코드 1. **약한 검사**: 위조 0건은 인용의 존재만 말한다(a/b/c 분류가 맞다는 증명이 아니고 맥락 왜곡·한정 상실은 못 잡는다).
+- `ctxaudit score --key <정답표.json> <보고서>… `: 오탐률(N 군)·재현율(결함 군)·위조 인용·꼬리 읽기(H 군)와 반복 간 지적이 갈린 전제를 낸다. 정답표 형식은 `ctxaudit.score` 의 docstring(전제 id → group·defect·tail). 기준값(오탐 ≤10%·재현율 ≥80%·위조 0·꼬리 100%)은 **근거 없는 시작값**이고 표본이 작아 통과/실패 판정이 아니라 지적 사례를 하나씩 읽는 정성 판단과 병행한다.
+- 보고서 형식: 표 한 행 = 전제 하나, 첫 칸 `[N1-03]` 식 id, 둘째 칸 a/b/c 또는 확인 불가, 셋째 칸 uuid + 인용(「…」·“…”·"…").
+- 시험: `tests/test_ctxaudit.py`(순수 함수 + `--texts` 폴더로 CLI 실제 실행, DB 없음). 효과(오탐률·재현율)는 **아직 측정하지 않았다** — 대조군 시험은 다음 라운드.
+
 ## 비밀번호 관리 (2026-10-23) — 등록표 · 출력 치환 · 주입 래퍼 · 후보 탐지 · 로컬 치환 · llmui
 **목적**: Claude 등이 ctx 를 불러갈 때 비밀번호·토큰·키가 대화에 실려 나가지 않게 하고(출력 치환), 비밀이 필요한 명령은 값을 대화에 적지 않고 실행하게 한다(주입 래퍼).
 **사용자 결정**: ① 등록표는 ctx DB(Postgres)에 **평문 저장** — DB 는 허용된 tailnet 기기만 접속하는 설계이고, 분산된 비밀 키 관리의 복잡도를 늘리지 않는다. ② DB 원문(messages·hook_events)은 **바꾸지 않는다**. ③ 이미 DB 에 적재된 **로컬** 트랜스크립트 사본만 치환한다. ④ 기존 데이터 일괄 치환은 별도 명령(`scrub`).

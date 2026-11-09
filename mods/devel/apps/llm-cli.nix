@@ -102,12 +102,14 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # (observe 의 usageui 와 같은 방식). 훅·타이머·사용자가 부르는 `donghans` 는 모두 이 래퍼다.
   ctxSrc = pkgs.runCommand "llm-ctx-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_store.py" "ctx_doccli.py" "ctx_toolhook.py" "ctxdata.py" "ctxchart.py" "ctxcards.py" "llmcards.py" "llmui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_store.py" "ctx_doccli.py" "ctx_toolhook.py" "ctxdata.py" "ctxchart.py" "ctxcards.py" "ctxaudit.py" "llmcards.py" "llmui.py"]}
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-sessions + "/${f}"} $out/${f}") ["llm_sessions.py" "tmuxsess.py"]}
     cp ${../../_tools/_lib/uikit/uikit.py} $out/uikit.py
     mkdir -p $out/agents
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx/agents + "/${f}"} $out/agents/${f}") ["__init__.py" "claude.py"]}
   '';
+  # 전제 감사관(donghans-plan 점검 항목 9) 보고의 기계 검사·채점 — 호출자가 쓰는 도구(`ctxaudit check|score`). 원문은 PATH 의 `donghans ctx msg` 로 읽는다. 설계: ctx 문서 plan llm-trust/06-p4-premise-auditor
+  ctxaudit = pkgs.writeShellScriptBin "ctxaudit" ''exec ${pkgs.python3}/bin/python3 -I ${ctxSrc}/ctxaudit.py "$@"'';
   claudeCtx = pkgs.writeShellScriptBin "donghans" ''exec ${pkgs.python3.withPackages (ps: [ps.psycopg])}/bin/python3 ${ctxSrc}/llm_ctx.py "$@"'';
   # LLM 관리 TUI(Textual): 저장소별 용량·검색·발언 대조·비밀 등록표·후보 탐지 + 8 카드 탭(결정 카드·논의 세션 시작, llmcards.py) + 7 세션 탭(claude tmux 세션). 사람이 터미널에서 쓰는 도구(`llmui`).
   # `llmui --sessions` 는 세션 탭만 단독으로(DB 에 연결하지 않음) — `llm-sessions` 가 이것이다. 세션 탭이 tmux·claude-run 을 찾도록 tmuxEnv 를 준다.
@@ -246,7 +248,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   otelCollectorConfig = pkgs.writeText "claude-otel-collector.yaml" (builtins.readFile ./llm-cli/otel-collector.yaml);
 in {
   hm = {
-    home.packages = [claude unstable.antigravity-cli claudeSudoAuth claudeCtx llmui claudeTmux claudeSessions];
+    home.packages = [claude unstable.antigravity-cli claudeSudoAuth claudeCtx ctxaudit llmui claudeTmux claudeSessions];
 
     # 앱 런처(SUPER+Space)에서도 열리도록 등록(터미널 앱이라 uwsm 이 xdg-terminal-exec 로 kitty 에 띄움; usageui 와 같은 방식).
     # (런처에 보이는 이름은 다른 앱들처럼 영어로 통일)
