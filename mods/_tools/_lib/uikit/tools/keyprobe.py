@@ -1,6 +1,6 @@
 import asyncio, os, sys, time, tempfile
 R="/home/donghans/nixos/mods/_tools"
-for p in ("observe/observe","_lib/uikit","observe/process-manager","llm/llm-sessions","desktop/notification-center","desktop/clipboard","desktop/monitor-manager","llm/llm-ctx","../_data/claude-skills/donghans-host-resources/scripts"): sys.path.insert(0, f"{R}/{p}")
+for p in ("observe/observe","_lib/uikit","observe/process-manager","llm/llm-sessions","desktop/notification-center","desktop/clipboard","desktop/embedctl","desktop/monitor-manager","llm/llm-ctx","../_data/claude-skills/donghans-host-resources/scripts"): sys.path.insert(0, f"{R}/{p}")
 which=sys.argv[1]
 def make():
     if which=="usageui":
@@ -17,6 +17,8 @@ def make():
         import clipui; return clipui.ClipUI()
     if which=="display":
         import displayui; return displayui.DisplayUI()
+    if which=="embedctlui":
+        import embedctlui; return embedctlui.EmbedUI()
 KEYS=["q","escape","ctrl+c","ctrl+q"]
 HELP_CLOSE=["escape","question_mark","f1","enter","q","x","space"]        # q·x·space 는 닫히면 안 된다(2026-11-03 q 제거)
 async def one(key):

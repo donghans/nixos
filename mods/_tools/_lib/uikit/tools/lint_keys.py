@@ -1,7 +1,7 @@
 """단일 알파벳 Binding 키 검사 — 한영 전환(fcitx)에 영향받는 키를 앱이 다시 쓰지 않게 한다.
 
 `Binding("a,b", ...)` / `Binding("키", ...)` 의 첫 인자를 ',' 로 쪼개 `^[A-Za-z]$` 이면 위반.
-사용: python3 lint_keys.py [소스.py ...]  (인자 없으면 uikit 앱 7개 전부). 종료 코드 = 위반 있으면 1.
+사용: python3 lint_keys.py [소스.py ...]  (인자 없으면 uikit 앱 전부 — APPS). 종료 코드 = 위반 있으면 1.
 `PENDING` 은 아직 변환하지 않은 앱의 남은 키 허용 목록 — 앱을 변환하면 그 앱을 지운다(최종 목표: 비어 있음).
 """
 import ast, os, re, sys
@@ -11,7 +11,7 @@ APPS = {
     "llmui": "llm/llm-ctx/llmui.py", "usageui": "observe/observe/usageui.py",
     "procui": "observe/process-manager/procui.py", "displayui": "desktop/monitor-manager/displayui.py",
     "llm-sessions": "llm/llm-sessions/llm_sessions.py", "notif": "desktop/notification-center/notif_ui.py",
-    "clipui": "desktop/clipboard/clipui.py",
+    "clipui": "desktop/clipboard/clipui.py", "embedctlui": "desktop/embedctl/embedctlui.py",
 }
 PENDING: set = set()  # 아직 변환하지 않은 앱 이름(전부 변환 끝 — 2026-11-03). 새 앱을 추가하면 APPS 에 넣고, 변환 전이면 여기에 잠시 둔다
 

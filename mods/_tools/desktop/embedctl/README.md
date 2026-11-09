@@ -3,7 +3,7 @@
 MSI Summit E16Flip A12UDT(보드 `MS-1592`) **한 기종**의 EC 에 남는 상태를 허용 목록으로만 다루는 CLI(`embedctl`)와 TUI(`embedctlui`).
 Windows 의 MSI Center 가 마지막으로 정한 값이 EC 에 남아 리눅스의 전력·소음·충전에 숨은 변수가 되는 문제를, 리눅스에서 보고·바꾸고·기록·복원하려는 도구다.
 
-> **구현 상태 (계획 `plan/embedctl-구현`)**: 단계 1(읽기 전용 코어)·2(root helper + Nix 모듈)·3(쓰기 동작과 `restore`)의 코드와 가짜 환경 시험이 있다. **실기 쓰기 시험은 아직 하지 않았다**(WMI `set_data` 로 값을 실제로 바꾸는 쓰기는 이 도구로는 처음이다). `embedctlui`(단계 4)와 호스트 정리·정식 적용(단계 5)은 아직 없다.
+> **구현 상태 (계획 `plan/embedctl-구현`)**: 단계 1(읽기 전용 코어)·2(root helper + Nix 모듈)·3(쓰기 동작과 `restore`)·4(`embedctlui`)의 코드와 가짜 환경 시험이 있다. 쓰기 동작은 **실기에서 확인했다**(저장소 helper 를 root 로 직접 실행: 충전 80/100·범위 밖 거부, 모드 eco/sport/comfort, Cooler Boost on/off — 18개 모두 통과, 시작 값으로 복원·일치). 설치본(`nixup os --try` 로 임시 적용 중)은 아직 단계 2 코드라서 **helper 경유 쓰기와 TUI 의 실기 확인은 재적용 뒤**다. 호스트 정리와 정식 적용(`write_support=1`·`turbo-*` 제거, 세대 등록)은 단계 5.
 > 설계·근거·검증 이력: ctx `plan/embedctl-구현`, 조사: ctx `note/msi-summit-me-ec-충전상한-성능모드-분석`.
 
 ## 사용
@@ -38,6 +38,23 @@ fans    [RPM…] | null      temp_pkg  °C | null      power {ac, status, capaci
 
 종료 코드: 0 성공 · 2 입력/사용법 오류 · 3 게이트·허용 목록 거부 · 4 권한(polkit)·helper 실패 · 5 되읽기 값 불일치. (3·4·5 는 쓰기 단계에서 쓰인다.)
 
+## embedctlui (TUI)
+
+`embedctlui` — 한 화면에서 보고 바꾼다(Textual + uikit). 위에서부터 ① 기종·펌웨어 게이트와 EC 접근 방식 ② **충전 상한**·**성능 모드** 드롭다운 ③ **Cooler Boost**(켜져 있으면 경고 색) ④ **스냅샷** 저장/복원 ⑤ 팬 RPM·온도·전원(2초 갱신, 창이 포커스를 잃으면 멈춤) ⑥ 마지막 동작 결과.
+
+| 키 | 동작 |
+|---|---|
+| 드롭다운 선택 | 충전 상한(50~100)·성능 모드(sport/comfort/eco)를 바로 적용. 실패하면 메시지를 보이고 드롭다운을 **실제 상태로 되돌린다** |
+| `F8` / 버튼 | Cooler Boost 토글 |
+| `F6` | 스냅샷 저장(`~/.local/state/embedctl/snapshots/`, 이 키를 누를 때만) |
+| `F7` | 스냅샷 복원: 목록 선택 → **계획을 보여 주는 확인창(기본 「취소」)** → 적용 |
+| `F5` | EC 바이트 다시 읽기(EC 는 helper 를 부르므로 열 때·동작 뒤·F5 에서만 읽는다) |
+| `?` / `F1` | 도움말 |
+| `Esc` / `Ctrl+Q` | 종료 확인창(기본 「아니오」) / 즉시 종료 |
+
+EC 접근이 「사용 불가」(세션 밖 프로세스 등)이거나 기종·펌웨어가 검증 상태가 아니면 드롭다운·버튼이 잠기고 값은 읽기만 된다. 현재 상태와 같은 선택은 무시한다(드롭다운이 되돌아올 때 쓰기가 다시 일어나지 않게).
+주의(구현): `App.run_action` 은 Textual 이 모든 키 바인딩에 쓰는 내부 메서드라 같은 이름의 메서드를 만들면 앱이 망가진다 — 작업자 메서드 이름은 `act_worker`.
+
 ## 기종 게이트
 
 쓰기 전·EC 해석 전에 `board_name == "MS-1592"` 이고 EC 펌웨어 문자열이 **검증된 목록**(`embedlib.VERIFIED_FW`, 지금 `1592EMS1.111`)에 있는지 본다. 하나라도 아니면 읽기만 하고 쓰기는 거부한다.
@@ -56,7 +73,8 @@ EC 는 같은 바이트를 두 창구로 보여 준다(`ec_sys` 의 `ec0/io` 와
 ## 시험
 
 ```
-cd mods/_tools/desktop/embedctl && python3 -I tests/test_core.py     # 또는 mods/_tools/run-tests.sh 의 embedctl 줄
+cd mods/_tools/desktop/embedctl && python3 -I tests/test_core.py && python3 -I tests/test_helper.py     # 또는 mods/_tools/run-tests.sh 의 embedctl 줄
+<textual 이 있는 python> -I tests/test_embedctlui.py                                                   # run-tests.sh 의 embedui 줄(displayui 가 쓰는 python)
 ```
 실제 EC·sysfs·systemctl 을 건드리지 않는다: 가짜 sysfs/hwmon/DMI 디렉터리(`EMBEDCTL_SYSFS_BAT`·`EMBEDCTL_SYSFS_AC`·`EMBEDCTL_HWMON`·`EMBEDCTL_DMI`·`EMBEDCTL_RUN`), 가짜 `systemctl`(`EMBEDCTL_SYSTEMCTL`, `tests/fake_systemctl.py`), 메모리 속 EC 에뮬레이터를 쓴다.
 `python3 -I` 아래에서는 `sys.path` 를 시험이 직접 구성한다(`observe/process-manager/tests/test_procctl.py` 선례).
@@ -68,6 +86,7 @@ cd mods/_tools/desktop/embedctl && python3 -I tests/test_core.py     # 또는 mo
 | `embedlib.py` | 코어: 게이트, EC 읽기·쓰기(`apply_action`), 상태 모으기, 스냅샷, helper 호출·결과 파일, 인스턴스 이름 검증(`INSTANCE_RE`), TLP 설정 읽기 |
 | `embedctl.py` | CLI 진입점(ctlkit 봉투, `Fail(코드, 메시지)`) |
 | `embedhelper.py` | root helper(`embedctl-root@<동작>.service` 가 실행) |
-| `tests/` | `test_core.py`(코어·CLI·열화), `test_helper.py`(helper·쓰기 동작·끝단·restore), `fake_systemctl.py`(정적 결과), `fake_systemctl_e2e.py`(실제 helper 코드를 EC 에뮬레이터 위에서 실행, 상태는 파일에 유지) |
+| `embedctlui.py` | TUI(Textual). `embedlib` 의 `helper_call`·`restore_plan`·`save_snapshot` 을 CLI 와 같이 쓴다 |
+| `tests/` | `test_core.py`(코어·CLI·열화), `test_helper.py`(helper·쓰기 동작·끝단·restore), `fake_systemctl.py`(정적 결과), `test_embedctlui.py`(헤드리스 Textual Pilot, 가짜 helper), `fake_systemctl_e2e.py`(실제 helper 코드를 EC 에뮬레이터 위에서 실행, 상태는 파일에 유지) |
 
-시험의 신뢰도를 확인하려고 복사본에서 일부러 결함을 넣어 보았다(마스크 제거, 게이트 무력화, 범위 검사 제거, 되읽기 검사 제거, 정규식 `\Z`→`$`, 신선도 검사 완화, restore 의 펌웨어 일치·user 모드 거부 제거, 종료 코드 변경, 미설정 안내 제거 — 11가지). 처음에는 한 가지(EC 되읽기 검사)를 시험이 놓쳐서 그 시험을 추가했고, 지금은 11가지 모두 시험이 실패한다.
+시험의 신뢰도를 확인하려고 복사본에서 일부러 결함을 넣어 보았다(마스크 제거, 게이트 무력화, 범위 검사 제거, 되읽기 검사 제거, 정규식 `\Z`→`$`, 신선도 검사 완화, restore 의 펌웨어 일치·user 모드 거부 제거, 종료 코드 변경, 미설정 안내 제거 — 11가지). 처음에는 한 가지(EC 되읽기 검사)를 시험이 놓쳐서 그 시험을 추가했고, 지금은 11가지 모두 시험이 실패한다. TUI 시험도 같은 방식으로 확인했다(충전·모드의 「현재와 같은 선택 무시」·동기화 가드·실패 뒤 되돌림·게이트 무시·쓰기 전 writable 확인 제거·복원 확인창 생략·복원 취소 시에도 적용·Esc 즉시 종료·시작 때 자동 저장 — 의미 있는 변이 10가지, 동치 변이 1개는 제외; 처음에 둘을 놓쳐 시험을 고치고 추가했다: 드롭다운 값이 같으면 Textual 이 `Changed` 를 만들지 않아 가드가 시험되지 않았다).

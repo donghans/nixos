@@ -250,6 +250,99 @@ def apply_action(inst):
     return before, after
 
 
+# --- 동작 결과 문구(CLI·TUI 공용) ----------------------------------------------------------------
+LABEL = {"charge": "충전 상한", "mode": "성능 모드", "boost": "Cooler Boost"}
+EC_KEY = {"charge": ("d7", EC_CHARGE), "mode": ("d2", EC_MODE), "boost": ("b98", EC_BOOST)}
+
+
+def describe(kind, raw):
+    if kind == "charge":
+        return "미설정(100%)" if not raw["end"] else f"{raw['end']}%"
+    if kind == "mode":
+        return MODES[raw["d2"] & 0x03]
+    return "켜짐" if raw["b98"] & 0x80 else "꺼짐"
+
+
+def action_summary(kind, res):
+    """helper 결과(before/after)를 (데이터, 한 줄 문구)로."""
+    key, addr = EC_KEY[kind]
+    b, af = res["before"], res["after"]
+    changed = b[key] != af[key] or b["end"] != af["end"]
+    line = f"{LABEL[kind]}: {describe(kind, b)} → {describe(kind, af)}  [EC 0x{addr:02X}: 0x{b[key]:02X} → 0x{af[key]:02X}]" + ("" if changed else "  (이미 같은 값이었다)")
+    return {"action": kind, "before": b, "after": af, "changed": changed}, line
+
+
+# --- restore 계획(CLI·TUI 공용) --------------------------------------------------------------------
+class RestoreError(Exception):
+    """복원할 수 없는 스냅샷/상태. code = 종료 코드(2 형식 · 3 거부 · 4 EC 를 못 읽음). 아무것도 쓰기 전에 낸다."""
+
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code, self.msg = code, msg
+
+
+def restore_plan(snap, st):
+    """스냅샷 snap 을 지금 상태 st(collect_status 결과)에 맞추는 계획을 만든다. 하나라도 안 맞으면 RestoreError — 이 함수는 아무것도 쓰지 않는다.
+    돌려주는 값: (계획 [{"kind","instance","text"}…], 참고 문구 […])."""
+    if not isinstance(snap, dict) or snap.get("schema") != 1 or not isinstance(snap.get("gate"), dict):
+        raise RestoreError(2, "스냅샷 형식이 아니다(schema 1 이 아님)")
+    if st["access"] == "unavailable":
+        raise RestoreError(4, "EC 를 읽지 못해 복원할 수 없다: " + ("; ".join(st["warnings"]) or "이유 없음"))
+    if st["gate"]["state"] != "verified":
+        raise RestoreError(3, f"게이트 거부: {GATE_REASON.get(st['gate']['state'], st['gate']['state'])} — 복원하지 않았다")
+    if snap["gate"].get("fw") != st["gate"]["fw"]:
+        raise RestoreError(3, f"스냅샷의 EC 펌웨어({snap['gate'].get('fw')!r})가 지금({st['gate']['fw']!r})과 달라 복원하지 않는다")
+    want_charge = (snap.get("charge") or {}).get("limit")
+    mode, boost = snap.get("mode"), snap.get("boost")
+    if not isinstance(want_charge, int) or not (CHARGE_MIN <= want_charge <= CHARGE_MAX):
+        raise RestoreError(3, f"스냅샷의 충전 상한 {want_charge!r} 은 허용 범위({CHARGE_MIN}~{CHARGE_MAX})가 아니다 — 복원하지 않았다")
+    if mode not in MODE_BITS:
+        raise RestoreError(3, f"스냅샷의 성능 모드 {mode!r} 는 복원하지 않는다(sport·comfort·eco 만; 스냅샷을 찍을 때 EC 를 읽지 못했을 수도 있다)")
+    if not isinstance(boost, bool):
+        raise RestoreError(3, "스냅샷에 Cooler Boost 값이 없다 — 복원하지 않았다")
+    plan = []
+    if st["charge"]["limit"] != want_charge:
+        plan.append({"kind": "charge", "instance": f"charge-{want_charge}", "text": f"{LABEL['charge']}: {st['charge']['limit']}% → {want_charge}%"})
+    if st["mode"]["name"] != mode:
+        plan.append({"kind": "mode", "instance": f"mode-{mode}", "text": f"{LABEL['mode']}: {st['mode']['name']} → {mode}"})
+    if st["boost"] != boost:
+        plan.append({"kind": "boost", "instance": f"boost-{'on' if boost else 'off'}",
+                     "text": f"{LABEL['boost']}: {'켜짐' if st['boost'] else '꺼짐'} → {'켜짐' if boost else '꺼짐'}"})
+    notes = []
+    if not (snap.get("charge") or {}).get("set") and want_charge == 100 and st["charge"]["set"]:
+        notes.append("스냅샷의 충전 상한은 「미설정」이었다. 미설정은 sysfs 로 되돌릴 수 없어 100% 로 복원한다(동작은 같다)")
+    return plan, notes
+
+
+# --- 스냅샷 저장 위치(TUI 가 쓴다; CLI 는 --out 으로 명시할 때만 저장) -----------------------------------
+def snapshot_dir():
+    base = os.environ.get("EMBEDCTL_SNAPSHOT_DIR")
+    if base:
+        return base
+    state = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+    return os.path.join(state, "embedctl", "snapshots")
+
+
+def save_snapshot(status):
+    """스냅샷을 snapshot_dir() 에 `YYYYmmdd-HHMMSS.json` 으로 저장하고 경로를 돌려준다(같은 초면 -2, -3 …)."""
+    d = snapshot_dir()
+    os.makedirs(d, exist_ok=True)
+    stem = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    path, n = os.path.join(d, stem + ".json"), 1
+    while os.path.exists(path):
+        n += 1
+        path = os.path.join(d, f"{stem}-{n}.json")
+    with open(path, "w") as f:
+        json.dump(make_snapshot(status), f, ensure_ascii=False, indent=1)
+        f.write("\n")
+    return path
+
+
+def list_snapshots():
+    """저장된 스냅샷 경로를 최신순으로."""
+    return sorted(glob.glob(os.path.join(snapshot_dir(), "*.json")), reverse=True)
+
+
 # --- TLP 충돌 경고 ---------------------------------------------------------------------------
 def tlp_charge_settings():
     """TLP 설정 파일이 충전 임계값을 지정하고 있으면 [(파일, 이름, 값)] 을 돌려준다. TLP 가 다음 적용 때 embedctl 의 값을 덮어쓸 수 있다."""

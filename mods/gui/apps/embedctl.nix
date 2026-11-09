@@ -1,4 +1,4 @@
-# embedctl — MSI Summit E16Flip A12UDT(보드 MS-1592) 전용: EC 상태(충전 상한·성능 모드·Cooler Boost)를 허용 목록으로 읽고 다루는 CLI.
+# embedctl / embedctlui — MSI Summit E16Flip A12UDT(보드 MS-1592) 전용: EC 상태(충전 상한·성능 모드·Cooler Boost)를 허용 목록으로 읽고 다루는 CLI 와 TUI.
 # 본체는 mods/_tools/desktop/embedctl/ (README.md), 설계·검증은 ctx `plan/embedctl-구현`.
 # 기종 전용이라 모든 노트북에 깔지 않고 호스트 toml 의 `[mods.gui.apps] embedctl = true` 로만 켠다.
 #
@@ -15,16 +15,23 @@ mkMod __curPos "embedctl: MS-1592 노트북의 EC 상태(충전 상한·성능 �
     cp ${../../_tools/desktop/embedctl/embedctl.py} $out/embedctl.py
     cp ${../../_tools/desktop/embedctl/embedlib.py} $out/embedlib.py
     cp ${../../_tools/desktop/embedctl/embedhelper.py} $out/embedhelper.py
+    cp ${../../_tools/desktop/embedctl/embedctlui.py} $out/embedctlui.py
     cp ${../../_tools/_lib/ctlkit/ctlkit.py} $out/ctlkit.py
+    cp ${../../_tools/_lib/uikit/uikit.py} $out/uikit.py
   '';
   py = "${pkgs.python3}/bin/python3";
+  pyUi = "${pkgs.python3.withPackages (ps: [ps.textual])}/bin/python3"; # TUI 만 textual 이 필요하다(CLI 와 root helper 는 표준 라이브러리만)
   embedctl = pkgs.writeShellScriptBin "embedctl" ''
     export EMBEDCTL_SYSTEMCTL="''${EMBEDCTL_SYSTEMCTL:-${pkgs.systemd}/bin/systemctl}"
     exec ${py} -I ${dir}/embedctl.py "$@"
   '';
+  embedctlui = pkgs.writeShellScriptBin "embedctlui" ''
+    export EMBEDCTL_SYSTEMCTL="''${EMBEDCTL_SYSTEMCTL:-${pkgs.systemd}/bin/systemctl}"
+    exec ${pyUi} -I ${dir}/embedctlui.py "$@"
+  '';
 in {
   os = {
-    environment.systemPackages = [embedctl];
+    environment.systemPackages = [embedctl embedctlui];
 
     systemd.tmpfiles.rules = ["d /run/embedctl 0755 root root -"];
 
