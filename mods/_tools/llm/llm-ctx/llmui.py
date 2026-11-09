@@ -11,7 +11,8 @@
   5 후보   키·비밀번호처럼 보이는 문자열 자동 탐지 → 승인(등록)·무시
   6 지침   프로젝트별 지침(공유 정본 project_instructions)을 모든 저장소에 대해 보고 고친다 — 로컬 캐시 없이 DB 만 대상   (Enter: 본문 · e: 편집기)
   8 카드   결정 카드(ctx note cards/*) — Space 체크 · Enter 상세(근거 원문 대조·이력·승격) · 체크하면 하단에서 쟁점을 적고 확인 → `/donghans-card` 논의 세션 시작. 제한 모드에서는 읽기만
-  9 호스트 (읽기 전용 S0) 세션 호스트(llm-trust 11)의 이벤트 녹화본을 렌더링만 한다 — 텍스트·도구 호출·권한 요청·질문·결과·비용. 호스트 연결은 아직 없다. 제한 모드에서는 안내문만
+  9 호스트 세션 호스트(llm-trust 11) — 처음엔 이벤트 녹화본을 그리기만 하고, F2 로 세션을 시작하면 실시간으로 텍스트 스트림·도구 호출·결과·비용을 보여 준다(F3 닫기 · F4 지시 입력 · Enter 보내기).
+         S1: 권한·질문 요청은 자동 거부(응답 화면은 S2). llm-host 는 소스 트리에서 찾는다(배포본은 LLMUI_HOST_DIR). 제한 모드에서는 안내문만(세션 시작·전송 막힘)
   7 세션   claude 가 도는 tmux 세션 목록·화면 미리보기 — Enter 붙기 · F2 새 세션 · F3 붙은 곳 떼기 · Delete 정리 (ssh·다른 터미널에서도 같은 세션). 제한 모드에서는 목록만 보인다
 
 원문(DB)은 바꾸지 않는다. 화면의 치환(F10)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. TTY 가 없으면 실행하지 않는다.
@@ -52,6 +53,7 @@ import ctxchart as cch
 import ctxdata as cd
 import llmcards as lc
 import llmhost_view as hv
+import llmhost_ctl as hc
 
 TABS = [("dashboard", "대시보드"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("instr", "지침"), ("sessions", "세션"), ("cards", "카드"), ("host", "호스트")]
 
@@ -512,7 +514,7 @@ class InstrScreen(ModalScreen):
 class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
     TITLE = "llmui — LLM 컨텍스트·세션 관리"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
-        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침) · 7 세션(claude 가 도는 tmux 세션 — 붙기·새 세션·정리, DB 없이도 `llmui --sessions` 로 이 탭만 단독 실행) · 8 카드(결정 카드 — Space 체크, Enter 상세·근거 대조·이력(h)·승격(F2, 사람만), 체크하면 하단에서 논의 세션 시작. F2/F3 상태·범위 필터) · 9 호스트(세션 호스트 이벤트 녹화본 보기 — 지금은 읽기 전용, 호스트에 연결하지 않음. 제한 모드에서는 안내문만)'),
+        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침) · 7 세션(claude 가 도는 tmux 세션 — 붙기·새 세션·정리, DB 없이도 `llmui --sessions` 로 이 탭만 단독 실행) · 8 카드(결정 카드 — Space 체크, Enter 상세·근거 대조·이력(h)·승격(F2, 사람만), 체크하면 하단에서 논의 세션 시작. F2/F3 상태·범위 필터) · 9 호스트(세션 호스트 — 처음엔 녹화본, F2 로 실제 세션 시작 후 텍스트 스트림·결과·비용 실시간 표시, F4/Enter 로 지시 전송, F3 닫기. 권한·질문은 아직 자동 거부. 제한 모드에서는 안내문만)'),
         *[t for t in ls.SESSIONS_HELP_TERMS if t[0] != '제한 모드'],
         ('치환(F10)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
         ('제한 모드', 'LLM 세션이 실행하면: 모든 탭을 볼 수 있지만 화면의 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(키 형식·password=·한글 비밀번호)이 [protected] 로 치환되고(끌 수 없음), 후보 미리보기도 [protected](N자)로 가려지며, 값 보기(F4)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용된다'),
@@ -582,6 +584,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         Binding("f2", "secret_add", "비밀 추가"), Binding("f3", "secret_toggle", "켬/끔"), Binding("f4", "reveal", "값 보기"),
         Binding("delete", "secret_delete", "삭제"), Binding("f2", "cand_ignore", "무시"), Binding("f2", "instr_edit", "지침 편집"),
         Binding("f2", "card_state_cycle", "상태 필터"), Binding("f3", "card_scope_cycle", "범위 필터"), Binding("f2", "sess_new", "새 세션"), Binding("f3", "sess_detach", "붙은 곳 떼기"), Binding("delete", "sess_kill", "정리(종료)"),
+        Binding("f2", "host_start", "새 호스트 세션"), Binding("f3", "host_close", "세션 닫기"), Binding("f4", "host_input", "지시 입력"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
@@ -607,6 +610,11 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         self._reveal = False
         self.stat_period, self.stat_bucket, self.stat_by, self.stat_order = 3, "day", "model", "cost"   # 기본: 30일 · 일 단위 · 모델별 · 비용순
         self._stat_loaded = False
+        self.host_bridge = None                       # 9 호스트: llmhost_ctl.HostBridge(처음 세션을 시작할 때 만든다). 제한 모드에서는 만들지 않는다
+        self.host_bridge_factory = lambda: hc.HostBridge(log_root=os.environ.get("LLMUI_HOST_LOG_ROOT") or hc.DEFAULT_LOG)
+        self.host_start_kwargs: dict = {}              # 시험용 주입(exe·extra_spec)
+        self.host_events: list = []                    # 실시간 세션의 이벤트(dict) — 시작할 때 비운다
+        self.host_live = False                         # 한 번이라도 세션을 시작했으면 녹화본 대신 실시간 화면
 
     # --- 구성
     def compose(self) -> ComposeResult:
@@ -663,6 +671,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
             with TabPane("9 호스트", id="host"):
                 yield Static("", id="host-head")
                 yield uikit.box(VerticalScroll(Static("", id="host-body"), id="host-scroll"), "호스트 이벤트 — 읽기 전용(녹화본)")
+                yield uikit.box(Input(placeholder="세션에 보낼 지시 — Enter (먼저 F2 로 세션 시작)", id="host-input"), "지시")
         yield Footer()
 
     def on_mount(self):
@@ -680,6 +689,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         self.sess_mount()
         self.cards_mount()
         self.set_interval(3.0, self._sess_tick)
+        self.set_interval(0.25, self._host_tick)
         self.reload_overview()
 
     DASH_NARROW_COLS = 110      # 이보다 좁으면 대시보드의 2열 배치를 1열로(좁은 터미널에서 표가 잘리지 않게)
@@ -780,7 +790,8 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
     TAB_ACTIONS = {"stat_period": {"dashboard"}, "stat_bucket": {"dashboard"}, "stat_by": {"dashboard"}, "stat_order": {"dashboard"}, "stat_clear": {"dashboard"},
                    "toggle_role": {"search"}, "toggle_regex": {"search"}, "toggle_tools": {"search"}, "toggle_title_only": {"search"}, "expand_all": {"search"},
                    "secret_add": {"secrets"}, "secret_toggle": {"secrets"}, "secret_delete": {"secrets"}, "reveal": {"secrets", "cands"}, "cand_ignore": {"cands"}, "instr_edit": {"instr"},
-                   **lc.CardsMixin.CARD_ACTIONS, "sess_new": {"sessions"}, "sess_detach": {"sessions"}, "sess_kill": {"sessions"}}
+                   **lc.CardsMixin.CARD_ACTIONS, "sess_new": {"sessions"}, "sess_detach": {"sessions"}, "sess_kill": {"sessions"},
+                   "host_start": {"host"}, "host_close": {"host"}, "host_input": {"host"}}
 
     def check_action(self, action, parameters):
         """탭 전용 동작은 그 탭에서만 켠다(같은 F키를 탭마다 다른 동작에 재사용). 제한 모드에서는 막힌 동작(치환 끄기·값 보기·비밀 추가/삭제/끄기·후보 무시)을 푸터·도움말에서 숨긴다(눌러도 deny 가 막는다)."""
@@ -873,12 +884,19 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
     HOST_COLORS = {"head": "bold #33ccff", "text": "#e0e0e0", "think": "#6a6a6a", "tool": "#b8a46a", "result": "#9a9a9a", "err": "#e06c6c", "perm": "bold #e0a050",
                    "ask": "bold #7fbf7f", "info": "#33ccff", "warn": "#e0a050", "cost": "#7fbf7f", "dim": "#8a8a8a"}
 
+    HOST_EVENTS_MAX = 5000
+
     def reload_host(self):
-        """9 호스트(S0): 녹화본·이벤트 로그를 읽어 그리기만 한다(호스트 프로세스 없음). 제한 모드면 안내문만(H-4) — 파일도 읽지 않는다."""
+        """9 호스트: 세션을 시작한 적이 있으면 실시간 화면, 아니면 S0 처럼 녹화본·이벤트 로그를 그리기만 한다. 제한 모드면 안내문만(H-4) — 파일도 읽지 않고 호스트도 만들지 않는다."""
         head, body = self.query_one("#host-head", Static), self.query_one("#host-body", Static)
+        inp = self.query_one("#host-input", Input)
         if self.restricted:
             head.update(Text(hv.RESTRICTED_NOTICE, style="#e0a050"))
             body.update("")
+            inp.disabled = True
+            return
+        if self.host_live:
+            self.render_host_live()
             return
         path = hv.default_fixture()
         events, err = hv.load_events(path) if path else ([], "표시할 녹화본이 없다 — 환경변수 LLMUI_HOST_FIXTURE 에 이벤트 로그(JSON 줄) 경로를 지정하라(소스 트리에서는 llm-host/tests/fixtures/main.jsonl 이 기본)")
@@ -888,12 +906,123 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
             return
         sm = hv.summarize(events)
         head.update(Text(f"{path}  ·  이벤트 {sm['events']}  ·  턴 {sm['turns']}  ·  도구 호출 {sm['tool_calls']}  ·  권한 요청 {sm['permission_requests']}  ·  질문 {sm['questions']}  ·  "
-                         f"알 수 없는 줄(raw) {sm['raw']}  ·  누적 비용 {hv._money(sm['cost_total'])}   [읽기 전용: 호스트에 연결하지 않음]", style="#9a9a9a"))
+                         f"알 수 없는 줄(raw) {sm['raw']}  ·  누적 비용 {hv._money(sm['cost_total'])}   [녹화본 — F2 로 실제 세션을 시작하면 실시간 화면으로 바뀝니다]", style="#9a9a9a"))
         mk = self.masker()
         t = Text()
         for style, line in hv.render_events(events):
             t.append(mk.text(line) + "\n", style=self.HOST_COLORS.get(style, "#e0e0e0"))
         body.update(t)
+
+    def render_host_live(self):
+        head, body = self.query_one("#host-head", Static), self.query_one("#host-body", Static)
+        sc = self.query_one("#host-scroll")
+        b = self.host_bridge
+        sm = hv.summarize(self.host_events)
+        at_end = sc.scroll_y >= sc.max_scroll_y - 1
+        head.update(Text(f"실시간 세션 {b.session_label or '-'}  ·  상태 {b.state}  ·  턴 {sm['turns']}  ·  도구 호출 {sm['tool_calls']}  ·  알 수 없는 줄(raw) {sm['raw']}  ·  누적 비용 {hv._money(b.cost_total)}"
+                         f"   [F2 새 세션 · F3 닫기 · F4 지시 입력 · 권한·질문은 S1 에서 자동 거부]" if b else "", style="#9a9a9a"))
+        mk = self.masker()
+        t = Text()
+        for style, line in hv.render_events(self.host_events):
+            t.append(mk.text(line) + "\n", style=self.HOST_COLORS.get(style, "#e0e0e0"))
+        body.update(t)
+        if at_end:
+            sc.scroll_end(animate=False)
+
+    def _host_tick(self):
+        """실시간 세션 이벤트를 가져와 다시 그린다(탭이 보일 때만 그리고, 안 보이면 이벤트는 호스트 어댑터에 쌓아 둔다)."""
+        b = self.host_bridge
+        if b is None or self.restricted or self.current_tab() != "host" or len(self.screen_stack) != 1:
+            return
+        try:
+            new = b.drain()
+            if new:
+                self.host_events.extend(new)
+                if len(self.host_events) > self.HOST_EVENTS_MAX:
+                    del self.host_events[:len(self.host_events) - self.HOST_EVENTS_MAX]
+            if new or b.state in ("starting",):
+                self.render_host_live()
+        except Exception:
+            pass
+
+    def action_host_start(self):
+        if self.deny("호스트 세션 시작"):
+            return
+        if self.current_tab() != "host" or len(self.screen_stack) != 1:
+            return
+        ok, why = hc.availability()
+        if not ok:
+            self.flash(why, "error")
+            return
+        if self.host_bridge is not None and self.host_bridge.running:
+            self.flash("이미 호스트 세션이 실행 중이다 — F3 으로 닫은 뒤 새로 시작", "warning")
+            return
+
+        def got_cwd(cwd):
+            if not cwd or not cwd.strip():
+                return
+
+            def got_model(model):
+                if model is not None:
+                    self.host_begin(os.path.expanduser(cwd.strip()), model.strip())
+            self.push_screen(PromptScreen("모델 (비우면 claude 기본)", "예: haiku · sonnet", value=os.environ.get("LLMUI_HOST_MODEL", "")), got_model)
+        self.push_screen(PromptScreen("호스트 세션을 시작할 작업 폴더", "이 폴더에서 claude 가 실행됩니다", value=os.getcwd()), got_cwd)
+
+    def host_begin(self, cwd: str, model: str):
+        """세션 시작(제한 모드에서는 어떤 경로로도 오지 못한다 — 이중 방어로 한 번 더 막는다)."""
+        if self.deny("호스트 세션 시작"):
+            return
+        try:
+            if self.host_bridge is None:
+                self.host_bridge = self.host_bridge_factory()
+        except Exception as e:                                          # noqa: BLE001
+            self.flash(f"호스트를 준비하지 못함: {e}", "error")
+            return
+        err = self.host_bridge.start(cwd, model or None, **self.host_start_kwargs)
+        if err:
+            self.flash(err, "warning")
+            return
+        self.host_events = []
+        self.host_live = True
+        self.query_one("#host-scroll").border_title = "호스트 이벤트 — 실시간"
+        self.reload_host()
+        self.query_one("#host-input", Input).focus()
+
+    def action_host_close(self):
+        if self.deny("호스트 세션 닫기"):
+            return
+        b = self.host_bridge
+        if b is None or not b.running:
+            self.flash("실행 중인 호스트 세션이 없다", "warning")
+            return
+        b.close()
+        self.flash("세션을 닫는다(미해결 요청은 거부 처리)")
+
+    def action_host_input(self):
+        if self.deny("호스트 지시 입력"):
+            return
+        self.query_one("#host-input", Input).focus()
+
+    def host_send_text(self):
+        if self.deny("호스트 지시 보내기"):
+            return
+        inp = self.query_one("#host-input", Input)
+        text = inp.value
+        err = self.host_bridge.send(text) if self.host_bridge is not None else "실행 중인 세션이 없다(F2 로 시작)"
+        if err:
+            self.flash(err, "warning")
+            return
+        inp.value = ""
+        self.host_live = True
+        self.render_host_live()
+
+    def host_shutdown(self):
+        b, self.host_bridge = self.host_bridge, None
+        if b is not None:
+            b.shutdown()
+
+    def on_unmount(self):
+        self.host_shutdown()
 
     def update_state(self):
         self.query_one("#sstate", Static).update(
@@ -972,7 +1101,9 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
 
     # --- 검색
     def on_input_submitted(self, ev: Input.Submitted):
-        if ev.input.id == "card-issue":
+        if ev.input.id == "host-input":
+            self.host_send_text()
+        elif ev.input.id == "card-issue":
             self.launch_card_session()
         elif ev.input.id in ("q", "repo", "days"):
             self.run_search()
@@ -1497,7 +1628,11 @@ def main():
     if argv:
         sys.exit(f"알 수 없는 인자: {' '.join(argv)} (사용법: llmui [--sessions])")
     # LLM 세션이 실행하면(환경 표식) 제한 모드: 열람 제한 정보(비밀·후보)는 읽지도 보이지도 않고 치환을 끌 수 없다. 대시보드·검색·대조·지침 보기는 `donghans ctx` CLI 와 같은 범위라 허용
-    LlmUI(restricted=cc.is_agent_session()).run()
+    app = LlmUI(restricted=cc.is_agent_session())
+    try:
+        app.run()
+    finally:
+        app.host_shutdown()          # 자식 claude 를 남기지 않는다(on_unmount 가 이미 했으면 아무것도 안 한다)
 
 
 if __name__ == "__main__":

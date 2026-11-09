@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """llmui 시험(Textual Pilot + 임시 Postgres): 8개 탭(세션·카드 탭 포함) · 검색/필터 · 대화 보기 · 치환 켬/끔 · 대조 · 비밀 추가/끄기/삭제/값 보기 · 후보 승인/무시.
 필요: psycopg + textual 이 있는 python 과 postgres 17 바이너리. 없으면 건너뛴다."""
-import asyncio, json, os, re, sys, time
+import asyncio, json, os, re, shutil, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker
@@ -924,9 +924,10 @@ async def run_host_tab():
         await settle(pilot, lambda: rows(app, "#projects") == 3)
         await pilot.press("9"); await settle(pilot, lambda: app.current_tab() == "host" and "이벤트" in txt(app.query_one("#host-head")))
         body, head = txt(app.query_one("#host-body")), txt(app.query_one("#host-head"))
-        check("9: 호스트 탭이 열리고 녹화본 머리줄(raw 0·읽기 전용)", app.current_tab() == "host" and "알 수 없는 줄(raw) 0" in head and "읽기 전용" in head, head[:200])
+        check("9: 호스트 탭이 열리고 녹화본 머리줄(raw 0·녹화본)", app.current_tab() == "host" and "알 수 없는 줄(raw) 0" in head and "녹화본" in head, head[:200])
         check("9: 본문에 도구 호출·질문·결과·비용 줄", all(w in body for w in ("▸ Bash [위험]  command=echo s0-allow", "? 질문 [", "빨간색과 파란색", "✔ 결과 성공", "누적 $0.0100")), body[:300])
-        check("9: 호스트에 연결하지 않는다(탭 전용 동작·입력 위젯 없음)", not app.query("#host-scroll Input") and True)
+        check("9: 세션을 시작하기 전에는 호스트를 만들지 않는다(녹화본 화면, 입력창은 스크롤 밖)", app.host_bridge is None and not app.query("#host-scroll Input") and app.query("#host-input"))
+        check("9: 탭 전용 동작(F2·F3·F4)은 호스트 탭에서만 켜진다", all(app.check_action(a, ()) is True for a in ("host_start", "host_close", "host_input")))
         await pilot.press("8"); await pilot.pause(0.3)
         check("9 다음 8 키가 여전히 카드 탭", app.current_tab() == "cards")
         await pilot.press("9"); await pilot.pause(0.3); await pilot.press("f5"); await pilot.pause(0.3)
@@ -951,11 +952,85 @@ async def run_host_tab():
                 check("9(제한): 호스트 동작은 푸터에서 숨김(기존 SESS_ACTIONS 패턴)", all(rapp.check_action(a, ()) is False for a in hv.HOST_ACTIONS) and rapp.check_action("tab", ("host",)) is True)
                 await pilot.press("f5"); await pilot.pause(0.3)
                 check("9(제한): 새로고침해도 파일을 읽지 않는다", calls == [])
-            check("9(비제한): 같은 동작은 막히지 않는다", all(app.check_action(a, ()) is True for a in hv.HOST_ACTIONS))
+                check("9(제한): 입력창은 꺼져 있고 호스트(스레드)는 만들어지지 않는다", rapp.query_one("#host-input").disabled and rapp.host_bridge is None)
+                made = []
+                rapp.host_bridge_factory = lambda: made.append(1)
+                rapp.action_host_start(); rapp.action_host_close(); rapp.action_host_input(); rapp.host_begin("/tmp", "haiku"); rapp.host_send_text(); await pilot.pause(0.3)
+                check("9(제한): 시작·닫기·입력·전송을 직접 불러도 deny 로 막힌다(호스트 만들지 않음, 모달 없음)", made == [] and rapp.host_bridge is None and len(rapp.screen_stack) == 1 and not rapp.host_live)
+            app2 = llmui.LlmUI()
+            async with app2.run_test(size=(160, 50)) as pilot:
+                await pilot.press("9"); await settle(pilot, lambda: app2.current_tab() == "host")
+                check("9(비제한): 같은 동작은 막히지 않는다", all(app2.check_action(a, ()) is True for a in hv.HOST_ACTIONS))
         finally:
             hv.load_events = orig
     finally:
         del os.environ["LLMUI_HOST_FIXTURE"]
+
+
+async def run_host_live():
+    """9 호스트 탭(S1): F2 로 세션 시작 → 지시 입력·Enter → 텍스트 스트림·결과·비용이 실시간으로 그려진다. 가짜 백엔드(fake_claude + 녹화본)만 쓴다(비용 0).
+    백엔드가 2.5초 쉬는 동안에도 화면은 막히지 않는다(탭 전환이 바로 된다). F3 닫기 · 종료 시 자식 프로세스 0개."""
+    import json as _j, tempfile as _t
+    import llmhost_ctl as hc
+    hd = hc.find_host_dir()
+    if not hd:
+        print("llm-host 가 없어 호스트 실시간 시험을 건너뜀"); return
+    fx = [_j.loads(l) for l in open(os.path.join(hd, "tests", "fixtures", "main.jsonl"), encoding="utf-8") if l.strip()]
+    tmp = _t.mkdtemp(prefix="llmui-s1-")
+    steps = [{"expect": {"stdin_type": "user", "line": _j.dumps(fx[0]["line"], ensure_ascii=False, separators=(",", ":"))}}, {"sleep": 2.5}, {"emit": [e["line"] for e in fx[1:15] if e["dir"] == "out"]}]
+    sc = os.path.join(tmp, "sc.jsonl")
+    open(sc, "w", encoding="utf-8").write("\n".join(_j.dumps(x, ensure_ascii=False, separators=(",", ":")) for x in steps) + "\n")
+    hello = fx[0]["line"]["message"]["content"]
+    app = llmui.LlmUI()
+    app.host_bridge_factory = lambda: hc.HostBridge(log_root=None, use_launcher=False)
+    app.host_start_kwargs = {"exe": [sys.executable, os.path.join(hd, "fake_claude.py"), sc, "--timeout", "12"]}
+    pid = None
+    try:
+        async with app.run_test(size=(160, 50)) as pilot:
+            await settle(pilot, lambda: rows(app, "#projects") == 3)
+            await pilot.press("9"); await settle(pilot, lambda: app.current_tab() == "host")
+            await pilot.press("f2"); await settle(pilot, lambda: len(app.screen_stack) == 2)
+            check("S1: F2 가 작업 폴더 입력창을 띄운다", len(app.screen_stack) == 2 and "작업 폴더" in txt(app.screen.query_one("#dialog-title")))
+            app.screen.query_one("#prompt-input").value = tmp; await pilot.pause(0.1); await pilot.press("enter")
+            await settle(pilot, lambda: len(app.screen_stack) == 2 and "모델" in txt(app.screen.query_one("#dialog-title")))
+            app.screen.query_one("#prompt-input").value = "haiku"; await pilot.pause(0.1); await pilot.press("enter")
+            await settle(pilot, lambda: len(app.screen_stack) == 1 and app.host_live)
+            head = txt(app.query_one("#host-head"))
+            check("S1: 모델까지 답하면 실시간 화면(머리줄 '실시간 세션')으로 바뀌고 지시 입력창에 포커스", app.host_live and "실시간 세션" in head and app.focused is app.query_one("#host-input"), f"{head[:120]} {app.focused}")
+            check("S1: 실시간 상자 제목", "실시간" in (app.query_one("#host-scroll").border_title or ""))
+            app.query_one("#host-input").value = hello; await pilot.pause(0.1); await pilot.press("enter")
+            await settle(pilot, lambda: "▶ 나" in txt(app.query_one("#host-body")))
+            check("S1: 보낸 지시가 즉시 '나:' 로 보이고 입력창은 비워진다", "▶ 나: Say hello" in txt(app.query_one("#host-body")) and app.query_one("#host-input").value == "")
+            t0 = time.time()
+            await pilot.press("escape"); await pilot.press("8"); await settle(pilot, lambda: app.current_tab() == "cards", timeout=1.0)
+            check("S1: 백엔드가 응답 중(2.5초 대기)이어도 화면이 막히지 않는다 — 탭 전환이 바로 된다", app.current_tab() == "cards" and time.time() - t0 < 1.8 and app.host_bridge.state == "busy", f"{app.current_tab()} {time.time() - t0:.2f} {app.host_bridge.state}")
+            await pilot.press("9")
+            await settle(pilot, lambda: "✔ 결과 성공" in txt(app.query_one("#host-body")), timeout=6.0)
+            body, head = txt(app.query_one("#host-body")), txt(app.query_one("#host-head"))
+            check("S1: 텍스트 스트림·턴·결과·비용이 본문에", all(w in body for w in ("● 세션 시작", "─ 턴 1", "✔ 결과 성공", "누적 $0.0042")), body[:400])
+            check("S1: 머리줄에 상태 idle·턴 1·누적 비용·raw 0", all(w in head for w in ("상태 idle", "턴 1", "$0.0042", "(raw) 0")), head)
+            pid = app.host_bridge.child_pids()[0]
+            await pilot.press("f3"); await settle(pilot, lambda: app.host_bridge.state == "closed", timeout=6.0)
+            await settle(pilot, lambda: "상태 closed" in txt(app.query_one("#host-head")) and "■ 세션 끝 — closed" in txt(app.query_one("#host-body")), timeout=4.0)
+            check("S1: F3 로 닫으면 '■ 세션 끝 — closed' 와 상태 closed", "상태 closed" in txt(app.query_one("#host-head")) and "■ 세션 끝 — closed" in txt(app.query_one("#host-body")), txt(app.query_one("#host-body"))[-200:])
+            app.query_one("#host-input").value = "또 한 번"; await pilot.pause(0.1); app.query_one("#host-input").focus(); await pilot.pause(0.1); await pilot.press("enter")
+            await pilot.pause(0.3)
+            check("S1: 세션이 없을 때 Enter 는 보내지 않고 입력을 남긴다", app.query_one("#host-input").value == "또 한 번")
+            await pilot.press("f5"); await pilot.pause(0.3)
+            check("S1: F5 새로고침이 실시간 화면을 유지한다(녹화본으로 되돌아가지 않음)", "실시간 세션" in txt(app.query_one("#host-head")))
+        await asyncio.sleep(0.3)
+        check("S1: 앱 종료 뒤 자식 프로세스 0개, 호스트 해제", pid is not None and not _alive(pid) and app.host_bridge is None)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
 
 
 def check_launch_prompt():
@@ -983,6 +1058,7 @@ try:
     check_launch_prompt()
     asyncio.run(run_cards_tab())
     asyncio.run(run_host_tab())
+    asyncio.run(run_host_live())
     check_sessions_only_no_db()
 finally:
     pg.stop()

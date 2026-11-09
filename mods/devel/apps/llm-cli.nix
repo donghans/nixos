@@ -102,7 +102,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # (observe 의 usageui 와 같은 방식). 훅·타이머·사용자가 부르는 `donghans` 는 모두 이 래퍼다.
   ctxSrc = pkgs.runCommand "llm-ctx-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_store.py" "ctx_doccli.py" "ctx_toolhook.py" "ctxdata.py" "ctxchart.py" "ctxcards.py" "ctxaudit.py" "protocolcheck.py" "protocolhook.py" "protocol_text.py" "llmcards.py" "llmhost_view.py" "llmui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_secrets.py" "ctx_instr.py" "ctx_store.py" "ctx_doccli.py" "ctx_toolhook.py" "ctxdata.py" "ctxchart.py" "ctxcards.py" "ctxaudit.py" "protocolcheck.py" "protocolhook.py" "protocol_text.py" "llmcards.py" "llmhost_view.py" "llmhost_ctl.py" "llmui.py"]}
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-sessions + "/${f}"} $out/${f}") ["llm_sessions.py" "tmuxsess.py"]}
     cp ${../../_tools/_lib/uikit/uikit.py} $out/uikit.py
     mkdir -p $out/agents
