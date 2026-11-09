@@ -166,6 +166,38 @@ def wake() -> bool:
     return True
 
 
+# ───────────────────────── 부팅/전원 변경 복원(시스템 서비스용) ─────────────────────────
+def _wait_backlight(timeout: float = 10.0) -> bool:
+    """백라이트 장치가 생기고 systemd-backlight(직전 밝기 복원)가 끝날 때까지 기다린다(그 뒤에 써야 덮어써지지 않음)"""
+    end = time.time() + timeout
+    while time.time() < end and backlight_dir() is None:
+        time.sleep(0.2)
+    if backlight_dir() is None:
+        return False
+    while time.time() < end:
+        out = subprocess.run(["systemctl", "list-units", "--state=activating", "--no-legend", "systemd-backlight@*"],
+                             capture_output=True, text=True, check=False).stdout.strip()
+        if not out:
+            break
+        time.sleep(0.2)
+    return True
+
+
+def restore_boot(wait: bool = True) -> bool:
+    """현재 전원 상태의 기억 밝기를 적용한다. 로그인 화면(greetd)·TTY(kmscon)처럼 사용자 세션이 없을 때를 위한 것으로,
+    root 시스템 서비스가 부팅 때와 전원 변경(udev) 때 부른다. 백라이트는 커널 전역이라 한 번 쓰면 어디서든 유지된다."""
+    if wait and not _wait_backlight():
+        return False
+    p, b = power_state(), read_brightness()
+    if p is None or b is None or b[0] <= 0:           # 덮개를 닫아 0 인 동안은 건드리지 않음
+        return False
+    want = load_conf()["mem"].get(p)
+    if not want or want == b[0]:
+        return False
+    set_brightness(min(want, b[1]))
+    return True
+
+
 # ───────────────────────── 데몬 ─────────────────────────
 class Watcher:
     """한 번의 tick 이 하는 일을 분리해 둔 것(시험하기 쉽게). 상태는 RUN_FILE 에 두어 데몬이 재시작해도 이어진다."""

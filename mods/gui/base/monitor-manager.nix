@@ -62,7 +62,29 @@ mkPartOf "mods.gui" ({
     fi
     exec ${uwsm} app -- ${kitty} --class displayui --title "화면 관리" ${displayui}/bin/displayui "''${args[@]}"
   '';
+  stateDir = "/home/${config.workspace.username}/.local/state/displayctl";
 in {
+  # 노트북: 로그인 화면(greetd)·TTY(kmscon)에는 사용자 세션의 감시 서비스가 없으므로 시스템 서비스가 기억한 밝기를 적용한다.
+  #  - 부팅: systemd-backlight(직전 밝기 복원)가 끝난 뒤, greetd/getty 보다 먼저
+  #  - 전원 변경(AC↔배터리): udev 가 같은 서비스를 다시 시작(로그인 전에도 반영)
+  # 밝기 기억 파일은 사용자 홈의 것을 그대로 읽는다(쓰기는 사용자 감시 서비스만). 백라이트는 커널 전역이라 Wayland 로 넘어가도 유지된다.
+  os = lib.mkIf laptop {
+    systemd.services.display-brightness-restore = {
+      description = "전원별 기억 밝기 적용 (로그인 화면·TTY 용)";
+      after = ["systemd-udevd.service" "local-fs.target"];
+      before = ["greetd.service" "getty.target" "display-manager.service"];
+      wantedBy = ["multi-user.target"];
+      serviceConfig = {
+        Type = "oneshot";
+        Environment = ["DISPLAYCTL_STATE=${stateDir}" "DISPLAYCTL_BRIGHTNESSCTL=${pkgs.brightnessctl}/bin/brightnessctl" "PATH=${lib.makeBinPath [pkgs.systemd]}"];
+        ExecStart = "${displayctl}/bin/displayctl brightness restore";
+      };
+    };
+    services.udev.extraRules = ''
+      SUBSYSTEM=="power_supply", ATTR{type}=="Mains", ACTION=="change", TAG+="systemd", ENV{SYSTEMD_WANTS}+="display-brightness-restore.service"
+    '';
+  };
+
   hm = {
     home.packages = [displayctl displayui displayuiOpen];
 

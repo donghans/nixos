@@ -223,6 +223,9 @@ def cmd_brightness(a) -> int:
     if a.action == "wake":
         b.wake()
         return 0
+    if a.action == "restore":
+        b.restore_boot()                                 # 시스템 서비스(부팅·전원 변경)가 부름 — 할 일이 없어도 성공
+        return 0
     if a.action == "pause":
         b.set_paused(True)
     elif a.action == "unpause":
@@ -283,8 +286,8 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("revert-pending", help="확인되지 않은 변경을 이전 구성으로 되돌림 (되돌리기 타이머가 부름)")
     s.set_defaults(fn=cmd_revert_pending)
     s = sub.add_parser("brightness", help="전원별 밝기 기억·복원 + 배터리 유휴 시 밝기 낮춤")
-    s.add_argument("action", choices=["status", "config", "pause", "unpause", "watch", "idle", "wake"],
-                   help="watch=데몬, idle N=hypridle 이 부름, wake=입력 재개, pause=이번 배터리 사용만 끔, config=--level/--delay")
+    s.add_argument("action", choices=["status", "config", "pause", "unpause", "watch", "idle", "wake", "restore"],
+                   help="watch=데몬, idle N=hypridle 이 부름, wake=입력 재개, restore=기억 밝기 적용(시스템 서비스용), pause=이번 배터리 사용만 끔, config=--level/--delay")
     s.add_argument("value", nargs="?", type=int, help="idle 의 유휴 시간(초)")
     s.add_argument("--level", type=int, help="낮출 밝기 %% (5/10/15/20/25)")
     s.add_argument("--delay", type=int, help="입력 없는 시간(초) (30/60/120/300)")
