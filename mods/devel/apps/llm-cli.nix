@@ -396,6 +396,11 @@ in {
       source = ../../_data/claude-skills/donghans-plan;
       force = true;
     };
+    # 시험을 새로 만들기 전에 장기 보호용/단기 확인용/다른 수단/만들지 않음을 가르는 판단. 설계: ctx 문서 plan llm-trust/07-p6-test-judgment-skill
+    home.file.".claude/skills/donghans-test-judgment" = {
+      source = ../../_data/claude-skills/donghans-test-judgment;
+      force = true;
+    };
     home.file.".claude/skills/donghans-llm-instruction-audit" = {
       source = ../../_data/claude-skills/donghans-llm-instruction-audit;
       force = true;
