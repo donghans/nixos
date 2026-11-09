@@ -34,7 +34,23 @@ INSTANCE_RE = re.compile(r"^(status|charge-[0-9]{2,3}|mode-(sport|comfort|eco)|b
 
 
 class EcError(Exception):
-    """EC/WMI 접근 실패(펌웨어가 실패 응답을 주었거나 debugfs 를 못 연 경우)."""
+    """EC/WMI 접근 실패(펌웨어가 실패 응답을 주었거나 debugfs 를 못 연 경우). helper 종료 코드 4."""
+
+
+class InputError(Exception):
+    """허용 범위 밖 입력(예: 충전 상한 49). helper 종료 코드 2."""
+
+
+class GateError(Exception):
+    """기종·펌웨어 게이트가 쓰기를 거부. helper 종료 코드 3."""
+
+
+class MismatchError(Exception):
+    """쓴 뒤 되읽은 값이 기대와 다름. before/after 를 들고 있다. helper 종료 코드 5."""
+
+    def __init__(self, msg, before=None, after=None):
+        super().__init__(msg)
+        self.before, self.after = before, after
 
 
 class HelperError(Exception):
@@ -126,6 +142,132 @@ def collect_ec_direct():
     return {"fw": fw, "fw_date": date, "ec": {"d7": ec_get(EC_CHARGE), "d2": ec_get(EC_MODE), "b98": ec_get(EC_BOOST)}}
 
 
+# --- 쓰기(root 전용; helper 만 부른다) ----------------------------------------------------------
+CHARGE_MIN, CHARGE_MAX = 50, 100                       # 시험으로 확인한 범위(커널은 5·0·101 을 거부, 하한은 6~49 사이 미확인)
+MODE_BITS = {"sport": 0, "comfort": 1, "eco": 2}       # `user`(3)는 쓰지 않는다: 사용자 팬 곡선의 저장 위치를 모른다
+GATE_REASON = {
+    "unsupported_board": "지원하지 않는 기종이다",
+    "unverified_fw": "검증되지 않은 EC 펌웨어다(검증된 목록: " + ", ".join(sorted(VERIFIED_FW)) + ")",
+    "unknown": "EC 펌웨어를 읽지 못했다",
+}
+
+
+def _settle():
+    """EC 반영을 기다리는 시간. 시험은 0 으로 둔다."""
+    try:
+        time.sleep(float(os.environ.get("EMBEDCTL_SETTLE", "0.3")))
+    except ValueError:
+        time.sleep(0.3)
+
+
+def sysfs_end_path():
+    return os.path.join(p_bat(), "charge_control_end_threshold")
+
+
+def sysfs_write_end(n):
+    """커널(msi_ec)에 충전 상한을 쓴다. msi_ec 가 범위를 검사하고 EC[0xD7] 을 0x80+N 으로 바꾼다. 시험이 EC 연동을 흉내 내려고 이 함수를 대체한다."""
+    try:
+        with open(sysfs_end_path(), "w") as f:
+            f.write(str(int(n)))
+    except OSError as e:
+        raise EcError(f"충전 상한 쓰기 실패({sysfs_end_path()}): {e}") from e
+
+
+def ec_set(idx, val):
+    r = wmi_call("set_data", bytes([idx, val & 0xFF]))
+    if len(r) < 1 or r[0] != 1:
+        raise EcError(f"set_data(0x{idx:02X}=0x{val & 0xFF:02X}) 실패 응답 {bytes(r[:4]).hex()}")
+
+
+def raw_state():
+    return {"d7": ec_get(EC_CHARGE), "d2": ec_get(EC_MODE), "b98": ec_get(EC_BOOST), "end": _read_int(sysfs_end_path())}
+
+
+def require_verified():
+    """쓰기 직전 게이트를 다시 평가한다(기종 + 방금 읽은 EC 펌웨어). 통과하지 못하면 GateError."""
+    data = collect_ec_direct()
+    gate = evaluate_gate(_read(os.path.join(p_dmi(), "board_name")), data["fw"], data["fw_date"])
+    if gate["state"] != "verified":
+        raise GateError(f"게이트 거부: {GATE_REASON[gate['state']]} (보드 {gate['board']!r}, 펌웨어 {gate['fw']!r}) — 쓰기를 하지 않았다")
+    return gate
+
+
+def parse_instance(inst):
+    """INSTANCE_RE 를 통과한 이름을 (동작, 인자)로. status → ("status", None) · charge-80 → ("charge", 80) · mode-eco → ("mode", "eco") · boost-on → ("boost", "on")."""
+    if not INSTANCE_RE.match(inst):
+        raise InputError(f"허용되지 않는 동작 이름: {inst!r}")
+    if inst == "status":
+        return "status", None
+    kind, _, arg = inst.partition("-")
+    return kind, (int(arg) if kind == "charge" else arg)
+
+
+def apply_action(inst):
+    """쓰기 동작 한 개를 실행하고 (before, after) 를 돌려준다. 게이트 → 쓰기 → 되읽기 확인 순서이며
+    다른 EC 바이트가 바뀌었거나 기대와 다르면 MismatchError. 모드·Cooler Boost 는 어긋나면 이전 값으로 되돌리려 시도한다(최선 노력)."""
+    kind, arg = parse_instance(inst)
+    if kind == "status":
+        raise InputError("status 는 쓰기 동작이 아니다")
+    if kind == "charge" and not (CHARGE_MIN <= arg <= CHARGE_MAX):
+        raise InputError(f"충전 상한은 {CHARGE_MIN}~{CHARGE_MAX} 만 허용한다(받은 값 {arg})")
+    require_verified()
+    before = raw_state()
+    expect = dict(before)
+    restore_addr = None
+    if kind == "charge":
+        sysfs_write_end(arg)
+        expect["end"] = arg
+    elif kind == "mode":
+        new = (before["d2"] & 0xFC) | MODE_BITS[arg]       # 비트7(지원)·비트6(활성)과 나머지 비트는 보존하고 하위 2비트만 바꾼다
+        ec_set(EC_MODE, new)
+        expect["d2"], restore_addr = new, (EC_MODE, before["d2"])
+    else:                                                    # boost
+        new = (before["b98"] | 0x80) if arg == "on" else (before["b98"] & 0x7F)
+        ec_set(EC_BOOST, new)
+        expect["b98"], restore_addr = new, (EC_BOOST, before["b98"])
+    _settle()
+    after = raw_state()
+    bad = []
+    if kind == "charge":
+        if (after["d7"] & 0x7F) != arg:
+            bad.append(f"EC[0xD7] 하위 7비트가 {after['d7'] & 0x7F} (기대 {arg})")
+        if after["end"] != arg:
+            bad.append(f"sysfs 충전 상한이 {after['end']} (기대 {arg})")
+        for k in ("d2", "b98"):
+            if after[k] != before[k]:
+                bad.append(f"쓰지 않은 {k} 가 0x{before[k]:02X} → 0x{after[k]:02X} 로 바뀜")
+    else:
+        for k in ("d7", "d2", "b98"):
+            if after[k] != expect[k]:
+                bad.append(f"{k} 가 0x{after[k]:02X} (기대 0x{expect[k]:02X})")
+    if bad:
+        if restore_addr:
+            try:
+                ec_set(*restore_addr)
+            except EcError:
+                pass
+        raise MismatchError("되읽기 값이 기대와 다르다: " + "; ".join(bad), before, after)
+    return before, after
+
+
+# --- TLP 충돌 경고 ---------------------------------------------------------------------------
+def tlp_charge_settings():
+    """TLP 설정 파일이 충전 임계값을 지정하고 있으면 [(파일, 이름, 값)] 을 돌려준다. TLP 가 다음 적용 때 embedctl 의 값을 덮어쓸 수 있다."""
+    files = [os.environ.get("EMBEDCTL_TLP_CONF") or "/etc/tlp.conf"]
+    files += sorted(glob.glob(os.path.join(os.environ.get("EMBEDCTL_TLP_D") or "/etc/tlp.d", "*.conf")))
+    found = []
+    for f in files:
+        try:
+            lines = open(f).read().splitlines()
+        except OSError:
+            continue
+        for ln in lines:
+            m = re.match(r"^\s*(STOP_CHARGE_THRESH_BAT[01])\s*=\s*\"?([0-9]+)\"?", ln)
+            if m:
+                found.append((f, m.group(1), int(m.group(2))))
+    return found
+
+
 # --- helper 호출(사용자 쪽) ------------------------------------------------------------------
 def helper_call(instance, timeout=20):
     """`systemctl start embedctl-root@<instance>.service` 를 부르고 그 인스턴스의 결과 파일을 읽어 돌려준다.
@@ -152,8 +294,8 @@ def helper_call(instance, timeout=20):
     if r.returncode != 0:
         if res is not None and res.get("error"):     # helper 가 직접 남긴 이유가 systemctl 의 일반 문구보다 정확하다
             raise HelperError(f"helper 실패({unit}): {res['error']}", code=res.get("code") or 4)
-        why = (r.stderr or r.stdout or "").strip().splitlines()
-        raise HelperError(f"helper 실패({unit}, 종료 코드 {r.returncode}): {why[-1] if why else '이유 없음'} — 로컬 세션에서 실행해야 한다(SSH 세션은 polkit 이 거부할 수 있다)", code=4)
+        why = [x for x in (r.stderr or r.stdout or "").strip().splitlines() if x.strip()]
+        raise HelperError(f"helper 실패({unit}, 종료 코드 {r.returncode}): {why[0] if why else '이유 없음'} — 로컬 세션에서 실행해야 한다(SSH 세션 등 세션 밖에서는 polkit 이 거부한다)", code=4)
     if res is None:
         raise HelperError(why_not, code=4)
     if not res.get("ok"):

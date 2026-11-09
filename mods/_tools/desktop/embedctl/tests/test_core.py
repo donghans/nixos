@@ -176,9 +176,13 @@ check("snapshot --json: 봉투 data 에 스냅샷과 written 경로", rc == 0 an
 rc, out, err = cli("snapshot", "--out", f"{T}/없는폴더/x.json", FAKE_RESULT=FIX)
 check("snapshot: 쓸 수 없는 경로는 오류 종료(조용히 넘기지 않음)", rc != 0 and "스냅샷을 쓰지 못했다" in err, f"rc={rc} {err[:200]}")
 
-# --- 10. 쓰기 명령은 이 단계에 없다 ---------------------------------------------------------------
-for cmdline in (("charge", "80"), ("mode", "eco"), ("boost", "on"), ("restore", "x.json")):
-    rc, out, err = cli(*cmdline, FAKE_RESULT=FIX)
-    check(f"{cmdline[0]}: 이 단계에는 없음(사용법 오류 종료 코드 2)", rc == 2, f"rc={rc}")
+# --- 10. 쓰기 명령의 인자 검증은 helper 를 부르기 전에 끝난다(argparse, 종료 코드 2) ---------------------------------
+if os.path.exists(LOG): os.remove(LOG)
+for cmdline in (("charge", "49"), ("charge", "101"), ("charge", "abc"), ("charge", "-5"), ("mode", "user"), ("mode", "turbo"), ("boost", "maybe"), ("restore",)):
+    rc, out, err = cli(*cmdline, FAKE_RESULT=FIX, FAKE_LOG=LOG)
+    check(f"{' '.join(cmdline)}: 사용법 오류 종료 코드 2", rc == 2, f"rc={rc} {err[:120]}")
+check("잘못된 인자는 systemctl 을 한 번도 부르지 않음", not os.path.exists(LOG), open(LOG).read() if os.path.exists(LOG) else "")
+rc, out, err = cli("charge", "49", FAKE_RESULT=FIX)
+check("charge 49 의 오류 문구에 허용 범위와 「100 이 상한 없음」", "50~100" in err and "상한 없음" in err, err)
 
 finish("embedctl core")

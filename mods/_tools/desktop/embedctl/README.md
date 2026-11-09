@@ -3,15 +3,24 @@
 MSI Summit E16Flip A12UDT(보드 `MS-1592`) **한 기종**의 EC 에 남는 상태를 허용 목록으로만 다루는 CLI(`embedctl`)와 TUI(`embedctlui`).
 Windows 의 MSI Center 가 마지막으로 정한 값이 EC 에 남아 리눅스의 전력·소음·충전에 숨은 변수가 되는 문제를, 리눅스에서 보고·바꾸고·기록·복원하려는 도구다.
 
-> **구현 상태 (계획 `plan/embedctl-구현` 의 단계 1 완료)**: 읽기 전용(`status`, `snapshot`)만 있다. root helper·Nix 패키징(단계 2), 쓰기 동작과 `restore`(단계 3), `embedctlui`(단계 4)는 아직 없다.
+> **구현 상태 (계획 `plan/embedctl-구현`)**: 단계 1(읽기 전용 코어)·2(root helper + Nix 모듈)·3(쓰기 동작과 `restore`)의 코드와 가짜 환경 시험이 있다. **실기 쓰기 시험은 아직 하지 않았다**(WMI `set_data` 로 값을 실제로 바꾸는 쓰기는 이 도구로는 처음이다). `embedctlui`(단계 4)와 호스트 정리·정식 적용(단계 5)은 아직 없다.
 > 설계·근거·검증 이력: ctx `plan/embedctl-구현`, 조사: ctx `note/msi-summit-me-ec-충전상한-성능모드-분석`.
 
-## 사용 (현재)
+## 사용
 
 ```
-embedctl status   [--json]               기종·펌웨어 게이트, 충전 상한, 성능 모드, Cooler Boost, 팬 RPM·온도, 전원
-embedctl snapshot [--out 파일] [--json]  위 상태를 스냅샷(JSON)으로. --out 없이는 표준출력, 자동 저장 없음
+embedctl status   [--json]                   기종·펌웨어 게이트, 충전 상한, 성능 모드, Cooler Boost, 팬 RPM·온도, 전원 (읽기 전용)
+embedctl snapshot [--out 파일] [--json]      위 상태를 스냅샷(JSON)으로. --out 없이는 표준출력, 자동 저장 없음
+embedctl charge <50..100> [--json]           충전 상한(%). 100 이 「상한 없음」과 같다
+embedctl mode sport|comfort|eco [--json]     성능 모드(하위 2비트만 바꾸고 나머지 비트는 보존). user 모드는 다루지 않는다
+embedctl boost on|off [--json]               Cooler Boost(비트7 만 바꾼다)
+embedctl restore <스냅샷> [--dry-run] [--json]   스냅샷의 충전 상한·성능 모드·Cooler Boost 로 되돌린다
 ```
+
+- **쓰기는 root helper 가 한다**: `embedctl-root@<동작>.service`(polkit 이 로컬 활성 세션의 `start` 만 허용)가 ① 게이트(기종 + **방금 읽은** EC 펌웨어가 검증 목록에 있어야 함) ② 쓰기 ③ 되읽기 확인 순서로 실행한다. 어긋나면 종료 코드 5 이고, 모드·Cooler Boost 는 이전 값으로 되돌리려 시도한다(최선 노력; 충전 상한은 되돌리지 않고 before/after 만 보고).
+- 충전 상한은 sysfs(`msi_ec` 의 `charge_control_end_threshold`)로 쓰고 커널이 EC `0xD7` 을 `0x80+N` 으로 바꾼다. 모드·Cooler Boost 는 MSI WMI `set_data` 다. **`ec_sys` 의 전역 쓰기 허용에 의존하지 않는다.**
+- `charge` 는 TLP 설정(`/etc/tlp.conf`, `/etc/tlp.d/*.conf`)에 `STOP_CHARGE_THRESH_BAT0/1` 이 있으면 「TLP 가 다음 적용 때 덮어쓸 수 있다」고 경고한다(지금 이 호스트는 설정하지 않는다).
+- `restore` 는 **먼저 전부 검증하고 하나라도 안 맞으면 아무것도 쓰지 않는다**: 스냅샷 형식(schema 1), 지금 게이트가 검증 상태, 스냅샷의 EC 펌웨어 == 지금 펌웨어, 충전 상한 50~100, 모드가 sport·comfort·eco, Cooler Boost 값 존재. 이미 같은 값인 항목은 건너뛴다. 적용 중 하나가 실패하면 거기서 멈추고 이미 적용된 것을 알린다(되돌리지 않는다). 스냅샷의 충전 상한이 「미설정」(end=0)이었으면 sysfs 로 0 을 쓸 수 없어 **100% 로 복원**한다(동작은 같다. `status` 에는 「100% 설정됨」으로 보인다).
 
 - EC 바이트(`0xD7`·`0xD2`·`0x98`)와 펌웨어 문자열은 root 만 읽는 debugfs 에 있어서, 일반 사용자는 **root helper**(단계 2)를 거친다. helper 가 없거나 거부되면(SSH 세션 등) `status` 는 사용자 권한으로 읽히는 부분(DMI 보드, sysfs 충전 상한, hwmon 팬·온도, AC/배터리)만 내고 EC 항목은 「알 수 없음」, 종료 코드는 0 이다.
 - root 로 실행하면 debugfs 를 직접 읽는다(`access: "direct"`).
@@ -56,6 +65,9 @@ cd mods/_tools/desktop/embedctl && python3 -I tests/test_core.py     # 또는 mo
 
 | 파일 | 역할 |
 |---|---|
-| `embedlib.py` | 코어: 게이트, EC 읽기(직접/helper), 상태 모으기, 스냅샷, helper 호출·결과 파일, 인스턴스 이름 검증(`INSTANCE_RE`) |
-| `embedctl.py` | CLI 진입점(ctlkit 봉투) |
-| `tests/` | `test_core.py`, `fake_systemctl.py` |
+| `embedlib.py` | 코어: 게이트, EC 읽기·쓰기(`apply_action`), 상태 모으기, 스냅샷, helper 호출·결과 파일, 인스턴스 이름 검증(`INSTANCE_RE`), TLP 설정 읽기 |
+| `embedctl.py` | CLI 진입점(ctlkit 봉투, `Fail(코드, 메시지)`) |
+| `embedhelper.py` | root helper(`embedctl-root@<동작>.service` 가 실행) |
+| `tests/` | `test_core.py`(코어·CLI·열화), `test_helper.py`(helper·쓰기 동작·끝단·restore), `fake_systemctl.py`(정적 결과), `fake_systemctl_e2e.py`(실제 helper 코드를 EC 에뮬레이터 위에서 실행, 상태는 파일에 유지) |
+
+시험의 신뢰도를 확인하려고 복사본에서 일부러 결함을 넣어 보았다(마스크 제거, 게이트 무력화, 범위 검사 제거, 되읽기 검사 제거, 정규식 `\Z`→`$`, 신선도 검사 완화, restore 의 펌웨어 일치·user 모드 거부 제거, 종료 코드 변경, 미설정 안내 제거 — 11가지). 처음에는 한 가지(EC 되읽기 검사)를 시험이 놓쳐서 그 시험을 추가했고, 지금은 11가지 모두 시험이 실패한다.

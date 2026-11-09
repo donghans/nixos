@@ -3,12 +3,19 @@
 
   embedctl status   [--json]                 기종·펌웨어 게이트, 충전 상한, 성능 모드, Cooler Boost, 팬 RPM·온도, 전원 상태(읽기 전용)
   embedctl snapshot [--out 파일] [--json]    위 상태를 스냅샷(JSON)으로. 파일은 --out 으로 지정할 때만 쓴다(자동 저장 없음)
+  embedctl charge <50..100> [--json]         충전 상한(%)을 정한다. 100 이 「상한 없음」과 같다
+  embedctl mode sport|comfort|eco [--json]   성능 모드. user 모드는 다루지 않는다
+  embedctl boost on|off [--json]             Cooler Boost(팬 최대)
+  embedctl restore <스냅샷> [--dry-run] [--json]   스냅샷의 충전 상한·성능 모드·Cooler Boost 로 되돌린다(먼저 전부 검증하고, 같은 값은 건너뜀)
 
+쓰기 동작은 root helper(`embedctl-root@<동작>.service`, polkit 허용)가 게이트 → 쓰기 → 되읽기 확인 순서로 한다.
 종료 코드: 0 성공 · 2 입력/사용법 오류 · 3 게이트·허용 목록 거부 · 4 권한(polkit)·helper 실패 · 5 되읽기 값 불일치.
-EC 바이트를 못 읽는 환경(SSH 세션 등)에서도 `status` 는 사용자 권한으로 읽히는 부분만 내고 종료 코드 0 이다.
+EC 바이트를 못 읽는 환경(세션 밖 프로세스 등)에서도 `status` 는 사용자 권한으로 읽히는 부분만 내고 종료 코드 0 이다.
 설계·근거: ctx `plan/embedctl-구현`. 설치본에서는 ctlkit.py·embedlib.py 가 이 파일과 같은 디렉터리에 있다.
 """
 import argparse
+import contextlib
+import io
 import json
 import os
 import sys
@@ -29,6 +36,16 @@ GATE_TEXT = {
     "unknown": "펌웨어를 읽지 못함 — 쓰기 거부",
 }
 ACCESS_TEXT = {"direct": "직접(root)", "helper": "helper(polkit)", "unavailable": "사용 불가 — EC 값 없음"}
+LABEL = {"charge": "충전 상한", "mode": "성능 모드", "boost": "Cooler Boost"}
+EC_KEY = {"charge": ("d7", lib.EC_CHARGE), "mode": ("d2", lib.EC_MODE), "boost": ("b98", lib.EC_BOOST)}
+
+
+class Fail(Exception):
+    """종료 코드와 메시지를 함께 내는 실패. data 가 있으면 --json 봉투에 같이 실린다."""
+
+    def __init__(self, code, msg, data=None):
+        super().__init__(msg)
+        self.code, self.msg, self.data = code, msg, data
 
 
 def _cells(s):
@@ -95,17 +112,151 @@ def cmd_snapshot(a):
     a.out.done(snap)
 
 
-def run(a, name, fn):
+# --- 쓰기 동작 --------------------------------------------------------------------------------
+def helper_act(inst):
+    try:
+        return lib.helper_call(inst, timeout=30)
+    except lib.HelperError as e:
+        raise Fail(e.code, str(e))
+
+
+def describe(kind, raw):
+    if kind == "charge":
+        return "미설정(100%)" if not raw["end"] else f"{raw['end']}%"
+    if kind == "mode":
+        return lib.MODES[raw["d2"] & 0x03]
+    return "켜짐" if raw["b98"] & 0x80 else "꺼짐"
+
+
+def action_summary(kind, res):
+    key, addr = EC_KEY[kind]
+    b, af = res["before"], res["after"]
+    changed = b[key] != af[key] or b["end"] != af["end"]
+    line = f"{LABEL[kind]}: {describe(kind, b)} → {describe(kind, af)}  [EC 0x{addr:02X}: 0x{b[key]:02X} → 0x{af[key]:02X}]" + ("" if changed else "  (이미 같은 값이었다)")
+    return {"action": kind, "before": b, "after": af, "changed": changed}, line
+
+
+def cmd_action(a):
+    kind = a.cmd
+    inst = {"charge": f"charge-{getattr(a, 'percent', 0)}", "mode": f"mode-{getattr(a, 'value', '')}", "boost": f"boost-{getattr(a, 'value', '')}"}[kind]
+    warnings = []
+    if kind == "charge":
+        for f, name, val in lib.tlp_charge_settings():
+            warnings.append(f"TLP 설정에 {name}={val} 가 있다({f}) — TLP 가 다음에 적용할 때 이 값을 덮어쓸 수 있다")
+    data, line = action_summary(kind, helper_act(inst))
+    data["warnings"] = warnings
+    a.out.done(data)
     if a.json:
-        ctlkit.run_json(a, f"{CMD} {name}", fn)
+        for w in warnings:
+            a.out.note(w)
     else:
-        a.out = ctlkit.Out(a, False)
+        print(line)
+        for w in warnings:
+            print(f"(주의) {w}")
+
+
+def cmd_restore(a):
+    try:
+        with open(a.file) as f:
+            snap = json.load(f)
+    except (OSError, ValueError) as e:
+        raise Fail(2, f"스냅샷을 읽지 못했다({a.file}): {e}")
+    if not isinstance(snap, dict) or snap.get("schema") != 1 or not isinstance(snap.get("gate"), dict):
+        raise Fail(2, f"스냅샷 형식이 아니다(schema 1 이 아님): {a.file}")
+    # 먼저 전부 검증한다: 하나라도 안 맞으면 아무것도 쓰지 않는다
+    st = lib.collect_status()
+    if st["access"] == "unavailable":
+        raise Fail(4, "EC 를 읽지 못해 복원할 수 없다: " + ("; ".join(st["warnings"]) or "이유 없음"))
+    if st["gate"]["state"] != "verified":
+        raise Fail(3, f"게이트 거부: {lib.GATE_REASON.get(st['gate']['state'], st['gate']['state'])} — 복원하지 않았다")
+    if snap["gate"].get("fw") != st["gate"]["fw"]:
+        raise Fail(3, f"스냅샷의 EC 펌웨어({snap['gate'].get('fw')!r})가 지금({st['gate']['fw']!r})과 달라 복원하지 않는다")
+    want_charge = (snap.get("charge") or {}).get("limit")
+    mode, boost = snap.get("mode"), snap.get("boost")
+    if not isinstance(want_charge, int) or not (lib.CHARGE_MIN <= want_charge <= lib.CHARGE_MAX):
+        raise Fail(3, f"스냅샷의 충전 상한 {want_charge!r} 은 허용 범위({lib.CHARGE_MIN}~{lib.CHARGE_MAX})가 아니다 — 복원하지 않았다")
+    if mode not in lib.MODE_BITS:
+        raise Fail(3, f"스냅샷의 성능 모드 {mode!r} 는 복원하지 않는다(sport·comfort·eco 만; 스냅샷을 찍을 때 EC 를 읽지 못했을 수도 있다)")
+    if not isinstance(boost, bool):
+        raise Fail(3, "스냅샷에 Cooler Boost 값이 없다 — 복원하지 않았다")
+    plan = []
+    if st["charge"]["limit"] != want_charge:
+        plan.append(("charge", f"charge-{want_charge}", f"{LABEL['charge']}: {st['charge']['limit']}% → {want_charge}%"))
+    if st["mode"]["name"] != mode:
+        plan.append(("mode", f"mode-{mode}", f"{LABEL['mode']}: {st['mode']['name']} → {mode}"))
+    if st["boost"] != boost:
+        plan.append(("boost", f"boost-{'on' if boost else 'off'}", f"{LABEL['boost']}: {'켜짐' if st['boost'] else '꺼짐'} → {'켜짐' if boost else '꺼짐'}"))
+    notes = []
+    if not (snap.get("charge") or {}).get("set") and want_charge == 100 and st["charge"]["set"]:
+        notes.append("스냅샷의 충전 상한은 「미설정」이었다. 미설정은 sysfs 로 되돌릴 수 없어 100% 로 복원한다(동작은 같다)")
+    if not plan:
+        print("이미 스냅샷과 같은 상태다 — 할 일이 없다.")
+        a.out.done({"dry_run": a.dry_run, "plan": [], "applied": [], "notes": notes})
+        return
+    if a.dry_run:
+        print("복원 계획(적용하지 않음):")
+        for _, inst, text in plan:
+            print(f"  {text}  [{inst}]")
+        a.out.done({"dry_run": True, "plan": [{"instance": i, "text": t} for _, i, t in plan], "applied": [], "notes": notes})
+        return
+    applied = []
+    for kind, inst, text in plan:
         try:
+            res = lib.helper_call(inst, timeout=30)
+        except lib.HelperError as e:
+            done = [x["instance"] for x in applied]
+            raise Fail(e.code, f"{inst} 적용 실패: {e} (이미 적용된 것: {done or '없음'})", data={"applied": applied})
+        data, line = action_summary(kind, res)
+        data["instance"] = inst
+        applied.append(data)
+        print(line)
+    for n in notes:
+        print(f"(참고) {n}")
+    a.out.done({"dry_run": False, "plan": [{"instance": i, "text": t} for _, i, t in plan], "applied": applied, "notes": notes})
+
+
+# --- 실행 틀 ----------------------------------------------------------------------------------
+def run(a, name, fn):
+    """--json 이면 ctlkit 봉투로, 아니면 텍스트로. Fail(코드, 메시지)은 봉투의 error·exit_code 와 프로세스 종료 코드로 그대로 나간다."""
+    cmd = f"{CMD} {name}"
+    a.out = ctlkit.Out(a, bool(a.json))
+    buf = io.StringIO()
+    code, err, data = 0, None, None
+    try:
+        if a.json:
+            with contextlib.redirect_stdout(buf):
+                fn(a)
+        else:
             fn(a)
-        except SystemExit as e:
-            if e.code not in (None, 0):
-                print(e.code if isinstance(e.code, str) else f"종료 코드 {e.code}", file=sys.stderr)
-                sys.exit(e.code if isinstance(e.code, int) else 1)
+    except Fail as f:
+        code, err, data = f.code, f.msg, f.data
+    except SystemExit as e:
+        if e.code not in (None, 0):
+            if isinstance(e.code, int):
+                code = e.code
+            else:
+                code, err = 1, str(e.code)
+    if a.json:
+        if code:
+            ctlkit.emit_json(cmd, False, data=data, text=buf.getvalue() or None, notes=a.out.notes, error=err or f"종료 코드 {code}", code=code)
+        elif a.out.data is not None:
+            ctlkit.emit_json(cmd, True, data=a.out.data, notes=a.out.notes)
+        else:
+            ctlkit.emit_json(cmd, True, text=buf.getvalue(), notes=a.out.notes)
+    elif err:
+        print(err, file=sys.stderr)
+    if code:
+        sys.exit(code)
+
+
+def _percent(s):
+    try:
+        v = int(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"정수여야 한다: {s!r}")
+    if not (lib.CHARGE_MIN <= v <= lib.CHARGE_MAX):
+        raise argparse.ArgumentTypeError(f"{lib.CHARGE_MIN}~{lib.CHARGE_MAX} 만 허용한다(받은 값 {v}). 100 이 「상한 없음」과 같다")
+    return v
 
 
 def main(argv=None):
@@ -118,6 +269,23 @@ def main(argv=None):
     n.add_argument("--out", dest="out_file", metavar="파일", help="이 경로에 저장(지정하지 않으면 표준출력)")
     n.add_argument("--json", action="store_true")
     n.set_defaults(fn=cmd_snapshot, name="snapshot")
+    c = sub.add_parser("charge", help="충전 상한(%%)")
+    c.add_argument("percent", type=_percent, metavar=f"{lib.CHARGE_MIN}..{lib.CHARGE_MAX}")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_action, name="charge")
+    m = sub.add_parser("mode", help="성능 모드")
+    m.add_argument("value", choices=sorted(lib.MODE_BITS))
+    m.add_argument("--json", action="store_true")
+    m.set_defaults(fn=cmd_action, name="mode")
+    b = sub.add_parser("boost", help="Cooler Boost")
+    b.add_argument("value", choices=["on", "off"])
+    b.add_argument("--json", action="store_true")
+    b.set_defaults(fn=cmd_action, name="boost")
+    r = sub.add_parser("restore", help="스냅샷으로 복원")
+    r.add_argument("file", metavar="스냅샷")
+    r.add_argument("--dry-run", action="store_true", help="계획만 보이고 적용하지 않는다")
+    r.add_argument("--json", action="store_true")
+    r.set_defaults(fn=cmd_restore, name="restore")
     a = ap.parse_args(argv)
     run(a, a.name, a.fn)
     return 0
