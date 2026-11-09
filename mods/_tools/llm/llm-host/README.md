@@ -92,7 +92,16 @@ nix 에는 아직 등록하지 않았다(`mods/devel/apps/llm-cli.nix` 의 `ctxS
 - 상태: `starting → idle ⇄ busy ⇄ waiting_request → closing → closed`, 예기치 않은 종료 `crashed`. 기동 직후 idle(첫 메시지 전에는 백엔드 출력이 없다). busy 는 send 뒤 turn_result 까지(백엔드 대기열의 send 도 센다). 대기 표 `session.pending`.
 - 종료 사유: 우리가 close → `closed`, kill → `killed`, 예기치 않은 종료는 코드 0 이면 `eof`, 그 밖은 `crashed`. 미해결 요청은 `request_resolved(deny, session_end)` 로 닫고 `session_ended` 가 마지막 이벤트. close 는 표준입력 닫기 → grace → SIGTERM → term_wait → SIGKILL.
 - 표준오류 줄은 `notice(warn, extra.stream=stderr)`(최대 50줄). 어댑터 decode 예외·너무 긴 줄은 `notice(error)`. 실행 파일이 없으면 `notice(error)` + `session_ended(crashed)`.
-- 아직 없는 것(뒤 단계): 정책·요청 대기 상한·자동 거부(S4), 다중 세션·상한·고아 레지스트리(S5), 이벤트 로그(S6).
+- 아직 없는 것(뒤 단계): 정책을 세션에 연결해 대기 상한 시각에 자동 거부를 실제로 보내는 일(host.py·S5; S4 는 순수 함수만), 다중 세션·상한·고아 레지스트리(S5), 이벤트 로그(S6).
 
 ## 가짜 백엔드 (`fake_claude.py`)
 `python3 fake_claude.py 시나리오.jsonl [--timeout 초]`. 시나리오 한 줄이 단계 하나: `{"emit":[줄…]}` · `{"expect":{stdin_type|line|text|control_response|control_request|request_id|stdin_eof}}` · `{"sleep":초}` · `{"stderr":"글"}` · `{"ignore_sigterm":true}` · `{"exit":코드}`. `line` 은 바이트 단위 비교, `control_response`·`control_request` 는 부분집합 비교. 기대가 어긋나면 종료 코드 3, 입력이 안 오면 4, 입력이 닫히면 5, 시나리오 오류 2. 시나리오 끝에서는 입력 EOF 까지 읽고 0 으로 끝난다. 시험은 녹화본 fixtures 를 시나리오로 바꿔 쓴다(in→expect, out→emit).
+
+## 정책 (`policy.py`, S4) — 순수 함수
+시계·세션을 모른다. 호출하는 쪽이 구독자 수·대기 시간(초)을 세어 넘긴다. `python3 policy.py --dump-messages` 가 모델이 읽는 문구 전체를 찍는다(검토용).
+- **먼저 알아 둘 것**: claude 가 사용자 설정 규칙(`permissions.allow`·`ask`)과 권한 모드를 **먼저** 평가해, 규칙이 허용한 호출은 호스트에 `can_use_tool` 이 오지 않는다(S0 확인). 이 정책은 「결정이 안 난 요청」만 본다. 호스트가 허용 목록을 새로 만들지 않는다.
+- `normalize_policy(dict|None) -> Policy`: `request_timeout`(초, 기본 1800)·`auto_allow`(기본 비움)·`max_auto_turns`(기본 3)·`allow_bypass`(기본 False). 잘못된 값·모르는 키는 ValueError. `auto_allow` 는 읽기 전용 집합(`Read`·`Glob`·`Grep`·`LS`) 안의 이름만 받고 나머지는 `ignored` 로 남긴다.
+- `decide_request(policy, tool, subscribers=, waited=, is_question=) -> Decision(allow|wait|deny, by, message, wait_left)`: 질문은 정책이 답하지 않는다. 읽기 전용 목록에 있으면 allow(by=policy). 그 밖은 `request_timeout` 전이면 wait(구독자 유무와 무관 — 구독자가 없으면 대기 표에 둔다), 닿으면 deny(by=timeout, 모델이 읽는 문구). 구독자가 있어도 같은 상한이 적용된다(응답 없는 화면이 요청을 영원히 붙잡지 못하게).
+- `check_start(spec) -> [사유]`: bypass 계열(`permission_mode` bypass*·`--dangerously-skip-permissions`·`--permission-mode bypassPermissions` 등)은 `policy.allow_bypass=True` **이고** cwd 에 `.llm-host-sandbox` 파일이 있을 때만 통과. `--settings` 파일 안의 간접 지정은 읽지 못한다.
+- `next_auto_turn(policy, count) -> (허용, 새 count, 사유)`: 사람 메시지 없는 연속 자동 턴 상한.
+- `deny_message(kind, user_reason=, request_timeout=, question=)`·`MESSAGES`: 거부·타임아웃·세션 종료 문구. 형식은 ① 누가·왜 ② 재시도 금지 ③ 멈추고 보고. 사용자가 쓴 이유는 그대로 전달한다. 이 문구는 모델 입력이다 — 바꾸면 tests/test_policy.py 의 속성 시험과 문구 덤프 검토 기록을 갱신한다.
