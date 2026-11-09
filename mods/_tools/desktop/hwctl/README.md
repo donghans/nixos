@@ -1,5 +1,7 @@
 # hwctl 쉘 스크립트 본문
 
+> **역할**: `hwctl` 은 명령 이름이 아니라 **Hyprland 키 바인딩·이벤트(볼륨·밝기 키, 덮개, 터치 토글)가 부르는 접착제 쉘 스크립트 모음**이다. 실제 기능의 엔진은 도메인별 `<도메인>ctl` 이 갖는다 — 밝기는 `displayctl brightness`(`desktop/monitor-manager/`), EC 상태(충전 상한·성능 모드·Cooler Boost)는 `embedctl`(`desktop/embedctl/`). 키를 EC 기능에 묶고 싶으면 여기에 스크립트를 추가해 `embedctl` 을 부른다(엔진 코드를 이쪽으로 옮기지 않는다).
+
 `mods/gui/base/core.bind.hwctl.nix`(노트북 하드웨어 키 처리)의 쉘 스크립트 중 순수 쉘로 뺄 수 있는 것의 본문.
 shebang 은 없다(`writeShellScriptBin` 이 붙인다). Nix 쪽은 `builtins.replaceStrings` 로 `@이름@` 자리표시자를 스토어 경로·값으로 바꿔 넘긴다.
 (`replaceVars` 는 쓰지 않는다: `@DEFAULT_AUDIO_SINK@` 같은 wpctl 예약어까지 치환 대상으로 보고 빌드가 실패한다. 목록에 없는 `@…@` 는 그대로 남는다.)

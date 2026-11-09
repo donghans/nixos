@@ -24,6 +24,7 @@ description: 이 환경의 ctl류 명령(observectl·procctl·hostres·donghans 
 |---|---|---|---|
 | `observectl` | 성능·자원·전력 관측 기록 조회 | **공통 봉투**. 구조화(data): status·top·states·events·query·wakers·energy(explain 은 자체 --json). 나머지는 text 봉투 | `donghans-observe` |
 | `procctl` | 프로세스 정리(plan → 사용자 확인 → apply → escalate) | **공통 봉투**(data 에 plan·groups 등). `log` 는 JSON 없음 | `donghans-procctl` |
+| `embedctl` | MS-1592 노트북의 EC 상태(충전 상한·성능 모드·Cooler Boost) 읽기/제어. `status`·`snapshot` 은 읽기 전용, `charge`·`mode`·`boost`·`restore` 는 EC 에 쓴다(기종·EC 펌웨어 게이트, 되읽기 확인). 종료 코드: 0 성공 · 2 입력 · 3 게이트 거부 · 4 권한/helper 실패 · 5 되읽기 불일치. 쓰기 전 `embedctl snapshot --out 파일` 로 지금 값을 남기고 끝나면 `restore` 한다 | **공통 봉투**(전 명령 data 구조화; 실패도 ok=false + error + 같은 종료 코드) | 스킬 없음 — `mods/_tools/desktop/embedctl/README.md` |
 | `hostres.py` | 가용 자원 스냅샷·판정 | 자체 JSON(봉투 아님) | `donghans-host-resources` |
 | `donghans ctx …` | 지난 대화·사용량 조회 | 없음(텍스트) | `donghans-ctx` |
 | `donghans instr`·`secret`·`handoff` | 프로젝트 지침·비밀 실행·인수인계 | 없음(텍스트) | `donghans-ctx` / `donghans-handoff` |

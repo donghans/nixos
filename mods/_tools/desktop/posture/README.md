@@ -262,7 +262,7 @@ Hyprland 는 변화가 빠르고 이 저장소의 여러 곳이 그 API 에 직�
 - 기본: 165Hz → 60Hz → 48Hz(저장된 구성) 순으로 각 90초(+안정화 15초)를 2바퀴(약 11분). 번갈아 재는 이유는 배터리 온도/잔량에 따른 느린 변화가 한 설정에 몰리지 않게 하려는 것. 표에는 "바퀴 간 차이"를 같이 보여주며, 이 값이 설정 간 차이보다 크면 측정 잡음이다. 측정 중 CPU 평균 사용률이 10% 를 넘으면 표시한다.
 - 끝나거나 중단되면 `displayctl restore` 로 저장된 화면 설정으로 되돌린다. 밝기는 건드리지 않으므로 비교할 때는 같은 밝기로 둔다.
 - 예상 사용시간은 `charge_full` × 15.2V(설계 전압)를 그 전력으로 쓴다고 가정한 값. 이 노트북의 배터리는 만충 3615mAh/설계 5280mAh 로 설계 용량의 약 68%(2026-10-19 측정, `cycle_count` 는 0 으로 보고돼 쓸 수 없음).
-- 충전 한도(예: 80%)는 쓸 수 없다: TLP 가 이 기종에서 "지원 기능 없음" 으로 보고하고 `charge_control_*_threshold` 파일도 없다.
+- 충전 한도(예: 80%)는 **쓸 수 있다**(2026-11-09 정정 — 이전에는 이 줄이 「쓸 수 없다: TLP 가 지원 기능 없음으로 보고하고 `charge_control_*_threshold` 파일도 없다」였다. 지금은 두 가지 모두 사실과 다르다. 언제부터 그랬는지는 확인하지 않았다): `msi_ec` 모듈이 BAT1 에 `charge_control_{start,end}_threshold` 를 만들고(`start` 는 `end-10` 으로 따라 나온다) TLP 1.9.1 의 `msi` 플러그인도 `STOP_CHARGE_THRESH_BAT0/1` 을 지원한다. 도구는 `embedctl charge <50..100>`(`mods/_tools/desktop/embedctl/README.md`). 값은 EC 에 남는다 — 측정 전에 `embedctl status`/`snapshot` 으로 지금 상한·성능 모드·Cooler Boost 를 기록해 두면 Windows 에서 남은 값이 측정에 섞이는 것을 알 수 있다.
 
 #### power-ab 측정 결과 (2026-10-19, msi-summit-me, 배터리 방전 중, TLP `balanced/BAT`)
 백그라운드에 낮은 우선순위의 컨테이너(node, cadvisor, mongod, dockerd)가 돌아 CPU 평균이 항상 약 15% 였다(모든 측정에 공통이라 비교에는 영향이 작지만 절대값은 그만큼 높음). 각 값은 중앙값 평균, 90초 × 2~3바퀴.
