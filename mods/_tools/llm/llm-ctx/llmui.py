@@ -946,6 +946,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         self.query_one("#stat-break", DataTable).add_columns("분류", "요청", "비용", "비중", "출력")
         self.query_one("#stat-sessions", DataTable).add_columns("최근", "머신", "저장소", "프롬프트", "도구", "턴시간", "비용", "모델", "첫 프롬프트")
         self.query_one("#instr-table", DataTable).add_columns("저장소", "이름", "rev", "수정 머신", "수정 시각", "길이")
+        self.set_interval(0.5, self._repaint_if_stale)      # 리사이즈 뒤 레이아웃 확정이 늦으면(부하) on_resize 의 짧은 재시도가 끝난 뒤에 폭이 바뀐다 — 그릴 때 폭과 다르면 그때라도 다시 그린다
         self.update_state()
         self.sess_mount()
         self.cards_mount()

@@ -84,7 +84,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--items", default="a")
-    ap.add_argument("--claude", default="/home/donghans/.nix-profile/bin/claude")
+    ap.add_argument("--claude", default=os.path.expanduser("~/.nix-profile/bin/claude"))
     a = ap.parse_args()
     out = os.path.abspath(a.out)
     os.makedirs(out, exist_ok=True)

@@ -560,13 +560,19 @@ async def run_resize():
         for cols in (120, 220, 170, 100, 200, 90, 300):
             await pilot.resize_terminal(cols, 50)
             await pilot.pause(0.8)
-            bad = []
-            for wid in ("stat-trend-chart", "stat-limits", "stat-summary"):
-                w = app.query_one("#" + wid)
-                need = max((cell_len(l) for l in txt(w).split("\n")), default=0)
-                if not (w.size.width - 8 <= need <= w.size.width):
-                    bad.append((wid, w.size.width, need))
-            check(f"리사이즈 → {cols}칸: 그래프·글 칸의 본문 폭이 칸 폭에 맞는다(칸 폭−8 ≤ 본문 ≤ 칸 폭)", not bad, bad)
+
+            def widths_bad():
+                out = []
+                for wid in ("stat-trend-chart", "stat-limits", "stat-summary"):
+                    w = app.query_one("#" + wid)
+                    need = max((cell_len(l) for l in txt(w).split("\n")), default=0)
+                    if not (w.size.width - 8 <= need <= w.size.width):
+                        out.append((wid, w.size.width, need))
+                return out
+            # 고정 대기만으로는 부하 때 다시 그리기가 늦어 실패한다 — 폭이 맞을 때까지 조건 대기(최대 15초), 끝내 안 맞으면 실패
+            await settle(pilot, lambda: not widths_bad(), timeout=15.0)
+            bad = widths_bad()
+            check(f"리사이즈 → {cols}칸: 그래프·글 칸의 본문 폭이 칸 폭에 맞는다(칸 폭−8 ≤ 본문 ≤ 칸 폭)", not bad, (bad, "그릴 때 폭", getattr(app, "_painted_w", None), "지금 폭", app._box_widths(), "좁은 배치", app.query_one("#dash-scroll").has_class("narrow"), "앱 폭", app.size.width))
             tt = app.query_one("#stat-trend")
             bw = max((len(tt.get_row_at(i)[3].plain) for i in range(tt.row_count)), default=0)
             check(f"리사이즈 → {cols}칸: 추이 표의 막대가 표 폭 안에 있다", bw <= tt.size.width, (bw, tt.size.width))
@@ -1155,6 +1161,8 @@ async def run_host_s2():
             pids.append(app.host_bridge.child_pids()[0])
             app.host_bridge.send(main[73]["line"]["message"]["content"])
             await settle(pilot, lambda: isinstance(app.screen, llmui.HostRequestScreen))
+            # 화면이 뜬 직후엔 본문이 아직 비어 있을 수 있다 — 질문 문구가 채워질 때까지 조건 대기
+            await settle(pilot, lambda: isinstance(app.screen, llmui.HostRequestScreen) and "파란색" in txt(app.screen.query_one("#req-body")) and "색상 선호" in txt(app.screen.query_one("#dialog-title")))
             title, body = txt(app.screen.query_one("#dialog-title")), txt(app.screen.query_one("#req-body"))
             check("S2: 질문 대화상자 — 머리글·질문·번호 붙은 선택지", "질문 1/1" in title and "색상 선호" in title and "빨간색과 파란색" in body and "1 " in body and "파란색" in body, f"{title} | {body}")
             await pilot.press("1")
