@@ -59,6 +59,9 @@ in {
       initrd.availableKernelModules = ["i2c_hid_acpi" "intel_lpss_pci" "intel_ishtp_hid" "intel_hid" "hid_multitouch" "i2c_i801"];
       initrd.kernelModules = ["i2c_hid_acpi"];
 
+      # ec_sys: EC 256바이트를 읽는 디버그 덤프(/sys/kernel/debug/ec/ec0/io)용 — **읽기 전용**이다(2026-11-09 부터 write_support 를 켜지 않는다).
+      #  EC 를 바꾸는 일은 embedctl 이 MSI WMI(set_data)로 한다(mods/_tools/desktop/embedctl/README.md). 연구 때 ec_sys 로 직접 써야 하면
+      #  `sudo modprobe -r ec_sys && sudo modprobe ec_sys write_support=1` 로 그 세션만 잠깐 켠다(재부팅하면 읽기 전용으로 돌아온다; 표준 절차이며 이 호스트에서 시험하지는 않았다).
       kernelModules = ["ec_sys"];
       # (idma64 차단 이유, 2026-10-19)
       # (이유, 2026-10-19: idma64(DMA 컨트롤러)가 i2c_designware 와 IRQ 27 을 공유해 DMA 모드에서 spurious interrupt 가 생기면
@@ -79,7 +82,6 @@ in {
       extraModprobeConfig = ''
         blacklist nouveau
         options nouveau modeset=0
-        options ec_sys write_support=1
       '';
     };
 
@@ -316,13 +318,8 @@ in {
       libva-vdpau-driver
       libvdpau-va-gl
 
-      # == MSI Special Hardware Controls ==
-      (writeShellScriptBin "turbo-on" ''
-        echo -en '\x80' | sudo dd of="/sys/kernel/debug/ec/ec0/io" bs=1 seek=152 count=1 conv=notrunc 2>/dev/null
-      '')
-      (writeShellScriptBin "turbo-off" ''
-        echo -en '\x04' | sudo dd of="/sys/kernel/debug/ec/ec0/io" bs=1 seek=152 count=1 conv=notrunc 2>/dev/null
-      '')
+      # (2026-11-09: `turbo-on`/`turbo-off` 삭제. EC[0x98] 바이트 **전체**를 0x80/0x04 로 덮어써서, 실제 원래 값 0x02 의 하위 비트를 바꾸고 있었다(그 비트의 의미는 모른다).
+      #  `embedctl boost on|off` 는 비트7 만 바꾸고 나머지를 보존한다 — mods/_tools/desktop/embedctl/README.md)
     ];
   };
 
