@@ -1204,6 +1204,102 @@ async def run_host_s2():
     rapp.host_bridge = None
 
 
+async def run_host_s3():
+    """9 호스트 탭(S3): F8 산출물 보기 — 색인(INDEX.md)의 항목 접기·펴기, 검사 상태, 파일 내용. 표본 산출물은 임시 폴더에 만든다(비용 0, 호스트 불필요).
+    비밀은 화면 마스커로 치환(제한 모드의 StrictMasker 는 끌 수 없다), 폴더 밖 경로는 열지 않고, 제한 모드에서는 이 화면이 열리지 않는다."""
+    import json as _j, tempfile as _t
+    import llmhost_artifacts as ha
+    with cc.connect() as c:
+        cs.add_secret(c, "ART_PW", "literal", PW)            # 앞선 시험이 등록표를 비웠을 수 있어 이 구간용으로 다시 등록
+    tmp = _t.mkdtemp(prefix="llmui-s3-")
+    work = os.path.join(tmp, "work"); root = os.path.join(work, "art")
+    os.makedirs(os.path.join(root, "facts")); os.makedirs(os.path.join(root, ".check"))
+    W = lambda rel, t: open(os.path.join(root, rel), "w", encoding="utf-8").write(t)
+    W("INDEX.md", "# INDEX — 표본\n- 분류: 결정(승인 전)\n- 상태: 완료\n\n## 지금 결정할 것\n1. A 안으로 갈까요\n\n## 파일\n| 파일 | 한 줄 요약 | 언제 읽나 | 근거 대화 범위 | 종류 | 검사 |\n|---|---|---|---|---|---|\n"
+              "| 00-cover.md | 표지 | 지금 | - | 해석 | 통과 |\n| facts/diff-stat.txt | 변경 목록 | 필요할 때 | - | 사실 | 통과 |\n| ../outside.txt | 밖 | - | - | 해석 | 통과 |\n| /etc/passwd | 절대 | - | - | 해석 | 통과 |\n")
+    W("00-cover.md", f"# 표지\n결정할 것: 첫째 본문 마커\n비밀 {PW} 와 키 {KEY2}\n"); W("facts/diff-stat.txt", " a.py | 2 +-\n")
+    open(os.path.join(work, "outside.txt"), "w").write("밖의 내용 마커")
+    _j.dump({"mode": "final", "ts": "t", "counts": {"FAIL": 1, "WARN": 0, "INFO": 0}, "items": [{"id": "C3", "level": "FAIL", "file": "facts/diff-stat.txt", "reason": "x"}]}, open(os.path.join(root, ".check", "result.json"), "w"))
+    def body(app):
+        try:
+            return txt(app.screen.query_one("#art-text"))
+        except Exception:                                # 화면이 아직 조립 중
+            return ""
+    app = llmui.LlmUI()
+    async with app.run_test(size=(160, 50)) as pilot:
+        await settle(pilot, lambda: rows(app, "#projects") == 3)
+        await pilot.press("9"); await settle(pilot, lambda: app.current_tab() == "host")
+        check("S3: F8 은 호스트 탭에서만 켜진다", app.check_action("host_artifacts", ()) is True)
+        await pilot.press("f8"); await settle(pilot, lambda: len(app.screen_stack) == 2)
+        check("S3: F8 이 산출물 폴더 입력창을 띄운다", len(app.screen_stack) == 2 and "산출물 폴더" in txt(app.screen.query_one("#dialog-title")))
+        app.screen.query_one("#prompt-input").value = os.path.join(tmp, "nope"); await pilot.pause(0.1); await pilot.press("enter")
+        await settle(pilot, lambda: len(app.screen_stack) == 1)
+        check("S3: 없는 폴더는 안내만 하고 화면을 열지 않는다", len(app.screen_stack) == 1)
+        await pilot.press("f8"); await settle(pilot, lambda: len(app.screen_stack) == 2)
+        app.screen.query_one("#prompt-input").value = root; await pilot.pause(0.1); await pilot.press("enter")
+        await settle(pilot, lambda: isinstance(app.screen, llmui.HostArtifactScreen) and "표지" in body(app))
+        b = body(app)
+        check("S3: 산출물 화면이 열리고 머리·결정할 것·읽힘 보장 아님 문구", all(w in b for w in ("산출물 — INDEX — 표본", "분류: 결정(승인 전)", "A 안으로 갈까요", "읽힘")), b[:300])
+        check("S3: 접힌 상태 — 항목 4개, 내용(본문 마커)은 없다", b.count("▶") == 4 and "첫째 본문 마커" not in b, b)
+        check("S3: 검사 상태 — 검사기 FAIL 이 색인의 통과보다 우선, 종류 라벨", "미충족 C3  [검사기]" in b and "검사: 통과  [검사기]" in b and "도구가 모은 사실분" in b and "LLM 의 해석" in b)
+        await pilot.press("enter"); await pilot.pause(0.3)
+        b = body(app)
+        check("S3: Enter 로 첫 항목을 펴면 내용이 나오고 나머지는 접혀 있다", "▼ 00-cover.md" in b and "첫째 본문 마커" in b and b.count("▶") == 3, b[:400])
+        check("S3: 화면 텍스트의 등록한 비밀은 [protected] 로 치환", PW not in b and "[protected]" in b, b[:500])
+        await pilot.press("enter"); await pilot.pause(0.3)
+        check("S3: Enter 를 다시 누르면 접힌다", "첫째 본문 마커" not in body(app) and body(app).count("▶") == 4)
+        await pilot.press("down"); await pilot.press("space"); await pilot.pause(0.3)
+        check("S3: ↓ 로 이동해 Space 로 두 번째 항목을 편다", "▼ facts/diff-stat.txt" in body(app) and "a.py | 2" in body(app))
+        await pilot.press("f2"); await pilot.pause(0.3)
+        b = body(app)
+        check("S3: F2 모두 펴기 — 폴더 밖·절대 경로는 오류 줄이고 내용이 새지 않는다", b.count("▼") == 4 and b.count("✗") == 2 and "밖의 내용 마커" not in b and "root:" not in b, b[-500:])
+        await pilot.press("f3"); await pilot.pause(0.3)
+        check("S3: F3 모두 접기", body(app).count("▶") == 4)
+        await pilot.press("right"); await pilot.pause(0.3)
+        check("S3: → 는 현재 항목만 펴고 ← 는 접는다", body(app).count("▼") == 1)
+        await pilot.press("left"); await pilot.pause(0.3)
+        check("S3: ← 로 접힘", body(app).count("▼") == 0)
+        await pilot.press("up"); await pilot.press("enter"); await pilot.pause(0.3)
+        check("S3: ↑ 로 첫 항목으로 이동해 Enter — 그 항목만 펼쳐진다", "▼ 00-cover.md" in body(app) and body(app).count("▼") == 1)
+        app.mask = True
+        await pilot.press("f10"); await pilot.pause(0.3)
+        await pilot.press("f2"); await pilot.pause(0.3)
+        check("S3: 사람 모드에서 F10 으로 치환을 끄면 원문(앱 설정을 따른다), 다시 켜면 가려진다", PW in body(app))
+        await pilot.press("f10"); await pilot.pause(0.3)
+        check("S3: F10 다시 — 가려진다", PW not in body(app) and app.mask)
+        W("01-new.md", "새 파일")
+        await pilot.press("f5"); await pilot.pause(0.3)
+        check("S3: F5 다시 읽기 후에도 화면이 산다", "산출물 — INDEX" in body(app))
+        await pilot.press("escape"); await settle(pilot, lambda: len(app.screen_stack) == 1)
+        check("S3: Esc 로 닫으면 호스트 탭으로 돌아온다", len(app.screen_stack) == 1 and app.current_tab() == "host")
+        # 세션 작업 폴더가 있으면 그 밖은 열지 않는다
+        app.host_cwd = os.path.join(tmp, "elsewhere"); os.makedirs(app.host_cwd)
+        check("S3: 실시간 세션의 작업 폴더 밖 산출물 폴더는 열지 않는다", app.host_open_artifacts(root) is False and len(app.screen_stack) == 1)
+        app.host_cwd = work
+        check("S3: 작업 폴더 안이면 열린다", app.host_open_artifacts(root) is True)
+        await settle(pilot, lambda: isinstance(app.screen, llmui.HostArtifactScreen))
+        await pilot.press("escape"); await settle(pilot, lambda: len(app.screen_stack) == 1)
+    # 제한 모드: 열리지 않는다(읽지도 않는다). 화면을 억지로 열어도 StrictMasker 는 끌 수 없다
+    calls = []
+    orig = ha.load
+    ha.load = lambda *a, **k: (calls.append(a), orig(*a, **k))[1]
+    try:
+        rapp = llmui.LlmUI(restricted=True)
+        async with rapp.run_test(size=(160, 50)) as pilot:
+            await pilot.press("9"); await pilot.pause(0.4)
+            check("S3(제한): F8 은 푸터·도움말에서 숨김", rapp.check_action("host_artifacts", ()) is False)
+            rapp.action_host_artifacts(); r = rapp.host_open_artifacts(root); await pilot.pause(0.3)
+            check("S3(제한): 직접 불러도 deny — 화면 없음·산출물 파일을 읽지 않는다", r is False and len(rapp.screen_stack) == 1 and calls == [], str(calls))
+            rapp.push_screen(llmui.HostArtifactScreen(rapp, root))
+            await settle(pilot, lambda: isinstance(rapp.screen, llmui.HostArtifactScreen) and "표지" in body(rapp))
+            await pilot.press("f2"); await pilot.pause(0.3)
+            await pilot.press("f10"); await pilot.pause(0.3)
+            b = body(rapp)
+            check("S3(제한): 화면을 열어도 F10 으로 치환을 끌 수 없고 비밀·키는 [protected]", rapp.mask is True and PW not in b and KEY2 not in b and "[protected]" in b and "첫째 본문 마커" in b, b[:400])
+    finally:
+        ha.load = orig
+
+
 def check_launch_prompt():
     import llmcards as lcd
     check("초기 프롬프트: 슬래시로 시작, 카드 여러 장과 쟁점(줄바꿈은 공백)", lcd.launch_prompt(["a:11111111", "b:22222222"], "첫째\n  둘째") == "/donghans-card a:11111111 b:22222222 첫째 둘째")
@@ -1231,6 +1327,7 @@ try:
     asyncio.run(run_host_tab())
     asyncio.run(run_host_live())
     asyncio.run(run_host_s2())
+    asyncio.run(run_host_s3())
     check_sessions_only_no_db()
 finally:
     pg.stop()

@@ -12,7 +12,8 @@
   6 지침   프로젝트별 지침(공유 정본 project_instructions)을 모든 저장소에 대해 보고 고친다 — 로컬 캐시 없이 DB 만 대상   (Enter: 본문 · e: 편집기)
   8 카드   결정 카드(ctx note cards/*) — Space 체크 · Enter 상세(근거 원문 대조·이력·승격) · 체크하면 하단에서 쟁점을 적고 확인 → `/donghans-card` 논의 세션 시작. 제한 모드에서는 읽기만
   9 호스트 세션 호스트(llm-trust 11) — 처음엔 이벤트 녹화본을 그리기만 하고, F2 로 세션을 시작하면 실시간으로 텍스트 스트림·도구 호출·결과·비용을 보여 준다(F3 닫기 · F4 지시 입력 · Enter 보내기).
-         S2: 권한·질문 요청은 대화상자로 답한다(y 허용·n 거부·숫자 선택·Esc 나중에·F6 다시 열기·F7 턴 중단; 30분 넘기면 자동 거부). llm-host 는 소스 트리에서 찾는다(배포본은 LLMUI_HOST_DIR). 제한 모드에서는 안내문만(세션 시작·전송 막힘)
+         S2: 권한·질문 요청은 대화상자로 답한다(y 허용·n 거부·숫자 선택·Esc 나중에·F6 다시 열기·F7 턴 중단; 30분 넘기면 자동 거부).
+         S3: F8 로 산출물 폴더(INDEX.md)를 열면 항목 접기·펴기, 검사 상태, 파일 내용을 읽기 전용으로 보인다(↑↓·Enter·←→·F2·F3; 폴더 밖 경로는 열지 않고 비밀은 치환; 제한 모드에서는 못 연다). llm-host 는 소스 트리에서 찾는다(배포본은 LLMUI_HOST_DIR). 제한 모드에서는 안내문만(세션 시작·전송 막힘)
   7 세션   claude 가 도는 tmux 세션 목록·화면 미리보기 — Enter 붙기 · F2 새 세션 · F3 붙은 곳 떼기 · Delete 정리 (ssh·다른 터미널에서도 같은 세션). 제한 모드에서는 목록만 보인다
 
 원문(DB)은 바꾸지 않는다. 화면의 치환(F10)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. TTY 가 없으면 실행하지 않는다.
@@ -28,6 +29,7 @@ import tempfile
 import time
 from datetime import datetime
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual import events, work
 from textual.app import App, ComposeResult
@@ -55,6 +57,7 @@ import ctxdata as cd
 import llmcards as lc
 import llmhost_view as hv
 import llmhost_ctl as hc
+import llmhost_artifacts as ha
 
 TABS = [("dashboard", "대시보드"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("instr", "지침"), ("sessions", "세션"), ("cards", "카드"), ("host", "호스트")]
 
@@ -632,6 +635,94 @@ class HostRequestScreen(ModalScreen):
             self.set_answer(e, ", ".join(order))
 
 
+class HostArtifactScreen(ModalScreen):
+    """9 호스트 S3: 세션이 만든 산출물(INDEX.md → 파일) 열람. 항목 접기/펴기·검사 상태·파일 내용. 읽기 전용.
+    모든 줄은 화면 마스커(비밀 치환)를 통과한다 — 제한 모드(StrictMasker)에서는 끌 수 없고(이 화면은 제한 모드에서 열리지도 않는다), 사람 모드의 F10 은 앱 설정을 따른다."""
+    BINDINGS = [Binding("escape", "close", "닫기"), Binding("up", "move(-1)", "위", show=False), Binding("down", "move(1)", "아래", show=False),
+                Binding("enter", "toggle", "접기·펴기"), Binding("space", "toggle", "접기·펴기", show=False), Binding("f2", "expand_all", "모두 펴기"), Binding("right", "expand", "펴기", show=False), Binding("left", "collapse", "접기", show=False),
+                Binding("f3", "collapse_all", "모두 접기"), Binding("f10", "toggle_mask", "치환 켬/끔"), Binding("f5", "reload", "다시 읽기")]
+    COLORS = {"head": "bold #33ccff", "meta": "#9a9a9a", "decide": "#e0e0e0", "row": "#e0e0e0", "row_sel": "bold reverse #33ccff", "ok": "#7fbf7f", "warn": "#e0a050",
+              "fail": "bold #e06c6c", "fact": "#7fbf7f", "interp": "#b8a46a", "body": "#cfcfcf", "dim": "#8a8a8a", "err": "#e06c6c"}
+
+    def __init__(self, app_ref, root: str, base: str | None = None):
+        super().__init__()
+        self.ctx_app, self.root, self.base = app_ref, root, base
+        self.data: dict = {}
+        self.expanded: set = set()
+        self.cursor = 0
+        self.contents: dict = {}
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="stats-box"):
+            yield Static("", id="art-head")
+            with VerticalScroll(id="art-scroll"):
+                yield Static("", id="art-text")
+
+    def on_mount(self):
+        self.call_after_refresh(self.action_reload)       # 자식 위젯이 붙은 뒤에 그린다
+
+    def nrows(self) -> int:
+        idx = self.data.get("index") if self.data.get("ok") else None
+        return len(idx["rows"]) if idx else 0
+
+    def action_reload(self):
+        self.data = ha.load(self.root, self.base)
+        self.contents = {}
+        self.cursor = min(self.cursor, max(0, self.nrows() - 1))
+        self.expanded = {i for i in self.expanded if i < self.nrows()}
+        self.draw(scroll=False)
+
+    def draw(self, scroll=True):
+        mk = self.ctx_app.masker()                    # 매번 앱에서 받는다(F10 으로 바뀔 수 있다) — 제한 모드면 StrictMasker
+        lines, starts = ha.render(self.data, self.expanded, self.cursor, self.contents)
+        t = Text()
+        for style, line in lines:
+            t.append(mk.text(line) + "\n", style=self.COLORS.get(style, "#e0e0e0"))
+        self.query_one("#art-head", Static).update(Text(f"산출물 보기  ·  치환 {'켜짐' if self.ctx_app.mask else '꺼짐(원문 표시 중)'}  ·  Esc 닫기 · ←→ 접기·펴기 · F2 모두 펴기 · F3 모두 접기 · F5 다시 읽기 · F10 치환", style="#9a9a9a"))
+        self.query_one("#art-text", Static).update(t)
+        if scroll and starts:
+            sc = self.query_one("#art-scroll")
+            w = max(10, sc.size.width - 2)
+            y = sum(max(1, -(-cell_len(l) // w)) for _s, l in lines[:starts[self.cursor]])      # 줄바꿈을 감안한 화면 줄 수
+            if y < sc.scroll_y or y > sc.scroll_y + max(1, sc.size.height - 6):
+                sc.scroll_to(y=max(0, y - 1), animate=False)
+
+    def action_move(self, d: int):
+        n = self.nrows()
+        if n:
+            self.cursor = (self.cursor + d) % n
+            self.draw()
+
+    def action_toggle(self):
+        if self.nrows():
+            self.expanded ^= {self.cursor}
+            self.draw()
+
+    def action_expand(self):
+        if self.nrows():
+            self.expanded |= {self.cursor}
+            self.draw()
+
+    def action_collapse(self):
+        self.expanded -= {self.cursor}
+        self.draw()
+
+    def action_expand_all(self):
+        self.expanded = set(range(self.nrows()))
+        self.draw()
+
+    def action_collapse_all(self):
+        self.expanded = set()
+        self.draw()
+
+    def action_toggle_mask(self):
+        self.ctx_app.action_toggle_mask()          # 제한 모드에서는 deny 가 막는다
+        self.draw(scroll=False)
+
+    def action_close(self):
+        self.dismiss()
+
+
 class InstrScreen(ModalScreen):
     """지침 한 건의 본문(공유 정본 그대로 — 로컬 캐시 아님). `## ` 절 목록을 위에, 본문을 아래에 보인다. F2 편집 · F10 치환 켬/끔."""
     BINDINGS = [Binding("escape", "close", "닫기"), Binding("f2", "edit", "편집기로 고치기"), Binding("f10", "toggle_mask", "치환 켬/끔")]
@@ -680,7 +771,7 @@ class InstrScreen(ModalScreen):
 class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
     TITLE = "llmui — LLM 컨텍스트·세션 관리"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
-        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침) · 7 세션(claude 가 도는 tmux 세션 — 붙기·새 세션·정리, DB 없이도 `llmui --sessions` 로 이 탭만 단독 실행) · 8 카드(결정 카드 — Space 체크, Enter 상세·근거 대조·이력(h)·승격(F2, 사람만), 체크하면 하단에서 논의 세션 시작. F2/F3 상태·범위 필터) · 9 호스트(세션 호스트 — 처음엔 녹화본, F2 로 실제 세션 시작 후 텍스트 스트림·결과·비용 실시간 표시, F4/Enter 로 지시 전송, F3 닫기. 권한·질문은 대화상자로 답하고(F6 다시 열기) F7 로 턴 중단. 제한 모드에서는 안내문만)'),
+        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침) · 7 세션(claude 가 도는 tmux 세션 — 붙기·새 세션·정리, DB 없이도 `llmui --sessions` 로 이 탭만 단독 실행) · 8 카드(결정 카드 — Space 체크, Enter 상세·근거 대조·이력(h)·승격(F2, 사람만), 체크하면 하단에서 논의 세션 시작. F2/F3 상태·범위 필터) · 9 호스트(세션 호스트 — 처음엔 녹화본, F2 로 실제 세션 시작 후 텍스트 스트림·결과·비용 실시간 표시, F4/Enter 로 지시 전송, F3 닫기. 권한·질문은 대화상자로 답하고(F6 다시 열기) F7 로 턴 중단. F8 산출물 보기(INDEX.md → 파일, 접기·검사 상태·내용). 제한 모드에서는 안내문만)'),
         *[t for t in ls.SESSIONS_HELP_TERMS if t[0] != '제한 모드'],
         ('치환(F10)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
         ('제한 모드', 'LLM 세션이 실행하면: 모든 탭을 볼 수 있지만 화면의 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(키 형식·password=·한글 비밀번호)이 [protected] 로 치환되고(끌 수 없음), 후보 미리보기도 [protected](N자)로 가려지며, 값 보기(F4)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용된다'),
@@ -751,7 +842,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         Binding("delete", "secret_delete", "삭제"), Binding("f2", "cand_ignore", "무시"), Binding("f2", "instr_edit", "지침 편집"),
         Binding("f2", "card_state_cycle", "상태 필터"), Binding("f3", "card_scope_cycle", "범위 필터"), Binding("f2", "sess_new", "새 세션"), Binding("f3", "sess_detach", "붙은 곳 떼기"), Binding("delete", "sess_kill", "정리(종료)"),
         Binding("f2", "host_start", "새 호스트 세션"), Binding("f3", "host_close", "세션 닫기"), Binding("f4", "host_input", "지시 입력"),
-        Binding("f6", "host_answer", "응답 대기 요청"), Binding("f7", "host_interrupt", "턴 중단"),
+        Binding("f6", "host_answer", "응답 대기 요청"), Binding("f7", "host_interrupt", "턴 중단"), Binding("f8", "host_artifacts", "산출물 보기"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
@@ -783,6 +874,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         self.host_events: list = []                    # 실시간 세션의 이벤트(dict) — 시작할 때 비운다
         self.host_deferred: set = set()                # 사용자가 「나중에」 로 미룬 요청(자동으로 다시 열지 않는다)
         self.host_notified: set = set()                # 다른 탭에 있을 때 알린 요청
+        self.host_cwd: str | None = None               # 실시간 세션의 작업 폴더(산출물 보기가 이 안만 열도록)
         self.host_live = False                         # 한 번이라도 세션을 시작했으면 녹화본 대신 실시간 화면
 
     # --- 구성
@@ -960,7 +1052,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
                    "toggle_role": {"search"}, "toggle_regex": {"search"}, "toggle_tools": {"search"}, "toggle_title_only": {"search"}, "expand_all": {"search"},
                    "secret_add": {"secrets"}, "secret_toggle": {"secrets"}, "secret_delete": {"secrets"}, "reveal": {"secrets", "cands"}, "cand_ignore": {"cands"}, "instr_edit": {"instr"},
                    **lc.CardsMixin.CARD_ACTIONS, "sess_new": {"sessions"}, "sess_detach": {"sessions"}, "sess_kill": {"sessions"},
-                   "host_start": {"host"}, "host_close": {"host"}, "host_input": {"host"}, "host_answer": {"host"}, "host_interrupt": {"host"}}
+                   "host_start": {"host"}, "host_close": {"host"}, "host_input": {"host"}, "host_answer": {"host"}, "host_interrupt": {"host"}, "host_artifacts": {"host"}}
 
     def check_action(self, action, parameters):
         """탭 전용 동작은 그 탭에서만 켠다(같은 F키를 탭마다 다른 동작에 재사용). 제한 모드에서는 막힌 동작(치환 끄기·값 보기·비밀 추가/삭제/끄기·후보 무시)을 푸터·도움말에서 숨긴다(눌러도 deny 가 막는다)."""
@@ -1090,7 +1182,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         at_end = sc.scroll_y >= sc.max_scroll_y - 1
         head.update(Text(f"실시간 세션 {b.session_label or '-'}  ·  상태 {b.state}  ·  턴 {sm['turns']}  ·  도구 호출 {sm['tool_calls']}  ·  알 수 없는 줄(raw) {sm['raw']}  ·  누적 비용 {hv._money(b.cost_total)}"
                          f"  ·  응답 대기 {len(b.pending_requests())}건"
-                         f"   [F2 새 세션 · F3 닫기 · F4 지시 입력 · F6 응답 대기 요청 · F7 턴 중단]" if b else "", style="#9a9a9a"))
+                         f"   [F2 새 세션 · F3 닫기 · F4 지시 입력 · F6 응답 대기 요청 · F7 턴 중단 · F8 산출물]" if b else "", style="#9a9a9a"))
         mk = self.masker()
         t = Text()
         for style, line in hv.render_events(self.host_events):
@@ -1157,6 +1249,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
             self.flash(err, "warning")
             return
         self.host_events = []
+        self.host_cwd = cwd
         self.host_live = True
         self.query_one("#host-scroll").border_title = "호스트 이벤트 — 실시간"
         self.reload_host()
@@ -1220,6 +1313,32 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
 
     def host_request_gone(self, req: str):
         self.flash("요청이 이미 처리됐다(시간 초과 자동 거부·턴 종료·세션 종료)", "warning")
+
+    def action_host_artifacts(self):
+        """S3: 산출물 폴더(INDEX.md 가 있는 폴더)를 물어 열람 화면을 연다. 실시간 세션이 있으면 그 작업 폴더 안만 열 수 있다. 제한 모드에서는 못 쓴다(H-4)."""
+        if self.deny("산출물 보기"):
+            return
+        if self.current_tab() != "host" or len(self.screen_stack) != 1:
+            return
+        base = self.host_cwd
+        start = base or os.getcwd()
+        cands = ha.find_candidates(start)
+
+        def got(path):
+            if not path or not path.strip():
+                return
+            self.host_open_artifacts(os.path.expanduser(path.strip()))
+        self.push_screen(PromptScreen("산출물 폴더 (INDEX.md 가 있는 폴더)", ("세션 작업 폴더 안만 열 수 있다" if base else "세션이 없어 아무 폴더나 연다(읽기만)"), value=cands[0] if cands else start), got)
+
+    def host_open_artifacts(self, path: str) -> bool:
+        if self.deny("산출물 보기"):
+            return False
+        d = ha.load(path, self.host_cwd)
+        if not d["ok"]:
+            self.flash(d["err"], "warning")
+            return False
+        self.push_screen(HostArtifactScreen(self, path, self.host_cwd))
+        return True
 
     def action_host_answer(self):
         if self.deny("호스트 요청 응답"):
