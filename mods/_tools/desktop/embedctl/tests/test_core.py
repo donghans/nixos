@@ -135,6 +135,22 @@ bad = dict(FIXTURE, ok=False, error="게이트 거부"); json.dump(bad, open(f"{
 rc, out, err = cli("status", "--json", FAKE_RESULT=f"{T}/bad.json")
 check("helper 가 실패를 보고하면 열화 + 이유", rc == 0 and json.loads(out)["data"]["access"] == "unavailable" and any("게이트 거부" in n for n in json.loads(out).get("notes", [])))
 
+bad2 = {"ok": False, "code": 3, "error": "게이트 거부: 펌웨어 미검증"}; json.dump(bad2, open(f"{T}/bad2.json", "w"))
+rc, out, err = cli("status", "--json", FAKE_RESULT=f"{T}/bad2.json", FAKE_RC="1", FAKE_RESULT_ON_FAIL="1")
+check("helper 가 비정상 종료하며 남긴 이유가 systemctl 의 일반 문구 대신 메시지에 들어감", rc == 0 and any("게이트 거부: 펌웨어 미검증" in n for n in json.loads(out).get("notes", [])), out[:300])
+os.environ.update(FAKE_RESULT=f"{T}/bad2.json", FAKE_RC="1", FAKE_RESULT_ON_FAIL="1")
+try:
+    lib.helper_call("status"); check("helper_call: 결과 파일의 code 가 HelperError.code 로 전달", False)
+except lib.HelperError as e:
+    check("helper_call: 결과 파일의 code(3)가 HelperError.code 로 전달", e.code == 3, str(e.code))
+for k in ("FAKE_RESULT", "FAKE_RC", "FAKE_RESULT_ON_FAIL"): os.environ.pop(k, None)
+os.environ.update(FAKE_RC="1")
+try:
+    lib.helper_call("status"); check("helper_call: 결과 파일이 없으면 code 4", False)
+except lib.HelperError as e:
+    check("helper_call: 결과 파일 없는 실패는 code 4", e.code == 4, str(e.code))
+os.environ.pop("FAKE_RC", None)
+
 # --- 8. 게이트가 데이터에 반영되는지 -------------------------------------------------------------
 other = {"ok": True, "data": {"fw": "1592EMS1.109", "fw_date": None, "ec": {"d7": 0xE4, "d2": 0xC1, "b98": 0x02}}}; json.dump(other, open(f"{T}/other.json", "w"))
 rc, out, err = cli("status", "--json", FAKE_RESULT=f"{T}/other.json")

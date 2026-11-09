@@ -38,7 +38,11 @@ class EcError(Exception):
 
 
 class HelperError(Exception):
-    """root helper 호출 실패(polkit 거부·유닛 실패·결과 파일 없음/오래됨)."""
+    """root helper 호출 실패(polkit 거부·유닛 실패·결과 파일 없음/오래됨). code = 종료 코드(2 입력 · 3 게이트 거부 · 4 권한/helper 실패 · 5 되읽기 불일치)."""
+
+    def __init__(self, msg, code=4):
+        super().__init__(msg)
+        self.code = code
 
 
 # --- 경로(환경변수로 바꿀 수 있음) ----------------------------------------------------------
@@ -134,31 +138,37 @@ def helper_call(instance, timeout=20):
         r = subprocess.run([systemctl_cmd(), "start", "--no-ask-password", unit], capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise HelperError(f"helper 를 시작하지 못했다({unit}): {e}") from e
-    if r.returncode != 0:
-        why = (r.stderr or r.stdout or "").strip().splitlines()
-        raise HelperError(f"helper 실패({unit}, 종료 코드 {r.returncode}): {why[-1] if why else '이유 없음'} — 로컬 세션에서 실행해야 한다(SSH 세션은 polkit 이 거부할 수 있다)")
     path = os.path.join(p_run(), f"last-{instance}.json")
+    res, why_not = None, None
     try:
         with open(path) as f:
             res = json.load(f)
     except (OSError, ValueError) as e:
-        raise HelperError(f"helper 결과 파일을 읽지 못했다({path}): {e}") from e
+        why_not = f"helper 결과 파일을 읽지 못했다({path}): {e}"
     # 결과의 time 은 helper 가 요청 뒤에 찍으므로 t0 이상이어야 한다. 여유를 두면 직전 요청의 같은 인스턴스 결과를 이번 것으로 착각한다(시험이 잡았다).
-    if res.get("instance") != instance or float(res.get("time", 0)) < t0:
-        raise HelperError(f"helper 결과가 이 요청의 것이 아니다({path}: instance={res.get('instance')!r}, time={res.get('time')})")
+    if res is not None and (res.get("instance") != instance or float(res.get("time", 0)) < t0):
+        why_not = f"helper 결과가 이 요청의 것이 아니다({path}: instance={res.get('instance')!r}, time={res.get('time')})"
+        res = None
+    if r.returncode != 0:
+        if res is not None and res.get("error"):     # helper 가 직접 남긴 이유가 systemctl 의 일반 문구보다 정확하다
+            raise HelperError(f"helper 실패({unit}): {res['error']}", code=res.get("code") or 4)
+        why = (r.stderr or r.stdout or "").strip().splitlines()
+        raise HelperError(f"helper 실패({unit}, 종료 코드 {r.returncode}): {why[-1] if why else '이유 없음'} — 로컬 세션에서 실행해야 한다(SSH 세션은 polkit 이 거부할 수 있다)", code=4)
+    if res is None:
+        raise HelperError(why_not, code=4)
     if not res.get("ok"):
-        raise HelperError(f"helper 가 실패를 보고했다: {res.get('error')}")
+        raise HelperError(f"helper 가 실패를 보고했다: {res.get('error')}", code=res.get("code") or 4)
     return res
 
 
-def write_result(instance, ok, data=None, before=None, after=None, error=None):
-    """helper 가 결과를 남긴다: 임시 파일에 쓴 뒤 rename(읽는 쪽이 반쯤 쓴 파일을 보지 않게)."""
+def write_result(instance, ok, data=None, before=None, after=None, error=None, code=0):
+    """helper 가 결과를 남긴다: 임시 파일에 쓴 뒤 rename(읽는 쪽이 반쯤 쓴 파일을 보지 않게). code = 실패 때의 종료 코드."""
     d = p_run()
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, f"last-{instance}.json")
     tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w") as f:
-        json.dump({"instance": instance, "time": time.time(), "ok": ok, "data": data, "before": before, "after": after, "error": error}, f, ensure_ascii=False)
+        json.dump({"instance": instance, "time": time.time(), "ok": ok, "code": code, "data": data, "before": before, "after": after, "error": error}, f, ensure_ascii=False)
     os.chmod(tmp, 0o644)
     os.replace(tmp, path)
     return path

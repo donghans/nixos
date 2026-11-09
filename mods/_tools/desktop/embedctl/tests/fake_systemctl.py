@@ -11,6 +11,12 @@ if log:
         f.write(" ".join(args) + "\n")
 unit = next((x for x in args if x.startswith("embedctl-root@")), None)
 rc = int(os.environ.get("FAKE_RC", "0"))
+if rc and os.environ.get("FAKE_RESULT_ON_FAIL") and unit:      # helper 가 실패 이유를 결과 파일에 남기고 비정상 종료하는 경우
+    inst = unit[len("embedctl-root@"):-len(".service")]
+    res = json.load(open(os.environ["FAKE_RESULT"]))
+    res.update(instance=inst, time=time.time())
+    os.makedirs(os.environ["EMBEDCTL_RUN"], exist_ok=True)
+    json.dump(res, open(os.path.join(os.environ["EMBEDCTL_RUN"], "last-%s.json" % inst), "w"))
 if rc:
     print("Failed to start %s: Interactive authentication required." % unit, file=sys.stderr)
     sys.exit(rc)
