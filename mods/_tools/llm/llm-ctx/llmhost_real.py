@@ -2,7 +2,8 @@
 """llmhost_ctl 의 실제 claude 시험(계획서 llm-trust/13 §4 S1). **비용이 든다**(haiku, 항목당 약 $0.01~0.02) — run-tests.sh 에 넣지 않는다.
 사용: python3 -I llmhost_real.py --out <새 폴더> [--items a,b] [--claude 실행파일]
   a  세션 시작 → 한 문장 지시 → 텍스트 스트림(text_delta)·turn_result·비용이 오는가, raw 0, 닫은 뒤 자식 0개
-  b  쓰기 도구를 쓰게 하는 지시 → 권한 요청이 자동 거부되고(S1) 턴이 끝나며 파일이 생기지 않는가
+  b  쓰기 도구를 쓰게 하는 지시 → 권한 요청이 오면 b.deny() 로 거부(S2) → 턴이 끝나며 파일이 생기지 않는가
+  c  같은 지시 → 권한 요청이 오면 b.allow() 로 허용(S2) → 파일이 실제로 생기고 턴이 정상 종료하는가
 조건: 실행 파일은 claude 직접(env 는 ClaudeAdapter.env 의 HOME·PATH·TERM 뿐 — env -i 와 같다), --model haiku, persist=False(--no-session-persistence), 새 폴더(--out 아래 proj), 훅 없음(use_launcher=False)이라 ctx DB 에 시험 세션이 남지 않는다.
 시험 뒤 `donghans ctx recent` 로 cwd 에 이 폴더 이름이 있는 세션이 없는지 확인한다.
 """
@@ -41,7 +42,7 @@ def alive(pid):
         return False
 
 
-def run_item(name, prompt, out, claude, expect_file=None):
+def run_item(name, prompt, out, claude, expect_file=None, respond=None):
     proj = os.path.join(out, "proj-" + name)
     os.makedirs(proj, exist_ok=True)
     b = hc.HostBridge(log_root=os.path.join(out, "logs"), use_launcher=False)
@@ -52,7 +53,17 @@ def run_item(name, prompt, out, claude, expect_file=None):
     t0 = time.time()
     r["send_err"] = b.send(prompt)
     r["send_seconds"] = round(time.time() - t0, 3)
-    evs += collect(b, lambda e: kinds(e, "turn_result"), 90)
+    t1, got = time.time(), []
+    while time.time() - t1 < 90:                      # 권한 요청이 오면 respond(b, req) 로 답한다(없으면 그냥 기다린다 — 30분 상한이 있어도 시험은 90초에서 끊는다)
+        got += b.drain()
+        if kinds(got, "turn_result"):
+            break
+        for p in b.pending_requests():
+            if respond is not None and p["req"] not in r.setdefault("answered", []):
+                r["answered"].append(p["req"])
+                r["respond_err"] = respond(b, p["req"])
+        time.sleep(0.05)
+    evs += got + b.drain()
     pid = (b.child_pids() or [None])[0]
     b.close()
     evs += collect(b, lambda e: kinds(e, "session_ended"), 20)
@@ -84,10 +95,17 @@ def main() -> int:
                    and (r["cost_total"] or 0) > 0 and r["raw"] == 0 and r["ended"] == ["closed"] and not r["child_alive_after"])
         res["a"] = r
     if "b" in a.items.split(","):
-        r = run_item("b", "Create a file named s1-deny.txt containing the text no, using the Write tool, then say in one sentence what happened.", out, a.claude, "s1-deny.txt")
+        r = run_item("b", "Create a file named s2-deny.txt containing the text no, using the Write tool, then say in one sentence what happened.", out, a.claude, "s2-deny.txt",
+                     respond=lambda b, req: b.deny(req, "시험: 거부한다"))
         r["ok"] = (r["start_err"] is None and r["ok_turn"] is True and ("deny", "user") in [tuple(x) for x in r["resolved"]] and not r["file_created"]
-                   and any("자동 거부" in n for n in r["notices"]) and r["raw"] == 0 and not r["child_alive_after"])
+                   and r.get("respond_err") is None and len(r.get("answered", [])) == 1 and r["raw"] == 0 and not r["child_alive_after"])
         res["b"] = r
+    if "c" in a.items.split(","):
+        r = run_item("c", "Create a file named s2-allow.txt containing the text ok, using the Write tool, then say in one sentence what happened.", out, a.claude, "s2-allow.txt",
+                     respond=lambda b, req: b.allow(req))
+        r["ok"] = (r["start_err"] is None and r["ok_turn"] is True and ("allow", "user") in [tuple(x) for x in r["resolved"]] and r["file_created"]
+                   and r.get("respond_err") is None and len(r.get("answered", [])) == 1 and r["raw"] == 0 and not r["child_alive_after"])
+        res["c"] = r
     for k, v in res.items():
         print(f"항목 {k}: {'통과' if v['ok'] else '실패'}  비용누적 {v['cost_total']}")
         rc |= 0 if v["ok"] else 1

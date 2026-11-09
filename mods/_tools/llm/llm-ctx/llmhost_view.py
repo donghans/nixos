@@ -14,7 +14,7 @@ import sys
 STYLES = ("head", "text", "think", "tool", "result", "err", "perm", "ask", "info", "warn", "cost", "dim")
 
 # 제한 모드(H-4)에서 막을 호스트 동작 이름 — 여기에 넣으면 llmui.check_action 이 푸터·도움말에서 숨기고 실행 함수는 deny() 로 막는다.
-# S1: host_start(F2 새 세션)·host_close(F3)·host_input(F4 지시 입력창)·host_send(Enter). S2 에서 host_answer·host_interrupt 가 실제 동작이 된다.
+# S1: host_start(F2 새 세션)·host_close(F3)·host_input(F4 지시 입력창)·host_send(Enter). S2: host_answer(F6 응답 대기 요청 열기)·host_interrupt(F7 턴 중단)도 실제 동작이다.
 HOST_ACTIONS = ("host_start", "host_close", "host_input", "host_send", "host_answer", "host_interrupt")
 
 RESTRICTED_NOTICE = ("제한 모드(LLM 세션 안에서 실행됨): 호스트 탭은 읽기만 한다 — 세션 구동·응답 전송·권한 허용은 사람이 터미널에서 직접 llmui 를 "

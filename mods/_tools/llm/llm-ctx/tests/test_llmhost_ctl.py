@@ -29,14 +29,17 @@ def rows(name):
     return [json.loads(l) for l in open(os.path.join(FX, name + ".jsonl"), encoding="utf-8") if l.strip()]
 
 
-def scenario(name, start, end, deny_at=None, extra_sleep=0.0):
-    """녹화본 [start, end) 를 시나리오로. deny_at(요청 줄 번호) 가 있으면 그 줄 뒤의 in(응답) 한 줄은 「deny 응답이 왔다」 기대로 바꾼다(문구는 우리 것이라 바이트 비교 불가)."""
+def scenario(name, start, end, deny_at=None, extra_sleep=0.0, resp=None):
+    """녹화본 [start, end) 를 시나리오로. in(control_response) 한 줄은 「resp 응답이 왔다」 기대로 바꾼다(기본 {"behavior":"deny"} — 문구는 우리 것이라 바이트 비교 불가).
+    in(interrupt control_request) 한 줄은 id 가 우리 것(host-int-N)이라 subtype 만 보는 기대로 바꾼다."""
     steps = []
     for i, e in enumerate(rows(name)[start:end], start):
         ln = e["line"]
         if e["dir"] == "in":
             if ln.get("type") == "control_response":
-                steps.append({"expect": {"control_response": {"behavior": "deny"}}})
+                steps.append({"expect": {"control_response": resp or {"behavior": "deny"}}})
+            elif ln.get("type") == "control_request":
+                steps.append({"expect": {"control_request": {"subtype": ln["request"]["subtype"]}}})
             else:
                 steps.append({"expect": {"stdin_type": "user", "line": dump(ln)}})
                 if extra_sleep:
@@ -126,31 +129,105 @@ time.sleep(0.2)
 check("닫은 뒤 자식 프로세스 0개", not alive(pid))
 b.shutdown()
 
-# ---- 3. 권한 요청 자동 거부(S1: 사용자가 답할 화면이 없다) — 세션은 계속 산다
+# ---- 3. 권한 요청 — 대기 표에 두고 사람이 답한다(S2). 자동 거부하지 않는다
+ALLOW_PROMPT = rows("perm")[0]["line"]["message"]["content"]
+ALLOW_RESP = rows("perm")[24]["line"]["response"]["response"]          # {"behavior":"allow","updatedInput":{원래 input}}
+QUESTION_RESP = rows("main")[103]["line"]["response"]["response"]      # {"behavior":"allow","updatedInput":{questions, answers}}
 b = bridge()
-b.start(TMP, "haiku", exe=scenario("perm", 54, 103, deny_at=80))
+b.start(TMP, "haiku", exe=scenario("perm", 0, 54, resp=ALLOW_RESP))
 collect(b, lambda e: b.running)
-b.send(WRITE_DENY)
-evs = collect(b, lambda e: kinds(e, "turn_result"))
+b.send(ALLOW_PROMPT)
+evs = collect(b, lambda e: kinds(e, "permission_request"))
 pr = kinds(evs, "permission_request")
+time.sleep(0.3)
+pend = b.pending_requests()
+check("권한 요청이 오면 대기 표에 남고 자동 거부되지 않는다(0.3초 뒤에도 미해결)", pr and len(pend) == 1 and pend[0]["req"] == pr[0]["req"] and pend[0]["kind"] == "permission" and pend[0]["tool"] == "Write" and not kinds(b.drain(), "request_resolved"), str(pend))
+check("대기 중 상태는 waiting 이고 남은 시간은 상한(1800초) 이하", b.state == "waiting" and 0 < pend[0]["left"] <= 1800 and pend[0]["input"], f"{b.state} {pend[0]['left']}")
+check("허용 → 호스트가 allow+updatedInput(원래 input)을 받는다(가짜 백엔드가 바이트 대신 부분집합으로 검사)", b.allow(pr[0]["req"]) is None)
+evs = collect(b, lambda e: kinds(e, "turn_result"))
 rs = kinds(evs, "request_resolved")
-check("권한 요청이 이벤트로 오고 자동 거부된다(request_resolved deny)", pr and rs and rs[0]["outcome"] == "deny" and rs[0]["req"] == pr[0]["req"], str([e["kind"] for e in evs]))
-nt = [e for e in kinds(evs, "notice") if "자동 거부" in e.get("text", "")]
-check("자동 거부를 사용자에게 notice(warn)로 알린다", nt and nt[0]["level"] == "warn" and pr[0]["req"] in nt[0]["text"], str(nt))
-check("거부 문구는 모델용(재시도 금지·보고)이고 S1 한계를 말한다", "deny" == rs[0]["outcome"] and (rs[0].get("message") or "") != "" and "S1" in (rs[0].get("message") or ""), str(rs[:1]))
-check("거부 뒤에도 턴이 끝나고(turn_result) 세션은 살아 있다", kinds(evs, "turn_result") and b.running and b.state == "idle", b.state)
+check("허용 경로: request_resolved(allow, user)·대기 표 비워짐·턴 정상 종료(백엔드 기대 불일치 없음)", rs and rs[0]["outcome"] == "allow" and rs[0]["by"] == "user" and b.pending_requests() == [] and kinds(evs, "turn_result") and kinds(evs, "turn_result")[0]["ok"] and b.state == "idle", f"{rs} {b.state}")
+check("허용 뒤 같은 요청에 다시 답하면 거부 사유 문자열(이중 응답 방지)", "이미 처리" in (b.allow(pr[0]["req"]) or ""))
 b.shutdown()
 
-# ---- 4. 질문 요청도 자동 거부
 b = bridge()
-b.start(TMP, "haiku", exe=scenario("main", 73, 103))
+b.start(TMP, "haiku", exe=scenario("perm", 54, 103))
+collect(b, lambda e: b.running)
+b.send(WRITE_DENY)
+evs = collect(b, lambda e: kinds(e, "permission_request"))
+pr = kinds(evs, "permission_request")
+check("거부 → deny+message 가 호스트에 간다", b.deny(pr[0]["req"], "이 폴더 밖은 안 된다") is None)
+evs = collect(b, lambda e: kinds(e, "turn_result"))
+rs = kinds(evs, "request_resolved")
+check("거부 경로: request_resolved(deny, user)·사용자 이유가 모델 문구에 그대로 들어간다·세션 유지", rs and rs[0]["outcome"] == "deny" and rs[0]["by"] == "user" and "이 폴더 밖은 안 된다" in (rs[0].get("message") or "") and kinds(evs, "turn_result") and b.running and b.state == "idle", str(rs[:1]))
+check("거부 문구에는 S1 한계 같은 낡은 말이 없다", "S1" not in (rs[0].get("message") or ""))
+b.shutdown()
+
+# 시간 초과: 시계를 주입해 30분을 건너뛴다. 정책 판정(decide_request)이 deny 이면 어댑터가 자동 거부하고 notice 로 알린다
+T = [1000.0]
+b = bridge(clock=lambda: T[0], poll=0.02)
+b.start(TMP, "haiku", exe=scenario("perm", 54, 103))
+collect(b, lambda e: b.running)
+b.send(WRITE_DENY)
+evs = collect(b, lambda e: kinds(e, "permission_request"))
+pr = kinds(evs, "permission_request")
+T[0] += 1799.0
+time.sleep(0.2)
+check("상한 1초 전(1799초)에는 아직 대기 중이고 남은 시간이 1초 안팎", len(b.pending_requests()) == 1 and 0 <= b.pending_requests()[0]["left"] <= 1.5, str(b.pending_requests()))
+T[0] += 2.0
+evs = collect(b, lambda e: kinds(e, "turn_result"))
+rs = kinds(evs, "request_resolved")
+check("시간 초과 경로: 1801초 뒤 자동 거부(request_resolved deny)·대기 표 비워짐·턴 종료(백엔드는 deny 응답을 받았다)", rs and rs[0]["outcome"] == "deny" and not b.pending_requests() and kinds(evs, "turn_result"), str([e["kind"] for e in evs]))
+check("시간 초과 문구는 모델용(30분·사용자 부재·보고)", "30분" in (rs[0].get("message") or "") and "보고" in (rs[0].get("message") or ""), str(rs[:1]))
+nt = [e for e in kinds(evs, "notice") if "자동 거부" in e.get("text", "")]
+check("자동 거부를 사용자에게 notice(warn)로 알린다", nt and nt[0]["level"] == "warn" and pr[0]["req"] in nt[0]["text"], str(nt))
+b.shutdown()
+
+# ---- 4. 질문(AskUserQuestion): 선택지를 보고 answers 로 답한다. 비어 있는 답은 보내지 않는다
+b = bridge()
+b.start(TMP, "haiku", exe=scenario("main", 73, 121, resp=QUESTION_RESP))
 collect(b, lambda e: b.running)
 b.send(ASK)
-evs = collect(b, lambda e: kinds(e, "request_resolved"))
+evs = collect(b, lambda e: kinds(e, "question_request"))
 q = kinds(evs, "question_request")
+time.sleep(0.2)
+pend = b.pending_requests()
+check("질문 요청이 대기 표에 질문 목록과 함께 남는다(자동 거부 없음)", q and len(pend) == 1 and pend[0]["kind"] == "question" and pend[0]["questions"][0]["options"][0]["label"] == "빨간색", str(pend))
+check("빈 답은 보내지 않는다", "비어" in (b.answer_question(q[0]["req"], {}) or "") and len(b.pending_requests()) == 1)
+qtext = q[0]["questions"][0]["question"]
+check("답하기 → updatedInput.answers 가 호스트에 간다", b.answer_question(q[0]["req"], {qtext: "빨간색"}) is None)
+evs = collect(b, lambda e: kinds(e, "turn_result"))
 rs = kinds(evs, "request_resolved")
-check("질문 요청이 오고 자동 거부된다", q and rs and rs[0]["outcome"] == "deny" and rs[0]["req"] == q[0]["req"], str([e["kind"] for e in evs]))
-check("질문 거부 notice 는 '질문' 으로 표시", any("질문" in e.get("text", "") and "자동 거부" in e.get("text", "") for e in kinds(evs, "notice")))
+check("질문 답 경로: request_resolved(answered, user)·턴 정상 종료(백엔드가 answers 를 확인했다)", rs and rs[0]["outcome"] == "answered" and rs[0]["by"] == "user" and kinds(evs, "turn_result") and kinds(evs, "turn_result")[0]["ok"] and not b.pending_requests(), f"{rs} {[e['kind'] for e in evs]}")
+b.shutdown()
+
+# ---- 4-2. 중단: 진행 중인 턴만 멈추고 세션은 산다 — 다음 지시가 정상 처리된다
+COUNT = rows("main")[121]["line"]["message"]["content"]
+b = bridge()
+b.start(TMP, "haiku", exe=scenario("main", 121, 163))
+collect(b, lambda e: b.running)
+check("턴이 없을 때 interrupt 는 거부 사유 문자열", "진행 중인 턴이 없다" in (b.interrupt() or ""))
+b.send(COUNT)
+collect(b, lambda e: kinds(e, "text_delta"))
+check("진행 중에는 interrupt 가 받아들여진다", b.interrupt() is None)
+evs = collect(b, lambda e: kinds(e, "turn_result"))
+tr = kinds(evs, "turn_result")
+check("중단 경로: 턴이 결과로 끝나고(ok 아님 — error_during_execution) 세션은 살아 있다", tr and tr[0]["ok"] is False and b.running and b.state == "idle", f"{tr[:1]} {b.state}")
+b.send("Reply with the single word: done.")
+evs = collect(b, lambda e: kinds(e, "turn_result"))
+check("중단 뒤 다음 지시가 정상 처리된다(ok)", kinds(evs, "turn_result") and kinds(evs, "turn_result")[0]["ok"] is True and b.state == "idle", str([e["kind"] for e in evs]))
+b.shutdown()
+
+# ---- 4-3. 요청 응답 중 세션이 끝나면 대기 표가 비워진다
+b = bridge()
+b.start(TMP, "haiku", exe=scenario("perm", 54, 103))
+collect(b, lambda e: b.running)
+b.send(WRITE_DENY)
+collect(b, lambda e: kinds(e, "permission_request"))
+check("(준비) 요청 대기 중", len(b.pending_requests()) == 1)
+b.close()
+collect(b, lambda e: kinds(e, "session_ended"))
+check("세션이 끝나면 대기 표가 비고, 이후 응답은 거부 사유 문자열", b.pending_requests() == [] and (b.allow("x") or "") != "", str(b.pending_requests()))
 b.shutdown()
 
 # ---- 5. 거부 사유(예외가 아니라 문자열 — 화면이 flash 로 보여 준다)

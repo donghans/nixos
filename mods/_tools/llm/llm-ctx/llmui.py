@@ -12,7 +12,7 @@
   6 지침   프로젝트별 지침(공유 정본 project_instructions)을 모든 저장소에 대해 보고 고친다 — 로컬 캐시 없이 DB 만 대상   (Enter: 본문 · e: 편집기)
   8 카드   결정 카드(ctx note cards/*) — Space 체크 · Enter 상세(근거 원문 대조·이력·승격) · 체크하면 하단에서 쟁점을 적고 확인 → `/donghans-card` 논의 세션 시작. 제한 모드에서는 읽기만
   9 호스트 세션 호스트(llm-trust 11) — 처음엔 이벤트 녹화본을 그리기만 하고, F2 로 세션을 시작하면 실시간으로 텍스트 스트림·도구 호출·결과·비용을 보여 준다(F3 닫기 · F4 지시 입력 · Enter 보내기).
-         S1: 권한·질문 요청은 자동 거부(응답 화면은 S2). llm-host 는 소스 트리에서 찾는다(배포본은 LLMUI_HOST_DIR). 제한 모드에서는 안내문만(세션 시작·전송 막힘)
+         S2: 권한·질문 요청은 대화상자로 답한다(y 허용·n 거부·숫자 선택·Esc 나중에·F6 다시 열기·F7 턴 중단; 30분 넘기면 자동 거부). llm-host 는 소스 트리에서 찾는다(배포본은 LLMUI_HOST_DIR). 제한 모드에서는 안내문만(세션 시작·전송 막힘)
   7 세션   claude 가 도는 tmux 세션 목록·화면 미리보기 — Enter 붙기 · F2 새 세션 · F3 붙은 곳 떼기 · Delete 정리 (ssh·다른 터미널에서도 같은 세션). 제한 모드에서는 목록만 보인다
 
 원문(DB)은 바꾸지 않는다. 화면의 치환(F10)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. TTY 가 없으면 실행하지 않는다.
@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -466,6 +467,171 @@ class SessionScreen(ModalScreen):
         self.load()
 
 
+class HostRequestScreen(ModalScreen):
+    """9 호스트 탭(S2)의 권한·질문 응답 대화상자. 호스트가 낸 can_use_tool 요청 하나를 보여 주고 사람이 답한다(사용자가 제한 모드면 열리지 않는다).
+    권한: y 허용 · n 거부 · r 거부 이유 적기(Enter 로 거부) · Esc 나중에(요청은 그대로 대기, F6 으로 다시 연다).
+    질문(AskUserQuestion): 숫자 키로 선택지(다중 선택은 토글 후 Enter) · o 직접 입력(Enter) · n 거부 · Esc 나중에.
+    남은 시간(응답 대기 상한까지)을 보여 준다. 사용자가 직접 해야 하는 것(sudo 비밀번호·skip-permissions 승인)은 이 화면이 받지 않는다 — 안내만(D-6)."""
+    BINDINGS = [Binding("y", "allow", "허용"), Binding("n", "deny", "거부"), Binding("r", "reason", "거부 이유"), Binding("o", "other", "직접 입력"),
+                Binding("enter", "confirm", "선택 확정"), Binding("escape", "defer", "나중에"),
+                *[Binding(str(i), f"pick({i})", show=False) for i in range(1, 10)]]
+    AUTO_FOCUS = ""          # 입력창에 자동 포커스하지 않는다(y·n 같은 글자 키가 입력창에 들어가 버린다)
+    GUIDE = "sudo 비밀번호·skip-permissions(권한 검사 끄기) 승인은 이 화면이 받지 않는다 — 터미널에서 직접 하라."
+
+    def __init__(self, bridge, req: str):
+        super().__init__()
+        self.bridge, self.req = bridge, req
+        self.answers: dict = {}
+        self.qi = 0
+        self.multi: set = set()
+        self.closed = False
+
+    def entry(self):
+        for r in self.bridge.pending_requests():
+            if r["req"] == self.req:
+                return r
+        return None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Static("", id="dialog-title")
+            yield Static("", id="req-body")
+            yield Static("", id="req-left")
+            yield Input(placeholder="", id="req-input")
+            yield Static("", id="dialog-hint")
+
+    def on_mount(self):
+        self.mk = self.app.masker()          # 한 번만 읽는다(비밀 치환; 갱신마다 DB 를 읽지 않는다)
+        self.set_interval(0.5, self.refresh_view)
+        self.refresh_view()
+
+    @staticmethod
+    def fmt_left(sec: float) -> str:
+        sec = int(max(0, sec))
+        return f"{sec // 60}:{sec % 60:02d}"
+
+    def refresh_view(self):
+        if self.closed:
+            return
+        e = self.entry()
+        if e is None:                                   # 시간 초과·턴 종료·세션 종료로 이미 처리됨
+            self.closed = True
+            self.app.host_request_gone(self.req)
+            self.dismiss("gone")
+            return
+        mk = self.mk
+        title, body, hint = self.query_one("#dialog-title", Static), self.query_one("#req-body", Static), self.query_one("#dialog-hint", Static)
+        inp = self.query_one("#req-input", Input)
+        t = Text()
+        if e["kind"] == "question":
+            qs = e["questions"]
+            q = qs[self.qi] if self.qi < len(qs) else {}
+            title.update(f"질문 {self.qi + 1}/{len(qs)} — {mk.text(str(q.get('header') or ''))}  [{e['req'][:8]}]")
+            t.append(mk.text(str(q.get("question") or "")) + "\n", style="bold")
+            multi = bool(q.get("multiSelect"))
+            for i, o in enumerate(q.get("options") or [], 1):
+                mark = "[x]" if multi and o.get("label") in self.multi else "[ ]" if multi else f"{i}."
+                t.append(f"  {i} {mark} {mk.text(str(o.get('label')))}  — {mk.text(str(o.get('description') or ''))}\n")
+            for k, v in self.answers.items():
+                t.append(f"  ✓ {mk.text(k)} → {mk.text(str(v))}\n", style="#7fbf7f")
+            inp.placeholder = "목록에 없는 답을 직접 입력 — o 로 이동, Enter"
+            hint.update(("숫자 키 선택 · Enter 확정(다중 선택) · " if multi else "숫자 키 선택 · ") + "o 직접 입력 · n 거부(답하지 않음) · Esc 나중에")
+        else:
+            risky = hv.is_risky(e["tool"])
+            title.update(f"권한 요청 — {e['tool']}{'  [위험]' if risky else ''}  [{e['req'][:8]}]")
+            if e.get("description"):
+                t.append(mk.text(str(e["description"])) + "\n", style="bold")
+            try:
+                raw = json.dumps(e["input"], ensure_ascii=False, indent=1) if not isinstance(e["input"], str) else e["input"]
+            except Exception:
+                raw = str(e["input"])
+            t.append(mk.text(raw if len(raw) <= 1500 else raw[:1500] + "\n… (잘림)") + "\n", style="#b8a46a" if risky else "#e0e0e0")
+            if "sudo" in raw:
+                t.append("\n※ 명령에 sudo 가 있다. 비밀번호는 이 화면이 받지 않는다 — 허용해도 터미널에서 먼저 인증해 두어야 한다.\n", style="#e0a050")
+            inp.placeholder = "거부 이유(선택, 모델에게 그대로 전달됨) — r 로 이동, Enter=거부"
+            hint.update("y 허용 · n 거부 · r 이유 적고 거부 · Esc 나중에   " + self.GUIDE)
+        body.update(t)
+        self.query_one("#req-left", Static).update(Text(f"남은 응답 시간 {self.fmt_left(e['left'])} — 0 이 되면 자동 거부(모델에게 사용자 부재로 알림)", style="#e0a050" if e["left"] < 300 else "#8a8a8a"))
+
+    def done(self, how: str):
+        self.closed = True
+        self.dismiss(how)
+
+    def action_allow(self):
+        e = self.entry()
+        if e is None or e["kind"] != "permission":
+            return
+        if self.app.host_allow(self.req):
+            self.done("allow")
+
+    def action_deny(self):
+        if self.entry() is not None and self.app.host_deny(self.req, ""):
+            self.done("deny")
+
+    def action_reason(self):
+        self.query_one("#req-input", Input).focus()
+
+    action_other = action_reason
+
+    def action_defer(self):
+        self.done("defer")
+
+    def on_input_submitted(self, ev: Input.Submitted):
+        e = self.entry()
+        if e is None:
+            return
+        if e["kind"] == "question":
+            if ev.value.strip():
+                self.set_answer(e, ev.value.strip())
+            return
+        if self.app.host_deny(self.req, ev.value):
+            self.done("deny")
+
+    def cur_q(self, e):
+        qs = e["questions"]
+        return qs[self.qi] if self.qi < len(qs) else None
+
+    def set_answer(self, e, value: str):
+        q = self.cur_q(e)
+        if q is None:
+            return
+        self.answers[str(q.get("question"))] = value
+        self.multi = set()
+        self.qi += 1
+        self.query_one("#req-input", Input).value = ""
+        self.set_focus(None)
+        if self.qi >= len(e["questions"]):
+            if self.app.host_answer_question(self.req, dict(self.answers)):
+                self.done("answered")
+            else:
+                self.qi, self.answers = 0, {}
+        self.refresh_view()
+
+    def action_pick(self, n: int):
+        e = self.entry()
+        if e is None or e["kind"] != "question":
+            return
+        q = self.cur_q(e)
+        opts = (q or {}).get("options") or []
+        if not (1 <= n <= len(opts)):
+            return
+        label = str(opts[n - 1].get("label"))
+        if q.get("multiSelect"):
+            self.multi ^= {label}
+            self.refresh_view()
+        else:
+            self.set_answer(e, label)
+
+    def action_confirm(self):
+        e = self.entry()
+        if e is None or e["kind"] != "question":
+            return
+        q = self.cur_q(e)
+        if q is not None and q.get("multiSelect") and self.multi:
+            order = [str(o.get("label")) for o in q.get("options") or [] if str(o.get("label")) in self.multi]
+            self.set_answer(e, ", ".join(order))
+
+
 class InstrScreen(ModalScreen):
     """지침 한 건의 본문(공유 정본 그대로 — 로컬 캐시 아님). `## ` 절 목록을 위에, 본문을 아래에 보인다. F2 편집 · F10 치환 켬/끔."""
     BINDINGS = [Binding("escape", "close", "닫기"), Binding("f2", "edit", "편집기로 고치기"), Binding("f10", "toggle_mask", "치환 켬/끔")]
@@ -514,7 +680,7 @@ class InstrScreen(ModalScreen):
 class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
     TITLE = "llmui — LLM 컨텍스트·세션 관리"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
-        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침) · 7 세션(claude 가 도는 tmux 세션 — 붙기·새 세션·정리, DB 없이도 `llmui --sessions` 로 이 탭만 단독 실행) · 8 카드(결정 카드 — Space 체크, Enter 상세·근거 대조·이력(h)·승격(F2, 사람만), 체크하면 하단에서 논의 세션 시작. F2/F3 상태·범위 필터) · 9 호스트(세션 호스트 — 처음엔 녹화본, F2 로 실제 세션 시작 후 텍스트 스트림·결과·비용 실시간 표시, F4/Enter 로 지시 전송, F3 닫기. 권한·질문은 아직 자동 거부. 제한 모드에서는 안내문만)'),
+        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침) · 7 세션(claude 가 도는 tmux 세션 — 붙기·새 세션·정리, DB 없이도 `llmui --sessions` 로 이 탭만 단독 실행) · 8 카드(결정 카드 — Space 체크, Enter 상세·근거 대조·이력(h)·승격(F2, 사람만), 체크하면 하단에서 논의 세션 시작. F2/F3 상태·범위 필터) · 9 호스트(세션 호스트 — 처음엔 녹화본, F2 로 실제 세션 시작 후 텍스트 스트림·결과·비용 실시간 표시, F4/Enter 로 지시 전송, F3 닫기. 권한·질문은 대화상자로 답하고(F6 다시 열기) F7 로 턴 중단. 제한 모드에서는 안내문만)'),
         *[t for t in ls.SESSIONS_HELP_TERMS if t[0] != '제한 모드'],
         ('치환(F10)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
         ('제한 모드', 'LLM 세션이 실행하면: 모든 탭을 볼 수 있지만 화면의 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(키 형식·password=·한글 비밀번호)이 [protected] 로 치환되고(끌 수 없음), 후보 미리보기도 [protected](N자)로 가려지며, 값 보기(F4)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용된다'),
@@ -585,6 +751,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         Binding("delete", "secret_delete", "삭제"), Binding("f2", "cand_ignore", "무시"), Binding("f2", "instr_edit", "지침 편집"),
         Binding("f2", "card_state_cycle", "상태 필터"), Binding("f3", "card_scope_cycle", "범위 필터"), Binding("f2", "sess_new", "새 세션"), Binding("f3", "sess_detach", "붙은 곳 떼기"), Binding("delete", "sess_kill", "정리(종료)"),
         Binding("f2", "host_start", "새 호스트 세션"), Binding("f3", "host_close", "세션 닫기"), Binding("f4", "host_input", "지시 입력"),
+        Binding("f6", "host_answer", "응답 대기 요청"), Binding("f7", "host_interrupt", "턴 중단"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
@@ -614,6 +781,8 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         self.host_bridge_factory = lambda: hc.HostBridge(log_root=os.environ.get("LLMUI_HOST_LOG_ROOT") or hc.DEFAULT_LOG)
         self.host_start_kwargs: dict = {}              # 시험용 주입(exe·extra_spec)
         self.host_events: list = []                    # 실시간 세션의 이벤트(dict) — 시작할 때 비운다
+        self.host_deferred: set = set()                # 사용자가 「나중에」 로 미룬 요청(자동으로 다시 열지 않는다)
+        self.host_notified: set = set()                # 다른 탭에 있을 때 알린 요청
         self.host_live = False                         # 한 번이라도 세션을 시작했으면 녹화본 대신 실시간 화면
 
     # --- 구성
@@ -791,7 +960,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
                    "toggle_role": {"search"}, "toggle_regex": {"search"}, "toggle_tools": {"search"}, "toggle_title_only": {"search"}, "expand_all": {"search"},
                    "secret_add": {"secrets"}, "secret_toggle": {"secrets"}, "secret_delete": {"secrets"}, "reveal": {"secrets", "cands"}, "cand_ignore": {"cands"}, "instr_edit": {"instr"},
                    **lc.CardsMixin.CARD_ACTIONS, "sess_new": {"sessions"}, "sess_detach": {"sessions"}, "sess_kill": {"sessions"},
-                   "host_start": {"host"}, "host_close": {"host"}, "host_input": {"host"}}
+                   "host_start": {"host"}, "host_close": {"host"}, "host_input": {"host"}, "host_answer": {"host"}, "host_interrupt": {"host"}}
 
     def check_action(self, action, parameters):
         """탭 전용 동작은 그 탭에서만 켠다(같은 F키를 탭마다 다른 동작에 재사용). 제한 모드에서는 막힌 동작(치환 끄기·값 보기·비밀 추가/삭제/끄기·후보 무시)을 푸터·도움말에서 숨긴다(눌러도 deny 가 막는다)."""
@@ -920,7 +1089,8 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         sm = hv.summarize(self.host_events)
         at_end = sc.scroll_y >= sc.max_scroll_y - 1
         head.update(Text(f"실시간 세션 {b.session_label or '-'}  ·  상태 {b.state}  ·  턴 {sm['turns']}  ·  도구 호출 {sm['tool_calls']}  ·  알 수 없는 줄(raw) {sm['raw']}  ·  누적 비용 {hv._money(b.cost_total)}"
-                         f"   [F2 새 세션 · F3 닫기 · F4 지시 입력 · 권한·질문은 S1 에서 자동 거부]" if b else "", style="#9a9a9a"))
+                         f"  ·  응답 대기 {len(b.pending_requests())}건"
+                         f"   [F2 새 세션 · F3 닫기 · F4 지시 입력 · F6 응답 대기 요청 · F7 턴 중단]" if b else "", style="#9a9a9a"))
         mk = self.masker()
         t = Text()
         for style, line in hv.render_events(self.host_events):
@@ -932,7 +1102,11 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
     def _host_tick(self):
         """실시간 세션 이벤트를 가져와 다시 그린다(탭이 보일 때만 그리고, 안 보이면 이벤트는 호스트 어댑터에 쌓아 둔다)."""
         b = self.host_bridge
-        if b is None or self.restricted or self.current_tab() != "host" or len(self.screen_stack) != 1:
+        if b is None or self.restricted:
+            return
+        if len(self.screen_stack) == 1:
+            self.host_check_requests()
+        if self.current_tab() != "host" or len(self.screen_stack) != 1:
             return
         try:
             new = b.drain()
@@ -1015,6 +1189,77 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         inp.value = ""
         self.host_live = True
         self.render_host_live()
+
+    def host_check_requests(self):
+        """응답을 기다리는 요청이 있으면 대화상자를 연다(호스트 탭을 보고 있을 때). 다른 탭이면 한 번 알린다. 「나중에」 로 미룬 것은 F6 으로만 다시 연다."""
+        b = self.host_bridge
+        pend = b.pending_requests()
+        ids = {r["req"] for r in pend}
+        self.host_deferred &= ids
+        self.host_notified &= ids
+        for r in pend:
+            if self.current_tab() != "host":
+                if r["req"] not in self.host_notified:
+                    self.host_notified.add(r["req"])
+                    self.flash(f"호스트 세션이 {'질문' if r['kind'] == 'question' else '권한 요청(' + r['tool'] + ')'} 에 대한 응답을 기다린다 — 9 호스트 탭에서 답하라", "warning")
+            elif r["req"] not in self.host_deferred and len(self.screen_stack) == 1:
+                self.host_open_request(r["req"])
+                return
+
+    def host_open_request(self, req: str):
+        if self.deny("호스트 요청 응답"):
+            return
+        b = self.host_bridge
+        if b is None or req not in {r["req"] for r in b.pending_requests()}:
+            return
+
+        def closed(how):
+            if how == "defer":
+                self.host_deferred.add(req)
+        self.push_screen(HostRequestScreen(b, req), closed)
+
+    def host_request_gone(self, req: str):
+        self.flash("요청이 이미 처리됐다(시간 초과 자동 거부·턴 종료·세션 종료)", "warning")
+
+    def action_host_answer(self):
+        if self.deny("호스트 요청 응답"):
+            return
+        b = self.host_bridge
+        pend = b.pending_requests() if b is not None else []
+        if not pend:
+            self.flash("응답을 기다리는 요청이 없다", "warning")
+            return
+        if len(self.screen_stack) != 1:
+            return
+        self.host_deferred.discard(pend[0]["req"])
+        self.host_open_request(pend[0]["req"])
+
+    def _host_reply(self, what: str, fn) -> bool:
+        if self.deny(what):
+            return False
+        err = fn() if self.host_bridge is not None else "실행 중인 세션이 없다"
+        if err:
+            self.flash(err, "warning")
+            return False
+        return True
+
+    def host_allow(self, req: str) -> bool:
+        return self._host_reply("호스트 권한 허용", lambda: self.host_bridge.allow(req))
+
+    def host_deny(self, req: str, reason: str) -> bool:
+        return self._host_reply("호스트 권한 거부", lambda: self.host_bridge.deny(req, reason))
+
+    def host_answer_question(self, req: str, answers: dict) -> bool:
+        return self._host_reply("호스트 질문 답", lambda: self.host_bridge.answer_question(req, answers))
+
+    def action_host_interrupt(self):
+        if self.deny("호스트 턴 중단"):
+            return
+        if self.current_tab() != "host" or len(self.screen_stack) != 1:
+            return
+        b = self.host_bridge
+        err = b.interrupt() if b is not None else "실행 중인 호스트 세션이 없다"
+        self.flash(err or "현재 턴을 중단한다(세션은 유지)", "warning" if err else "information")
 
     def host_shutdown(self):
         b, self.host_bridge = self.host_bridge, None

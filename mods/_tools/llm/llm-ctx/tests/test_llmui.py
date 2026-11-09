@@ -1033,6 +1033,177 @@ def _alive(pid):
 
 
 
+async def run_host_s2():
+    """9 호스트 탭(S2): 권한·질문 대화상자(허용·거부·이유·시간 초과·나중에·질문 선택)와 턴 중단. 가짜 백엔드(녹화본 시나리오)만 쓴다(비용 0).
+    시간 초과는 시계 주입(HostBridge(clock=…))으로 30분을 건너뛴다. 제한 모드에서는 어떤 경로로도 응답이 호스트에 가지 않는다."""
+    import json as _j, tempfile as _t
+    import llmhost_ctl as hc
+    hd = hc.find_host_dir()
+    if not hd:
+        print("llm-host 가 없어 호스트 S2 시험을 건너뜀"); return
+    fxd = os.path.join(hd, "tests", "fixtures")
+    R = lambda n: [_j.loads(l) for l in open(os.path.join(fxd, n + ".jsonl"), encoding="utf-8") if l.strip()]
+    perm, main = R("perm"), R("main")
+    tmp = _t.mkdtemp(prefix="llmui-s2-")
+    dump = lambda o: _j.dumps(o, ensure_ascii=False, separators=(",", ":"))
+
+    def scen(rows_, a, b, resp=None, name="sc"):
+        steps = []
+        for e in rows_[a:b]:
+            ln = e["line"]
+            if e["dir"] == "in":
+                if ln.get("type") == "control_response":
+                    steps.append({"expect": {"control_response": resp or {"behavior": "deny"}}})
+                elif ln.get("type") == "control_request":
+                    steps.append({"expect": {"control_request": {"subtype": ln["request"]["subtype"]}}})
+                else:
+                    steps.append({"expect": {"stdin_type": "user", "line": dump(ln)}})
+            elif steps and "emit" in steps[-1]:
+                steps[-1]["emit"].append(ln)
+            else:
+                steps.append({"emit": [ln]})
+        pth = os.path.join(tmp, f"{name}{len(os.listdir(tmp))}.jsonl")
+        open(pth, "w", encoding="utf-8").write("\n".join(dump(x) for x in steps) + "\n")
+        return [sys.executable, os.path.join(hd, "fake_claude.py"), pth, "--timeout", "90"]
+
+    T = [5000.0]
+
+    async def session(app, pilot, exe):
+        app.host_bridge_factory = lambda: hc.HostBridge(log_root=None, use_launcher=False, clock=lambda: T[0], poll=0.05)
+        app.host_start_kwargs = {"exe": exe}
+        app.host_begin(tmp, "haiku")
+        await settle(pilot, lambda: app.host_bridge.running)
+
+    def finish_session(app):
+        b = app.host_bridge
+        if b is not None:
+            b.close()
+
+    app = llmui.LlmUI()
+    ALLOW = perm[24]["line"]["response"]["response"]
+    pids = []
+    try:
+        async with app.run_test(size=(160, 50)) as pilot:
+            await settle(pilot, lambda: rows(app, "#projects") == 3)
+            await pilot.press("9"); await settle(pilot, lambda: app.current_tab() == "host")
+            check("S2: 응답·중단 동작은 호스트 탭에서만 켜진다(F6·F7)", app.check_action("host_answer", ()) is True and app.check_action("host_interrupt", ()) is True)
+            # ---- 허용
+            await session(app, pilot, scen(perm, 0, 54, resp=ALLOW))
+            pids.append(app.host_bridge.child_pids()[0])
+            app.host_bridge.send(perm[0]["line"]["message"]["content"])
+            await settle(pilot, lambda: isinstance(app.screen, llmui.HostRequestScreen))
+            scr = app.screen
+            body, title, left, hint = txt(scr.query_one("#req-body")), txt(scr.query_one("#dialog-title")), txt(scr.query_one("#req-left")), txt(scr.query_one("#dialog-hint"))
+            check("S2: 권한 요청이 오면 대화상자가 저절로 열리고 도구 이름과 [위험] 표시(도구 이름 기준)", "권한 요청 — Write" in title and "[위험]" in title, title)
+            check("S2: 도구 입력(경로·내용)이 보인다", "s0-allow.txt" in body, body[:200])
+            check("S2: 남은 응답 시간 30:00 부근을 보여 준다", "남은 응답 시간 29:5" in left or "남은 응답 시간 30:00" in left, left)
+            check("S2: sudo 비밀번호·skip-permissions 는 받지 않는다는 안내(D-6)", "sudo 비밀번호" in hint and "skip-permissions" in hint and "터미널" in hint, hint)
+            check("S2: 대기 중 머리줄 상태 waiting", "상태 waiting" in txt(app.query_one("#host-head")) or app.host_bridge.state == "waiting", app.host_bridge.state)
+            await pilot.press("y")
+            await settle(pilot, lambda: len(app.screen_stack) == 1)
+            await settle(pilot, lambda: "✔ 결과 성공" in txt(app.query_one("#host-body")), timeout=6.0)
+            ev = [e for e in app.host_events]
+            body = txt(app.query_one("#host-body"))
+            check("S2: y → 허용이 호스트에 가서 턴이 끝난다(백엔드가 allow+updatedInput 을 확인)", app.host_bridge.pending_requests() == [] and "✔ 결과 성공" in body and app.host_bridge.state == "idle", f"{app.host_bridge.state}")
+            finish_session(app)
+            await settle(pilot, lambda: not app.host_bridge.running)
+
+            # ---- 거부 + 이유
+            await session(app, pilot, scen(perm, 54, 103))
+            pids.append(app.host_bridge.child_pids()[0])
+            app.host_bridge.send(perm[54]["line"]["message"]["content"])
+            await settle(pilot, lambda: isinstance(app.screen, llmui.HostRequestScreen))
+            await pilot.press("r"); await pilot.pause(0.2)
+            check("S2: r 이 거부 이유 입력창으로 포커스를 옮긴다", app.screen.query_one("#req-input").has_focus)
+            app.screen.query_one("#req-input").value = "이 폴더 밖은 안 된다"; await pilot.pause(0.1); await pilot.press("enter")
+            await settle(pilot, lambda: len(app.screen_stack) == 1)
+            await settle(pilot, lambda: any(e.get("kind") == "request_resolved" for e in app.host_events) or app.host_bridge.state == "idle", timeout=6.0)
+            await settle(pilot, lambda: any(e.get("kind") == "turn_result" for e in app.host_events), timeout=6.0)
+            rs = [e for e in app.host_events if e.get("kind") == "request_resolved"]
+            check("S2: 이유를 적고 Enter → deny, 이유가 모델 문구에 그대로 간다(by=user)", rs and rs[0]["outcome"] == "deny" and rs[0]["by"] == "user" and "이 폴더 밖은 안 된다" in (rs[0].get("message") or ""), str(rs))
+            finish_session(app)
+            await settle(pilot, lambda: not app.host_bridge.running)
+
+            # ---- 나중에(Esc) → 자동으로 다시 열지 않고 F6 으로 연다
+            await session(app, pilot, scen(perm, 54, 103))
+            pids.append(app.host_bridge.child_pids()[0])
+            app.host_bridge.send(perm[54]["line"]["message"]["content"])
+            await settle(pilot, lambda: isinstance(app.screen, llmui.HostRequestScreen))
+            await pilot.press("escape"); await settle(pilot, lambda: len(app.screen_stack) == 1)
+            await pilot.pause(0.8)
+            check("S2: Esc(나중에)는 요청을 그대로 두고 대화상자를 자동으로 다시 열지 않는다", len(app.screen_stack) == 1 and len(app.host_bridge.pending_requests()) == 1, str(len(app.screen_stack)))
+            check("S2: 머리줄에 응답 대기 1건·F6 안내", "응답 대기 1건" in txt(app.query_one("#host-head")) and "F6" in txt(app.query_one("#host-head")))
+            await pilot.press("f6"); await settle(pilot, lambda: isinstance(app.screen, llmui.HostRequestScreen))
+            check("S2: F6 이 미룬 요청 대화상자를 다시 연다", isinstance(app.screen, llmui.HostRequestScreen))
+            # ---- 시간 초과: 대화상자가 열린 채로 30분이 지난다
+            left0 = txt(app.screen.query_one("#req-left"))
+            T[0] += 600.0
+            await settle(pilot, lambda: "남은 응답 시간 20:" in txt(app.screen.query_one("#req-left")) if isinstance(app.screen, llmui.HostRequestScreen) else True, timeout=3.0)
+            check("S2: 시간이 지나면 남은 시간이 줄어든다(600초 뒤 20분대)", isinstance(app.screen, llmui.HostRequestScreen) and "남은 응답 시간 20:" in txt(app.screen.query_one("#req-left")), txt(app.screen.query_one("#req-left")))
+            T[0] += 1300.0
+            await settle(pilot, lambda: len(app.screen_stack) == 1, timeout=4.0)
+            await settle(pilot, lambda: any(e.get("kind") == "turn_result" for e in app.host_events), timeout=6.0)
+            rs = [e for e in app.host_events if e.get("kind") == "request_resolved"]
+            check("S2: 30분 넘기면 대화상자가 닫히고 자동 거부(by 는 호스트 기록상 user 라도 문구는 시간 초과)", len(app.screen_stack) == 1 and rs and rs[0]["outcome"] == "deny" and "30분" in (rs[0].get("message") or ""), str(rs))
+            check("S2: 자동 거부 notice 가 화면에 보인다", "자동 거부했다" in txt(app.query_one("#host-body")), txt(app.query_one("#host-body"))[-300:])
+            finish_session(app)
+            await settle(pilot, lambda: not app.host_bridge.running)
+
+            # ---- 질문
+            QR = main[103]["line"]["response"]["response"]
+            await session(app, pilot, scen(main, 73, 121, resp=QR))
+            pids.append(app.host_bridge.child_pids()[0])
+            app.host_bridge.send(main[73]["line"]["message"]["content"])
+            await settle(pilot, lambda: isinstance(app.screen, llmui.HostRequestScreen))
+            title, body = txt(app.screen.query_one("#dialog-title")), txt(app.screen.query_one("#req-body"))
+            check("S2: 질문 대화상자 — 머리글·질문·번호 붙은 선택지", "질문 1/1" in title and "색상 선호" in title and "빨간색과 파란색" in body and "1 " in body and "파란색" in body, f"{title} | {body}")
+            await pilot.press("1")
+            await settle(pilot, lambda: len(app.screen_stack) == 1)
+            await settle(pilot, lambda: any(e.get("kind") == "turn_result" for e in app.host_events), timeout=6.0)
+            tr = [e for e in app.host_events if e.get("kind") == "turn_result"]
+            check("S2: 숫자 키 1 → updatedInput.answers 로 답이 가고 턴이 정상 종료(백엔드가 answers 를 확인)", tr and tr[0]["ok"] and not app.host_bridge.pending_requests(), str(tr[:1]))
+            finish_session(app)
+            await settle(pilot, lambda: not app.host_bridge.running)
+
+            # ---- 중단(F7)
+            await session(app, pilot, scen(main, 121, 163))
+            pids.append(app.host_bridge.child_pids()[0])
+            await pilot.press("f7"); await pilot.pause(0.2)
+            check("S2: 진행 중인 턴이 없으면 F7 은 아무것도 보내지 않는다", app.host_bridge.state == "idle")
+            app.host_bridge.send(main[121]["line"]["message"]["content"])
+            await settle(pilot, lambda: any(e.get("kind") == "text_delta" for e in app.host_events) or (app.host_bridge.drain() and False), timeout=3.0)
+            await pilot.pause(0.5)
+            await pilot.press("f7")
+            await settle(pilot, lambda: any(e.get("kind") == "turn_result" for e in app.host_events), timeout=6.0)
+            tr = [e for e in app.host_events if e.get("kind") == "turn_result"]
+            check("S2: F7 → 진행 중인 턴이 중단되고(ok 아님) 세션은 살아 있다", tr and tr[0]["ok"] is False and app.host_bridge.running and app.host_bridge.state == "idle", f"{tr[:1]} {app.host_bridge.state}")
+            finish_session(app)
+            await settle(pilot, lambda: not app.host_bridge.running)
+        await asyncio.sleep(0.3)
+        check("S2: 앱 종료 뒤 자식 프로세스 0개", pids and all(not _alive(x) for x in pids), str(pids))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- 제한 모드(H-4): 응답·허용 동작 전부 비활성 — 호스트로 아무것도 가지 않는다
+    class Boom:
+        calls = []
+        def pending_requests(self):
+            return [{"req": "r1", "kind": "permission", "tool": "Bash", "input": {"command": "ls"}, "description": None, "questions": [], "left": 100.0, "event": {}}]
+        def __getattr__(self, n):
+            def f(*a, **k):
+                Boom.calls.append(n); return None
+            return f
+    rapp = llmui.LlmUI(restricted=True)
+    rapp.host_bridge = Boom()
+    async with rapp.run_test(size=(160, 50)) as pilot:
+        await pilot.press("9"); await pilot.pause(0.3)
+        check("S2(제한): 응답·중단 동작은 푸터에서 숨김", rapp.check_action("host_answer", ()) is False and rapp.check_action("host_interrupt", ()) is False)
+        r1 = [rapp.host_allow("r1"), rapp.host_deny("r1", "x"), rapp.host_answer_question("r1", {"q": "a"})]
+        rapp.host_open_request("r1"); rapp.action_host_answer(); rapp.action_host_interrupt(); rapp._host_tick(); await pilot.pause(0.6)
+        check("S2(제한): 허용·거부·답·열기·중단을 직접 불러도 호스트 호출 0·대화상자 없음", r1 == [False, False, False] and Boom.calls == [] and len(rapp.screen_stack) == 1, f"{r1} {Boom.calls}")
+    rapp.host_bridge = None
+
+
 def check_launch_prompt():
     import llmcards as lcd
     check("초기 프롬프트: 슬래시로 시작, 카드 여러 장과 쟁점(줄바꿈은 공백)", lcd.launch_prompt(["a:11111111", "b:22222222"], "첫째\n  둘째") == "/donghans-card a:11111111 b:22222222 첫째 둘째")
@@ -1059,6 +1230,7 @@ try:
     asyncio.run(run_cards_tab())
     asyncio.run(run_host_tab())
     asyncio.run(run_host_live())
+    asyncio.run(run_host_s2())
     check_sessions_only_no_db()
 finally:
     pg.stop()
