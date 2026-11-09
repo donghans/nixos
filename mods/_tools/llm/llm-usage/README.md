@@ -69,3 +69,7 @@ PATH 문제를 지침 문구로 우회하는 대신 도구 자체를 **스킬로
 - 인수인계 문서의 "이 호스트에 없다" 문장은 **틀렸을 가능성**이 높다(§3-1). 재확인 없이 따르지 말 것. 확인은 `ls -la ~/.local/bin`.
 - 시작 직후 알림이 쏟아져도 놀라지 말고 사용량 스냅샷과 대조할 것(§3-3).
 - 이 조사 과정에서 "새 터미널에 키를 보내 확인"한 시도가 있었다(자동 모드가 한 번 막았고, 사용자 지시로 한 번 허용). 같은 방식은 권하지 않는다 — 설정 파일을 읽거나 사용자가 직접 새 터미널에서 `echo $PATH` 를 보는 편이 안전하다.
+
+## 7. 스킬 `donghans-limit-watch` 의 시험(2026-11-09 추가)
+- 시험 `tests/test_limitwatch.py`: 합성 `limits.jsonl` 로 `limitwatch.py` 의 `calibrate`(창 필터·플랜별 분리·비용 감소·`--write` 기준·고정값)·`estimate`(식·판정 경계·다른 세션 합산·못 쟀음·기록에 숫자만)·`review`·`status` 를 확인한다. `mods/_tools/run-tests.sh` 의 `limitwatch` 묶음.
+- 스킬 소스는 `mods/_data/claude-skills/donghans-limit-watch/`(설계 근거는 ctx 계획 `plan/llm-trust/05-p3-limit-predict`).
