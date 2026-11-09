@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 import events as E
+import policy as P
 import recorder as R
 from session import Session
 
@@ -47,6 +48,13 @@ class DuplicateSession(HostError):
 
 class HostClosed(HostError):
     pass
+
+
+class StartRefused(HostError):
+    """policy.check_start 가 시작을 거부했다(예: 샌드박스 밖에서 skip-permissions 계열). reasons 에 사유 목록."""
+    def __init__(self, reasons):
+        super().__init__("; ".join(reasons))
+        self.reasons = list(reasons)
 
 
 def proc_starttime(pid: int) -> Optional[int]:
@@ -234,6 +242,9 @@ class SessionHost:
         if self._closed:
             raise HostClosed("호스트가 닫혔다")
         spec = dict(spec or {})
+        reasons = P.check_start(spec)                 # 어떤 상태도 바꾸기 전에 정책부터(bypass 계열은 샌드박스·명시 허용일 때만)
+        if reasons:
+            raise StartRefused(reasons)
         if self.active >= self.max_sessions:
             raise HostFull(f"동시 세션 상한 {self.max_sessions} 에 도달")
         resume = spec.get("resume")

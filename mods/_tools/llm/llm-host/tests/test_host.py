@@ -84,6 +84,22 @@ async def t_basic():
     return h, a, b, c, reg_live, full, active_before, closed_refuse
 h, a, b, c, reg_live, full, active_before, closed_refuse = run(t_basic())
 check("동시 상한: 2개 뒤 세 번째는 HostFull, 하나 끝나면 다시 시작 가능", full and active_before == 2 and c.end_reason == "closed")
+async def t_refuse():
+    h = new_host(max_sessions=2)
+    got = {}
+    for name, sp in (("mode", spec_for(IDLE, permission_mode="bypassPermissions")),
+                     ("flag", spec_for(IDLE, extra_args=["--dangerously-skip-permissions"]))):
+        try:
+            await h.start_session(sp); got[name] = None
+        except H.StartRefused as e:
+            got[name] = e.reasons
+    state = (h.active, h.registry.entries(), len(h._sessions))
+    ok = await h.start_session(spec_for(IDLE, permission_mode="default"))      # 평범한 spec 은 통과
+    await h.close_all(grace=5)
+    return got, state, ok
+got, state, okses = run(t_refuse())
+check("시작 정책: skip-permissions 계열은 StartRefused 로 거부되고 아무 상태도 남지 않는다", all(got.get(k) for k in ("mode", "flag")) and state == (0, [], 0), f"{got} {state}")
+check("시작 정책: permission_mode=default 는 통과", okses.pid is not None)
 check("시작한 세션은 레지스트리에 (pid, host_session) 으로 올라간다", reg_live == {(a.pid, a.host_session), (b.pid, b.host_session)})
 check("close_all 뒤 레지스트리는 비고 자식 표지 프로세스 0개, 이후 시작은 HostClosed", h.registry.entries() == [] and procs_with_marker(h.host_id) == [] and closed_refuse)
 check("유휴 가짜는 stdin 닫기만으로 종료 코드 0(eof 아닌 closed: 우리가 닫음)", a.exit_code == 0 and a.end_reason == "closed")

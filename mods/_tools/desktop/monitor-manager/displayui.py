@@ -55,7 +55,6 @@ class BrightnessBar(Static, can_focus=True):
     """현재 밝기 슬라이더. ←/→ 한 단계(10% 이하 1%, 그 위 5%), PgUp/PgDn 10%, Home/End 1%/100%, 마우스 클릭. 바로 적용·저장"""
     BINDINGS = [
         Binding("right", "step(1)", "올림", show=False), Binding("left", "step(0)", "내림", show=False),
-        Binding("l", "step(1)", "올림", show=False), Binding("h", "step(0)", "내림", show=False),
         Binding("pageup", "jump(10)", "+10%", show=False), Binding("pagedown", "jump(-10)", "-10%", show=False),
         Binding("home", "to(1)", "1%", show=False), Binding("end", "to(100)", "100%", show=False),
     ]

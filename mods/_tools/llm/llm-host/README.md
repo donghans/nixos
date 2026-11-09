@@ -107,7 +107,7 @@ nix 에는 아직 등록하지 않았다(`mods/devel/apps/llm-cli.nix` 의 `ctxS
 - `deny_message(kind, user_reason=, request_timeout=, question=)`·`MESSAGES`: 거부·타임아웃·세션 종료 문구. 형식은 ① 누가·왜 ② 재시도 금지 ③ 멈추고 보고. 사용자가 쓴 이유는 그대로 전달한다. 이 문구는 모델 입력이다 — 바꾸면 tests/test_policy.py 의 속성 시험과 문구 덤프 검토 기록을 갱신한다.
 
 ## 다중 세션·수명 (S5, `host.py`)
-- `SessionHost(adapter_factory, max_sessions=4, registry_dir=None, term_wait=5.0)`: 세션마다 독립 프로세스·이벤트 큐. `start_session(spec)` 은 상한을 넘으면 `HostFull`, 같은 `spec["resume"]` 을 동시에 쓰면 `DuplicateResume`, 이름 중복은 `DuplicateSession`, `close_all` 뒤에는 `HostClosed`. 동시 시작도 상한을 넘지 못한다. 상한 4 는 D-9 임시값(S7 측정 뒤 조정).
+- `SessionHost(adapter_factory, max_sessions=4, registry_dir=None, term_wait=5.0)`: 세션마다 독립 프로세스·이벤트 큐. `start_session(spec)` 은 상한을 넘으면 `HostFull`, bypass 계열 지정은 `StartRefused`, 같은 `spec["resume"]` 을 동시에 쓰면 `DuplicateResume`, 이름 중복은 `DuplicateSession`, `close_all` 뒤에는 `HostClosed`. 동시 시작도 상한을 넘지 못한다. 상한 4 는 D-9 임시값(S7 측정 뒤 조정).
 - 종료: `close_session`·`close_all`(병렬) = `Session.close` 4단계(stdin 닫기→grace→SIGTERM→term_wait→SIGKILL), `kill_all` = SIGKILL. 신호는 자기 자식의 프로세스 그룹에만 간다.
 - 자식 레지스트리 `<registry_dir>/children.jsonl`(기본 `$XDG_RUNTIME_DIR/llm-host/`): 추가 기록만(add·del), flock, 잘린 꼬리 줄 무시. add 에 pid·starttime·host_id·host_pid·host_starttime. 자식 환경에 `LLM_HOST_ID=<host_id>` 표지.
 - 고아 탐지 `scan_orphans()`: 레지스트리에 있고 pid·starttime 이 같은 채 살아 있는데 띄운 호스트가 죽은 자식만 보고한다(표지가 읽히는데 다르면 제외, 형제 호스트의 자식은 제외). **죽이지 않는다** — `host.notices` 에 procctl plan 안내만 쌓는다(D-14: 안내만). 사람이 정리한 뒤 `forget_orphan`.
@@ -155,7 +155,7 @@ bad  = policy.check_start(spec)                                  # ★ 소비자
 spec, plan = launcher.launch_spec(spec, sudo_ready=False)        # claude-run·훅 설정·(선택) sudo 환경. 못 찾으면 LauncherError
 h = host.SessionHost(lambda hs: claude_adapter.ClaudeAdapter(hs), max_sessions=4,
                      log_root=recorder.default_log_root())       # log_root=None 이면 이벤트 로그 안 남김
-s = await h.start_session(spec)                                  # HostFull·DuplicateResume·DuplicateSession·HostClosed
+s = await h.start_session(spec)                                  # HostFull·DuplicateResume·DuplicateSession·HostClosed·StartRefused(check_start 를 호스트가 이미 부른다)
 ```
 - `spec` 키: `cwd`·`model`·`permission_mode`(기본 `manual`)·`resume`(백엔드 세션 id)·`persist`(기본 true)·`extra_args[]`·`env_extra{}`·`label`·`exe`(시험용 실행 파일 교체)·`max_budget_usd`(선택, 기본 없음)·`policy`. `launcher.apply` 가 `exe`·`env_extra`·`launch_notices` 를 덮어쓴다.
 - 호스트 하나가 세션 여러 개를 가진다. 세션 하나만 쓸 때는 `session.Session(adapter, spec)` + `await s.start()` 로 호스트 없이도 쓸 수 있다(레지스트리·상한·로그 연결 없음).
@@ -187,7 +187,7 @@ await s.kill()                                        # 자기 자식 그룹만 
 **5. 래퍼·sudo**: 실행기가 터미널에서 `sudo-claude-auth` 로 인증한 뒤 `launcher.launch_spec(spec, sudo_ready=True)`. 호스트는 비밀번호를 읽지 않는다. `launcher.sudo_hint(ev)` 는 Session 이 이미 불러 `notice(extra.hint="sudo")` 를 낸다.
 
 ## 소비자 책임 (세션·호스트가 하지 않는 것)
-1. **bypass 검사**: `SessionHost.start_session`·`Session.start` 는 `policy.check_start` 를 부르지 않는다(S4 는 순수 함수만 만들었고 연결은 안 됐다). `--dangerously-skip-permissions` 등 bypass 계열은 소비자가 `check_start(spec)` 로 먼저 거르지 않으면 그대로 시작된다. 계획서 성공 기준 ⑦(명시 허용 없이는 거부)은 **함수 수준에서만** 충족돼 있다. 연결(호스트가 거부)은 P5′-3 착수 때 결정할 변경 후보다.
+1. **bypass 검사**: `SessionHost.start_session` 이 시작 전에 `policy.check_start(spec)` 를 부르고, 사유가 있으면 `StartRefused`(사유 목록 `.reasons`)로 거부한다(어떤 상태도 바꾸기 전, 2026-11-09 연결). 단 `Session` 을 호스트 없이 직접 쓰는 소비자는 여전히 스스로 `check_start` 를 불러야 한다. `--settings` 파일 안의 간접 지정은 읽지 못한다.
 2. **대기 상한 구동**: 위 3번처럼 `request_timeout` 에 자동 거부를 보내는 일은 세션이 안 한다(타이머는 소비자 몫).
 3. **구독자 수**: 세션은 구독자를 세지 않는다. `decide_request` 의 `subscribers` 는 소비자가 센다.
 4. **로그의 민감성**: 이벤트 로그에는 도구 입력·메시지 본문이 있어 비밀·고객 데이터가 섞일 수 있다(0600, 14일). ctx 로 올리지 않는다.

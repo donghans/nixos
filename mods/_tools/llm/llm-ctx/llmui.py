@@ -36,7 +36,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Input, Select, Static, TabbedContent, TabPane
+from textual.widgets import Button, DataTable, Footer, Input, OptionList, Select, Static, TabbedContent, TabPane
+from textual.widgets.option_list import Option
 
 try:
     import uikit                                   # 배포: 같은 디렉터리에 복사됨
@@ -472,13 +473,18 @@ class SessionScreen(ModalScreen):
 
 class HostRequestScreen(ModalScreen):
     """9 호스트 탭(S2)의 권한·질문 응답 대화상자. 호스트가 낸 can_use_tool 요청 하나를 보여 주고 사람이 답한다(사용자가 제한 모드면 열리지 않는다).
-    권한: y 허용 · n 거부 · r 거부 이유 적기(Enter 로 거부) · Esc 나중에(요청은 그대로 대기, F6 으로 다시 연다).
-    질문(AskUserQuestion): 숫자 키로 선택지(다중 선택은 토글 후 Enter) · o 직접 입력(Enter) · n 거부 · Esc 나중에.
+    조작은 마우스 클릭, Tab·방향키로 옮기고 Enter 로 누르기다(한영 전환에 흔들리는 글자 키는 쓰지 않는다).
+    권한: [허용] [거부] [이유 적고 거부] [나중에] 버튼(처음 포커스는 안전한 [거부]) · Esc 나중에(요청은 그대로 대기, F6 으로 다시 연다).
+    질문(AskUserQuestion): 선택지 목록(↑↓·Enter·클릭, 숫자 키도 됨; 다중 선택은 토글 후 [확정]) · [직접 입력] · [거부] · [나중에].
     남은 시간(응답 대기 상한까지)을 보여 준다. 사용자가 직접 해야 하는 것(sudo 비밀번호·skip-permissions 승인)은 이 화면이 받지 않는다 — 안내만(D-6)."""
-    BINDINGS = [Binding("y", "allow", "허용"), Binding("n", "deny", "거부"), Binding("r", "reason", "거부 이유"), Binding("o", "other", "직접 입력"),
-                Binding("enter", "confirm", "선택 확정"), Binding("escape", "defer", "나중에"),
+    BINDINGS = [Binding("escape", "defer", "나중에"),
                 *[Binding(str(i), f"pick({i})", show=False) for i in range(1, 10)]]
-    AUTO_FOCUS = ""          # 입력창에 자동 포커스하지 않는다(y·n 같은 글자 키가 입력창에 들어가 버린다)
+    DEFAULT_CSS = """
+    HostRequestScreen #req-options { height: auto; max-height: 12; margin-top: 1; background: #101010; border: none; }
+    HostRequestScreen #req-buttons { height: auto; margin-top: 1; }
+    HostRequestScreen #req-buttons Button { margin-right: 2; }
+    """
+    AUTO_FOCUS = ""          # 입력창에 자동 포커스하지 않는다(on_mount 가 [거부] 버튼·선택지 목록에 둔다)
     GUIDE = "sudo 비밀번호·skip-permissions(권한 검사 끄기) 승인은 이 화면이 받지 않는다 — 터미널에서 직접 하라."
 
     def __init__(self, bridge, req: str):
@@ -500,13 +506,25 @@ class HostRequestScreen(ModalScreen):
             yield Static("", id="dialog-title")
             yield Static("", id="req-body")
             yield Static("", id="req-left")
+            yield OptionList(id="req-options")
             yield Input(placeholder="", id="req-input")
+            with Horizontal(id="req-buttons"):
+                yield Button("허용", id="btn-allow", variant="success")
+                yield Button("거부", id="btn-deny", variant="error")
+                yield Button("이유 적고 거부", id="btn-reason")
+                yield Button("나중에", id="btn-defer")
             yield Static("", id="dialog-hint")
 
     def on_mount(self):
         self.mk = self.app.masker()          # 한 번만 읽는다(비밀 치환; 갱신마다 DB 를 읽지 않는다)
+        self.opt_sig = None
         self.set_interval(0.5, self.refresh_view)
         self.refresh_view()
+        e = self.entry()
+        if e is not None and e["kind"] == "question":
+            self.query_one("#req-options", OptionList).focus()
+        else:
+            self.query_one("#btn-deny", Button).focus()    # 처음 포커스는 안전한 쪽(실수로 Enter 를 눌러도 거부)
 
     @staticmethod
     def fmt_left(sec: float) -> str:
@@ -537,8 +555,9 @@ class HostRequestScreen(ModalScreen):
                 t.append(f"  {i} {mark} {mk.text(str(o.get('label')))}  — {mk.text(str(o.get('description') or ''))}\n")
             for k, v in self.answers.items():
                 t.append(f"  ✓ {mk.text(k)} → {mk.text(str(v))}\n", style="#7fbf7f")
-            inp.placeholder = "목록에 없는 답을 직접 입력 — o 로 이동, Enter"
-            hint.update(("숫자 키 선택 · Enter 확정(다중 선택) · " if multi else "숫자 키 선택 · ") + "o 직접 입력 · n 거부(답하지 않음) · Esc 나중에")
+            inp.placeholder = "목록에 없는 답을 직접 입력 — [직접 입력] 을 고른 뒤 Enter"
+            hint.update("↑↓ 또는 Tab 으로 이동 · Enter·클릭으로 선택" + (" · 고른 뒤 [확정]" if multi else "") + " · 숫자 키도 됨 · Esc 나중에")
+            self.build_options(e, q, multi)
         else:
             risky = hv.is_risky(e["tool"])
             title.update(f"권한 요청 — {e['tool']}{'  [위험]' if risky else ''}  [{e['req'][:8]}]")
@@ -551,10 +570,46 @@ class HostRequestScreen(ModalScreen):
             t.append(mk.text(raw if len(raw) <= 1500 else raw[:1500] + "\n… (잘림)") + "\n", style="#b8a46a" if risky else "#e0e0e0")
             if "sudo" in raw:
                 t.append("\n※ 명령에 sudo 가 있다. 비밀번호는 이 화면이 받지 않는다 — 허용해도 터미널에서 먼저 인증해 두어야 한다.\n", style="#e0a050")
-            inp.placeholder = "거부 이유(선택, 모델에게 그대로 전달됨) — r 로 이동, Enter=거부"
-            hint.update("y 허용 · n 거부 · r 이유 적고 거부 · Esc 나중에   " + self.GUIDE)
+            inp.placeholder = "거부 이유(선택, 모델에게 그대로 전달됨) — [이유 적고 거부] 를 고른 뒤 Enter=거부"
+            hint.update("Tab·←→ 로 버튼 이동 · Enter·클릭으로 누르기 · Esc 나중에   " + self.GUIDE)
+        self.query_one("#req-buttons").display = e["kind"] != "question"
+        self.query_one("#req-options").display = e["kind"] == "question"
         body.update(t)
         self.query_one("#req-left", Static).update(Text(f"남은 응답 시간 {self.fmt_left(e['left'])} — 0 이 되면 자동 거부(모델에게 사용자 부재로 알림)", style="#e0a050" if e["left"] < 300 else "#8a8a8a"))
+
+    def build_options(self, e, q, multi: bool):
+        """선택지 목록 — 요청·질문 번호·고른 항목이 바뀔 때만 다시 만든다(0.5초 갱신이 하이라이트를 지우지 않게)."""
+        ol = self.query_one("#req-options", OptionList)
+        sig = (self.req, self.qi, tuple(sorted(self.multi)))
+        if sig == self.opt_sig:
+            return
+        keep = ol.highlighted
+        self.opt_sig = sig
+        ol.clear_options()
+        opts = [Option(f"{i} {'[x] ' if multi and o.get('label') in self.multi else '[ ] ' if multi else ''}{self.mk.text(str(o.get('label')))}", id=f"pick{i}") for i, o in enumerate(q.get("options") or [], 1)]
+        if multi:
+            opts.append(Option("▶ 확정", id="confirm"))
+        opts += [Option("✎ 직접 입력", id="other"), Option("✖ 거부(답하지 않음)", id="deny"), Option("… 나중에", id="defer")]
+        ol.add_options(opts)
+        ol.highlighted = keep if keep is not None and keep < len(opts) else 0
+
+    def on_button_pressed(self, ev: Button.Pressed):
+        ev.stop()
+        {"btn-allow": self.action_allow, "btn-deny": self.action_deny, "btn-reason": self.action_reason, "btn-defer": self.action_defer}[ev.button.id]()
+
+    def on_option_list_option_selected(self, ev: OptionList.OptionSelected):
+        ev.stop()
+        oid = ev.option.id or ""
+        if oid.startswith("pick"):
+            self.action_pick(int(oid[4:]))
+        elif oid == "confirm":
+            self.action_confirm()
+        elif oid == "other":
+            self.action_reason()
+        elif oid == "deny":
+            self.action_deny()
+        elif oid == "defer":
+            self.action_defer()
 
     def done(self, how: str):
         self.closed = True
