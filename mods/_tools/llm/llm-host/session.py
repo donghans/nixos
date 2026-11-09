@@ -19,6 +19,7 @@ import time
 from typing import Callable, Optional
 
 import events as E
+import launcher
 from adapter import Adapter
 from recorder import CostTracker
 
@@ -53,6 +54,7 @@ class Session:
         self._killed = False
         self._stderr_n = 0
         self._started = False
+        self._sudo_hinted = False
         self._exited = asyncio.Event()       # SessionEnded 까지 낸 뒤
 
     # ------------------------------------------------------------ 이벤트
@@ -118,6 +120,8 @@ class Session:
         if self._started:
             raise RuntimeError("이미 start 했다")
         self._started = True
+        for lvl, txt in (self.spec.get("launch_notices") or []):    # launcher.prepare 가 정한 시작 경고(sudo 중계 없음 등, S8)
+            self._notice(lvl, txt)
         argv = self.adapter.argv(self.spec)
         try:
             self._proc = await asyncio.create_subprocess_exec(
@@ -197,6 +201,11 @@ class Session:
 
     # ------------------------------------------------------------ 상태기계
     def _handle(self, ev: E.Event) -> None:
+        if isinstance(ev, E.ToolResult) and not self._sudo_hinted:     # sudo 중계 안내문 감지(힌트, 세션당 한 번, S8)
+            h = launcher.sudo_hint(ev)
+            if h is not None:
+                self._sudo_hinted = True
+                self._notice(h.level, h.text, **h.extra)
         if isinstance(ev, (E.PermissionRequest, E.QuestionRequest)):
             self.pending[ev.req] = ev
             if not self._closing:

@@ -1,6 +1,6 @@
 # llm-host — LLM 세션 호스트 코어 (규격 v0)
 
-설계 근거: ctx 문서 `plan llm-trust/11-p5prime-2-session-host` (읽기: `donghans ctx doc read plan llm-trust/11-p5prime-2-session-host --project nixos`). 이 폴더는 단계 S7 까지 있다(S4 정책 `policy.py`, S5 다중 세션 `host.py`는 아래 절)(규격 `events.py`, 어댑터 인터페이스 `adapter.py`, claude 어댑터 `claude_adapter.py` 의 읽기 `decode` 와 쓰기 `argv`·`env`·`encode`, 세션 `session.py`, 시험용 가짜 백엔드 `fake_claude.py`). 정책·다중 세션·기록 등은 계획서 §9 의 뒤 단계에서 추가된다.
+설계 근거: ctx 문서 `plan llm-trust/11-p5prime-2-session-host` (읽기: `donghans ctx doc read plan llm-trust/11-p5prime-2-session-host --project nixos`). 이 폴더는 단계 S8 까지 있다(S8 래퍼·sudo `launcher.py` 는 아래 「래퍼·sudo」 절)(S4 정책 `policy.py`, S5 다중 세션 `host.py`는 아래 절)(규격 `events.py`, 어댑터 인터페이스 `adapter.py`, claude 어댑터 `claude_adapter.py` 의 읽기 `decode` 와 쓰기 `argv`·`env`·`encode`, 세션 `session.py`, 시험용 가짜 백엔드 `fake_claude.py`). 정책·다중 세션·기록 등은 계획서 §9 의 뒤 단계에서 추가된다.
 시험: `tests/test_events.py`(규격)·`tests/test_claude_adapter.py`(어댑터 읽기; 녹화본 `tests/fixtures/` 전체 재생). 직접 실행: `cd mods/_tools/llm/llm-host && python3 -I tests/test_claude_adapter.py`. `tests/test_session.py`(세션·가짜 백엔드·어댑터 쓰기; 비용 0). `mods/_tools/run-tests.sh` 에 `llm-host-ev`·`llm-host-claude`·`llm-host-session` 으로 등록돼 있다.
 
 **규격은 v0 이다.** P5′-3(TUI)을 만들며 부족한 필드를 추가하고 P5′-4(두 번째 백엔드) 때 한 번 정리한다. 그때까지 `raw` 통과가 안전판이다.
@@ -128,3 +128,14 @@ nix 에는 아직 등록하지 않았다(`mods/devel/apps/llm-cli.nix` 의 `ctxS
 **비용이 든다**(haiku, 항목당 약 $0.01~0.02) — `run-tests.sh` 에 넣지 않고 사람이 부른다. 사용: `python3 -I integration_real.py --out <새 폴더> --items canary|all|1,2,…` (항목 1 hello·비용 / 2 권한 허용·거부 / 3 질문 / 4 중단 / 5 서브에이전트 / 6 동시 4세션·메모리·자식 0개 / 7 resume(persistence 켬 — 시험 cwd 세션이 ctx 에 남는다) / 8·8b 호스트 SIGKILL 뒤 자식(유휴·진행 중)). `canary` = 1·2·4, **Claude Code 를 갱신할 때마다** 한 번 돌려 줄 형식 변화를 잡는다(`raw` 가 0 이 아니거나 비용 합이 어긋나면 실패). 결과는 `<out>/results.json`·`raw/`·`logs/`.
 판정 함수(`analyze_*`)는 이벤트 목록만 보는 순수 함수이고 `tests/test_integration_real.py` 가 돈 없이 시험한다(통과 사례마다 변이 사례가 실패해야 함 — `llm-host-integ`).
 S7 에서 실측으로 어댑터에 반영한 것(claude 2.1.318): ① `system/background_tasks_changed` 는 알려진 줄(이벤트 없음, `ignored` 로 셈) ② `--resume` 으로 띄운 프로세스의 `total_cost_usd` 는 이전 실행분을 포함한 누적 → 재개 세션 **첫 턴 `cost_delta` 는 null**(이후는 그 값 기준). 결과 상세는 ctx 노트 `llm-trust/wf-s7-integration`.
+
+## 래퍼·sudo (S8, `launcher.py`)
+쉘 함수 `claude` 가 하는 일(훅 설정 주입·sudo 환경)을 호스트가 한 곳에서 재현한다. 쉘 함수는 부르지 않는다. 사용: `spec, plan = launcher.launch_spec(spec, sudo_ready=…)` 뒤 `Session(adapter, spec)`(`prepare`→`apply`). 시험 `tests/test_launcher.py`(비용 0, 가짜 claude-run·sudo), 실제 시험 `launcher_real.py`(비용 있음, run-tests.sh 에 넣지 않음).
+- **실행 파일 = `claude-run`**. 표준입력이 파이프이면 claude-run 은 sudo 부분을 건너뛰고 `--settings <훅 설정>` 만 붙여 claude 를 부른다 — **실측 확인(S8)**: 훅 이벤트(`SessionStart:startup`·`UserPromptSubmit`·`PostToolUse:Bash`·`Stop`)가 호스트에 오고, 자식 환경에 `CLAUDE_SUDO_SOCK` 가 없다.
+- **claude-run 찾기**: 인자 > PATH 의 `claude-tmux` 글에서 읽은 `CLAUDE_RUN_BIN=`(현재 프로필) > 환경변수 `CLAUDE_RUN_BIN`. **환경변수는 낡을 수 있다**(실측: 이 에이전트 세션의 환경변수는 옛 세대 claude-run 을 가리켰고 sudo 부분이 없었다) → 프로필을 먼저 본다. 독립 호스트(llmui 아님)도 nix 수정 없이 찾는다.
+- **sudo 래퍼·`sudo-claude-auth` 의 store 경로**는 claude-run 글(`export PATH=<dir>:$PATH`, `<경로>/sudo-claude-auth --lease`)에서 읽는다. 글 모양에 의존한다: 못 읽으면 sudo 없는 세션 + notice.
+- **sudo_ready**: 실행기가 터미널에서 `sudo-claude-auth` 로 먼저 인증하고 `sudo_ready=True` 를 넘긴다. 호스트는 비밀번호를 읽지 않는다. `prepare` 가 하는 일은 `sudo-claude-auth --lease <호스트 PID>`(표준입력 /dev/null — 티켓이 유효하면 0, 아니면 묻지 않고 1)와 쓰기 없는 `sudo true` 확인이고, 둘 다 통과해야 `CLAUDE_SUDO_SOCK`·PATH 앞붙임(래퍼 디렉터리)을 붙인다. 하나라도 실패하면 sudo 환경 없이 시작하고 `notice(warn, "sudo 중계 없음 … [사유]")`. claude-run 은 파이프 모드에서 임대를 하지 않으므로 호스트 PID 임대가 필요하다(중계는 임대 PID 가 모두 죽고 15초 뒤 끝난다).
+- **claude-run 을 못 찾으면 거부**(`LauncherError`): 훅 설정에 확인 강제 규칙(`ctx doc delete`·`procctl apply` 등)이 들어 있어 없이 시작하면 안전 규칙이 빠진다. `allow_no_hooks=True` 로 명시하면 일반 claude 로 시작하고 경고 2건.
+- **세션 중 만료 힌트**: `launcher.sudo_hint(ev)` — tool_result 에 `claude-sudo:` 와 안내 키(`sudo-claude-auth`·`sudo 중계가 없음`·`sudo 인증이 없거나 만료`)가 있으면 notice(warn, `extra.hint="sudo"`). Session 이 세션당 한 번 낸다. 문구 일치라 **힌트용**이다(실측: 소켓 없는 래퍼의 「중계가 없음」 문구로 1건 감지).
+- `Session` 은 `spec["launch_notices"]`([(level, text)])를 시작할 때 notice 로 낸다.
+- **ctx 흔적(주의)**: claude-run 이 붙이는 훅은 `--no-session-persistence` 여도 `donghans ctx hook` 으로 ctx DB 의 `hook_events`·`sessions` 에 행을 남긴다(실측: 세션 1개당 SessionStart·UserPromptSubmit·Stop·SessionEnd 등, 최소 환경 HOME·PATH·TERM 만으로도 기록됨). 시험은 cwd 로 구분한다. 지우지 않는다.
