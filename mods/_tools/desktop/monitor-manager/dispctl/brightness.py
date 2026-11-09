@@ -100,6 +100,36 @@ def level_raw(pct: int, mx: int) -> int:
     return max(1, round(mx * pct / 100))
 
 
+def step_pct(pct: int, up: bool) -> int:
+    """슬라이더·밝기 키의 한 단계: 10% 이하는 1%씩, 그 위는 5%의 배수로 맞춰 5%씩. 1~100. hwctl/brt-control.sh 와 같은 규칙"""
+    if up:
+        t = pct + 1 if pct < 10 else (pct // 5 + 1) * 5
+    else:
+        t = pct - 1 if pct <= 10 else ((pct + 4) // 5 - 1) * 5
+    return max(1, min(100, t))
+
+
+def set_level(pct: int) -> int | None:
+    """사용자가 직접 정한 밝기(%). 1~100 으로 제한(0 은 화면이 꺼져 복구가 어려움).
+    낮춤 상태면 먼저 끝내고, 지금 전원 상태의 기억 밝기로 바로 저장한다(Wayland 감시 서비스가 없는 TTY 에서도 기억되게). 적용한 %를 돌려줌."""
+    b = read_brightness()
+    if not b:
+        return None
+    pct = max(1, min(100, int(pct)))
+    r = load_run()
+    r["dimmed"] = None                                # 사용자가 직접 정했으니 낮춤 상태는 끝(wake 가 옛 값으로 덮지 않게)
+    raw = level_raw(pct, b[1])
+    set_brightness(raw)
+    r["seen"] = raw
+    _save(RUN_FILE, r)
+    p = power_state()
+    if p:
+        c = load_conf()
+        c["mem"][p] = raw
+        _save(CONF_FILE, c)
+    return pct
+
+
 # ───────────────────────── 설정 ─────────────────────────
 def set_conf(level: int | None = None, delay: int | None = None) -> dict:
     c = load_conf()

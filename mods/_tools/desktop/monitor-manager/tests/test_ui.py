@@ -208,6 +208,29 @@ async def t_obs():
     dump = json.dumps(events(), ensure_ascii=False)
     check("입력창에 친 글자는 이벤트 로그에 남지 않음", "비밀" not in dump and '"key":"a"' not in dump.replace(" ", "") and "abc" not in dump, dump[:200])
 
+async def t_brightness_tty():
+    """Hyprland 밖(TTY): 밝기 칸만 보이고, 키로 조절하면 바로 적용·기억"""
+    reset(); os.environ["DISPLAYUI_MODE"] = "brightness"
+    try:
+        app = ui.DisplayUI()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(pilot, 5)
+            from dispctl import brightness as b
+            check("TTY: 모니터 쪽 칸은 숨김, 밝기 칸이 보이고 포커스", not app.query_one("#left").display and not app.query_one("#form").display and app.focused.id == "brt")
+            before = b.read_brightness()[0]
+            await pilot.press("left"); await settle(pilot, 3)
+            mx = b.read_brightness()[1]
+            check("← → 한 단계(5%) 낮아짐", b.read_brightness()[0] == round(mx * (round(100 * before / mx) - 5) / 100), str(b.read_brightness()))
+            await pilot.press("end"); await settle(pilot, 3)
+            check("End → 100%", b.read_brightness()[0] == mx)
+            await pilot.press("home"); await settle(pilot, 3)
+            check("Home → 1% (0 으로는 내려가지 않음)", b.read_brightness()[0] == max(1, round(mx / 100)))
+            await pilot.press("pageup"); await settle(pilot, 3)
+            c = b.load_conf()
+            check("바뀐 밝기가 지금 전원 상태(AC)의 기억으로 저장", c["mem"].get(b.power_state()) == b.read_brightness()[0], str(c["mem"]))
+    finally:
+        os.environ["DISPLAYUI_MODE"] = "full"
+
 async def t_quit():
     reset(); app = ui.DisplayUI(focus="mode")
     async with app.run_test(size=(140, 42)) as pilot:
@@ -231,7 +254,7 @@ async def t_dim():
     app = ui.DisplayUI(focus="dim")
     async with app.run_test(size=(140, 46)) as pilot:
         await settle(pilot, 10)
-        check("절전 밝기 칸: 6 으로 포커스, 기본 5%/1분", app.focused.id == "dimlevel" and app.query_one("#dimlevel", Select).value == "5" and app.query_one("#dimdelay", Select).value == "60")
+        check("절전 밝기 칸: 6 으로 포커스, 기본 5%/1분", app.focused.id == "brt" and app.query_one("#dimlevel", Select).value == "5" and app.query_one("#dimdelay", Select).value == "60")
         check("절전 밝기 칸이 보임(전원·백라이트 정보 있음)", app.query_one("#dimbox").display)
         app.query_one("#dimlevel", Select).value = "15"; await settle(pilot, 5); app.query_one("#dimdelay", Select).value = "120"; await settle(pilot, 5)
         c = b.load_conf(); check("밝기·시간 선택이 설정 파일에 저장", c["dim_level"] == 15 and c["dim_delay"] == 120, str(c))
@@ -242,11 +265,11 @@ async def t_dim():
     app = ui.DisplayUI(focus="mode")
     async with app.run_test(size=(140, 46)) as pilot:
         await settle(pilot, 10); await pilot.press("6"); await settle(pilot, 3)
-        check("숫자 6 → 절전 밝기 포커스, 저장값 복원", app.focused.id == "dimlevel" and app.query_one("#dimlevel", Select).value == "15")
+        check("숫자 6 → 밝기 포커스, 저장값 복원", app.focused.id == "brt" and app.query_one("#dimlevel", Select).value == "15")
 
 async def main():
     only = os.environ.get("ONLY")
-    for t in [x for x in (t_basic, t_arrange, t_focus, t_cursor, t_layout_quick, t_apply_confirm, t_misc, t_dim, t_quit, t_obs) if not only or x.__name__ == only]:
+    for t in [x for x in (t_basic, t_arrange, t_focus, t_cursor, t_layout_quick, t_apply_confirm, t_misc, t_dim, t_brightness_tty, t_quit, t_obs) if not only or x.__name__ == only]:
         try: await t()
         except Exception:
             import traceback; traceback.print_exc(); results.append(False); print("FAIL (예외)", t.__name__)

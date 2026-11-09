@@ -55,4 +55,10 @@ try: b.set_conf(level=7); ok = False
 except SystemExit: ok = True
 check("허용되지 않은 밝기 값 거부", ok)
 rc = dc.main(["brightness", "status", "--json"]); check("CLI status", rc == 0)
+
+# 단계: 10% 이하 1%씩, 그 위 5%의 배수
+up = lambda p: b.step_pct(p, True); dn = lambda p: b.step_pct(p, False)
+check("올림 단계", [up(1), up(9), up(10), up(12), up(95), up(100)] == [2, 10, 15, 15, 100, 100], str([up(1), up(9), up(10), up(12), up(95), up(100)]))
+check("내림 단계", [dn(100), dn(15), dn(12), dn(11), dn(10), dn(2), dn(1)] == [95, 10, 10, 10, 9, 1, 1], str([dn(100), dn(15), dn(12), dn(11), dn(10), dn(2), dn(1)]))
+check("set_level 은 1% 아래로 내려가지 않고 전원 기억에 저장", b.set_level(0) == 1 and cur() == 10 and b.load_conf()["mem"][b.power_state()] == 10)
 finish("밝기 기억·절전 낮춤")

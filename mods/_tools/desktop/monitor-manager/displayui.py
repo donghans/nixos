@@ -37,10 +37,66 @@ except ImportError:                                # 소스 트리: ../uikit
 from dispctl.observelog import events as observe_events  # noqa: E402
 
 FOCUS_IDS = {
-    "mode": "modes", "monitors": "mons", "resolution": "res", "refresh": "hz", "scale": "scale", "position": "rel", "dim": "dimlevel",
+    "mode": "modes", "monitors": "mons", "resolution": "res", "refresh": "hz", "scale": "scale", "position": "rel", "dim": "brt", "brightness": "brt",
 }
 CONFIRM_SECONDS = int(os.environ.get("DISPLAYUI_CONFIRM", "10"))
 NARROW = 100  # 이 폭 미만이면 모드 목록과 설정을 위아래로
+
+
+def tty_mode() -> bool:
+    """Hyprland 밖(greetd 뒤의 TTY·kmscon·ssh)이면 밝기 칸만 보여 준다. DISPLAYUI_MODE=full|brightness 로 강제"""
+    m = os.environ.get("DISPLAYUI_MODE")
+    if m in ("full", "brightness"):
+        return m == "brightness"
+    return not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+
+
+class BrightnessBar(Static, can_focus=True):
+    """현재 밝기 슬라이더. ←/→ 한 단계(10% 이하 1%, 그 위 5%), PgUp/PgDn 10%, Home/End 1%/100%, 마우스 클릭. 바로 적용·저장"""
+    BINDINGS = [
+        Binding("right", "step(1)", "올림", show=False), Binding("left", "step(0)", "내림", show=False),
+        Binding("l", "step(1)", "올림", show=False), Binding("h", "step(0)", "내림", show=False),
+        Binding("pageup", "jump(10)", "+10%", show=False), Binding("pagedown", "jump(-10)", "-10%", show=False),
+        Binding("home", "to(1)", "1%", show=False), Binding("end", "to(100)", "100%", show=False),
+    ]
+
+    def __init__(self, **kw) -> None:
+        super().__init__("", **kw)
+        self.pct = 0
+
+    def sync(self) -> None:
+        st = dbr.read_brightness()
+        self.pct = round(100 * st[0] / st[1]) if st and st[1] else 0
+        self.paint()
+
+    def paint(self) -> None:
+        w = max(10, (self.size.width or 60) - 8)
+        n = round(w * self.pct / 100)
+        self.update(f"[#33ccff]{'█' * n}[/][#3a3a3a]{'█' * (w - n)}[/] {self.pct:>3}%")
+
+    def on_resize(self, *_a) -> None:
+        self.paint()
+
+    def to_pct(self, v: int) -> None:
+        got = dbr.set_level(v)
+        if got is not None:
+            self.pct = got
+            self.paint()
+            self.app.ev.info("brightness.set", pct=got)
+            self.app.msg(f"밝기 {got}% (현재 전원 상태의 기억 밝기로 저장됨)")
+
+    def action_step(self, up: int) -> None:
+        self.to_pct(dbr.step_pct(self.pct, bool(up)))
+
+    def action_jump(self, d: int) -> None:
+        self.to_pct(self.pct + d)
+
+    def action_to(self, v: int) -> None:
+        self.to_pct(v)
+
+    def on_click(self, ev) -> None:
+        w = max(10, (self.size.width or 60) - 8)
+        self.to_pct(round(100 * min(ev.x, w) / w))
 
 
 def _delay_label(v: int) -> str:
@@ -131,7 +187,7 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
         ('화면 모드', '확장 / 미러 / 내장만 / 외부만 — Enter 로 바로 적용. 1 로 목록에 포커스'),
         ('프리셋', '프리젠테이션 등 해상도 조합 — Enter 적용, F3 저장, Delete 삭제'),
         ('확인 시간', '적용하면 정해진 시간(기본 10초) 안에 확인하지 않으면 이전 구성으로 되돌린다 — 되지 않는 모드로 화면이 안 나와도 스스로 복구된다'),
-        ('배터리 절전 밝기', '6 — 배터리에서 정해진 시간 입력이 없으면 밝기를 낮춤(5/10/15/20/25%, 30초/1분/2분/5분). 「이번 배터리 끄기」는 AC 에 연결했다 빼거나 재부팅하면 다시 켜짐. AC·배터리 각각 마지막 밝기는 전원이 바뀔 때 자동 복귀'),
+        ('밝기', '6 — 슬라이더: ←→ 한 단계(10% 이하 1%씩, 그 위 5%씩) · PgUp/PgDn 10% · Home/End 1%/100% (바로 적용, 지금 전원 상태의 기억 밝기로 저장). Hyprland 밖(TTY·kmscon)에서는 이 칸만 열림. 아래는 배터리에서 정해진 시간 입력이 없으면 밝기를 낮춤(5/10/15/20/25%, 30초/1분/2분/5분). 「이번 배터리 끄기」는 AC 에 연결했다 빼거나 재부팅하면 다시 켜짐. AC·배터리 각각 마지막 밝기는 전원이 바뀔 때 자동 복귀'),
         ('모니터별 설정', '2 해상도 · 3 주사율 · 4 배율 · 5 위치 · F2 적용. 위치는 기준 모니터에 대한 상대 위치와 정렬'),
     ]
     HELP_NOTES = [
@@ -157,6 +213,9 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
     #dimbox { background: #000000; border: round #595959; border-title-color: #9a9a9a; }
     #dimbox:focus-within { border: round #33ccff; border-title-color: #33ccff; border-title-style: bold; }
     #dimstat { color: #7a7a7a; }
+    #brt { height: 1; margin-bottom: 1; width: 1fr; background: #141414; padding: 0 1; }
+    #brt:focus { background: #1b2a38; }
+    .ttymode #left, .ttymode #mons, .ttymode #form { display: none; }
     .row { height: 1; margin-bottom: 1; }
     .row Label { width: 12; color: #9a9a9a; }
     .row Select { width: 1fr; height: 1; }
@@ -180,7 +239,7 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
         Binding("3", "focus_to('hz')", "주사율"),
         Binding("4", "focus_to('scale')", "배율"),
         Binding("5", "focus_to('rel')", "위치"),
-        Binding("6", "focus_to('dimlevel')", "절전 밝기"),
+        Binding("6", "focus_to('brt')", "밝기"),
         Binding("f2", "apply", "적용"),
         Binding("f3", "save_preset", "프리셋 저장"),
         Binding("delete", "delete_preset", "프리셋 삭제"),
@@ -190,7 +249,8 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
 
     def __init__(self, focus: str = "mode", quick: bool = False) -> None:
         super().__init__()
-        self.focus_target = FOCUS_IDS.get(focus, "modes")
+        self.tty = tty_mode()
+        self.focus_target = "brt" if self.tty else FOCUS_IDS.get(focus, "modes")   # TTY 에서는 밝기 칸만 있음
         self.quick = quick
         self.quit_confirm = not quick       # --quick 은 팝업처럼 잠깐 쓰는 모드라 Esc 로 바로 종료
         self.sel: str | None = None
@@ -227,8 +287,9 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
                         yield Button("적용 (F2)", id="apply", variant="primary")
                         yield Button("기본 구성으로 초기화", id="reset")
                 with Vertical(id="dimbox"):
+                    yield BrightnessBar(id="brt")
                     with Horizontal(classes="row"):
-                        yield Label("밝기 (6)")
+                        yield Label("절전 밝기")
                         yield Select([(f"{v}%", str(v)) for v in dbr.LEVELS], id="dimlevel", allow_blank=False)
                     with Horizontal(classes="row"):
                         yield Label("대기 시간")
@@ -265,11 +326,18 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
         # lazygit 처럼 제목을 테두리 안에 둠 ("[키]-이름"). 포커스가 있는 칸은 제목 앞에 ▶ 를 붙여 Enter 가 어디로 가는지 분명히 함
         self._pane_titles = {}
         for wid, title, sub in (("#left", "\\[m] 화면 모드 / 프리셋", "Enter 적용"), ("#mons", "모니터", ""), ("#form", "선택한 모니터 설정", ""),
-                               ("#dimbox", "\\[6] 배터리 절전 밝기 (노트북)", "")):
+                               ("#dimbox", "\\[6] 밝기 / 배터리 절전 밝기 (노트북)", "")):
             box = self.query_one(wid)
             box.border_title = title
             box.border_subtitle = sub
             self._pane_titles[wid] = title
+        self.set_class(self.tty, "ttymode")
+        if self.tty:
+            self.title = "밝기"
+            self.ev.info("mount", focus="brt", tty=True, size=f"{self.size.width}x{self.size.height}")
+            self.reload_all()
+            self.query_one("#brt").focus()
+            return
         self.ev.info("mount", focus=self.focus_target, quick=self.quick, size=f"{self.size.width}x{self.size.height}",
                      monitors=[(m.name, m.mode, m.disabled) for m in dc.get_monitors()])
         t = self.query_one("#mons", DataTable)
@@ -292,6 +360,9 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
         self.reload_all()
 
     def reload_all(self) -> None:
+        if self.tty:                          # Hyprland 가 없으니 모니터 쪽은 건너뜀
+            self.fill_dim()
+            return
         self.mons = dc.get_monitors()
         if self.sel not in [m.name for m in self.mons]:
             ext = next((m for m in self.mons if not m.internal), None)
@@ -308,6 +379,7 @@ class DisplayUI(uikit.QuitMixin, uikit.HelpMixin, App):
         box = base.query_one("#dimbox")
         st = dbr.status()
         box.display = st["power"] is not None and dbr.backlight_dir() is not None   # 노트북(전원·백라이트 정보가 있는 기기)만
+        base.query_one("#brt", BrightnessBar).sync()
         self._updating = True
         try:
             base.query_one("#dimlevel", Select).value = str(st["dim_level"])

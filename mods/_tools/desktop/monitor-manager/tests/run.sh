@@ -2,7 +2,7 @@
 # 사용: tests/run.sh   (코어 + TUI 시험. 실제 Hyprland 를 건드리지 않음)
 D=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d)
-export FAKE_STATE=$T/fake.json DISPLAYCTL_HYPRCTL=$D/fake_hyprctl.py DISPLAYCTL_STATE=$T/state DISPLAYCTL_CONF=$T/conf DISPLAYCTL_SETTLE=0 DISPLAYCTL_VERIFY_TIMEOUT=0 DISPLAYUI_CONFIRM=3
+export FAKE_STATE=$T/fake.json DISPLAYCTL_HYPRCTL=$D/fake_hyprctl.py DISPLAYCTL_STATE=$T/state DISPLAYCTL_CONF=$T/conf DISPLAYCTL_SETTLE=0 DISPLAYCTL_VERIFY_TIMEOUT=0 DISPLAYUI_CONFIRM=3 DISPLAYUI_MODE=full
 export DISPLAYCTL_SYSTEMD_RUN=$D/fake_systemd_run.py DISPLAYCTL_SYSTEMCTL=$D/fake_systemctl.py FAKE_UNITS=$T/units DISPLAYCTL_NOTIFY= DISPLAYCTL_POSTURE=$D/fake_posture.py FAKE_POSTURE=$T/posture.json
 export PYTHONDONTWRITEBYTECODE=1 TESTS_TMP=$T OBSERVE_STATE_DIR=$T/observectl-state OBSERVE_DATA_DIR=$T/observectl-data   # observectl 이벤트 로그가 실제 ~/.local/state 로 새지 않게
 # 밝기 시험용 가짜 sysfs(AC 연결, 백라이트 1000/1000)
