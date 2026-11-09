@@ -11,7 +11,7 @@ description: 여러 머신·프로젝트의 지난 에이전트(현재는 Claude
 - `donghans ctx search "<키워드>" --here`(현재 저장소 한정, `--role user` 로 사용자 발언만 — 자동 메시지와 **서브에이전트에게 준 브리프(`is_sidechain`)도 빠진다**; 더 있는 옵션: `--repo`, `--days`, `--limit`)
 - `donghans ctx recent --here`(최근 세션; `--limit`)
 - `donghans ctx session <세션ID접두> [--n 20]`(한 세션의 대화). 메시지 하나가 1,500자를 넘으면 `[잘림: +M자 더 있음 → --full]` 표지가 붙는다.
-- `donghans ctx msg <uuid 앞자리> [--max N | --all]`(한 메시지의 **완전한 본문** — 도구 호출 입력·결과 포함. 기본 8,000자까지, 넘으면 `[잘림: … → --all]` 표지. 앞자리가 모호하면 후보 목록을 보이니 더 길게 적는다. 원본 줄이 너무 커서 raw 가 잘린 2건 정도는 원본 대화 파일에만 있다고 안내한다. 도구 입력은 키 순서가 원본과 다를 수 있다는 안내가 붙는다)
+- `donghans ctx msg <uuid 앞자리> [--max N | --all]`(한 메시지의 **완전한 본문** — 도구 호출 입력·결과 포함. 기본 8,000자까지, 넘으면 `[잘림: … → --all]` 표지. **에이전트 셸에서 상한을 넘으면 전체를 `~/.cache/ctx-views/<세션>/msg/<uuid>.txt` 파일로 쓰고 화면에는 미리보기 1,500자와 경로만 찍는다 — `Read`(offset/limit)·grep 으로 필요한 부분만 읽고, 파일이 없으면 같은 `ctx msg` 를 다시 실행(새 비밀 등록 때 지워짐); 전부 화면에 필요하면 `--all`**. 앞자리가 모호하면 후보 목록을 보이니 더 길게 적는다. 원본 줄이 너무 커서 raw 가 잘린 2건 정도는 원본 대화 파일에만 있다고 안내한다. 도구 입력은 키 순서가 원본과 다를 수 있다는 안내가 붙는다)
 - `donghans ctx usage`(모델·일별 토큰/비용)
 - `donghans ctx sql "<SELECT …>"`(읽기 전용; 테이블: sessions·messages·usage_events·hook_events·handoffs). **셀은 기본 1,000자, 행은 50개(`--limit`)까지만 출력하고 넘으면 `[잘림: +M자 더 있음 → --cell 0]`·`[잘림: 행이 N개 넘게 있다 → --limit N]` 표지가 붙는다**(예전에는 300자에서 표지 없이 잘렸다). 긴 본문이 필요하면 `--cell 0`(무제한) 또는 `ctx msg`. M 은 비밀 치환 뒤 글자 수라 `length(text)` 와 다를 수 있다. `sessions` 의 시각 컬럼은 `first_ts`/`last_ts`/`updated_at` 이다(`started_at` 없음).
 - 각 행에 작업 머신(host)·작업 디렉터리(cwd)·저장소(repo_url)·브랜치가 있다.

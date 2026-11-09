@@ -282,6 +282,14 @@ def cmd_watch(a):
 def cmd_cleanup(a):
     gone = st.cleanup_views(st.views_dir(), max_age_days=a.days)
     print(f"지운 뷰 {len(gone)}개" + "".join(f"\n  {g}" for g in gone))
+    try:                                    # 낡은(등록표가 바뀐 뒤의) `ctx msg` 파일 — DB 를 못 읽으면 어느 것이 낡았는지 몰라 건드리지 않는다
+        import ctx_secrets as cs
+        with H.connect(timeout=3, readonly=True) as c:
+            h = cs.registry_hash(cs.load_secrets(c))
+        stale = st.sweep_stale_msgs(st.views_dir(), h)
+        print(f"지운 낡은 ctx msg 파일 {len(stale)}개" + "".join(f"\n  {g}" for g in stale))
+    except Exception as e:
+        print(f"ctx msg 파일 훑기를 건너뜀(DB 를 못 읽음) — {type(e).__name__}: {e}", file=sys.stderr)
     return 0
 
 

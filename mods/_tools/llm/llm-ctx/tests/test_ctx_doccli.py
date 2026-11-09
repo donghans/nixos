@@ -133,6 +133,11 @@ check("PreToolUse: 뷰 파일의 Edit 를 막고 propose 를 안내", d.get("hoo
 check("PreToolUse: Write 도 막는다", deny(vp, "Write").get("hookSpecificOutput", {}).get("permissionDecision") == "deny")
 check("PreToolUse: 저장소 파일도 막는다", deny(f"{STORE}/proj/plan/a/first.md").get("hookSpecificOutput", {}).get("permissionDecision") == "deny")
 check("PreToolUse: 다른 경로는 막지 않는다", deny(f"{TMP}/work/x.py") == {})
+mp = f"{VIEWS}/{A}/msg/aaaaaaaa-0000-0000-0000-000000000001.txt"
+d = deny(mp, "Write")
+rsn = d.get("hookSpecificOutput", {}).get("permissionReason", d.get("hookSpecificOutput", {}).get("permissionDecisionReason", ""))
+check("PreToolUse(P1b): msg/ 파일도 막고, propose 가 아니라 ctx msg 재실행을 안내", d.get("hookSpecificOutput", {}).get("permissionDecision") == "deny" and "ctx msg" in rsn and "propose" not in rsn, d)
+check("PreToolUse(P1b): msg/ 가 아닌 뷰 경로는 여전히 propose 안내", "propose" in deny(f"{root}/proj/note/m/msg.md")["hookSpecificOutput"]["permissionDecisionReason"])
 check("PreToolUse: Read 는 막지 않는다", deny(vp, "Read") == {})
 check("PreToolUse: Bash 는 막지 않는다(문자열 패턴은 오탐·미탐)", json.loads(th("PreToolUse", hook_in("PreToolUse", tool_name="Bash", tool_input={"command": f"echo x >> {vp}"})).stdout or "{}") == {})
 check("훅: 깨진 입력도 조용히 통과", th("PreToolUse", "not json").returncode == 0)

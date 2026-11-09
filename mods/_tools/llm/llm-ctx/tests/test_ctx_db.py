@@ -19,7 +19,11 @@ HOME = os.path.join(TMP, "home"); os.makedirs(os.path.join(HOME, ".claude/projec
 PORT = str(20000 + os.getpid() % 20000)
 env = dict(os.environ, HOME=HOME, CLAUDE_CTX_HOST="testhost", CLAUDE_CTX_DSN=f"host={SOCK} port={PORT} dbname=claude_ctx user=claude_ctx", PYTHONDONTWRITEBYTECODE="1")
 env.pop("CLAUDECODE", None)
+for k in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "CTX_VIEWS_DIR"):   # 실행하는 쪽 세션의 값이 시험 결과(뷰 파일 내보내기)를 바꾸지 않게
+    env.pop(k, None)
 os.environ.update(env)
+for k in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "CTX_VIEWS_DIR"):
+    os.environ.pop(k, None)
 
 
 def sh(*a, **k):
@@ -196,6 +200,75 @@ try:
     check("msg: 없으면 실패 코드", r.returncode == 1 and "없음" in r.stdout)
     r = cli("ctx", "msg", U(0xb1), "--raw")
     check("msg --raw 는 TTY 가 아니면 거부", r.returncode != 0)
+    # --- P1b(llm-trust): 상한 넘는 본문은 에이전트 셸에서 뷰 파일로 내보낸다
+    VW = os.path.join(TMP, "views"); MSID = "99999999-8888-7777-6666-555555555555"
+    msg_env = {**env, "CTX_VIEWS_DIR": VW, "CLAUDE_CODE_SESSION_ID": MSID, "PYTHONPATH": ROOT}
+    def cli_m(*a, extra=None, stdin=None):
+        return subprocess.run([sys.executable, os.path.join(ROOT, "llm_ctx.py"), *a], capture_output=True, text=True, env={**msg_env, **(extra or {})}, input=stdin, timeout=120)
+    mf = lambda u, sid=MSID: os.path.join(VW, sid, "msg", u + ".txt")
+    r = cli_m("ctx", "msg", U(0xc2))
+    f2 = mf(U(0xc2))
+    check("P1b 파일: 상한 초과 + 환경변수 세션 → 파일 생성, 0400", r.returncode == 0 and os.path.isfile(f2) and (os.stat(f2).st_mode & 0o777) == 0o400, r.stdout[-300:] + r.stderr)
+    check("P1b 파일: 화면에 경로·미리보기(1,500자)만, 전체 아님", f2 in r.stdout and r.stdout.count("나") == 1500 - len("[tool_result] ") and "[잘림" not in r.stdout and "Read(offset/limit)" in r.stdout, r.stdout[-400:])
+    check("P1b 파일: 파일에는 치환 뒤 전체(10,000자)", open(f2).read().count("나") == 10000)
+    r = cli_m("ctx", "msg", U(0xc1), "--max", "1000")
+    f1 = mf(U(0xc1))
+    check("P1b 파일: --max 로 낮추면 3,000자 tool_use 도 파일로", os.path.isfile(f1) and open(f1).read().count("가") >= 3000)
+    check("P1b 비밀: 등록된 비밀 값은 파일·화면에 없다", PW not in open(f1).read() + r.stdout and "[protected]" in open(f1).read(), open(f1).read()[:200])
+    check("P1b 파일: 머리 첫 줄에 등록표 해시", open(f1).readline().startswith("# ctx-msg v1 등록표="))
+    r = cli_m("ctx", "msg", U(0xc2))
+    check("P1b 파일: 같은 uuid 를 다시 실행해도 한 파일", len(os.listdir(os.path.join(VW, MSID, "msg"))) == 2 and r.returncode == 0)
+    r = cli_m("secret", "add", "P1B_TMP", "--stdin", stdin="p1b-temp-secret-value\n")
+    check("P1b 지속성: secret add 직후 낡은 파일이 모두 삭제됨", r.returncode == 0 and not os.path.exists(f1) and not os.path.exists(f2) and "낡은 ctx msg 파일 2개" in r.stdout, r.stdout + r.stderr)
+    cli_m("ctx", "msg", U(0xc2))
+    r = cli_m("secret", "disable", "P1B_TMP")
+    check("P1b 지속성: secret disable 도 훑는다(해시가 바뀌므로)", not os.path.exists(f2), r.stdout + r.stderr)
+    cli_m("ctx", "msg", U(0xc2))
+    r = cli_m("secret", "enable", "P1B_TMP")
+    check("P1b 지속성: secret enable 도 훑는다", not os.path.exists(f2), r.stdout + r.stderr)
+    cli_m("ctx", "msg", U(0xc2))
+    r = cli_m("secret", "rm", "P1B_TMP")
+    check("P1b 지속성: secret rm 도 훑는다", not os.path.exists(f2), r.stdout + r.stderr)
+    cli_m("ctx", "msg", U(0xc2)); cli_m("ctx", "msg", U(0xc1), "--max", "1000")
+    r = cli_m("ctx", "doc", "cleanup")
+    check("P1b 정리: ctx doc cleanup 은 현재 해시와 같은 파일은 둔다", os.path.isfile(f2) and "지운 낡은 ctx msg 파일 0개" in r.stdout, r.stdout + r.stderr)
+    os.chmod(f2, 0o600); txt = open(f2).read().splitlines(); txt[0] = "# ctx-msg v1 등록표=stale0000000000"; open(f2, "w").write("\n".join(txt) + "\n"); os.chmod(f2, 0o400)
+    r = cli_m("ctx", "doc", "cleanup")
+    check("P1b 정리: 낡은 해시 파일은 ctx doc cleanup 이 지운다", not os.path.exists(f2) and os.path.isfile(f1) and "지운 낡은 ctx msg 파일 1개" in r.stdout, r.stdout + r.stderr)
+    for lbl, args, ex in (("--all", ("--all",), None), ("상한 이하(기본 8,000)", (), None), ("--raw", ("--raw",), None)):
+        shutil.rmtree(VW, ignore_errors=True)
+        r = cli_m("ctx", "msg", U(0xb1) if lbl == "상한 이하(기본 8,000)" else U(0xc2), *args)
+        check(f"P1b 안 씀: {lbl} → 파일 없음", not os.path.exists(VW), r.stdout[-200:])
+    r = cli_m("ctx", "msg", U(0xc2), "--all")
+    check("P1b 안 씀: --all 은 전체 화면 출력", r.stdout.count("나") == 10000 and "Read(offset" not in r.stdout)
+    r = cli_m("ctx", "msg", U(0xc2), extra={"CLAUDE_CODE_SESSION_ID": ""})
+    check("P1b 안 씀: 세션 ID 없음 → 지금처럼 8,000자 + 잘림 표지", not os.path.exists(VW) and "[잘림: +2014자 더 있음 → --all]" in r.stdout, r.stdout[-150:])
+    r = cli_m("ctx", "msg", U(0xc2), extra={"CLAUDE_CODE_SESSION_ID": "../../x"})
+    check("P1b 안 씀: UUID 아닌 세션 ID → 폴백, 경계 밖에 아무것도 안 만듦", not os.path.exists(VW) and "[잘림" in r.stdout and not os.path.exists(os.path.join(TMP, "x")), r.stdout[-150:])
+    r = cli_m("ctx", "msg", "0000", extra=None)
+    check("P1b 안 씀: 모호한 접두 → 파일 없음", not os.path.exists(VW) and r.returncode == 1)
+    import pty
+    m_, sl_ = pty.openpty()
+    pp = subprocess.Popen([sys.executable, os.path.join(ROOT, "llm_ctx.py"), "ctx", "msg", U(0xc2)], stdin=sl_, stdout=sl_, stderr=sl_, env={k: v for k, v in msg_env.items() if k not in ("CLAUDECODE", "DONGHANS_AGENT")})
+    os.close(sl_)
+    pty_out = b""
+    while True:                                  # pty 버퍼가 작아 읽어 주지 않으면 자식이 막힌다
+        try:
+            chunk = os.read(m_, 65536)
+        except OSError:
+            break
+        if not chunk:
+            break
+        pty_out += chunk
+    pp.wait(timeout=60); os.close(m_)
+    pr = pp
+    check("P1b 안 씀: 사람 셸(TTY) → 파일 없음, 화면에 잘림 표지", pr.returncode == 0 and not os.path.exists(VW) and b"[\xec\x9e\x98\xeb\xa6\xbc" in pty_out, pty_out[-100:])
+    # 쓰기 실패(뷰 폴더가 파일) → 조회는 성공하고 화면 폴백
+    open(os.path.join(TMP, "notadir"), "w").write("x")
+    r = cli_m("ctx", "msg", U(0xc2), extra={"CTX_VIEWS_DIR": os.path.join(TMP, "notadir")})
+    check("P1b 폴백: 파일 쓰기 실패여도 조회는 성공, 8,000자 + 표지", r.returncode == 0 and "[잘림: +2014자" in r.stdout, r.stdout[-150:] + r.stderr)
+    shutil.rmtree(VW, ignore_errors=True)
+
     r = cli("ctx", "search", "유일문구", "--role", "user")
     check("search --role user: 서브에이전트 브리프는 빠지고 사람 발언만", "사람유일문구" in r.stdout and "서브브리프" not in r.stdout, r.stdout)
     r = cli("ctx", "search", "서브브리프유일문구")

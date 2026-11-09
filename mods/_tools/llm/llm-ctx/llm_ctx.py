@@ -555,11 +555,48 @@ def cmd_msg(a):
         uid, sid, ts, role, kind, side, text, raw = rows[0]
         body, notes = _msg_body(kind, text, raw)
         body = mk.text(body)
-        print(mk.text(f"# {uid}  세션 {sid}  {ts:%Y-%m-%d %H:%M:%S}  {role}{'(sub)' if side else ''}/{kind}  전체 {len(body)}자(치환 뒤)"))
+        head = mk.text(f"# {uid}  세션 {sid}  {ts:%Y-%m-%d %H:%M:%S}  {role}{'(sub)' if side else ''}/{kind}  전체 {len(body)}자(치환 뒤)")
+        path = _export_msg_file(a, mk, uid, head, notes, body)
+        print(head)
         for n in notes:
             print(f"# {n}")
+        if path:
+            print(f"{body[:MSG_PREVIEW]}\n[전체 {len(body)}자 중 앞 {MSG_PREVIEW}자만 화면에 찍었다 → 전체는 파일 {path} — Read(offset/limit) 또는 grep 으로 필요한 부분만 읽는다. "
+                  "파일이 없으면 같은 `ctx msg` 를 다시 실행한다. 전부 화면에 필요하면 --all]")
+            return 0
         print(cut_mark(body, 0 if a.all else a.max, "--all"))
     return 0
+
+
+MSG_PREVIEW = 1500   # 파일로 내보낼 때 화면에 찍는 미리보기 길이(plan llm-trust/08-p1b-view-files D3)
+
+
+def _export_msg_file(a, mk, uid, head, notes, body):
+    """상한을 넘는 본문을 에이전트 셸에서만 뷰 파일로 내보내고 경로를 돌려준다(아니면 None → 호출자가 화면에 8,000자 + 표지로 되돌아간다).
+    --raw·--all·상한 이하·사람 셸·세션 ID 없음/UUID 아님·쓰기 실패는 모두 파일을 쓰지 않는다. body·head 는 이미 치환된 것이다."""
+    if getattr(a, "raw", False) or a.all or not a.max or len(body) <= a.max or is_human():
+        return None
+    sid = getattr(a, "session", None) or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if not ctx_store.valid_session(sid):
+        return None
+    pid = int(os.environ["CLAUDE_PID"]) if os.environ.get("CLAUDE_PID", "").isdigit() else None
+    try:
+        return ctx_store.write_msg_file(ctx_store.views_dir(), sid, uid, cs.registry_hash(mk.secrets),
+                                        "\n".join([head] + [f"# {n}" for n in notes]), body, pid=pid)
+    except (OSError, ValueError):
+        return None
+
+
+def _sweep_msgs_after_registry_change():
+    """등록표를 바꾸는 명령(secret add|rm|enable|disable|adopt|ignore)이 성공한 직후, 이 호스트의 낡은 `ctx msg` 파일을 지운다(최선 노력 — 실패해도 등록표 변경은 성공)."""
+    try:
+        with connect(readonly=True) as c:
+            h = cs.registry_hash(cs.load_secrets(c))
+        n = len(ctx_store.sweep_stale_msgs(ctx_store.views_dir(), h))
+        if n:
+            print(f"(낡은 ctx msg 파일 {n}개를 지웠다 — 필요하면 같은 `ctx msg` 를 다시 실행한다)")
+    except Exception as e:
+        print(f"(ctx msg 파일 훑기 실패: {type(e).__name__} — `donghans ctx doc cleanup` 이 하루 안에 지운다)", file=sys.stderr)
 
 
 # ---------------------------------------------------------------- 결정 카드(ctx note cards/*) — 설계: plan llm-trust/02-card-skill-ui
@@ -992,6 +1029,7 @@ def cmd_secret_add(a):
     except ValueError as e:
         sys.exit(str(e))
     print(f"등록: {a.label} ({'regex' if a.regex else 'literal'}, {len(value)}자, fp {cs.fingerprint(value)}) — 이제 ctx 출력·주입 래퍼 출력에서 [protected] 로 바뀐다")
+    _sweep_msgs_after_registry_change()
     return 0
 
 
@@ -1017,6 +1055,7 @@ def cmd_secret_set(a):
     if not n:
         sys.exit(f"'{a.label}' 이(가) 없다")
     print({"rm": "삭제", "enable": "켬", "disable": "끔"}[a.what] + f": {a.label}")
+    _sweep_msgs_after_registry_change()
     return 0
 
 
@@ -1099,6 +1138,7 @@ def cmd_secret_adopt(a):
     except ValueError as e:
         sys.exit(str(e))
     print(f"등록: {a.label} ({len(val)}자, fp {a.fp}) — 값은 화면에 표시하지 않았다")
+    _sweep_msgs_after_registry_change()
     return 0
 
 
@@ -1111,6 +1151,7 @@ def cmd_secret_ignore(a):
             c.execute("INSERT INTO secret_ignores (fp, note) VALUES (%s,%s) ON CONFLICT DO NOTHING", (a.fp, a.note))
         c.commit()
     print(("무시 해제: " if a.undo else "무시: ") + a.fp)
+    _sweep_msgs_after_registry_change()
     return 0
 
 
@@ -1167,7 +1208,7 @@ def main():
     p = ctx.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.set_defaults(f=cmd_search)
     p = ctx.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.set_defaults(f=cmd_recent)
     p = ctx.add_parser("session"); p.add_argument("sid"); p.add_argument("--n", type=int); p.add_argument("--full", action="store_true"); p.add_argument("--from", dest="from_uuid"); p.add_argument("--to", dest="to_uuid"); p.set_defaults(f=cmd_session)
-    p = ctx.add_parser("msg", help="한 메시지의 완전한 본문(도구 호출 포함)"); p.add_argument("uuid", help="메시지 uuid 앞자리(ctx session 출력의 8자 등)"); p.add_argument("--max", type=int, default=8000, help="출력 글자 수 상한(기본 8000)"); p.add_argument("--all", action="store_true", help="상한 없이 전부"); p.set_defaults(f=cmd_msg)
+    p = ctx.add_parser("msg", help="한 메시지의 완전한 본문(도구 호출 포함)"); p.add_argument("uuid", help="메시지 uuid 앞자리(ctx session 출력의 8자 등)"); p.add_argument("--max", type=int, default=8000, help="출력 글자 수 상한(기본 8000)"); p.add_argument("--all", action="store_true", help="상한 없이 전부"); p.add_argument("--session", help="(에이전트 셸) 파일을 둘 세션 ID(기본: 환경변수 CLAUDE_CODE_SESSION_ID)"); p.set_defaults(f=cmd_msg)
     p = ctx.add_parser("card", help="결정 카드(ctx note cards/*) 조회"); cd2 = p.add_subparsers(dest="cardcmd", required=True)
     q = cd2.add_parser("show", help="카드 본문 + 근거 원문 대조(인용 일치 검사)"); q.add_argument("ref", nargs="+", help="`프로젝트:uuid8`(uuid 앞 8자 이상)"); q.add_argument("--history", action="store_true", help="판 이력(git, 강등 표시)"); q.set_defaults(f=cmd_card_show)
     q = cd2.add_parser("list", help="카드 목록"); q.add_argument("--project"); q.add_argument("--state"); q.set_defaults(f=cmd_card_list)

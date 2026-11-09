@@ -190,7 +190,7 @@ cs.mark_ended(VIEWS, "sess-live")
 check("정리: 종료 표식이 있어도 세션 프로세스가 살아 있으면 둔다", "sess-live" not in cs.cleanup_views(VIEWS))
 cs.build_view(STORE, VIEWS, "sess-old", "nixos")
 old = time.time() - 9 * 86400
-os.utime(f"{VIEWS}/sess-old/.ctx-base.json", (old, old))
+os.utime(f"{VIEWS}/sess-old/.ctx-base.json", (old, old)); os.utime(f"{VIEWS}/sess-old", (old, old))   # 나이 = 뷰 폴더·base·msg/ 중 최근(P1b)
 check("정리: 오래되고 죽은 세션의 뷰를 지운다", "sess-old" in cs.cleanup_views(VIEWS))
 cs.build_view(STORE, VIEWS, "sess-restart", "nixos"); cs.mark_ended(VIEWS, "sess-restart")
 cs.build_view(STORE, VIEWS, "sess-restart", "nixos")
@@ -419,6 +419,61 @@ os.makedirs(f"{PS}/plain"); subprocess.run(["git", "init", "-q", f"{PS}/plain"],
 check("최신화: origin 없는 저장소는 건너뜀", cs.refresh_project(PS, "plain", force=True) is None)
 check("최신화: 저장소가 아닌 폴더·없는 프로젝트는 건너뜀", cs.refresh_project(PS, "ghost", force=True) is None)
 os.environ.pop("CTX_IS_WRITER", None)
+
+# --- P1b: ctx msg 뷰 파일(msg/) — 쓰기·낡음 삭제·정리 기준
+MV = f"{TMP}/msgviews"
+S1, S2 = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+U1, U2 = "aaaaaaaa-0000-0000-0000-000000000001", "aaaaaaaa-0000-0000-0000-000000000002"
+p1 = cs.write_msg_file(MV, S1, U1, "h1", "# 머리", "본문 전체", pid=os.getpid())
+check("msg 파일: 경로 <뷰>/<세션>/msg/<uuid>.txt", p1 == f"{MV}/{S1}/msg/{U1}.txt" and open(p1).read().splitlines()[0] == cs.MSG_HEAD + "h1")
+check("msg 파일: 본문 전체가 들어 있다", "본문 전체" in open(p1).read() and "# 머리" in open(p1).read())
+check("msg 파일: 파일 0400·폴더 0700", (os.stat(p1).st_mode & 0o777) == 0o400 and (os.stat(f"{MV}/{S1}/msg").st_mode & 0o777) == 0o700)
+check("msg 파일: 임시 파일이 남지 않는다", not [f for f in os.listdir(f"{MV}/{S1}/msg") if f.endswith(".ctx-tmp")])
+p1b = cs.write_msg_file(MV, S1, U1, "h2", "# 머리", "새 본문")
+check("msg 파일: 같은 uuid 는 한 파일로 덮어쓴다", p1b == p1 and len(os.listdir(f"{MV}/{S1}/msg")) == 1 and "새 본문" in open(p1).read())
+check("msg 파일: pid 가 있으면 .ctx-pid 기록, 이미 있으면 덮지 않는다", open(f"{MV}/{S1}/.ctx-pid").read() == str(os.getpid()))
+cs.write_msg_file(MV, S1, U2, "h2", "# 머리", "둘째", pid=1); 
+check("msg 파일: 기존 .ctx-pid 는 덮지 않는다", open(f"{MV}/{S1}/.ctx-pid").read() == str(os.getpid()))
+for bad in ("../x", "x", "", None, S1 + "/.."):
+    try:
+        cs.write_msg_file(MV, bad, U1, "h", "", "x"); ok = False
+    except ValueError:
+        ok = True
+    check(f"msg 파일: UUID 아닌 세션 {bad!r} 거부", ok)
+try:
+    cs.write_msg_file(MV, S1, "../../evil", "h", "", "x"); ok = False
+except ValueError:
+    ok = True
+check("msg 파일: UUID 아닌 메시지 uuid 거부", ok and not os.path.exists(f"{MV}/evil"))
+check("msg_files: 목록", sorted(cs.msg_files(MV)) == sorted([p1, f"{MV}/{S1}/msg/{U2}.txt"]))
+gone = cs.sweep_stale_msgs(MV, "h2")
+check("낡은 해시 삭제: 해시가 같은 파일은 둔다", gone == [] and len(cs.msg_files(MV)) == 2)
+gone = cs.sweep_stale_msgs(MV, "h3")
+check("낡은 해시 삭제: 해시가 다르면 모두 지운다", len(gone) == 2 and cs.msg_files(MV) == [])
+cs.write_msg_file(MV, S1, U1, "h3", "", "x")
+open(f"{MV}/{S1}/msg/{U2}.txt", "w").write("머리 없는 파일\n")
+check("낡은 해시 삭제: 머리가 없거나 깨진 파일도 지운다", cs.sweep_stale_msgs(MV, "h3") == [f"{MV}/{S1}/msg/{U2}.txt"])
+# 정리 기준: 오래된 .ctx-base.json 이 있어도 msg/ 에 새 파일을 쓰면 7일 뒤에도 안 지운다(.ctx-pid 없음 — CLAUDE_PID 가 빈 경우)
+cs.build_view(STORE, MV, S2, "nixos")
+old = time.time() - 9 * 86400
+for r_, ds, fs in os.walk(f"{MV}/{S2}"):
+    for x in ds + fs:
+        os.utime(os.path.join(r_, x), (old, old))
+os.utime(f"{MV}/{S2}", (old, old))
+cs.write_msg_file(MV, S2, U1, "h3", "", "x")
+os.utime(f"{MV}/{S2}", (old, old)); os.utime(f"{MV}/{S2}/.ctx-base.json", (old, old))
+check("정리: base 가 오래돼도 msg/ 에 최근 파일이 있으면 둔다", S2 not in cs.cleanup_views(MV) and os.path.isdir(f"{MV}/{S2}"))
+for f in os.listdir(f"{MV}/{S2}/msg"):
+    os.utime(f"{MV}/{S2}/msg/{f}", (old, old))
+os.utime(f"{MV}/{S2}/msg", (old, old))
+check("정리: 전부 오래되고 프로세스도 없으면 지운다(msg/ 포함)", S2 in cs.cleanup_views(MV) and not os.path.exists(f"{MV}/{S2}"))
+# base 없이 msg/ 만 있는 세션
+S3 = "33333333-3333-3333-3333-333333333333"
+cs.write_msg_file(MV, S3, U1, "h3", "", "x")
+os.utime(f"{MV}/{S3}", (old, old))
+check("정리: base 없이 msg/ 만 있고 방금 쓴 세션은 둔다", S3 not in cs.cleanup_views(MV))
+cs.mark_ended(MV, S3)
+check("정리: 종료 표식 뒤엔 msg/ 째 지운다", S3 in cs.cleanup_views(MV) and not os.path.exists(f"{MV}/{S3}"))
 
 import shutil; shutil.rmtree(TMP, ignore_errors=True)
 sys.exit(finish("ctx_store"))

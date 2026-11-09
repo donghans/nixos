@@ -28,6 +28,12 @@ def _under(path: str, root: str) -> bool:
     return p == r or p.startswith(r + os.sep)
 
 
+def _is_msg_path(path: str) -> bool:
+    """`<뷰>/<세션>/msg/…` 인가(`ctx msg` 가 만든 파생물 파일)."""
+    rel = os.path.relpath(os.path.realpath(path), os.path.realpath(st.views_dir())).split(os.sep)
+    return len(rel) >= 3 and rel[0] != ".." and rel[1] == st.MSG_DIR
+
+
 def pre(payload: dict) -> dict | None:
     tool = payload.get("tool_name")
     if tool not in WRITE_TOOLS:
@@ -39,6 +45,9 @@ def pre(payload: dict) -> dict | None:
     where = "읽기 뷰" if _under(path, st.views_dir()) else ("문서 저장소" if _under(path, st.store_dir()) else None)
     if not where:
         return None
+    if where == "읽기 뷰" and _is_msg_path(path):
+        reason = (f"{path} 는 `ctx msg` 가 만든 파생물(대화 본문 사본)이라 고치지 않는다. 내용이 필요하면 같은 `donghans ctx msg <uuid 앞자리>` 를 다시 실행한다(새로 만든다).")
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}
     reason = (f"{where}({path})는 직접 고치지 않는다. 문서를 고치려면 새 본문을 파일로 만든 뒤 `donghans ctx doc propose <kind> <name> --file <파일>` 을 쓴다 "
               "(동기화 담당이 읽은 판·비밀·머리말을 검사해 반영한다). 먼저 `donghans ctx doc read`/`path` 로 읽어 판을 기록해 둬야 한다.")
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}

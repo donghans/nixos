@@ -48,6 +48,9 @@ FIELD_ORDER = ("status", "scope", "state", "adopted_to", "provenance", "env_depe
 MAX_BYTES = 2_000_000
 HDR_OPEN, HDR_CLOSE = "<!-- ctx\n", "-->\n"
 PROP_OPEN = "<!-- ctx-proposal\n"
+MSG_DIR = "msg"
+MSG_HEAD = "# ctx-msg v1 등록표="   # 파일 첫 줄: 쓸 때의 비밀 등록표 해시(낡음 판정)
+UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 BASE_FILE, ENDED_FILE, PID_FILE, WATCH_PID_FILE, REJECTED_DIR = ".ctx-base.json", ".ctx-ended", ".ctx-pid", ".ctx-watch.pid", ".ctx-rejected"
 EXCLUDE_TOP = ("_inbox", ".git")
 
@@ -372,6 +375,67 @@ def clear_ended(views: str, session: str) -> None:
         pass
 
 
+def valid_session(session: str | None) -> bool:
+    """세션 ID 는 UUID 형식만 — `--session ../x` 같은 값이 경로 성분이 되는 것을 막는다."""
+    return bool(session) and bool(UUID_RE.match(session))
+
+
+def write_msg_file(views: str, session: str, uuid: str, registry: str, header: str, body: str, pid: int | None = None) -> str:
+    """`ctx msg` 가 긴 본문을 내보내는 파일 `<views>/<세션>/msg/<uuid>.txt`(폴더 0700·파일 0400, 임시 이름에 쓰고 rename — 같은 uuid 는 덮어쓴다).
+    호출자가 이미 치환한 header·body 만 받는다. 세션·uuid 가 UUID 형식이 아니면 ValueError. pid 가 있고 `.ctx-pid` 가 없으면 기록(있으면 덮지 않는다)."""
+    if not valid_session(session) or not UUID_RE.match(uuid or ""):
+        raise ValueError("세션 ID·메시지 uuid 가 UUID 형식이 아니다")
+    root = view_root(views, session)
+    d = os.path.join(root, MSG_DIR)
+    os.makedirs(d, exist_ok=True)
+    os.chmod(d, 0o700)
+    dst = os.path.join(d, uuid + ".txt")
+    tmp = dst + ".ctx-tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(f"{MSG_HEAD}{registry}\n{header.rstrip()}\n\n{body}\n")
+    os.chmod(tmp, 0o400)
+    os.replace(tmp, dst)
+    if pid and not os.path.exists(os.path.join(root, PID_FILE)):
+        open(os.path.join(root, PID_FILE), "w").write(str(pid))
+    clear_ended(views, session)
+    return dst
+
+
+def msg_files(views: str) -> list[str]:
+    """모든 세션 뷰의 `msg/` 파일 경로 목록."""
+    out = []
+    try:
+        sessions = sorted(os.listdir(views))
+    except OSError:
+        return out
+    for sid in sessions:
+        d = os.path.join(views, sid, MSG_DIR)
+        try:
+            out += [os.path.join(d, f) for f in sorted(os.listdir(d)) if f.endswith(".txt")]
+        except OSError:
+            pass
+    return out
+
+
+def sweep_stale_msgs(views: str, registry: str) -> list[str]:
+    """첫 줄의 등록표 해시가 현재와 다르거나 읽을 수 없는 `msg/` 파일을 지운다(새 비밀 등록 뒤 평문이 남지 않게). 지운 경로 목록."""
+    gone = []
+    for p in msg_files(views):
+        try:
+            first = open(p, errors="replace").readline().rstrip("\n")
+        except OSError:
+            first = ""
+        if first == MSG_HEAD + registry:
+            continue
+        try:
+            os.remove(p)
+            gone.append(p)
+        except OSError:
+            pass
+    return gone
+
+
 def _pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -380,6 +444,26 @@ def _pid_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+
+
+def _last_touched(root: str) -> float:
+    """뷰 폴더의 마지막 사용 시각 — `.ctx-base.json`·폴더 자신·`msg/` 폴더·`msg/` 안 파일 중 가장 최근 수정 시각.
+    (문서 뷰만 있거나 대화 파일(msg/)만 쓰는 세션 어느 쪽이든 살아 있는 세션의 뷰가 7일 뒤 조기 삭제되지 않게 한다.)"""
+    cands = []
+    for p in (os.path.join(root, BASE_FILE), root, os.path.join(root, MSG_DIR)):
+        try:
+            cands.append(os.path.getmtime(p))
+        except OSError:
+            pass
+    try:
+        for f in os.listdir(os.path.join(root, MSG_DIR)):
+            try:
+                cands.append(os.path.getmtime(os.path.join(root, MSG_DIR, f)))
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return max(cands) if cands else 0.0
 
 
 def cleanup_views(views: str, now: float | None = None, max_age_days: float = 7.0) -> list[str]:
@@ -400,10 +484,7 @@ def cleanup_views(views: str, now: float | None = None, max_age_days: float = 7.
         except (OSError, ValueError):
             pid = 0
         alive = bool(pid) and _pid_alive(pid)
-        try:
-            age = now - os.path.getmtime(os.path.join(root, BASE_FILE))
-        except OSError:
-            age = now - os.path.getmtime(root)
+        age = now - _last_touched(root)
         if (ended and not alive) or (age > max_age_days * 86400 and not alive):
             for r, d, f in os.walk(root):
                 for x in d:
