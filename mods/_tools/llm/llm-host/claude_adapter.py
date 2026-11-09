@@ -51,6 +51,7 @@ class ClaudeAdapter(Adapter):
         self._caps: list = []
         self._seen_init = False
         self._cost_total = 0.0
+        self._resume_pending = False     # --resume 으로 띄운 프로세스의 첫 result 를 기다리는 중(S7: 그 total 은 이전 실행분까지 포함한 누적)
         self._turn = 0
         self._in_turn = False
         self._sent_pending = 0
@@ -73,6 +74,7 @@ class ClaudeAdapter(Adapter):
             a += ["--model", spec["model"]]
         if spec.get("resume"):
             a += ["--resume", spec["resume"]]
+            self._resume_pending = True
         if spec.get("persist", True) is False:
             a.append("--no-session-persistence")
         if spec.get("max_budget_usd") is not None:       # 선택 안전장치(기본 없음). 한도를 넘을 수 있고 resume 의 이전 합계는 세지 않는다 [공식]
@@ -234,6 +236,8 @@ class ClaudeAdapter(Adapter):
             return [self._ev(E.Hook, run=run, name=name, phase="started" if st == "hook_started" else "finished", extra=ex)]
         if st in ("task_started", "task_progress", "task_updated", "task_notification"):
             return self._task(o, st)
+        if st == "background_tasks_changed":   # S7 실측(2.1.318): 백그라운드 작업 목록 스냅샷. task_* 가 같은 내용을 이미 주므로 이벤트 없음
+            return self._skip("system:background_tasks_changed")
         if st == "api_retry":   # 형식 미녹화(계획서 표의 notice 대응) — 알려진 키만 느슨하게 요약하고 원문은 extra 에 둔다
             bits = [f"{k}={o[k]}" for k in ("attempt", "max_retries", "retry_delay_ms", "error_status", "error") if k in o]
             return [self._ev(E.Notice, level="warn", text="API 재시도 " + " ".join(bits), extra={"payload": o})]
@@ -341,7 +345,11 @@ class ClaudeAdapter(Adapter):
         total = _num(o.get("total_cost_usd"))
         delta = None
         if total is not None:
-            delta = total - self._cost_total if total >= self._cost_total else total
+            if self._resume_pending:     # S7 실측(2.1.318): 재개한 프로세스의 total_cost_usd 는 이전 실행분을 포함한 누적 → 첫 턴 delta 는 알 수 없다(null), 이후는 이 값 기준
+                delta = None
+                self._resume_pending = False
+            else:
+                delta = total - self._cost_total if total >= self._cost_total else total
             self._cost_total = total
         self._in_turn = False
         self._streamed.clear()

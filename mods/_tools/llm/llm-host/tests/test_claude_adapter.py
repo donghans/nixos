@@ -205,10 +205,19 @@ rr = ClaudeAdapter().decode({"type": "brand_new", "parent_tool_use_id": "toolu_p
 check("raw 도 run·backend_session 을 단다", rr.run == "toolu_p" and rr.backend_session == "S")
 api = ClaudeAdapter().decode({"type": "system", "subtype": "api_retry", "attempt": 2, "max_retries": 5})[0]
 check("api_retry → notice(warn, 원문은 extra; 형식 미녹화라 합성 시험)", api.kind == "notice" and api.level == "warn" and "attempt=2" in api.text and api.extra["payload"]["attempt"] == 2)
+# S7 실측: 서브에이전트가 돌 때 오는 background_tasks_changed 는 알려진 줄(raw 가 아님) — 이벤트 없이 ignored 로 센다
+bg = ClaudeAdapter()
+bgl = {"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "t1", "run_id": "r1", "task_type": "local_agent", "subagent_type": "general-purpose", "description": "d"}], "uuid": "u", "session_id": "S"}
+check("background_tasks_changed → 이벤트 없음(raw 아님, ignored 로 셈)", bg.decode(bgl) == [] and bg.ignored.get("system:background_tasks_changed") == 1 and bg.decode({**bgl, "tasks": []}) == [])
 # 비용: 누적이 줄면(새 프로세스) total 자체가 delta
 adc = ClaudeAdapter(); mk = lambda c: {"type": "result", "subtype": "success", "total_cost_usd": c}
 ds = [adc.decode(mk(c))[0].cost_delta for c in (0.5, 0.75, 0.25)]
 check("cost_delta: 첫 턴은 total, 이후 차, 줄면 total", ds == [0.5, 0.25, 0.25], str(ds))
+# S7 실측: --resume 으로 띄운 프로세스의 total 은 이전 실행분을 포함한 누적이라 첫 턴 delta 는 null, 이후는 그 값 기준
+adr = ClaudeAdapter(); adr.argv({"resume": "sid-1"})
+dr = [adr.decode(mk(c))[0].cost_delta for c in (0.003, 0.0034)]
+check("resume: 첫 턴 cost_delta null, 이후는 첫 total 기준 차", dr[0] is None and abs(dr[1] - 0.0004) < 1e-12, str(dr))
+adn = ClaudeAdapter(); adn.argv({}); check("resume 아니면 첫 턴 delta 는 total", adn.decode(mk(0.003))[0].cost_delta == 0.003)
 check("total_cost_usd 없는 result 는 cost None", ClaudeAdapter().decode({"type": "result", "subtype": "success"})[0].cost_delta is None)
 rl = evs_of("main", "rate_limit")[0]
 check("rate_limit 필드", rl.status == "allowed" and rl.window == "five_hour" and isinstance(rl.resets_at, (int, float)))

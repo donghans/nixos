@@ -1,6 +1,6 @@
 # llm-host — LLM 세션 호스트 코어 (규격 v0)
 
-설계 근거: ctx 문서 `plan llm-trust/11-p5prime-2-session-host` (읽기: `donghans ctx doc read plan llm-trust/11-p5prime-2-session-host --project nixos`). 이 폴더는 단계 S5 까지 있다(S4 정책 `policy.py`, S5 다중 세션 `host.py`는 아래 절)(규격 `events.py`, 어댑터 인터페이스 `adapter.py`, claude 어댑터 `claude_adapter.py` 의 읽기 `decode` 와 쓰기 `argv`·`env`·`encode`, 세션 `session.py`, 시험용 가짜 백엔드 `fake_claude.py`). 정책·다중 세션·기록 등은 계획서 §9 의 뒤 단계에서 추가된다.
+설계 근거: ctx 문서 `plan llm-trust/11-p5prime-2-session-host` (읽기: `donghans ctx doc read plan llm-trust/11-p5prime-2-session-host --project nixos`). 이 폴더는 단계 S7 까지 있다(S4 정책 `policy.py`, S5 다중 세션 `host.py`는 아래 절)(규격 `events.py`, 어댑터 인터페이스 `adapter.py`, claude 어댑터 `claude_adapter.py` 의 읽기 `decode` 와 쓰기 `argv`·`env`·`encode`, 세션 `session.py`, 시험용 가짜 백엔드 `fake_claude.py`). 정책·다중 세션·기록 등은 계획서 §9 의 뒤 단계에서 추가된다.
 시험: `tests/test_events.py`(규격)·`tests/test_claude_adapter.py`(어댑터 읽기; 녹화본 `tests/fixtures/` 전체 재생). 직접 실행: `cd mods/_tools/llm/llm-host && python3 -I tests/test_claude_adapter.py`. `tests/test_session.py`(세션·가짜 백엔드·어댑터 쓰기; 비용 0). `mods/_tools/run-tests.sh` 에 `llm-host-ev`·`llm-host-claude`·`llm-host-session` 으로 등록돼 있다.
 
 **규격은 v0 이다.** P5′-3(TUI)을 만들며 부족한 필드를 추가하고 P5′-4(두 번째 백엔드) 때 한 번 정리한다. 그때까지 `raw` 통과가 안전판이다.
@@ -123,3 +123,8 @@ nix 에는 아직 등록하지 않았다(`mods/devel/apps/llm-cli.nix` 의 `ctxS
 - **`spec["max_budget_usd"]` → `--max-budget-usd`**: 선택 안전장치, **기본값 없음**(상한 값은 추천하지 않는다 — D-8). 0 초과 유한 숫자만(아니면 `ValueError`, 자리는 잡지 않는다). claude 쪽 한도는 넘을 수 있고 resume 이전 합계는 세지 않는다 [공식].
 - **원본 줄 녹화(시험용)** `RecordingAdapter(adapter, path)` / `SessionHost(raw_dir=폴더)`: 날 줄을 `{"t","dir","line"}`(in·out·out_unparsed·note)로 `<raw_dir>/<host_session>.raw.jsonl`(0600)에 쓴다 — `tests/fixtures` 와 같은 형식. 원본에는 개인 경로·세션 id 가 있으니 저장소에 두기 전 치환(S0 방식)한다. 표준오류 줄은 어댑터를 지나지 않아 녹화하지 않는다.
 - 시험 `tests/test_recorder.py`(비용 0, 임시 폴더): 권한 0600/0700, 제외·포함, 왕복, 쓰기 실패 무시, 보존 삭제 경계(14일·13.9일·링크·여분 파일), 비용 합 = 마지막 누적 = 로그 합, 호스트 연결, 원본 녹화 형식, 예산 인자. run-tests.sh 의 `llm-host-recorder`.
+
+## 실제 claude 통합 시험·카나리아 (S7, `integration_real.py`)
+**비용이 든다**(haiku, 항목당 약 $0.01~0.02) — `run-tests.sh` 에 넣지 않고 사람이 부른다. 사용: `python3 -I integration_real.py --out <새 폴더> --items canary|all|1,2,…` (항목 1 hello·비용 / 2 권한 허용·거부 / 3 질문 / 4 중단 / 5 서브에이전트 / 6 동시 4세션·메모리·자식 0개 / 7 resume(persistence 켬 — 시험 cwd 세션이 ctx 에 남는다) / 8·8b 호스트 SIGKILL 뒤 자식(유휴·진행 중)). `canary` = 1·2·4, **Claude Code 를 갱신할 때마다** 한 번 돌려 줄 형식 변화를 잡는다(`raw` 가 0 이 아니거나 비용 합이 어긋나면 실패). 결과는 `<out>/results.json`·`raw/`·`logs/`.
+판정 함수(`analyze_*`)는 이벤트 목록만 보는 순수 함수이고 `tests/test_integration_real.py` 가 돈 없이 시험한다(통과 사례마다 변이 사례가 실패해야 함 — `llm-host-integ`).
+S7 에서 실측으로 어댑터에 반영한 것(claude 2.1.318): ① `system/background_tasks_changed` 는 알려진 줄(이벤트 없음, `ignored` 로 셈) ② `--resume` 으로 띄운 프로세스의 `total_cost_usd` 는 이전 실행분을 포함한 누적 → 재개 세션 **첫 턴 `cost_delta` 는 null**(이후는 그 값 기준). 결과 상세는 ctx 노트 `llm-trust/wf-s7-integration`.
