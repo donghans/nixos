@@ -912,6 +912,52 @@ async def run_cards_tab():
                 os.environ[k] = v
 
 
+async def run_host_tab():
+    """9 호스트 탭(S0, 읽기 전용): 키 1~8 매핑 불변·9 → host, 녹화본 렌더링, 파일 없음 안내, 제한 모드(안내문만·파일 안 읽음·동작 숨김)."""
+    import llmhost_view as hv
+    want = {"1": "dashboard", "2": "search", "3": "verify", "4": "secrets", "5": "cands", "6": "instr", "7": "sessions", "8": "cards", "9": "host"}
+    got = {b.key: b.action for b in llmui.LlmUI.BINDINGS if b.key in want}
+    check("탭 키 1~9 매핑(1~8 불변, 9 호스트)", got == {k: f"tab('{v}')" for k, v in want.items()}, str(got))
+    check("TABS 9개, 마지막이 호스트", len(llmui.TABS) == 9 and llmui.TABS[-1] == ("host", "호스트") and [t[0] for t in llmui.TABS[:8]] == [want[str(i)] for i in range(1, 9)])
+    app = llmui.LlmUI()
+    async with app.run_test(size=(160, 50)) as pilot:
+        await settle(pilot, lambda: rows(app, "#projects") == 3)
+        await pilot.press("9"); await settle(pilot, lambda: app.current_tab() == "host" and "이벤트" in txt(app.query_one("#host-head")))
+        body, head = txt(app.query_one("#host-body")), txt(app.query_one("#host-head"))
+        check("9: 호스트 탭이 열리고 녹화본 머리줄(raw 0·읽기 전용)", app.current_tab() == "host" and "알 수 없는 줄(raw) 0" in head and "읽기 전용" in head, head[:200])
+        check("9: 본문에 도구 호출·질문·결과·비용 줄", all(w in body for w in ("▸ Bash [위험]  command=echo s0-allow", "? 질문 [", "빨간색과 파란색", "✔ 결과 성공", "누적 $0.0100")), body[:300])
+        check("9: 호스트에 연결하지 않는다(탭 전용 동작·입력 위젯 없음)", not app.query("#host-scroll Input") and True)
+        await pilot.press("8"); await pilot.pause(0.3)
+        check("9 다음 8 키가 여전히 카드 탭", app.current_tab() == "cards")
+        await pilot.press("9"); await pilot.pause(0.3); await pilot.press("f5"); await pilot.pause(0.3)
+        check("9: F5 새로고침이 호스트 탭에서 동작(예외 없음)", app.current_tab() == "host" and "누적" in txt(app.query_one("#host-head")))
+    os.environ["LLMUI_HOST_FIXTURE"] = "/nonexistent/none.jsonl"
+    try:
+        app = llmui.LlmUI()
+        async with app.run_test(size=(160, 50)) as pilot:
+            await pilot.press("9"); await settle(pilot, lambda: app.current_tab() == "host" and "읽지 못함" in txt(app.query_one("#host-head")))
+            check("9: 녹화본을 못 읽으면 안내 문구(앱은 살아 있음)", "읽지 못함" in txt(app.query_one("#host-head")) and txt(app.query_one("#host-body")).strip() == "")
+        # 제한 모드: 안내문만, 파일(비밀이 들었을 수 있음)을 읽지 않는다
+        os.environ["LLMUI_HOST_FIXTURE"] = "/nonexistent/should-not-be-read.jsonl"
+        orig = hv.load_events
+        calls = []
+        hv.load_events = lambda p: (calls.append(p), orig(p))[1]
+        try:
+            rapp = llmui.LlmUI(restricted=True)
+            async with rapp.run_test(size=(160, 50)) as pilot:
+                await pilot.press("9"); await settle(pilot, lambda: rapp.current_tab() == "host" and "제한 모드" in txt(rapp.query_one("#host-head")))
+                check("9(제한): 안내문만 보이고 본문은 비어 있다", "읽기만" in txt(rapp.query_one("#host-head")) and txt(rapp.query_one("#host-body")).strip() == "")
+                check("9(제한): 녹화본 파일을 읽지 않는다", calls == [], str(calls))
+                check("9(제한): 호스트 동작은 푸터에서 숨김(기존 SESS_ACTIONS 패턴)", all(rapp.check_action(a, ()) is False for a in hv.HOST_ACTIONS) and rapp.check_action("tab", ("host",)) is True)
+                await pilot.press("f5"); await pilot.pause(0.3)
+                check("9(제한): 새로고침해도 파일을 읽지 않는다", calls == [])
+            check("9(비제한): 같은 동작은 막히지 않는다", all(app.check_action(a, ()) is True for a in hv.HOST_ACTIONS))
+        finally:
+            hv.load_events = orig
+    finally:
+        del os.environ["LLMUI_HOST_FIXTURE"]
+
+
 def check_launch_prompt():
     import llmcards as lcd
     check("초기 프롬프트: 슬래시로 시작, 카드 여러 장과 쟁점(줄바꿈은 공백)", lcd.launch_prompt(["a:11111111", "b:22222222"], "첫째\n  둘째") == "/donghans-card a:11111111 b:22222222 첫째 둘째")
@@ -936,6 +982,7 @@ try:
     asyncio.run(run_sessions_tab())
     check_launch_prompt()
     asyncio.run(run_cards_tab())
+    asyncio.run(run_host_tab())
     check_sessions_only_no_db()
 finally:
     pg.stop()
