@@ -20,6 +20,7 @@ from typing import Callable, Optional
 
 import events as E
 from adapter import Adapter
+from recorder import CostTracker
 
 STATES = ("starting", "idle", "busy", "waiting_request", "closing", "closed", "crashed")
 _LINE_LIMIT = 1 << 26        # init 줄이 크다(도구·스킬 목록). 64MB
@@ -28,8 +29,10 @@ _STDERR_MAX = 50             # 표준오류 줄 중 notice 로 올리는 최대 
 
 class Session:
     def __init__(self, adapter: Adapter, spec: Optional[dict] = None, host_session: str = "s1",
-                 keep_history: bool = False, term_wait: float = 5.0):
+                 keep_history: bool = False, term_wait: float = 5.0, sinks: Optional[list] = None):
         self.adapter = adapter
+        self.sinks = list(sinks or [])       # 이벤트마다 부르는 함수(예: recorder.EventLog). 예외는 세션에 영향이 없다(S6)
+        self.cost = CostTracker()            # turn_result.cost_delta 합(S6)
         self.spec = dict(spec or {})
         self.host_session = host_session
         self.state = "starting"
@@ -63,6 +66,12 @@ class Session:
             ev.backend_session = getattr(self.adapter, "backend_session", None)
         if self._keep:
             self.history.append(ev)
+        self.cost.add(ev)
+        for sink in self.sinks:
+            try:
+                sink(ev)
+            except Exception:
+                pass
         self._q.put_nowait(ev)
         return ev
 

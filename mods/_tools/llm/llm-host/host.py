@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 import events as E
+import recorder as R
 from session import Session
 
 DEFAULT_MAX_SESSIONS = 4          # D-9 임시값(데스크톱 4). 노트북 2 는 호출하는 쪽이 정한다. S7 측정 뒤 조정.
@@ -178,13 +179,23 @@ class Registry:
 
 class SessionHost:
     def __init__(self, adapter_factory: Callable[[str], object], max_sessions: int = DEFAULT_MAX_SESSIONS,
-                 registry_dir: Optional[str] = None, term_wait: float = 5.0, keep_history: bool = False):
+                 registry_dir: Optional[str] = None, term_wait: float = 5.0, keep_history: bool = False,
+                 log_root: Optional[str] = None, log_deltas: bool = False, retention_days: Optional[float] = R.DEFAULT_RETENTION_DAYS,
+                 raw_dir: Optional[str] = None):
         if max_sessions < 1:
             raise ValueError("max_sessions 는 1 이상")
         self.adapter_factory = adapter_factory
         self.max_sessions = max_sessions
         self.term_wait = term_wait
         self.keep_history = keep_history
+        self.log_root = log_root                      # None 이면 이벤트 로그를 남기지 않는다(S6). 기본 위치는 recorder.default_log_root()
+        self.log_deltas = log_deltas
+        self.raw_dir = raw_dir                        # 시험용 원본 줄 녹화 폴더(None 이면 끔)
+        self._costs: dict = {}                        # host_session → CostTracker(세션 객체를 release 한 뒤에도 남는다)
+        self._logs: dict = {}
+        self.purged_logs: list = []
+        if log_root is not None and retention_days is not None:
+            self.purged_logs = R.purge_logs(log_root, retention_days)
         self.registry = Registry(registry_dir)
         self.host_id = uuid.uuid4().hex[:8]
         self.host_pid = os.getpid()
@@ -243,11 +254,21 @@ class SessionHost:
         if resume:
             self._resume_ids[resume] = host_session
         try:
-            s = Session(self.adapter_factory(host_session), spec, host_session=host_session,
-                        keep_history=self.keep_history, term_wait=self.term_wait)
+            adapter = self.adapter_factory(host_session)
+            if self.raw_dir is not None:
+                adapter = R.RecordingAdapter(adapter, os.path.join(self.raw_dir, f"{host_session}.raw.jsonl"))
+            sinks = []
+            if self.log_root is not None:
+                log = R.EventLog(host_session, self.log_root, include=self.log_deltas, host_id=self.host_id)
+                self._logs[host_session] = log
+                sinks.append(log)
+            s = Session(adapter, spec, host_session=host_session, keep_history=self.keep_history,
+                        term_wait=self.term_wait, sinks=sinks)
+            self._costs[host_session] = s.cost
             await s.start()
             self._sessions[host_session] = s
         except BaseException:
+            self._close_recorders(host_session, adapter=locals().get("adapter"))
             if resume:
                 self._resume_ids.pop(resume, None)
             raise
@@ -255,6 +276,7 @@ class SessionHost:
             self._starting.discard(host_session)
         if s._exited.is_set():                        # 기동 실패(백엔드를 못 띄움): 레지스트리에 올리지 않는다
             self._forget_session(host_session)
+            self._close_recorders(host_session, s)
             return s
         st = proc_starttime(s.pid) if s.pid else None
         if st is not None:
@@ -265,8 +287,23 @@ class SessionHost:
         self._watchers[host_session] = asyncio.create_task(self._watch(host_session, s))
         return s
 
+    def _close_recorders(self, host_session: str, s: Optional[Session] = None, adapter=None) -> None:
+        log = self._logs.pop(host_session, None)
+        if log is not None:
+            log.close()
+        ad = adapter if adapter is not None else (s.adapter if s is not None else None)
+        if isinstance(ad, R.RecordingAdapter):
+            ad.close()
+
+    def cost_summary(self) -> dict:
+        """세션별·전체 비용 합계(turn_result.cost_delta 의 합). release 한 세션도 포함. 클라이언트 추정치라 청구와 다를 수 있다."""
+        per = {h: c.summary() for h, c in self._costs.items()}
+        return {"total": round(sum(c.total for c in self._costs.values()), 10), "turns": sum(c.turns for c in self._costs.values()),
+                "sessions": per}
+
     async def _watch(self, host_session: str, s: Session) -> None:
         await s.wait_closed()
+        self._close_recorders(host_session, s)
         # 프로세스는 끝났다. 레지스트리에서 지우고 상한에서 뺀다(세션 객체는 이벤트 소비를 위해 get 으로 계속 얻을 수 있게 둔다).
         key = self._reg_keys.pop(host_session, None)
         if key:

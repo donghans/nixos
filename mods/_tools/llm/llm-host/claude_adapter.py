@@ -75,6 +75,11 @@ class ClaudeAdapter(Adapter):
             a += ["--resume", spec["resume"]]
         if spec.get("persist", True) is False:
             a.append("--no-session-persistence")
+        if spec.get("max_budget_usd") is not None:       # 선택 안전장치(기본 없음). 한도를 넘을 수 있고 resume 의 이전 합계는 세지 않는다 [공식]
+            b = spec["max_budget_usd"]
+            if isinstance(b, bool) or not isinstance(b, (int, float)) or not b > 0 or b != b or b == float("inf"):
+                raise ValueError(f"max_budget_usd 는 0 보다 큰 유한한 숫자: {b!r}")
+            a += ["--max-budget-usd", f"{b:g}"]
         a += [str(x) for x in (spec.get("extra_args") or [])]
         return a
 

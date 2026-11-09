@@ -92,7 +92,7 @@ nix 에는 아직 등록하지 않았다(`mods/devel/apps/llm-cli.nix` 의 `ctxS
 - 상태: `starting → idle ⇄ busy ⇄ waiting_request → closing → closed`, 예기치 않은 종료 `crashed`. 기동 직후 idle(첫 메시지 전에는 백엔드 출력이 없다). busy 는 send 뒤 turn_result 까지(백엔드 대기열의 send 도 센다). 대기 표 `session.pending`.
 - 종료 사유: 우리가 close → `closed`, kill → `killed`, 예기치 않은 종료는 코드 0 이면 `eof`, 그 밖은 `crashed`. 미해결 요청은 `request_resolved(deny, session_end)` 로 닫고 `session_ended` 가 마지막 이벤트. close 는 표준입력 닫기 → grace → SIGTERM → term_wait → SIGKILL.
 - 표준오류 줄은 `notice(warn, extra.stream=stderr)`(최대 50줄). 어댑터 decode 예외·너무 긴 줄은 `notice(error)`. 실행 파일이 없으면 `notice(error)` + `session_ended(crashed)`.
-- 아직 없는 것(뒤 단계): 정책을 세션에 연결해 대기 상한 시각에 자동 거부를 실제로 보내는 일(host.py·S5; S4 는 순수 함수만), 다중 세션·상한·고아 레지스트리(S5), 이벤트 로그(S6).
+- 아직 없는 것(뒤 단계): 정책을 세션에 연결해 대기 상한 시각에 자동 거부를 실제로 보내는 일(host.py·S5; S4 는 순수 함수만), 다중 세션·상한·고아 레지스트리(S5), 이벤트 로그(S6, 아래 「기록」 절에서 연결됨).
 
 ## 가짜 백엔드 (`fake_claude.py`)
 `python3 fake_claude.py 시나리오.jsonl [--timeout 초]`. 시나리오 한 줄이 단계 하나: `{"emit":[줄…]}` · `{"expect":{stdin_type|line|text|control_response|control_request|request_id|stdin_eof}}` · `{"sleep":초}` · `{"stderr":"글"}` · `{"ignore_sigterm":true}` · `{"exit":코드}`. `line` 은 바이트 단위 비교, `control_response`·`control_request` 는 부분집합 비교. 기대가 어긋나면 종료 코드 3, 입력이 안 오면 4, 입력이 닫히면 5, 시나리오 오류 2. 시나리오 끝에서는 입력 EOF 까지 읽고 0 으로 끝난다. 시험은 녹화본 fixtures 를 시나리오로 바꿔 쓴다(in→expect, out→emit).
@@ -113,3 +113,13 @@ nix 에는 아직 등록하지 않았다(`mods/devel/apps/llm-cli.nix` 의 `ctxS
 - 고아 탐지 `scan_orphans()`: 레지스트리에 있고 pid·starttime 이 같은 채 살아 있는데 띄운 호스트가 죽은 자식만 보고한다(표지가 읽히는데 다르면 제외, 형제 호스트의 자식은 제외). **죽이지 않는다** — `host.notices` 에 procctl plan 안내만 쌓는다(D-14: 안내만). 사람이 정리한 뒤 `forget_orphan`.
 - 시험 `tests/test_host.py`(비용 0, 가짜 백엔드): 100회 시작·종료 후 자식 표지 프로세스 0개, SIGTERM·EOF 무시 가짜로 SIGKILL 경로, 호스트 흉내 프로세스 강제 종료 후 재시작·고아, 동시 세션 격리. run-tests.sh 의 `llm-host-host`.
 - 호스트 사망 시 자식 거동은 유휴 상태 EOF 만 확인됨(S0). 턴 진행 중·권한 대기 중 EOF 는 미확인(S7 항목 8, 선택).
+
+## 기록 (S6, `recorder.py`)
+- **이벤트 로그** `EventLog(host_session, root, include=False)`: `<root>/<host_session>/events.jsonl`(파일 0600·폴더 0700, umask 와 무관하게 `fchmod`), 줄 하나 = `Event.to_dict()`. `text_delta` 는 기본 제외(`log_deltas=True` 로 포함). 첫 줄은 `log_open`(host_id·pid·제외 목록) — 같은 host_session 이름은 호스트가 다시 떠도 이어 쓰므로 구분용. 로그를 못 써도 세션은 죽지 않는다(`errors` 카운트). **로그에는 도구 입력·메시지 본문이 있어 비밀·고객 데이터가 섞일 수 있다** → ctx 로 올리는 코드는 없다(ctx 는 transcript 에서 따로 적재).
+- **위치 관례(S6 확인)**: `$XDG_STATE_HOME`(없으면 `~/.local/state`) 아래 `llm-host/`. 이 저장소의 `displayctl`(`dispctl/config.py`)·`hypr`(hwctl)가 같은 관례를 쓰고 홈에 `observe`·`procui`·`claude-ctx` 등이 이미 있다 — 계획서의 「관례 미확인」은 확인됨.
+- **보존 삭제** `purge_logs(root, days=14)`: `events.jsonl` 이 days 일보다 오래 안 바뀐 세션 폴더(파일 → 비면 폴더)만 지운다. root 바로 아래 폴더만 보고 심볼릭 링크·`events.jsonl` 없는 폴더는 건드리지 않는다. `SessionHost(log_root=…, retention_days=14)` 는 만들 때 한 번 돈다(`retention_days=None` 이면 안 지움, 결과는 `host.purged_logs`).
+- **연결**: `SessionHost(log_root=None, log_deltas=False, retention_days=14, raw_dir=None)`. `log_root=None`(기본)이면 로그를 안 남긴다. `Session(sinks=[함수…])` 는 이벤트마다 함수를 부르고 예외는 삼킨다(`EventLog` 는 호출 가능).
+- **비용** `CostTracker`: `turn_result.cost_delta` 의 합(`total`)·마지막 `cost_total`·턴 수. `Session.cost`, `SessionHost.cost_summary() -> {total, turns, sessions:{host_session:{total,last_cost_total,turns,priced_turns}}}`(release 한 세션 포함). `total_cost_usd` 는 클라이언트 추정치라 청구와 다를 수 있다. resume 한 세션의 합계는 이번 프로세스 증가분이다.
+- **`spec["max_budget_usd"]` → `--max-budget-usd`**: 선택 안전장치, **기본값 없음**(상한 값은 추천하지 않는다 — D-8). 0 초과 유한 숫자만(아니면 `ValueError`, 자리는 잡지 않는다). claude 쪽 한도는 넘을 수 있고 resume 이전 합계는 세지 않는다 [공식].
+- **원본 줄 녹화(시험용)** `RecordingAdapter(adapter, path)` / `SessionHost(raw_dir=폴더)`: 날 줄을 `{"t","dir","line"}`(in·out·out_unparsed·note)로 `<raw_dir>/<host_session>.raw.jsonl`(0600)에 쓴다 — `tests/fixtures` 와 같은 형식. 원본에는 개인 경로·세션 id 가 있으니 저장소에 두기 전 치환(S0 방식)한다. 표준오류 줄은 어댑터를 지나지 않아 녹화하지 않는다.
+- 시험 `tests/test_recorder.py`(비용 0, 임시 폴더): 권한 0600/0700, 제외·포함, 왕복, 쓰기 실패 무시, 보존 삭제 경계(14일·13.9일·링크·여분 파일), 비용 합 = 마지막 누적 = 로그 합, 호스트 연결, 원본 녹화 형식, 예산 인자. run-tests.sh 의 `llm-host-recorder`.
