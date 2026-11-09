@@ -1,7 +1,7 @@
 # llm-host — LLM 세션 호스트 코어 (규격 v0)
 
-설계 근거: ctx 문서 `plan llm-trust/11-p5prime-2-session-host` (읽기: `donghans ctx doc read plan llm-trust/11-p5prime-2-session-host --project nixos`). 이 폴더는 단계 S8 까지 있다(S8 래퍼·sudo `launcher.py` 는 아래 「래퍼·sudo」 절)(S4 정책 `policy.py`, S5 다중 세션 `host.py`는 아래 절)(규격 `events.py`, 어댑터 인터페이스 `adapter.py`, claude 어댑터 `claude_adapter.py` 의 읽기 `decode` 와 쓰기 `argv`·`env`·`encode`, 세션 `session.py`, 시험용 가짜 백엔드 `fake_claude.py`). 정책·다중 세션·기록 등은 계획서 §9 의 뒤 단계에서 추가된다.
-시험: `tests/test_events.py`(규격)·`tests/test_claude_adapter.py`(어댑터 읽기; 녹화본 `tests/fixtures/` 전체 재생). 직접 실행: `cd mods/_tools/llm/llm-host && python3 -I tests/test_claude_adapter.py`. `tests/test_session.py`(세션·가짜 백엔드·어댑터 쓰기; 비용 0). `mods/_tools/run-tests.sh` 에 `llm-host-ev`·`llm-host-claude`·`llm-host-session` 으로 등록돼 있다.
+설계 근거: ctx 문서 `plan llm-trust/11-p5prime-2-session-host` (읽기: `donghans ctx doc read plan llm-trust/11-p5prime-2-session-host --project nixos`). 이 폴더는 계획서 §9 의 S1~S9 를 모두 갖췄다. **P5′-3 이 쓰려면 맨 아래 「공개 API (S9)」와 「확인 못 함·소비자 책임」부터 읽는다.** 아래 절들은 모듈별 상세다(규격 `events.py`·어댑터 `adapter.py`/`claude_adapter.py`·세션 `session.py`·가짜 백엔드 `fake_claude.py`·정책 `policy.py`·다중 세션 `host.py`·기록 `recorder.py`·실제 시험 `integration_real.py`·래퍼 `launcher.py`).
+시험(모두 비용 0, 가짜 백엔드·녹화본): `tests/test_events.py`(규격)·`test_claude_adapter.py`(어댑터; 녹화본 `tests/fixtures/` 전체 재생)·`test_session.py`·`test_policy.py`·`test_host.py`·`test_recorder.py`·`test_integration_real.py`(판정 함수)·`test_launcher.py`. 각각 `cd mods/_tools/llm/llm-host && python3 -I tests/<파일>` 로 직접 실행하고, `mods/_tools/run-tests.sh` 에 `llm-host-ev`·`-claude`·`-session`·`-policy`·`-host`·`-recorder`·`-integ`·`-launcher` 8항목으로 등록돼 있다. 비용이 드는 `integration_real.py`·`launcher_real.py` 는 run-tests.sh 에 없다.
 
 **규격은 v0 이다.** P5′-3(TUI)을 만들며 부족한 필드를 추가하고 P5′-4(두 번째 백엔드) 때 한 번 정리한다. 그때까지 `raw` 통과가 안전판이다.
 nix 에는 아직 등록하지 않았다(`mods/devel/apps/llm-cli.nix` 의 `ctxSrc`·`sessionsSrc` 는 파일 이름을 하나씩 나열해 복사하므로 이 폴더는 자동 수집되지 않고, 빌드·평가에 영향이 없다 — 등록은 계획서 S8 의 별도 허락 사항).
@@ -139,3 +139,75 @@ S7 에서 실측으로 어댑터에 반영한 것(claude 2.1.318): ① `system/b
 - **세션 중 만료 힌트**: `launcher.sudo_hint(ev)` — tool_result 에 `claude-sudo:` 와 안내 키(`sudo-claude-auth`·`sudo 중계가 없음`·`sudo 인증이 없거나 만료`)가 있으면 notice(warn, `extra.hint="sudo"`). Session 이 세션당 한 번 낸다. 문구 일치라 **힌트용**이다(실측: 소켓 없는 래퍼의 「중계가 없음」 문구로 1건 감지).
 - `Session` 은 `spec["launch_notices"]`([(level, text)])를 시작할 때 notice 로 낸다.
 - **ctx 흔적(주의)**: claude-run 이 붙이는 훅은 `--no-session-persistence` 여도 `donghans ctx hook` 으로 ctx DB 의 `hook_events`·`sessions` 에 행을 남긴다(실측: 세션 1개당 SessionStart·UserPromptSubmit·Stop·SessionEnd 등, 최소 환경 HOME·PATH·TERM 만으로도 기록됨). 시험은 cwd 로 구분한다. 지우지 않는다.
+
+## 공개 API (S9) — P5′-3 이 규격 변경 없이 쓰는 법
+모두 `llm-host/` 폴더를 `sys.path` 에 올려 `import events, host, ...` 로 쓴다(패키지 아님; nix 에는 아직 등록 안 함 — 위 안내). Python 3.10+, 표준 라이브러리만.
+
+**1. 기동(소비자 한 곳에서 이 순서를 지킨다)**
+```python
+import host, claude_adapter, launcher, policy, recorder
+
+pol_dict = {"request_timeout": 1800}
+pol  = policy.normalize_policy(pol_dict)                         # 잘못된 값은 ValueError. decide_request 에 넘기는 값
+spec = {"cwd": "/작업/폴더", "model": "haiku", "permission_mode": "manual",
+        "persist": True, "policy": pol_dict}
+bad  = policy.check_start(spec)                                  # ★ 소비자가 부른다(아래 「소비자 책임」). 비어 있지 않으면 시작하지 않는다
+spec, plan = launcher.launch_spec(spec, sudo_ready=False)        # claude-run·훅 설정·(선택) sudo 환경. 못 찾으면 LauncherError
+h = host.SessionHost(lambda hs: claude_adapter.ClaudeAdapter(hs), max_sessions=4,
+                     log_root=recorder.default_log_root())       # log_root=None 이면 이벤트 로그 안 남김
+s = await h.start_session(spec)                                  # HostFull·DuplicateResume·DuplicateSession·HostClosed
+```
+- `spec` 키: `cwd`·`model`·`permission_mode`(기본 `manual`)·`resume`(백엔드 세션 id)·`persist`(기본 true)·`extra_args[]`·`env_extra{}`·`label`·`exe`(시험용 실행 파일 교체)·`max_budget_usd`(선택, 기본 없음)·`policy`. `launcher.apply` 가 `exe`·`env_extra`·`launch_notices` 를 덮어쓴다.
+- 호스트 하나가 세션 여러 개를 가진다. 세션 하나만 쓸 때는 `session.Session(adapter, spec)` + `await s.start()` 로 호스트 없이도 쓸 수 있다(레지스트리·상한·로그 연결 없음).
+
+**2. 이벤트 받기·명령 보내기 (세션 단위, 이벤트 소비자는 세션당 하나)**
+```python
+async for ev in s.events():          # SessionEnded 로 끝난다. 또는 await s.next_event(timeout)·s.collect_until(pred, timeout)
+    if ev.kind == "permission_request":   ...  # req·tool·display·input·description·suggestions
+    if ev.kind == "question_request":     ...  # req·questions
+await s.send("글")                                    # 생성 중이면 백엔드가 대기열에 둔다
+await s.interrupt()                                   # 세션 유지
+await s.answer_permission(req, True|False, message=None, updated_input=None)
+await s.answer_question(req, {"질문 문장": "고른 label"}, free_text=None)
+await s.close(grace=10.0)                             # stdin 닫기 → grace → SIGTERM → SIGKILL. 미해결 요청은 deny(session_end)
+await s.kill()                                        # 자기 자식 그룹만 SIGKILL
+```
+- `s.state`(starting·idle·busy·waiting_request·closing·closed·crashed)·`s.pending`(req → 미해결 요청)·`s.cost`·`s.pid` 는 화면 힌트다. 정합성의 근거는 이벤트다.
+- 이벤트·명령은 JSON 줄로 직렬화된다(`events.to_json`·`event_from_json`·`command_from_json`) — TUI 와 웹 UI 가 같은 규격을 쓴다. 규격에 UI 의존 필드는 없다.
+- 이벤트에 모르는 필드가 오면 `extra` 로 보존, 모르는 줄은 `raw`(`vendor="claude"`) 로 통과하므로 **소비자는 `raw` 를 무시하지 말고 개수를 센다**(카나리아가 `raw` 0 을 요구한다).
+- `message.blocks` 중 `shown_as` 가 붙은 블록은 이미 다른 이벤트(`text_delta`·`tool_call`·`tool_result`)로 그렸으니 다시 그리지 않는다.
+- `turn_result.cost_delta` 는 재개(`resume`) 세션의 첫 턴에서 `null` 이다(합산 시 None 처리 필요).
+- `session_ready` 는 **첫 `send` 뒤에야** 온다. 그 전에는 `capabilities` 를 알 수 없다(`s.adapter.capabilities` 의 값은 `unknown` 가능).
+
+**3. 정책·요청 처리(소비자가 구동한다)**
+`policy.decide_request(pol, tool, subscribers=, waited=, is_question=) -> Decision(action allow|wait|deny, by, message, wait_left)`. 세션은 이 함수를 **스스로 부르지 않는다**. 소비자는 `permission_request`/`question_request` 를 받으면 대기 시간을 재서 이 함수를 부르고, `allow`·`deny` 이면 `answer_*` 로 답하며 deny 의 `message` 는 모델이 읽는 문구(`policy.deny_message`)를 그대로 쓴다. 사용자가 거부 이유를 썼으면 `deny_message(kind, user_reason=…)` 로 전달한다. 자동 턴은 `policy.next_auto_turn`.
+
+**4. 종료·정리**: `await h.close_all()`(병렬 4단계 종료)·`h.kill_all()`. 호스트가 비정상 종료한 뒤 다시 뜨면 `h.scan_orphans()` → `host.orphan_guidance(o)` 로 procctl plan 안내를 보인다(죽이지 않는다). `h.cost_summary()`·`h.notices`·`h.purged_logs`·`recorder.read_log(path)`·`recorder.purge_logs`.
+
+**5. 래퍼·sudo**: 실행기가 터미널에서 `sudo-claude-auth` 로 인증한 뒤 `launcher.launch_spec(spec, sudo_ready=True)`. 호스트는 비밀번호를 읽지 않는다. `launcher.sudo_hint(ev)` 는 Session 이 이미 불러 `notice(extra.hint="sudo")` 를 낸다.
+
+## 소비자 책임 (세션·호스트가 하지 않는 것)
+1. **bypass 검사**: `SessionHost.start_session`·`Session.start` 는 `policy.check_start` 를 부르지 않는다(S4 는 순수 함수만 만들었고 연결은 안 됐다). `--dangerously-skip-permissions` 등 bypass 계열은 소비자가 `check_start(spec)` 로 먼저 거르지 않으면 그대로 시작된다. 계획서 성공 기준 ⑦(명시 허용 없이는 거부)은 **함수 수준에서만** 충족돼 있다. 연결(호스트가 거부)은 P5′-3 착수 때 결정할 변경 후보다.
+2. **대기 상한 구동**: 위 3번처럼 `request_timeout` 에 자동 거부를 보내는 일은 세션이 안 한다(타이머는 소비자 몫).
+3. **구독자 수**: 세션은 구독자를 세지 않는다. `decide_request` 의 `subscribers` 는 소비자가 센다.
+4. **로그의 민감성**: 이벤트 로그에는 도구 입력·메시지 본문이 있어 비밀·고객 데이터가 섞일 수 있다(0600, 14일). ctx 로 올리지 않는다.
+5. **시험 세션의 ctx 흔적**: claude-run 훅은 `--no-session-persistence` 여도 ctx DB 에 행을 남긴다(S8 실측). 시험은 cwd 를 스크래치 아래로 두고, 집계에서 빼는 자동 규칙은 없다(수동 구분).
+
+## 확인 못 함 (S9 시점 갱신, claude 2.1.317~2.1.318)
+확인된 것은 각 절 본문과 계획서 §2-2·§2-2b·§5·§7-3 에 있다. 아래는 **아직 근거가 없는 것**이다.
+| 항목 | 상태 |
+|---|---|
+| 서브에이전트가 요청한 권한의 원본 필드 전체 | 도착과 `run`(=Agent 도구 호출 id) 매핑은 S7 에서 실제로 확인(서브의 Bash 요청, 허용 뒤 파일 생김). 원본 줄의 키 목록은 메인 요청과 대조하지 않았다 |
+| `system/api_retry` 의 실제 형식 | 한 번도 녹화하지 못함. 합성 줄로만 시험(`notice` warn, 키 이름 추정) |
+| 훅 종료 정보(`outcome`·`exit_code`) | 규격 필드가 아니라 `hook.extra` 에 담는다. P5′-3 에서 정식 필드로 올릴지 정한다(규격 v0 변경 후보) |
+| 다중 선택 질문 답 형식(`", "` 로 이음)·`free_text` 자리 | 공식 서술 기준, 실측은 단일 선택만(S7 항목 3) |
+| bypass 모드에서 `can_use_tool` 이 오는지 | 시험 안 함(계획서 §6-1-5). 그래서 기본 거부 |
+| 20분 넘는 권한 대기 | 20분까지만 확인(S0 `hold.log`) |
+| `--max-budget-usd` 가 실제로 세션을 끊는 동작 | 인자 전달만 시험, 실제 한도 도달은 안 봄 |
+| 브로커의 「인증 만료」 문구가 세션에서 오는 경로 | 합성 문구 단위 시험만. 실물은 「중계가 없음」 경로 1건(S8) |
+| 호스트 사망 시 자식 거동의 일반성 | 유휴·진행 중 턴 각 1~2회(S7). 권한 대기 중은 안 해 봄 |
+| 많은 세션의 자원 | 4세션 1회, 세션당 RSS 약 245 MiB(S7). `max_sessions=4` 는 임시값(D-9) |
+| MCP·계정 커넥터 | 첫 턴 뒤 `mcp` 0→30·`tools` 32→85 로 늘어남(`session_info`)만 봤다. 호출은 안 해 봄 |
+| 사용자 스킬의 실제 호출 | 안 해 봄(init 에 목록만) |
+| 공식 SDK 경로(D-1 비교) | S0 의 SDK 스파이크는 하지 않았다. 날 줄 프로토콜(`--permission-prompt-tool stdio`)은 비문서 값이라 버전 종속 — Claude Code 갱신 때마다 카나리아(`integration_real.py --items canary`) |
+| claude-run 글 모양 의존 | `parse_claude_run` 이 못 읽으면 sudo 없는 세션으로 폴백(시험됨). nix 쪽이 바뀌면 파서 수정이 필요 |

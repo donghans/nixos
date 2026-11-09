@@ -50,6 +50,13 @@ for t, pol, subs, w, ea, eb in TABLE:
 # is_question 플래그: 도구 이름이 달라도 질문 취급
 dq = P.decide_request({"auto_allow": ["Read"], "request_timeout": 10}, "Read", subscribers=0, waited=10, is_question=True)
 check("is_question=True 면 Read 라도 자동 허용 없이 질문용 거부 문구", dq.action == "deny" and "질문" in dq.message)
+# 질문 도구 이름 경로(is_question 플래그 없이): 자동 허용 목록이 비었든 읽기 전용이 있든 정책이 대신 답하지 않는다
+for pol_q in ({"request_timeout": 10}, {"auto_allow": ["Read", "Grep"], "request_timeout": 10}):
+    for subs_q in (0, 1):
+        dq1 = P.decide_request(pol_q, "AskUserQuestion", subscribers=subs_q, waited=0)
+        dq2 = P.decide_request(pol_q, "AskUserQuestion", subscribers=subs_q, waited=10)
+        check(f"AskUserQuestion(이름만) auto_allow={pol_q.get('auto_allow')} subs={subs_q}: 상한 전 wait·상한 후 질문용 deny, allow 아님",
+              dq1.action == "wait" and dq2.action == "deny" and dq2.by == "timeout" and "질문" in dq2.message, repr((dq1, dq2)))
 dw = P.decide_request(NO, "Write", subscribers=0, waited=40)
 check("wait 는 상한까지 남은 초를 준다", dw.action == "wait" and abs(dw.wait_left - 60) < 1e-9 and dw.message is None)
 dd = P.decide_request(NO, "Write", subscribers=0, waited=100)
