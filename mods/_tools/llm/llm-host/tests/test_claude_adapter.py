@@ -30,12 +30,9 @@ def replay(name):
 
 
 check("Adapter 의 추상 메서드를 모두 구현(인스턴스 생성 가능)", isinstance(ClaudeAdapter(), Adapter))
-for fn in (lambda a: a.argv({}), lambda a: a.env({}), lambda a: a.encode(E.Interrupt())):
-    try:
-        fn(ClaudeAdapter()); ok = False
-    except NotImplementedError:
-        ok = True
-    check("쓰기 쪽 NotImplementedError", ok)
+ad0 = ClaudeAdapter()
+check("쓰기 쪽(S3): argv·env·encode 가 동작(상세는 test_session.py)", ad0.argv({})[0] == "claude" and isinstance(ad0.env({}), dict)
+      and len(ad0.encode(E.Interrupt())) == 1 and ad0.encode(E.Close()) == [])
 
 # ---- 1. 녹화본 전체 재생: raw 0, 줄 수, 왕복
 ALL = {}

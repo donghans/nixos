@@ -1,5 +1,5 @@
 """claude 스트리밍 모드(`-p --input-format stream-json --output-format stream-json`) 어댑터. 설계: plan llm-trust/11 §4-2.
-이 파일은 S2(읽기: decode)까지다. argv·env·encode 는 S3 에서 채운다(지금은 NotImplementedError).
+S2(읽기: decode)와 S3(쓰기: argv·env·encode).
 
 근거 녹화본: tests/fixtures/{noinit,perm,main,sub}.jsonl (S0 시험, claude 2.1.317; 경로·uuid 치환본). 번역 규칙 요약은 README 의 「claude 번역」.
 decode 정책(계획서가 S2 에 맡긴 결정):
@@ -16,6 +16,7 @@ decode 정책(계획서가 S2 에 맡긴 결정):
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Optional, Union
 
 import events as E
@@ -29,6 +30,10 @@ _INIT_FIELDS = (  # SessionReady/SessionInfo 필드 ← init 키
 _STREAM_SKELETON = {"message_start", "message_delta", "message_stop", "content_block_start", "content_block_stop"}
 # 글자 조각이 아닌 delta(도구 입력 조각·사고 조각·서명). 사고는 system/thinking_tokens 로, 도구 입력은 완결 tool_use 로 전달된다.
 _DELTA_SKIPPED = {"input_json_delta", "thinking_delta", "signature_delta"}
+
+
+def _dump(o: Any) -> str:
+    return json.dumps(o, ensure_ascii=False, separators=(",", ":"))
 
 
 def _num(x: Any) -> Optional[float]:
@@ -52,19 +57,77 @@ class ClaudeAdapter(Adapter):
         self._streamed: dict = {}        # api_message_id → {블록 index: 글자 조각을 이은 글}
         self._task_run: dict = {}        # task_id → run
         self._call_run: dict = {}        # 도구 호출 id → run(서브에이전트 안의 호출)
+        self._req_input: dict = {}       # 미해결 요청 id → 원래 input(허용 응답의 updatedInput 기본값)
+        self._int_seq = 0
 
-    # ------------------------------------------------------------ 쓰기 쪽은 S3
+    # ------------------------------------------------------------ 쓰기 쪽 (S3)
     def argv(self, spec: dict) -> list:
-        raise NotImplementedError("S3 에서 구현")
+        """기동 명령행. 실행 파일은 spec["exe"](문자열 또는 [실행 파일, 인자…]) 로 갈아끼운다(시험: 가짜 백엔드). 없으면 ["claude"].
+        옵션은 S0 에서 시험한 조합이다. permission_mode 가 없으면 manual(사용자 설정이 먼저 평가되므로 init 에는 default 로 보일 수 있다 — S0)."""
+        exe = spec.get("exe") or ["claude"]
+        a = [exe] if isinstance(exe, str) else list(exe)
+        a += ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+              "--include-partial-messages", "--include-hook-events",
+              "--permission-mode", spec.get("permission_mode") or "manual", "--permission-prompt-tool", "stdio"]
+        if spec.get("model"):
+            a += ["--model", spec["model"]]
+        if spec.get("resume"):
+            a += ["--resume", spec["resume"]]
+        if spec.get("persist", True) is False:
+            a.append("--no-session-persistence")
+        a += [str(x) for x in (spec.get("extra_args") or [])]
+        return a
 
     def env(self, spec: dict) -> dict:
-        raise NotImplementedError("S3 에서 구현")
+        """자식 환경(상속하지 않는다): HOME·PATH·TERM=dumb 만 현재 환경에서 가져오고 spec["env_extra"] 를 덮어쓴다. 래퍼 재현(sudo 등)은 S8 launcher."""
+        e = {"TERM": "dumb"}
+        for k in ("HOME", "PATH"):
+            if k in os.environ:
+                e[k] = os.environ[k]
+        e.update({str(k): str(v) for k, v in (spec.get("env_extra") or {}).items()})
+        return e
 
     def encode(self, command) -> list:
-        raise NotImplementedError("S3 에서 구현")
+        """소비자 명령 → 백엔드 입력 줄들. 호스트 안에서만 쓰는 명령(start·set_policy·close·kill)은 []. 줄은 공백 없는 JSON(ensure_ascii=False)."""
+        if isinstance(command, E.Send):
+            if (command.text is None) == (command.blocks is None):
+                raise ValueError("send 는 text 또는 blocks 중 정확히 하나")
+            self.note_sent()
+            content = command.text if command.text is not None else command.blocks
+            return [_dump({"type": "user", "message": {"role": "user", "content": content}})]
+        if isinstance(command, E.Interrupt):
+            self._int_seq += 1
+            return [_dump({"type": "control_request", "request_id": f"host-int-{self._int_seq}", "request": {"subtype": "interrupt"}})]
+        if isinstance(command, E.AnswerPermission):
+            orig = self._req_input.pop(command.req, None)
+            if command.allow:
+                r: dict = {"behavior": "allow", "updatedInput": command.updated_input if command.updated_input is not None else orig}
+                if command.updated_permissions:
+                    r["updatedPermissions"] = command.updated_permissions
+            else:
+                r = {"behavior": "deny", "message": command.message or "denied"}
+            return [self._respond(command.req, r)]
+        if isinstance(command, E.AnswerQuestion):
+            orig = self._req_input.pop(command.req, None)
+            inp = dict(orig) if isinstance(orig, dict) else {}
+            answers = {q: (", ".join(map(str, v)) if isinstance(v, (list, tuple)) else v) for q, v in command.answers.items()}
+            if command.free_text is not None:   # 자유 입력은 아직 답이 없는 첫 질문의 답으로 둔다(공식 형식은 질문→글; 자유 입력 칸의 실측은 없음)
+                qs = inp.get("questions") or []
+                first = next((q.get("question") for q in qs if isinstance(q, dict) and q.get("question") not in answers), None)
+                if first is not None:
+                    answers[first] = command.free_text
+            inp["answers"] = answers
+            return [self._respond(command.req, {"behavior": "allow", "updatedInput": inp})]
+        if isinstance(command, (E.Start, E.SetPolicy, E.Close, E.Kill)):
+            return []
+        raise ValueError(f"알 수 없는 명령: {type(command).__name__}")
+
+    @staticmethod
+    def _respond(req: str, response: dict) -> str:
+        return _dump({"type": "control_response", "response": {"subtype": "success", "request_id": req, "response": response}})
 
     def note_sent(self) -> None:
-        """호스트가 사용자 메시지를 보냈음을 알린다(S3 의 encode(Send)가 부른다). 다음 턴 시작의 source 를 user 로 만든다."""
+        """호스트가 사용자 메시지를 보냈음을 알린다(encode(Send)가 부른다). 다음 턴 시작의 source 를 user 로 만든다."""
         self._sent_pending += 1
 
     # ------------------------------------------------------------ 능력
@@ -293,6 +356,7 @@ class ClaudeAdapter(Adapter):
             return None
         rid, tool, inp, cid = o["request_id"], r["tool_name"], r.get("input"), r.get("tool_use_id")
         run = self._call_run.get(cid)
+        self._req_input[rid] = inp
         qs = inp.get("questions") if isinstance(inp, dict) else None
         if tool == "AskUserQuestion" and isinstance(qs, list):
             return [self._ev(E.QuestionRequest, run=run, req=rid, questions=qs, call=cid)]

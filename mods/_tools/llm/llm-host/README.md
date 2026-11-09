@@ -1,7 +1,7 @@
 # llm-host — LLM 세션 호스트 코어 (규격 v0)
 
-설계 근거: ctx 문서 `plan llm-trust/11-p5prime-2-session-host` (읽기: `donghans ctx doc read plan llm-trust/11-p5prime-2-session-host --project nixos`). 이 폴더는 단계 S2 까지 있다(규격 `events.py`, 어댑터 인터페이스 `adapter.py`, claude 어댑터의 읽기 `claude_adapter.py` 의 `decode`). 쓰기(`argv`·`env`·`encode`)·세션·정책 등은 계획서 §9 의 뒤 단계에서 추가된다.
-시험: `tests/test_events.py`(규격)·`tests/test_claude_adapter.py`(어댑터 읽기; 녹화본 `tests/fixtures/` 전체 재생). 직접 실행: `cd mods/_tools/llm/llm-host && python3 -I tests/test_claude_adapter.py`. `mods/_tools/run-tests.sh` 에 `llm-host-ev`·`llm-host-claude` 로 등록돼 있다.
+설계 근거: ctx 문서 `plan llm-trust/11-p5prime-2-session-host` (읽기: `donghans ctx doc read plan llm-trust/11-p5prime-2-session-host --project nixos`). 이 폴더는 단계 S3 까지 있다(규격 `events.py`, 어댑터 인터페이스 `adapter.py`, claude 어댑터 `claude_adapter.py` 의 읽기 `decode` 와 쓰기 `argv`·`env`·`encode`, 세션 `session.py`, 시험용 가짜 백엔드 `fake_claude.py`). 정책·다중 세션·기록 등은 계획서 §9 의 뒤 단계에서 추가된다.
+시험: `tests/test_events.py`(규격)·`tests/test_claude_adapter.py`(어댑터 읽기; 녹화본 `tests/fixtures/` 전체 재생). 직접 실행: `cd mods/_tools/llm/llm-host && python3 -I tests/test_claude_adapter.py`. `tests/test_session.py`(세션·가짜 백엔드·어댑터 쓰기; 비용 0). `mods/_tools/run-tests.sh` 에 `llm-host-ev`·`llm-host-claude`·`llm-host-session` 으로 등록돼 있다.
 
 **규격은 v0 이다.** P5′-3(TUI)을 만들며 부족한 필드를 추가하고 P5′-4(두 번째 백엔드) 때 한 번 정리한다. 그때까지 `raw` 통과가 안전판이다.
 nix 에는 아직 등록하지 않았다(`mods/devel/apps/llm-cli.nix` 의 `ctxSrc`·`sessionsSrc` 는 파일 이름을 하나씩 나열해 복사하므로 이 폴더는 자동 수집되지 않고, 빌드·평가에 영향이 없다 — 등록은 계획서 S8 의 별도 허락 사항).
@@ -54,7 +54,7 @@ nix 에는 아직 등록하지 않았다(`mods/devel/apps/llm-cli.nix` 의 `ctxS
 
 ## 어댑터 (S2)
 - `adapter.Adapter`: `argv(spec)`·`env(spec)`·`decode(line)->[Event]`·`encode(Command)->[줄]`·`capabilities`. 어댑터는 **세션마다 인스턴스 하나**(decode 가 상태를 가진다). `decode` 는 `seq`·`ts` 를 채우지 않는다(세션이 받는 순서로 매긴다).
-- `claude_adapter.ClaudeAdapter(host_session)`: `decode` 와 `capabilities` 만 구현(`argv`·`env`·`encode` 는 S3, 지금은 `NotImplementedError`). 호스트가 사용자 메시지를 보낼 때 `note_sent()` 를 불러야 `turn_started.source` 가 `user` 가 된다(S3 의 encode 가 부른다).
+- `claude_adapter.ClaudeAdapter(host_session)`: `decode`·`capabilities`(S2)와 `argv`·`env`·`encode`(S3). `encode(Send)` 가 `note_sent()` 를 불러 `turn_started.source` 가 `user` 가 된다.
 - 알 수 없는 줄·모양이 틀린 줄·JSON 이 아닌 줄은 `raw`(`vendor="claude"`, 원문 `payload`)로 통과. 알려진 줄 중 소비자에게 줄 게 없는 것은 이벤트 0개이고 `adapter.ignored` 에 종류별로 센다.
 
 ### claude 번역 (녹화본 `tests/fixtures/{noinit,perm,main,sub}.jsonl` 로 시험, claude 2.1.317·haiku)
@@ -80,3 +80,19 @@ nix 에는 아직 등록하지 않았다(`mods/devel/apps/llm-cli.nix` 의 `ctxS
 ### Message 블록과 중복 표시 (`shown_as`)
 `--include-partial-messages` 로 이미 `text_delta` 로 전한 글은 이어서 오는 `assistant` 완결 메시지(**중단 직후의 부분 응답 포함**)에 또 들어 있다. `message.blocks` 는 완결본을 그대로 담되, **다른 이벤트로 이미 전달한 블록에 `shown_as` 를 붙인다**: `text`→`"text_delta"`, `tool_use`→`"tool_call"`, `tool_result`→`"tool_result"`. 소비자는 `shown_as` 가 있는 블록을 다시 그리지 않는다. 글자 조각 없이 온 글(부분 메시지 옵션 없음)은 `shown_as` 가 없어 Message 로 그린다. 사고 블록은 `{"type":"thinking","text":…}`(불투명 서명은 버린다).
 녹화본은 경로·uuid·소켓 치환본이다(원본은 개인 경로를 담아 저장소에 두지 않는다). `sub.jsonl` 은 S2 에서 실제 claude 로 재녹화(훅 3종·서브에이전트 1개, `--include-hook-events`)했다.
+
+## 어댑터 쓰기 쪽 (S3)
+- `argv(spec)`: `[exe…] -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --include-hook-events --permission-mode <spec.permission_mode|manual> --permission-prompt-tool stdio [--model] [--resume] [--no-session-persistence(persist=false)] [extra_args…]`. 실행 파일은 `spec["exe"]`(문자열 또는 `[실행 파일, 인자…]`)로 갈아끼운다(시험: 가짜 백엔드). 없으면 `claude`. bypass 거부 같은 정책은 S4.
+- `env(spec)`: 상속하지 않는다. `HOME`·`PATH`·`TERM=dumb` + `spec["env_extra"]`. 래퍼 재현(sudo·`claude-run`)은 S8.
+- `encode`: 줄은 공백 없는 JSON(`ensure_ascii=False`). `send`→`{"type":"user","message":{"role":"user","content":…}}`, `interrupt`→`control_request` `{"subtype":"interrupt"}`(요청 id `host-int-N`), `answer_permission` allow→`{"behavior":"allow","updatedInput":<바꾼 input 없으면 원래 input>[,"updatedPermissions"]}`·deny→`{"behavior":"deny","message":…}`, `answer_question`→allow + `updatedInput={questions(원본), answers}`. 허용·거부·질문 답·user 줄은 S0 녹화본과 **바이트 단위로 같다**(시험). 확인 못 한 것: 다중 선택 답을 `", "` 로 잇는 형식(공식 문서 서술 기준, 실측 없음)과 `free_text` 의 자리(답 없는 첫 질문의 답으로 둠) — S7 에서 실제 claude 로 확인.
+
+## 세션 (S3, `session.py`)
+`Session(adapter, spec, host_session, keep_history=False, term_wait=5)` → `await start()` → `await send(text)`·`interrupt()`·`answer_permission(req, allow, message)`·`answer_question(req, answers)`·`command(cmd)`·`close(grace)`·`kill()`. 이벤트는 `async for ev in session.events()`(SessionEnded 까지; 소비자 하나), `next_event(timeout)`, `collect_until(pred, timeout)`.
+- 자식은 `start_new_session=True` 새 프로세스 그룹, 신호는 자기 자식 그룹에만(`killpg`). 읽기·쓰기·표준오류는 각각 태스크. 쓰기는 큐로 순서를 지킨다.
+- 상태: `starting → idle ⇄ busy ⇄ waiting_request → closing → closed`, 예기치 않은 종료 `crashed`. 기동 직후 idle(첫 메시지 전에는 백엔드 출력이 없다). busy 는 send 뒤 turn_result 까지(백엔드 대기열의 send 도 센다). 대기 표 `session.pending`.
+- 종료 사유: 우리가 close → `closed`, kill → `killed`, 예기치 않은 종료는 코드 0 이면 `eof`, 그 밖은 `crashed`. 미해결 요청은 `request_resolved(deny, session_end)` 로 닫고 `session_ended` 가 마지막 이벤트. close 는 표준입력 닫기 → grace → SIGTERM → term_wait → SIGKILL.
+- 표준오류 줄은 `notice(warn, extra.stream=stderr)`(최대 50줄). 어댑터 decode 예외·너무 긴 줄은 `notice(error)`. 실행 파일이 없으면 `notice(error)` + `session_ended(crashed)`.
+- 아직 없는 것(뒤 단계): 정책·요청 대기 상한·자동 거부(S4), 다중 세션·상한·고아 레지스트리(S5), 이벤트 로그(S6).
+
+## 가짜 백엔드 (`fake_claude.py`)
+`python3 fake_claude.py 시나리오.jsonl [--timeout 초]`. 시나리오 한 줄이 단계 하나: `{"emit":[줄…]}` · `{"expect":{stdin_type|line|text|control_response|control_request|request_id|stdin_eof}}` · `{"sleep":초}` · `{"stderr":"글"}` · `{"ignore_sigterm":true}` · `{"exit":코드}`. `line` 은 바이트 단위 비교, `control_response`·`control_request` 는 부분집합 비교. 기대가 어긋나면 종료 코드 3, 입력이 안 오면 4, 입력이 닫히면 5, 시나리오 오류 2. 시나리오 끝에서는 입력 EOF 까지 읽고 0 으로 끝난다. 시험은 녹화본 fixtures 를 시나리오로 바꿔 쓴다(in→expect, out→emit).
