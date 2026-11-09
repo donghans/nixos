@@ -415,5 +415,32 @@ check("팔 없는 Stop: 검사하지 않고 INFO 기록", p.stdout == "" and slo
 # 훅 입력의 session_id 가 폴더 이름 앞 8자로 대응
 check("폴더 이름은 session_id 앞 8자", os.path.basename(ph.session_dir(S1)) == S1[:8] and os.path.isdir(os.path.join(HOME, "nixos", S1[:8])))
 
+# ---- S3: 규칙 동결·슬롯 파생
+check("규칙 동결: 현재 규칙 상수·동결 문구의 해시가 기록된 RULES_SHA256 과 같다(규칙을 바꾸면 여기서 실패 — E-3)", pc.rules_sha256() == pc.RULES_SHA256, pc.rules_sha256())
+r = subprocess.run([sys.executable, "-I", CLI, "rules"], capture_output=True, text=True)
+check("`protocolcheck rules` 일치면 종료 코드 0·버전 표기", r.returncode == 0 and "규칙 버전 " + pc.RULES_VERSION in r.stdout and "일치" in r.stdout, r.stdout)
+_keep = pc.RULES_SHA256
+pc.RULES_SHA256 = "f" * 64
+_o = sys.stdout; sys.stdout = open(os.devnull, "w")
+try:
+    _rc = pc.cmd_rules(None)
+finally:
+    sys.stdout = _o; pc.RULES_SHA256 = _keep
+check("`rules` 는 동결값과 다르면 종료 코드 1(규칙이 바뀐 것을 알린다)", _rc == 1)
+sl = [pc.slots_from_seed(sd) for sd in range(200)]
+check("슬롯: 종류마다 [G, F] 한 쌍(순서만 다름)·종류 4개", all(sorted(v) == ["F", "G"] and len(v) == 2 for x in sl for v in x.values()) and all(list(x) == list(pc.SLOT_KINDS) for x in sl))
+check("슬롯: 같은 시드는 같은 값(결정적)·시드가 다르면 첫 팔이 갈린다", pc.slots_from_seed(7) == pc.slots_from_seed(7) and len({x["결정"][0] for x in sl}) == 2)
+SH = os.path.join(TMP, "slot-home")
+env = dict(os.environ, LLM_PROTOCOL_HOME=SH)
+r = subprocess.run([sys.executable, "-I", CLI, "slots", "--seed", "12345"], capture_output=True, text=True, env=env)
+check("slots 미리보기는 파일을 만들지 않는다", r.returncode == 0 and not os.path.exists(SH), r.stdout + r.stderr)
+r = subprocess.run([sys.executable, "-I", CLI, "slots", "--seed", "12345", "--write"], capture_output=True, text=True, env=env)
+sp = os.path.join(SH, "pilot-slots.json")
+okw = r.returncode == 0 and os.path.exists(sp) and (os.stat(sp).st_mode & 0o777) == 0o400 and json.load(open(sp)) == pc.slots_from_seed(12345)
+check("slots --write: 슬롯 파일 0400·시드 파생과 일치·메타(시드) 기록", okw and json.load(open(os.path.join(SH, "pilot-slots.meta.json")))["seed"] == 12345, r.stdout + r.stderr)
+before = open(sp).read()
+r = subprocess.run([sys.executable, "-I", CLI, "slots", "--seed", "999", "--write"], capture_output=True, text=True, env=env)
+check("slots --write 는 이미 있으면 거부(동결)하고 파일을 바꾸지 않는다", r.returncode == 1 and open(sp).read() == before, r.stdout + r.stderr)
+
 shutil.rmtree(TMP, ignore_errors=True)
 finish("protocolcheck")

@@ -5,6 +5,8 @@
 
   protocolcheck run <폴더> [--final] [--json]   검사. 상태 `작업중` 이면 부분 검사, 아니면 마감 시도 검사. --final(종료 후 수동): 전부(C6 포함)·상태 작업중은 C1 FAIL
   protocolcheck facts <폴더> [--no-quotes]       facts/diff-stat.txt·facts/quotes.txt 를 만들고 sha 를 등록한다
+  protocolcheck rules                            동결한 규칙(버전·해시)이 지금 코드와 같은지 확인(다르면 종료 코드 1)
+  protocolcheck slots [--seed N] [--write]       종류별 팔 슬롯(G/F) 파생·기록(이미 있으면 거부 — 동결)
   protocolcheck hook prompt|stop                 Claude Code 훅(UserPromptSubmit·Stop). 게이트 `LLM_PROTOCOL_PILOT=1` 이 없으면 아무것도 하지 않고 종료 코드 0
 
 판정: FAIL(미충족)·WARN(경고)·INFO(정보). 되돌림(F 팔)은 FAIL 중 REWIND_IDS 만 근거로 한다. 이 검사는 형식·문자열 존재만 본다 — 읽히는지·의미가 맞는지는 못 본다(검사 통과 ≠ 읽힘).
@@ -42,6 +44,7 @@ SECTIONS = {   # 파일 → 필수 절 제목(`## ` 줄)
 INDEX_COLS = ("파일", "한 줄 요약", "언제 읽나", "근거 대화 범위", "종류", "검사")
 HEAD_KEYS = ("종류", "모듈", "작성", "근거")
 REWIND_IDS = ("C1", "C2", "C3", "C4", "C4b", "C5", "C8", "C9")   # 되돌림 근거가 되는 FAIL 의 ID(순서가 (c) 사유 정렬 순서)
+C3_MIN_CHARS = 20   # C3: 고정 틀 파일 본문(머리 제외) 하한
 LEN_WARN = 2000
 LEN_TOTAL_WARN = 12000
 FACTS_MAX_BYTES = 20 * 1024
@@ -326,8 +329,8 @@ def check_c3(fo: Folder, working: bool) -> list:
                 out.append(item("C3", "FAIL", n, f"{n} 없음"))
     pool = [n for n in fo.md if n != "INDEX.md" and (n in FIXED if working else True)]
     for n in sorted(pool):
-        if body_len(fo.md[n]) < 20:
-            out.append(item("C3", "FAIL", n, "본문이 20자 미만"))
+        if body_len(fo.md[n]) < C3_MIN_CHARS:
+            out.append(item("C3", "FAIL", n, f"본문이 {C3_MIN_CHARS}자 미만"))
     return out
 
 
@@ -818,6 +821,76 @@ def refresh_diff_stat(d: str) -> bool:
     register_sha(d, ["facts/diff-stat.txt"])
     return True
 
+# ---------------------------------------------------------------- 규칙 동결(S3, E-3)
+# 파일럿 종료 전까지 이 규칙(필수 절·하한·금지 목록·상한·되돌림 상한·판정 ID·동결 문구)을 바꾸지 않는다. 바꿔야 하면 파일럿 중단·보고 사안이다(DESIGN_CHANGE 가 아니다).
+# RULES_SHA256 은 `rules_snapshot()` 의 정규 JSON sha256 이다. 시험(test_protocolcheck)이 둘이 같은지 단언하므로, 규칙 상수·동결 문구를 건드리면 시험이 실패한다.
+# 함수 안의 판정 논리(등급 FAIL/WARN/INFO 배정 등)는 이 해시가 덮지 못한다 — 동결 시점의 커밋과 파일 sha256 은 ctx note llm-trust/wf-10-s3-freeze 에 기록했다.
+RULES_VERSION = "1.0"
+RULES_SHA256 = "5f1b325868411a8f4bcafb5335a71f5780947812bbd162beda940ed2a374f387"
+SLOT_KINDS = ("결정", "계획", "검증·QA", "구현 결과")
+
+
+def rules_snapshot() -> dict:
+    import protocolhook as ph   # 지연 import(순환 방지) — 되돌림 상한·분류 줄 정규식이 훅 쪽에 있다
+    import protocol_text as T
+    sha = lambda t: hashlib.sha256(t.encode("utf-8")).hexdigest()
+    return {
+        "version": RULES_VERSION,
+        "classes": list(CLASSES), "modules_by_class": MODULES_BY_CLASS, "module_values": list(MODULE_VALUES), "facts_module": FACTS_MODULE, "fixed": list(FIXED),
+        "sections": {k: list(v) for k, v in SECTIONS.items()}, "index_cols": list(INDEX_COLS), "head_keys": list(HEAD_KEYS),
+        "rewind_ids": list(REWIND_IDS), "c3_min_chars": C3_MIN_CHARS, "len_warn": LEN_WARN, "len_total_warn": LEN_TOTAL_WARN,
+        "facts_max_bytes": FACTS_MAX_BYTES, "max_interpretive_files": MAX_INTERPRETIVE_FILES, "c6_one_timeout": C6_ONE_TIMEOUT, "c6_total_timeout": C6_TOTAL_TIMEOUT,
+        "placeholder_ok": PLACEHOLDER_OK, "banned": [b.pattern for b in BANNED], "banned_flags": [b.flags for b in BANNED], "placeholder_re": PLACEHOLDER_RE.pattern,
+        "uuid_pre": UUID_PRE, "quote_line": QUOTE_LINE.pattern, "pointer_line": POINTER_LINE.pattern, "msg_line": MSG_LINE.pattern,
+        "prompt_rewind_max": ph.PROMPT_REWIND_MAX, "session_rewind_max": ph.SESSION_REWIND_MAX, "write_tools": list(ph.WRITE_TOOLS), "class_line": ph.CLASS_LINE.pattern,
+        "slot_kinds": list(SLOT_KINDS),
+        "text_sha256": {k: sha(getattr(T, k)) for k in ("A_TEMPLATE", "B_TEMPLATE", "C_HEAD", "C_TAIL", "FORMAT_MD")},
+    }
+
+
+def rules_sha256() -> str:
+    return hashlib.sha256(json.dumps(rules_snapshot(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def slots_from_seed(seed: int) -> dict:
+    """종류마다 첫 작업의 팔을 sha256(`seed:종류`) 의 첫 비트로 정하고, 같은 종류의 둘째 작업은 반대 팔로 한다(종류마다 G 1·F 1)."""
+    out = {}
+    for k in SLOT_KINDS:
+        first = "G" if hashlib.sha256(f"{seed}:{k}".encode("utf-8")).digest()[0] & 1 == 0 else "F"
+        out[k] = [first, "F" if first == "G" else "G"]
+    return out
+
+
+def cmd_rules(a) -> int:
+    cur = rules_sha256()
+    ok = cur == RULES_SHA256
+    print(f"규칙 버전 {RULES_VERSION}\n규칙 해시 {cur}\n동결값   {RULES_SHA256}\n" + ("일치" if ok else "불일치 — 동결 후 규칙이 바뀌었다(E-3: 파일럿 중단·보고 사안)"))
+    return 0 if ok else 1
+
+
+def cmd_slots(a) -> int:
+    import protocolhook as ph
+    import secrets
+    seed = a.seed if a.seed is not None else secrets.randbits(63)
+    slots = slots_from_seed(seed)
+    print(f"시드 {seed}\n" + json.dumps(slots, ensure_ascii=False))
+    if not a.write:
+        print("(미리보기 — 쓰려면 --write)")
+        return 0
+    base = ph.home()
+    sp = os.path.join(base, "pilot-slots.json")
+    if os.path.exists(sp):
+        print(f"이미 있다(동결 — 바꾸지 않는다): {sp}", file=sys.stderr)
+        return 1
+    os.makedirs(base, mode=0o700, exist_ok=True)
+    text = json.dumps(slots, ensure_ascii=False, indent=1) + "\n"
+    write_tool_file(sp, text)
+    meta = {"seed": seed, "derivation": "첫 팔 = sha256('<seed>:<종류>')[0] & 1 == 0 이면 G 아니면 F, 둘째 = 반대", "slots_sha256": hashlib.sha256(text.encode()).hexdigest(),
+            "rules_version": RULES_VERSION, "created": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    write_tool_file(os.path.join(base, "pilot-slots.meta.json"), json.dumps(meta, ensure_ascii=False, indent=1) + "\n")
+    print(f"썼다: {sp} (0400)")
+    return 0
+
 
 def cmd_facts(a) -> int:
     d = os.path.abspath(a.dir)
@@ -874,6 +947,8 @@ def main(argv=None) -> int:
     r = sub.add_parser("run"); r.add_argument("dir"); r.add_argument("--final", action="store_true"); r.add_argument("--json", action="store_true"); r.set_defaults(f=cmd_run)
     f = sub.add_parser("facts"); f.add_argument("dir"); f.add_argument("--no-quotes", action="store_true"); f.set_defaults(f=cmd_facts)
     h = sub.add_parser("hook"); h.add_argument("which", choices=["prompt", "stop"])
+    ru = sub.add_parser("rules"); ru.set_defaults(f=cmd_rules)
+    sl = sub.add_parser("slots"); sl.add_argument("--seed", type=int); sl.add_argument("--write", action="store_true"); sl.set_defaults(f=cmd_slots)
     a = p.parse_args(argv)
     return a.f(a)
 
