@@ -302,6 +302,24 @@ in {
       };
       Install.WantedBy = ["default.target"];
     };
+    # 한도 보정(donghans-limit-watch 스킬의 calibrate): limits.jsonl 에서 「5h 1% 가 몇 달러인가」를 하루 한 번 다시 구해 ~/.local/share/claude-otel/limit-calibration.json 에 쓴다.
+    # 창이 8개 미만이거나 25/75분위 폭이 중앙값의 50% 를 넘으면 기존 파일을 그대로 두고, 손으로 고정한 값(`limitwatch.py pin`)은 덮어쓰지 않는다. 서버 역할 호스트에서만(노트북은 전력 측정 규칙상 타이머 없음 — 필요하면 손으로 한 번).
+    # 설계: ctx 계획 plan/llm-trust/05-p3-limit-predict §3-5. 끄기: 이 두 블록을 지우고 nixup(보정 파일은 남겨도 무해).
+    systemd.user.services.limit-calibrate = lib.mkIf config.mods.sys.services.llm-ctx.enable {
+      Unit.Description = "구독 한도 보정(5h 1% 당 달러) 갱신";
+      Service = {
+        Type = "oneshot";
+        ExecStart = "${pkgs.python3}/bin/python3 -I ${../../_data/claude-skills/donghans-limit-watch}/scripts/limitwatch.py calibrate --write --quiet";
+      };
+    };
+    systemd.user.timers.limit-calibrate = lib.mkIf config.mods.sys.services.llm-ctx.enable {
+      Unit.Description = "구독 한도 보정 주기(하루 1회)";
+      Timer = {
+        OnCalendar = "daily";
+        Persistent = true;
+      };
+      Install.WantedBy = ["timers.target"];
+    };
     # 끝난 세션의 낡은 읽기 뷰를 하루 한 번 정리(세션 종료 표식·`ctx doc` 호출 때의 정리가 놓친 것)
     systemd.user.services.ctx-doc-cleanup = {
       Unit.Description = "ctx 문서 읽기 뷰 정리";
