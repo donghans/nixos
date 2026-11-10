@@ -97,6 +97,9 @@ def submit(store: str, session: str, host: str, project: str, kind: str, name: s
     if why:
         return 1, why, None
     target = f"{project}/{kind}/{name}"
+    suffix = f"-{project}-{kind}-{name.replace('/', '__')}.proposal.md"
+    if any(os.path.basename(p).endswith(suffix) and os.path.basename(os.path.dirname(p)) == session for p in outbox_files(store)):
+        return 1, f"{target}: 이 세션의 이전 제안이 서버 불가로 보관 중이다 — 다음 `donghans ctx doc` 실행 때 보낸다(다시 올리지 않는다)", None
     pid = st.proposal_id(project, kind, name)
     text = st.render_proposal(target, op, base_hash, session, host, body)
     masker = None

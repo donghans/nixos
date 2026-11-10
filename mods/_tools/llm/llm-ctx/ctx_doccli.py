@@ -234,7 +234,7 @@ def _finish_queued(store, pid, msg, sid, proj, kind, name, op):
     """읽기 뷰 호스트: DB 대기열 행의 결과를 기다려 보이고, 반영됐으면 로컬 읽기 뷰를 서버 판에 맞춘다(맞추지 못하면 읽은 판을 갱신하지 않는다)."""
     r = dq.wait_row(H.connect, pid, float(os.environ.get("CTX_PROPOSE_WAIT", dq.WAIT_DEFAULT)))
     if not r or r["status"] in dq.OPEN_STATUSES:
-        print(f"{proj}/{kind}/{name}: **아직 반영되지 않았다**(대기열에서 처리를 기다리는 중) — `donghans ctx doc status` 로 확인한다. 같은 제안을 다시 올리지 않는다")
+        print(f"{proj}/{kind}/{name}: **아직 반영되지 않았다**(대기열에서 처리를 기다리는 중{'' if r else ' — 상태를 읽지 못했다'}) — `donghans ctx doc status` 로 확인한다. 같은 제안을 다시 올리지 않는다(종료 코드 0 이어도 반영 완료가 아니다)")
         return 0
     print(r["msg"] + (f" (커밋 {r['commit']})" if r.get("commit") else ""))
     if r["status"] in dq.OK_STATUSES:
@@ -242,14 +242,14 @@ def _finish_queued(store, pid, msg, sid, proj, kind, name, op):
             if sid and op == "write":
                 st.ensure_in_view(store, st.views_dir(), sid, proj, kind, name)
         else:
-            print("(반영됐지만 이 호스트의 읽기 뷰는 아직 낡았다 — 잠시 뒤 `donghans ctx doc read` 로 다시 읽고 고친다)")
+            print("(반영됐지만 이 호스트의 읽기 뷰는 아직 낡았다 — 잠시 뒤 `donghans ctx doc read` 로 다시 읽고 고친다. 계속 같으면 사용자에게 알린다)")
         return 0
     return 1
 
 
 def _finish_proposal(store, pid, msg, sid=None, proj=None, kind=None, name=None, op="write"):
     if pid and pid.startswith("outbox:"):
-        print(msg)
+        print(msg + " (종료 코드 0 이어도 반영 완료가 아니다)")
         return 0
     if dq.use_queue():
         return _finish_queued(store, pid, msg, sid, proj, kind, name, op)
@@ -515,7 +515,7 @@ def cmd_import_docs(a):
         end = time.time() + float(a.wait)
         for rel, tgt, pid in pids:
             if pid.startswith("outbox:"):
-                rows["held"].append((rel, f"{tgt}: 서버에 접속하지 못해 보관만 했다(아직 반영되지 않음 — 다음 `ctx doc` 실행 때 다시 보낸다)")); continue
+                rows["held"].append((rel, f"{tgt}: **아직 반영되지 않았다**(서버에 접속하지 못해 보관만 했다) — 같은 제안을 다시 올리지 않는다, 다음 `ctx doc` 실행 때 다시 보낸다")); continue
             if queue_mode:
                 r = dq.wait_row(H.connect, pid, max(0.2, end - time.time()))
                 if r and r["status"] in dq.OPEN_STATUSES:
@@ -525,7 +525,7 @@ def cmd_import_docs(a):
             if r and r["status"] in ("applied", "same"):
                 rows["proposed"].append((rel, tgt))
             else:
-                rows["held"].append((rel, f"{tgt}: " + (r["msg"] if r else "시간 안에 처리되지 않음(대기 중일 수 있다 — `ctx doc status`)")))
+                rows["held"].append((rel, f"{tgt}: " + (r["msg"] if r else "**아직 반영되지 않았다**(시간 안에 처리되지 않음, 대기 중일 수 있다) — 같은 제안을 다시 올리지 않는다, `ctx doc status` 로 확인한다")))
     print(f"프로젝트 {proj} · 원본 {src}" + (" · (dry-run)" if a.dry_run else ""))
     print(f"반영{'할 것' if a.dry_run else ''} {len(rows['proposed'])} · 이미 있음 {len(rows['same'])} · 보류 {len(rows['held'])} · 이름 불가 {len(rows['name-bad'])} · md 아님(건너뜀) {rows['skip-nonmd']}")
     for k in ("held", "name-bad"):

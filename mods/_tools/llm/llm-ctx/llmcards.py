@@ -337,7 +337,7 @@ class CardsMixin:
         return True
 
     def promote_card(self, row: dict, done=None):
-        """draft→reviewed→adopted. 사람만(제한 모드 차단). 확인창 → 가드(human=True) → propose. 노트북은 동기화 담당이 없어 대기만 한다."""
+        """draft→reviewed→adopted. 사람만(제한 모드 차단). 확인창 → 가드(human=True) → propose. 동기화 담당이 없는 호스트(노트북)는 DB 대기열로 보낸다(ctx_docqueue.submit)."""
         if self.deny("카드 승격(사용자 확인)"):
             return
         state = row["meta"].get("state", "unknown")
