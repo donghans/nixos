@@ -157,6 +157,29 @@ INSERT INTO schema_version (v) VALUES (2) ON CONFLICT DO NOTHING;  -- 2: secrets
 INSERT INTO schema_version (v) VALUES (3) ON CONFLICT DO NOTHING;  -- 3: limit_samples 계정·리셋 시각
 INSERT INTO schema_version (v) VALUES (4) ON CONFLICT DO NOTHING;  -- 4: project_docs
 INSERT INTO schema_version (v) VALUES (5) ON CONFLICT DO NOTHING;  -- 5: sessions.excluded_*
+INSERT INTO schema_version (v) VALUES (6) ON CONFLICT DO NOTHING;  -- 6: doc_proposals
+
+-- 읽기 뷰 호스트(노트북)의 작업 문서 쓰기 대기열 — ctx_docqueue.py. 노트북은 행을 넣고, 정본 호스트의 동기화 담당(ctx-doc-sync)이 가져가 기존 파일 형식 제안으로 풀어
+-- process_inbox 에 태운 뒤 결과를 이 행에 기록한다(계획 plan/ctx-doc-db-queue). body 는 applied·same·rejected 면 비우고 충돌만 7일 보관한다.
+CREATE TABLE IF NOT EXISTS doc_proposals (
+  id          text PRIMARY KEY,                 -- 제안 id(`<UTC 스탬프>-<프로젝트>-<종류>-<이름>`) — 파일 인박스의 제안 id 와 같다
+  session_id  text NOT NULL,
+  host        text NOT NULL DEFAULT '',
+  target      text NOT NULL,                    -- 프로젝트/종류/이름
+  op          text NOT NULL DEFAULT 'write',    -- write | delete
+  base_hash   text NOT NULL DEFAULT 'none',     -- 읽은 판의 해시(새 문서면 none)
+  body        text,                             -- 제안 머리말을 뺀 문서 본문(문서 머리말 포함). 해결되면 비운다
+  status      text NOT NULL DEFAULT 'queued',   -- queued | fetched | applied | same | conflict | rejected
+  msg         text,
+  commit_sha  text,
+  doc_hash    text,                             -- applied·same(write) 때 반영된 문서의 해시 — 노트북이 읽기 뷰를 맞추는 데 쓴다
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  fetched_at  timestamptz,
+  resolved_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS doc_proposals_status ON doc_proposals (status, created_at);
+CREATE INDEX IF NOT EXISTS doc_proposals_session ON doc_proposals (session_id, created_at DESC);
+
 
 -- 프로젝트별 지침(`.claude/donghans-instructions.md`·`donghans-override.md`)의 공유 정본 — 로컬 파일은 SessionStart 훅이 만드는 캐시(ctx_instr.py).
 -- rev 는 낙관적 잠금: 올릴 때 `WHERE rev = 읽은 값` 이 아니면 거부한다(다른 기기가 먼저 바꾼 것을 덮지 않는다). 본문에 비밀 값을 두지 않는다(올릴 때 등록표로 검사).

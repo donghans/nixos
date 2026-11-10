@@ -26,6 +26,7 @@ import subprocess
 import sys
 import time
 
+import ctx_docqueue as dq
 import ctx_store as st
 
 H = None   # llm_ctx 가 넘겨 주는 도우미(norm_repo·git_meta·connect·load_masker·HOST·human_only·is_human) — 순환 import 를 피한다
@@ -49,7 +50,17 @@ def _project(a, need=True):
     proj, err = st.resolve_project(man, getattr(a, "project", None), repo)
     if err and need:
         sys.exit(err + f"\n(문서 저장소: {store})")
+    _flush_outbox(store)
     return store, proj
+
+
+def _flush_outbox(store):
+    """서버에 못 보내 outbox 에 보관했던 제안을 다시 보낸다(`ctx doc` 명령이 시작할 때마다 — 비어 있으면 DB 에 접속하지 않는다)."""
+    if not dq.outbox_files(store) or not dq.use_queue():
+        return
+    sent, _left = dq.flush_outbox(store, H.connect, H.load_masker)
+    if sent:
+        print(f"(서버에 못 보냈던 제안 {sent}개를 대기열로 보냈다)", file=sys.stderr)
 
 
 def _masker():
@@ -212,14 +223,36 @@ def cmd_propose(a):
     if cx.is_card_name(a.kind, a.name):                           # 결정 카드: 형식 검증·상태 가드·인용 출처 검사(설계: plan llm-trust/02-card-skill-ui S2)
         body = _guard_card(store, proj, a.name, body, sid)
     base = st.base_hash_for(st.views_dir(), sid, proj, a.kind, a.name)
-    code, msg, pid = st.propose(store, sid, H.HOST, proj, a.kind, a.name, body, base)
+    code, msg, pid = dq.submit(store, sid, H.HOST, proj, a.kind, a.name, body, base, "write", H.connect, H.load_masker)
     if code:
         print(msg, file=sys.stderr)
         return 1
     return _finish_proposal(store, pid, msg, sid, proj, a.kind, a.name)
 
 
-def _finish_proposal(store, pid, msg, sid=None, proj=None, kind=None, name=None):
+def _finish_queued(store, pid, msg, sid, proj, kind, name, op):
+    """읽기 뷰 호스트: DB 대기열 행의 결과를 기다려 보이고, 반영됐으면 로컬 읽기 뷰를 서버 판에 맞춘다(맞추지 못하면 읽은 판을 갱신하지 않는다)."""
+    r = dq.wait_row(H.connect, pid, float(os.environ.get("CTX_PROPOSE_WAIT", dq.WAIT_DEFAULT)))
+    if not r or r["status"] in dq.OPEN_STATUSES:
+        print(f"{proj}/{kind}/{name}: **아직 반영되지 않았다**(대기열에서 처리를 기다리는 중) — `donghans ctx doc status` 로 확인한다. 같은 제안을 다시 올리지 않는다")
+        return 0
+    print(r["msg"] + (f" (커밋 {r['commit']})" if r.get("commit") else ""))
+    if r["status"] in dq.OK_STATUSES:
+        if dq.sync_view(store, proj, kind, name, op, r):
+            if sid and op == "write":
+                st.ensure_in_view(store, st.views_dir(), sid, proj, kind, name)
+        else:
+            print("(반영됐지만 이 호스트의 읽기 뷰는 아직 낡았다 — 잠시 뒤 `donghans ctx doc read` 로 다시 읽고 고친다)")
+        return 0
+    return 1
+
+
+def _finish_proposal(store, pid, msg, sid=None, proj=None, kind=None, name=None, op="write"):
+    if pid and pid.startswith("outbox:"):
+        print(msg)
+        return 0
+    if dq.use_queue():
+        return _finish_queued(store, pid, msg, sid, proj, kind, name, op)
     if os.environ.get("CTX_SYNC_INLINE"):
         _inline_sync(store)
         worker = True
@@ -242,11 +275,28 @@ def cmd_delete(a):
     _refresh(store, proj, force=True)
     sid = _need_session(a)
     base = st.base_hash_for(st.views_dir(), sid, proj, a.kind, a.name)
-    code, msg, pid = st.propose(store, sid, H.HOST, proj, a.kind, a.name, "", base, op="delete")
+    code, msg, pid = dq.submit(store, sid, H.HOST, proj, a.kind, a.name, "", base, "delete", H.connect, H.load_masker)
     if code:
         print(msg, file=sys.stderr)
         return 1
-    return _finish_proposal(store, pid, msg)
+    return _finish_proposal(store, pid, msg, None, proj, a.kind, a.name, op="delete")
+
+
+def _status_queue(store, sid):
+    """읽기 뷰 호스트의 status — 「대기열」 줄이 이 경로(DB 대기열)의 관찰 가능한 표지다."""
+    print("[대기열] 이 호스트는 동기화 담당이 없어 제안을 DB 대기열로 보낸다 — 정본 호스트의 동기화 담당이 반영한다(반영 전에는 문서가 바뀌지 않는다)")
+    if sid:
+        try:
+            s = dq.status_summary(H.connect, sid)
+            print(f"이 세션: 대기 {s['pending']} · 충돌 {s['conflict']} · 거부 {s['rejected']}")
+            for n in s["notices"]:
+                print("  " + n)
+        except Exception as e:
+            print(f"(대기열을 못 읽었다 — {type(e).__name__}: 서버에 접속할 수 없거나 스키마가 아직 대기열을 지원하지 않는다)")
+    left = dq.outbox_files(store)
+    if left:
+        old = dq.outbox_old(store)
+        print(f"[대기열] 서버에 못 보내 보관 중인 제안 {len(left)}개" + (f" — 그중 {len(old)}개는 {int(dq.OUTBOX_WARN_DAYS)}일을 넘었다(서버 접속·허용 목록을 확인한다)" if old else " (다음 `ctx doc` 실행 때 다시 보낸다)"))
 
 
 def cmd_status(a):
@@ -254,6 +304,9 @@ def cmd_status(a):
     sid = _session(a)
     active = subprocess.run(["systemctl", "--user", "is-active", "ctx-doc-sync.service"], capture_output=True, text=True).stdout.strip() or "없음"
     print(f"문서 저장소 {store} · 프로젝트 {proj or '(알 수 없음)'} · 동기화 담당 {active}")
+    if dq.use_queue():
+        _status_queue(store, sid)
+        return 0
     if sid:
         s = st.session_status(store, sid)
         print(f"이 세션: 대기 {s['pending']} · 충돌 {s['conflict']} · 거부 {s['rejected']}")
@@ -277,6 +330,21 @@ def cmd_watch(a):
     open(os.path.join(root, st.WATCH_PID_FILE), "w").write(str(os.getpid()))
     print(f"[ctx 뷰] 감시를 시작했다({root}) — 직접 수정이 생기면 이 줄처럼 알린다", flush=True)
     return st.watch_view(root, lambda line: print(line, flush=True), pid=pid)
+
+
+def cmd_import_inbox(a):
+    """옛 방식의 `_inbox/<세션>/*.proposal.md` 제안 파일들을 DB 대기열에 넣는다(어느 호스트에서든 — 정본 호스트에서도 이 명령만은 DB 를 쓴다). 원본은 건드리지 않는다."""
+    folder = os.path.abspath(a.folder)
+    if not os.path.isdir(folder):
+        sys.exit(f"폴더가 아니다: {folder}")
+    try:
+        r = dq.import_inbox(H.connect, H.load_masker, folder)
+    except Exception as e:
+        sys.exit(f"대기열에 넣지 못했다(DB 접속·스키마 확인) — {type(e).__name__}: {e}")
+    print(f"대기열에 넣음 {r['new']} · 이미 있음 {r['dup']} · 비밀 때문에 건너뜀 {r['secret']} · 올바르지 않음 {len(r['bad'])}")
+    for p, why in r["bad"]:
+        print(f"  bad: {p} — {why}")
+    return 0
 
 
 def cmd_cleanup(a):
@@ -307,22 +375,60 @@ PUSH_EVERY = 600      # 반영된 커밋이 없어도 못 보낸 것을 따라�
 _last_push = {}
 
 
+_last_log = {}
+
+
+def _log_throttled(key, line, every=600.0):
+    """같은 오류를 `every` 초에 한 번만 낸다(DB 가 내려갔을 때 점검 주기마다 반복하지 않게)."""
+    now = time.time()
+    if now - _last_log.get(key, 0) >= every:
+        _last_log[key] = now
+        print(line, flush=True)
+
+
 def _sync_once(store, push, force_push=False):
+    """① 필요 판정(masker 없이): 대기열·파일 인박스에 할 일이 있는가, push 가 필요한가 — 없으면 DB 에는 선검사 1회만 쓰고 끝 ② 필요하면 비밀 검사기(못 얻으면 아무것도 하지 않는다 — fail-closed)
+    ③ DB 대기열 → 파일 인박스(pull_queue) ④ process_inbox ⑤ push ⑥ 그 뒤에 대기열 행에 결과 기록(push 가 끝난 뒤라야 노트북이 pull 로 반영분을 받는다)."""
+    now = time.time()
+    man = st.load_manifest(store)
+    queued = dq.queue_has_work(H.connect)
+    pending = bool(st.pending_proposals(store, include_invalid=True))
+    push_due = bool(push) and any(meta.get("remote") and (force_push or now - _last_push.get(proj, 0) >= PUSH_EVERY) for proj, meta in man.items())
+    if not (queued or pending or push_due or force_push):
+        return 0
     m = _load_masker_or_none()
     if m is None:
-        return 1                      # 비밀 검사 없이 반영하지 않는다(fail-closed) — 제안은 인박스에 남고 다음 점검 때 다시 시도
+        return 1                      # 비밀 검사 없이 반영·push 하지 않는다(fail-closed) — 제안은 인박스·대기열에 남고 다음 점검 때 다시 시도
+    if queued:
+        try:
+            pulled = dq.pull_queue(store, H.connect)
+            if pulled:
+                print(f"[sync] 대기열에서 {len(pulled)}건을 가져왔다", flush=True)
+        except Exception as e:        # 표가 아직 없음(스키마 서비스·동기화 서비스 재시작 순서) 등 — 파일 인박스 경로와 push 를 막지 않는다
+            _log_throttled("pull_queue", f"[sync] 대기열을 가져오지 못했다 — {type(e).__name__}: {e}")
     applied = False
     for _pid, status, msg, commit in st.process_inbox(store, m):
         print(f"[sync] {status}: {msg}" + (f" ({commit})" if commit else ""), flush=True)
         applied = applied or status == "applied"
+    results = []
+    if queued:
+        try:
+            results = dq.collect_results(store, H.connect)
+            applied = applied or any(r["status"] == "applied" for _p, _o, r in results)
+        except Exception as e:
+            _log_throttled("collect_results", f"[sync] 대기열 결과를 모으지 못했다 — {type(e).__name__}: {e}")
     if push:
-        man = st.load_manifest(store)
-        now = time.time()
         for proj, meta in man.items():
             if meta.get("remote") and (force_push or applied or now - _last_push.get(proj, 0) >= PUSH_EVERY):
                 ok, msg = st.push_project(store, proj, m, man)
                 _last_push[proj] = now
                 print(f"[sync] push {proj}: {'ok' if ok else '못 함'} — {msg}", flush=True)
+    if queued:
+        try:
+            dq.record_results(store, H.connect, results)
+            dq.maintenance(store, H.connect, now)
+        except Exception as e:
+            _log_throttled("record_results", f"[sync] 대기열 결과를 기록하지 못했다 — {type(e).__name__}: {e}")
     return 0
 
 
@@ -396,17 +502,26 @@ def cmd_import_docs(a):
     else:
         pids = []
         for rel, kd, name, body in queued:
-            code, msg, pid = st.propose(store, sid, H.HOST, proj, kd, name, body, None)
+            code, msg, pid = dq.submit(store, sid, H.HOST, proj, kd, name, body, None, "write", H.connect, H.load_masker)
             if code:
                 rows["held"].append((rel, msg)); continue
             pids.append((rel, f"{kd}/{name}", pid))
-        if os.environ.get("CTX_SYNC_INLINE"):
-            _inline_sync(store)
-        else:
-            _wake_worker()
+        queue_mode = dq.use_queue()
+        if not queue_mode:
+            if os.environ.get("CTX_SYNC_INLINE"):
+                _inline_sync(store)
+            else:
+                _wake_worker()
         end = time.time() + float(a.wait)
         for rel, tgt, pid in pids:
-            r = st.wait_result(store, pid, max(0.2, end - time.time()))
+            if pid.startswith("outbox:"):
+                rows["held"].append((rel, f"{tgt}: 서버에 접속하지 못해 보관만 했다(아직 반영되지 않음 — 다음 `ctx doc` 실행 때 다시 보낸다)")); continue
+            if queue_mode:
+                r = dq.wait_row(H.connect, pid, max(0.2, end - time.time()))
+                if r and r["status"] in dq.OPEN_STATUSES:
+                    r = None
+            else:
+                r = st.wait_result(store, pid, max(0.2, end - time.time()))
             if r and r["status"] in ("applied", "same"):
                 rows["proposed"].append((rel, tgt))
             else:
@@ -537,7 +652,8 @@ def register(ctx_sub, helpers):
     p = doc.add_parser("status", help="이 세션의 대기·충돌·거부 제안과 동기화 담당 상태(읽기만)"); P(p); S(p); p.set_defaults(f=cmd_status)
     p = doc.add_parser("watch", help="이 세션의 뷰가 직접 수정되면 한 줄로 알린다(Monitor 로 띄운다; 저장소는 고치지 않는다)"); S(p); p.add_argument("--pid", type=int, help="이 프로세스가 죽으면 끝낸다(기본: CLAUDE_PID)"); p.set_defaults(f=cmd_watch)
     p = doc.add_parser("sync", help="(동기화 담당) 인박스의 제안을 검사해 반영한다 — 세션 안에서 부르는 명령이 아니다")
-    p.add_argument("--watch", action="store_true", help="서비스로: 인박스를 지켜보며 반복"); p.add_argument("--push", action="store_true", help="remote 가 있는 프로젝트는 push(직전 비밀 검사)"); p.add_argument("--interval", type=float, default=30, help="--watch 의 주기 점검(초)"); p.set_defaults(f=cmd_sync)
+    p.add_argument("--watch", action="store_true", help="서비스로: 인박스를 지켜보며 반복"); p.add_argument("--push", action="store_true", help="remote 가 있는 프로젝트는 push(직전 비밀 검사)"); p.add_argument("--interval", type=float, default=5, help="--watch 의 주기 점검(초) — DB 대기열 점검 주기이기도 하다"); p.set_defaults(f=cmd_sync)
+    p = doc.add_parser("import-inbox", help="옛 방식의 인박스 제안 파일을 DB 대기열에 넣는다(원본은 건드리지 않는다 — 정본 호스트의 동기화 담당이 반영)"); p.add_argument("folder"); p.set_defaults(f=cmd_import_inbox)
     p = doc.add_parser("cleanup", help="끝난 세션의 낡은 뷰를 지운다"); p.add_argument("--days", type=float, default=7); p.set_defaults(f=cmd_cleanup)
     p = doc.add_parser("init", help="프로젝트를 매니페스트에 등록하고 저장소를 만든다(하네스가 실행 전 사용자 확인을 띄운다)"); p.add_argument("project"); p.add_argument("--repo-url"); p.add_argument("--owner", default="personal"); p.add_argument("--remote"); p.set_defaults(f=cmd_init)
 
