@@ -16,9 +16,11 @@ STYLES = ("head", "text", "think", "tool", "result", "err", "perm", "ask", "info
 # 제한 모드(H-4)에서 막을 호스트 동작 이름 — 여기에 넣으면 llmui.check_action 이 푸터·도움말에서 숨기고 실행 함수는 deny() 로 막는다.
 # S1: host_start(F2 새 세션)·host_close(F3)·host_input(F4 지시 입력창)·host_send(Enter). S2: host_answer(F6 응답 대기 요청 열기)·host_interrupt(F7 턴 중단)도 실제 동작이다. S3: host_artifacts(F8 산출물 보기).
 HOST_ACTIONS = ("host_start", "host_close", "host_input", "host_send", "host_answer", "host_interrupt", "host_artifacts")
+# 제한 모드에서도 허용하는 읽기 전용 동작(산출물 보기 — 비밀 치환 고정). 나머지는 모두 막힌다.
+RESTRICTED_OK_ACTIONS = ("host_artifacts",)
 
-RESTRICTED_NOTICE = ("제한 모드(LLM 세션 안에서 실행됨): 호스트 탭은 읽기만 한다 — 세션 구동·응답 전송·권한 허용은 사람이 터미널에서 직접 llmui 를 "
-                     "실행했을 때만 쓸 수 있다(권한 위임·skip-permissions 와 닿는 탭이라 막아 둔다).")
+RESTRICTED_NOTICE = ("제한 모드(LLM 세션 안에서 실행됨): 호스트 탭은 읽기만 한다 — 세션 구동·응답 전송·권한 허용·중단은 사람이 터미널에서 직접 llmui 를 "
+                     "실행했을 때만 쓸 수 있다(권한 위임·skip-permissions 와 닿는 탭이라 막아 둔다). 산출물 보기(F8)는 읽기 전용으로 쓸 수 있다(비밀은 [protected] 로 치환).")
 
 # 위험 도구(11 D-5, 도구 이름 기준): 정책이 자동 허용하지 않는 것. 표시용이라 이름이 늘면 여기만 고친다.
 RISKY_TOOLS = frozenset({"Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "Agent", "Task"})

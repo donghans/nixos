@@ -13,7 +13,7 @@
   8 카드   결정 카드(ctx note cards/*) — Space 체크 · Enter 상세(근거 원문 대조·이력·승격) · 체크하면 하단에서 쟁점을 적고 확인 → `/donghans-card` 논의 세션 시작. 제한 모드에서는 읽기만
   9 호스트 세션 호스트(llm-trust 11) — 처음엔 이벤트 녹화본을 그리기만 하고, F2 로 세션을 시작하면 실시간으로 텍스트 스트림·도구 호출·결과·비용을 보여 준다(F3 닫기 · F4 지시 입력 · Enter 보내기).
          S2: 권한·질문 요청은 대화상자로 답한다(y 허용·n 거부·숫자 선택·Esc 나중에·F6 다시 열기·F7 턴 중단; 30분 넘기면 자동 거부).
-         S3: F8 로 산출물 폴더(INDEX.md)를 열면 항목 접기·펴기, 검사 상태, 파일 내용을 읽기 전용으로 보인다(↑↓·Enter·←→·F2·F3; 폴더 밖 경로는 열지 않고 비밀은 치환; 제한 모드에서는 못 연다). llm-host 는 소스 트리에서 찾는다(배포본은 LLMUI_HOST_DIR). 제한 모드에서는 안내문만(세션 시작·전송 막힘)
+         S3: F8 로 산출물 폴더(INDEX.md)를 열면 항목 접기·펴기, 검사 상태, 파일 내용을 읽기 전용으로 보인다(↑↓·Enter·←→·F2·F3; 폴더 밖 경로는 열지 않고 비밀은 치환; 제한 모드에서도 읽기 전용으로 열 수 있다 — 치환 고정). llm-host 는 소스 트리에서 찾는다(배포본은 LLMUI_HOST_DIR). 제한 모드에서는 안내문과 F8 산출물 보기(읽기 전용)만(세션 시작·전송·응답·중단 막힘)
   7 세션   claude 가 도는 tmux 세션 목록·화면 미리보기 — Enter 붙기 · F2 새 세션 · F3 붙은 곳 떼기 · Delete 정리 (ssh·다른 터미널에서도 같은 세션). 제한 모드에서는 목록만 보인다
 
 원문(DB)은 바꾸지 않는다. 화면의 치환(F10)은 어깨너머 노출을 막는 용도이고 기본 켜짐이다. TTY 가 없으면 실행하지 않는다.
@@ -693,7 +693,7 @@ class HostRequestScreen(ModalScreen):
 
 class HostArtifactScreen(ModalScreen):
     """9 호스트 S3: 세션이 만든 산출물(INDEX.md → 파일) 열람. 항목 접기/펴기·검사 상태·파일 내용. 읽기 전용.
-    모든 줄은 화면 마스커(비밀 치환)를 통과한다 — 제한 모드(StrictMasker)에서는 끌 수 없고(이 화면은 제한 모드에서 열리지도 않는다), 사람 모드의 F10 은 앱 설정을 따른다."""
+    모든 줄은 화면 마스커(비밀 치환)를 통과한다 — 제한 모드(StrictMasker)에서는 끌 수 없고(제한 모드에서도 이 화면은 열 수 있다 — 읽기 전용·치환 고정), 사람 모드의 F10 은 앱 설정을 따른다."""
     BINDINGS = [Binding("escape", "close", "닫기"), Binding("up", "move(-1)", "위", show=False), Binding("down", "move(1)", "아래", show=False),
                 Binding("enter", "toggle", "접기·펴기"), Binding("space", "toggle", "접기·펴기", show=False), Binding("f2", "expand_all", "모두 펴기"), Binding("right", "expand", "펴기", show=False), Binding("left", "collapse", "접기", show=False),
                 Binding("f3", "collapse_all", "모두 접기"), Binding("f10", "toggle_mask", "치환 켬/끔"), Binding("f5", "reload", "다시 읽기")]
@@ -827,7 +827,7 @@ class InstrScreen(ModalScreen):
 class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
     TITLE = "llmui — LLM 컨텍스트·세션 관리"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
-        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침) · 7 세션(claude 가 도는 tmux 세션 — 붙기·새 세션·정리, DB 없이도 `llmui --sessions` 로 이 탭만 단독 실행) · 8 카드(결정 카드 — Space 체크, Enter 상세·근거 대조·이력(h)·승격(F2, 사람만), 체크하면 하단에서 논의 세션 시작. F2/F3 상태·범위 필터) · 9 호스트(세션 호스트 — 처음엔 녹화본, F2 로 실제 세션 시작 후 텍스트 스트림·결과·비용 실시간 표시, F4/Enter 로 지시 전송, F3 닫기. 권한·질문은 대화상자로 답하고(F6 다시 열기) F7 로 턴 중단. F8 산출물 보기(INDEX.md → 파일, 접기·검사 상태·내용). 제한 모드에서는 안내문만) · 0 한도(10번째 탭 — 한도 예측용 보정값 조회·수동 고정: 표에서 행 선택 후 F2/Enter 값 고정, F3 고정 해제, F4 자동 값 다시 계산. 자동 갱신은 고정값을 덮어쓰지 않고 「제안」 칸에만 쓴다. 제한 모드에서는 조회만)'),
+        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침) · 7 세션(claude 가 도는 tmux 세션 — 붙기·새 세션·정리, DB 없이도 `llmui --sessions` 로 이 탭만 단독 실행) · 8 카드(결정 카드 — Space 체크, Enter 상세·근거 대조·이력(h)·승격(F2, 사람만), 체크하면 하단에서 논의 세션 시작. F2/F3 상태·범위 필터) · 9 호스트(세션 호스트 — 처음엔 녹화본, F2 로 실제 세션 시작 후 텍스트 스트림·결과·비용 실시간 표시, F4/Enter 로 지시 전송, F3 닫기. 권한·질문은 대화상자로 답하고(F6 다시 열기) F7 로 턴 중단. F8 산출물 보기(INDEX.md → 파일, 접기·검사 상태·내용). 제한 모드에서는 안내문과 F8 산출물 보기(읽기 전용·치환 고정)만) · 0 한도(10번째 탭 — 한도 예측용 보정값 조회·수동 고정: 표에서 행 선택 후 F2/Enter 값 고정, F3 고정 해제, F4 자동 값 다시 계산. 자동 갱신은 고정값을 덮어쓰지 않고 「제안」 칸에만 쓴다. 제한 모드에서는 조회만)'),
         *[t for t in ls.SESSIONS_HELP_TERMS if t[0] != '제한 모드'],
         ('치환(F10)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
         ('제한 모드', 'LLM 세션이 실행하면: 모든 탭을 볼 수 있지만 화면의 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(키 형식·password=·한글 비밀번호)이 [protected] 로 치환되고(끌 수 없음), 후보 미리보기도 [protected](N자)로 가려지며, 값 보기(F4)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용된다'),
@@ -1104,7 +1104,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
 
     # --- 공통
     def masker(self):
-        if not self.mask:
+        if not self.mask and not self.restricted:        # 제한 모드는 치환을 끌 수 없다(어떤 경로로 mask 가 꺼져도 StrictMasker 유지)
             return cs.IDENTITY
         try:
             with cc.connect(readonly=True) as c:
@@ -1129,7 +1129,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
 
     def check_action(self, action, parameters):
         """탭 전용 동작은 그 탭에서만 켠다(같은 F키를 탭마다 다른 동작에 재사용). 제한 모드에서는 막힌 동작(치환 끄기·값 보기·비밀 추가/삭제/끄기·후보 무시)을 푸터·도움말에서 숨긴다(눌러도 deny 가 막는다)."""
-        if self.restricted and action in ("toggle_mask", "secret_add", "secret_delete", "secret_toggle", "reveal", "cand_ignore", "instr_edit", *ls.SESS_ACTIONS, *hv.HOST_ACTIONS, *ll.LIMIT_ACTIONS):
+        if self.restricted and action in ("toggle_mask", "secret_add", "secret_delete", "secret_toggle", "reveal", "cand_ignore", "instr_edit", *ls.SESS_ACTIONS, *(a for a in hv.HOST_ACTIONS if a not in hv.RESTRICTED_OK_ACTIONS), *ll.LIMIT_ACTIONS):
             return False
         tabs = self.TAB_ACTIONS.get(action)
         if tabs is not None:
@@ -1466,9 +1466,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         self.flash("요청이 이미 처리됐다(시간 초과 자동 거부·턴 종료·세션 종료)", "warning")
 
     def action_host_artifacts(self):
-        """S3: 산출물 폴더(INDEX.md 가 있는 폴더)를 물어 열람 화면을 연다. 실시간 세션이 있으면 그 작업 폴더 안만 열 수 있다. 제한 모드에서는 못 쓴다(H-4)."""
-        if self.deny("산출물 보기"):
-            return
+        """S3: 산출물 폴더(INDEX.md 가 있는 폴더)를 물어 열람 화면을 연다. 실시간 세션이 있으면 그 작업 폴더 안만 열 수 있다. 제한 모드에서도 읽기 전용으로 쓸 수 있다(H-4 확장 — StrictMasker 로 치환이 켜진 채일 때만)."""
         if self.current_tab() != "host" or len(self.screen_stack) != 1:
             return
         base = self.host_cwd
@@ -1482,7 +1480,8 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         self.push_screen(PromptScreen("산출물 폴더 (INDEX.md 가 있는 폴더)", ("세션 작업 폴더 안만 열 수 있다" if base else "세션이 없어 아무 폴더나 연다(읽기만)"), value=cands[0] if cands else start), got)
 
     def host_open_artifacts(self, path: str) -> bool:
-        if self.deny("산출물 보기"):
+        if self.restricted and not isinstance(self.masker(), cs.StrictMasker):      # 제한 모드는 비밀 치환이 보장될 때만(마지막 방어선)
+            self.flash("제한 모드: 비밀 치환을 보장할 수 없어 산출물을 열지 않는다", "warning")
             return False
         d = ha.load(path, self.host_cwd)
         if not d["ok"]:

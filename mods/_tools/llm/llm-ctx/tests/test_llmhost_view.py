@@ -75,6 +75,7 @@ check("위험 도구 판정: Bash·Write·mcp__ 는 위험, Read 는 아님", v.
 check("빈 목록은 빈 결과", v.render_events([]) == [] and v.summarize([])["events"] == 0)
 sm = v.summarize(evs)
 check("summarize: raw·도구 호출·권한 요청·질문·누적 비용", sm["raw"] == 1 and sm["tool_calls"] == 2 and sm["permission_requests"] == 1 and sm["questions"] == 1 and sm["cost_total"] == 0.0123, str(sm))
+check("제한 모드 허용 동작은 산출물 보기뿐이다", v.RESTRICTED_OK_ACTIONS == ("host_artifacts",) and set(v.RESTRICTED_OK_ACTIONS) <= set(v.HOST_ACTIONS))
 check("제한 모드 막을 동작 이름과 안내문이 있다", len(v.HOST_ACTIONS) >= 4 and "읽기만" in v.RESTRICTED_NOTICE)
 
 # ---- 2. 녹화본 재생(llm-host 어댑터 경유) — 기대 줄
