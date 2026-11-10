@@ -237,3 +237,10 @@ donghans secret scrub                 # 로컬 트랜스크립트 점검(dry-run
 llmui                                 # 대시보드·검색·대조·비밀·후보·지침·세션 화면
 llmui --sessions                      # 세션 탭만 단독으로(DB 에 연결하지 않음) — `llm-sessions` 가 이것이다
 ```
+
+## 시험 세션 제외 (`donghans ctx session-exclude`)
+시험·파일럿으로 돌린 세션이 사용량(`ctx usage`)·검색·최근 목록을 오염시키지 않게 **삭제 없이 표시**로 뺀다(`sessions.excluded_at/_reason/_by`, 스키마 v5). 조회(`ctx session`)는 되고 제외 표시가 붙으며 `--include-excluded` 로 집계에 다시 넣어 볼 수 있다.
+- `plan <세션…>`: 읽기 전용. 대상 목록(호스트·cwd·메시지 수·비용)과 **토큰**(목록의 해시)을 보인다.
+- `apply <같은 세션…> --reason … --token <토큰>`: 토큰이 plan 의 목록과 같을 때만 쓴다. 에이전트는 plan 목록을 사용자에게 보여 주고 **사용자가 확인한 뒤에만** 실행한다(procctl 과 같은 절차). 누가 했는지(`agent`/`human`)를 기록한다.
+- `restore <세션…>`, `list`. 아직 `llmui`·`ctxdata` 의 목록은 제외를 반영하지 않는다(후속).
+- 스키마는 서비스 `claude-ctx-schema` 가 다음 배포 때 적용하므로, 새 명령은 그 뒤에 동작한다.

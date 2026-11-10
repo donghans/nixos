@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   last_ts      timestamptz,
   updated_at   timestamptz NOT NULL DEFAULT now()
 );
+-- 집계에서 제외(삭제 아님, 복원 가능): 시험·파일럿 세션이 사용량·검색을 오염시키지 않게. `donghans ctx session-exclude` 가 쓴다(plan → 토큰 확인 → apply).
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS excluded_at timestamptz;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS excluded_reason text;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS excluded_by text;
 CREATE INDEX IF NOT EXISTS sessions_repo ON sessions (repo_url, last_ts DESC);
 CREATE INDEX IF NOT EXISTS sessions_host ON sessions (host, last_ts DESC);
 
@@ -152,6 +156,7 @@ INSERT INTO schema_version (v) VALUES (1) ON CONFLICT DO NOTHING;
 INSERT INTO schema_version (v) VALUES (2) ON CONFLICT DO NOTHING;  -- 2: secrets, secret_ignores
 INSERT INTO schema_version (v) VALUES (3) ON CONFLICT DO NOTHING;  -- 3: limit_samples 계정·리셋 시각
 INSERT INTO schema_version (v) VALUES (4) ON CONFLICT DO NOTHING;  -- 4: project_docs
+INSERT INTO schema_version (v) VALUES (5) ON CONFLICT DO NOTHING;  -- 5: sessions.excluded_*
 
 -- 프로젝트별 지침(`.claude/donghans-instructions.md`·`donghans-override.md`)의 공유 정본 — 로컬 파일은 SessionStart 훅이 만드는 캐시(ctx_instr.py).
 -- rev 는 낙관적 잠금: 올릴 때 `WHERE rev = 읽은 값` 이 아니면 거부한다(다른 기기가 먼저 바꾼 것을 덮지 않는다). 본문에 비밀 값을 두지 않는다(올릴 때 등록표로 검사).
