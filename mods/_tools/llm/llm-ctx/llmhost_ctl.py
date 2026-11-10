@@ -6,7 +6,7 @@ UI 는 타이머로 drain() 해서 가져간다(스레드 사이에 위젯을 �
 S1: 세션 시작·텍스트 스트림·결과·비용.
 S2: 권한·질문 요청은 대기 표(pending)에 두고 사람이 allow·deny·answer_question 으로 답한다. 응답 대기 상한(policy.request_timeout, 기본 30분 — 11 D-3)을 넘기면
 이 어댑터가 policy.decide_request 로 판정해 자동 거부한다(호스트 세션은 이 함수를 스스로 부르지 않는다). 시계는 주입할 수 있다(시험이 시간을 단축). 중단(interrupt)은 현재 턴만 멈춘다.
-llm-host 위치: 환경변수 LLMUI_HOST_DIR > 소스 트리의 ../llm-host (llm-host 는 아직 nix 에 등록되지 않았다 — 배포본에서는 환경변수로 가리킨다).
+llm-host 위치: 환경변수 LLMUI_HOST_DIR > 소스 트리의 ../llm-host > 배포본의 ./llm-host (llm-cli.nix 의 ctxSrc 가 싣는다).
 """
 from __future__ import annotations
 
@@ -22,7 +22,8 @@ DEFAULT_LOG = "<default>"      # log_root 에 이 값을 주면 llm-host 의 기
 
 def find_host_dir() -> str | None:
     """llm-host 소스 폴더(환경변수 LLMUI_HOST_DIR 이 먼저). claude_adapter.py 가 있는 폴더만 인정한다."""
-    cands = [os.environ.get("LLMUI_HOST_DIR"), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "llm-host")]
+    cands = [os.environ.get("LLMUI_HOST_DIR"), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "llm-host"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm-host")]
     for d in cands:
         if d and os.path.isfile(os.path.join(d, "claude_adapter.py")):
             return os.path.abspath(d)

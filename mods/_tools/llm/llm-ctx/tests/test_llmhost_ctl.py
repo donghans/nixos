@@ -3,7 +3,7 @@
 확인하는 것: 세션 시작·텍스트 스트림·결과·비용이 이벤트로 오는가 / 명령이 호출한 스레드를 막지 않는가 / 권한·질문 요청을 자동 거부하는가 /
 거부 사유(실행 중·폴더 없음·bypass·세션 없음·빈 지시·claude-run 없음) / 닫기·shutdown 뒤 자식 프로세스가 0개인가.
 실제 claude 시험은 llmhost_real.py(비용 있음, run-tests.sh 에 넣지 않는다). 화면 쪽은 test_llmui.py."""
-import json, os, shutil, sys, tempfile, time
+import json, os, shutil, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(ROOT)), "_lib", "testkit"))
 from harness import checker
@@ -99,6 +99,20 @@ try:
 except RuntimeError:
     check("llm-host 가 없으면 HostBridge 를 만들지 못한다", True)
 hc.find_host_dir = _orig
+
+# 배포 배치(llm-cli.nix ctxSrc): llmhost_ctl.py 옆의 ./llm-host 를 환경변수 없이 찾는다(소스 트리 ../llm-host 가 없는 위치)
+_dep = tempfile.mkdtemp(prefix="llmhost-dep-")
+_envsave = os.environ.pop("LLMUI_HOST_DIR", None)
+try:
+    shutil.copy(hc.__file__, _dep)
+    shutil.copytree(HOSTDIR, os.path.join(_dep, "llm-host"), ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    _r = subprocess.run([sys.executable, "-I", "-c", f"import sys; sys.path.insert(0, {_dep!r}); import llmhost_ctl as h; print(h.find_host_dir())"],
+                       capture_output=True, text=True, env={"PATH": os.environ.get("PATH", "")})
+    check("배포 배치(./llm-host)에서 환경변수 없이 찾는다", _r.stdout.strip() == os.path.join(_dep, "llm-host"), _r.stdout + _r.stderr)
+finally:
+    shutil.rmtree(_dep, ignore_errors=True)
+    if _envsave is not None:
+        os.environ["LLMUI_HOST_DIR"] = _envsave
 
 # ---- 2. hello: 시작 → 텍스트 스트림 → 결과·비용, 호출은 막지 않는다
 b = bridge()
