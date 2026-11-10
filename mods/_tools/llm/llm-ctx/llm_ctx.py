@@ -441,29 +441,56 @@ def _repo_filter(a):
     return norm_repo(getattr(a, "repo", None))
 
 
+SEARCH_KINDS = ("prompt", "response", "tool_use", "tool_result", "other", "meta")
+SEARCH_DEFAULT_KINDS = ("prompt", "response")
+
+
+def _search_kinds(spec):
+    """--kind 값(쉼표 목록 또는 all)을 종류 튜플로. 모르는 이름이면 종료."""
+    if not spec:
+        return SEARCH_DEFAULT_KINDS
+    if spec.strip() == "all":
+        return SEARCH_KINDS
+    ks = tuple(k.strip() for k in spec.split(",") if k.strip())
+    bad = [k for k in ks if k not in SEARCH_KINDS]
+    if bad or not ks:
+        sys.exit(f"--kind 에 알 수 없는 종류: {', '.join(bad) or spec} (가능: {', '.join(SEARCH_KINDS)}, all)")
+    return ks
+
+
 def cmd_search(a):
     repo = _repo_filter(a)
     q = " ".join(a.query)
-    sql = """SELECT m.ts, m.session_id, m.role, m.kind, s.host, s.repo_url, s.branch, m.text
-             FROM messages m JOIN sessions s USING (session_id)
-             WHERE m.text ILIKE %s AND m.kind IN ('prompt','response')"""
-    args = [f"%{q}%"]
+    kinds = _search_kinds(a.kind)
+    # prompt·response 만이 「사람과 모델의 말」이다. tool_use·tool_result(명령 호출·결과)·other 는 --kind 로 골라야 검색된다.
+    where = "m.text ILIKE %s AND m.kind = ANY(%s)"
+    args = [f"%{q}%", list(kinds)]
+    common = ""        # 결과 쿼리와 「제외된 종류」 집계가 함께 쓰는 필터
+    cargs = []
     if repo:
-        sql += " AND s.repo_url = %s"; args.append(repo)
+        common += " AND s.repo_url = %s"; cargs.append(repo)
+    if a.session:
+        common += " AND m.session_id LIKE %s"; cargs.append(a.session + "%")
     if a.role:
-        sql += " AND m.role = %s"; args.append(a.role)
+        common += " AND m.role = %s"; cargs.append(a.role)
+    if a.days:
+        common += " AND m.ts > now() - make_interval(days => %s)"; cargs.append(a.days)
+    sql = f"""SELECT m.ts, m.session_id, m.role, m.kind, s.host, s.repo_url, s.branch, m.text
+             FROM messages m JOIN sessions s USING (session_id)
+             WHERE {where}{common}"""
+    args += cargs
     if a.role == "user":      # 「사용자 발언」은 자동 메시지(작업 알림·명령 출력 등)를 뺀다 — LLM 이 자동 보고를 사용자 지시로 읽지 않게(donghans ctx doc read --project nixos plan ctx-message-kinds)
         import ctxdata as cd
         sql += " AND NOT (m.kind = 'prompt' AND coalesce(m.text, '') ~ %s)"; args.append(cd.AUTO_RE)
         sql += " AND NOT m.is_sidechain"      # 서브에이전트에게 준 브리프(role=user 로 저장됨)는 사람 말이 아니다
-    if a.days:
-        sql += " AND m.ts > now() - make_interval(days => %s)"; args.append(a.days)
     sql += " ORDER BY m.ts DESC LIMIT %s"; args.append(a.limit)
     with connect(readonly=True) as c:
         mk = _masker(a, c)
         if mk.hits(q):
             sys.exit("검색어에 등록된 비밀이 들어 있어 검색하지 않는다(존재 여부가 드러나므로)")
+        n = 0
         for ts, sid, role, kind, host, rurl, br, text in c.execute(sql, args):
+            n += 1
             t = mk.text(text or "")                         # 치환을 먼저 하고 자른다(경계에서 잘린 비밀 조각이 남지 않게)
             i = t.lower().find(q.lower())
             st = max((i if i >= 0 else 0) - 60, 0)
@@ -471,6 +498,18 @@ def cmd_search(a):
             cat = cd.classify(role, kind, t)[0]
             tag = f" [{cd.CAT_LABEL[cat]}]" if cd.CAT_LABEL.get(cat) else ""
             print(mk.text(f"[{ts:%Y-%m-%d %H:%M}] {sid[:8]} {role}/{kind}{tag} @{host} {rurl or '-'}#{br or '-'}") + f"\n  {t[st:st + 240].strip()!r}")
+        # 이번에 보지 않은 종류에 같은 말이 얼마나 있는지 알린다 — 「검색했는데 없다」가 「없다」로 읽히지 않게.
+        # 서브에이전트 브리프·자동 메시지 필터는 걸지 않은 대략의 건수다(종류별 건수만 보이고 본문은 안 나온다).
+        skipped = [k for k in SEARCH_KINDS if k not in kinds]
+        if skipped:
+            rows = c.execute(f"""SELECT m.kind, count(*) FROM messages m JOIN sessions s USING (session_id)
+                                 WHERE m.text ILIKE %s AND m.kind = ANY(%s){common} GROUP BY m.kind ORDER BY 2 DESC""",
+                             [f"%{q}%", skipped] + cargs).fetchall()
+            if rows:
+                det = ", ".join(f"{k} {cnt}건" for k, cnt in rows)
+                print(f"\n[검색 범위: {','.join(kinds)} — {n}건. 이번에 보지 않은 종류에도 같은 말이 있다: {det} → --kind {rows[0][0]} 또는 --kind all]", file=sys.stderr)
+            elif n == 0:
+                print(f"\n[검색 범위: {','.join(kinds)} — 0건. 다른 종류({', '.join(skipped)})에도 없다]", file=sys.stderr)
     return 0
 
 
@@ -1205,7 +1244,7 @@ def main():
     p = ctx.add_parser("hook"); p.add_argument("event"); p.set_defaults(f=cmd_hook)
     p = ctx.add_parser("backfill-accounts", help="OTel 원본(events.jsonl)으로 usage_events 의 계정 열을 채운다(기본 dry-run)"); p.add_argument("--apply", action="store_true"); p.add_argument("--file"); p.set_defaults(f=cmd_backfill_accounts)
     p = ctx.add_parser("ingest"); p.add_argument("--days", type=int, default=2); p.add_argument("--all", action="store_true"); p.add_argument("--no-otel", action="store_true"); p.set_defaults(f=cmd_ingest)
-    p = ctx.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.set_defaults(f=cmd_search)
+    p = ctx.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--session", help="세션 ID 앞자리로 한정"); p.add_argument("--kind", help="검색할 메시지 종류(쉼표 목록 또는 all). 기본 prompt,response — tool_use·tool_result(명령 호출·결과)·other 는 지정해야 검색된다"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.set_defaults(f=cmd_search)
     p = ctx.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.set_defaults(f=cmd_recent)
     p = ctx.add_parser("session"); p.add_argument("sid"); p.add_argument("--n", type=int); p.add_argument("--full", action="store_true"); p.add_argument("--from", dest="from_uuid"); p.add_argument("--to", dest="to_uuid"); p.set_defaults(f=cmd_session)
     p = ctx.add_parser("msg", help="한 메시지의 완전한 본문(도구 호출 포함)"); p.add_argument("uuid", help="메시지 uuid 앞자리(ctx session 출력의 8자 등)"); p.add_argument("--max", type=int, default=8000, help="출력 글자 수 상한(기본 8000)"); p.add_argument("--all", action="store_true", help="상한 없이 전부"); p.add_argument("--session", help="(에이전트 셸) 파일을 둘 세션 ID(기본: 환경변수 CLAUDE_CODE_SESSION_ID)"); p.set_defaults(f=cmd_msg)
