@@ -59,8 +59,9 @@ import llmcards as lc
 import llmhost_view as hv
 import llmhost_ctl as hc
 import llmhost_artifacts as ha
+import llmlimit as ll
 
-TABS = [("dashboard", "대시보드"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("instr", "지침"), ("sessions", "세션"), ("cards", "카드"), ("host", "호스트")]
+TABS = [("dashboard", "대시보드"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("instr", "지침"), ("sessions", "세션"), ("cards", "카드"), ("host", "호스트"), ("limits", "한도")]
 
 
 def short_repo(url: str | None) -> str:
@@ -826,7 +827,7 @@ class InstrScreen(ModalScreen):
 class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
     TITLE = "llmui — LLM 컨텍스트·세션 관리"
     HELP_TERMS = [   # ? 도움말의 「용어·사용법」 — 별도 용어 탭 대신(uikit 공통 규칙)
-        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침) · 7 세션(claude 가 도는 tmux 세션 — 붙기·새 세션·정리, DB 없이도 `llmui --sessions` 로 이 탭만 단독 실행) · 8 카드(결정 카드 — Space 체크, Enter 상세·근거 대조·이력(h)·승격(F2, 사람만), 체크하면 하단에서 논의 세션 시작. F2/F3 상태·범위 필터) · 9 호스트(세션 호스트 — 처음엔 녹화본, F2 로 실제 세션 시작 후 텍스트 스트림·결과·비용 실시간 표시, F4/Enter 로 지시 전송, F3 닫기. 권한·질문은 대화상자로 답하고(F6 다시 열기) F7 로 턴 중단. F8 산출물 보기(INDEX.md → 파일, 접기·검사 상태·내용). 제한 모드에서는 안내문만)'),
+        ('탭', '1 대시보드(저장소별 용량·한도·토큰/비용 추이·세션 통계) · 2 검색(세션 기준) · 3 대조(같은 문구를 저장소별로 묶어 교차검증) · 4 비밀(등록한 비밀 관리) · 5 후보(키처럼 보이는 문자열 탐지→승인·무시) · 6 지침(프로젝트별 공유 지침) · 7 세션(claude 가 도는 tmux 세션 — 붙기·새 세션·정리, DB 없이도 `llmui --sessions` 로 이 탭만 단독 실행) · 8 카드(결정 카드 — Space 체크, Enter 상세·근거 대조·이력(h)·승격(F2, 사람만), 체크하면 하단에서 논의 세션 시작. F2/F3 상태·범위 필터) · 9 호스트(세션 호스트 — 처음엔 녹화본, F2 로 실제 세션 시작 후 텍스트 스트림·결과·비용 실시간 표시, F4/Enter 로 지시 전송, F3 닫기. 권한·질문은 대화상자로 답하고(F6 다시 열기) F7 로 턴 중단. F8 산출물 보기(INDEX.md → 파일, 접기·검사 상태·내용). 제한 모드에서는 안내문만) · 0 한도(10번째 탭 — 한도 예측용 보정값 조회·수동 고정: 표에서 행 선택 후 F2/Enter 값 고정, F3 고정 해제, F4 자동 값 다시 계산. 자동 갱신은 고정값을 덮어쓰지 않고 「제안」 칸에만 쓴다. 제한 모드에서는 조회만)'),
         *[t for t in ls.SESSIONS_HELP_TERMS if t[0] != '제한 모드'],
         ('치환(F10)', '등록한 비밀을 [protected] 로 바꿔 보여 준다 — 기본 켜짐, 어깨너머 노출 방지용이며 원문(DB)은 바뀌지 않는다'),
         ('제한 모드', 'LLM 세션이 실행하면: 모든 탭을 볼 수 있지만 화면의 모든 텍스트에서 등록한 비밀과 비밀처럼 보이는 문자열(키 형식·password=·한글 비밀번호)이 [protected] 로 치환되고(끌 수 없음), 후보 미리보기도 [protected](N자)로 가려지며, 값 보기(F4)·비밀 추가·삭제·끄기·후보 무시·지침 편집은 막힌다. 후보 승인(Enter)은 값을 보여 주지 않고 등록만 하므로 허용된다'),
@@ -876,6 +877,10 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
     #ev-table { height: 8; }
     #ev-head { height: auto; }
     #ev-scroll { height: 1fr; }
+    #lim-head { height: auto; padding: 0 1; }
+    #lim-buttons { height: 3; padding: 0 1; }
+    #lim-buttons Button { margin-right: 2; }
+    #lim-note { height: auto; }
     #host-head { height: auto; padding: 0 1; }
     #host-scroll { height: 1fr; }
     #hist-body { height: 1fr; }
@@ -885,7 +890,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
     """
     BINDINGS = [
         Binding("1", "tab('dashboard')", "대시보드"), Binding("2", "tab('search')", "검색"), Binding("3", "tab('verify')", "대조"),
-        Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"), Binding("6", "tab('instr')", "지침"), Binding("7", "tab('sessions')", "세션"), Binding("8", "tab('cards')", "카드"), Binding("9", "tab('host')", "호스트"),
+        Binding("4", "tab('secrets')", "비밀"), Binding("5", "tab('cands')", "후보"), Binding("6", "tab('instr')", "지침"), Binding("7", "tab('sessions')", "세션"), Binding("8", "tab('cards')", "카드"), Binding("9", "tab('host')", "호스트"), Binding("0", "tab('limits')", "한도"),
         Binding("escape", "escape_back", "뒤로/종료", show=False),
         Binding("f10", "toggle_mask", "치환 켬/끔"), Binding("f5", "reload", "새로고침"),
         # 같은 F키를 탭마다 다른 동작에 쓴다 — check_action 이 현재 탭의 것만 켠다(TAB_ACTIONS)
@@ -898,6 +903,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         Binding("f2", "card_state_cycle", "상태 필터"), Binding("f3", "card_scope_cycle", "범위 필터"), Binding("f2", "sess_new", "새 세션"), Binding("f3", "sess_detach", "붙은 곳 떼기"), Binding("delete", "sess_kill", "정리(종료)"),
         Binding("f2", "host_start", "새 호스트 세션"), Binding("f3", "host_close", "세션 닫기"), Binding("f4", "host_input", "지시 입력"),
         Binding("f6", "host_answer", "응답 대기 요청"), Binding("f7", "host_interrupt", "턴 중단"), Binding("f8", "host_artifacts", "산출물 보기"),
+        Binding("f2", "limit_pin", "값 고정"), Binding("f3", "limit_unpin", "고정 해제"), Binding("f4", "limit_recalc", "자동 값 다시 계산"),
         *uikit.HelpMixin.HELP_BINDINGS,
     ]
 
@@ -930,6 +936,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         self.host_deferred: set = set()                # 사용자가 「나중에」 로 미룬 요청(자동으로 다시 열지 않는다)
         self.host_notified: set = set()                # 다른 탭에 있을 때 알린 요청
         self.host_cwd: str | None = None               # 실시간 세션의 작업 폴더(산출물 보기가 이 안만 열도록)
+        self.lim_view: dict = {"rows": []}             # 10 한도: llmlimit.load_view() 결과
         self.host_live = False                         # 한 번이라도 세션을 시작했으면 녹화본 대신 실시간 화면
 
     # --- 구성
@@ -988,6 +995,14 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
                 yield Static("", id="host-head")
                 yield uikit.box(VerticalScroll(Static("", id="host-body"), id="host-scroll"), "호스트 이벤트 — 읽기 전용(녹화본)")
                 yield uikit.box(Input(placeholder="세션에 보낼 지시 — Enter (먼저 F2 로 세션 시작)", id="host-input"), "지시")
+            with TabPane("10 한도", id="limits"):
+                yield Static("", id="lim-head")
+                yield uikit.box(DataTable(id="lim-table", cursor_type="row"), "한도 보정값(1 포인트당 달러) — Enter/F2 값 고정 · F3 고정 해제 · F4 자동 값 다시 계산")
+                with Horizontal(id="lim-buttons"):
+                    yield Button("값 고정", id="lim-pin")
+                    yield Button("고정 해제", id="lim-unpin")
+                    yield Button("자동 값 다시 계산", id="lim-recalc")
+                yield Static("", id="lim-note", classes="state")
         yield Footer()
 
     def on_mount(self):
@@ -1073,7 +1088,8 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         """리사이즈 직후 on_resize 시점에는 자식 박스가 아직 이전 레이아웃의 폭이라 그래프가 한 단계 전 폭으로 그려진다(실측: 170→120 에서 박스 68 인데 본문 94칸).
         그릴 때 읽은 폭(_painted_w)과 지금 폭이 다르면 다시 그린다. 폭이 같아지면 멈추고, 흔들려도 최대 REPAINT_TRIES 번."""
         tries = self.REPAINT_TRIES if tries is None else tries
-        if not getattr(self, "_st", None) or self._box_widths() == getattr(self, "_painted_w", None):
+        w = self._box_widths()
+        if not getattr(self, "_st", None) or w is None or w == getattr(self, "_painted_w", None):      # w None = 화면이 이미 내려갔다(종료·시험 정리 중 0.5초 타이머가 늦게 도는 경우)
             return
         self._fit_dash()
         self._paint_dash()
@@ -1108,11 +1124,12 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
                    "toggle_role": {"search"}, "toggle_regex": {"search"}, "toggle_tools": {"search"}, "toggle_title_only": {"search"}, "expand_all": {"search"},
                    "secret_add": {"secrets"}, "secret_toggle": {"secrets"}, "secret_delete": {"secrets"}, "reveal": {"secrets", "cands"}, "cand_ignore": {"cands"}, "instr_edit": {"instr"},
                    **lc.CardsMixin.CARD_ACTIONS, "sess_new": {"sessions"}, "sess_detach": {"sessions"}, "sess_kill": {"sessions"},
-                   "host_start": {"host"}, "host_close": {"host"}, "host_input": {"host"}, "host_answer": {"host"}, "host_interrupt": {"host"}, "host_artifacts": {"host"}}
+                   "host_start": {"host"}, "host_close": {"host"}, "host_input": {"host"}, "host_answer": {"host"}, "host_interrupt": {"host"}, "host_artifacts": {"host"},
+                   "limit_pin": {"limits"}, "limit_unpin": {"limits"}, "limit_recalc": {"limits"}}
 
     def check_action(self, action, parameters):
         """탭 전용 동작은 그 탭에서만 켠다(같은 F키를 탭마다 다른 동작에 재사용). 제한 모드에서는 막힌 동작(치환 끄기·값 보기·비밀 추가/삭제/끄기·후보 무시)을 푸터·도움말에서 숨긴다(눌러도 deny 가 막는다)."""
-        if self.restricted and action in ("toggle_mask", "secret_add", "secret_delete", "secret_toggle", "reveal", "cand_ignore", "instr_edit", *ls.SESS_ACTIONS, *hv.HOST_ACTIONS):
+        if self.restricted and action in ("toggle_mask", "secret_add", "secret_delete", "secret_toggle", "reveal", "cand_ignore", "instr_edit", *ls.SESS_ACTIONS, *hv.HOST_ACTIONS, *ll.LIMIT_ACTIONS):
             return False
         tabs = self.TAB_ACTIONS.get(action)
         if tabs is not None:
@@ -1157,6 +1174,8 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
             self.reload_cards()
         elif name == "host":
             self.reload_host()
+        elif name == "limits":
+            self.reload_limits()
 
     def _sess_tick(self):
         """세션 탭이 보일 때만 3초마다 tmux 를 다시 읽는다(다른 탭·대화 화면이 떠 있을 땐 쉬어서 tmux 를 부르지 않는다)."""
@@ -1167,7 +1186,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
             pass
 
     TAB_TABLES = {"dashboard": "#projects", "search": "#results", "verify": "#vrepos", "secrets": "#secrets-table", "cands": "#cands-table",
-                  "instr": "#instr-table", "sessions": "#list", "cards": "#cards-table", "host": "#host-scroll"}      # 표가 있는 탭은 모두 표에 포커스 — 없으면 탭 키 뒤 Enter·↑↓ 가 아무 일도 안 했다
+                  "instr": "#instr-table", "sessions": "#list", "cards": "#cards-table", "host": "#host-scroll", "limits": "#lim-table"}      # 표가 있는 탭은 모두 표에 포커스 — 없으면 탭 키 뒤 Enter·↑↓ 가 아무 일도 안 했다
 
     def action_focus_table(self):
         try:
@@ -1196,7 +1215,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
 
     def action_reload(self):
         t = self.current_tab()
-        {"dashboard": self.reload_dashboard, "search": self.run_search, "verify": self.run_verify, "secrets": self.reload_secrets, "cands": self.scan_candidates, "instr": self.reload_instr, "sessions": self.refresh_data, "cards": self.reload_cards, "host": self.reload_host}[t]()
+        {"dashboard": self.reload_dashboard, "search": self.run_search, "verify": self.run_verify, "secrets": self.reload_secrets, "cands": self.scan_candidates, "instr": self.reload_instr, "sessions": self.refresh_data, "cards": self.reload_cards, "host": self.reload_host, "limits": self.reload_limits}[t]()
 
     HOST_COLORS = {"head": "bold #33ccff", "text": "#e0e0e0", "think": "#6a6a6a", "tool": "#b8a46a", "result": "#9a9a9a", "err": "#e06c6c", "perm": "bold #e0a050",
                    "ask": "bold #7fbf7f", "info": "#33ccff", "warn": "#e0a050", "cost": "#7fbf7f", "dim": "#8a8a8a"}
@@ -1229,6 +1248,82 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         for style, line in hv.render_events(events):
             t.append(mk.text(line) + "\n", style=self.HOST_COLORS.get(style, "#e0e0e0"))
         body.update(t)
+
+    # --- 10 한도: 한도 예측(limitwatch estimate)이 쓰는 보정값 조회·수동 고정. 쓰기는 limitwatch CLI 를 부른다(llmlimit)
+    def reload_limits(self):
+        head, note = self.query_one("#lim-head", Static), self.query_one("#lim-note", Static)
+        tb = self.query_one("#lim-table", DataTable)
+        keep = tb.cursor_row if tb.row_count else 0
+        tb.clear(columns=True)
+        tb.add_columns("플랜", "구분", "쓰는 값", "고정값", "자동 중앙", "25~75분위", "창 수", "제안(고정 중 자동 값)")
+        self.lim_view = v = ll.load_view()
+        if v["err"]:
+            head.update(Text(v["err"], style="#e0a050"))
+        else:
+            head.update(Text(f"{v['path']}  ·  갱신 {v['updated'] or '-'}  ·  값 = 1 퍼센트포인트가 몇 달러에 해당하나(클수록 같은 작업이 %를 덜 올린다)" + ("   [제한 모드 — 조회만]" if self.restricted else ""), style="#9a9a9a"))
+        for i, r in enumerate(v["rows"]):
+            tb.add_row(*ll.row_cells(r), key=f"{r['plan']}|{r['key']}")
+        if v["rows"]:
+            tb.move_cursor(row=min(keep, len(v["rows"]) - 1))
+        for b in ("lim-pin", "lim-unpin", "lim-recalc"):
+            self.query_one("#" + b, Button).disabled = self.restricted
+        note.update(Text(ll.RESTRICTED_NOTICE if self.restricted else "고정값은 자동 갱신이 덮어쓰지 않는다(새 자동 값은 「제안」 칸). 고정 해제는 그 플랜의 5h·7d 를 함께 푼다.", style="#e0a050" if self.restricted else "#9a9a9a"))
+
+    def _limit_row(self):
+        tb = self.query_one("#lim-table", DataTable)
+        rows = getattr(self, "lim_view", {}).get("rows") or []
+        if not rows or not tb.row_count:
+            self.flash("보정값이 없다 — 먼저 자동 값을 계산(F4)하거나 스킬 배포를 확인", "warning")
+            return None
+        return rows[min(tb.cursor_row, len(rows) - 1)]
+
+    def action_limit_pin(self):
+        if self.deny("한도 값 고정"):
+            return
+        if self.current_tab() != "limits" or len(self.screen_stack) != 1:
+            return
+        r = self._limit_row()
+        if r is None:
+            return
+        cur = r["eff"][0] if r["eff"] else None
+
+        def got(text):
+            if text is None or not text.strip():
+                return
+            v, err = ll.parse_pin(text)
+            if v is None:
+                self.flash(f"고정하지 않음: {err}", "warning")
+                return
+            self.limit_do("pin", r["plan"], r["key"], v)
+        self.push_screen(PromptScreen(f"{r['plan']} {r['label']} 값 고정 (1 퍼센트포인트당 달러)", f"지금 쓰는 값 {cur:.2f}" if cur else "", value=f"{cur:.2f}" if cur else ""), got)
+
+    def action_limit_unpin(self):
+        if self.deny("한도 고정 해제"):
+            return
+        if self.current_tab() != "limits" or len(self.screen_stack) != 1:
+            return
+        r = self._limit_row()
+        if r is None:
+            return
+        if not any(x["pinned"] for x in self.lim_view["rows"] if x["plan"] == r["plan"]):
+            self.flash(f"{r['plan']} 에는 고정값이 없다", "information")
+            return
+        self.limit_do("unpin", r["plan"])
+
+    def action_limit_recalc(self):
+        if self.deny("한도 자동 값 다시 계산"):
+            return
+        if self.current_tab() != "limits" or len(self.screen_stack) != 1:
+            return
+        self.limit_do("recalc")
+
+    def limit_do(self, what, *args):
+        """CLI 를 부르고(동기, 수 초 이내) 결과를 알린 뒤 표를 다시 읽는다."""
+        if self.deny("한도 보정값 쓰기"):      # 입력창을 거치지 않고 부르는 경로까지 막는다(제한 모드의 마지막 방어선)
+            return
+        ok, out = {"pin": lambda p, k, v: ll.pin(p, k, v, self.lim_view), "unpin": ll.unpin, "recalc": ll.recalc}[what](*args)
+        self.flash((out.splitlines() or ["완료"])[-1] if ok else f"실패: {out[:200]}", "information" if ok else "error")
+        self.reload_limits()
 
     def render_host_live(self):
         head, body = self.query_one("#host-head", Static), self.query_one("#host-body", Static)
@@ -1506,6 +1601,8 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
             self.adopt_selected()
         elif tid == "cards-table" and key:
             self.open_card(key)
+        elif tid == "lim-table":
+            self.action_limit_pin()
         elif tid == "instr-table" and key:
             repo, _, name = key.rpartition("|")
             self.push_screen(InstrScreen(self, repo, name))
@@ -1518,6 +1615,12 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         elif ev.button.id == "card-clear":
             self.clear_card_checks()
             self.action_focus_table()
+        elif ev.button.id == "lim-pin":
+            self.action_limit_pin()
+        elif ev.button.id == "lim-unpin":
+            self.action_limit_unpin()
+        elif ev.button.id == "lim-recalc":
+            self.action_limit_recalc()
 
     # --- 검색
     def on_input_submitted(self, ev: Input.Submitted):

@@ -924,7 +924,7 @@ async def run_host_tab():
     want = {"1": "dashboard", "2": "search", "3": "verify", "4": "secrets", "5": "cands", "6": "instr", "7": "sessions", "8": "cards", "9": "host"}
     got = {b.key: b.action for b in llmui.LlmUI.BINDINGS if b.key in want}
     check("탭 키 1~9 매핑(1~8 불변, 9 호스트)", got == {k: f"tab('{v}')" for k, v in want.items()}, str(got))
-    check("TABS 9개, 마지막이 호스트", len(llmui.TABS) == 9 and llmui.TABS[-1] == ("host", "호스트") and [t[0] for t in llmui.TABS[:8]] == [want[str(i)] for i in range(1, 9)])
+    check("TABS 10개, 9번째가 호스트·10번째가 한도(1~9 불변)", len(llmui.TABS) == 10 and llmui.TABS[8] == ("host", "호스트") and llmui.TABS[9] == ("limits", "한도") and [t[0] for t in llmui.TABS[:8]] == [want[str(i)] for i in range(1, 9)])
     app = llmui.LlmUI()
     async with app.run_test(size=(160, 50)) as pilot:
         await settle(pilot, lambda: rows(app, "#projects") == 3)
@@ -1317,6 +1317,132 @@ def check_launch_prompt():
     check("초기 프롬프트: 쟁점이 없으면 카드만", lcd.launch_prompt(["a:11111111"]) == "/donghans-card a:11111111")
 
 
+LIM_CALIB = {"version": 1, "source": "limits.jsonl", "updated": "2026-11-10T00:00:48+09:00", "plans": {
+    "max_5x": {"five": {"median": 1.68, "p25": 1.58, "p75": 1.73, "min": 1.3, "max": 1.87, "n": 24},
+               "seven": {"median": 9.95, "p25": 9.93, "p75": 9.97, "min": 9.9, "max": 9.99, "n": 2}, "updated": "2026-11-10T00:00:48+09:00", "pinned": {}},
+    "max_20x": {"five": {"median": 6.0, "p25": 5.0, "p75": 7.0, "min": 4.0, "max": 8.0, "n": 9}, "updated": "2026-11-10T00:00:48+09:00", "pinned": {"five": 5.5},
+                "suggest": {"five": {"median": 6.2, "p25": 5.1, "p75": 7.1, "n": 10}}}}}
+LW_SRC = os.path.normpath(os.path.join(ROOT, "..", "..", "_data", "claude-skills", "donghans-limit-watch", "scripts", "limitwatch.py"))
+
+
+def check_limit_logic():
+    """llmlimit 순수 로직: 입력 검증·행 만들기·스킬이 없을 때."""
+    import llmlimit as ll
+    check("parse_pin: 정상 값", ll.parse_pin(" 1.7 ")[0] == 1.7 and ll.parse_pin("10")[0] == 10.0)
+    bad = ["", "abc", "0", "-1", "nan", "inf", "1e9", "1001"]
+    check("parse_pin: 숫자 아님·0 이하·nan·inf·상한 초과는 거부(오류 문구가 있다)", all(ll.parse_pin(b)[0] is None and ll.parse_pin(b)[1] for b in bad), str([ll.parse_pin(b) for b in bad]))
+    orig = ll.find_limitwatch
+    ll.find_limitwatch = lambda: None
+    try:
+        v = ll.load_view()
+        check("스킬이 없으면 안내만(행 없음)", v["err"] and "찾지 못함" in v["err"] and v["rows"] == [], str(v))
+        ok, out = ll.pin("max_5x", "five", 2.0)
+        check("스킬이 없으면 고정은 실패로 돌려주고 예외가 없다", ok is False and "찾지 못함" in out, out)
+    finally:
+        ll.find_limitwatch = orig
+    check("pin: 5h·7d 가 아닌 구분은 거부", ll.pin("max_5x", "nine", 2.0)[0] is False)
+
+
+async def clear_prompt(app):
+    app.screen.query_one("#prompt-input").value = ""
+
+
+async def run_limits_tab():
+    """10 한도 탭(S5): 키 0·보정값 표·Enter/F2/버튼으로 고정·해제·다시 계산·입력 검증·다른 키 보존·제한 모드(조회만)·기존 탭 키 불변.
+    보정 파일은 임시 폴더(LLMUI_LIMIT_DIR)의 합성본, 쓰기는 소스 트리의 limitwatch.py(LLMUI_LIMITWATCH)가 한다 — 실제 ~/.local/share 는 건드리지 않는다."""
+    import llmlimit as ll, tempfile
+    d = tempfile.mkdtemp(prefix="llmui-limit-")
+    cal = os.path.join(d, "limit-calibration.json")
+    os.environ["LLMUI_LIMIT_DIR"] = d; os.environ["LLMUI_LIMITWATCH"] = LW_SRC
+    save = lambda: json.dump(LIM_CALIB, open(cal, "w"))
+    load = lambda: json.load(open(cal))
+    pinned = lambda: {p: e.get("pinned") for p, e in load()["plans"].items()}
+    tbl = lambda app: [[str(c) for c in app.query_one("#lim-table").get_row_at(i)] for i in range(app.query_one("#lim-table").row_count)]
+    try:
+        keys = {b.key: b.action for b in llmui.LlmUI.BINDINGS}
+        check("키 0 → 한도 탭, 1~9 매핑은 그대로", keys.get("0") == "tab('limits')" and all(keys.get(str(i)) for i in range(1, 10)) and keys["9"] == "tab('host')" and keys["1"] == "tab('dashboard')")
+        check("한도 탭에는 단일 알파벳 키 바인딩이 없다(한영 전환)", not [b.key for b in llmui.LlmUI.BINDINGS if b.action.startswith("limit_") and len(b.key) == 1 and b.key.isalpha()])
+        save()
+        app = llmui.LlmUI()
+        async with app.run_test(size=(170, 50)) as pilot:
+            await settle(pilot, lambda: rows(app, "#projects") == 3)
+            check("한도: 다른 탭에서는 한도 동작이 꺼져 있다(F2 재사용 충돌 없음)", all(app.check_action(a, ()) is False for a in ll.LIMIT_ACTIONS) and app.check_action("host_start", ()) is False)
+            await pilot.press("0"); await settle(pilot, lambda: app.current_tab() == "limits" and app.query_one("#lim-table").row_count == 3)
+            t = tbl(app)
+            check("한도: 표 3행(max_20x 5h·max_5x 5h·7d, 플랜 순) — 자동 값·분위·창 수", [r[:2] for r in t] == [["max_20x", "5h"], ["max_5x", "5h"], ["max_5x", "7d"]] and t[1][4] == "1.68" and t[1][5] == "1.58~1.73" and t[1][6] == "24", str(t))
+            check("한도: 고정 중인 플랜은 쓰는 값=고정값, 제안 칸에 자동 제안이 보인다", t[0][2] == "5.50" and t[0][3] == "5.50" and t[0][7].startswith("6.20"), str(t[0]))
+            check("한도: 한도 동작이 이 탭에서 켜져 있다", all(app.check_action(a, ()) is True for a in ll.LIMIT_ACTIONS) and app.focused is app.query_one("#lim-table"))
+            check("한도: 머리줄에 파일 경로와 갱신 시각", cal in txt(app.query_one("#lim-head")) and "2026-11-10" in txt(app.query_one("#lim-head")))
+            await pilot.press("9"); await pilot.pause(0.3); await pilot.press("0"); await settle(pilot, lambda: app.current_tab() == "limits")
+            check("한도: 9 다음 0 이 다시 한도 탭", app.current_tab() == "limits")
+            # --- F2: max_5x 5h 행에 고정
+            await pilot.press("down"); await pilot.pause(0.2)
+            await pilot.press("f2"); await settle(pilot, lambda: len(app.screen_stack) == 2)
+            check("F2: 값 입력창이 현재 값(1.68)을 채워 열린다", app.screen.query_one("#prompt-input").value == "1.68" and "max_5x 5h" in txt(app.screen.query_one("#dialog-title")))
+            await clear_prompt(app); await type_text(pilot, "abc"); await pilot.press("enter"); await settle(pilot, lambda: len(app.screen_stack) == 1)
+            check("한도: 숫자가 아니면 거부하고 파일은 그대로", pinned() == {"max_20x": {"five": 5.5}, "max_5x": {}}, str(pinned()))
+            for bad in ("0", "-3", "nan", "5000"):
+                await pilot.press("f2"); await settle(pilot, lambda: len(app.screen_stack) == 2)
+                await clear_prompt(app); await type_text(pilot, bad); await pilot.press("enter"); await settle(pilot, lambda: len(app.screen_stack) == 1)
+            check("한도: 0·음수·nan·상한 초과도 거부(파일 그대로)", pinned() == {"max_20x": {"five": 5.5}, "max_5x": {}}, str(pinned()))
+            await pilot.press("f2"); await settle(pilot, lambda: len(app.screen_stack) == 2)
+            await clear_prompt(app); await type_text(pilot, "2.5"); await pilot.press("enter")
+            await settle(pilot, lambda: pinned()["max_5x"] == {"five": 2.5})
+            await settle(pilot, lambda: tbl(app)[1][3] == "2.50")
+            t = tbl(app)
+            check("한도: 2.5 고정 → 파일 pinned.five=2.5, 표의 쓰는 값·고정값 2.50, 다른 플랜 고정 보존", pinned() == {"max_20x": {"five": 5.5}, "max_5x": {"five": 2.5}} and t[1][2] == "2.50" and t[1][3] == "2.50" and t[0][3] == "5.50", f"{pinned()} {t}")
+            # --- Enter: 7d 행(다른 키 보존)
+            await pilot.press("down"); await pilot.pause(0.2); await pilot.press("enter"); await settle(pilot, lambda: len(app.screen_stack) == 2)
+            check("Enter: 행에서 입력창이 열린다(7d)", "max_5x 7d" in txt(app.screen.query_one("#dialog-title")) and app.screen.query_one("#prompt-input").value == "9.95")
+            await clear_prompt(app); await type_text(pilot, "11"); await pilot.press("enter")
+            await settle(pilot, lambda: pinned()["max_5x"] == {"five": 2.5, "seven": 11.0})
+            check("한도: 7d 를 고정해도 5h 고정이 남는다(CLI pin 이 다른 키를 지우는 것을 막음)", pinned()["max_5x"] == {"five": 2.5, "seven": 11.0}, str(pinned()))
+            # --- Esc 로 취소하면 변화 없음
+            before = open(cal).read()
+            await pilot.press("f2"); await settle(pilot, lambda: len(app.screen_stack) == 2); await pilot.press("escape"); await settle(pilot, lambda: len(app.screen_stack) == 1)
+            check("한도: 입력창을 Esc 로 닫으면 파일 불변", open(cal).read() == before)
+            # --- 버튼 클릭(마우스)·Tab 이동
+            await pilot.click("#lim-pin"); await settle(pilot, lambda: len(app.screen_stack) == 2)
+            check("한도: 「값 고정」 버튼 클릭으로 입력창이 열린다", "값 고정" in txt(app.screen.query_one("#dialog-title"))); await pilot.press("escape"); await settle(pilot, lambda: len(app.screen_stack) == 1)
+            app.query_one("#lim-table").focus(); await pilot.press("tab"); await pilot.pause(0.2)
+            check("한도: Tab 으로 버튼에 포커스가 간다(키보드 접근)", app.focused is not None and app.focused.id == "lim-pin", str(app.focused))
+            # --- F3 해제(max_5x 행이 선택돼 있다)
+            app.query_one("#lim-table").focus(); await pilot.pause(0.2)
+            await pilot.press("f3"); await settle(pilot, lambda: pinned()["max_5x"] == {})
+            check("F3: max_5x 고정이 모두 풀리고 max_20x 고정은 그대로", pinned() == {"max_20x": {"five": 5.5}, "max_5x": {}}, str(pinned()))
+            await settle(pilot, lambda: tbl(app)[1][3] == "-")
+            check("한도: 해제 뒤 표의 고정값 '-'·쓰는 값은 자동 값", tbl(app)[1][3] == "-" and tbl(app)[1][2] == "1.68", str(tbl(app)[1]))
+            before = open(cal).read()
+            await pilot.press("f3"); await pilot.pause(0.5)
+            check("한도: 고정이 없는 플랜에서 F3 는 아무것도 쓰지 않는다", open(cal).read() == before)
+            # --- F4 다시 계산: limits.jsonl 이 없으면 보정할 창이 없어 파일 불변
+            await pilot.press("f4"); await pilot.pause(1.5)
+            check("F4: 기록이 없어 만들 값이 없으면 보정 파일은 그대로(앱은 살아 있음)", open(cal).read() == before and app.current_tab() == "limits")
+            check("한도: F5 새로고침이 동작(행 3개 유지)", (await pilot.press("f5") or True) and app.query_one("#lim-table").row_count == 3)
+        # --- 보정 파일이 없을 때
+        os.remove(cal)
+        app = llmui.LlmUI()
+        async with app.run_test(size=(170, 50)) as pilot:
+            await pilot.press("0"); await settle(pilot, lambda: app.current_tab() == "limits" and "보정 파일이 없" in txt(app.query_one("#lim-head")))
+            check("한도: 보정 파일이 없으면 안내(행 0)이고 F2·F3 는 알리기만 한다", app.query_one("#lim-table").row_count == 0)
+            await pilot.press("f2"); await pilot.press("f3"); await pilot.pause(0.4)
+            check("한도: 행이 없을 때 F2 가 입력창을 열지 않는다", len(app.screen_stack) == 1)
+        # --- 제한 모드: 조회만
+        save()
+        before = open(cal).read()
+        rapp = llmui.LlmUI(restricted=True)
+        async with rapp.run_test(size=(170, 50)) as pilot:
+            await pilot.press("0"); await settle(pilot, lambda: rapp.current_tab() == "limits" and rapp.query_one("#lim-table").row_count == 3)
+            check("한도(제한): 표는 보인다(읽기)", rapp.query_one("#lim-table").row_count == 3 and "조회만" in txt(rapp.query_one("#lim-head")))
+            check("한도(제한): 쓰기 동작은 푸터에서 숨김, 버튼은 비활성, 안내문", all(rapp.check_action(a, ()) is False for a in ll.LIMIT_ACTIONS) and all(rapp.query_one("#" + b).disabled for b in ("lim-pin", "lim-unpin", "lim-recalc")) and "읽기만" in txt(rapp.query_one("#lim-note")))
+            await pilot.press("f2"); await pilot.press("f3"); await pilot.press("f4"); await pilot.press("enter"); await pilot.pause(0.5)
+            rapp.action_limit_pin(); rapp.action_limit_unpin(); rapp.action_limit_recalc(); rapp.limit_do("pin", "max_5x", "five", 9.0); await pilot.pause(0.5)
+            check("한도(제한): 키·직접 호출(limit_do 포함)로도 입력창이 안 열리고 파일은 불변", len(rapp.screen_stack) == 1 and open(cal).read() == before)
+    finally:
+        os.environ.pop("LLMUI_LIMIT_DIR", None); os.environ.pop("LLMUI_LIMITWATCH", None)
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def check_sessions_only_no_db():
     """`llmui --sessions` 는 DB 에 연결하지 않는다 — DB 접속을 막아 두고(잘못된 PG 환경) 띄워도 앱이 뜬다(main 이 SessionsUI 로 직행하는지 코드로 확인)."""
     src = open(os.path.join(ROOT, "llmui.py"), encoding="utf-8").read()
@@ -1339,6 +1465,8 @@ try:
     asyncio.run(run_host_live())
     asyncio.run(run_host_s2())
     asyncio.run(run_host_s3())
+    check_limit_logic()
+    asyncio.run(run_limits_tab())
     check_sessions_only_no_db()
 finally:
     pg.stop()
