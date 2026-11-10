@@ -529,7 +529,8 @@ def cmd_session_exclude(a):
         if a.action == "plan":
             print(f"[plan] {len(rows)}개 세션을 집계에서 제외한다(삭제 아님, restore 로 복원). 이미 제외된 것은 표시.")
             for sid, host, cwd, rurl, f, l, ex, n, cost in rows:
-                print(f"  {sid}  @{host}  {cwd}  메시지 {n}  ${cost:.2f}  {f:%m-%d %H:%M}~{l:%H:%M}" + ("  [이미 제외됨]" if ex else ""))
+                span = f"{f:%m-%d %H:%M}~{l:%H:%M}" if f and l else "시각 없음"      # 시각이 비어 있는 세션도 목록에 나온다
+                print(f"  {sid}  @{host}  {cwd}  메시지 {n}  ${cost:.2f}  {span}" + ("  [이미 제외됨]" if ex else ""))
             print(f"토큰: {token}  → 사용자가 위 목록을 확인한 뒤: donghans ctx session-exclude apply <같은 세션들> --reason '<사유>' --token {token}")
             return 0
         if a.action == "apply":
