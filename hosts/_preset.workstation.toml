@@ -28,6 +28,7 @@ netdata            = true
 llm-ctx         = false
 observe            = true
 qa-desktop         = false   # incus VM `qa-desktop` 이 있는 호스트에서만 true (Claude 전역 지침에 VM 사용 규칙 추가)
+kernel-lockdown       = false   # unstable 커널(lockdown LSM 시험용) — 호스트가 specialisation 에서만 켠다
 
 [mods.gui]
 enable = true

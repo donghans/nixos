@@ -95,6 +95,14 @@ in {
     specialisation.with-irqpoll.configuration.boot.kernelParams = lib.mkOverride 40 (kernelBase ++ ["irqpoll"]);
     specialisation.with-osi-linux.configuration.boot.kernelParams = lib.mkOverride 40 (kernelBase ++ ["acpi_osi=Linux"]);
 
+    #  lockdown-test : lockdown 지원 unstable 커널 + `lsm=lockdown,...`·`lockdown=integrity` (plan boot-security S1 시험용, 반응형 항목이 아님).
+    #    기본 항목은 그대로이고, 이 항목으로 **한 번만** 부팅해 `/sys/kernel/security/lockdown`·embedctl·observectl 등의 동작을 잰다.
+    #    `lsm=` 는 kernelBase 의 것을 빼고 lockdown 을 맨 앞에 넣은 목록으로 바꾼다(순서는 시험으로 확정).
+    specialisation.lockdown-test.configuration = {
+      mods.sys.services.kernel-lockdown.enable = lib.mkForce true; # 프리셋이 false 를 같은 우선순위로 정의하므로 mkForce
+      boot.kernelParams = lib.mkOverride 40 ((builtins.filter (p: !(lib.hasPrefix "lsm=" p)) kernelBase) ++ ["lsm=lockdown,landlock,yama,bpf" "lockdown=integrity"]);
+    };
+
     # (이유: TLP RUNTIME_PM_DENYLIST는 TLP 서비스 시작 후 적용되어 부팅 초기 probe 시점엔 늦음.
     #  kernel 6.18+ 에서 i2c_designware 모듈이 없어 disable_ps 파라미터도 무효가 됨.
     #  I2C 컨트롤러(0x51e8)가 runtime suspend 상태로 터치패드 probe 실패 방지를 위해
