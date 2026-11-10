@@ -846,7 +846,8 @@ def push_project(store: str, project: str, masker=None, manifest: dict | None = 
     if masker is None:
         return False, "비밀 검사기를 못 써서(DB 연결 실패 등) push 하지 않는다"
     pd = os.path.join(store, project)
-    files = _git(pd, "ls-files", check=False).stdout.splitlines()
+    # -z: 한글 등 ASCII 아닌 파일명을 git 이 "\354\233…" 로 따옴표 처리해 내보내면 파일을 못 열어 「검사할 수 없는 파일」로 push 가 막힌다(2026-11-10 실제 발생 — 자동 push 가 127커밋 밀림)
+    files = [f for f in _git(pd, "ls-files", "-z", check=False).stdout.split("\0") if f]
     for rel in files:
         text, why = read_text(os.path.join(pd, rel))
         if text is None:
