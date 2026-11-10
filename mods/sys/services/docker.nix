@@ -131,6 +131,13 @@ mkMod __curPos "Docker Daemon and tools" ({
       #        커널 레벨에서 투명하게 가로챔)가 전담하고, 이건 프로세스가 proxy env를 읽는지와
       #        무관하게 항상 적용된다. 그래서 docker.service 시작 시점의 전역 환경변수에
       #        프록시가 섞여 있어도 무조건 벗겨내 이 재발 자체를 원천 차단한다.)
+      # (목적: nixup 이 docker.service(사용자 유닛)를 자동 중지·시작하지 않게 한다 — 도커가 내려가면 컨테이너가 전부 내려가고
+      #        재시작 정책이 no 인 컨테이너(테스트·QA 스택)는 다시 안 올라온다)
+      # (이유: docker-compose 만 unstable(v5.x — 26.05 stable 은 2.40.x 라 v5 없음)에서 가져오는데 이 패키지가 docker 래퍼에 들어가
+      #        ExecStart 경로가 되므로, rolling 모드의 nixup 이 unstable 을 갱신해 compose 가 바뀔 때마다 dockerd 는 같은데도
+      #        유닛 파일이 달라져 switch-to-configuration 이 docker.service 를 stop/start 했다(2026-11-09 14:49 실제 발생,
+      #        시스템 세대 238→239 비교로 확인). dockerd 자체를 바꾸고 싶으면 `systemctl --user restart docker` 를 직접 한다)
+      systemd.user.services.docker.restartIfChanged = lib.mkIf cfg.rootless false;
       systemd.user.services.docker.serviceConfig = lib.mkIf cfg.rootless {
         Slice = "docker.slice";
         Nice = 15; # (nice 상향 = 우선순위 하향, fork로 모든 컨테이너 프로세스에 상속)
