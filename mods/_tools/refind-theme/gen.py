@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """rEFInd 테마 변형 생성기 (plan refind-theme): 원본 refind-theme-regular 의 아이콘·글꼴은 그대로 쓰고 **배경과 선택 영역 색만** 바꾼다.
 
-  gen.py SRC_THEME_DIR OUT_DIR [--sel-alpha 0.55]
+  gen.py SRC_THEME_DIR OUT_DIR [--sel-alpha 0.30]
 
 SRC_THEME_DIR = ESP 의 refind-theme-regular. OUT_DIR(= ESP 의 themes/refind-black) 에 theme.conf, bg_black.png, selection-{big,small}.png 를 쓴다.
  - 배경: 32x32 단색 #000000 (그림 없음 — Windows 체인 잔상 방지). 원본 bg_dark.png 는 32x32 #222222 였다.
- - 선택 영역: 원본 selection_dark-*.png 의 **모양(알파 채널)을 그대로** 두고 색만 검정 → 흰색, 알파에 --sel-alpha 를 곱한다(0.55 → 검정 위 #464646). 테두리 등은 더하지 않는다.
+ - 선택 영역: 원본 selection_dark-*.png 의 **모양(알파 채널)을 그대로** 두고 색만 검정 → 흰색, 알파에 --sel-alpha 를 곱한다(0.30 → 검정 위 #292929). 테두리 등은 더하지 않는다.
  - 아이콘·글꼴은 원본 폴더를 가리킨다(복사 안 함). 점 그래픽 아이콘 시도(고해상도 원본→도트 변환)는 표현력이 부족해 기각 — 커밋 a680f2f 에 남아 있다.
 """
 import argparse, os, sys
@@ -20,7 +20,7 @@ def recolor(path, k):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src"); ap.add_argument("out")
-    ap.add_argument("--sel-alpha", type=float, default=0.55)
+    ap.add_argument("--sel-alpha", type=float, default=0.30)
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     ic = os.path.join(a.src, "icons", "128-48")
