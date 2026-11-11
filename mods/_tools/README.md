@@ -18,7 +18,7 @@ Nix 모듈(`mods/sys|gui|devel`)이 설치해 실행하는 도구(Python·쉘)�
 | `desktop/posture/` | 힌지 각도로 laptop/tent/tablet 판정하는 자세 허브 | `desktop/posture/README.md` |
 | `desktop/external-keyboard/` | 외부 키보드가 있으면 내장 키보드를 끄는 감시 | `desktop/external-keyboard/README.md` |
 | `desktop/monitor-manager/` | 모니터 구성 CLI·TUI(displayctl·displayui) | `desktop/monitor-manager/README.md` |
-| `desktop/embedctl/` | MSI Summit E16Flip(MS-1592) 전용 EC 상태(충전 상한·성능 모드·Cooler Boost) CLI·TUI(embedctl·embedctlui). 쓰기는 root helper(polkit 허용 템플릿 유닛), 호스트 toml `[mods.gui.apps] embedctl = true` 로 켠다 | `desktop/embedctl/README.md` |
+| `desktop/embedctl/` | MSI Summit E16Flip(MS-1592) 전용 EC 상태(충전 상한·성능 모드·Cooler Boost) CLI·TUI(embedctl·embedctlui). lockdown 아래에서 되도록 msi-ec sysfs 만 쓴다(읽기는 일반 사용자, 쓰기는 root helper = polkit 허용 템플릿 유닛), 호스트 toml `[mods.gui.apps] embedctl = true` 로 켠다 | `desktop/embedctl/README.md` |
 | `desktop/clipboard/`·`desktop/virtual-keyboard/` | 클립보드 UI / 화상 키보드(wvkbd 패치는 `mods/_patches/wvkbd/`) | 코드 머리말 주석 |
 | `desktop/office-font-alias/` | 오피스 글꼴 별칭(빌드 때 `office.nix` 가 실행) | 코드 머리말 주석 |
 | `desktop/hwctl/` | 노트북 하드웨어 제어 쉘 스크립트(볼륨·밝기·덮개·터치 토글) | `desktop/hwctl/README.md` |

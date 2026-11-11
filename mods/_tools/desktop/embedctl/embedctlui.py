@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """embedctlui — embedctl 의 TUI (Textual + uikit). MSI Summit E16Flip(MS-1592) 한 기종의 EC 상태를 보고 바꾼다.
 
-한 화면에 ① 기종·펌웨어 게이트와 접근 방식 ② 충전 상한(드롭다운) ③ 성능 모드(드롭다운) ④ Cooler Boost(켜짐일 때 경고) ⑤ 팬 RPM·온도(2초 갱신, 창이 포커스를 잃으면 멈춤) ⑥ 스냅샷 저장/복원.
-EC 바이트를 읽는 건 root helper 를 부르므로 열 때·동작 뒤·F5 에서만 한다(주기 갱신 대상은 사용자 권한으로 읽히는 팬·온도·전원뿐).
-모든 쓰기는 embedctl 과 같은 경로(embedlib.helper_call → embedctl-root@<동작>.service)이고 게이트·되읽기 확인은 helper 가 한다. 설계: ctx `plan/embedctl-구현` §3-5.
+한 화면에 ① 기종·펌웨어 게이트 ② 충전 상한(드롭다운) ③ 성능 모드(드롭다운; turbo·comfort·eco, sport 는 사용 불가 안내) ④ Cooler Boost(켜짐일 때 경고) ⑤ 팬 RPM·온도(2초 갱신, 창이 포커스를 잃으면 멈춤) ⑥ 스냅샷 저장/복원.
+상태는 전부 sysfs(msi-ec 등)라 일반 사용자 권한으로 읽는다(lockdown 아래에서도 동작; helper 를 거치지 않는다). 열 때·동작 뒤·F5 에서 다시 읽는다.
+모든 쓰기는 embedctl 과 같은 경로(embedlib.helper_call → embedctl-root@<동작>.service)이고 게이트·되읽기 확인은 helper 가 한다. 설계: ctx `plan/embedctl-lockdown`, `plan/embedctl-구현` §3-5.
 """
 from __future__ import annotations
 
@@ -31,9 +31,18 @@ except ImportError:                                # 소스 트리: ../../_lib/u
 import embedlib as lib   # noqa: E402
 
 CHARGE_STEPS = (50, 60, 70, 80, 90, 100)
-MODE_OPTS = [("sport — 성능", "sport"), ("comfort — 균형", "comfort"), ("eco — 조용(팬 정지)", "eco")]
-GATE_TEXT = {"verified": "검증됨", "unverified_fw": "미검증 펌웨어 — 읽기만", "unsupported_board": "지원하지 않는 기종 — 읽기만", "unknown": "펌웨어를 읽지 못함 — 쓰기 거부"}
-ACCESS_TEXT = {"direct": "직접(root)", "helper": "helper(polkit)", "unavailable": "사용 불가"}
+MODE_LABEL = {"turbo": "turbo — 오버클럭(성능 최대)", "comfort": "comfort — 균형", "eco": "eco — 저전력(유휴 시 팬 정지)"}
+MODE_NOTE = "sport — 사용 불가(이 펌웨어에서 msi-ec 가 지원하지 않음) · turbo 는 과전압·오버클럭 모드"
+GATE_TEXT = {"verified": "검증됨", "unverified_fw": "미검증 펌웨어 — 읽기만", "unsupported_board": "지원하지 않는 기종 — 읽기만", "no_msi_ec": "msi-ec 없음 — 읽을 수 없고 쓰기 거부"}
+
+
+def mode_options(current, writable=None):
+    """쓸 수 있는 모드(writable, 없으면 전체) + 지금 값이 그 밖이면 지금 값도 보인다(예: 레거시 sport — 고를 수는 있어도 현재와 같아 무시된다)."""
+    names = [m for m in lib.MODE_ORDER if writable is None or m in writable]
+    opts = [(MODE_LABEL[m], m) for m in names]
+    if current and current["name"] not in names:
+        opts.append((f"{lib.mode_label(current['text'])} (현재)", current["name"]))
+    return opts
 
 
 def charge_options(limit):
@@ -82,10 +91,10 @@ class EmbedUI(uikit.PauseOnBlurMixin, uikit.QuitMixin, uikit.HelpMixin, App):
     ENABLE_COMMAND_PALETTE = False
     HELP_TERMS = [
         ("충전 상한", "충전을 이 % 에서 멈춘다(50~100). 100 이 「상한 없음」과 같다. 값은 EC 에 남아 OS 를 바꿔도 유지된다. TLP 가 같은 설정을 갖고 있으면 TLP 가 덮어쓸 수 있다"),
-        ("성능 모드", "sport · comfort · eco. 팬 동작이 달라진다 — 이 기기에서 eco 는 유휴·가벼운 부하에서 팬이 멈추고 comfort/sport 는 약 2,800 RPM 으로 돈다. user 모드는 다루지 않는다"),
+        ("성능 모드", "turbo · comfort · eco (msi-ec 의 shift_mode). turbo = 과전압·오버클럭, comfort = 균형, eco = 저전력 — 이 기기에서 eco 는 유휴·가벼운 부하에서 팬이 멈추고 comfort 는 약 2,800 RPM 으로 돈다. turbo 의 팬·온도는 아직 측정 전이다. 예전의 sport(EC 0xC0)는 sysfs 로 쓸 수 없어 사용 불가이고, EC 에 그 값이 남아 있으면 「sport(레거시 값)」으로만 보인다. 한 번 turbo/comfort/eco 로 바꾸면 sport 로는 되돌릴 수 없다"),
         ("Cooler Boost", "F8. 팬을 최대(약 8,000 RPM)로 돌린다. 끄기 전까지 자동으로 꺼지지 않는다 — 켜져 있으면 화면에 경고가 보인다"),
         ("스냅샷", "F6 저장 / F7 복원. 충전 상한·성능 모드·Cooler Boost 를 파일(~/.local/state/embedctl/snapshots)에 남기고 되돌린다. 복원은 먼저 계획을 보여 주고 확인을 받는다. 펌웨어가 다른 스냅샷은 거부"),
-        ("접근 방식", "helper(polkit) = 로컬 세션에서 root helper 를 거친다. 「사용 불가」면 EC 항목을 읽거나 바꿀 수 없다(SSH 같은 세션 밖). 쓰기는 기종·EC 펌웨어가 검증된 때만 켜진다"),
+        ("읽기·쓰기", "읽기는 sysfs 를 일반 사용자 권한으로 직접 읽는다(lockdown 아래에서도 된다). 쓰기는 로컬 세션에서 root helper(polkit)를 거치며 기종·EC 펌웨어가 검증된 때만 켜진다. msi-ec 가 없으면 이유를 상태 줄에 보이고 쓰기를 잠근다"),
     ]
     HELP_NOTES = [
         "종료는 Esc(뒤로 갈 곳이 없을 때 확인창), Ctrl+Q 는 확인 없이 즉시 종료. 모든 동작은 helper 가 쓴 뒤 되읽어 확인하며 어긋나면 실패로 표시한다",
@@ -94,6 +103,7 @@ class EmbedUI(uikit.PauseOnBlurMixin, uikit.QuitMixin, uikit.HelpMixin, App):
     #status { height: 3; padding: 1 1 0 1; color: #cfcfcf; }
     #selects { height: 5; }
     #selects > Select { width: 1fr; }
+    #mode-note { height: 1; padding: 0 1; color: #7f7f7f; }
     #row2 { height: 7; }
     #boost-box { width: 1fr; height: 7; padding: 0 1; }
     #boost-box.on { border: round #b8a46a; }
@@ -118,6 +128,7 @@ class EmbedUI(uikit.PauseOnBlurMixin, uikit.QuitMixin, uikit.HelpMixin, App):
     def __init__(self) -> None:
         super().__init__()
         self.st = None
+        self._mode_opts = []
         self._syncing = False
         self._busy = False
 
@@ -125,7 +136,8 @@ class EmbedUI(uikit.PauseOnBlurMixin, uikit.QuitMixin, uikit.HelpMixin, App):
         yield Static("", id="status")
         with Horizontal(id="selects"):
             yield uikit.select_box(charge_options(100), 100, "sel-charge", "충전 상한")
-            yield uikit.select_box(MODE_OPTS, "comfort", "sel-mode", "성능 모드")
+            yield uikit.select_box(mode_options(None), "comfort", "sel-mode", "성능 모드")
+        yield Static(MODE_NOTE, id="mode-note")
         with Horizontal(id="row2"):
             yield uikit.box(Vertical(Static("", id="boost-state"), Button("켜기 / 끄기 (F8)", id="btn-boost"), id="boost-box"), "Cooler Boost")
             yield uikit.box(Vertical(Static("F6 저장 · F7 복원\n저장 위치: " + lib.snapshot_dir(), id="snap-info"),
@@ -144,7 +156,7 @@ class EmbedUI(uikit.PauseOnBlurMixin, uikit.QuitMixin, uikit.HelpMixin, App):
         self.tick()
 
     def tick(self) -> None:
-        """사용자 권한으로 읽히는 것(팬·온도·전원)만. EC 바이트는 여기서 읽지 않는다(helper 호출이라 무겁다)."""
+        """팬·온도·전원만 2초마다. 모드·부스트·충전은 열 때·동작 뒤·F5 에서 다시 읽는다(다른 곳에서 바뀐 값은 F5)."""
         fans, temp = lib.read_fans(), lib.read_temp_pkg()
         ac = lib._read(os.path.join(lib.p_ac(), "online"))
         bat = lib._read(os.path.join(lib.p_bat(), "status"))
@@ -166,14 +178,14 @@ class EmbedUI(uikit.PauseOnBlurMixin, uikit.QuitMixin, uikit.HelpMixin, App):
         self.say("새로고침", None)
 
     def writable(self) -> bool:
-        return bool(self.st) and self.st["access"] != "unavailable" and self.st["gate"]["state"] == "verified"
+        return bool(self.st) and self.st["gate"]["state"] == "verified"
 
     def apply_state(self, st) -> None:
         self.st = st
         g = st["gate"]
         line = Text()
-        line.append(f"{g['board'] or '?'} · EC 펌웨어 {g['fw'] or '?'} · {GATE_TEXT[g['state']]}  |  EC 접근: {ACCESS_TEXT[st['access']]}")
-        if st["warnings"] and st["access"] == "unavailable":
+        line.append(f"{g['board'] or '?'} · EC 펌웨어 {g['fw'] or '?'} · {GATE_TEXT[g['state']]}")
+        if st["warnings"] and g["state"] == "no_msi_ec":
             line.append("\n" + st["warnings"][0][:120], style="#b8a46a")
         self.query_one("#status", Static).update(line)
         can = self.writable()
@@ -187,17 +199,21 @@ class EmbedUI(uikit.PauseOnBlurMixin, uikit.QuitMixin, uikit.HelpMixin, App):
                     sc.set_options(opts)
                     self._charge_opts = opts
                 uikit.sync_select(sc, limit)
-            if st["mode"] and st["mode"]["name"] in lib.MODE_BITS:
+            if st["mode"]:
+                mopts = mode_options(st["mode"], st["modes"]["writable"])
+                if [o[1] for o in mopts] != [o[1] for o in self._mode_opts]:
+                    sm.set_options(mopts)
+                    self._mode_opts = mopts
                 uikit.sync_select(sm, st["mode"]["name"])
             sc.disabled = not can or limit is None
-            sm.disabled = not can or not (st["mode"] and st["mode"]["name"] in lib.MODE_BITS)
+            sm.disabled = not can or not st["mode"]
         finally:
             self.call_after_refresh(self._unsync)
         boost = st["boost"]
         bs = self.query_one("#boost-state", Static)
         box = self.query_one("#boost-box")
         if boost is None:
-            bs.update("알 수 없음(EC 를 읽지 못함)")
+            bs.update("알 수 없음(msi-ec 없음)")
         elif boost:
             bs.update(Text("켜짐 — 팬 최대 · 자동으로 꺼지지 않는다", style="bold #b8a46a"))
         else:
@@ -275,7 +291,7 @@ class EmbedUI(uikit.PauseOnBlurMixin, uikit.QuitMixin, uikit.HelpMixin, App):
         except OSError as e:
             self.say(f"스냅샷을 저장하지 못했다: {e}", False)
             return
-        warn = "" if self.st["ec"] else "  (주의: EC 값이 없는 스냅샷이라 복원에는 쓸 수 없다)"
+        warn = "" if self.st["gate"]["state"] == "verified" and self.st["mode"] else "  (주의: msi-ec 값이 없는 스냅샷이라 복원에는 쓸 수 없다)"
         self.say(f"스냅샷을 저장했다: {path}{warn}", True)
 
     def action_snap_restore(self) -> None:

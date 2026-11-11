@@ -62,7 +62,7 @@ in {
       initrd.kernelModules = ["i2c_hid_acpi" "i915"]; # i915: initrd 에서 PSR 설정(psr-force-initrd)과 lockdown 이 필요하므로
 
       # ec_sys: EC 256바이트를 읽는 디버그 덤프(/sys/kernel/debug/ec/ec0/io)용 — **읽기 전용**이다(2026-11-09 부터 write_support 를 켜지 않는다).
-      #  EC 를 바꾸는 일은 embedctl 이 MSI WMI(set_data)로 한다(mods/_tools/desktop/embedctl/README.md). 연구 때 ec_sys 로 직접 써야 하면
+      #  EC 를 바꾸는 일은 embedctl 이 msi-ec sysfs 로 한다(lockdown 하에서도 됨; mods/_tools/desktop/embedctl/README.md). 연구 때 ec_sys 로 직접 써야 하면
       #  `sudo modprobe -r ec_sys && sudo modprobe ec_sys write_support=1` 로 그 세션만 잠깐 켠다(재부팅하면 읽기 전용으로 돌아온다; 표준 절차이며 이 호스트에서 시험하지는 않았다).
       kernelModules = ["ec_sys"];
       # (idma64 차단 이유, 2026-10-19)

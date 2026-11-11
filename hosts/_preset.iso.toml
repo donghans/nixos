@@ -48,10 +48,10 @@ drawing       = false
 incus-vm      = false
 hop           = false
 incus-remote-view = false   # 랩탑(msi-summit-me)만 호스트 toml 에서 true — 데스크톱의 incus VM 화면 보기
-# embedctl: MS-1592(MSI Summit E16Flip) 전용 EC 도구(충전 상한·성능 모드·Cooler Boost). 지금은 Mods Coverage 통과용 false.
-# 설치 이미지에서 팬을 올린 채 재설치하려고 true 로 바꾸려면 먼저 확인할 것: iso 에서 helper(polkit·ioport) 동작, iso 크기,
-# 쓰기는 기종 게이트(embedlib.evaluate_gate)가 MS-1592 외에는 막는다. 검토 계획: ctx plan/iso-embedctl
-# (donghans ctx doc read plan iso-embedctl --project nixos), 코드 mods/_tools/desktop/embedctl/, 노트북은 hosts/msi-summit-me.toml 에서 true
+# embedctl: MS-1592(MSI Summit E16Flip) 전용 EC 도구(충전 상한·성능 모드·Cooler Boost). Mods Coverage 통과용 false — **ISO 는 대상이 아니다**(2026-11-12 사용자 결정).
+# embedctl 은 이제 debugfs/WMI 없이 msi-ec 커널 모듈의 sysfs 만 쓴다(lockdown 아래에서도 동작하도록). msi-ec 는 kernel-lockdown mod 만 제공하므로 설치 이미지에서는
+# EC 쓰기가 아예 동작하지 않는다(예전의 「설치 이미지에서 팬을 올린 채 재설치」 구상은 폐기). 켜려면 먼저 plan embedctl-lockdown 결정 7·8 과 mods/gui/apps/embedctl.nix 의 assertion 을 볼 것.
+# 코드 mods/_tools/desktop/embedctl/, 노트북은 hosts/msi-summit-me.toml 에서 true
 embedctl      = false
 
 [mods.gui.utils]

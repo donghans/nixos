@@ -41,7 +41,7 @@ mkMod __curPos "unstable 커널 + 모듈 인증서를 넣은 이미지 (lockdown
 in {
   os = {
     boot.kernelPackages = lib.mkForce unstable.linuxPackages;
-    # 시험(2026-11-11): lockdown 에서 쓸 수 있는 쿨러 제어용 out-of-tree msi-ec (embedctl 은 debugfs 라 lockdown 에서 막힘). 인증서 문제는 위 certTree.
+    # 시험(2026-11-11): lockdown 에서 쓸 수 있는 쿨러·성능 모드·충전 제어용 out-of-tree msi-ec (embedctl 이 이 sysfs 를 쓴다 — 2026-11-12 sysfs 전환; 이 mod 가 msi-ec 를 제공하는 유일한 곳이다). 인증서 문제는 위 certTree.
     boot.extraModulePackages = [config.boot.kernelPackages.msi-ec];
     boot.kernelModules = ["msi-ec"]; # 외부 모듈은 DMI 별칭이 없어 자동으로 안 올라온다(2026-11-11 실기: modprobe 하면 lockdown 에서도 서명 검증 통과·로드됨)
     system.systemBuilderCommands = lib.mkAfter ''

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""embedctlui 시험(헤드리스 Textual Pilot; 실제 EC·helper·systemctl 없이 가짜 helper 로):
-상태 표시, 드롭다운으로 충전 상한·성능 모드 적용(helper 인스턴스 이름), 현재 상태와 같은 선택 무시, 실패 시 드롭다운이 실제 상태로 되돌아옴,
-Cooler Boost 버튼/F8 과 켜짐 경고, 접근 불가·게이트 거부 시 조작 잠금, 스냅샷 저장/복원(계획 확인창 기본 「취소」), 종료 규칙, 도움말, 2초 갱신.
+"""embedctlui 시험(헤드리스 Textual Pilot; 실제 sysfs·helper·systemctl 없이 가짜 상태/helper 로):
+상태 표시, 드롭다운으로 충전 상한·성능 모드(turbo·comfort·eco) 적용(helper 인스턴스 이름), sport 비활성 안내와 레거시 sport 표시, 현재 상태와 같은 선택 무시, 실패 시 드롭다운이 실제 상태로 되돌아옴,
+Cooler Boost 버튼/F8 과 켜짐 경고, msi-ec 없음·게이트 거부 시 조작 잠금, 스냅샷 저장/복원(계획 확인창 기본 「취소」), 종료 규칙, 도움말, 2초 갱신.
 textual 이 있는 python 으로 `python3 -I` 실행(run-tests.sh 의 $PY)."""
 import asyncio, json, os, sys, tempfile
 
@@ -20,27 +20,29 @@ import embedctlui as ui
 from textual.widgets import Button, OptionList, Select, Static
 check, finish = checker()
 
-# --- 가짜 EC/helper -----------------------------------------------------------------------------
-S = {"limit": 100, "set": False, "mode": "comfort", "boost": False, "access": "helper", "gate": "verified", "fw": "1592EMS1.111"}
+# --- 가짜 상태/helper -----------------------------------------------------------------------------
+S = {"limit": 100, "set": False, "mode": "comfort", "boost": False, "msiec": True, "gate": "verified", "fw": "1592EMS1.111", "legacy": False}
 CALLS, FAIL = [], {}
 FANS = {"v": [2840, 2711, 0, 0]}
-def raw():
-    return {"d7": 0x80 + S["limit"] if S["set"] else 0x80, "d2": 0xC0 | {"sport": 0, "comfort": 1, "eco": 2}[S["mode"]], "b98": 0x82 if S["boost"] else 0x02, "end": S["limit"] if S["set"] else 0}
 def status():
-    r = raw(); ok = S["access"] != "unavailable"
-    return {"gate": {"board": "MS-1592", "board_ok": True, "fw": S["fw"] if ok else None, "fw_date": None, "fw_verified": S["gate"] == "verified", "state": S["gate"] if ok else "unknown"},
-            "access": S["access"], "ec": ({"d7": r["d7"], "d2": r["d2"], "b98": r["b98"]} if ok else None),
-            "charge": {"end": r["end"], "start": r["end"] - 10, "set": S["set"], "limit": S["limit"]},
-            "mode": lib.decode_mode(r["d2"]) if ok else None, "boost": S["boost"] if ok else None,
+    ok = S["msiec"]
+    text = "unknown (192)" if S["legacy"] else S["mode"]
+    return {"gate": {"board": "MS-1592", "board_ok": True, "fw": S["fw"] if ok else None, "fw_date": None, "fw_verified": S["gate"] == "verified", "state": S["gate"] if ok else "no_msi_ec"},
+            "msi_ec": {"present": ok, "available_modes": ["turbo", "eco", "comfort"] if ok else None},
+            "charge": {"end": S["limit"] if S["set"] else 0, "start": (S["limit"] if S["set"] else 10) - 10, "set": S["set"], "limit": S["limit"]},
+            "mode": lib.parse_mode(text) if ok else None, "modes": {"writable": ["turbo", "comfort", "eco"] if ok else [], "disabled": ["sport"]},
+            "boost": S["boost"] if ok else None,
             "fans": FANS["v"], "temp_pkg": 33.5, "power": {"ac": True, "status": "Charging", "capacity": 64},
-            "warnings": [] if ok else ["helper 실패(시험용): 로컬 세션에서 실행해야 한다"]}
+            "warnings": [] if ok else [lib.NO_MSIEC_HINT]}
+def raw():
+    return {"end": S["limit"] if S["set"] else 0, "start": 0, "mode": S["mode"], "boost": "on" if S["boost"] else "off"}
 def fake_helper(inst, timeout=20):
     CALLS.append(inst)
     if FAIL.get(inst):
         raise lib.HelperError(FAIL[inst], code=3)
     kind, arg = lib.parse_instance(inst); before = raw()
     if kind == "charge": S.update(limit=arg, set=True)
-    elif kind == "mode": S["mode"] = arg
+    elif kind == "mode": S.update(mode=arg, legacy=False)
     else: S["boost"] = (arg == "on")
     return {"ok": True, "before": before, "after": raw()}
 lib.collect_status = status
@@ -57,7 +59,8 @@ async def drive():
     async with app.run_test(size=(120, 42)) as pilot:
         await pilot.pause(0.8)
         sc, sm = app.query_one("#sel-charge", Select), app.query_one("#sel-mode", Select)
-        check("시작: 상태 줄에 기종·펌웨어·검증됨·helper", all(x in text_of(app, "#status") for x in ("MS-1592", "1592EMS1.111", "검증됨", "helper(polkit)")), text_of(app, "#status"))
+        check("시작: 상태 줄에 기종·펌웨어·검증됨(EC 접근 방식 표시는 없음)", all(x in text_of(app, "#status") for x in ("MS-1592", "1592EMS1.111", "검증됨")) and "접근" not in text_of(app, "#status"), text_of(app, "#status"))
+        check("시작: sport 사용 불가 안내가 보임", "sport — 사용 불가" in text_of(app, "#mode-note") and "turbo" in text_of(app, "#mode-note"), text_of(app, "#mode-note"))
         check("시작: 드롭다운이 현재 상태(충전 100, comfort)", sc.value == 100 and sm.value == "comfort", (sc.value, sm.value))
         check("시작: 시작만으로 쓰기 동작이 일어나지 않음(드롭다운 동기화가 되돌아오지 않음)", CALLS == [], CALLS)
         check("시작: Cooler Boost 꺼짐 표시, 경고 없음", "꺼짐" in text_of(app, "#boost-state") and not app.query_one("#boost-box").has_class("on"))
@@ -74,15 +77,17 @@ async def drive():
         sc.post_message(Select.Changed(sc, 80)); await pilot.pause(0.5)
         check("현재와 같은 값의 Changed 이벤트(드롭다운이 되돌아온 경우)는 무시 — helper 호출 없음", len(CALLS) == n, CALLS)
 
-        # 성능 모드
+        # 성능 모드 (turbo·comfort·eco)
+        sm.value = "turbo"; await pilot.pause(0.8)
+        check("turbo 선택 → helper mode-turbo", CALLS[-1] == "mode-turbo" and sm.value == "turbo", CALLS)
         sm.value = "eco"; await pilot.pause(0.8)
         check("eco 선택 → helper mode-eco", CALLS[-1] == "mode-eco" and sm.value == "eco", CALLS)
         n = len(CALLS); sm.post_message(Select.Changed(sm, "eco")); await pilot.pause(0.5)
         check("성능 모드도 현재와 같은 값의 Changed 이벤트는 무시", len(CALLS) == n, CALLS)
 
         # 실패 시 드롭다운이 실제 상태로 되돌아온다
-        FAIL["mode-sport"] = "게이트 거부: 시험용"
-        sm.value = "sport"; await pilot.pause(1.0)
+        FAIL["mode-turbo"] = "게이트 거부: 시험용"
+        sm.value = "turbo"; await pilot.pause(1.0)
         check("실패: 메시지에 종료 코드 3과 이유, 오류 스타일", "실패(종료 코드 3)" in text_of(app, "#msg") and "게이트 거부: 시험용" in text_of(app, "#msg") and app.query_one("#msg").has_class("err"), text_of(app, "#msg"))
         check("실패: 드롭다운이 실제 상태(eco)로 되돌아감", sm.value == "eco", sm.value)
         FAIL.clear()
@@ -104,7 +109,7 @@ async def drive():
         check("F6: 저장 경로 안내", "스냅샷을 저장했다" in text_of(app, "#msg"))
 
         # 복원: 상태를 바꾼 뒤 스냅샷으로
-        S.update(limit=60, set=True, mode="sport", boost=True); await pilot.press("f5"); await pilot.pause(0.8)
+        S.update(limit=60, set=True, mode="turbo", boost=True); await pilot.press("f5"); await pilot.pause(0.8)
         n = len(CALLS)
         await pilot.press("f7"); await pilot.pause(0.5)
         check("F7: 스냅샷 선택 대화상자", type(app.screen).__name__ == "SnapshotPick" and app.screen.query_one("#snap-list", OptionList).option_count == 1, type(app.screen).__name__)
@@ -145,22 +150,33 @@ async def drive():
         await pilot.press("escape"); await pilot.pause(0.3); await pilot.press("right"); await pilot.pause(0.2); await pilot.press("enter"); await pilot.pause(0.3)
         check("Esc → → → Enter = 종료", not app.is_running)
 
-    # 접근 불가: 조작 잠금
-    S.update(access="unavailable", limit=100, set=False, mode="comfort", boost=False, gate="verified"); CALLS.clear()
+    # 레거시 sport(EC 에 0xC0 이 남아 있음): 현재 값으로 보이고, 다른 모드로는 바꿀 수 있다
+    S.update(msiec=True, limit=100, set=False, mode="comfort", boost=False, gate="verified", legacy=True); CALLS.clear()
+    appL = ui.EmbedUI()
+    async with appL.run_test(size=(120, 42)) as pilot:
+        await pilot.pause(0.9)
+        smL = appL.query_one("#sel-mode", Select)
+        check("레거시 sport: 드롭다운이 sport(현재)를 보이고 비활성이 아니다", smL.value == "sport" and not smL.disabled, (smL.value, smL.disabled))
+        check("레거시 sport: 시작만으로 쓰기 동작이 일어나지 않음", CALLS == [], CALLS)
+        smL.value = "comfort"; await pilot.pause(0.8)
+        check("레거시 sport 에서 comfort 선택 → helper mode-comfort, 이후 sport 는 사라짐", CALLS == ["mode-comfort"] and smL.value == "comfort", CALLS)
+
+    # msi-ec 없음: 조작 잠금
+    S.update(msiec=False, limit=100, set=False, mode="comfort", boost=False, gate="verified", legacy=False); CALLS.clear()
     app2 = ui.EmbedUI()
     async with app2.run_test(size=(120, 42)) as pilot:
         await pilot.pause(0.9)
-        check("접근 불가: 상태 줄에 사용 불가와 이유", "사용 불가" in text_of(app2, "#status") and "로컬 세션" in text_of(app2, "#status"), text_of(app2, "#status"))
-        check("접근 불가: 드롭다운·버튼 잠김, EC 항목은 알 수 없음", app2.query_one("#sel-charge", Select).disabled and app2.query_one("#sel-mode", Select).disabled and app2.query_one("#btn-boost", Button).disabled and "알 수 없음" in text_of(app2, "#boost-state"))
+        check("msi-ec 없음: 상태 줄에 msi-ec 없음과 이유", "msi-ec 없음" in text_of(app2, "#status") and "허용 목록" in text_of(app2, "#status"), text_of(app2, "#status"))
+        check("msi-ec 없음: 드롭다운·버튼 잠김, EC 항목은 알 수 없음", app2.query_one("#sel-charge", Select).disabled and app2.query_one("#sel-mode", Select).disabled and app2.query_one("#btn-boost", Button).disabled and "알 수 없음" in text_of(app2, "#boost-state"))
         await pilot.press("f8"); await pilot.pause(0.4)
-        check("접근 불가: F8 이 아무것도 하지 않음", CALLS == [], CALLS)
+        check("msi-ec 없음: F8 이 아무것도 하지 않음", CALLS == [], CALLS)
         await pilot.press("f6"); await pilot.pause(0.4)
-        check("접근 불가여도 스냅샷 저장은 되고 복원에 못 쓴다는 주의가 붙음", "복원에는 쓸 수 없다" in text_of(app2, "#msg"), text_of(app2, "#msg"))
+        check("msi-ec 없어도 스냅샷 저장은 되고 복원에 못 쓴다는 주의가 붙음", "복원에는 쓸 수 없다" in text_of(app2, "#msg"), text_of(app2, "#msg"))
         await pilot.press("ctrl+q"); await pilot.pause(0.3)
         check("Ctrl+Q 는 확인 없이 즉시 종료", not app2.is_running)
 
     # 게이트 거부(미검증 펌웨어): 읽기만
-    S.update(access="helper", gate="unverified_fw", fw="1592EMS1.222"); CALLS.clear()
+    S.update(msiec=True, gate="unverified_fw", fw="1592EMS1.222"); CALLS.clear()
     app3 = ui.EmbedUI()
     async with app3.run_test(size=(120, 42)) as pilot:
         await pilot.pause(0.9)

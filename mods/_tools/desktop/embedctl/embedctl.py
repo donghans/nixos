@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """embedctl — MSI Summit E16Flip(MS-1592) 한 기종의 EC 상태(충전 상한·성능 모드·Cooler Boost)를 허용 목록으로만 다룬다.
+lockdown 아래에서도 동작하도록 debugfs/WMI 없이 **sysfs(msi-ec 커널 모듈)만** 쓴다.
 
-  embedctl status   [--json]                 기종·펌웨어 게이트, 충전 상한, 성능 모드, Cooler Boost, 팬 RPM·온도, 전원 상태(읽기 전용)
-  embedctl snapshot [--out 파일] [--json]    위 상태를 스냅샷(JSON)으로. 파일은 --out 으로 지정할 때만 쓴다(자동 저장 없음)
+  embedctl status   [--json]                 기종·펌웨어 게이트, 충전 상한, 성능 모드, Cooler Boost, 팬 RPM·온도, 전원 상태(읽기 전용, 일반 사용자 권한)
+  embedctl snapshot [--out 파일] [--json]    위 상태를 스냅샷(JSON, schema 2)으로. 파일은 --out 으로 지정할 때만 쓴다(자동 저장 없음)
   embedctl charge <50..100> [--json]         충전 상한(%)을 정한다. 100 이 「상한 없음」과 같다
-  embedctl mode sport|comfort|eco [--json]   성능 모드. user 모드는 다루지 않는다
+  embedctl mode turbo|comfort|eco [--json]   성능 모드. turbo 는 과전압·오버클럭 모드다. sport 는 이 펌웨어에서 쓸 수 없다(비활성)
   embedctl boost on|off [--json]             Cooler Boost(팬 최대)
   embedctl restore <스냅샷> [--dry-run] [--json]   스냅샷의 충전 상한·성능 모드·Cooler Boost 로 되돌린다(먼저 전부 검증하고, 같은 값은 건너뜀)
 
 쓰기 동작은 root helper(`embedctl-root@<동작>.service`, polkit 허용)가 게이트 → 쓰기 → 되읽기 확인 순서로 한다.
 종료 코드: 0 성공 · 2 입력/사용법 오류 · 3 게이트·허용 목록 거부 · 4 권한(polkit)·helper 실패 · 5 되읽기 값 불일치.
-EC 바이트를 못 읽는 환경(세션 밖 프로세스 등)에서도 `status` 는 사용자 권한으로 읽히는 부분만 내고 종료 코드 0 이다.
-설계·근거: ctx `plan/embedctl-구현`. 설치본에서는 ctlkit.py·embedlib.py 가 이 파일과 같은 디렉터리에 있다.
+msi-ec 가 없으면 `status` 는 게이트 `no_msi_ec` 와 이유를 내고 종료 코드 0 이며, 쓰기는 모두 거부(3)한다.
+설계·근거: ctx `plan/embedctl-lockdown`, `plan/embedctl-구현`. 설치본에서는 ctlkit.py·embedlib.py 가 이 파일과 같은 디렉터리에 있다.
 """
 import argparse
 import contextlib
@@ -33,10 +34,9 @@ GATE_TEXT = {
     "verified": "검증됨",
     "unverified_fw": "미검증 펌웨어 — 쓰기 거부(읽기만)",
     "unsupported_board": "지원하지 않는 기종 — 쓰기 거부(읽기만)",
-    "unknown": "펌웨어를 읽지 못함 — 쓰기 거부",
+    "no_msi_ec": "msi-ec 없음 — EC 를 읽을 수 없고 쓰기 거부",
 }
-ACCESS_TEXT = {"direct": "직접(root)", "helper": "helper(polkit)", "unavailable": "사용 불가 — EC 값 없음"}
-LABEL, EC_KEY = lib.LABEL, lib.EC_KEY
+LABEL = lib.LABEL
 
 
 class Fail(Exception):
@@ -56,21 +56,22 @@ def render_status(st):
     g, c, p = st["gate"], st["charge"], st["power"]
     rows = []
     rows.append(("기종", f"{g['board'] or '?'} · EC 펌웨어 {g['fw'] or '?'} ({GATE_TEXT[g['state']]})"))
-    rows.append(("EC 접근", ACCESS_TEXT[st["access"]]))
-    ec = st["ec"]
     if c["end"] is None:
         rows.append(("충전 상한", "읽지 못함(sysfs 에 임계값 파일이 없음)"))
     else:
         eff = f"{c['limit']}%" + ("" if c["set"] else " (미설정 = 100% 로 동작)")
-        rows.append(("충전 상한", f"{eff}  [sysfs end={c['end']}, start={c['start']}" + (f", EC 0xD7=0x{ec['d7']:02X}" if ec else "") + "]"))
+        rows.append(("충전 상한", f"{eff}  [sysfs end={c['end']}, start={c['start']}]"))
     if st["mode"]:
         m = st["mode"]
-        flags = ("" if m["supported"] else " · 모드 미지원") + ("" if m["active"] else " · 비활성")
-        rows.append(("성능 모드", f"{m['name']}{flags}  [EC 0xD2=0x{m['raw']:02X}]"))
-        rows.append(("Cooler Boost", ("켜짐" if st["boost"] else "꺼짐") + f"  [EC 0x98=0x{ec['b98']:02X}]"))
+        rows.append(("성능 모드", f"{lib.mode_label(m['text'])}  [msi-ec shift_mode={m['text']}]"))
+        w = st["modes"]["writable"]
+        rows.append(("모드 선택지", (" · ".join(w) if w else "없음") + "  (turbo 는 오버클럭)" + "".join(f" · {d}(사용 불가)" for d in st["modes"]["disabled"])))
     else:
-        rows.append(("성능 모드", "알 수 없음(EC 를 읽지 못함)"))
-        rows.append(("Cooler Boost", "알 수 없음(EC 를 읽지 못함)"))
+        rows.append(("성능 모드", "알 수 없음(msi-ec 없음)"))
+    if st["boost"] is None:
+        rows.append(("Cooler Boost", "알 수 없음(msi-ec 없음)"))
+    else:
+        rows.append(("Cooler Boost", "켜짐" if st["boost"] else "꺼짐"))
     fans = st["fans"]
     rows.append(("팬", " · ".join(f"fan{i + 1} {v}" for i, v in enumerate(fans)) + " RPM" if fans else "읽지 못함"))
     rows.append(("온도", f"패키지 {st['temp_pkg']:.1f}°C" if st["temp_pkg"] is not None else "읽지 못함"))
@@ -219,6 +220,14 @@ def _percent(s):
     return v
 
 
+def _mode(s):
+    if s in lib.DISABLED_MODES:
+        raise argparse.ArgumentTypeError(f"{s} 는 쓸 수 없다 — {lib.DISABLED_MODES[s]}. 선택지: {', '.join(lib.MODE_ORDER)}")
+    if s not in lib.MODE_ORDER:
+        raise argparse.ArgumentTypeError(f"알 수 없는 모드 {s!r} (선택지: {', '.join(lib.MODE_ORDER)}; sport 는 사용 불가)")
+    return s
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="embedctl", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -233,8 +242,10 @@ def main(argv=None):
     c.add_argument("percent", type=_percent, metavar=f"{lib.CHARGE_MIN}..{lib.CHARGE_MAX}")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_action, name="charge")
-    m = sub.add_parser("mode", help="성능 모드")
-    m.add_argument("value", choices=sorted(lib.MODE_BITS))
+    m = sub.add_parser("mode", help="성능 모드 (turbo=오버클럭 · comfort=균형 · eco=저전력; sport 는 사용 불가)",
+                       description="성능 모드(msi-ec shift_mode). turbo = 과전압·오버클럭, comfort = 균형, eco = 저전력. sport 는 사용 불가 — 이 펌웨어에서 msi-ec 가 지원하지 않아 sysfs 로 쓸 수 없다. "
+                                   "turbo/comfort/eco 로 바꾸면 sport 로는 되돌릴 수 없다.")
+    m.add_argument("value", type=_mode)
     m.add_argument("--json", action="store_true")
     m.set_defaults(fn=cmd_action, name="mode")
     b = sub.add_parser("boost", help="Cooler Boost")
