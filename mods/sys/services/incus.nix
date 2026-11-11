@@ -3,6 +3,9 @@ mkMod __curPos "Incus hypervisor" ({config, ...}: {
   os = {
     virtualisation.incus.enable = true;
     virtualisation.incus.ui.enable = true;
+    # 기본 600초는 incusd 가 시작 중 죽으면(2026-11 초 두 번 관측: SIGKILL 원인 미확인, note msi-summit-me-boot-shutdown-stalls) `waitready` 가 최대 600초 부팅 목표(graphical.target)를 막아
+    # greetd 로그인 뒤 uwsm 이 60초 기다리다 실패한다. 정상 시작은 3~4초이므로 20초로 줄이면 실패→`Restart=on-failure` 로 빨리 다시 시도한다.
+    virtualisation.incus.startTimeout = 20;
     networking.firewall.allowedTCPPorts = [8443];
     # nixos-fw의 기본 정책이 drop이라 VM→호스트 트래픽(DHCP 등)도 차단됨
     networking.firewall.trustedInterfaces = ["incusbr0"];

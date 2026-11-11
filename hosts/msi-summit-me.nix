@@ -148,6 +148,48 @@ in {
       };
     };
 
+    # == 종료·부팅 지연 대책과 진단 (note msi-summit-me-boot-shutdown-stalls-2026-11-12) ==
+    # ① tailscaled 종료 31초: wpa_supplicant 가 tailscaled 와 동시에 멈춰 Wi-Fi 가 먼저 끊기면 tailscaled 가 DERP 닫기를 30초 기다린다(정상 1.7초).
+    #   종료 때 tailscaled 가 먼저, wpa_supplicant 가 나중에 멈추도록 순서를 주고(After = 시작은 나중·종료는 먼저), 최악 대기를 8초로 제한한다.
+    systemd.services.tailscaled = {
+      after = ["wpa_supplicant.service"];
+      serviceConfig.TimeoutStopSec = "8s";
+    };
+    # ② xdg-document-portal 종료 90초(36부팅 중 1번): 종료 때 fusermount3 가 멈춤 — 뿌리 미확인. 최악 대기를 5초로 줄이고,
+    #   멈추기 전(ExecStop 시점)에 /run/user/<uid>/doc FUSE 마운트를 붙잡은 프로세스와 포털의 커널 대기 상태를 journal 에 남긴다(태그 docportal-trace) — 다음에 멈추면 원인 프로세스가 보인다.
+    systemd.user.services.xdg-document-portal = {
+      overrideStrategy = "asDropin";
+      serviceConfig = {
+        TimeoutStopSec = "5s";
+        ExecStop = pkgs.writeShellScript "docportal-stop-trace" ''
+          export PATH=${lib.makeBinPath [pkgs.coreutils pkgs.gnugrep pkgs.systemd]}
+          doc="/run/user/$(id -u)/doc"
+          {
+            echo "stop begins; portal pid=$MAINPID wchan=$(cat /proc/$MAINPID/wchan 2>/dev/null)"
+            for p in /proc/[0-9]*; do
+              hit=$(ls -l "$p/cwd" "$p/root" "$p/fd" 2>/dev/null | grep -F "$doc" | head -3 | tr '\n' ' ')
+              [ -n "$hit" ] && echo "holder pid=''${p#/proc/} comm=$(cat "$p/comm" 2>/dev/null) :: $hit"
+            done
+            grep -F "$doc" /proc/self/mountinfo | head -2
+          } 2>&1 | systemd-cat -t docportal-trace -p info
+          exit 0
+        '';
+      };
+    };
+    # ③ incusd 가 부팅 직후 SIGKILL 로 죽는 경우(2/36부팅, 둘 다 시작 1.8~1.9초 뒤)의 송신자를 잡는 임시 진단: 부팅 직후 3분 동안 SIGKILL 신호 생성을 bpftrace 로 journal 에 남긴다(태그 sigkill-trace).
+    #   원인이 잡히면 지운다. integrity lockdown 에서도 bpftrace 추적이 된다(2026-11-12 시험). 평소 SIGKILL 은 드물다(touchpad-watchdog 의 자식 정리 정도).
+    systemd.services.sigkill-trace = {
+      description = "Trace SIGKILL senders for 3 minutes after boot (diagnosis, remove after cause found)";
+      wantedBy = ["multi-user.target"];
+      after = ["sysinit.target"];
+      before = ["incus.service"];
+      unitConfig.DefaultDependencies = false;
+      serviceConfig.SyslogIdentifier = "sigkill-trace";
+      script = ''
+        ${pkgs.coreutils}/bin/timeout 180 ${pkgs.bpftrace}/bin/bpftrace -e 'tracepoint:signal:signal_generate /args->sig == 9/ { printf("sender=%s pid=%d cg=%s target=%s pid=%d\n", comm, pid, cgroup_path(cgroup), args->comm, args->pid); }' || true
+      '';
+    };
+
     # rEFInd 메뉴의 호스트 전용 항목(mods/sys/services/refind.nix). Gentoo LiveGUI 는 p6(GENTOO_ISO) 가 있는 동안만 — S4 재파티션 때 같이 지운다(plan boot-security S4).
     # 이 볼륨은 FAT 이 아니라 rEFInd 파일시스템 드라이버가 필요하다 → 이 mod 는 드라이버를 만들지 않으므로 예전 수동 설치의 `drivers_x64/` 가 ESP 에 남아 있는 동안만 동작한다.
     mods.sys.services.refind.extraEntries = ''
