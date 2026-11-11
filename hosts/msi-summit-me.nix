@@ -16,7 +16,9 @@ mkHostConfiguration ({
     "loglevel=3"
     "i915.enable_psr=1"
     "module_blacklist=idma64" # (아래 boot.kernelParams 주석 참고: idma64/IRQ 27 공유 → 터치패드 먹통의 진짜 원인 차단)
-    "lsm=landlock,yama,bpf"
+    # lockdown LSM 을 목록에 넣는다(kernel-lockdown mod 의 lockdown-engage 가 부팅 중 `integrity` 로 올린다; `lockdown=integrity` 인자는 쓰지 않는다 — psr-force 가 debugfs 에 써야 해서, 2026-11-10 실기).
+    # specialisation(legacy-quirks·with-*)도 kernelBase 를 쓰므로 모두 lockdown 으로 뜬다(lockdown 없는 항목이 구멍이 되지 않게). lockdown 없는 부팅은 이전 세대(≤527)뿐이다.
+    "lsm=lockdown,landlock,yama,bpf"
   ];
   legacy = ["pcie_aspm=off" "acpi_osi=Linux" "irqpoll"];
 in {
@@ -94,34 +96,6 @@ in {
     specialisation.with-aspm-off.configuration.boot.kernelParams = lib.mkOverride 40 (kernelBase ++ ["pcie_aspm=off"]);
     specialisation.with-irqpoll.configuration.boot.kernelParams = lib.mkOverride 40 (kernelBase ++ ["irqpoll"]);
     specialisation.with-osi-linux.configuration.boot.kernelParams = lib.mkOverride 40 (kernelBase ++ ["acpi_osi=Linux"]);
-
-    #  lockdown-test : lockdown 지원 unstable 커널 + `lsm=lockdown,...`·`lockdown=integrity` (plan boot-security S1 시험용, 반응형 항목이 아님).
-    #    기본 항목은 그대로이고, 이 항목으로 **한 번만** 부팅해 `/sys/kernel/security/lockdown`·embedctl·observectl 등의 동작을 잰다.
-    #    `lsm=` 는 kernelBase 의 것을 빼고 lockdown 을 맨 앞에 넣은 목록으로 바꾼다(순서는 시험으로 확정).
-    specialisation.lockdown-test.configuration = {
-      mods.sys.services.kernel-lockdown.enable = lib.mkForce true; # 프리셋이 false 를 같은 우선순위로 정의하므로 mkForce
-      # `lockdown=integrity` 는 커널 인자에 넣지 않는다(late lockdown): 인자로 켜면 부팅 첫 순간부터 debugfs 쓰기가 막혀 psr-force 가 실패한다(2026-11-10 실기).
-      # 대신 psr-force 가 끝난 뒤 lockdown-engage 가 `integrity` 로 올린다. 실기 시험(2026-11-11): 올린 뒤에도 PSR1 유지, debugfs 읽기·쓰기 거부, 내리기 거부.
-      boot.kernelParams = lib.mkOverride 40 ((builtins.filter (p: !(lib.hasPrefix "lsm=" p)) kernelBase) ++ ["lsm=lockdown,landlock,yama,bpf"]);
-      # 올리는 시점 = psr-force(성공·실패 불문) 뒤, 사용자 세션 시작 전. After 만 쓰고 Requires 는 쓰지 않아 psr-force 가 실패해도 lockdown 은 올라간다.
-      # 한 번 올리면 재부팅 전까지 내릴 수 없다. 그 전(커널 시작~이 서비스)에는 보호가 없는 창이 있다 — initrd·로그인 전 구간이며 plan §6-2d 에 위험으로 적었다.
-      systemd.services.lockdown-engage = {
-        description = "Engage kernel lockdown (integrity) after boot-time privileged setup";
-        unitConfig.DefaultDependencies = true;
-        wantedBy = ["multi-user.target"];
-        after = ["psr-force.service" "sys-kernel-debug.mount" "sys-kernel-security.mount"];
-        # 네트워크·원격 접속 서비스보다 먼저(2026-11-11 측정: 같은 부팅에서 network-pre 8s·NetworkManager/sshd/psr-force 9s 가 동시라 순서가 없으면 sshd 리슨 때 lockdown 이 꺼져 있을 수 있다).
-        before = ["network-pre.target" "network.target" "NetworkManager.service" "wpa_supplicant.service" "sshd.service" "tailscaled.service" "incus.service" "systemd-user-sessions.service" "display-manager.service"];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-        };
-        script = ''
-          echo integrity > /sys/kernel/security/lockdown
-          grep -q '\[integrity\]' /sys/kernel/security/lockdown
-        '';
-      };
-    };
 
     # (이유: TLP RUNTIME_PM_DENYLIST는 TLP 서비스 시작 후 적용되어 부팅 초기 probe 시점엔 늦음.
     #  kernel 6.18+ 에서 i2c_designware 모듈이 없어 disable_ps 파라미터도 무효가 됨.

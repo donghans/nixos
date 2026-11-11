@@ -5,6 +5,7 @@ bootDevice = "/dev/disk/by-label/ESP"
 cpuCount   = 16
 
 [mods.sys.services]
+kernel-lockdown = true   # unstable 커널 + 인증서 이미지 + 부팅 중 lockdown(integrity) — mods/sys/services/kernel-lockdown.nix, plan boot-security S3a
 tailpass = true
 netdata  = true
 

@@ -29,7 +29,7 @@ netdata            = false
 llm-ctx         = false
 observe            = false
 qa-desktop        = false   # 화면 확인용 QA VM(incus) — 워크스테이션 전용
-kernel-lockdown       = false   # unstable 커널(lockdown LSM 시험용) — 호스트가 specialisation 에서만 켠다
+kernel-lockdown       = false   # unstable 커널 + lockdown(integrity) — 호스트가 켠다(msi-summit-me)
 
 [mods.gui]
 enable = true
