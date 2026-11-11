@@ -109,7 +109,7 @@ in {
         description = "Engage kernel lockdown (integrity) after boot-time privileged setup";
         unitConfig.DefaultDependencies = true;
         wantedBy = ["multi-user.target"];
-        after = ["psr-force.service" "sys-kernel-debug.mount"];
+        after = ["psr-force.service" "sys-kernel-debug.mount" "sys-kernel-security.mount"];
         # 네트워크·원격 접속 서비스보다 먼저(2026-11-11 측정: 같은 부팅에서 network-pre 8s·NetworkManager/sshd/psr-force 9s 가 동시라 순서가 없으면 sshd 리슨 때 lockdown 이 꺼져 있을 수 있다).
         before = ["network-pre.target" "network.target" "NetworkManager.service" "wpa_supplicant.service" "sshd.service" "tailscaled.service" "incus.service" "systemd-user-sessions.service" "display-manager.service"];
         serviceConfig = {
@@ -186,11 +186,11 @@ in {
       wantedBy = ["multi-user.target"];
       serviceConfig.Type = "oneshot";
       serviceConfig.RemainAfterExit = true;
-      serviceConfig.TimeoutStartSec = 30; # 멈춰도 late lockdown(lockdown-engage)과 네트워크가 30초 넘게 밀리지 않게
+      serviceConfig.TimeoutStartSec = 10; # 멈춰도 late lockdown(lockdown-engage)과 네트워크가 10초 넘게 밀리지 않게(PSR 은 전력용이라 실패해도 보안 영향 없음; i915 는 실측 6.7초에 올라옴)
       after = ["sys-kernel-debug.mount"];
       script = ''
-        # i915 는 initrd 가 끝난 뒤(부팅 약 5초)에 올라온다. 장치가 아직 없으면 아래 루프가 조용히 건너뛰어 PSR 이 안 켜지므로 최대 20초 기다린다.
-        for _ in $(seq 1 100); do
+        # i915 는 initrd 가 끝난 뒤(부팅 약 5초)에 올라온다. 장치가 아직 없으면 아래 루프가 조용히 건너뛰어 PSR 이 안 켜지므로 최대 5초 기다린다.
+        for _ in $(seq 1 25); do
           for f in /sys/kernel/debug/dri/*/i915_edp_psr_debug; do [ -e "$f" ] && break 2; done # (bash 에 compgen 이 없어 첫 시도는 20초를 그냥 기다렸다: 2026-11-11 실측)
           sleep 0.2
         done
