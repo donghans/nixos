@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """rEFInd 테마 에셋 생성기 (plan refind-theme R1). 결정적: 같은 입력·같은 파라미터면 같은 PNG.
 
-  gen.py SRC_THEME_DIR OUT_DIR [--pitch 4] [--color RRGGBB] [--mode mono|tint]
+  gen.py SRC_THEME_DIR OUT_DIR [--pitch 3] [--color RRGGBB] [--mode mono|tint]
 
 SRC_THEME_DIR = refind-theme-regular (icons/128-48 를 읽는다). OUT_DIR/icons 에 아이콘, bg_black.png, selection-{big,small}.png 를 쓴다.
  - 배경: 1x1 #000000 (banner_scale fillscreen 으로 늘림; 그림 없음 — Windows 체인 잔상 방지).
  - 아이콘: 원본 128px RGBA 를 pitch 격자로 나눠 칸의 (불투명도 x 밝기)로 원형 점 반지름을 정한 도트 매트릭스.
    mono = 한 색(--color), tint = 칸의 평균 색을 점 색으로.
- - 선택 영역: 반투명 흰색 사각(채움 알파 40, 테두리 알파 110), big 144 / small 64.
+ - 선택 영역: 반투명 회색(흰색 α48 채움·α120 테두리; 검정 위에서 회색 사각으로 보임 — uikit 의 선택·호버 영역과 같은 계열), big 144 / small 64.
 """
 import argparse, os, sys
 from PIL import Image, ImageDraw
@@ -37,7 +37,7 @@ def dotify(img, pitch, mode, color, ss=4):
             d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=col + (int(255 * min(1.0, 0.45 + a)),))
     return out.resize((w, h), Image.LANCZOS)
 
-def selection(size, fill_a=40, border_a=110):
+def selection(size, fill_a=48, border_a=120):
     im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     d.rounded_rectangle((0, 0, size - 1, size - 1), radius=max(4, size // 16), fill=(255, 255, 255, fill_a), outline=(255, 255, 255, border_a), width=1)
@@ -46,9 +46,9 @@ def selection(size, fill_a=40, border_a=110):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src"); ap.add_argument("out")
-    ap.add_argument("--pitch", type=int, default=4)
+    ap.add_argument("--pitch", type=int, default=3)
     ap.add_argument("--color", default="9fe8b0")
-    ap.add_argument("--mode", choices=["mono", "tint"], default="mono")
+    ap.add_argument("--mode", choices=["mono", "tint"], default="tint")
     a = ap.parse_args()
     color = tuple(int(a.color[i:i + 2], 16) for i in (0, 2, 4))
     src = os.path.join(a.src, "icons", "128-48")
@@ -59,8 +59,6 @@ def main():
         if not name.endswith(".png") or name.startswith(("bg", "selection")):
             continue
         im = Image.open(os.path.join(src, name))
-        if im.size[0] < 100:       # 화살표 등 작은 UI 이미지는 그대로
-            im.convert("RGBA").save(os.path.join(odir, name), optimize=False); continue
         dotify(im, a.pitch, a.mode, color).save(os.path.join(odir, name), optimize=False); n += 1
     Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(os.path.join(odir, "bg_black.png"))
     selection(144).save(os.path.join(odir, "selection-big.png"))
