@@ -16,7 +16,7 @@ mkHostConfiguration ({
     "loglevel=3"
     "i915.enable_psr=1"
     "module_blacklist=idma64" # (아래 boot.kernelParams 주석 참고: idma64/IRQ 27 공유 → 터치패드 먹통의 진짜 원인 차단)
-    # lockdown LSM 을 목록에 넣는다(kernel-lockdown mod 의 lockdown-engage 가 부팅 중 `integrity` 로 올린다; `lockdown=integrity` 인자는 쓰지 않는다 — psr-force 가 debugfs 에 써야 해서, 2026-11-10 실기).
+    # lockdown LSM 을 목록에 넣는다(kernel-lockdown mod 의 lockdown-engage-initrd 가 initrd 에서 `integrity` 로 올린다; `lockdown=integrity` 인자는 쓰지 않는다 — psr-force-initrd 가 debugfs 에 써야 해서, 2026-11-10 실기).
     # specialisation(legacy-quirks·with-*)도 kernelBase 를 쓰므로 모두 lockdown 으로 뜬다(lockdown 없는 항목이 구멍이 되지 않게). lockdown 없는 부팅은 이전 세대(≤527)뿐이다.
     "lsm=lockdown,landlock,yama,bpf"
   ];
@@ -59,7 +59,7 @@ in {
     # (목적: 터치패드 초기화 지연 방지 및 I2C 충돌 해결)
     boot = {
       initrd.availableKernelModules = ["i2c_hid_acpi" "intel_lpss_pci" "intel_ishtp_hid" "intel_hid" "hid_multitouch" "i2c_i801"];
-      initrd.kernelModules = ["i2c_hid_acpi"];
+      initrd.kernelModules = ["i2c_hid_acpi" "i915"]; # i915: initrd 에서 PSR 설정(psr-force-initrd)과 lockdown 이 필요하므로
 
       # ec_sys: EC 256바이트를 읽는 디버그 덤프(/sys/kernel/debug/ec/ec0/io)용 — **읽기 전용**이다(2026-11-09 부터 write_support 를 켜지 않는다).
       #  EC 를 바꾸는 일은 embedctl 이 MSI WMI(set_data)로 한다(mods/_tools/desktop/embedctl/README.md). 연구 때 ec_sys 로 직접 써야 하면
@@ -89,63 +89,35 @@ in {
 
     services.libinput.enable = true;
 
-    # == S3b 시험(plan boot-security §6-2h): initrd 안에서 PSR 설정 + lockdown 올리기 — LUKS 입력 전에 lockdown 이 켜지게 한다 ==
-    # 이 항목(specialisation)에서만: systemd initrd 를 켜고 i915 를 initrd 에 넣고, psr-force·lockdown-engage 를 stage 2 가 아니라 initrd 서비스로 돌린다.
-    # 기본 항목은 그대로(stage 2 의 late lockdown). `bootctl set-oneshot nixos-generation-<N>-specialisation-initrd-lockdown.conf` 로 한 번만 부팅한다.
-    # initrd 의 systemd 에는 debugfs·securityfs 마운트 유닛이 없어 서비스 스크립트가 직접 마운트한다. engage 는 psr-force 의 성공 여부와 무관하게(After 만, Requires 없음) 돈다.
-    specialisation.initrd-lockdown.configuration = let
-      mount = "/bin/mount";
-      seq = "/bin/seq";
-      sleep = "/bin/sleep";
-    in {
-      boot.initrd.systemd.enable = true;
-      boot.initrd.kernelModules = ["i915"];
-      # initrd 에는 유닛 스크립트가 참조하는 store 경로의 프로그램이 자동으로 들어가지 않는다(2026-11-11 실기: `${pkgs.gnugrep}/bin/grep`·`${pkgs.util-linux}/bin/mount` 절대 경로가 없어
-      # engage 서비스가 실패하고 debugfs 를 못 마운트해 psr 이 12초 헛돎). initrd 의 `/bin`(initrd-bin-env)에 있는 것(`mount`=util-linux-minimal, coreutils)을 이름으로 부른다. grep 은 쓰지 않는다.
-      systemd.services.psr-force.enable = lib.mkForce false;
-      systemd.services.lockdown-engage.enable = lib.mkForce false;
-      boot.initrd.systemd.services.psr-force-initrd = {
-        description = "Force eDP PSR1 on (initrd)";
-        wantedBy = ["initrd.target"];
-        before = ["lockdown-engage-initrd.service"];
-        unitConfig.DefaultDependencies = false;
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-          TimeoutStartSec = 15;
-        };
-        script = ''
-          ${mount} -t debugfs debugfs /sys/kernel/debug || true # 이미 마운트돼 있으면 실패해도 무시(오류는 journal 에 남김)
-          for _ in $(${seq} 1 60); do
-            for f in /sys/kernel/debug/dri/*/i915_edp_psr_debug; do [ -e "$f" ] && break 2; done
-            ${sleep} 0.2
-          done
-          for d in /sys/kernel/debug/dri/*/; do
-            [ -e "$d/i915_edp_psr_debug" ] || continue
-            echo 2 > "$d/i915_edp_psr_debug"
-            echo 1 > "$d/eDP-1/i915_dp_force_link_retrain"
-          done
-        '';
+    # == S3b: initrd 안에서 PSR 설정 + lockdown 올리기 — LUKS 입력 전에 lockdown 이 켜진다 (plan boot-security §6-2h; 2026-11-12 시험 specialisation 에서 승격) ==
+    # lockdown 서비스(lockdown-engage-initrd)와 systemd initrd 는 kernel-lockdown mod 가 담당한다. 여기서는 i915 를 initrd 에 넣고 PSR 을 먼저 켠다(lockdown 뒤에는 debugfs 쓰기가 막히므로).
+    # initrd 의 systemd 에는 debugfs 마운트 유닛이 없어 스크립트가 직접 마운트한다. engage 는 psr-force-initrd 의 성공 여부와 무관하게(After 만, Requires 없음) 돈다.
+    # 펌웨어 VBT 가 이 패널의 PSR 을 꺼 두어(`PSR disabled by flag`) `i915.enable_psr=1` 이 무시된다. debugfs `i915_edp_psr_debug`=2 는 VBT 를 무시하게 하며
+    # 다음 모드셋부터 적용되므로 링크 재훈련으로 모드셋을 한 번 일으킨다(부팅 중 화면이 잠깐 깜빡임). 측정: psys −0.35 W·배터리 −0.44 W(ctx 장부 #54, #56).
+    # 화면 이상이 보이면 이 서비스(psr-force-initrd)를 지운다. lockdown 때문에 실제 PSR 활성은 debugfs 로 읽을 수 없다(전력으로 간접 확인).
+    # initrd 스크립트는 store 절대 경로 대신 initrd 의 `/bin` 프로그램을 이름으로 부른다(2026-11-11 실기: 절대 경로는 initrd 에 없어 실패).
+    boot.initrd.systemd.services.psr-force-initrd = {
+      description = "Force eDP PSR1 on (initrd)";
+      wantedBy = ["initrd.target"];
+      before = ["lockdown-engage-initrd.service"];
+      unitConfig.DefaultDependencies = false;
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        TimeoutStartSec = 15;
       };
-      boot.initrd.systemd.services.lockdown-engage-initrd = {
-        description = "Engage kernel lockdown (integrity) in initrd";
-        wantedBy = ["initrd.target"];
-        after = ["psr-force-initrd.service"];
-        # 디스크 해제(LUKS 입력)·루트 마운트보다 먼저
-        before = ["cryptsetup-pre.target" "initrd-root-device.target" "sysroot.mount"];
-        unitConfig.DefaultDependencies = false;
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-        };
-        script = ''
-          ${mount} -t securityfs securityfs /sys/kernel/security || true
-          echo integrity > /sys/kernel/security/lockdown
-          # 확인은 셸 내장으로(grep 에 의존하지 않음)
-          read -r state < /sys/kernel/security/lockdown
-          case "$state" in *"[integrity]"*) ;; *) echo "lockdown is not integrity: $state" >&2; exit 1 ;; esac
-        '';
-      };
+      script = ''
+        /bin/mount -t debugfs debugfs /sys/kernel/debug || true # 이미 마운트돼 있으면 실패해도 무시(오류는 journal 에 남김)
+        for _ in $(/bin/seq 1 60); do
+          for f in /sys/kernel/debug/dri/*/i915_edp_psr_debug; do [ -e "$f" ] && break 2; done
+          /bin/sleep 0.2
+        done
+        for d in /sys/kernel/debug/dri/*/; do
+          [ -e "$d/i915_edp_psr_debug" ] || continue
+          echo 2 > "$d/i915_edp_psr_debug"
+          echo 1 > "$d/eDP-1/i915_dp_force_link_retrain"
+        done
+      '';
     };
 
     # == 종료·부팅 지연 대책과 진단 (note msi-summit-me-boot-shutdown-stalls-2026-11-12) ==
@@ -284,36 +256,6 @@ in {
     };
     security.pam.howdy.enable = false; # (이유: 기본값은 모든 PAM 서비스에 적용되므로 끄고 아래 한 곳만 켬)
     security.pam.services.hyprlock.howdy.enable = false; # (2026-10-17 끔: 잠금 중 pam_howdy 가 ~37분 멈춰 비밀번호 입력창이 안 떴음. pam_howdy 는 비밀번호 프롬프트 전에 동기 실행돼 timeout=4 가 안 먹으면 잠금 해제 불가. 재현은 안 됨(pamtester 로 5초 만에 정상))
-
-    # == eDP 패널 PSR1 강제 켜기 ==
-    # 펌웨어 VBT 가 이 패널의 PSR 을 꺼 두어(`PSR disabled by flag`) `i915.enable_psr=1` 이 무시된다. debugfs `i915_edp_psr_debug`=2 는 VBT 를 무시하게 하며
-    # 다음 모드셋부터 적용되므로 링크 재훈련으로 모드셋을 한 번 일으킨다(부팅 중 화면이 잠깐 깜빡임). 측정: psys −0.35 W·배터리 −0.44 W(ctx 장부 #54, #56).
-    # 화면 이상(깜빡임·잔상)이 보이면 이 서비스를 끄면 된다: `sudo systemctl disable --now psr-force`(끄면 다음 부팅부터 원래대로).
-    systemd.services.psr-force = {
-      description = "Force eDP PSR1 on (override VBT disable)";
-      wantedBy = ["multi-user.target"];
-      serviceConfig.Type = "oneshot";
-      serviceConfig.RemainAfterExit = true;
-      serviceConfig.TimeoutStartSec = 10; # 멈춰도 late lockdown(lockdown-engage)과 네트워크가 10초 넘게 밀리지 않게(PSR 은 전력용이라 실패해도 보안 영향 없음; i915 는 실측 6.7초에 올라옴)
-      after = ["sys-kernel-debug.mount"];
-      script = ''
-        # i915 는 initrd 가 끝난 뒤(부팅 약 5초)에 올라온다. 장치가 아직 없으면 아래 루프가 조용히 건너뛰어 PSR 이 안 켜지므로 최대 5초 기다린다.
-        for _ in $(seq 1 25); do
-          for f in /sys/kernel/debug/dri/*/i915_edp_psr_debug; do [ -e "$f" ] && break 2; done # (bash 에 compgen 이 없어 첫 시도는 20초를 그냥 기다렸다: 2026-11-11 실측)
-          sleep 0.2
-        done
-        for d in /sys/kernel/debug/dri/*/; do
-          [ -e "$d/i915_edp_psr_debug" ] || continue
-          echo 2 > "$d/i915_edp_psr_debug"
-          echo 1 > "$d/eDP-1/i915_dp_force_link_retrain"
-        done
-      '';
-      preStop = ''
-        for d in /sys/kernel/debug/dri/*/; do
-          [ -e "$d/i915_edp_psr_debug" ] && { echo 0 > "$d/i915_edp_psr_debug" || true; } # lockdown 이 올라온 뒤에는 debugfs 쓰기가 거부된다(종료 때 실패로 남기지 않음)
-        done
-      '';
-    };
 
     # == 터치패드 재인식 (장치 메뉴의 "터치패드 재인식" 항목) ==
     # 터치패드(I2C HID)가 먹통이 될 때 드라이버를 unbind/bind 해서 다시 인식시킴.

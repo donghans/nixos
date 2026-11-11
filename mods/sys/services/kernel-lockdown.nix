@@ -8,8 +8,8 @@
 #  - **부트로더가 읽는 값은 `$out/kernel` 이 아니라 `boot.json`(bootspec)의 `org.nixos.bootspec.v1.kernel` 이다**(systemd-boot-builder.py·lanzaboote 모두).
 #    그 값은 nixpkgs 의 bootspec.nix 가 `${kernelPackages.kernel}/${kernelFile}` 로 고정해 만들고 덮어쓰는 옵션이 없으며, `systemBuilderCommands` 는 boot.json 을 쓰는 `boot.bootspec.writer` **보다 먼저** 실행된다.
 #    그래서 `writer`(internal 옵션) 를 기본 생성기 + jq 로 `kernel` 값 교체로 덮어쓴다. 교체 뒤 값이 기대와 다르면 빌드를 실패시킨다(nixpkgs 변경 대비). 안 A (plan §6-2f).
-#  - 이 mod 는 커널 패키지·이미지와 lockdown 을 올리는 서비스(lockdown-engage)를 다룬다. `lsm=lockdown,...` 인자는 호스트가 넣는다 (hosts/msi-summit-me.nix 의 kernelBase; lockdown=integrity 는 인자로 넣지 않는다).
-#  - 2026-11-11 시험(specialisation) 통과 뒤 기본 구성으로 옮겼다. 이 mod 를 켜는 호스트는 `lsm=` 에 lockdown 이 있어야 하고, psr-force 같은 debugfs 쓰기 서비스는 `lockdown-engage` 보다 먼저 끝나야 한다(After 로 순서만 건다).
+#  - 이 mod 는 커널 패키지·이미지와 initrd 에서 lockdown 을 올리는 서비스(lockdown-engage-initrd)를 다룬다. `lsm=lockdown,...` 인자는 호스트가 넣는다 (hosts/msi-summit-me.nix 의 kernelBase; lockdown=integrity 는 인자로 넣지 않는다).
+#  - 2026-11-11 시험(specialisation) 통과 뒤 기본 구성으로 옮겼다. 이 mod 를 켜는 호스트는 `lsm=` 에 lockdown 이 있어야 하고, psr-force-initrd 같은 debugfs 쓰기 initrd 서비스는 `lockdown-engage-initrd` 보다 먼저 끝나야 한다(After 로 순서만 건다).
 #  - rolling 락이라 `nixup` 마다 unstable 리비전이 바뀌어 커널 패치 버전이 달라지거나 바이너리 캐시에 없으면 로컬 빌드가 필요할 수 있다 (plan §9).
 mkMod __curPos "unstable 커널 + 모듈 인증서를 넣은 이미지 (lockdown 시험용)" ({
   unstable,
@@ -48,22 +48,26 @@ in {
       ln -sf -- ${lib.escapeShellArg imageFile} $out/kernel
     '';
     # 부트로더(systemd-boot·lanzaboote)가 읽는 boot.json 의 kernel 값을 인증서 이미지로 바꾼다 (S3a 안 A).
-    # 올리는 시점 = debugfs 를 쓰는 서비스(psr-force; 성공·실패 불문) 뒤, 네트워크·사용자 세션 전. After 만 쓰고 Requires 는 쓰지 않아 psr-force 가 실패해도 lockdown 은 올라간다.
-    # 한 번 올리면 재부팅 전까지 내릴 수 없다. 그 전(커널 시작~이 서비스, LUKS 입력 구간 포함)에는 보호가 없는 창이 있다 — plan boot-security §6-2d·S3b.
-    systemd.services.lockdown-engage = {
-      description = "Engage kernel lockdown (integrity) after boot-time privileged setup";
-      unitConfig.DefaultDependencies = true;
-      wantedBy = ["multi-user.target"];
-      after = ["psr-force.service" "sys-kernel-debug.mount" "sys-kernel-security.mount"];
-      # 네트워크·원격 접속 서비스보다 먼저(2026-11-11 측정: 순서가 없으면 sshd 리슨 때 lockdown 이 꺼져 있을 수 있다).
-      before = ["network-pre.target" "network.target" "NetworkManager.service" "wpa_supplicant.service" "sshd.service" "tailscaled.service" "incus.service" "systemd-user-sessions.service" "display-manager.service"];
+    # 올리는 시점 = **initrd**, 디스크 해제(LUKS 입력)·루트 마운트보다 먼저 (S3b 승격 2026-11-12; 시험 specialisation 으로 initrd 4.58초에 올라옴을 실기 확인).
+    # debugfs 를 쓰는 initrd 서비스(호스트의 psr-force-initrd 등)는 이 서비스보다 먼저 끝나야 한다(`before = ["lockdown-engage-initrd.service"]` 로 순서만 건다. Requires 는 쓰지 않아 실패해도 lockdown 은 올라간다).
+    # 한 번 올리면 재부팅 전까지 내릴 수 없다. 커널 시작~이 서비스 구간만 보호가 없다.
+    # initrd 의 systemd 에는 securityfs 마운트 유닛이 없어 스크립트가 직접 마운트한다. 유닛 스크립트가 참조한 store 경로의 프로그램은 initrd 에 자동 포함되지 않으므로
+    # initrd 의 `/bin` 에 있는 `mount`(util-linux-minimal)를 이름으로 부르고 grep 대신 셸 내장으로 확인한다.
+    boot.initrd.systemd.enable = true;
+    boot.initrd.systemd.services.lockdown-engage-initrd = {
+      description = "Engage kernel lockdown (integrity) in initrd";
+      wantedBy = ["initrd.target"];
+      before = ["cryptsetup-pre.target" "initrd-root-device.target" "sysroot.mount"];
+      unitConfig.DefaultDependencies = false;
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
       };
       script = ''
+        /bin/mount -t securityfs securityfs /sys/kernel/security || true
         echo integrity > /sys/kernel/security/lockdown
-        grep -q '\[integrity\]' /sys/kernel/security/lockdown
+        read -r state < /sys/kernel/security/lockdown
+        case "$state" in *"[integrity]"*) ;; *) echo "lockdown is not integrity: $state" >&2; exit 1 ;; esac
       '';
     };
     boot.bootspec.writer = lib.mkForce (options.boot.bootspec.writer.default
