@@ -89,6 +89,17 @@ in {
 
     services.libinput.enable = true;
 
+    # rEFInd 메뉴의 호스트 전용 항목(mods/sys/services/refind.nix). Gentoo LiveGUI 는 p6(GENTOO_ISO) 가 있는 동안만 — S4 재파티션 때 같이 지운다(plan boot-security S4).
+    # 이 볼륨은 FAT 이 아니라 rEFInd 파일시스템 드라이버가 필요하다 → 이 mod 는 드라이버를 만들지 않으므로 예전 수동 설치의 `drivers_x64/` 가 ESP 에 남아 있는 동안만 동작한다.
+    mods.sys.services.refind.extraEntries = ''
+      menuentry "Gentoo LiveGUI" {
+          volume   "GENTOO_ISO"
+          loader   /boot/gentoo
+          initrd   /boot/gentoo.igz
+          options  "linux /boot/gentoo root=/dev/ram0 init=/linuxrc overlayfs nodhcp looptype=squashfs loop=/image.squashfs cdroot"
+      }
+    '';
+
     # 부팅 메뉴(또는 `sudo bootctl set-oneshot nixos-generation-<N>-specialisation-<이름>.conf`)로 **한 번만** 고를 수 있는 항목(우선순위 40 = 기본의 mkForce 보다 높음):
     #  legacy-quirks : 이전 기본(옛 인자 3개 모두) — 문제가 생겼을 때 비상용
     #  with-aspm-off / with-irqpoll / with-osi-linux : 기본에 인자 **하나만** 되살림 — 문제가 생겼을 때 어느 인자가 필요한지 가리는 용도(반응형으로만 사용)

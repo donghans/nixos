@@ -33,6 +33,7 @@ llm-ctx               = false
 observe                 = false
 qa-desktop             = false   # 화면 확인용 QA VM(incus) — 워크스테이션 전용
 kernel-lockdown       = false   # unstable 커널 + lockdown(integrity) — 호스트가 켠다(msi-summit-me)
+refind                = false   # rEFInd 메뉴를 nix 로 설치·관리(노트북에서 켠다)
 
 [mods.gui]
 enable = false

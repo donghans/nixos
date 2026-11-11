@@ -6,6 +6,7 @@ cpuCount   = 16
 
 [mods.sys.services]
 kernel-lockdown = true   # unstable 커널 + 인증서 이미지 + 부팅 중 lockdown(integrity) — mods/sys/services/kernel-lockdown.nix, plan boot-security S3a
+refind          = true   # rEFInd 메뉴를 nix 로 관리 — mods/sys/services/refind.nix, plan refind-theme §12
 tailpass = true
 netdata  = true
 
