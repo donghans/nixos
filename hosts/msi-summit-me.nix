@@ -97,10 +97,11 @@ in {
       mount = "${pkgs.util-linux}/bin/mount";
       seq = "${pkgs.coreutils}/bin/seq";
       sleep = "${pkgs.coreutils}/bin/sleep";
-      grep = "${pkgs.gnugrep}/bin/grep";
     in {
       boot.initrd.systemd.enable = true;
       boot.initrd.kernelModules = ["i915"];
+      # initrd 에는 유닛 스크립트가 참조하는 프로그램이 자동으로 들어가지 않는다(2026-11-11 실기: `grep`·`mount` 없음 → engage 서비스 실패, debugfs 를 못 마운트해 psr 이 12초 헛돎).
+      boot.initrd.systemd.initrdBin = [pkgs.util-linux pkgs.gnugrep pkgs.coreutils];
       systemd.services.psr-force.enable = lib.mkForce false;
       systemd.services.lockdown-engage.enable = lib.mkForce false;
       boot.initrd.systemd.services.psr-force-initrd = {
@@ -114,7 +115,7 @@ in {
           TimeoutStartSec = 15;
         };
         script = ''
-          ${mount} -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
+          ${mount} -t debugfs debugfs /sys/kernel/debug || true # 이미 마운트돼 있으면 실패해도 무시(오류는 journal 에 남김)
           for _ in $(${seq} 1 60); do
             for f in /sys/kernel/debug/dri/*/i915_edp_psr_debug; do [ -e "$f" ] && break 2; done
             ${sleep} 0.2
@@ -138,9 +139,11 @@ in {
           RemainAfterExit = true;
         };
         script = ''
-          ${mount} -t securityfs securityfs /sys/kernel/security 2>/dev/null || true
+          ${mount} -t securityfs securityfs /sys/kernel/security || true
           echo integrity > /sys/kernel/security/lockdown
-          ${grep} -q '\[integrity\]' /sys/kernel/security/lockdown
+          # 확인은 셸 내장으로(grep 에 의존하지 않음)
+          read -r state < /sys/kernel/security/lockdown
+          case "$state" in *"[integrity]"*) ;; *) echo "lockdown is not integrity: $state" >&2; exit 1 ;; esac
         '';
       };
     };
