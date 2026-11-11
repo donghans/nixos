@@ -155,6 +155,28 @@ in {
       after = ["wpa_supplicant.service"];
       serviceConfig.TimeoutStopSec = "8s";
     };
+    # ①-b tailscaled 종료 지연의 더 깊은 원인(2026-11-12): 이 노트북은 `RouteAll=true`(서브넷 경로 수락; **저장소에는 선언이 없던 런타임 상태 — 아래에서 선언함**)이고 beelink 가 사무실 LAN 192.168.11.0/24 를 광고한다.
+    #   tailscale 의 ip rule 5270(table 52)이 main 보다 먼저라, 노트북이 **그 사무실 LAN 에 직접 붙어 있어도** 192.168.11.x(공유기 192.168.11.1·프린터 .246·beelink .202) 트래픽이 tailscale0 로 돌아 나갔다
+    #   (`ip route get 192.168.11.1` → `dev tailscale0 table 52`). 종료 때 공유기 UPnP(192.168.11.1:62399) 접속이 이 터널로 들어가 상대 피어가 WireGuard 에 없어(`open-conn-track: … unknown to WireGuard`) 25~30초 기다린다.
+    #   수정: 직접 연결된 서브넷(main 의 구체적 경로)이 tailscale 경로보다 먼저 이기게 하는 규칙(우선순위 5260 = tailscale 5250 과 5270 사이; `suppress_prefixlength 0` 은 main 의 기본 경로만 제외).
+    #   LAN 밖(집·핫스팟)에서는 main 에 그 경로가 없어 table 52 로 내려가므로 원격 접근(프린터 등)은 그대로다.
+    mods.sys.services.tailscale.acceptRoutes = true;
+    systemd.services.tailscale-lan-first = {
+      description = "Prefer directly connected LAN subnets over tailscale subnet routes";
+      wantedBy = ["multi-user.target"];
+      after = ["network-pre.target"];
+      path = [pkgs.iproute2 pkgs.gnugrep];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        ip rule show | grep -q '^5260:' || ip rule add priority 5260 lookup main suppress_prefixlength 0
+      '';
+      preStop = ''
+        ip rule del priority 5260 || true
+      '';
+    };
     # ② xdg-document-portal 종료 90초(36부팅 중 1번): 종료 때 fusermount3 가 멈춤 — 뿌리 미확인. 최악 대기를 5초로 줄이고,
     #   멈추기 전(ExecStop 시점)에 /run/user/<uid>/doc FUSE 마운트를 붙잡은 프로세스와 포털의 커널 대기 상태를 journal 에 남긴다(태그 docportal-trace) — 다음에 멈추면 원인 프로세스가 보인다.
     systemd.user.services.xdg-document-portal = {
