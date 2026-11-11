@@ -280,7 +280,7 @@ in {
 
     # 훅이 놓친 대화·사용량을 따라잡는 안전망(오프셋 기반, 여러 번 돌아도 안전). 서버에 못 붙으면 다음 주기에 재시도.
     systemd.user.services.claude-ctx-ingest = {
-      Unit.Description = "llm-ctx 백필(최근 2일)";
+      Unit.Description = "llm-ctx backfill (last 2 days)";
       Service = {
         Type = "oneshot";
         ExecStart = "${claudeCtx}/bin/donghans ctx ingest --days 2";
@@ -290,7 +290,7 @@ in {
       };
     };
     systemd.user.timers.claude-ctx-ingest = {
-      Unit.Description = "llm-ctx 백필 주기";
+      Unit.Description = "llm-ctx backfill schedule";
       Timer = {
         OnBootSec = "2min";
         OnUnitActiveSec = "10min";
@@ -302,7 +302,7 @@ in {
     # 작업 문서 저장소(~/ctx)의 동기화 담당: 인박스의 제안을 검사(읽은 판·비밀·머리말)해 커밋한다. 쓰기 경로는 서버 역할 호스트(llm-ctx 서버)에서만 둔다 —
     # 다른 호스트(노트북)는 전력 측정에 변수를 섞지 않으려고 상시 서비스를 깔지 않고, 문서는 읽기 뷰만 쓴다(plan2 05 §4-4-7 의 6).
     systemd.user.services.ctx-doc-sync = lib.mkIf config.mods.sys.services.llm-ctx.enable {
-      Unit.Description = "ctx 문서 저장소 동기화 담당 — 인박스의 제안을 검사해 커밋";
+      Unit.Description = "ctx document store sync worker - checks and commits inbox proposals";
       Service = {
         ExecStart = "${claudeCtx}/bin/donghans ctx doc sync --watch --push";
         Restart = "on-failure";
@@ -314,14 +314,14 @@ in {
     # 창이 8개 미만이거나 25/75분위 폭이 중앙값의 50% 를 넘으면 기존 파일을 그대로 두고, 손으로 고정한 값(`limitwatch.py pin`)은 덮어쓰지 않는다. 서버 역할 호스트에서만(노트북은 전력 측정 규칙상 타이머 없음 — 필요하면 손으로 한 번).
     # 설계: ctx 계획 plan/llm-trust/05-p3-limit-predict §3-5. 끄기: 이 두 블록을 지우고 nixup(보정 파일은 남겨도 무해).
     systemd.user.services.limit-calibrate = lib.mkIf config.mods.sys.services.llm-ctx.enable {
-      Unit.Description = "구독 한도 보정(5h 1% 당 달러) 갱신";
+      Unit.Description = "Refresh subscription limit calibration (dollars per 1% of 5h)";
       Service = {
         Type = "oneshot";
         ExecStart = "${pkgs.python3}/bin/python3 -I ${../../_data/claude-skills/donghans-limit-watch}/scripts/limitwatch.py calibrate --write --quiet";
       };
     };
     systemd.user.timers.limit-calibrate = lib.mkIf config.mods.sys.services.llm-ctx.enable {
-      Unit.Description = "구독 한도 보정 주기(하루 1회)";
+      Unit.Description = "Subscription limit calibration schedule (daily)";
       Timer = {
         OnCalendar = "daily";
         Persistent = true;
@@ -330,14 +330,14 @@ in {
     };
     # 끝난 세션의 낡은 읽기 뷰를 하루 한 번 정리(세션 종료 표식·`ctx doc` 호출 때의 정리가 놓친 것)
     systemd.user.services.ctx-doc-cleanup = {
-      Unit.Description = "ctx 문서 읽기 뷰 정리";
+      Unit.Description = "Clean up ctx document read views";
       Service = {
         Type = "oneshot";
         ExecStart = "${claudeCtx}/bin/donghans ctx doc cleanup";
       };
     };
     systemd.user.timers.ctx-doc-cleanup = {
-      Unit.Description = "ctx 문서 읽기 뷰 정리 주기";
+      Unit.Description = "ctx document read view cleanup schedule";
       Timer = {
         OnCalendar = "daily";
         Persistent = true;
@@ -346,7 +346,7 @@ in {
     };
 
     systemd.user.services.claude-otel-collector = {
-      Unit.Description = "Claude Code 사용량(OTLP) 로컬 수집기 — 파일로만 저장";
+      Unit.Description = "Claude Code usage (OTLP) local collector - file output only";
       Service = {
         ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p %h/.local/share/claude-otel";
         ExecStart = "${pkgs.opentelemetry-collector-contrib}/bin/otelcol-contrib --config ${otelCollectorConfig}";

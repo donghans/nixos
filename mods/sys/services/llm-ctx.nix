@@ -58,7 +58,7 @@ in {
 
     # 스키마 적용(멱등): DB/역할이 만들어진 뒤 postgres 사용자로 실행
     systemd.services.claude-ctx-schema = {
-      description = "claude_ctx 스키마 적용";
+      description = "Apply claude_ctx schema";
       # ensureDatabases/ensureUsers 는 postgresql-setup.service 가 만든다 — 그보다 먼저 돌면 "database does not exist" 로 실패한다(실측)
       after = ["postgresql.service" "postgresql-setup.service"];
       requires = ["postgresql.service" "postgresql-setup.service"];

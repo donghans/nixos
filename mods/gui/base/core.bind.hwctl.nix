@@ -260,7 +260,7 @@
       # 감시 대상(udevadm/gdbus)이 종료하면 이 서비스도 실패 종료하고 5초 뒤 다시 시작(시작 때 정책을 한 번 돌려 놓친 변화를 맞춘다). 시작 제한은 두지 않는다.
       systemd.user.services.extkbd-watch = lib.mkIf (config.workspace.type == "laptop" && kbName != null) {
         Unit = {
-          Description = "외부 키보드 연결/해제 감시 (내장 키보드 끄기/켜기 정책 재실행)";
+          Description = "Watch external keyboard connect/disconnect (re-run internal keyboard on/off policy)";
           After = ["graphical-session.target"];
           PartOf = ["graphical-session.target"];
           StartLimitIntervalSec = 0;

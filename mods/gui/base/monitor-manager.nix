@@ -70,7 +70,7 @@ in {
   # 밝기 기억 파일은 사용자 홈의 것을 그대로 읽는다(쓰기는 사용자 감시 서비스만). 백라이트는 커널 전역이라 Wayland 로 넘어가도 유지된다.
   os = lib.mkIf laptop {
     systemd.services.display-brightness-restore = {
-      description = "전원별 기억 밝기 적용 (로그인 화면·TTY 용)";
+      description = "Apply per-power-source remembered brightness (login screen / TTY)";
       after = ["systemd-udevd.service" "local-fs.target"];
       before = ["greetd.service" "getty.target" "display-manager.service"];
       wantedBy = ["multi-user.target"];
@@ -107,7 +107,7 @@ in {
     # 데스크톱은 백라이트가 없어 만들지 않는다(만들어도 즉시 종료).
     systemd.user.services.display-brightness = lib.mkIf laptop {
       Unit = {
-        Description = "전원별 밝기 기억·복원 (displayctl brightness watch)";
+        Description = "Remember and restore per-power-source brightness (displayctl brightness watch)";
         After = ["graphical-session.target"];
         PartOf = ["graphical-session.target"];
       };

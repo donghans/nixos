@@ -33,7 +33,7 @@ in {
     # 숨긴 채 상시 대기(메모리만 차지, 시그널로 즉시 표시)
     systemd.user.services.wvkbd = {
       Unit = {
-        Description = "가상 키보드 wvkbd (숨김 상태로 대기, vkb 명령으로 제어)";
+        Description = "Virtual keyboard wvkbd (idle hidden, controlled by the vkb command)";
         After = ["graphical-session.target"];
         PartOf = ["graphical-session.target"];
       };

@@ -77,7 +77,7 @@
 
       # 상태 파일이 바뀌면 소비자를 한 번 실행. 서비스가 정지할 때도 안전한 값(laptop)이 발행되므로 같은 경로로 복원됨
       systemd.user.paths.posture-apply = {
-        Unit.Description = "사용 모드 상태 변경 감시";
+        Unit.Description = "Watch posture (usage mode) state changes";
         Path = {
           PathChanged = "/run/posture/state.json";
           Unit = "posture-apply.service";
@@ -86,7 +86,7 @@
       };
       systemd.user.services.posture-apply = {
         Unit = {
-          Description = "사용 모드 소비자 실행 (입력 장치 정책 등)";
+          Description = "Run posture consumers (input device policy etc.)";
           StartLimitIntervalSec = 0; # 힌지를 빠르게 움직여도 경로 유닛의 시작 제한에 걸리지 않게
         };
         Service = {
