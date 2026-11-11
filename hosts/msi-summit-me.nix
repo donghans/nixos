@@ -100,7 +100,25 @@ in {
     #    `lsm=` 는 kernelBase 의 것을 빼고 lockdown 을 맨 앞에 넣은 목록으로 바꾼다(순서는 시험으로 확정).
     specialisation.lockdown-test.configuration = {
       mods.sys.services.kernel-lockdown.enable = lib.mkForce true; # 프리셋이 false 를 같은 우선순위로 정의하므로 mkForce
-      boot.kernelParams = lib.mkOverride 40 ((builtins.filter (p: !(lib.hasPrefix "lsm=" p)) kernelBase) ++ ["lsm=lockdown,landlock,yama,bpf" "lockdown=integrity"]);
+      # `lockdown=integrity` 는 커널 인자에 넣지 않는다(late lockdown): 인자로 켜면 부팅 첫 순간부터 debugfs 쓰기가 막혀 psr-force 가 실패한다(2026-11-10 실기).
+      # 대신 psr-force 가 끝난 뒤 lockdown-engage 가 `integrity` 로 올린다. 실기 시험(2026-11-11): 올린 뒤에도 PSR1 유지, debugfs 읽기·쓰기 거부, 내리기 거부.
+      boot.kernelParams = lib.mkOverride 40 ((builtins.filter (p: !(lib.hasPrefix "lsm=" p)) kernelBase) ++ ["lsm=lockdown,landlock,yama,bpf"]);
+      # 올리는 시점 = psr-force(성공·실패 불문) 뒤, 사용자 세션 시작 전. After 만 쓰고 Requires 는 쓰지 않아 psr-force 가 실패해도 lockdown 은 올라간다.
+      # 한 번 올리면 재부팅 전까지 내릴 수 없다. 그 전(커널 시작~이 서비스)에는 보호가 없는 창이 있다 — initrd·로그인 전 구간이며 plan §6-2d 에 위험으로 적었다.
+      systemd.services.lockdown-engage = {
+        description = "Engage kernel lockdown (integrity) after boot-time privileged setup";
+        wantedBy = ["multi-user.target"];
+        after = ["psr-force.service" "sys-kernel-debug.mount"];
+        before = ["systemd-user-sessions.service" "display-manager.service"];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = ''
+          echo integrity > /sys/kernel/security/lockdown
+          grep -q '\[integrity\]' /sys/kernel/security/lockdown
+        '';
+      };
     };
 
     # (이유: TLP RUNTIME_PM_DENYLIST는 TLP 서비스 시작 후 적용되어 부팅 초기 probe 시점엔 늦음.
@@ -175,7 +193,7 @@ in {
       '';
       preStop = ''
         for d in /sys/kernel/debug/dri/*/; do
-          [ -e "$d/i915_edp_psr_debug" ] && echo 0 > "$d/i915_edp_psr_debug"
+          [ -e "$d/i915_edp_psr_debug" ] && { echo 0 > "$d/i915_edp_psr_debug" || true; } # lockdown 이 올라온 뒤에는 debugfs 쓰기가 거부된다(종료 때 실패로 남기지 않음)
         done
       '';
     };
