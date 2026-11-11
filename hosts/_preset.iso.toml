@@ -29,6 +29,10 @@ netdata            = false
 llm-ctx         = false
 observe            = false
 qa-desktop        = false   # 화면 확인용 QA VM(incus) — 워크스테이션 전용
+kernel-lockdown       = false   # unstable 커널 + lockdown(integrity) — 호스트가 켠다(msi-summit-me)
+refind                = false   # rEFInd 메뉴를 nix 로 설치·관리(노트북에서 켠다)
+secure-boot           = false   # Secure Boot(lanzaboote) 골격 — S5 에서 msi-summit-me 가 켠다(plan boot-security S3c)
+luks                  = false   # LUKS2 루트(systemd initrd) 골격 — S4 에서 msi-summit-me 가 켠다(plan boot-security S3c)
 
 [mods.gui]
 enable = true
