@@ -1,68 +1,77 @@
 #!/usr/bin/env python3
 """rEFInd 테마 에셋 생성기 (plan refind-theme R1). 결정적: 같은 입력·같은 파라미터면 같은 PNG.
 
-  gen.py SRC_THEME_DIR OUT_DIR [--pitch 3] [--color RRGGBB] [--mode mono|tint]
+  gen.py SRC_THEME_DIR OUT_DIR [--pitch 3] [--small 72]
 
-SRC_THEME_DIR = refind-theme-regular (icons/128-48 를 읽는다). OUT_DIR/icons 에 아이콘, bg_black.png, selection-{big,small}.png 를 쓴다.
- - 배경: 1x1 #000000 (banner_scale fillscreen 으로 늘림; 그림 없음 — Windows 체인 잔상 방지).
- - 아이콘: 원본 128px RGBA 를 pitch 격자로 나눠 칸의 (불투명도 x 밝기)로 원형 점 반지름을 정한 도트 매트릭스.
-   mono = 한 색(--color), tint = 칸의 평균 색을 점 색으로.
- - 선택 영역: 반투명 회색(흰색 α48 채움·α120 테두리; 검정 위에서 회색 사각으로 보임 — uikit 의 선택·호버 영역과 같은 계열), big 144 / small 64.
+SRC_THEME_DIR = refind-theme-regular(icons/128-48 로 큰/작은 구분, icons/512-192 를 고해상도 원본으로 읽는다).
+OUT_DIR 에 icons/*.png, bg_black.png, selection-{big,small}.png, theme.conf 를 쓴다.
+ - 배경: 단색 #000000 (그림 없음 — Windows 체인 잔상 방지).
+ - 아이콘: 원본을 목표 크기(큰 128 · 작은 --small)로 줄인 뒤 pitch 격자로 나눠 **점 하나**로 바꾼다.
+   모든 아이콘(큰·작은·기능)이 같은 pitch → 화면 픽셀 기준으로 점 간격이 같다(터미널 위에 뜬 점 그래픽).
+   점 색 = 칸 평균 색(여러 색 유지, 검정 위에서 보이게 35% 밝힘), 점 반지름 = 칸의 밝기에 비례(R_LO~R_HI × pitch; 최대가 0.5 미만이라 점 사이에 항상 틈이 남음) →
+   채워진 모양 안의 어두운 세부(터미널 `>`, 시계 바늘, 펭귄 눈)가 작은 점으로 남아 의미가 읽힌다.
+ - 선택 영역: 반투명 흰색(채움 α48·테두리 α120) → 검정 위 회색 사각. 크기 = 아이콘 + 16.
 """
 import argparse, os, sys
 from PIL import Image, ImageDraw
 
-def dotify(img, pitch, mode, color, ss=4):
-    img = img.convert("RGBA")
-    w, h = img.size
-    out = Image.new("RGBA", (w * ss, h * ss), (0, 0, 0, 0))
-    d = ImageDraw.Draw(out)
-    for gy in range(0, h, pitch):
-        for gx in range(0, w, pitch):
-            cell = img.crop((gx, gy, gx + pitch, gy + pitch))
-            px = list(cell.getdata())
-            a = sum(p[3] for p in px) / (255.0 * len(px))
-            if a < 0.08:
-                continue
-            lum = sum((0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]) * p[3] for p in px) / (255.0 * sum(p[3] for p in px) or 1)
-            v = a * (0.35 + 0.65 * lum)          # 어두운 칸도 작은 점은 남긴다
-            r = (pitch / 2.0) * min(1.0, 0.25 + 0.85 * v) * ss
-            if mode == "tint":
-                tw = sum(p[3] for p in px) or 1
-                col = tuple(int(sum(p[i] * p[3] for p in px) / tw) for i in range(3))
-                col = tuple(min(255, int(c * 0.6 + 255 * 0.4)) for c in col)   # 검정 위에서 보이게 밝힘
-            else:
-                col = color
-            cx, cy = (gx + pitch / 2.0) * ss, (gy + pitch / 2.0) * ss
-            d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=col + (int(255 * min(1.0, 0.45 + a)),))
-    return out.resize((w, h), Image.LANCZOS)
+R_HI, R_LO, THR, SS, BRIGHT = 0.44, 0.20, 0.55, 8, 0.35
 
-def selection(size, fill_a=48, border_a=120):
+def dotify(img, size, pitch):
+    img = img.convert("RGBA").resize((size, size), Image.LANCZOS)
+    g = size // pitch
+    cell = img.convert("RGBa").resize((g, g), Image.BOX).convert("RGBA")   # 칸 평균(알파 가중)
+    px = cell.load()
+    ls = sorted((0.2126 * px[x, y][0] + 0.7152 * px[x, y][1] + 0.0722 * px[x, y][2]) / 255.0
+                for y in range(g) for x in range(g) if px[x, y][3] > 60)
+    ref = max(0.25, ls[int(len(ls) * 0.9)]) if ls else 1.0                 # 아이콘마다 상위 10% 밝기를 기준으로 정규화
+    out = Image.new("RGBA", (size * SS, size * SS), (0, 0, 0, 0))
+    d = ImageDraw.Draw(out)
+    for gy in range(g):
+        for gx in range(g):
+            r, gg, b, a = px[gx, gy]
+            c = a / 255.0
+            if c < 0.12:
+                continue
+            lum = (0.2126 * r + 0.7152 * gg + 0.0722 * b) / 255.0
+            rad = R_LO + (R_HI - R_LO) * min(1.0, lum / ref)
+            if c < THR:
+                rad *= 0.7                                                  # 가장자리 칸은 작게
+            col = tuple(min(255, int(v * (1 - BRIGHT) + 255 * BRIGHT)) for v in (r, gg, b))
+            cx, cy, R = (gx + 0.5) * pitch * SS, (gy + 0.5) * pitch * SS, rad * pitch * SS
+            d.ellipse((cx - R, cy - R, cx + R, cy + R), fill=col + (255,))
+    return out.resize((size, size), Image.LANCZOS)
+
+def selection(size):
     im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    d.rounded_rectangle((0, 0, size - 1, size - 1), radius=max(4, size // 16), fill=(255, 255, 255, fill_a), outline=(255, 255, 255, border_a), width=1)
+    ImageDraw.Draw(im).rounded_rectangle((0, 0, size - 1, size - 1), radius=max(4, size // 16),
+                                         fill=(255, 255, 255, 48), outline=(255, 255, 255, 120), width=1)
     return im
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src"); ap.add_argument("out")
     ap.add_argument("--pitch", type=int, default=3)
-    ap.add_argument("--color", default="9fe8b0")
-    ap.add_argument("--mode", choices=["mono", "tint"], default="tint")
+    ap.add_argument("--small", type=int, default=72)
     a = ap.parse_args()
-    color = tuple(int(a.color[i:i + 2], 16) for i in (0, 2, 4))
-    src = os.path.join(a.src, "icons", "128-48")
+    base = os.path.join(a.src, "icons")
     odir = os.path.join(a.out, "icons")
     os.makedirs(odir, exist_ok=True)
     n = 0
-    for name in sorted(os.listdir(src)):
+    for name in sorted(os.listdir(os.path.join(base, "128-48"))):
         if not name.endswith(".png") or name.startswith(("bg", "selection")):
             continue
-        im = Image.open(os.path.join(src, name))
-        dotify(im, a.pitch, a.mode, color).save(os.path.join(odir, name), optimize=False); n += 1
-    Image.new("RGBA", (1, 1), (0, 0, 0, 255)).save(os.path.join(odir, "bg_black.png"))
-    selection(144).save(os.path.join(odir, "selection-big.png"))
-    selection(64).save(os.path.join(odir, "selection-small.png"))
+        small = Image.open(os.path.join(base, "128-48", name)).size[0] < 100
+        src = Image.open(os.path.join(base, "512-192", name))
+        dotify(src, a.small if small else 128, a.pitch).save(os.path.join(odir, name)); n += 1
+    Image.new("RGBA", (32, 32), (0, 0, 0, 255)).save(os.path.join(odir, "bg_black.png"))
+    selection(128 + 16).save(os.path.join(odir, "selection-big.png"))
+    selection(a.small + 16).save(os.path.join(odir, "selection-small.png"))
+    open(os.path.join(a.out, "theme.conf"), "w").write(
+        f"icons_dir themes/refind-dot/icons\nbig_icon_size 128\nsmall_icon_size {a.small}\n"
+        "banner themes/refind-dot/icons/bg_black.png\nbanner_scale fillscreen\n"
+        "selection_big themes/refind-dot/icons/selection-big.png\nselection_small themes/refind-dot/icons/selection-small.png\n"
+        "font themes/refind-theme-regular/fonts/source-code-pro-extralight-14.png\n")
     print(f"icons dotified: {n}, out: {a.out}")
 
 if __name__ == "__main__":
