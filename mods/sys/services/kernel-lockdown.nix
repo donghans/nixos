@@ -13,16 +13,30 @@ mkMod __curPos "unstable 커널 + 모듈 인증서를 넣은 이미지 (lockdown
   unstable,
   config,
   lib,
+  pkgs,
   ...
 }: {
   os = {
     boot.kernelPackages = lib.mkForce unstable.linuxPackages;
+    # 시험(2026-11-11): lockdown 에서 쓸 수 있는 쿨러 제어용 out-of-tree msi-ec (embedctl 은 debugfs 라 lockdown 에서 막힘). 인증서 문제는 아래 주석.
+    boot.extraModulePackages = [config.boot.kernelPackages.msi-ec];
     system.systemBuilderCommands = let
       kp = config.boot.kernelPackages;
       inherit (kp.kernel) target;
+      ver = kp.kernel.modDirVersion;
+      # 외부 모듈(extraModulePackages)을 넣으면 NixOS 가 합친 modulesTree 에는 modules.cer 가 없다(2026-11-11 빌드 실패: `modules.cer: No such file`).
+      # nixpkgs 의 커널 makeFlags 는 외부 모듈도 kmodigest 로 서명해 `<모듈>.ko.cer` 를 남기므로, 커널의 modules.cer 뒤에 그 인증서들을 이어 붙인 트리를 만들어 넘긴다.
+      certTree = pkgs.runCommand "modules-cert-tree-${ver}" {} ''
+        d=$out/lib/modules/${ver}
+        mkdir -p $d
+        cat ${lib.getOutput "modules" kp.kernel}/lib/modules/${ver}/modules.cer > $d/modules.cer
+        for m in ${lib.concatStringsSep " " config.boot.extraModulePackages}; do
+          find "$m/lib/modules" -name '*.ko.cer' | sort | xargs -r cat >> $d/modules.cer
+        done
+      '';
       finalKernel = kp.rebuildImage {
         inherit target;
-        inherit (config.system) modulesTree;
+        modulesTree = certTree;
       };
     in
       lib.mkAfter ''
