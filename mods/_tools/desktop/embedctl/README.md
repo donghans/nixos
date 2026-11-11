@@ -4,7 +4,7 @@ MSI Summit E16Flip A12UDT(보드 `MS-1592`) **한 기종**의 EC 에 남는 상�
 Windows 의 MSI Center 가 마지막으로 정한 값이 EC 에 남아 리눅스의 전력·소음·충전에 숨은 변수가 되는 문제를, 리눅스에서 보고·바꾸고·기록·복원하려는 도구다.
 
 > **sysfs 전환 (2026-11-12, 계획 `plan/embedctl-lockdown`)**: 이 노트북은 lockdown(integrity)이 항상 켜져 **debugfs 를 읽고 쓸 수 없다**. 그래서 원래 설계(MSI WMI debugfs 로 EC 바이트 읽기·쓰기, 계획 `plan/embedctl-구현`)를 버리고
-> **커널 모듈 `msi-ec` 의 sysfs(`/sys/devices/platform/msi-ec/`)만** 쓰도록 바꿨다. 코드와 가짜 sysfs 시험은 끝났고, **실기 쓰기 확인(모드 turbo 포함)은 아직이다**(계획 P4).
+> **커널 모듈 `msi-ec` 의 sysfs(`/sys/devices/platform/msi-ec/`)만** 쓰도록 바꿨다. 코드와 가짜 sysfs 시험은 끝났고, **실기 확인도 했다**(2026-11-12 세대 540, 계획 P4: 읽기·충전 80↔100·모드 eco/comfort/turbo·Cooler Boost·restore 가 helper+polkit 을 거쳐 lockdown 아래에서 동작, 쓴 항목 외 값 불변). turbo 는 유휴에서 comfort 와 팬·온도가 같았고 **부하 시 차이는 아직 측정 전**이다.
 > 설계·근거·검증 이력: ctx `plan/embedctl-lockdown`, 원래 설계 `plan/embedctl-구현`, 조사: ctx `note/msi-summit-me-ec-충전상한-성능모드-분석`.
 
 ## 사용
