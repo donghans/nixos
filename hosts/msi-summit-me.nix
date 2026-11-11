@@ -89,6 +89,62 @@ in {
 
     services.libinput.enable = true;
 
+    # == S3b 시험(plan boot-security §6-2h): initrd 안에서 PSR 설정 + lockdown 올리기 — LUKS 입력 전에 lockdown 이 켜지게 한다 ==
+    # 이 항목(specialisation)에서만: systemd initrd 를 켜고 i915 를 initrd 에 넣고, psr-force·lockdown-engage 를 stage 2 가 아니라 initrd 서비스로 돌린다.
+    # 기본 항목은 그대로(stage 2 의 late lockdown). `bootctl set-oneshot nixos-generation-<N>-specialisation-initrd-lockdown.conf` 로 한 번만 부팅한다.
+    # initrd 의 systemd 에는 debugfs·securityfs 마운트 유닛이 없어 서비스 스크립트가 직접 마운트한다. engage 는 psr-force 의 성공 여부와 무관하게(After 만, Requires 없음) 돈다.
+    specialisation.initrd-lockdown.configuration = let
+      mount = "${pkgs.util-linux}/bin/mount";
+      seq = "${pkgs.coreutils}/bin/seq";
+      sleep = "${pkgs.coreutils}/bin/sleep";
+      grep = "${pkgs.gnugrep}/bin/grep";
+    in {
+      boot.initrd.systemd.enable = true;
+      boot.initrd.kernelModules = ["i915"];
+      systemd.services.psr-force.enable = lib.mkForce false;
+      systemd.services.lockdown-engage.enable = lib.mkForce false;
+      boot.initrd.systemd.services.psr-force-initrd = {
+        description = "Force eDP PSR1 on (initrd)";
+        wantedBy = ["initrd.target"];
+        before = ["lockdown-engage-initrd.service"];
+        unitConfig.DefaultDependencies = false;
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          TimeoutStartSec = 15;
+        };
+        script = ''
+          ${mount} -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
+          for _ in $(${seq} 1 60); do
+            for f in /sys/kernel/debug/dri/*/i915_edp_psr_debug; do [ -e "$f" ] && break 2; done
+            ${sleep} 0.2
+          done
+          for d in /sys/kernel/debug/dri/*/; do
+            [ -e "$d/i915_edp_psr_debug" ] || continue
+            echo 2 > "$d/i915_edp_psr_debug"
+            echo 1 > "$d/eDP-1/i915_dp_force_link_retrain"
+          done
+        '';
+      };
+      boot.initrd.systemd.services.lockdown-engage-initrd = {
+        description = "Engage kernel lockdown (integrity) in initrd";
+        wantedBy = ["initrd.target"];
+        after = ["psr-force-initrd.service"];
+        # 디스크 해제(LUKS 입력)·루트 마운트보다 먼저
+        before = ["cryptsetup-pre.target" "initrd-root-device.target" "sysroot.mount"];
+        unitConfig.DefaultDependencies = false;
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = ''
+          ${mount} -t securityfs securityfs /sys/kernel/security 2>/dev/null || true
+          echo integrity > /sys/kernel/security/lockdown
+          ${grep} -q '\[integrity\]' /sys/kernel/security/lockdown
+        '';
+      };
+    };
+
     # rEFInd 메뉴의 호스트 전용 항목(mods/sys/services/refind.nix). Gentoo LiveGUI 는 p6(GENTOO_ISO) 가 있는 동안만 — S4 재파티션 때 같이 지운다(plan boot-security S4).
     # 이 볼륨은 FAT 이 아니라 rEFInd 파일시스템 드라이버가 필요하다 → 이 mod 는 드라이버를 만들지 않으므로 예전 수동 설치의 `drivers_x64/` 가 ESP 에 남아 있는 동안만 동작한다.
     mods.sys.services.refind.extraEntries = ''
