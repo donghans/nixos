@@ -13,4 +13,4 @@ netdata  = true
 [mods.gui.apps]
 slack           = false  # 노트북에서는 쓰지 않음(데스크톱을 못 볼 때는 모바일 앱) — 장부 #95~#97: 실행 중 slack 이 배터리 약 0.3~0.4 W
 incus-remote-view = true   # 데스크톱(beelink-ser7-co)의 incus VM 화면을 SSH 터널로 본다(incus-remote-view [VM이름])
-# embedctl: 2026-11-11 끔 — kernel-lockdown(integrity) 하에서는 MSI WMI debugfs 가 막혀 읽기도 안 된다. 쿨러·성능 모드·충전 상한은 msi-ec(/sys/devices/platform/msi-ec/)로 한다. lockdown 을 끄는 날 다시 켠다(plan boot-security §6-2g).
+embedctl        = true   # EC 상태(충전 상한·성능 모드 turbo/comfort/eco·Cooler Boost) CLI/TUI — lockdown 아래에서도 되도록 debugfs/WMI 대신 msi-ec sysfs 만 쓴다(2026-11-12; 이전 2026-11-11 에는 WMI debugfs 가 막혀 꺼 뒀었다). plan embedctl-lockdown, mods/gui/apps/embedctl.nix
