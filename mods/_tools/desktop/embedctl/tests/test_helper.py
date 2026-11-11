@@ -49,7 +49,7 @@ def reset_all(**kw):
     reset_tree(**kw); FLAGS.update(ignore=False, side_effect=False, fail=False); writes.clear()
 
 # --- 1. 이름 검증: 실패하면 결과 파일도 락 파일도 만들지 않는다 ---------------------------------
-for bad in ("", "status", "charge-5000", "mode-user", "mode-sport", "charge-80\n", "../etc/passwd", "boost-on;reboot", "CHARGE-80", "write-0xD7", "charge-80 "):
+for bad in ("", "status", "charge-5000", "charge-080", "charge-00", "mode-user", "mode-sport", "charge-80\n", "../etc/passwd", "boost-on;reboot", "CHARGE-80", "write-0xD7", "charge-80 "):
     rc = embedhelper.main(["embedhelper", bad])
     check(f"잘못된 이름 {bad!r}: 종료 코드 2", rc == 2, f"rc={rc}")
 check("잘못된 이름만 보낸 뒤에는 아무 파일도 없음(디렉터리도 안 만듦)", listing() == [], str(listing()))
@@ -69,7 +69,7 @@ rc = embedhelper.main(["embedhelper", "charge-100"]); r = result("charge-100")
 check("charge-100: end 100", rc == 0 and r["after"]["end"] == 100)
 rc = embedhelper.main(["embedhelper", "charge-50"]); check("charge-50(하한): 허용", rc == 0 and result("charge-50")["after"]["end"] == 50)
 writes.clear()
-for bad in ("charge-49", "charge-101", "charge-00", "charge-10"):
+for bad in ("charge-49", "charge-101", "charge-10"):
     rc = embedhelper.main(["embedhelper", bad]); r = result(bad)
     check(f"{bad}: 범위 밖이라 종료 코드 2, code 2, 쓰기 0회", rc == 2 and r["ok"] is False and r["code"] == 2 and "허용한다" in r["error"] and writes == [], f"rc={rc} {r.get('error')} {writes}")
 

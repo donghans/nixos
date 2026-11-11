@@ -66,7 +66,7 @@ check("GATE_REASON 에 no_msi_ec 가 있고 원인 둘(모듈 미적재·허용 
 # --- 3. helper 인스턴스 이름 검증 --------------------------------------------------------------------
 for ok in ("charge-80", "charge-100", "mode-eco", "mode-turbo", "mode-comfort", "boost-on", "boost-off"):
     check(f"인스턴스 허용: {ok}", bool(lib.INSTANCE_RE.match(ok)))
-for bad in ("", "status", "charge-5000", "charge-8", "charge-80;x", "mode-user", "mode-sport", "mode-ECO", "boost-", "boost-on ", "../x", "charge-80\n", "charge--80", "write-0xD7"):
+for bad in ("", "status", "charge-5000", "charge-8", "charge-080", "charge-00", "charge-80;x", "mode-user", "mode-sport", "mode-ECO", "boost-", "boost-on ", "../x", "charge-80\n", "charge--80", "write-0xD7"):
     check(f"인스턴스 거부: {bad!r}", not lib.INSTANCE_RE.match(bad))
 try:
     lib.helper_call("mode-sport"); check("helper_call: 허용 밖 이름(sport)은 systemctl 호출 전에 거부", False)
@@ -103,6 +103,18 @@ check("status: msi-ec 디렉터리가 없으면 예외 없이 no_msi_ec + 경고
       and any("허용 목록" in x for x in st["warnings"]), str((st["gate"], st["warnings"])))
 check("status: msi-ec 가 없어도 사용자 권한 항목(충전 파일·팬·전원)은 그대로", st["charge"]["limit"] == 100 and st["fans"] == [2840, 2711, 0, 0] and st["power"]["ac"] is True)
 reset_fs()
+
+# 결과 파일 신선도: 직전 요청의 같은 인스턴스 결과를 이번 것으로 착각하지 않는다(전용 시험 — 변이 시험에서 다른 항목이 우연히 잡던 것)
+STALE = f"{T}/stale.json"; json.dump({"ok": True, "before": {"end": 0, "start": -10, "mode": "comfort", "boost": "off"}, "after": {"end": 80, "start": 70, "mode": "comfort", "boost": "off"}}, open(STALE, "w"))
+os.environ.update(FAKE_RESULT=STALE, FAKE_SKEW="-3600")
+try:
+    lib.helper_call("charge-80"); check("helper_call: 오래된 결과 파일(time 이 요청보다 앞섬)은 성공으로 받지 않는다", False)
+except lib.HelperError as e:
+    check("helper_call: 오래된 결과 파일은 「이 요청의 것이 아니다」로 실패(code 4)", "이 요청의 것이 아니다" in str(e) and e.code == 4, str(e))
+os.environ["FAKE_SKEW"] = "0"
+check("helper_call: 신선한 결과 파일은 받는다(같은 픽스처, time 만 다름)", lib.helper_call("charge-80")["ok"] is True)
+for k in ("FAKE_RESULT", "FAKE_SKEW"): os.environ.pop(k, None)
+os.remove(LOG) if os.path.exists(LOG) else None
 
 # --- 5. CLI: 읽기는 helper 없이 ----------------------------------------------------------------------
 rc, out, err = cli("status", "--json")
@@ -173,6 +185,12 @@ for label, snap, code, needle in (
         lib.restore_plan(snap, now); check(f"restore_plan {label}: 거부", False)
     except lib.RestoreError as e:
         check(f"restore_plan {label}: 종료 코드 {code}, 이유", e.code == code and needle in e.msg, f"{e.code} {e.msg}")
+os.rename(f"{T}/bat/charge_control_end_threshold", f"{T}/bat/end.off")
+try:
+    lib.restore_plan(snapd(), lib.collect_status()); check("restore_plan: 충전 임계값 파일이 없으면 거부", False)
+except lib.RestoreError as e:
+    check("restore_plan: 충전 임계값 파일을 못 읽으면 None% 계획 대신 거부(종료 코드 3)", e.code == 3 and "충전 임계값" in e.msg, e.msg)
+os.rename(f"{T}/bat/end.off", f"{T}/bat/charge_control_end_threshold")
 reset_fs(msiec=False)
 try:
     lib.restore_plan(snapd(), lib.collect_status()); check("restore_plan: msi-ec 없음이면 거부", False)

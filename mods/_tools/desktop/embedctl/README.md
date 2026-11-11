@@ -36,7 +36,7 @@ embedctl restore <스냅샷> [--dry-run] [--json]   스냅샷의 충전 상한·
 gate    {board, board_ok, fw, fw_date, fw_verified, state}   state: verified | unverified_fw | unsupported_board | no_msi_ec
 msi_ec  {present, available_modes}      available_modes: msi-ec 가 광고하는 모드 목록 | null
 charge  {end, start, set, limit}        sysfs 값. end=0 이면 미설정(set=false) → limit=100 으로 동작
-mode    {name, raw, text, known} | null     text: msi-ec shift_mode 원문. known: turbo|comfort|eco 면 true. name 은 그 이름, `unknown (192)` 는 "sport"(known=false, raw=192), 그 밖은 "unknown"/"unspecified"
+mode    {name, raw, text, known} | null     text: msi-ec shift_mode 원문. known: turbo|comfort|eco 면 true(이때 raw 는 null). name 은 그 이름, `unknown (192)` 는 "sport"(known=false, raw=192), 그 밖은 "unknown"/"unspecified"
 modes   {writable: [쓸 수 있는 모드…], disabled: ["sport"]}
 boost   true | false | null
 fans    [RPM…] | null      temp_pkg  °C | null      power {ac, status, capacity}      warnings […]
@@ -99,4 +99,4 @@ cd mods/_tools/desktop/embedctl && python3 -I tests/test_core.py && python3 -I t
 | `embedctlui.py` | TUI(Textual). `embedlib` 의 `helper_call`·`restore_plan`·`save_snapshot` 을 CLI 와 같이 쓴다 |
 | `tests/` | `test_core.py`(코어·CLI·msi-ec 없음·스냅샷·restore 계획·인자 검증), `test_helper.py`(helper·쓰기 동작·끝단·restore), `fake_systemctl.py`(정적 결과), `test_embedctlui.py`(헤드리스 Textual Pilot, 가짜 상태/helper), `fake_systemctl_e2e.py`(실제 helper 코드를 가짜 sysfs 트리 위에서 실행, 상태는 파일에 유지) |
 
-**시험의 신뢰도에 대하여**: 원래 WMI 판 시험은 복사본에서 일부러 결함을 넣어(마스크 제거, 게이트 무력화, 범위 검사 제거, 되읽기 검사 제거, 정규식 `\Z`→`$` 등) 시험이 잡는지 확인했다. 2026-11-12 sysfs 전환에서는 시험을 새로 썼고 **변이 시험은 다시 하지 않았다**(필요하면 같은 방식으로 한다).
+**시험의 신뢰도에 대하여**: 원래 WMI 판 시험은 복사본에서 일부러 결함을 넣어(마스크 제거, 게이트 무력화, 범위 검사 제거, 되읽기 검사 제거, 정규식 `\Z`→`$` 등) 시험이 잡는지 확인했다. 2026-11-12 sysfs 전환에서는 시험을 새로 썼고, 무맥락 검증자가 복사본에서 변이 10개(되읽기 검사 제거·게이트 무력화·`\Z`→`$`·쓰지 않은 항목 불변 검사 제거·`writable_modes` 교집합 제거·모드 허용 목록 검사 제거·충전 범위 검사 제거·롤백 제거·결과 신선도 검사 제거·unknown 롤백 가드 제거)를 넣어 **모두 시험이 잡는 것**을 확인했다(신선도 검사는 처음에 전용 시험 없이 다른 항목이 우연히 잡아 전용 시험을 추가했다). TUI 시험은 그 환경에 textual 이 없어 변이를 하지 않았다.

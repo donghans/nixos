@@ -32,7 +32,7 @@ DISABLED_MODES = {"sport": "msi-ec 가 이 펌웨어에서 지원하지 않는�
 LEGACY_SPORT_RAW = 0xC0
 # helper 인스턴스 이름의 허용 형식(동작 = 인스턴스). 범위(50..100)는 동작 단계에서 따로 검사한다. 읽기는 helper 를 거치지 않으므로 `status` 인스턴스는 없다.
 # 끝은 `\Z` 다: `$` 는 끝의 개행 앞에서도 맞아서 `charge-80\n` 같은 이름이 통과한다(시험이 잡았다). root helper 의 입력 검증이므로 엄격해야 한다.
-INSTANCE_RE = re.compile(r"^(charge-[0-9]{2,3}|mode-(turbo|comfort|eco)|boost-(on|off))\Z")
+INSTANCE_RE = re.compile(r"^(charge-[1-9][0-9]{1,2}|mode-(turbo|comfort|eco)|boost-(on|off))\Z")      # 충전 값은 선행 0 없는 2~3자리(`charge-080` 같은 별칭 이름을 만들지 않는다)
 
 
 class EcError(Exception):
@@ -296,6 +296,8 @@ def restore_plan(snap, st):
         raise RestoreError(2, "스냅샷 형식이 아니다(schema 2 가 아님)" + (" — schema 1 은 WMI/EC 바이트 시절의 옛 형식이라 복원하지 않는다" if old else ""))
     if st["gate"]["state"] != "verified":
         raise RestoreError(3, f"게이트 거부: {GATE_REASON.get(st['gate']['state'], st['gate']['state'])} — 복원하지 않았다")
+    if st["charge"]["limit"] is None:
+        raise RestoreError(3, "배터리 충전 임계값 파일을 읽지 못해 복원할 수 없다 — 복원하지 않았다")
     if snap["gate"].get("fw") != st["gate"]["fw"]:
         raise RestoreError(3, f"스냅샷의 EC 펌웨어({snap['gate'].get('fw')!r})가 지금({st['gate']['fw']!r})과 달라 복원하지 않는다")
     want_charge = (snap.get("charge") or {}).get("limit")
