@@ -94,14 +94,14 @@ in {
     # 기본 항목은 그대로(stage 2 의 late lockdown). `bootctl set-oneshot nixos-generation-<N>-specialisation-initrd-lockdown.conf` 로 한 번만 부팅한다.
     # initrd 의 systemd 에는 debugfs·securityfs 마운트 유닛이 없어 서비스 스크립트가 직접 마운트한다. engage 는 psr-force 의 성공 여부와 무관하게(After 만, Requires 없음) 돈다.
     specialisation.initrd-lockdown.configuration = let
-      mount = "${pkgs.util-linux}/bin/mount";
-      seq = "${pkgs.coreutils}/bin/seq";
-      sleep = "${pkgs.coreutils}/bin/sleep";
+      mount = "/bin/mount";
+      seq = "/bin/seq";
+      sleep = "/bin/sleep";
     in {
       boot.initrd.systemd.enable = true;
       boot.initrd.kernelModules = ["i915"];
-      # initrd 에는 유닛 스크립트가 참조하는 프로그램이 자동으로 들어가지 않는다(2026-11-11 실기: `grep`·`mount` 없음 → engage 서비스 실패, debugfs 를 못 마운트해 psr 이 12초 헛돎).
-      boot.initrd.systemd.initrdBin = [pkgs.util-linux pkgs.gnugrep pkgs.coreutils];
+      # initrd 에는 유닛 스크립트가 참조하는 store 경로의 프로그램이 자동으로 들어가지 않는다(2026-11-11 실기: `${pkgs.gnugrep}/bin/grep`·`${pkgs.util-linux}/bin/mount` 절대 경로가 없어
+      # engage 서비스가 실패하고 debugfs 를 못 마운트해 psr 이 12초 헛돎). initrd 의 `/bin`(initrd-bin-env)에 있는 것(`mount`=util-linux-minimal, coreutils)을 이름으로 부른다. grep 은 쓰지 않는다.
       systemd.services.psr-force.enable = lib.mkForce false;
       systemd.services.lockdown-engage.enable = lib.mkForce false;
       boot.initrd.systemd.services.psr-force-initrd = {
