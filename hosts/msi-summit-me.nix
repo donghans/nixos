@@ -189,10 +189,10 @@ in {
           {
             echo "stop begins; portal pid=$MAINPID wchan=$(cat /proc/$MAINPID/wchan 2>/dev/null)"
             for p in /proc/[0-9]*; do
-              hit=$(ls -l "$p/cwd" "$p/root" "$p/fd" 2>/dev/null | grep -F "$doc" | head -3 | tr '\n' ' ')
+              hit=$(ls -l "$p/cwd" "$p/root" "$p/fd" 2>/dev/null | grep -E "$doc(/|\$| )" | head -3 | tr '\n' ' ')
               [ -n "$hit" ] && echo "holder pid=''${p#/proc/} comm=$(cat "$p/comm" 2>/dev/null) :: $hit"
             done
-            grep -F "$doc" /proc/self/mountinfo | head -2
+            grep -E " $doc " /proc/self/mountinfo | head -2
           } 2>&1 | systemd-cat -t docportal-trace -p info
           exit 0
         '';
