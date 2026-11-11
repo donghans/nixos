@@ -94,7 +94,7 @@ in {
     # initrd 의 systemd 에는 debugfs 마운트 유닛이 없어 스크립트가 직접 마운트한다. engage 는 psr-force-initrd 의 성공 여부와 무관하게(After 만, Requires 없음) 돈다.
     # 펌웨어 VBT 가 이 패널의 PSR 을 꺼 두어(`PSR disabled by flag`) `i915.enable_psr=1` 이 무시된다. debugfs `i915_edp_psr_debug`=2 는 VBT 를 무시하게 하며
     # 다음 모드셋부터 적용되므로 링크 재훈련으로 모드셋을 한 번 일으킨다(부팅 중 화면이 잠깐 깜빡임). 측정: psys −0.35 W·배터리 −0.44 W(ctx 장부 #54, #56).
-    # 화면 이상이 보이면 이 서비스(psr-force-initrd)를 지운다. lockdown 때문에 실제 PSR 활성은 debugfs 로 읽을 수 없다(전력으로 간접 확인).
+    # 화면 이상이 보이면 이 서비스(psr-force-initrd)를 지운다. lockdown 때문에 부팅 뒤에는 PSR 활성을 debugfs 로 읽을 수 없어, 이 서비스가 lockdown 직전에 상태를 journal 에 남긴다(아래 진단).
     # initrd 스크립트는 store 절대 경로 대신 initrd 의 `/bin` 프로그램을 이름으로 부른다(2026-11-11 실기: 절대 경로는 initrd 에 없어 실패).
     boot.initrd.systemd.services.psr-force-initrd = {
       description = "Force eDP PSR1 on (initrd)";
@@ -116,6 +116,13 @@ in {
           [ -e "$d/i915_edp_psr_debug" ] || continue
           echo 2 > "$d/i915_edp_psr_debug"
           echo 1 > "$d/eDP-1/i915_dp_force_link_retrain"
+        done
+        # 진단: lockdown 이 올라오면 debugfs 를 읽을 수 없으므로 올라오기 직전에 PSR 상태를 journal 에 남긴다(`journalctl -b -u psr-force-initrd` 의 `psr-status:` 줄).
+        # 재훈련 모드셋이 끝나기를 잠깐 기다린 뒤 읽는다(읽기 실패는 무시 — 진단일 뿐 부팅을 막지 않는다). "PSR mode: PSR1 enabled" 면 켜진 것, "disabled" 면 꺼진 것.
+        /bin/sleep 1.5
+        for f in /sys/kernel/debug/dri/*/i915_edp_psr_status; do
+          [ -e "$f" ] || continue
+          while read -r line; do echo "psr-status: $line"; done < "$f" || true
         done
       '';
     };
