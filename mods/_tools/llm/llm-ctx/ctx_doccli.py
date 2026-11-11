@@ -48,6 +48,10 @@ def _project(a, need=True):
     man = st.load_manifest(store)
     repo = H.git_meta(os.getcwd()).get("repo_url")
     proj, err = st.resolve_project(man, getattr(a, "project", None), repo)
+    if err and dq.use_queue():      # 읽기 뷰 호스트: 서버가 등록한 프로젝트를 doc_projects 에서 찾아 자동 연결한다(수동 `git remote add` 불필요)
+        if dq.auto_connect(store, H.connect, getattr(a, "project", None), repo):
+            man = st.load_manifest(store)
+            proj, err = st.resolve_project(man, getattr(a, "project", None), repo)
     if err and need:
         sys.exit(err + f"\n(문서 저장소: {store})")
     _flush_outbox(store)
@@ -80,7 +84,7 @@ def _mask(m, text):
 # ---------------------------------------------------------------- 읽기
 def _refresh(store, proj, force=False):
     """읽기·쓰기 앞의 최신화(노트북 등 읽기 뷰 호스트만; 정본 호스트·origin 없음·최근 시도는 건너뜀). 알릴 것이 있으면 stderr 한 줄."""
-    msg = st.refresh_project(store, proj, force=force)
+    msg = dq.refresh_by_head(store, proj, H.connect, force=force) if dq.use_queue() else st.refresh_project(store, proj, force=force)
     if msg:
         print(msg, file=sys.stderr)
 
@@ -386,15 +390,29 @@ def _log_throttled(key, line, every=600.0):
         print(line, flush=True)
 
 
+_last_sweep = {"t": 0.0}
+
+
+def _sync_heads_safe(store, push_results=None):
+    try:
+        dq.sync_heads(store, H.connect, push_results)
+    except Exception as e:           # 표가 아직 없음(옛 스키마) 등 — 파일 인박스·push 를 막지 않는다
+        _log_throttled("sync_heads", f"[sync] head 를 기록하지 못했다 — {type(e).__name__}: {e}")
+
+
 def _sync_once(store, push, force_push=False):
-    """① 필요 판정(masker 없이): 대기열·파일 인박스에 할 일이 있는가, push 가 필요한가 — 없으면 DB 에는 선검사 1회만 쓰고 끝 ② 필요하면 비밀 검사기(못 얻으면 아무것도 하지 않는다 — fail-closed)
-    ③ DB 대기열 → 파일 인박스(pull_queue) ④ process_inbox ⑤ push ⑥ 그 뒤에 대기열 행에 결과 기록(push 가 끝난 뒤라야 노트북이 pull 로 반영분을 받는다)."""
+    """① 필요 판정(masker 없이): 대기열·파일 인박스에 할 일이 있는가, push 가 필요한가 — 없으면 DB 에는 선검사 1회만 쓰고 끝(단 HEAD_SWEEP_EVERY 마다 head 점검)
+    ② 필요하면 비밀 검사기(못 얻으면 아무것도 하지 않는다 — fail-closed) ③ DB 대기열 → 파일 인박스(pull_queue) ④ process_inbox ⑤ push
+    ⑥ 그 뒤에 대기열 행에 결과 기록 ⑦ 프로젝트별 head(실제 `git rev-parse HEAD`)를 doc_projects 에 기록 — push 가 끝난 뒤라야 pushed_sha 도 함께 남는다."""
     now = time.time()
     man = st.load_manifest(store)
     queued = dq.queue_has_work(H.connect)
     pending = bool(st.pending_proposals(store, include_invalid=True))
     push_due = bool(push) and any(meta.get("remote") and (force_push or now - _last_push.get(proj, 0) >= PUSH_EVERY) for proj, meta in man.items())
     if not (queued or pending or push_due or force_push):
+        if now - _last_sweep["t"] >= dq.HEAD_SWEEP_EVERY:      # 할 일이 없어도 가끔 head 를 점검한다(직접 git 으로 고친 경우·기록 전 죽음·NULL 백필 복구)
+            _last_sweep["t"] = now
+            _sync_heads_safe(store)
         return 0
     m = _load_masker_or_none()
     if m is None:
@@ -417,11 +435,14 @@ def _sync_once(store, push, force_push=False):
             applied = applied or any(r["status"] == "applied" for _p, _o, r in results)
         except Exception as e:
             _log_throttled("collect_results", f"[sync] 대기열 결과를 모으지 못했다 — {type(e).__name__}: {e}")
+    pushed_now = {}
     if push:
         for proj, meta in man.items():
             if meta.get("remote") and (force_push or applied or now - _last_push.get(proj, 0) >= PUSH_EVERY):
                 ok, msg = st.push_project(store, proj, m, man)
                 _last_push[proj] = now
+                if ok:
+                    pushed_now[proj] = dq.local_head(os.path.join(store, proj))
                 print(f"[sync] push {proj}: {'ok' if ok else '못 함'} — {msg}", flush=True)
     if queued:
         try:
@@ -429,6 +450,8 @@ def _sync_once(store, push, force_push=False):
             dq.maintenance(store, H.connect, now)
         except Exception as e:
             _log_throttled("record_results", f"[sync] 대기열 결과를 기록하지 못했다 — {type(e).__name__}: {e}")
+    _last_sweep["t"] = now
+    _sync_heads_safe(store, pushed_now)
     return 0
 
 
@@ -616,20 +639,25 @@ def cmd_init(a):
     why = st.valid_project(a.project)
     if why:
         sys.exit(why)
-    os.makedirs(store, exist_ok=True)
-    man = st.load_manifest(store)
-    if a.project in man:
-        print(f"{a.project}: 이미 등록돼 있다")
-    else:
-        repo = H.norm_repo(a.repo_url) if a.repo_url else ""
-        block = f'\n[projects.{a.project}]\nrepo_url = "{repo}"\nowner = "{a.owner}"\nremote = "{a.remote or ""}"\n'
-        with open(os.path.join(store, "manifest.toml"), "a") as f:
-            f.write(block)
-        print(f"{a.project}: 매니페스트에 등록했다")
-    st.ensure_repo(os.path.join(store, a.project))
-    for k in st.KINDS:
-        os.makedirs(os.path.join(store, a.project, k), exist_ok=True)
+    repo = H.norm_repo(a.repo_url) if a.repo_url else ""
+    if dq.use_queue():       # 읽기 뷰 호스트: 로컬 매니페스트를 쓰지 않고 정본 호스트에 등록을 요청한다(로컬에만 등록되어 서버와 갈라지던 `genple-new` 사고의 원인)
+        return _init_queued(a, repo)
+    print(st.init_project(store, a.project, repo, a.owner, a.remote or ""))
     return 0
+
+
+def _init_queued(a, repo):
+    sid = _session(a) or f"cli-{H.HOST}"
+    code, msg, pid = dq.submit_init(sid, H.HOST, a.project, repo, a.owner, a.remote or "", H.connect)
+    if code:
+        print(msg, file=sys.stderr)
+        return 1
+    r = dq.wait_row(H.connect, pid, float(os.environ.get("CTX_PROPOSE_WAIT", dq.WAIT_DEFAULT)))
+    if not r or r["status"] in dq.OPEN_STATUSES:
+        print(f"{a.project}: **아직 반영되지 않았다**(정본 호스트의 처리를 기다리는 중) — `donghans ctx doc status` 로 확인한다. 같은 `init` 을 다시 실행하지 않는다(종료 코드 0 이어도 등록 완료가 아니다)")
+        return 0
+    print(r["msg"] + ("" if r["status"] not in dq.OK_STATUSES else " — 다음 `donghans ctx doc` 실행 때 이 호스트에 자동으로 연결된다"))
+    return 0 if r["status"] in dq.OK_STATUSES else 1
 
 
 # ---------------------------------------------------------------- 등록

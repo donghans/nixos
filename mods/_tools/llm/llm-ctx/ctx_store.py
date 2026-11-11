@@ -654,10 +654,37 @@ def is_writer_host() -> bool:
     forced = os.environ.get("CTX_IS_WRITER")
     if forced in ("0", "1"):
         return forced == "1"
+    if "v" in _WRITER_CACHE:          # 같은 프로세스 안에서는 한 번만 판정한다(훅·여러 명령이 매번 systemctl 을 부르지 않게)
+        return _WRITER_CACHE["v"]
     try:
-        return subprocess.run(["systemctl", "--user", "cat", "ctx-doc-sync.service"], capture_output=True).returncode == 0
+        _WRITER_CACHE["v"] = subprocess.run(["systemctl", "--user", "cat", "ctx-doc-sync.service"], capture_output=True).returncode == 0
     except OSError:
-        return False
+        _WRITER_CACHE["v"] = False
+    return _WRITER_CACHE["v"]
+
+
+_WRITER_CACHE: dict = {}
+
+
+def init_project(store: str, project: str, repo_url: str, owner: str, remote: str) -> str:
+    """프로젝트를 매니페스트에 등록하고 저장소·plan|qa|note 폴더를 만든다(`ctx doc init` 과 DB 대기열의 op=init 이 공유). 인자는 호출하는 쪽이 검증해 온다.
+    돌려주는 것: 사용자에게 보일 한 줄."""
+    why = valid_project(project)
+    if why:
+        raise ValueError(why)
+    os.makedirs(store, exist_ok=True)
+    man = load_manifest(store)
+    if project in man:
+        msg = f"{project}: 이미 등록돼 있다"
+    else:
+        block = f'\n[projects.{project}]\nrepo_url = "{repo_url}"\nowner = "{owner}"\nremote = "{remote or ""}"\n'
+        with open(os.path.join(store, "manifest.toml"), "a") as f:
+            f.write(block)
+        msg = f"{project}: 매니페스트에 등록했다"
+    ensure_repo(os.path.join(store, project))
+    for k in KINDS:
+        os.makedirs(os.path.join(store, project, k), exist_ok=True)
+    return msg
 
 
 def refresh_project(store: str, project: str, force: bool = False, now: float | None = None) -> str | None:

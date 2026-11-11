@@ -60,7 +60,7 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 | `ctx doc status` | 이 세션의 대기·충돌·거부 제안, 동기화 담당 상태 | |
 | `ctx doc watch` | 이 세션의 뷰가 직접 수정되면 한 줄로 알림(**Monitor 로 띄운다**) | |
 | `ctx doc sync [--watch]` | (동기화 담당) 인박스 제안을 검사해 커밋 — 세션 안에서 부르지 않는다 | |
-| `ctx doc init <프로젝트>` | 매니페스트 등록 + 저장소 생성(하네스 `ask` 규칙이 실행 전 사용자 확인 — 2026-11-02 에 「사람만(TTY)」에서 바꿈) | |
+| `ctx doc init <프로젝트>` | 매니페스트 등록 + 저장소 생성(하네스 `ask` 규칙이 실행 전 사용자 확인). **정본 호스트에서는 직접 실행, 읽기 뷰 호스트(노트북)에서는 로컬을 쓰지 않고 정본 호스트에 등록을 요청**한다(op=init — `remote` 는 요청으로 설정할 수 없다. 2026-11-10 `genple-new` 가 노트북에만 등록돼 서버와 갈라진 사고의 수정) | |
 
 **프로젝트 결정**: `--project` > 현재 git `repo_url` 과 매니페스트의 `repo_url` 일치. 못 찾으면 추측하지 않고 실패한다(스킬·안내문은 `--project nixos` 처럼 명시).
 
@@ -78,7 +78,8 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 - `donghans ctx doc status` 가 읽기 뷰 호스트에서는 **「[대기열]」 줄**을 출력한다 — 이 경로가 켜져 있다는 관찰 가능한 표지다(노트북의 코드가 구버전이면 이 줄이 없다).
 - `donghans ctx doc import-inbox <폴더>`: 옛 방식 `_inbox/<세션>/*.proposal.md` 제안 파일을 대기열에 넣는다(어느 호스트에서나 — 정본 호스트에서도 이 명령만은 DB 를 쓴다. 원본은 건드리지 않는다).
 - 동기화 담당 서비스의 `--interval` 기본은 30초에서 5초로 낮췄다. 대기열·인박스·push 가 모두 필요 없으면 비밀 검사기를 읽지 않고 끝난다(주기 push 는 그대로).
-- 알려진 한계: 읽기 지연(정본 push 주기 + `PULL_INTERVAL`), `process_proposal` 이 파일을 지운 뒤 결과를 쓰기 전에 죽으면 30분 뒤 행이 queued 로 돌아가 두 번째 처리에서 거짓 충돌이 날 수 있다.
+- **읽기 연결 다리(2026-11-11, 계획 `plan/ctx-read-bridge`)**: 정본 호스트의 동기화 담당이 커밋마다 프로젝트별 **head(`git rev-parse HEAD` 전체 해시)** 를 DB 표 `doc_projects`(스키마 v7: `head_sha`·`pushed_sha`·`mirror`)에 기록한다(할 일이 없어도 300초마다 점검 — 직접 git 으로 고친 경우·기록 전 죽음·NULL 백필 복구). 읽기 뷰 호스트의 `ctx doc list|read|path|find|propose|delete|import-docs` 는 시작할 때 DB 에서 그 프로젝트의 행 한 줄만 조회해, **서버 head 가 로컬 HEAD 의 조상(또는 같음)이면 git 네트워크를 쓰지 않고**, 뒤처졌을 때만 한 번 `git pull --ff-only` 한다(origin 이 서버 mirror 가 아니면 `pushed_sha` 기준 — 노트북의 `nixos` 는 GitHub; 서버 head 가 아직 origin 에 없으면 30초 안에는 다시 받지 않는다). DB 를 못 읽으면 옛 방식(`PULL_INTERVAL` 제한 pull)으로 후퇴한다. `status` 는 최신화하지 않는다. SessionStart 훅(`donghans ctx hook`, `ctx_docqueue.hook_refresh`)도 같은 확인을 하되 모든 예외·시간 초과(8초)를 삼킨다. 로컬 매니페스트에 없는 프로젝트는 `doc_projects` 의 `mirror`(`<사용자>@<호스트>:ctx/<프로젝트>` 정규식에 맞을 때만)에서 자동 clone 하고 매니페스트에 `remote = ""` 로 등록한다(기존 origin 은 바꾸지 않는다). 프로젝트 목록(이름·repo_url·owner·remote)의 정본은 서버 `manifest.toml` 이고 표는 사본이다.
+- 알려진 한계: 읽기 지연(정본 push 주기 + `PULL_INTERVAL` — 이제 head 비교로 서버 mirror 를 쓰는 연결은 지연이 거의 없고 GitHub origin 연결만 push 주기를 따른다), `process_proposal` 이 파일을 지운 뒤 결과를 쓰기 전에 죽으면 30분 뒤 행이 queued 로 돌아가 두 번째 처리에서 거짓 충돌이 날 수 있다.
 
 **직접 수정 방지(P 철학, 안 되면 Q)**: `PreToolUse` 훅(`ctx_toolhook.py`)이 뷰·저장소 파일에 대한 `Edit`·`Write` 를 막고 `propose` 를 안내한다. Bash 명령 문자열은 막지 않는다(오탐·미탐 — plan2 05 §4-4-5). 뷰가 직접 수정되면 `watch`(inotify, 즉시) 또는 `PostToolUse` 훅(안전망)이 알리고, 뷰를 다시 만들 때 원본으로 되돌리되 고친 내용은 `.ctx-rejected/` 에 보관한다. 샌드박스는 쓰지 않는다(`claude-run` 이 sudo 를 유지해 실익이 작다).
 

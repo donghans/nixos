@@ -430,6 +430,127 @@ check("T14 대기열에 할 일이 있는데 검사기를 못 얻으면 1 을 �
 dc._load_masker_or_none, st.push_project = orig_lm, orig_push
 conn.execute("DELETE FROM doc_proposals WHERE target='p14/note/z'"); conn.commit()
 
+# ---------------------------------------------------------------- 읽기 연결 다리 — head 체크섬·사용 시 확인·자동 연결·init 요청 (계획 plan/ctx-read-bridge, 체크명 R1~R8)
+def git_out(d, *a):
+    return subprocess.run(["git", "-C", d, *a], capture_output=True, text=True).stdout.strip()
+
+
+dc._load_masker_or_none = lambda: masker
+dc._last_sweep["t"] = 0.0
+# R1 서버가 반영하면 doc_projects.head_sha 가 실제 HEAD(전체 해시)가 된다 — 한 틱에 여러 제안이어도 최종 HEAD
+st.propose(STORE, QS, "h", "proj", "note", "r1a", "R1 a\n", None); st.propose(STORE, "eeeeeeee-0000-0000-0000-00000000000e", "h", "proj", "note", "r1b", "R1 b\n", None)
+dc._sync_once(STORE, False, True)
+head = git_out(f"{STORE}/proj", "rev-parse", "HEAD")
+check("R1 한 틱에 제안 2건이 반영된 뒤 head_sha 는 서버 저장소의 최종 HEAD(전체 40자)다", sql1("SELECT head_sha FROM doc_projects WHERE project='proj'")[0] == head and len(head) == 40, f"{head} {sql1('SELECT head_sha FROM doc_projects WHERE project=%s', 'proj')}")
+check("R1 mirror 는 <사용자>@<호스트>:ctx/<프로젝트> 정규식에 맞는다", dq.MIRROR_RE.match(sql1("SELECT mirror FROM doc_projects WHERE project='proj'")[0]) is not None)
+# R2 점검(sweep): 서버 저장소를 직접 git 으로 고쳐도, NULL(옛 프로젝트 백필)이어도 다음 점검이 바로잡는다
+open(f"{STORE}/proj/note/direct.md", "w").write(st.compose({}, "직접 커밋\n")); st.commit_file(STORE, "proj", "note/direct.md", "direct commit")
+dc._last_sweep["t"] = _time.time()
+dc._sync_once(STORE, False, False)
+check("R2 점검 주기 안에는 idle 틱이 head 를 건드리지 않는다(DB 에는 선검사만)", sql1("SELECT head_sha FROM doc_projects WHERE project='proj'")[0] == head)
+dc._last_sweep["t"] = _time.time() - dq.HEAD_SWEEP_EVERY - 1
+dc._sync_once(STORE, False, False)
+head2 = git_out(f"{STORE}/proj", "rev-parse", "HEAD")
+check("R2 점검 주기가 지나면 idle 틱도 직접 커밋을 반영해 head 를 갱신한다", head2 != head and sql1("SELECT head_sha FROM doc_projects WHERE project='proj'")[0] == head2)
+conn.execute("UPDATE doc_projects SET head_sha=NULL, pushed_sha=NULL WHERE project='proj'"); conn.commit()
+dc._last_sweep["t"] = 0.0; dc._sync_once(STORE, False, False)
+check("R2 NULL 이던 head 도 다음 점검에서 백필된다(remote 가 빈 프로젝트는 pushed_sha=head_sha)", sql1("SELECT head_sha, pushed_sha FROM doc_projects WHERE project='proj'") == (head2, head2))
+
+# R3·R4 사용 시 확인(refresh_by_head) — 서버 저장소 + 노트북 클론(같은 bare), pull 호출 수는 주입 함수로 센다
+os.environ["CTX_IS_WRITER"] = "0"; os.environ.pop("CTX_NO_PULL", None)
+st.propose(S_SRV, QS, "lap", "proj", "note", "r3", "R3 첫 판\n", None); st.process_inbox(S_SRV, masker)
+subprocess.run(["git", "-C", f"{S_SRV}/proj", "push", "-q", "origin", "HEAD"], check=True)
+srv_head = git_out(f"{S_SRV}/proj", "rev-parse", "HEAD")
+conn.execute("INSERT INTO doc_projects (project, mirror, head_sha, pushed_sha) VALUES ('proj', %s, %s, %s) ON CONFLICT (project) DO UPDATE SET mirror=EXCLUDED.mirror, head_sha=EXCLUDED.head_sha, pushed_sha=EXCLUDED.pushed_sha", (BARE, srv_head, srv_head)); conn.commit()
+pulls = []
+def mkpull(store):
+    def f():
+        pulls.append(1); return st.refresh_project(store, "proj", force=True)
+    return f
+T0 = 1_000_000.0
+dq.refresh_by_head(S_LAP, "proj", cc.connect, pull=mkpull(S_LAP), now=T0)
+lap_head = git_out(f"{S_LAP}/proj", "rev-parse", "HEAD")
+check("R3 뒤처졌으면(서버 head 가 로컬 HEAD 의 조상이 아님) 한 번 pull 해서 맞춘다", len(pulls) == 1 and lap_head == srv_head, f"{pulls} {lap_head} {srv_head}")
+dq.refresh_by_head(S_LAP, "proj", cc.connect, pull=mkpull(S_LAP), now=T0 + 1000)
+check("R3 같으면 pull 하지 않는다(git 네트워크 0 — 5분 제한과 무관하게)", len(pulls) == 1)
+subprocess.run(["git", "-C", f"{S_LAP}/proj", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "local ahead"], check=True)
+dq.refresh_by_head(S_LAP, "proj", cc.connect, pull=mkpull(S_LAP), now=T0 + 2000)
+check("R3 로컬이 앞서 있어도(서버 head 가 조상) pull 하지 않는다", len(pulls) == 1)
+lockf = open(f"{S_LAP}/proj/.git/ctx-pull.lock", "w"); import fcntl as _fc; _fc.flock(lockf, _fc.LOCK_EX)
+conn.execute("UPDATE doc_projects SET head_sha=%s, pushed_sha=%s WHERE project='proj'", ("f" * 40, "f" * 40)); conn.commit()
+dq.refresh_by_head(S_LAP, "proj", cc.connect, pull=mkpull(S_LAP), now=T0 + 3000)
+check("R3 다른 프로세스가 pull 락을 쥐고 있으면 기다리지 않고 건너뛴다(index.lock 충돌 방지)", len(pulls) == 1); lockf.close()
+# R4: 서버 head 객체가 origin 에 아직 없으면 한 번 받아 보고 30초 안에는 다시 받지 않는다
+dq.refresh_by_head(S_LAP, "proj", cc.connect, pull=mkpull(S_LAP), now=T0 + 4000)
+dq.refresh_by_head(S_LAP, "proj", cc.connect, pull=mkpull(S_LAP), now=T0 + 4005)
+check("R4 서버 head 가 origin 에 없으면 첫 시도만 pull 하고 30초 안의 재시도는 건너뛴다(헛돌기 방지)", len(pulls) == 2, str(pulls))
+dq.refresh_by_head(S_LAP, "proj", cc.connect, pull=mkpull(S_LAP), now=T0 + 4040)
+check("R4 30초가 지나면 다시 시도한다", len(pulls) == 3)
+conn.execute("UPDATE doc_projects SET mirror='other@host:ctx/proj', head_sha=%s, pushed_sha=%s WHERE project='proj'", ("f" * 40, srv_head)); conn.commit()
+dq.refresh_by_head(S_LAP, "proj", cc.connect, pull=mkpull(S_LAP), now=T0 + 6000)
+check("R4 origin 이 서버 mirror 가 아니면(GitHub 등) push 된 해시(pushed_sha)를 기준으로 삼아 서버 head 가 앞서도 pull 하지 않는다", len(pulls) == 3, str(pulls))
+# R5 DB 불가 → 옛 방식 후퇴
+fb = []; orig_rp = st.refresh_project
+st.refresh_project = lambda store, project, force=False, now=None: fb.append(1)
+def _bad(**k): raise RuntimeError("db down")
+r5 = dq.refresh_by_head(S_LAP, "proj", _bad)
+st.refresh_project = orig_rp
+check("R5 DB 를 못 읽으면 예외 없이 옛 방식(refresh_project)으로 후퇴한다", fb == [1] and r5 is None)
+os.environ["CTX_NO_PULL"] = "1"; fb2 = []
+check("R5 CTX_NO_PULL=1 이면 아무것도 하지 않는다", dq.refresh_by_head(S_LAP, "proj", cc.connect, pull=lambda: fb2.append(1), now=T0 + 9000) is None and fb2 == [])
+os.environ.pop("CTX_NO_PULL", None)
+
+# R6 자동 연결 — clone 은 git url.insteadOf 로 로컬 폴더에 연결한다(시험이 ssh 없이 돌게)
+MIR = f"{TMP}/mirrors"; os.makedirs(f"{MIR}/autoproj"); subprocess.run(["git", "init", "-q", "-b", "main", f"{MIR}/autoproj"], check=True)
+open(f"{MIR}/autoproj/seed.txt", "w").write("x"); subprocess.run(["git", "-C", f"{MIR}/autoproj", "add", "-A"], check=True)
+subprocess.run(["git", "-C", f"{MIR}/autoproj", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "seed"], check=True)
+os.environ.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"url.{MIR}/.insteadOf", "GIT_CONFIG_VALUE_0": "testuser@testhost:ctx/"})
+S_AUTO = f"{TMP}/autostore"; os.makedirs(S_AUTO); open(f"{S_AUTO}/manifest.toml", "w").write("")
+conn.execute("INSERT INTO doc_projects (project, repo_url, owner, mirror) VALUES ('autoproj','https://github.com/test/autoproj','personal','testuser@testhost:ctx/autoproj') ON CONFLICT (project) DO NOTHING"); conn.commit()
+got = dq.auto_connect(S_AUTO, cc.connect, None, "https://github.com/test/autoproj")
+man6 = st.load_manifest(S_AUTO)
+check("R6 로컬에 없는 프로젝트를 repo_url 로 doc_projects 에서 찾아 mirror 에서 clone 하고 매니페스트에 remote=\"\" 로 등록한다", got == "autoproj" and os.path.isdir(f"{S_AUTO}/autoproj/.git") and man6.get("autoproj", {}).get("remote") == "" and man6["autoproj"].get("repo_url") == "https://github.com/test/autoproj", str((got, man6)))
+before = git_out(f"{S_AUTO}/autoproj", "remote", "-v")
+dq.auto_connect(S_AUTO, cc.connect, "autoproj", None)
+check("R6 이미 연결된 프로젝트의 저장소·origin 은 건드리지 않는다(매니페스트 줄도 늘지 않는다)", git_out(f"{S_AUTO}/autoproj", "remote", "-v") == before and open(f"{S_AUTO}/manifest.toml").read().count("[projects.autoproj]") == 1)
+for nm in (f"{MIR}/otherproj", f"{TMP}/x"):      # 실제로 clone 가능한 저장소를 만들어 둔다 — 정규식 검사가 없으면 이 값들은 clone 에 성공해 버린다
+    os.makedirs(nm, exist_ok=True); subprocess.run(["git", "init", "-q", "-b", "main", nm], check=True)
+    open(f"{nm}/f.txt", "w").write("x"); subprocess.run(["git", "-C", nm, "add", "-A"], check=True)
+    subprocess.run(["git", "-C", nm, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "s"], check=True)
+for bad in ("--upload-pack=touch /tmp/pwned-ctx", "file:///etc", "testuser@testhost:ctx/otherproj", "testuser@testhost:ctx/../x"):
+    conn.execute("INSERT INTO doc_projects (project, repo_url, owner, mirror) VALUES ('badproj','','personal',%s) ON CONFLICT (project) DO UPDATE SET mirror=EXCLUDED.mirror", (bad,)); conn.commit()
+    r = dq.auto_connect(S_AUTO, cc.connect, "badproj", None)
+    check(f"R6 정규식에 어긋나는 mirror 는 쓰지 않는다 — {bad[:30]}", r is None and not os.path.exists(f"{S_AUTO}/badproj") and not os.path.exists("/tmp/pwned-ctx"), str(r))
+os.environ.pop("GIT_CONFIG_COUNT"); os.environ.pop("GIT_CONFIG_KEY_0"); os.environ.pop("GIT_CONFIG_VALUE_0")
+
+# R7 읽기 호스트 init: 로컬 매니페스트를 쓰지 않고 요청 → 서버가 등록. 주입·remote 는 거부
+rc, out, err = run_q("init", "bridgeproj", "--repo-url", "https://github.com/test/bridgeproj", sid=QS)
+check("R7 읽기 호스트 init: 서버가 아직이면 「아직 반영되지 않았다」이고 이 호스트의 매니페스트·폴더는 바뀌지 않는다", rc == 0 and "아직 반영되지 않았다" in out and "bridgeproj" not in open(f"{STORE}/manifest.toml").read() and not os.path.exists(f"{STORE}/bridgeproj"), f"rc={rc} popup={'아직 반영되지 않았다' in out} inman={'bridgeproj' in open(STORE + '/manifest.toml').read()} dir={os.path.exists(STORE + '/bridgeproj')}")
+check("R7 DB 에 init 행(op=init, payload)이 queued 로 생긴다", conn.execute("SELECT op, status, payload->>'repo_url' FROM doc_proposals WHERE target='bridgeproj'").fetchone() == ("init", "queued", "https://github.com/test/bridgeproj")); conn.commit()
+rc, out, err = run_q("init", "bridgeproj", "--repo-url", "https://github.com/test/bridgeproj", sid=QS)
+check("R7 같은 세션의 이전 init 이 처리 중이면 거부(중복 방지)", rc != 0 and "처리 중" in err, out + err)
+rc, out, err = run("sync")
+man7 = open(f"{STORE}/manifest.toml").read()
+check("R7 서버가 init 요청을 처리해 매니페스트·저장소를 만들고 행이 applied, doc_projects 에 행이 생긴다", "[projects.bridgeproj]" in man7 and os.path.isdir(f"{STORE}/bridgeproj/.git") and sql1("SELECT status FROM doc_proposals WHERE target='bridgeproj' ORDER BY created_at DESC LIMIT 1")[0] == "applied" and sql1("SELECT count(*) FROM doc_projects WHERE project='bridgeproj'")[0] == 1, out + err)
+rc, out, err = run_q("init", "evil", "--owner", 'x"\nremote = "y', sid=QS)
+check("R7 클라이언트: owner 에 따옴표·개행이 든 init 은 요청하지 않는다", rc != 0 and "evil" not in open(f"{STORE}/manifest.toml").read() and conn.execute("SELECT count(*) FROM doc_proposals WHERE target='evil'").fetchone()[0] == 0, out + err); conn.commit()
+rc, out, err = run_q("init", "evil2", "--remote", "git@github.com:x/y.git", sid=QS)
+check("R7 클라이언트: remote(외부 push 대상)가 든 init 은 거부", rc != 0 and "remote" in err, out + err)
+dq.enqueue(conn, st.proposal_id("evil3", "init", "-"), QS, "h", "evil3", "init", None, "", {"repo_url": "", "owner": 'x"\nremote = "y'}); conn.commit()
+dq.enqueue(conn, st.proposal_id("evil4", "init", "-"), "ffffffff-0000-0000-0000-00000000000f", "h", "evil4", "init", None, "", {"repo_url": "", "owner": "personal", "remote": "git@github.com:x/y.git"}); conn.commit()
+run("sync")
+man7 = open(f"{STORE}/manifest.toml").read()
+check("R7 서버 검증: 주입·remote 가 든 init 요청은 거부되고 매니페스트에 remote 가 생기지 않는다", "evil3" not in man7 and "evil4" not in man7 and "git@github.com:x/y.git" not in man7 and conn.execute("SELECT status FROM doc_proposals WHERE target IN ('evil3','evil4')").fetchall() == [("rejected",), ("rejected",)], man7[-200:]); conn.commit()
+
+# R8 훅: DB 불가·느림에도 세션 시작을 막지 않는다
+os.environ["CTX_IS_WRITER"] = "0"
+t0 = _time.time(); dq.hook_refresh(WORK, _bad, lambda c: URL)
+check("R8 훅 최신화는 DB 가 죽어 있어도 예외 없이 끝난다", _time.time() - t0 < 5)
+orig_rbh = dq.refresh_by_head; dq.refresh_by_head = lambda *a, **k: _time.sleep(3); orig_to = dq.HOOK_REFRESH_TIMEOUT; dq.HOOK_REFRESH_TIMEOUT = 0.5
+t0 = _time.time(); dq.hook_refresh(WORK, cc.connect, lambda c: URL); el = _time.time() - t0
+dq.refresh_by_head = orig_rbh; dq.HOOK_REFRESH_TIMEOUT = orig_to
+check("R8 최신화가 느려도 훅은 상한(HOOK_REFRESH_TIMEOUT) 안에 돌아온다", el < 2.5, f"{el:.1f}s")
+
 # T13 표가 없는 옛 스키마에서도 파일 인박스 경로는 막히지 않는다(마지막 시험 — 표를 지운다)
 conn.execute("DROP TABLE doc_proposals"); conn.commit()
 st.propose(STORE, QS, "testhost", "proj", "note", "t13", "옛 스키마에서도 반영\n", None)

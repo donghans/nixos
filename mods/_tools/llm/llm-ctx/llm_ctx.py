@@ -348,6 +348,12 @@ def cmd_hook(a):
     except Exception:
         return 0
     doc_msg = _doc_hook_early(a.event, p)
+    if a.event == "SessionStart":      # 읽기 뷰 호스트: 현재 폴더 프로젝트의 문서를 DB head 비교로 최신화한다(DB 트랜잭션 밖, 모든 예외·시간 초과를 삼킨다)
+        try:
+            import ctx_docqueue as _dq
+            _dq.hook_refresh(p.get("cwd"), connect, lambda c: git_meta(c).get("repo_url"))
+        except Exception:
+            pass
     printed = False
     try:
         conn = connect(timeout=3)

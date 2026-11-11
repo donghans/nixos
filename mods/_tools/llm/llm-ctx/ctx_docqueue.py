@@ -14,8 +14,14 @@
   flush_outbox / import_inbox       서버 불가 중 보관분 재전송 / 옛 방식 제안 파일을 대기열로 옮기기
   pull_queue / collect_results / record_results / maintenance   (동기화 담당이 쓴다)
 """
+import fcntl
+import getpass
 import json
 import os
+import re
+import socket
+import subprocess
+import threading
 import time
 
 import ctx_store as st
@@ -27,6 +33,12 @@ VIEW_SYNC_STEP = 3.0           # 〃 재시도 간격(초)
 FETCHED_RECOVER_SEC = 30 * 60  # 가져간 뒤 파일도 결과도 없이 이 시간이 지나면 queued 로 되돌린다
 CONFLICT_BODY_KEEP_DAYS = 7    # 충돌 행 본문 보관 일수
 OUTBOX_WARN_DAYS = 7           # outbox 에 이만큼 묵으면 status 가 경고한다
+HEAD_SWEEP_EVERY = 300.0       # 서버: 할 일이 없어도 이 주기마다 head 를 점검·기록한다(직접 git 으로 고친 경우·기록 전 죽음·NULL 백필 복구)
+HEAD_RETRY_SEC = 30.0          # 읽기 호스트: 서버 head 객체가 아직 origin 에 없으면 이 시간 안에는 다시 pull 하지 않는다(헛돌기 방지)
+HOOK_REFRESH_TIMEOUT = 8.0     # SessionStart 훅의 최신화 상한(초)
+MIRROR_RE = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:ctx/([A-Za-z0-9][A-Za-z0-9._-]{0,60})$")
+OWNER_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+REPO_URL_RE = re.compile(r"^https://[A-Za-z0-9.-]+(/[A-Za-z0-9._-]+){1,4}$")
 OPEN_STATUSES = ("queued", "fetched")
 OK_STATUSES = ("applied", "same")
 
@@ -77,11 +89,42 @@ def outbox_old(store: str, days: float = OUTBOX_WARN_DAYS, now: float | None = N
 
 
 # ---------------------------------------------------------------- 표 쓰기·읽기(클라이언트)
-def enqueue(conn, pid: str, session: str, host: str, target: str, op: str, base_hash: str | None, body: str) -> bool:
-    """행을 넣는다. 같은 id 가 이미 있으면 넣지 않고 False(멱등 — outbox 재전송·import-inbox 재실행)."""
-    cur = conn.execute("INSERT INTO doc_proposals (id, session_id, host, target, op, base_hash, body, status) VALUES (%s,%s,%s,%s,%s,%s,%s,'queued') ON CONFLICT (id) DO NOTHING",
-                       (pid, session, host, target, op, base_hash or "none", body))
+def enqueue(conn, pid: str, session: str, host: str, target: str, op: str, base_hash: str | None, body: str, payload: dict | None = None) -> bool:
+    """행을 넣는다. 같은 id 가 이미 있으면 넣지 않고 False(멱등 — outbox 재전송·import-inbox 재실행). payload 는 op=init 의 인자."""
+    cur = conn.execute("INSERT INTO doc_proposals (id, session_id, host, target, op, base_hash, body, payload, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,'queued') ON CONFLICT (id) DO NOTHING",
+                       (pid, session, host, target, op, base_hash or "none", body, json.dumps(payload) if payload is not None else None))
     return cur.rowcount == 1
+
+
+def check_init_args(project: str, repo_url: str, owner: str, remote: str) -> str | None:
+    """op=init 인자의 검사(클라이언트와 서버가 같은 규칙을 쓴다). 값이 매니페스트(TOML)에 그대로 들어가므로 따옴표·개행·임의 문자를 막는다. 외부 전송 경로(remote)는 요청으로 설정할 수 없다."""
+    why = st.valid_project(project)
+    if why:
+        return why
+    if not OWNER_RE.match(owner or ""):
+        return "owner 는 영문·숫자·`_`·`-` 만(40자 이하)"
+    if repo_url and not REPO_URL_RE.match(repo_url):
+        return "repo_url 은 https://호스트/경로 형식만"
+    if remote:
+        return "읽기 뷰 호스트의 요청으로는 remote(외부 push 대상)를 설정할 수 없다 — 정본 호스트에서 직접 `donghans ctx doc init --remote …` 로 한다"
+    return None
+
+
+def submit_init(session: str, host: str, project: str, repo_url: str, owner: str, remote: str, connect) -> tuple[int, str, str | None]:
+    """읽기 뷰 호스트의 `init`: 정본 호스트에 프로젝트 등록을 요청한다. 보관(outbox)은 하지 않는다 — 서버가 닿지 않으면 실패로 알린다."""
+    why = check_init_args(project, repo_url, owner, remote)
+    if why:
+        return 1, why, None
+    pid = st.proposal_id(project, "init", "-")
+    try:
+        with connect(timeout=3) as c:
+            if has_open(c, session, project):
+                return 1, f"{project}: 이 세션의 이전 init 요청이 아직 처리 중이다 — 다시 실행하지 않는다(`donghans ctx doc status`)", None
+            enqueue(c, pid, session, host, project, "init", None, "", {"repo_url": repo_url, "owner": owner})
+            c.commit()
+    except Exception as e:
+        return 1, f"{project}: 서버에 접속하지 못해 init 을 요청하지 못했다({type(e).__name__}) — 서버가 닿을 때 다시 한다", None
+    return 0, f"{project}: init 을 요청했다", pid
 
 
 def has_open(conn, session: str, target: str) -> bool:
@@ -275,8 +318,12 @@ def pull_queue(store: str, connect) -> list[str]:
     """queued 행을 가져와(fetched) 기존 파일 형식 제안으로 풀어 놓는다. 쓰기 가능한 연결이 필요하다. 가져온 id 목록을 돌려준다."""
     out = []
     with connect(timeout=5) as c:
-        rows = c.execute("SELECT id, session_id, host, target, op, base_hash, body, created_at FROM doc_proposals WHERE status='queued' ORDER BY created_at, id FOR UPDATE SKIP LOCKED").fetchall()
-        for pid, sid, host, target, op, base, body, created in rows:
+        rows = c.execute("SELECT id, session_id, host, target, op, base_hash, body, created_at, payload FROM doc_proposals WHERE status='queued' ORDER BY created_at, id FOR UPDATE SKIP LOCKED").fetchall()
+        for pid, sid, host, target, op, base, body, created, payload in rows:
+            if op == "init":      # 파일 인박스·_results 를 타지 않고 같은 트랜잭션에서 바로 실행한다(fetched 를 거치지 않으므로 복구 규칙과 겹치지 않는다)
+                status, msg = _run_init(store, target, payload)
+                c.execute("UPDATE doc_proposals SET status=%s, msg=%s, body=NULL, resolved_at=now() WHERE id=%s", (status, msg, pid))
+                continue
             parts = (target or "").split("/", 2)
             why = None
             if not safe_component(pid) or not safe_component(sid):
@@ -299,6 +346,19 @@ def pull_queue(store: str, connect) -> list[str]:
             out.append(pid)
         c.commit()
     return out
+
+
+def _run_init(store: str, project: str, payload: dict | None) -> tuple[str, str]:
+    """op=init 행을 서버에서 실행한다. remote 는 요청으로 받지 않는다(빈 값으로 등록). (status, msg)."""
+    p = payload or {}
+    repo_url, owner = (p.get("repo_url") or ""), (p.get("owner") or "")
+    why = check_init_args(project, repo_url, owner, str(p.get("remote") or ""))
+    if why:
+        return "rejected", f"{project}: {why}"
+    try:
+        return "applied", st.init_project(store, project, repo_url, owner, "")
+    except Exception as e:
+        return "rejected", f"{project}: init 실패 — {type(e).__name__}: {e}"
 
 
 def collect_results(store: str, connect) -> list[tuple[str, str, dict]]:
@@ -346,3 +406,142 @@ def maintenance(store: str, connect, now: float | None = None) -> dict:
         out["body_cleared"] = c.execute("UPDATE doc_proposals SET body=NULL WHERE status='conflict' AND body IS NOT NULL AND resolved_at < to_timestamp(%s)", (now - CONFLICT_BODY_KEEP_DAYS * 86400,)).rowcount
         c.commit()
     return out
+
+
+# ---------------------------------------------------------------- head(체크섬) — 서버가 기록하고 읽기 호스트가 pull 하기 전에 비교한다
+def mirror_for(project: str) -> str:
+    """읽기 호스트가 clone·pull 하는 서버 저장소 주소. CTX_MIRROR_HOST(`사용자@호스트`)로 바꿀 수 있다."""
+    return f"{os.environ.get('CTX_MIRROR_HOST') or (getpass.getuser() + '@' + socket.gethostname())}:ctx/{project}"
+
+
+def local_head(pd: str) -> str | None:
+    r = st._git(pd, "rev-parse", "--verify", "-q", "HEAD", check=False)
+    return r.stdout.strip() or None if r.returncode == 0 else None
+
+
+def sync_heads(store: str, connect, push_results: dict | None = None) -> int:
+    """매니페스트의 프로젝트마다 DB 행(목록 사본)을 맞추고 head_sha 를 서버 저장소의 실제 HEAD 로 갱신한다(바뀐 행 수). push_results = {프로젝트: push 성공 시점의 HEAD} 는 pushed_sha 로 기록한다."""
+    man = st.load_manifest(store)
+    changed = 0
+    with connect(timeout=5) as c:
+        for proj, meta in man.items():
+            pd = os.path.join(store, proj)
+            if st.valid_project(proj) or not os.path.isdir(os.path.join(pd, ".git")):
+                continue
+            head = local_head(pd)
+            remote = meta.get("remote", "")
+            row = c.execute("SELECT head_sha, pushed_sha, repo_url, owner, remote, mirror FROM doc_projects WHERE project=%s", (proj,)).fetchone()
+            pushed = head if not remote else ((push_results or {}).get(proj) or (row[1] if row else None))
+            want = (head, pushed, meta.get("repo_url", ""), meta.get("owner", "personal"), remote, mirror_for(proj))
+            if row is None:
+                c.execute("INSERT INTO doc_projects (project, repo_url, owner, remote, mirror, head_sha, pushed_sha, head_at) VALUES (%s,%s,%s,%s,%s,%s,%s,now())", (proj, want[2], want[3], want[4], want[5], head, pushed))
+                changed += 1
+            elif tuple(row) != want:
+                c.execute("UPDATE doc_projects SET repo_url=%s, owner=%s, remote=%s, mirror=%s, head_sha=%s, pushed_sha=%s, head_at=CASE WHEN head_sha IS DISTINCT FROM %s THEN now() ELSE head_at END, updated_at=now() WHERE project=%s",
+                          (want[2], want[3], want[4], want[5], head, pushed, head, proj))
+                changed += 1
+        c.commit()
+    return changed
+
+
+def _is_ancestor(pd: str, sha: str) -> bool:
+    """sha 가 로컬 HEAD 의 조상이거나 같은가(로컬이 앞서 있어도 참). 객체가 없으면 거짓."""
+    return st._git(pd, "merge-base", "--is-ancestor", sha, "HEAD", check=False).returncode == 0
+
+
+def refresh_by_head(store: str, project: str, connect, force: bool = False, pull=None, now: float | None = None) -> str | None:
+    """읽기 뷰 호스트의 사용 시 최신화: DB 의 head 체크섬이 로컬 HEAD 의 조상(또는 같음)이면 git 네트워크를 쓰지 않고, 뒤처졌을 때만 한 번 pull 한다.
+    DB 를 못 읽거나 행·head 가 없으면 지금 방식(`refresh_project`, 최소 간격 제한)으로 후퇴한다. 정본 호스트·CTX_NO_PULL·origin 없음이면 아무것도 안 한다. 사용자에게 보일 한 줄(없으면 None)."""
+    if os.environ.get("CTX_NO_PULL") == "1" or st.is_writer_host():
+        return None
+    pd = os.path.join(store, project)
+    if not os.path.isdir(os.path.join(pd, ".git")) or st._git(pd, "remote", "get-url", "origin", check=False).returncode != 0:
+        return None
+    pull = pull or (lambda: st.refresh_project(store, project, force=True))
+    try:
+        with connect(timeout=3, readonly=True) as c:
+            row = c.execute("SELECT mirror, head_sha, pushed_sha FROM doc_projects WHERE project=%s", (project,)).fetchone()
+    except Exception:
+        row = None
+    if not row or not (row[1] or row[2]):
+        return st.refresh_project(store, project, force=force)
+    origin = st._git(pd, "remote", "get-url", "origin", check=False).stdout.strip()
+    want = row[1] if origin == row[0] else (row[2] or row[1])      # origin 이 서버 mirror 가 아니면(예: GitHub) push 된 해시를 기준으로 한다
+    if _is_ancestor(pd, want):
+        return None
+    now = time.time() if now is None else now
+    stamp = os.path.join(pd, ".git", "ctx-last-headpull")
+    try:
+        if not force and now - os.path.getmtime(stamp) < HEAD_RETRY_SEC:
+            return None            # 방금 받아 봤는데도 서버 head 가 origin 에 없다 — 헛돌지 않는다
+    except OSError:
+        pass
+    lock = None
+    try:
+        lock = open(os.path.join(pd, ".git", "ctx-pull.lock"), "w")
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, BlockingIOError):
+        if lock:
+            lock.close()
+        return None                # 다른 프로세스가 pull 중이다 — 기다리지 않는다(index.lock 충돌 방지)
+    try:
+        with open(stamp, "w"):
+            pass
+        os.utime(stamp, (now, now))
+        return pull()
+    finally:
+        lock.close()
+
+
+def auto_connect(store: str, connect, name: str | None, repo_url: str | None) -> str | None:
+    """읽기 뷰 호스트: 로컬 매니페스트에 없는 프로젝트를 doc_projects 에서 찾아 서버 mirror 에서 clone 하고 매니페스트(remote 는 빈 값)에 등록한다. 돌려주는 값: 프로젝트 이름(못 하면 None).
+    mirror 는 정규식(`<사용자>@<호스트>:ctx/<프로젝트>`)에 맞을 때만 쓴다(옵션 주입·임의 URL 방지)."""
+    if os.environ.get("CTX_NO_PULL") == "1" or st.is_writer_host():
+        return None
+    try:
+        with connect(timeout=3, readonly=True) as c:
+            if name:
+                row = c.execute("SELECT project, repo_url, owner, mirror FROM doc_projects WHERE project=%s", (name,)).fetchone()
+            elif repo_url:
+                row = c.execute("SELECT project, repo_url, owner, mirror FROM doc_projects WHERE repo_url=%s ORDER BY project LIMIT 1", (repo_url,)).fetchone()
+            else:
+                row = None
+    except Exception:
+        return None
+    if not row:
+        return None
+    project, url, owner, mirror = row
+    m = MIRROR_RE.match(mirror or "")
+    if st.valid_project(project) or not m or m.group(1) != project or not OWNER_RE.match(owner or "") or (url and not REPO_URL_RE.match(url)):
+        return None
+    dst = os.path.join(store, project)
+    if not os.path.isdir(os.path.join(dst, ".git")):
+        os.makedirs(store, exist_ok=True)
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10")
+        try:
+            r = subprocess.run(["git", "clone", "-q", "--", mirror, dst], capture_output=True, text=True, env=env, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if r.returncode != 0:
+            return None
+    if project not in st.load_manifest(store):
+        with open(os.path.join(store, "manifest.toml"), "a") as f:
+            f.write(f'\n[projects.{project}]\nrepo_url = "{url}"\nowner = "{owner}"\nremote = ""\n')
+    return project
+
+
+def hook_refresh(cwd: str | None, connect, repo_url_of) -> None:
+    """SessionStart 훅: 현재 폴더의 프로젝트를 최신화한다. 모든 예외·시간 초과를 삼킨다(훅은 세션 시작을 막지 않는다). 읽기 뷰 호스트에서만 한다."""
+    def work():
+        try:
+            if not cwd or not use_queue():
+                return
+            store = st.store_dir()
+            proj, err = st.resolve_project(st.load_manifest(store), None, repo_url_of(cwd))
+            if not err and proj:
+                refresh_by_head(store, proj, connect)
+        except Exception:
+            pass
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    t.join(HOOK_REFRESH_TIMEOUT)
