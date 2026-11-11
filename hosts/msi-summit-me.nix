@@ -191,7 +191,7 @@ in {
       script = ''
         # i915 는 initrd 가 끝난 뒤(부팅 약 5초)에 올라온다. 장치가 아직 없으면 아래 루프가 조용히 건너뛰어 PSR 이 안 켜지므로 최대 20초 기다린다.
         for _ in $(seq 1 100); do
-          compgen -G "/sys/kernel/debug/dri/*/i915_edp_psr_debug" > /dev/null && break
+          for f in /sys/kernel/debug/dri/*/i915_edp_psr_debug; do [ -e "$f" ] && break 2; done # (bash 에 compgen 이 없어 첫 시도는 20초를 그냥 기다렸다: 2026-11-11 실측)
           sleep 0.2
         done
         for d in /sys/kernel/debug/dri/*/; do
