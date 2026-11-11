@@ -169,6 +169,7 @@
         ++ mainConfig
         ++ [./workspace-options.nix]
         ++ [inputs.disko.nixosModules.disko]
+        ++ [inputs.lanzaboote.nixosModules.lanzaboote]
         ++ recursiveImportDir ../../mods
         ++ [
           {

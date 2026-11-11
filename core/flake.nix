@@ -27,6 +27,10 @@
     # (목적: 원격 NixOS 시스템 배포 — nixup deploy 서브커맨드)
     deploy-rs.url = "github:serokell/deploy-rs";
     deploy-rs.inputs.nixpkgs.follows = "nixpkgs";
+
+    # (목적: Secure Boot — systemd-boot/UKI 서명. mods/sys/services/secure-boot.nix 가 쓴다. 모듈은 모든 호스트에 들어가지만 boot.lanzaboote.enable 이 꺼져 있으면 아무 것도 바꾸지 않는다)
+    lanzaboote.url = "github:nix-community/lanzaboote/v1.2.0";
+    lanzaboote.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   # (목적: nixup은 빌드 시 이 파일을 .build/flake.nix(루트)로 복사하므로,

@@ -81,6 +81,14 @@ in {
     };
   };
   os = lib.mkIf cfg.enable {
+    # lanzaboote 는 systemd-boot 를 끄고 `boot.loader.external.installHook` 을 쓰므로 아래 `extraInstallCommands` 가 돌지 않는다 — rEFInd 가 ESP 에 안 깔린 채로 조용히 넘어가지 않게 막는다.
+    # S5(Secure Boot)에서 hook 을 감싸 rEFInd 복사와 `sbctl sign` 을 넣은 뒤 이 assertion 을 지운다(plan boot-security S3c·S5).
+    assertions = [
+      {
+        assertion = !config.boot.lanzaboote.enable;
+        message = "refind mod: boot.lanzaboote(secure-boot mod)가 켜지면 이 mod 의 ESP 설치 명령이 실행되지 않습니다. S5 에서 installHook 을 감싸기 전에는 둘을 같이 켤 수 없습니다.";
+      }
+    ];
     boot.loader.systemd-boot.extraInstallCommands = ''
       ${pkgs.coreutils}/bin/install -d ${esp}/EFI/refind
       ${pkgs.coreutils}/bin/cp -rfT --no-preserve=mode,ownership ${tree} ${esp}/EFI/refind
