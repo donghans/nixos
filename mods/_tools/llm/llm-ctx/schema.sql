@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   last_ts      timestamptz,
   updated_at   timestamptz NOT NULL DEFAULT now()
 );
+-- 집계에서 제외(삭제 아님, 복원 가능): 시험·파일럿 세션이 사용량·검색을 오염시키지 않게. `donghans ctx session-exclude` 가 쓴다(plan → 토큰 확인 → apply).
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS excluded_at timestamptz;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS excluded_reason text;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS excluded_by text;
 CREATE INDEX IF NOT EXISTS sessions_repo ON sessions (repo_url, last_ts DESC);
 CREATE INDEX IF NOT EXISTS sessions_host ON sessions (host, last_ts DESC);
 
@@ -152,6 +156,47 @@ INSERT INTO schema_version (v) VALUES (1) ON CONFLICT DO NOTHING;
 INSERT INTO schema_version (v) VALUES (2) ON CONFLICT DO NOTHING;  -- 2: secrets, secret_ignores
 INSERT INTO schema_version (v) VALUES (3) ON CONFLICT DO NOTHING;  -- 3: limit_samples 계정·리셋 시각
 INSERT INTO schema_version (v) VALUES (4) ON CONFLICT DO NOTHING;  -- 4: project_docs
+INSERT INTO schema_version (v) VALUES (5) ON CONFLICT DO NOTHING;  -- 5: sessions.excluded_*
+INSERT INTO schema_version (v) VALUES (6) ON CONFLICT DO NOTHING;  -- 6: doc_proposals
+INSERT INTO schema_version (v) VALUES (7) ON CONFLICT DO NOTHING;  -- 7: doc_projects, doc_proposals.payload
+
+-- 읽기 뷰 호스트(노트북)의 작업 문서 쓰기 대기열 — ctx_docqueue.py. 노트북은 행을 넣고, 정본 호스트의 동기화 담당(ctx-doc-sync)이 가져가 기존 파일 형식 제안으로 풀어
+-- process_inbox 에 태운 뒤 결과를 이 행에 기록한다(계획 plan/ctx-doc-db-queue). body 는 applied·same·rejected 면 비우고 충돌만 7일 보관한다.
+CREATE TABLE IF NOT EXISTS doc_proposals (
+  id          text PRIMARY KEY,                 -- 제안 id(`<UTC 스탬프>-<프로젝트>-<종류>-<이름>`) — 파일 인박스의 제안 id 와 같다
+  session_id  text NOT NULL,
+  host        text NOT NULL DEFAULT '',
+  target      text NOT NULL,                    -- 프로젝트/종류/이름
+  op          text NOT NULL DEFAULT 'write',    -- write | delete
+  base_hash   text NOT NULL DEFAULT 'none',     -- 읽은 판의 해시(새 문서면 none)
+  body        text,                             -- 제안 머리말을 뺀 문서 본문(문서 머리말 포함). 해결되면 비운다
+  status      text NOT NULL DEFAULT 'queued',   -- queued | fetched | applied | same | conflict | rejected
+  msg         text,
+  commit_sha  text,
+  doc_hash    text,                             -- applied·same(write) 때 반영된 문서의 해시 — 노트북이 읽기 뷰를 맞추는 데 쓴다
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  fetched_at  timestamptz,
+  resolved_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS doc_proposals_status ON doc_proposals (status, created_at);
+CREATE INDEX IF NOT EXISTS doc_proposals_session ON doc_proposals (session_id, created_at DESC);
+-- 요청 일반화(계획 plan/ctx-read-bridge): op=init 의 인자(repo_url·owner)를 담는다. write·delete 는 NULL.
+ALTER TABLE doc_proposals ADD COLUMN IF NOT EXISTS payload jsonb;
+
+-- 프로젝트 목록 사본과 head(체크섬) — 읽기 호스트가 pull 하기 전에 한 줄 조회로 「낡았는가」를 가린다. 프로젝트 목록(이름·repo_url·owner·remote)의 정본은 서버 manifest.toml 파일이고
+-- 이 표는 그 사본이다. head_sha·pushed_sha 는 DB 에만 있는 값(문서가 아니다). 쓰는 쪽: 정본 호스트의 동기화 담당(ctx_docqueue.sync_heads)과 op=init 처리.
+CREATE TABLE IF NOT EXISTS doc_projects (
+  project     text PRIMARY KEY,
+  repo_url    text NOT NULL DEFAULT '',
+  owner       text NOT NULL DEFAULT 'personal',
+  remote      text NOT NULL DEFAULT '',     -- 외부 push 대상(비면 push 안 함). 읽기 호스트는 이 값을 로컬 매니페스트에 옮기지 않는다
+  mirror      text NOT NULL DEFAULT '',     -- 읽기 호스트가 clone·pull 하는 서버 저장소 주소(<사용자>@<호스트>:ctx/<프로젝트>) — 클라이언트가 정규식으로 검증해 쓴다
+  head_sha    text,                         -- 서버 저장소 HEAD 전체 해시(커밋이 없으면 NULL)
+  pushed_sha  text,                         -- remote 에 마지막으로 push 성공한 해시(remote 가 비면 head_sha 와 같다)
+  head_at     timestamptz,
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
 
 -- 프로젝트별 지침(`.claude/donghans-instructions.md`·`donghans-override.md`)의 공유 정본 — 로컬 파일은 SessionStart 훅이 만드는 캐시(ctx_instr.py).
 -- rev 는 낙관적 잠금: 올릴 때 `WHERE rev = 읽은 값` 이 아니면 거부한다(다른 기기가 먼저 바꾼 것을 덮지 않는다). 본문에 비밀 값을 두지 않는다(올릴 때 등록표로 검사).

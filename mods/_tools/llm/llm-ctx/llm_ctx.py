@@ -348,6 +348,12 @@ def cmd_hook(a):
     except Exception:
         return 0
     doc_msg = _doc_hook_early(a.event, p)
+    if a.event == "SessionStart":      # 읽기 뷰 호스트: 현재 폴더 프로젝트의 문서를 DB head 비교로 최신화한다(DB 트랜잭션 밖, 모든 예외·시간 초과를 삼킨다)
+        try:
+            import ctx_docqueue as _dq
+            _dq.hook_refresh(p.get("cwd"), connect, lambda c: git_meta(c).get("repo_url"))
+        except Exception:
+            pass
     printed = False
     try:
         conn = connect(timeout=3)
@@ -467,6 +473,8 @@ def cmd_search(a):
     args = [f"%{q}%", list(kinds)]
     common = ""        # 결과 쿼리와 「제외된 종류」 집계가 함께 쓰는 필터
     cargs = []
+    if not getattr(a, "include_excluded", False):
+        common += " AND s.excluded_at IS NULL"      # session-exclude 로 제외한 세션은 기본 검색에서 뺀다(--include-excluded 로 포함)
     if repo:
         common += " AND s.repo_url = %s"; cargs.append(repo)
     if a.session:
@@ -518,14 +526,69 @@ def cmd_recent(a):
     import ctxdata as cd
     sql = """SELECT s.session_id, s.last_ts, s.host, s.cwd, s.repo_url, s.branch, count(m.uuid) FILTER (WHERE m.kind='prompt' AND coalesce(m.text,'') !~ %s) AS prompts,
                     count(m.uuid) FILTER (WHERE m.kind='prompt' AND m.text ~ %s) AS autos
-             FROM sessions s LEFT JOIN messages m USING (session_id) WHERE (%s::text IS NULL OR s.repo_url = %s)
+             FROM sessions s LEFT JOIN messages m USING (session_id) WHERE (%s::text IS NULL OR s.repo_url = %s) AND (%s OR s.excluded_at IS NULL)
              GROUP BY s.session_id ORDER BY s.last_ts DESC NULLS LAST LIMIT %s"""
     with connect(readonly=True) as c:
         mk = _masker(a, c)
-        rows = c.execute(sql, (cd.AUTO_RE, cd.AUTO_RE, repo, repo, a.limit)).fetchall()
+        rows = c.execute(sql, (cd.AUTO_RE, cd.AUTO_RE, repo, repo, bool(getattr(a, "include_excluded", False)), a.limit)).fetchall()
         titles = cd.session_titles(c, [r[0] for r in rows], mk, 120)      # 첫 사람 프롬프트(없으면 첫 스킬 호출 `/이름`) — 치환 후 자름
         for sid, last, host, cwd, rurl, br, n, autos in rows:
             print(mk.text(f"{sid}  {last:%m-%d %H:%M}  @{host}  {rurl or '-'}#{br or '-'}  {cwd}  프롬프트 {n}" + (f" (자동 {autos})" if autos else "")) + f"\n    첫 프롬프트: {titles.get(sid, '')!r}")
+    return 0
+
+
+def _exclude_token(sids):
+    import hashlib
+    return hashlib.sha256("\n".join(sorted(sids)).encode()).hexdigest()[:10]
+
+
+def _exclude_targets(c, prefixes):
+    """session id(접두 가능)를 정확히 한 세션으로 푼다. 못 찾거나 모호하면 (None, 사유)."""
+    out, bad = [], []
+    for pre in prefixes:
+        r = c.execute("SELECT session_id, host, cwd, repo_url, first_ts, last_ts, excluded_at, "
+                      "(SELECT count(*) FROM messages m WHERE m.session_id = s.session_id), "
+                      "(SELECT coalesce(sum(cost_usd), 0) FROM usage_events u WHERE u.session_id = s.session_id) "
+                      "FROM sessions s WHERE session_id LIKE %s", (pre + "%",)).fetchall()
+        if len(r) != 1:
+            bad.append(f"{pre}: 일치 {len(r)}건")
+        else:
+            out.append(r[0])
+    return out, bad
+
+
+def cmd_session_exclude(a):
+    """시험·파일럿 세션을 집계(사용량·검색·최근)에서 뺀다 — 삭제가 아니라 표시이며 restore 로 되돌린다.
+    HITL: plan 은 읽기 전용으로 대상 목록과 토큰을 보인다. apply 는 같은 목록의 토큰(--token)이 있어야만 쓴다 — 사용자가 plan 의 목록을 보고 확인한 뒤에만 실행한다(procctl 과 같은 절차)."""
+    with connect(readonly=(a.action in ("plan", "list"))) as c:
+        if a.action == "list":
+            for sid, at, why, by in c.execute("SELECT session_id, excluded_at, excluded_reason, excluded_by FROM sessions WHERE excluded_at IS NOT NULL ORDER BY excluded_at DESC"):
+                print(f"{sid}  {at:%Y-%m-%d %H:%M}  {by or '-'}  {why or '-'}")
+            return 0
+        rows, bad = _exclude_targets(c, a.sid)
+        if bad:
+            print("대상 해석 실패(아무것도 바꾸지 않음):", "; ".join(bad)); return 1
+        sids = [r[0] for r in rows]
+        token = _exclude_token(sids)
+        verb = "복원" if a.action == "restore" else "제외"
+        if a.action == "plan":
+            print(f"[plan] {len(rows)}개 세션을 집계에서 제외한다(삭제 아님, restore 로 복원). 이미 제외된 것은 표시.")
+            for sid, host, cwd, rurl, f, l, ex, n, cost in rows:
+                span = f"{f:%m-%d %H:%M}~{l:%H:%M}" if f and l else "시각 없음"      # 시각이 비어 있는 세션도 목록에 나온다
+                print(f"  {sid}  @{host}  {cwd}  메시지 {n}  ${cost:.2f}  {span}" + ("  [이미 제외됨]" if ex else ""))
+            print(f"토큰: {token}  → 사용자가 위 목록을 확인한 뒤: donghans ctx session-exclude apply <같은 세션들> --reason '<사유>' --token {token}")
+            return 0
+        if a.action == "apply":
+            if a.token != token:
+                print(f"토큰 불일치(대상 목록이 plan 과 다르다). 지금 목록의 토큰: {token} — plan 을 다시 보이고 확인받는다. 아무것도 바꾸지 않음."); return 1
+            if not a.reason:
+                print("--reason 필요"); return 1
+            who = "agent" if is_agent_session() else "human"
+            c.execute("UPDATE sessions SET excluded_at = now(), excluded_reason = %s, excluded_by = %s WHERE session_id = ANY(%s) AND excluded_at IS NULL", (a.reason, who, sids))
+        else:  # restore
+            c.execute("UPDATE sessions SET excluded_at = NULL, excluded_reason = NULL, excluded_by = NULL WHERE session_id = ANY(%s)", (sids,))
+        c.commit()
+        print(f"{len(sids)}개 세션 {verb} 완료(삭제 없음).")
     return 0
 
 
@@ -543,6 +606,9 @@ def cmd_session(a):
         if len(r) != 1:
             print("일치하는 세션:", len(r), [x[0] for x in r]); return 1
         sid, host, hosts, cwd, rurl, br, f, l = r[0]
+        ex = c.execute("SELECT excluded_at, excluded_reason FROM sessions WHERE session_id=%s", (sid,)).fetchone()
+        if ex and ex[0]:
+            print(f"# [집계 제외됨 {ex[0]:%Y-%m-%d %H:%M}: {ex[1] or '-'}] 사용량·검색·최근 목록에서 빠져 있다(조회는 가능)")
         mk = _masker(a, c)
         print(mk.text(f"# {sid}  @{','.join(hosts or [host])}  {rurl or '-'}#{br or '-'}  {cwd}\n# {f} ~ {l}"))
         kinds = "('prompt','response','tool_use')" if a.full else "('prompt','response')"
@@ -756,7 +822,9 @@ def cmd_usage(a):
     with connect(readonly=True) as c:
         for day, model, n, it, ot, cr, cost in c.execute(
             """SELECT date_trunc('day', ts)::date, model, count(*), sum(input_tokens), sum(output_tokens), sum(cache_read_tokens), sum(cost_usd)
-               FROM usage_events WHERE ts > now() - make_interval(days => %s) GROUP BY 1,2 ORDER BY 1 DESC, 7 DESC""", (a.days,)):
+               FROM usage_events WHERE ts > now() - make_interval(days => %s)
+               AND (%s OR session_id IS NULL OR session_id NOT IN (SELECT session_id FROM sessions WHERE excluded_at IS NOT NULL))
+               GROUP BY 1,2 ORDER BY 1 DESC, 7 DESC""", (a.days, bool(getattr(a, "include_excluded", False)))):
             print(f"{day} {model or '?':22} 요청 {n:5}  in {it or 0:>9} out {ot or 0:>8} cache_read {cr or 0:>12}  ${cost or 0:.2f}")
     return 0
 
@@ -1244,14 +1312,15 @@ def main():
     p = ctx.add_parser("hook"); p.add_argument("event"); p.set_defaults(f=cmd_hook)
     p = ctx.add_parser("backfill-accounts", help="OTel 원본(events.jsonl)으로 usage_events 의 계정 열을 채운다(기본 dry-run)"); p.add_argument("--apply", action="store_true"); p.add_argument("--file"); p.set_defaults(f=cmd_backfill_accounts)
     p = ctx.add_parser("ingest"); p.add_argument("--days", type=int, default=2); p.add_argument("--all", action="store_true"); p.add_argument("--no-otel", action="store_true"); p.set_defaults(f=cmd_ingest)
-    p = ctx.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--session", help="세션 ID 앞자리로 한정"); p.add_argument("--kind", help="검색할 메시지 종류(쉼표 목록 또는 all). 기본 prompt,response — tool_use·tool_result(명령 호출·결과)·other 는 지정해야 검색된다"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.set_defaults(f=cmd_search)
-    p = ctx.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.set_defaults(f=cmd_recent)
+    p = ctx.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--session", help="세션 ID 앞자리로 한정"); p.add_argument("--kind", help="검색할 메시지 종류(쉼표 목록 또는 all). 기본 prompt,response — tool_use·tool_result(명령 호출·결과)·other 는 지정해야 검색된다"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.add_argument("--include-excluded", action="store_true"); p.set_defaults(f=cmd_search)
+    p = ctx.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.add_argument("--include-excluded", action="store_true"); p.set_defaults(f=cmd_recent)
     p = ctx.add_parser("session"); p.add_argument("sid"); p.add_argument("--n", type=int); p.add_argument("--full", action="store_true"); p.add_argument("--from", dest="from_uuid"); p.add_argument("--to", dest="to_uuid"); p.set_defaults(f=cmd_session)
     p = ctx.add_parser("msg", help="한 메시지의 완전한 본문(도구 호출 포함)"); p.add_argument("uuid", help="메시지 uuid 앞자리(ctx session 출력의 8자 등)"); p.add_argument("--max", type=int, default=8000, help="출력 글자 수 상한(기본 8000)"); p.add_argument("--all", action="store_true", help="상한 없이 전부"); p.add_argument("--session", help="(에이전트 셸) 파일을 둘 세션 ID(기본: 환경변수 CLAUDE_CODE_SESSION_ID)"); p.set_defaults(f=cmd_msg)
     p = ctx.add_parser("card", help="결정 카드(ctx note cards/*) 조회"); cd2 = p.add_subparsers(dest="cardcmd", required=True)
     q = cd2.add_parser("show", help="카드 본문 + 근거 원문 대조(인용 일치 검사)"); q.add_argument("ref", nargs="+", help="`프로젝트:uuid8`(uuid 앞 8자 이상)"); q.add_argument("--history", action="store_true", help="판 이력(git, 강등 표시)"); q.set_defaults(f=cmd_card_show)
     q = cd2.add_parser("list", help="카드 목록"); q.add_argument("--project"); q.add_argument("--state"); q.set_defaults(f=cmd_card_list)
-    p = ctx.add_parser("usage"); p.add_argument("--days", type=int, default=7); p.set_defaults(f=cmd_usage)
+    p = ctx.add_parser("usage"); p.add_argument("--days", type=int, default=7); p.add_argument("--include-excluded", action="store_true"); p.set_defaults(f=cmd_usage)
+    p = ctx.add_parser("session-exclude", help="시험 세션을 집계(사용량·검색·최근)에서 제외/복원 — plan(읽기 전용) → 사용자 확인 → apply --token"); p.add_argument("action", choices=["plan", "apply", "restore", "list"]); p.add_argument("sid", nargs="*", help="세션 ID(접두 가능)"); p.add_argument("--reason"); p.add_argument("--token", help="plan 이 보인 토큰(같은 목록일 때만 apply)"); p.set_defaults(f=cmd_session_exclude)
     p = ctx.add_parser("limits", help="계정별 한도(5h/7d) 창별 최고 사용률"); p.add_argument("--days", type=int, default=14); p.add_argument("--limit", type=int, default=20); p.set_defaults(f=cmd_limits)
     p = ctx.add_parser("sql"); p.add_argument("query"); p.add_argument("--limit", type=int, default=50, help="출력 행 수 상한(넘으면 표지)"); p.add_argument("--cell", type=int, default=1000, help="셀 하나의 출력 글자 수 상한(0 = 무제한; 넘으면 [잘림: …] 표지)"); p.set_defaults(f=cmd_sql)
     ctx_doccli.register(ctx, argparse.Namespace(norm_repo=norm_repo, git_meta=git_meta, connect=connect, load_masker=cs.load_masker, HOST=HOST, human_only=_human_only, is_human=is_human))

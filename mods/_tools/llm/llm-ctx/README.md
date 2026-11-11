@@ -60,7 +60,7 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 | `ctx doc status` | 이 세션의 대기·충돌·거부 제안, 동기화 담당 상태 | |
 | `ctx doc watch` | 이 세션의 뷰가 직접 수정되면 한 줄로 알림(**Monitor 로 띄운다**) | |
 | `ctx doc sync [--watch]` | (동기화 담당) 인박스 제안을 검사해 커밋 — 세션 안에서 부르지 않는다 | |
-| `ctx doc init <프로젝트>` | 매니페스트 등록 + 저장소 생성(하네스 `ask` 규칙이 실행 전 사용자 확인 — 2026-11-02 에 「사람만(TTY)」에서 바꿈) | |
+| `ctx doc init <프로젝트>` | 매니페스트 등록 + 저장소 생성(하네스 `ask` 규칙이 실행 전 사용자 확인). **정본 호스트에서는 직접 실행, 읽기 뷰 호스트(노트북)에서는 로컬을 쓰지 않고 정본 호스트에 등록을 요청**한다(op=init — `remote` 는 요청으로 설정할 수 없다. 2026-11-10 `genple-new` 가 노트북에만 등록돼 서버와 갈라진 사고의 수정) | |
 
 **프로젝트 결정**: `--project` > 현재 git `repo_url` 과 매니페스트의 `repo_url` 일치. 못 찾으면 추측하지 않고 실패한다(스킬·안내문은 `--project nixos` 처럼 명시).
 
@@ -69,6 +69,17 @@ nix 만으로 끝난다 — **비밀번호도 dsn 파일도 없다.**
 
 **쓰기(제안)**: LLM 은 저장소를 직접 고치지 않는다. `propose` 가 `~/ctx/_inbox/<세션ID>/` 에 제안을 남기면 동기화 담당(서버 호스트의 user 서비스 `ctx-doc-sync`)이 순서대로 ① 읽은 판(`base_hash`)이 지금과 같은지 ② 등록된 비밀 값이 없는지 ③ 머리말 값이 올바른지 검사해 통과하면 커밋한다. 읽은 판이 다르면 **충돌**이라 자동으로 합치지 않고 `_inbox/_conflicts/` 로 옮겨 세션에 알린다. 이미 있는 문서를 읽지 않고 덮어쓰는 제안은 거부된다. DB 에 못 붙어 비밀 검사를 못 하면 반영하지 않고 대기시킨다(fail-closed).
 `push` 는 매니페스트에 `remote` 가 있는 프로젝트만, 직전에 추적 파일 전체를 비밀 검사한 뒤 한다(서비스는 `--push`: 반영이 있으면 곧바로, 없어도 10분마다 따라잡는다. remote 가 비어 있으면 push 하지 않는다 — 현재 nixos 만 개인 비공개 GitHub `ctx-nixos`, ToT·genple 은 외부로 나가지 않는다).
+
+**읽기 뷰 호스트(노트북)의 쓰기 — DB 대기열(2026-11-10, 계획 `plan/ctx-doc-db-queue`)**: 노트북에는 동기화 담당이 없어 `~/ctx/_inbox` 에 쌓인 제안이 처리되지 않았다(2026-11-02 제안이 9일 방치). 그래서 **동기화 담당이 없는 호스트의 제출은 DB 표 `doc_proposals`(스키마 v6)에 행으로 넣고**, 정본 호스트의 동기화 담당이 5초마다(가벼운 선검사 1회) 가져가 **기존 제안 파일 형식으로 풀어 기존 `process_inbox()` 에 그대로 태운 뒤** 결과(status·msg·commit_sha·`doc_hash`)를 행에 기록한다 — 읽은 판·머리말·비밀 검사와 커밋 논리는 `ctx_store.process_proposal` 한 곳에만 있고 DB 는 전달만 한다. 구현: `ctx_docqueue.py`(제출 지점 `submit` 하나를 `propose`·`delete`·`import-docs`·llmui 카드 쓰기가 모두 쓴다).
+- 경로 판정: 정본 호스트(동기화 담당이 있는 곳)이거나 `CTX_SYNC_INLINE` 이면 파일 인박스(지금까지와 같음), 그 밖이면 대기열.
+- **비밀**: 노트북 `submit` 이 넣기 전에 등록 비밀을 검사해 걸리면 DB 에 넣지 않는다(서버도 한 번 더 검사). 본문은 applied·same·rejected 면 비우고 충돌만 7일 보관한다. 서버가 풀어 놓은 파일은 거부·충돌 시 서버 `_inbox/_rejected|_conflicts/` 에 평문으로 남는다(기존 정본 호스트 경로와 같은 성질).
+- 노트북 CLI 는 결과를 `CTX_PROPOSE_WAIT`(기본 15초)까지 기다려 보이고, 안 끝나면 「아직 반영되지 않았다(대기 중)」를 출력한다 — **다시 제안하지 말고 `donghans ctx doc status` 로 확인한다.** 반영됐으면 서버가 push 한 뒤 로컬을 pull 해 `doc_hash` 가 나타날 때까지(마감 20초, 3초 간격) 읽기 뷰를 맞추고 읽은 판을 갱신한다. 못 맞추면 「반영됐지만 읽기 뷰는 아직 낡았다」를 출력하고 읽은 판을 갱신하지 않는다(그 상태에서 같은 문서를 또 제안하면 서버가 충돌로 거부한다 — 덮어쓰지 않는다).
+- **서버에 못 붙으면** 제안을 `~/ctx/_outbox/<세션>/` 에 보관하고(「보관만 했다 — 아직 반영되지 않았다」), 다음 `donghans ctx doc` 명령이 시작할 때 비어 있지 않으면 대기열로 다시 보낸다(7일 넘게 묵으면 `status` 가 경고). DB 허용 목록 밖 호스트는 계속 outbox 에 쌓인다.
+- `donghans ctx doc status` 가 읽기 뷰 호스트에서는 **「[대기열]」 줄**을 출력한다 — 이 경로가 켜져 있다는 관찰 가능한 표지다(노트북의 코드가 구버전이면 이 줄이 없다).
+- `donghans ctx doc import-inbox <폴더>`: 옛 방식 `_inbox/<세션>/*.proposal.md` 제안 파일을 대기열에 넣는다(어느 호스트에서나 — 정본 호스트에서도 이 명령만은 DB 를 쓴다. 원본은 건드리지 않는다).
+- 동기화 담당 서비스의 `--interval` 기본은 30초에서 5초로 낮췄다. 대기열·인박스·push 가 모두 필요 없으면 비밀 검사기를 읽지 않고 끝난다(주기 push 는 그대로).
+- **읽기 연결 다리(2026-11-11, 계획 `plan/ctx-read-bridge`)**: 정본 호스트의 동기화 담당이 커밋마다 프로젝트별 **head(`git rev-parse HEAD` 전체 해시)** 를 DB 표 `doc_projects`(스키마 v7: `head_sha`·`pushed_sha`·`mirror`)에 기록한다(할 일이 없어도 300초마다 점검 — 직접 git 으로 고친 경우·기록 전 죽음·NULL 백필 복구). 읽기 뷰 호스트의 `ctx doc list|read|path|find|propose|delete|import-docs` 는 시작할 때 DB 에서 그 프로젝트의 행 한 줄만 조회해, **서버 head 가 로컬 HEAD 의 조상(또는 같음)이면 git 네트워크를 쓰지 않고**, 뒤처졌을 때만 한 번 `git pull --ff-only` 한다(origin 이 서버 mirror 가 아니면 `pushed_sha` 기준 — 노트북의 `nixos` 는 GitHub; 서버 head 가 아직 origin 에 없으면 30초 안에는 다시 받지 않는다). DB 를 못 읽으면 옛 방식(`PULL_INTERVAL` 제한 pull)으로 후퇴한다. `status` 는 최신화하지 않는다. SessionStart 훅(`donghans ctx hook`, `ctx_docqueue.hook_refresh`)도 같은 확인을 하되 모든 예외·시간 초과(8초)를 삼킨다. 로컬 매니페스트에 없는 프로젝트는 `doc_projects` 의 `mirror`(`<사용자>@<호스트>:ctx/<프로젝트>` 정규식에 맞을 때만)에서 자동 clone 하고 매니페스트에 `remote = ""` 로 등록한다(기존 origin 은 바꾸지 않는다). 프로젝트 목록(이름·repo_url·owner·remote)의 정본은 서버 `manifest.toml` 이고 표는 사본이다.
+- 알려진 한계: 읽기 지연(정본 push 주기 + `PULL_INTERVAL` — 이제 head 비교로 서버 mirror 를 쓰는 연결은 지연이 거의 없고 GitHub origin 연결만 push 주기를 따른다), `process_proposal` 이 파일을 지운 뒤 결과를 쓰기 전에 죽으면 30분 뒤 행이 queued 로 돌아가 두 번째 처리에서 거짓 충돌이 날 수 있다.
 
 **직접 수정 방지(P 철학, 안 되면 Q)**: `PreToolUse` 훅(`ctx_toolhook.py`)이 뷰·저장소 파일에 대한 `Edit`·`Write` 를 막고 `propose` 를 안내한다. Bash 명령 문자열은 막지 않는다(오탐·미탐 — plan2 05 §4-4-5). 뷰가 직접 수정되면 `watch`(inotify, 즉시) 또는 `PostToolUse` 훅(안전망)이 알리고, 뷰를 다시 만들 때 원본으로 되돌리되 고친 내용은 `.ctx-rejected/` 에 보관한다. 샌드박스는 쓰지 않는다(`claude-run` 이 sudo 를 유지해 실익이 작다).
 
@@ -238,3 +249,10 @@ donghans secret scrub                 # 로컬 트랜스크립트 점검(dry-run
 llmui                                 # 대시보드·검색·대조·비밀·후보·지침·세션 화면
 llmui --sessions                      # 세션 탭만 단독으로(DB 에 연결하지 않음) — `llm-sessions` 가 이것이다
 ```
+
+## 시험 세션 제외 (`donghans ctx session-exclude`)
+시험·파일럿으로 돌린 세션이 사용량(`ctx usage`)·검색·최근 목록을 오염시키지 않게 **삭제 없이 표시**로 뺀다(`sessions.excluded_at/_reason/_by`, 스키마 v5). 조회(`ctx session`)는 되고 제외 표시가 붙으며 `--include-excluded` 로 집계에 다시 넣어 볼 수 있다.
+- `plan <세션…>`: 읽기 전용. 대상 목록(호스트·cwd·메시지 수·비용)과 **토큰**(목록의 해시)을 보인다.
+- `apply <같은 세션…> --reason … --token <토큰>`: 토큰이 plan 의 목록과 같을 때만 쓴다. 에이전트는 plan 목록을 사용자에게 보여 주고 **사용자가 확인한 뒤에만** 실행한다(procctl 과 같은 절차). 누가 했는지(`agent`/`human`)를 기록한다.
+- `restore <세션…>`, `list`. 아직 `llmui`·`ctxdata` 의 목록은 제외를 반영하지 않는다(후속).
+- 스키마는 서비스 `claude-ctx-schema` 가 다음 배포 때 적용하므로, 새 명령은 그 뒤에 동작한다.

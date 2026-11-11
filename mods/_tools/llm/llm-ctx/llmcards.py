@@ -337,7 +337,7 @@ class CardsMixin:
         return True
 
     def promote_card(self, row: dict, done=None):
-        """draft→reviewed→adopted. 사람만(제한 모드 차단). 확인창 → 가드(human=True) → propose. 노트북은 동기화 담당이 없어 대기만 한다."""
+        """draft→reviewed→adopted. 사람만(제한 모드 차단). 확인창 → 가드(human=True) → propose. 동기화 담당이 없는 호스트(노트북)는 DB 대기열로 보낸다(ctx_docqueue.submit)."""
         if self.deny("카드 승격(사용자 확인)"):
             return
         state = row["meta"].get("state", "unknown")
@@ -383,9 +383,21 @@ class CardsMixin:
         if errors:
             msg = "가드가 거부했습니다: " + " / ".join(errors)
             self.flash(msg, "error"); return False, msg
-        code, msg, pid = st.propose(store, f"llmui-{cc.HOST}", cc.HOST, row["project"], "note", row["name"], new_body, row["hash"])
+        import ctx_docqueue as dq
+        import ctx_secrets as cs
+        code, msg, pid = dq.submit(store, f"llmui-{cc.HOST}", cc.HOST, row["project"], "note", row["name"], new_body, row["hash"], "write", cc.connect, cs.load_masker)
         if code:
             self.flash(msg, "error"); return False, msg
+        if pid and pid.startswith("outbox:"):
+            self.flash(msg, "warning"); return True, msg
+        if dq.use_queue():                                           # 읽기 뷰 호스트: DB 대기열 — 정본 호스트의 동기화 담당이 반영한다
+            r = dq.wait_row(cc.connect, pid, float(os.environ.get("CTX_PROPOSE_WAIT", dq.WAIT_DEFAULT)))
+            if not r or r["status"] in dq.OPEN_STATUSES:
+                msg = "제안을 대기열에 넣었지만 아직 반영되지 않았습니다(서버의 동기화 담당이 처리하면 반영됩니다)"
+                self.flash(msg, "warning"); return True, msg
+            self.flash(r["msg"], "information" if r["status"] in dq.OK_STATUSES else "error")
+            self.reload_cards()
+            return r["status"] in dq.OK_STATUSES, r["msg"]
         if os.environ.get("CTX_SYNC_INLINE"):                      # 시험·동기화 담당 없는 호스트(`ctx doc propose` 와 같은 규칙)
             try:                                                   # ctx_doccli._inline_sync 는 llm_ctx 가 넘겨 준 도우미(H)가 필요해 여기서는 직접 한다
                 import ctx_secrets as cs
@@ -398,7 +410,7 @@ class CardsMixin:
             worker = dc._wake_worker()
         r = st.wait_result(store, pid, 10.0 if worker else 0.2)
         if not r:
-            msg = "제안을 남겼지만 이 호스트에는 동기화 담당이 없어 아직 반영되지 않았습니다(beelink 에서 처리됩니다)" if not worker else "제안을 남겼습니다(대기 중)"
+            msg = "제안을 남겼지만 이 호스트에는 동기화 담당이 없어 아직 반영되지 않았습니다" if not worker else "제안을 남겼습니다(대기 중)"
             self.flash(msg, "warning"); return True, msg
         self.flash(r["msg"], "information" if r["status"] in ("applied", "same") else "error")
         self.reload_cards()

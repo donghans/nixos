@@ -376,6 +376,25 @@ try:
     r = cli("ctx", "limits", "--days", "3650")
     check("ctx limits: 계정별 5h 창 최고값 출력", "A@x.test" in r.stdout and "40.0%" in r.stdout and "B@x.test" in r.stdout and "70.0%" in r.stdout, r.stdout + r.stderr)
 
+    # --- 세션 제외(session-exclude): plan 읽기 전용 → 토큰 일치 때만 apply → 집계에서 빠짐 → restore 로 복원, 삭제 없음
+    r = cli("ctx", "session-exclude", "plan", SID[:8])
+    tok = (re.search(r"토큰: (\w+)", r.stdout) or [None, ""])[1]
+    check("session-exclude plan: 목록·토큰만 보이고 아무것도 안 바꿈", r.returncode == 0 and tok and SID in r.stdout and conn.execute("SELECT count(*) FROM sessions WHERE excluded_at IS NOT NULL").fetchone()[0] == 0, r.stdout + r.stderr)
+    r = cli("ctx", "session-exclude", "apply", SID[:8], "--reason", "시험", "--token", "badbadbad0")
+    check("session-exclude apply: 토큰이 다르면 거부, 변경 없음", r.returncode != 0 and conn.execute("SELECT count(*) FROM sessions WHERE excluded_at IS NOT NULL").fetchone()[0] == 0, r.stdout + r.stderr)
+    r = cli("ctx", "session-exclude", "apply", "nonexistent", "--reason", "시험", "--token", tok)
+    check("session-exclude apply: 없는 세션은 거부(아무것도 안 바꿈)", r.returncode != 0 and "해석 실패" in r.stdout, r.stdout + r.stderr)
+    n_msgs = conn.execute("SELECT count(*) FROM messages WHERE session_id=%s", (SID,)).fetchone()[0]
+    r = cli("ctx", "session-exclude", "apply", SID[:8], "--reason", "시험", "--token", tok)
+    check("session-exclude apply: 토큰 일치 시 제외 표시", r.returncode == 0 and conn.execute("SELECT excluded_reason, excluded_by FROM sessions WHERE session_id=%s", (SID,)).fetchone()[0] == "시험", r.stdout + r.stderr)
+    check("session-exclude: 메시지는 삭제되지 않음", conn.execute("SELECT count(*) FROM messages WHERE session_id=%s", (SID,)).fetchone()[0] == n_msgs)
+    r = cli("ctx", "recent", "--limit", "50")
+    check("제외된 세션은 recent 에서 빠지고 --include-excluded 면 보임", SID not in r.stdout and SID in cli("ctx", "recent", "--limit", "50", "--include-excluded").stdout, r.stdout)
+    r = cli("ctx", "session", SID[:8])
+    check("제외된 세션도 session 조회는 되고 제외 표시가 보임", r.returncode == 0 and "집계 제외됨" in r.stdout, r.stdout[:200])
+    r = cli("ctx", "session-exclude", "restore", SID[:8])
+    check("restore: 복원, recent 에 다시 보임", r.returncode == 0 and SID in cli("ctx", "recent", "--limit", "50").stdout, r.stdout + r.stderr)
+
     # --- 표가 없는 옛 DB 에서도 조회 명령은 동작(마이그레이션 전 호환)
     conn.execute("DROP TABLE secrets"); conn.execute("DROP TABLE secret_ignores"); conn.commit()
     r = cli("ctx", "session", SID[:8])
