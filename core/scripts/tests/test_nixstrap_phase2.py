@@ -25,7 +25,7 @@ repo = os.path.join(tmp, "repo"); os.makedirs(os.path.join(repo, "hosts"))
 open(os.path.join(repo, "hosts", "_base.toml"), "w").write('username = "u"\n')
 open(os.path.join(repo, "hosts", "h1.toml"), "w").write('type = "laptop"\npreset = "workstation"\n')
 
-for name in ["parted", "mkfs.fat", "mkfs.btrfs", "mount", "umount", "btrfs", "swapoff", "udevadm", "mkdir", "cryptsetup", "cd_"]:
+for name in ["parted", "mkfs.fat", "mkfs.btrfs", "mount", "umount", "btrfs", "swapoff", "udevadm", "mkdir", "cryptsetup", "blkdiscard", "cd_"]:
     p = os.path.join(shim, name)
     open(p, "w").write('#!/usr/bin/env bash\nprintf "%s" "$(basename "$0")" >> "$CALLS"\n'
                        'for a in "$@"; do printf " %s" "$a" >> "$CALLS"; done; printf "\\n" >> "$CALLS"\n'
@@ -92,6 +92,7 @@ check("LUKS: mkfs.btrfs 는 매퍼 장치에", any(l.startswith("mkfs.btrfs") an
 check("LUKS: mount 도 매퍼 장치", any(l.startswith("mount") and "/dev/mapper/cryptroot /mnt" in l for l in lines))
 check("LUKS: 순서 mklabel < mkpart < luksFormat < mkfs.btrfs",
       -1 < idx("parted /dev/nvme0n1 --script mklabel") < idx("parted /dev/nvme0n1 --script mkpart ESP") < idx("cryptsetup luksFormat") < idx("mkfs.btrfs"), calls)
+check("LUKS: 전체 TRIM(blkdiscard)이 mklabel 보다 앞", -1 < idx("blkdiscard -f /dev/nvme0n1") < idx("parted /dev/nvme0n1 --script mklabel"), calls)
 check("LUKS: ESP 는 LUKS 밖(mkfs.fat 이 원래 부트 파티션)", any(l.startswith("mkfs.fat") and l.endswith("/dev/nvme0n1p1") for l in lines))
 check("LUKS: 열림 검증(--test-passphrase) 이 mkfs.btrfs 보다 앞", -1 < idx("cryptsetup open --test-passphrase") < idx("mkfs.btrfs"), calls)
 

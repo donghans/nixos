@@ -79,6 +79,19 @@ check("복원 후 verify 성공", lc("verify", img).returncode == 0)
 t = subprocess.run(["cryptsetup", "open", "--test-passphrase", "--key-file=-", img], input=PW.encode(), capture_output=True)
 check("복원 후 원래 암호로 열림", t.returncode == 0, t.stderr.decode())
 
+# --name 은 경로·옵션 모양을 거부한다
+for bad in ("../x", "a/b", "-x"):
+    check(f"--name {bad!r} 거부", lc("backup-header", img, bak, "--name", bad).returncode == 2)
+
+# 다른 장치(UUID 다름)의 백업을 덮으려면 추가 확인이 필요하다
+img2 = os.path.join(tmp, "other.img"); open(img2, "wb").truncate(64 * 1024 * 1024)
+subprocess.run(["cryptsetup", "luksFormat", "--type", "luks2", "--batch-mode", "--pbkdf", "pbkdf2", "--pbkdf-force-iterations", "1000", "--key-file=-", img2], input=b"other pw", check=True, capture_output=True)
+u2 = subprocess.run(["cryptsetup", "luksUUID", img2], capture_output=True, text=True).stdout.strip()
+rdiff = lc("restore-header", img2, out, inp=img2 + "\n")
+check("UUID 다름: 경고 후 'overwrite' 없으면 중단·변경 없음", rdiff.returncode != 0 and "UUID 가 다릅니다" in rdiff.stdout and subprocess.run(["cryptsetup", "luksUUID", img2], capture_output=True, text=True).stdout.strip() == u2, rdiff.stdout + rdiff.stderr)
+rdiff2 = lc("restore-header", img2, out, inp="overwrite\n" + img2 + "\n")
+check("UUID 다름: overwrite + 경로 확인 뒤에는 복원", rdiff2.returncode == 0, rdiff2.stdout + rdiff2.stderr)
+
 shutil.rmtree(tmp, ignore_errors=True)
 print(f"\nluksctl {n['ok']} 통과 / {n['bad']} 실패")
 sys.exit(1 if n["bad"] else 0)

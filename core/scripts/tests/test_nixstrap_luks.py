@@ -121,6 +121,7 @@ def read_log(name):
 shown, full, secret = run("full", lambda s: "\n" + s.upper() + "\n/dev/nvme0n1\n" + s + "\n")
 check("화면에 8단어 표시", len(secret.split()) == 8, secret)
 check("QR 표시", "QRCODE" in shown)
+check("대문자로 입력하면 정규화 경고(부팅 때는 정규화 안 됨)", "공백 1칸" in full, full[-500:])
 check("RC1=0 RC2=0 RC3=0 RC4=0", all(f"RC{i}=0" in full for i in (1, 2, 3, 4)), full[-300:])
 key = read_log("key")
 check("luksFormat 키 = 암호(개행 없음)", key == secret.encode(), repr(key))

@@ -24,6 +24,12 @@ _luks_clear_screen() {
 
 luks_scrub() { _LUKS_PW=""; }
 
+# 입력이 정규화 결과(소문자·공백 1칸)와 다르면 알린다. 부팅 때 initrd 의 암호 입력창은 정규화하지 않으므로
+# 대문자·이중 공백으로 입력하면 여기서는 통과해도 부팅 때 열리지 않는다. 인자: 입력 원문, 정규화 결과
+_luks_warn_if_unnormalized() {
+    [ "$1" = "$2" ] || log_msg "Notice" "입력이 '소문자·단어 사이 공백 1칸' 형식과 달랐습니다(정규화해 비교함). 부팅 때의 암호 입력창은 정규화하지 않으니 종이에 적힌 그대로 소문자·공백 1칸으로 입력하세요."
+}
+
 # QR 이 들어갈 만큼 터미널이 크면 그린다. 아니면 조용히 생략(단어 표시는 항상 병행).
 _luks_show_qr() {
     command -v qrencode >/dev/null 2>&1 || { log_msg "Notice" "qrencode 없음 — QR 생략(단어만 표시)"; return 0; }
@@ -45,7 +51,7 @@ _luks_show_secret() {
     _bits=$(python3 "$SCRIPT_DIR/nixstrap.lib-luks.py" bits "$_LUKS_WORDS")
     printf '\n'
     log_msg "Notice" "디스크 암호화 복구 암호 (영어 ${_LUKS_WORDS}단어, 약 ${_bits}비트) — 지금 종이/보안 저장소에 기록하세요."
-    log_msg "Notice" "생성 시각 $(date '+%Y-%m-%d %H:%M')도 함께 적어 두세요(재실행 시 옛 암호와 구분). 이 화면은 한 번만 보입니다."
+    log_msg "Notice" "생성 시각 $(date '+%Y-%m-%d %H:%M')도 함께 적어 두세요(재실행 시 옛 암호와 구분). 이 화면은 암호 확인이 끝나면 다시 볼 수 없습니다."
     printf '\n'
     printf '%s\n' "$_LUKS_PW" | python3 "$SCRIPT_DIR/nixstrap.lib-luks.py" words | sed 's/^/        /'
     printf '\n'
@@ -57,7 +63,7 @@ _luks_show_secret() {
 _luks_confirm_device() {
     local _dev=$1 _typed
     printf '\n'
-    log_msg "Notice" "다음 디스크 전체가 지워지고 암호화됩니다 (되돌릴 수 없음):"
+    log_msg "Notice" "다음 디스크의 모든 데이터를 지우고 암호화합니다 (되돌릴 수 없음). 옛 데이터는 TRIM 으로 폐기를 시도하지만, 매체에 따라 완전히 지워진다는 보장은 없습니다:"
     lsblk -o NAME,SIZE,MODEL,FSTYPE,LABEL "$_dev" 2>/dev/null | sed 's/^/        /' || true
     wipefs -n "$_dev" 2>/dev/null | sed 's/^/        /' || true
     read -rp "$(_log_prompt)지울 디스크 경로를 그대로 입력하세요 ($_dev): " _typed
@@ -71,7 +77,7 @@ _luks_confirm_device() {
 # Phase 1: 생성 → 표시 → 기록 → 화면 지움 → 재입력 확인 → 디스크 경로 확인. 실패하면 return 1 (디스크 불변).
 # 인자: 대상 디스크 경로(예 /dev/nvme0n1). 성공하면 _LUKS_PW 에 암호가 남는다(Phase 2 에서 사용 후 luks_scrub).
 luks_generate_and_confirm() {
-    local _disk=$1 _try _typed _want
+    local _disk=$1 _try _typed _want _raw
     _LUKS_PW=$(python3 "$SCRIPT_DIR/nixstrap.lib-luks.py" gen "$_LUKS_WORDS") || { log_msg "Error" "복구 암호 생성 실패"; _LUKS_PW=""; return 1; }
     python3 "$SCRIPT_DIR/nixstrap.lib-luks.py" check-wordlist >/dev/null || { log_msg "Error" "단어 목록 무결성 오류"; _LUKS_PW=""; return 1; }
     _luks_show_secret
@@ -83,7 +89,9 @@ luks_generate_and_confirm() {
         log_msg "Notice" "기록한 종이를 보고 복구 암호를 다시 입력하세요 (화면 복사 금지) [$_try/$_LUKS_MAX_TRIES]:"
         read -rsp "$(_log_prompt)복구 암호: " _typed
         printf '\n'
+        _raw=$_typed
         _typed=$(printf '%s\n' "$_typed" | python3 "$SCRIPT_DIR/nixstrap.lib-luks.py" normalize)
+        _luks_warn_if_unnormalized "$_raw" "$_typed"; _raw=""
         if [ "$_typed" = "$_want" ]; then
             _typed=""; _want=""
             _luks_confirm_device "$_disk" || { _LUKS_PW=""; return 1; }
@@ -115,12 +123,14 @@ luks_format_open() {
 
 # 포맷 직후: 종이를 보고 다시 입력해 열림을 검증한다(--test-passphrase). 최대 _LUKS_MAX_TRIES 회.
 luks_verify_typed() {
-    local _part=$1 _try _typed
+    local _part=$1 _try _typed _raw
     for (( _try = 1; _try <= _LUKS_MAX_TRIES; _try++ )); do
         log_msg "Notice" "종이의 복구 암호로 열림 검증 [$_try/$_LUKS_MAX_TRIES]:"
         read -rsp "$(_log_prompt)복구 암호: " _typed
         printf '\n'
+        _raw=$_typed
         _typed=$(printf '%s\n' "$_typed" | python3 "$SCRIPT_DIR/nixstrap.lib-luks.py" normalize)
+        _luks_warn_if_unnormalized "$_raw" "$_typed"; _raw=""
         if printf '%s' "$_typed" | cryptsetup open --test-passphrase --key-file=- "$_part"; then
             _typed=""
             log_msg "Success" "복구 암호로 열림 확인"
@@ -145,7 +155,7 @@ luks_close() {
 # 설치 직후 LUKS 헤더 백업 (기본 예). 대상: USB 파티션(Ventoy 데이터 파티션 등) / 마운트된 디렉터리 / scp.
 # 헤더는 노트북 디스크 밖에 둔다. 실패·건너뜀은 설치를 막지 않는다(경고). 인자: LUKS 파티션 경로.
 luks_offer_header_backup() {
-    local _part=$1 _ans _tmpdir _mnt _out _sel _target _dev
+    local _part=$1 _ans _tmpdir _mnt _out _sel _target _dev _size _fs _label _pdisk
     local -a _devs=() _labels=() _opts=()
     printf '\n'
     log_msg "Notice" "LUKS 헤더가 손상되면 복구 암호가 있어도 데이터를 열 수 없습니다. 헤더를 디스크 밖(USB 등)에 백업해 두는 것을 권장합니다."
@@ -156,10 +166,17 @@ luks_offer_header_backup() {
     fi
     while true; do
         _devs=(); _labels=()
-        while read -r _dev _size _fs _label _hot; do
-            [ -n "$_dev" ] && [ -n "$_fs" ] && [ "$_hot" = 1 ] || continue
+        # JSON 으로 읽는다: `lsblk -r` + read 는 빈 레이블 칸을 합쳐 버려 레이블 없는 USB 가 빠진다.
+        # 설치 대상 디스크 자신의 파티션은 후보에서 뺀다(디스크 밖 백업의 의미가 없어짐).
+        _pdisk=$(lsblk -dnpo PKNAME "$_part" 2>/dev/null | head -1 || true)
+        while IFS=$'\x1f' read -r _dev _size _fs _label; do
+            [ -n "$_dev" ] || continue
             _devs+=("$_dev"); _labels+=("$(printf '%-18s %8s [%-6s] %s' "$_dev" "$_size" "$_fs" "${_label:-<레이블 없음>}")")
-        done < <(lsblk -rpno NAME,SIZE,FSTYPE,LABEL,HOTPLUG 2>/dev/null)
+        done < <(lsblk -lJpo NAME,SIZE,FSTYPE,LABEL,HOTPLUG,PKNAME 2>/dev/null | jq -r --arg pd "$_pdisk" '
+            .blockdevices[]
+            | select(.fstype != null and (.hotplug == true or .hotplug == 1 or .hotplug == "1"))
+            | select($pd == "" or (.pkname != $pd and .name != $pd))
+            | [.name, .size, .fstype, (.label // "")] | join("\u001f")')
         _opts=("${_labels[@]}" "+ 이미 마운트된 디렉터리 경로 입력" "+ 다른 컴퓨터로 scp (user@host:경로)" "건너뜀")
         _pick "헤더 백업 위치 (USB 데이터 파티션 권장; exFAT 등은 파일 권한이 없음을 감안):" "${_opts[@]}"
         _sel=$REPLY
@@ -176,7 +193,7 @@ luks_offer_header_backup() {
             _tmpdir=$(mktemp -d /tmp/luks-hdr-XXXXXX)
             _out=$(python3 "$SCRIPT_DIR/luksctl.py" backup-header "$_part" "$_tmpdir") || _out=""
             if [ -n "$_out" ] && [ -n "$_target" ]; then
-                scp "$_out" "$_target" || { log_msg "Error" "scp 실패"; _out=""; }
+                scp -- "$_out" "$_target" || { log_msg "Error" "scp 실패"; _out=""; }
             else
                 _out=""
             fi

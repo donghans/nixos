@@ -47,6 +47,8 @@ def cmd_backup_header(args):
         i = args.index("--name")
         name = args[i + 1]
         del args[i:i + 2]
+        if not name or name.startswith("-") or os.sep in name or name in (".", ".."):
+            _die(f"--name 은 파일 이름 접두사여야 합니다(경로 구분자·'-' 시작 불가): {name}", 2)
     if len(args) != 2:
         _die("사용: luksctl backup-header <장치|파일> <대상디렉터리> [--name 접두사]", 2)
     dev, dest = args
@@ -129,7 +131,27 @@ def cmd_restore_header(args):
     dev, bak = args
     if _run(["isLuks", bak]).returncode != 0:
         _die(f"{bak}: LUKS 헤더가 아닙니다")
+    # 열려 있는(매핑된) 장치에는 복원하지 않는다
+    try:
+        kids = subprocess.run(["lsblk", "-rno", "TYPE", dev], capture_output=True, text=True).stdout.split()
+    except FileNotFoundError:
+        kids = []
+    if "crypt" in kids:
+        _die(f"{dev} 가 열려 있습니다(매퍼 존재). 먼저 cryptsetup close 로 닫으세요.")
+    cur = _run(["luksUUID", dev])
+    new_uuid = luks_uuid(bak)
+    differ = False
+    if cur.returncode == 0:
+        cur_uuid = cur.stdout.decode().strip()
+        print(f"현재 장치 UUID: {cur_uuid}\n백업 파일 UUID: {new_uuid}")
+        differ = cur_uuid != new_uuid
+    else:
+        print(f"현재 장치의 헤더를 읽지 못했습니다(손상됐다면 정상). 백업 파일 UUID: {new_uuid}")
     print(f"{dev} 의 현재 헤더를 {bak} 로 덮어씁니다. 이 장치의 현재 키슬롯은 사라집니다(되돌릴 수 없음).")
+    if differ:
+        print("경고: UUID 가 다릅니다 — 다른 디스크의 백업일 수 있습니다. 그 디스크의 헤더로 덮으면 이 장치의 데이터는 열리지 않게 됩니다.")
+        if input("그래도 덮으려면 'overwrite' 를 입력하세요: ") != "overwrite":
+            _die("중단합니다(변경 없음).")
     typed = input(f"계속하려면 장치 경로 '{dev}' 를 그대로 입력하세요: ")
     if typed != dev:
         _die("입력이 일치하지 않아 중단합니다(변경 없음).")

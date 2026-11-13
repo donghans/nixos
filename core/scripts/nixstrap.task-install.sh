@@ -30,6 +30,11 @@ _create_partitions() {
     log_msg "Disk" "$_DISK 에 파티션 생성 중..."
     log_exec "disk" ">" "parted"
     if [[ "$_WIPE" == "true" ]]; then
+        if [ "${_LUKS:-false}" = true ]; then
+            # 옛 평문 데이터가 LUKS 영역 밑에 raw 로 남지 않게 전체 TRIM(SSD/NVMe). 보장은 아니다 — 미지원이면 경고만 한다.
+            log_msg "Disk" "기존 데이터 폐기(TRIM): $_DISK"
+            blkdiscard -f "$_DISK" || log_msg "Notice" "TRIM 미지원/실패 — 옛 데이터가 디스크에 남아 있을 수 있습니다(암호화 영역 밖을 raw 로 읽으면 복원될 수 있음)."
+        fi
         parted "$_DISK" --script mklabel gpt
     fi
     parted "$_DISK" --script mkpart ESP fat32 "$_PART_START" "$_BOOT_END"
