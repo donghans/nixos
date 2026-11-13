@@ -183,6 +183,30 @@ _apply_luks_host_config() {
     log_msg "Config" "$HOST.toml: [mods.sys.services] luks = true (설치 사본에만 적용)"
 }
 
+# 새 시스템의 initrd 에 LUKS 해제 구성이 들어갔는지 확인한다(없으면 재부팅해도 루트를 못 연다). 경고만 한다(형식 해석 실패가 설치 실패는 아님).
+_luks_check_initrd() {
+    [ "${_LUKS:-false}" = true ] || return 0
+    local _f _list
+    _f=$(ls -t /mnt/boot/EFI/nixos/*initrd* 2>/dev/null | head -1)
+    if [ -z "$_f" ]; then
+        log_msg "Notice" "/mnt/boot/EFI/nixos 에서 initrd 를 찾지 못해 LUKS 구성 확인을 건너뜁니다 — 재부팅 전 직접 확인하세요."
+        return 0
+    fi
+    _list=$(zstdcat "$_f" 2>/dev/null | cpio -it 2>/dev/null || true)
+    if [ -z "$_list" ]; then
+        log_msg "Notice" "initrd 형식을 해석하지 못했습니다(확인 불가): ${_f##*/}"
+    elif printf '%s\n' "$_list" | grep -q -E 'cryptsetup|crypttab'; then
+        log_msg "Success" "initrd 에 LUKS 해제 구성 확인됨: ${_f##*/}"
+    else
+        log_msg "Error" "initrd 에 cryptsetup/crypttab 이 없습니다 — 이대로 재부팅하면 루트를 열지 못할 수 있습니다: ${_f##*/}"
+    fi
+}
+
+_luks_header_backup() {
+    [ "${_LUKS:-false}" = true ] || return 0
+    luks_offer_header_backup "$_LUKS_PART"
+}
+
 _luks_final_notice() {
     [ "${_LUKS:-false}" = true ] || return 0
     printf "\n"
@@ -426,6 +450,8 @@ phase2_execute() {
     _save_ssh_pem           # 17. PEM → ~/.ssh/ (generate-key 모드만)
     _commit_ssh_files       # 18. pub key + TOML 커밋 + push 시도
 
+    _luks_check_initrd
+    _luks_header_backup
     _luks_final_notice
     echo ""
     log_msg "Success" "설치 완료. 재부팅 → TTY 로그인 → 'nixup home' → 재로그인."

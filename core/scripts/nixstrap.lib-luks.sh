@@ -141,3 +141,66 @@ luks_close() {
     _LUKS_OPENED=false
     return 0
 }
+
+# 설치 직후 LUKS 헤더 백업 (기본 예). 대상: USB 파티션(Ventoy 데이터 파티션 등) / 마운트된 디렉터리 / scp.
+# 헤더는 노트북 디스크 밖에 둔다. 실패·건너뜀은 설치를 막지 않는다(경고). 인자: LUKS 파티션 경로.
+luks_offer_header_backup() {
+    local _part=$1 _ans _tmpdir _mnt _out _sel _target _dev
+    local -a _devs=() _labels=() _opts=()
+    printf '\n'
+    log_msg "Notice" "LUKS 헤더가 손상되면 복구 암호가 있어도 데이터를 열 수 없습니다. 헤더를 디스크 밖(USB 등)에 백업해 두는 것을 권장합니다."
+    read -rp "$(_log_prompt)지금 헤더를 백업하시겠습니까? (Y/n): " _ans || _ans=n
+    if [[ "${_ans:-Y}" =~ ^[Nn]$ ]]; then
+        log_msg "Notice" "백업 건너뜀 — 나중에 'luksctl.py backup-header $_part <디렉터리>' 로 할 수 있습니다."
+        return 0
+    fi
+    while true; do
+        _devs=(); _labels=()
+        while read -r _dev _size _fs _label _hot; do
+            [ -n "$_dev" ] && [ -n "$_fs" ] && [ "$_hot" = 1 ] || continue
+            _devs+=("$_dev"); _labels+=("$(printf '%-18s %8s [%-6s] %s' "$_dev" "$_size" "$_fs" "${_label:-<레이블 없음>}")")
+        done < <(lsblk -rpno NAME,SIZE,FSTYPE,LABEL,HOTPLUG 2>/dev/null)
+        _opts=("${_labels[@]}" "+ 이미 마운트된 디렉터리 경로 입력" "+ 다른 컴퓨터로 scp (user@host:경로)" "건너뜀")
+        _pick "헤더 백업 위치 (USB 데이터 파티션 권장; exFAT 등은 파일 권한이 없음을 감안):" "${_opts[@]}"
+        _sel=$REPLY
+        _out=""
+        if [ "$_sel" -eq "${#_devs[@]}" ]; then
+            read -rp "$(_log_prompt)디렉터리 경로: " _target || _target=""
+            if [ -d "$_target" ]; then
+                _out=$(python3 "$SCRIPT_DIR/luksctl.py" backup-header "$_part" "$_target") || _out=""
+            else
+                log_msg "Error" "디렉터리가 아닙니다: $_target"
+            fi
+        elif [ "$_sel" -eq "$(( ${#_devs[@]} + 1 ))" ]; then
+            read -rp "$(_log_prompt)scp 대상 (예: user@host:/path/): " _target || _target=""
+            _tmpdir=$(mktemp -d /tmp/luks-hdr-XXXXXX)
+            _out=$(python3 "$SCRIPT_DIR/luksctl.py" backup-header "$_part" "$_tmpdir") || _out=""
+            if [ -n "$_out" ] && [ -n "$_target" ]; then
+                scp "$_out" "$_target" || { log_msg "Error" "scp 실패"; _out=""; }
+            else
+                _out=""
+            fi
+            rm -rf "$_tmpdir"
+        elif [ "$_sel" -eq "$(( ${#_devs[@]} + 2 ))" ]; then
+            log_msg "Notice" "백업 건너뜀 — 나중에 'luksctl.py backup-header $_part <디렉터리>' 로 할 수 있습니다."
+            return 0
+        else
+            _mnt=$(mktemp -d /tmp/luks-hdr-mnt-XXXXXX)
+            if mount "${_devs[$_sel]}" "$_mnt"; then
+                _out=$(python3 "$SCRIPT_DIR/luksctl.py" backup-header "$_part" "$_mnt") || _out=""
+                sync
+                umount "$_mnt" || log_msg "Notice" "umount 실패: $_mnt (수동으로 정리하세요)"
+            else
+                log_msg "Error" "마운트 실패: ${_devs[$_sel]}"
+            fi
+            rmdir "$_mnt" 2>/dev/null || true
+        fi
+        if [ -n "$_out" ]; then
+            log_msg "Success" "헤더 백업 완료: ${_out##*/}"
+            log_msg "Notice" "※ TPM2/FIDO2 등으로 슬롯을 바꾸면 이 백업은 옛 암호로만 열립니다 — 그 뒤 다시 백업하세요."
+            return 0
+        fi
+        read -rp "$(_log_prompt)백업에 실패했습니다. 다시 시도하시겠습니까? (Y/n): " _ans || _ans=n
+        [[ "${_ans:-Y}" =~ ^[Nn]$ ]] && { log_msg "Notice" "백업하지 않고 계속합니다."; return 0; }
+    done
+}

@@ -15,6 +15,7 @@
     cp ${./scripts/nixstrap.lib-repo.py}     $out/nixstrap.lib-repo.py
     cp ${./scripts/nixstrap.lib-part.py}     $out/nixstrap.lib-part.py
     cp ${./scripts/nixstrap.lib-luks.py}     $out/nixstrap.lib-luks.py
+    cp ${./scripts/luksctl.py}               $out/luksctl.py
     cp ${./scripts/nixstrap.lib-luks.sh}     $out/nixstrap.lib-luks.sh
     cp ${./scripts/nixstrap.data-eff-large.txt} $out/nixstrap.data-eff-large.txt
   '';
