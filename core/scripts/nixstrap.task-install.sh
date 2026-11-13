@@ -187,15 +187,17 @@ _apply_luks_host_config() {
 _luks_check_initrd() {
     [ "${_LUKS:-false}" = true ] || return 0
     local _f _list
-    _f=$(ls -t /mnt/boot/EFI/nixos/*initrd* 2>/dev/null | head -1)
+    local _dir="${_INITRD_DIR:-/mnt/boot/EFI/nixos}"   # 환경변수는 시험용
+    _f=$(ls -t "$_dir"/*initrd* 2>/dev/null | head -1 || true)   # 없으면 ls 실패 → set -e/pipefail 로 중단되지 않게
     if [ -z "$_f" ]; then
-        log_msg "Notice" "/mnt/boot/EFI/nixos 에서 initrd 를 찾지 못해 LUKS 구성 확인을 건너뜁니다 — 재부팅 전 직접 확인하세요."
+        log_msg "Notice" "$_dir 에서 initrd 를 찾지 못해 LUKS 구성 확인을 건너뜁니다 — 재부팅 전 직접 확인하세요."
         return 0
     fi
     _list=$(zstdcat "$_f" 2>/dev/null | cpio -it 2>/dev/null || true)
     if [ -z "$_list" ]; then
         log_msg "Notice" "initrd 형식을 해석하지 못했습니다(확인 불가): ${_f##*/}"
-    elif printf '%s\n' "$_list" | grep -q -E 'cryptsetup|crypttab'; then
+    # 파이프(printf | grep -q)는 pipefail 에서 목록이 크면 SIGPIPE 로 실패해 오탐한다(리허설에서 실제로 발생) — here-string 사용
+    elif grep -q -E 'cryptsetup|crypttab' <<<"$_list"; then
         log_msg "Success" "initrd 에 LUKS 해제 구성 확인됨: ${_f##*/}"
     else
         log_msg "Error" "initrd 에 cryptsetup/crypttab 이 없습니다 — 이대로 재부팅하면 루트를 열지 못할 수 있습니다: ${_f##*/}"
