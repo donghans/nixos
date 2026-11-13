@@ -14,6 +14,9 @@
     cp ${./scripts/nixstrap.task-install.sh} $out/nixstrap.task-install.sh
     cp ${./scripts/nixstrap.lib-repo.py}     $out/nixstrap.lib-repo.py
     cp ${./scripts/nixstrap.lib-part.py}     $out/nixstrap.lib-part.py
+    cp ${./scripts/nixstrap.lib-luks.py}     $out/nixstrap.lib-luks.py
+    cp ${./scripts/nixstrap.lib-luks.sh}     $out/nixstrap.lib-luks.sh
+    cp ${./scripts/nixstrap.data-eff-large.txt} $out/nixstrap.data-eff-large.txt
   '';
 
   # 2. nixstrap.sh를 ISO 시스템의 bin 폴더에 넣기 위한 '패키지' 생성
