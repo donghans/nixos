@@ -83,7 +83,7 @@ check("VM+laptop: 표 하나에 합쳐짐", raw.count("[mods.sys.services]") == 
 t, raw = profile("_IS_LAPTOP=false; _REFIND=false; _IS_VM=false")
 check("평범한 신규: 기존과 같은 모양(type=desktop, 표 없음)", t["type"] == "desktop" and "mods" not in t, raw)
 t, raw = profile("_IS_LAPTOP=false; _REFIND=false; _IS_VM=true")
-check("VM 신규: 기존과 같은 모양", t["mods"]["sys"]["services"] == {"incus-guest": True, "incus": False}, raw)
+check("VM 신규: incus 계열을 함께 끈다(incus-win11·gui incus-vm)", t["mods"]["sys"]["services"] == {"incus-guest": True, "incus": False, "incus-win11": False} and t["mods"]["gui"]["apps"] == {"incus-vm": False}, raw)
 
 shutil.rmtree(tmp, ignore_errors=True)
 print(f"\nnixstrap-phase1 {n['ok']} 통과 / {n['bad']} 실패")

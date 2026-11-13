@@ -42,6 +42,8 @@ _create_partitions() {
 
     log_msg "Disk" "udev 대기 중..."
     udevadm settle --timeout=10
+    # BOOT_PART·ROOT_PART 는 nixstrap.sh/task-disk.sh 에서 대입되는 전역이다(다른 파일이라 shellcheck 가 오탐)
+    # shellcheck disable=SC2153
     log_msg "Disk" "파티션 준비 완료: boot=$BOOT_PART, root=$ROOT_PART"
 }
 
@@ -154,11 +156,19 @@ _create_host_profile() {
     # [mods.sys.services] 표는 하나로 합쳐 쓴다(헤더가 두 번 나오면 resolve 파싱 오류)
     local _svc_lines=""
     [[ "$_IS_VM" == "true" ]] && _svc_lines+=$'incus-guest = true\nincus = false\n'
+    # incus 를 끄면 그것을 요구하는 항목도 꺼야 한다(안 그러면 평가 어서션 실패 — P4 리허설에서 발생).
+    # incus-win11 은 services, incus-vm 은 gui.apps 에 있다. gui 는 워크스테이션 계열에만 있다.
+    local _gui_lines=""
+    if [[ "$_IS_VM" == "true" ]]; then
+        _svc_lines+=$'incus-win11 = false\n'
+        [ "${_PRESET:-}" != "server" ] && _gui_lines=$'\n[mods.gui.apps]\nincus-vm = false\n'
+    fi
     [ "${_REFIND:-false}" = true ] && _svc_lines+=$'refind = true\n'
     if [ -n "$_svc_lines" ]; then
         printf 'type = "%s"\npreset = "%s"%s%s%s\n\n[mods.sys.services]\n%s' \
             "$_type" "$_PRESET" "$_sv_line" "$_username_line" "$_ram_line" "$_svc_lines" > "$HOST_TOML"
-        [[ "$_IS_VM" == "true" ]] && log_msg "Config" "$HOST.toml 에서 incus-guest 활성화, incus 비활성화 (가상화 환경)"
+        printf '%s' "$_gui_lines" >> "$HOST_TOML"
+        [[ "$_IS_VM" == "true" ]] && log_msg "Config" "$HOST.toml 에서 incus-guest 활성화, incus·incus-win11·incus-vm 비활성화 (가상화 환경)"
         [ "${_REFIND:-false}" = true ] && log_msg "Config" "$HOST.toml 에서 refind 활성화 (노트북)"
     else
         printf 'type = "%s"\npreset = "%s"%s%s%s\n' "$_type" "$_PRESET" "$_sv_line" "$_username_line" "$_ram_line" > "$HOST_TOML"
@@ -188,7 +198,8 @@ _luks_check_initrd() {
     [ "${_LUKS:-false}" = true ] || return 0
     local _f _list
     local _dir="${_INITRD_DIR:-/mnt/boot/EFI/nixos}"   # 환경변수는 시험용
-    _f=$(ls -t "$_dir"/*initrd* 2>/dev/null | head -1 || true)   # 없으면 ls 실패 → set -e/pipefail 로 중단되지 않게
+    # 가장 최근 initrd. 없거나 find 가 실패해도 set -e/pipefail 로 중단되지 않게 || true
+    _f=$(find "$_dir" -maxdepth 1 -name '*initrd*' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2- || true)
     if [ -z "$_f" ]; then
         log_msg "Notice" "$_dir 에서 initrd 를 찾지 못해 LUKS 구성 확인을 건너뜁니다 — 재부팅 전 직접 확인하세요."
         return 0
