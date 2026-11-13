@@ -11,6 +11,7 @@ _LUKS="${_LUKS:-false}"
 _LUKS_NAME="${_LUKS_NAME:-cryptroot}"
 _LUKS_PART="${_LUKS_PART:-}"
 _LUKS_OPENED="${_LUKS_OPENED:-false}"
+_LUKS_MAPPER_DIR="${_LUKS_MAPPER_DIR:-/dev/mapper}"
 _LUKS_PW=""
 _LUKS_WORDS="${_LUKS_WORDS:-8}"
 _LUKS_MAX_TRIES=3
@@ -131,10 +132,12 @@ luks_verify_typed() {
     return 1
 }
 
-# 이번 실행이 연 매퍼만 닫는다(LUKS 아니오 실행이 기존 시스템의 cryptroot 를 닫지 않게).
+# LUKS 를 고른 실행에서만 매퍼를 닫는다(LUKS 아니오 실행이 열려 있는 시스템의 cryptroot 를 닫지 않게).
+# 시작 시 정리(이전 시도의 남은 매퍼)와 종료 시 정리에 모두 쓴다. 닫을 게 없거나 실패해도 계속한다.
 luks_close() {
-    if [ "$_LUKS" = true ] && [ "$_LUKS_OPENED" = true ] && [ -e "/dev/mapper/$_LUKS_NAME" ]; then
-        cryptsetup close "$_LUKS_NAME" 2>/dev/null || log_msg "Notice" "cryptsetup close 실패(사용 중?): /dev/mapper/$_LUKS_NAME"
-        _LUKS_OPENED=false
+    if [ "$_LUKS" = true ] && [ -e "$_LUKS_MAPPER_DIR/$_LUKS_NAME" ]; then
+        cryptsetup close "$_LUKS_NAME" 2>/dev/null || log_msg "Notice" "cryptsetup close 실패(사용 중?): $_LUKS_MAPPER_DIR/$_LUKS_NAME"
     fi
+    _LUKS_OPENED=false
+    return 0
 }

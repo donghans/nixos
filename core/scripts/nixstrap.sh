@@ -14,6 +14,7 @@ source "$SCRIPT_DIR/nixstrap.lib-ui.sh"
 source "$SCRIPT_DIR/nixstrap.task-input.sh"
 source "$SCRIPT_DIR/nixstrap.task-disk.sh"
 source "$SCRIPT_DIR/nixstrap.task-install.sh"
+source "$SCRIPT_DIR/nixstrap.lib-luks.sh"
 
 # -- 공유 상태 --
 NIXOS_REPO="${NIXOS_REPO:-}"
@@ -42,6 +43,9 @@ _HOST_USERNAME=""  # 신규 호스트: 비어있으면 _base.toml fallback, 값 
 _SSH_ACCESS_MODE=""           # server 신규 호스트: existing-key | generate-key | password
 _SSH_KEY_FILE=""              # existing-key 모드에서 공개키를 추출할 키 파일 경로
 _SSH_KEY_GENERATED=false      # generate-key 모드로 Phase 2에서 키를 만들었을 때 true → 개인키 저장 대상
+_LUKS=false                   # 워크스테이션 디스크 암호화(LUKS2) 선택. 기본 아니오. 모드 2 + 전체 초기화에서만 true 가능
+_IS_LAPTOP=false              # 신규 호스트에서 노트북인지 답한 값 (기존 호스트는 toml 의 type)
+_REFIND=false                 # rEFInd 사용 여부 (기존 호스트: toml 의 refind, 신규 노트북: true)
 REPO_TMP="/tmp/nixos-setup-repo"
 PARAMS_FILE="${PARAMS_FILE:-/root/nixstrap-params.env}"
 _USER_PASSWORD=""  # ask_password에서 설정, _post_process에서 적용 후 즉시 비움 (파일 저장 안 함)
@@ -58,6 +62,7 @@ _NIXOS_INSTALL_PID=""  # setsid로 실행한 nixos-install PID (종료 시 kill 
 # -- 인터럽트·종료 처리 --
 _trap_cleanup() {
     _USER_PASSWORD=""
+    luks_scrub
     preauth_cleanup_tmp_key 2>/dev/null || true
     tput cnorm 2>/dev/null || true
     stty sane 2>/dev/null || true
@@ -72,6 +77,7 @@ _trap_cleanup() {
         swapoff -a 2>/dev/null || true
         umount -R /mnt 2>/dev/null || umount -lR /mnt 2>/dev/null || true
     fi
+    luks_close
     if [ -d "${REPO_TMP:-}" ]; then
         rm -rf "$REPO_TMP" 2>/dev/null || true
     fi
@@ -127,10 +133,16 @@ else
     [ "$_HOST_IS_NEW" = true ] && ask_preset
     [ "$_HOST_IS_NEW" = true ] && ask_state_version
     [ "$_HOST_IS_NEW" = true ] && ask_ssh_access
+    [ "$_HOST_IS_NEW" = true ] && ask_laptop
     ask_partitions
+    ask_luks
 fi
 review_loop
 ask_password
+if [ "$_LUKS" = true ]; then
+    validate_luks_state || exit 1
+    luks_generate_and_confirm "$_DISK" || exit 1
+fi
 
 # -- Phase 2: 실행 --
 # 대화형 입력(Phase 1) 완료 후부터 시간 측정

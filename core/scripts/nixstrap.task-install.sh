@@ -11,6 +11,8 @@ _cleanup_mounts() {
         swapoff -a 2>/dev/null || true
         umount -R /mnt 2>/dev/null || umount -lR /mnt 2>/dev/null || true
     fi
+    # LUKS: 이전 시도가 남긴 열린 매퍼를 mklabel 전에 닫는다(마운트 없이 매퍼만 열린 경우도 포함)
+    luks_close
 }
 
 _read_disk_labels() {
@@ -32,12 +34,28 @@ _create_partitions() {
     fi
     parted "$_DISK" --script mkpart ESP fat32 "$_PART_START" "$_BOOT_END"
     parted "$_DISK" --script set "$_NEW_BOOT_NUM" esp on
-    parted "$_DISK" --script mkpart primary "$_BOOT_END" "$_PART_END"
+    # LUKS: 루트 파티션 이름을 cryptroot 로 짓는다 → mods/sys/services/luks.nix 기본 device(by-partlabel/cryptroot)와 맞음
+    local _root_pname="primary"
+    [ "${_LUKS:-false}" = true ] && _root_pname="$_LUKS_NAME"
+    parted "$_DISK" --script mkpart "$_root_pname" "$_BOOT_END" "$_PART_END"
     log_exec "disk" "<" "parted"
 
     log_msg "Disk" "udev 대기 중..."
     udevadm settle --timeout=10
     log_msg "Disk" "파티션 준비 완료: boot=$BOOT_PART, root=$ROOT_PART"
+}
+
+# LUKS: 루트 파티션을 luksFormat+open 하고 이후 단계(mkfs·mount)가 매퍼 장치를 루트로 쓰게 한다.
+# Phase 1 에서 확인된 복구 암호(_LUKS_PW)를 쓴다. 포맷 직후 종이를 보고 다시 입력해 열림을 검증한 뒤에만 계속한다.
+_luks_setup() {
+    [ "${_LUKS:-false}" = true ] || return 0
+    if [[ "$_NEW_PARTITIONS" != "true" || "$_WIPE" != "true" || "$FORMAT_ROOT" != "y" ]]; then
+        log_msg "Error" "LUKS 는 신규 파티션 + 전체 디스크 초기화에서만 지원됩니다(내부 정합성 오류)."
+        exit 1
+    fi
+    luks_format_open "$ROOT_PART" || { log_msg "Error" "LUKS 포맷/열기 실패"; exit 1; }
+    luks_verify_typed "$_LUKS_PART" || { log_msg "Error" "복구 암호로 열림을 확인하지 못했습니다 — 중단합니다."; exit 1; }
+    ROOT_PART="/dev/mapper/$_LUKS_NAME"
 }
 
 _format_boot() {
@@ -106,8 +124,8 @@ _move_repo() {
 _create_host_profile() {
     # 레포에 없는 신규 호스트면 <hostname>.toml + <hostname>.nix 자동 생성
     # resolve.py 실행 전에 생성해야 새 호스트명이 resolved.json에 포함됨
-    local HOST_TOML="/mnt/etc/nixos/hosts/$HOST.toml"
-    local HOST_NIX="/mnt/etc/nixos/hosts/$HOST.nix"
+    local HOST_TOML="${_INSTALL_REPO_DIR:-/mnt/etc/nixos}/hosts/$HOST.toml"
+    local HOST_NIX="${_INSTALL_REPO_DIR:-/mnt/etc/nixos}/hosts/$HOST.nix"
     if [ -f "$HOST_TOML" ]; then
         log_msg "Config" "기존 호스트 프로파일 사용: $HOST"
         return
@@ -125,6 +143,7 @@ _create_host_profile() {
     # type: server 프리셋은 "server", 그 외는 "desktop"
     local _type="desktop"
     [ "${_PRESET:-}" = "server" ] && _type="server"
+    [ "${_IS_LAPTOP:-false}" = true ] && _type="laptop"
 
     # 대상 머신 RAM 감지 (nixstrap은 대상 머신에서 직접 실행되므로 /proc/meminfo = 정확한 값)
     local _ram_line=""
@@ -132,10 +151,15 @@ _create_host_profile() {
     _ram_gb=$(awk '/^MemTotal:/ {printf "%d", int(($2 + 1048575) / 1048576)}' /proc/meminfo 2>/dev/null || true)
     [ -n "$_ram_gb" ] && _ram_line=$'\nramGb = '"$_ram_gb"
 
-    if [[ "$_IS_VM" == "true" ]]; then
-        printf 'type = "%s"\npreset = "%s"%s%s%s\n\n[mods.sys.services]\nincus-guest = true\nincus = false\n' \
-            "$_type" "$_PRESET" "$_sv_line" "$_username_line" "$_ram_line" > "$HOST_TOML"
-        log_msg "Config" "$HOST.toml 에서 incus-guest 활성화, incus 비활성화 (가상화 환경)"
+    # [mods.sys.services] 표는 하나로 합쳐 쓴다(헤더가 두 번 나오면 resolve 파싱 오류)
+    local _svc_lines=""
+    [[ "$_IS_VM" == "true" ]] && _svc_lines+=$'incus-guest = true\nincus = false\n'
+    [ "${_REFIND:-false}" = true ] && _svc_lines+=$'refind = true\n'
+    if [ -n "$_svc_lines" ]; then
+        printf 'type = "%s"\npreset = "%s"%s%s%s\n\n[mods.sys.services]\n%s' \
+            "$_type" "$_PRESET" "$_sv_line" "$_username_line" "$_ram_line" "$_svc_lines" > "$HOST_TOML"
+        [[ "$_IS_VM" == "true" ]] && log_msg "Config" "$HOST.toml 에서 incus-guest 활성화, incus 비활성화 (가상화 환경)"
+        [ "${_REFIND:-false}" = true ] && log_msg "Config" "$HOST.toml 에서 refind 활성화 (노트북)"
     else
         printf 'type = "%s"\npreset = "%s"%s%s%s\n' "$_type" "$_PRESET" "$_sv_line" "$_username_line" "$_ram_line" > "$HOST_TOML"
     fi
@@ -150,6 +174,22 @@ _create_host_profile() {
 # SSH 공개키를 hosts/_deploy/<host>.pub 에 등록 (host.nix가 primary user의 authorized_keys로 주입)
 # - existing-key: _SSH_KEY_FILE에서 공개키 추출 / generate-key: 새 키 생성
 # - [deploy] 섹션은 만들지 않음 (스탠드얼론 서버: root 로그인 비활성, nixup으로 서버에서 직접 관리)
+# LUKS 를 골랐으면 설치 사본의 호스트 toml 에 luks = true 를 [mods.sys.services] 표 안에 넣는다.
+# 원격 저장소에는 올라가지 않는다 — 설치 끝에 안내(_luks_final_notice). 현재 쓰는 시스템에서 먼저 켜면 부팅 불가(cryptroot 없음).
+_apply_luks_host_config() {
+    [ "${_LUKS:-false}" = true ] || return 0
+    python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" set-mod-bool "${_INSTALL_REPO_DIR:-/mnt/etc/nixos}/hosts/$HOST.toml" sys services luks true \
+        || { log_msg "Error" "호스트 toml 에 luks = true 설정 실패"; exit 1; }
+    log_msg "Config" "$HOST.toml: [mods.sys.services] luks = true (설치 사본에만 적용)"
+}
+
+_luks_final_notice() {
+    [ "${_LUKS:-false}" = true ] || return 0
+    printf "\n"
+    log_msg "Notice" "디스크가 LUKS2 로 암호화되었습니다. 첫 부팅에서 복구 암호(영어 단어)를 입력해야 합니다."
+    log_msg "Notice" "설치 사본의 hosts/$HOST.toml 에만 luks = true 가 있고 원격 저장소에는 없습니다 — 새 시스템에서 커밋·push 하세요."
+}
+
 _setup_ssh_pubkey() {
     local _mode="${_SSH_ACCESS_MODE:-}"
     [[ "$_mode" != "existing-key" && "$_mode" != "generate-key" ]] && return
@@ -174,6 +214,33 @@ _setup_ssh_pubkey() {
         _SSH_KEY_FILE="$key_tmp"
         _SSH_KEY_GENERATED=true
         log_msg "Done" "SSH 키 생성 및 pub key 등록: hosts/_deploy/${HOST}.pub"
+    fi
+}
+
+# rEFInd 를 쓰는 호스트: 펌웨어 NVRAM 에 rEFInd 부팅 항목을 등록한다(refind mod 는 ESP 파일만 채우고 NVRAM 은 안 건드림).
+# 디스크·파티션 번호는 BOOT_PART 에서 유도한다. 실패해도 설치는 계속(NVRAM 이 비어도 EFI/BOOT/BOOTX64.EFI 폴백으로 NixOS 가 부팅됨).
+_register_refind() {
+    [ "${_REFIND:-false}" = true ] || return 0
+    local _loader="/mnt/boot/EFI/refind/refind_x64.efi" _pk _num
+    if [ ! -f "$_loader" ]; then
+        log_msg "Notice" "ESP 에 rEFInd 파일이 없어 NVRAM 등록을 건너뜁니다 — 첫 부팅 후 nixup 으로 채운 뒤 efibootmgr 로 등록하세요."
+        return 0
+    fi
+    if [ ! -d /sys/firmware/efi/efivars ]; then
+        log_msg "Notice" "UEFI 변수 접근 불가(레거시 부팅?) — rEFInd NVRAM 등록 건너뜀."
+        return 0
+    fi
+    _pk=$(lsblk -no PKNAME "$BOOT_PART" 2>/dev/null | head -1)
+    _num=$(cat "/sys/class/block/$(basename "$BOOT_PART")/partition" 2>/dev/null || true)
+    if [ -z "$_pk" ] || [ -z "$_num" ]; then
+        log_msg "Notice" "ESP 의 디스크/번호를 알 수 없어 rEFInd NVRAM 등록을 건너뜁니다: $BOOT_PART"
+        return 0
+    fi
+    if efibootmgr --create --disk "/dev/$_pk" --part "$_num" --label "rEFInd" --loader '\EFI\refind\refind_x64.efi' >/dev/null; then
+        log_msg "Done" "rEFInd NVRAM 부팅 항목 등록: /dev/$_pk 파티션 $_num"
+        efibootmgr | sed 's/^/        /'
+    else
+        log_msg "Notice" "efibootmgr 등록 실패 — 첫 부팅 후 수동 등록 필요"
     fi
 }
 
@@ -341,11 +408,13 @@ phase2_execute() {
     _cleanup_mounts         # 1. 이전 마운트 정리
     _read_disk_labels       # 2. TOML → nixstrap.lib-repo.py disk-labels → BOOT_LABEL, DISK_LABEL
     _create_partitions      # 3. 파티션 생성 (mode 2만)
+    _luks_setup             # 3b. LUKS 포맷·열기 (LUKS 선택 시만; ROOT_PART → /dev/mapper/cryptroot)
     _format_boot            # 4. 부트 파티션 포맷
     _format_root            # 5. Btrfs 포맷 + 서브볼륨
     _mount_partitions       # 6. 마운트
     _move_repo              # 7. /tmp/nixos-setup-repo → /mnt/etc/nixos
     _create_host_profile    # 8. 신규 호스트 프로파일 생성
+    _apply_luks_host_config # 8b. 설치 사본 toml 에 luks=true (LUKS 선택 시만)
     _setup_ssh_pubkey       # 9. SSH pub key 등록 (existing-key/generate-key 시만)
     _resolve_metadata       # 10. nixup.task-resolve.py 실행 → RESOLVE_TMP
     _extract_username       # 11. base.toml → USERNAME
@@ -353,9 +422,11 @@ phase2_execute() {
     _generate_hw_config     # 13. hardware.nix → BUILD_DIR에 직접 생성
     _install_nixos          # 14. nixos-install
     _post_process           # 15. mv, chown, symlink
+    _register_refind        # 16. rEFInd NVRAM 항목 등록 (_REFIND 호스트만)
     _save_ssh_pem           # 17. PEM → ~/.ssh/ (generate-key 모드만)
     _commit_ssh_files       # 18. pub key + TOML 커밋 + push 시도
 
+    _luks_final_notice
     echo ""
     log_msg "Success" "설치 완료. 재부팅 → TTY 로그인 → 'nixup home' → 재로그인."
 }

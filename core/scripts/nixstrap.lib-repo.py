@@ -9,6 +9,11 @@
   list-hosts   <repo_tmp>             → hostname|type|preset 형식으로 호스트 목록 출력
   list-presets <repo_tmp>             → 프리셋 이름 출력 (iso 제외)
   disk-labels  <repo_tmp> <host>      → BOOT_LABEL DISK_LABEL 출력 (공백 구분)
+  mod-bool     <repo_tmp> <host> <카테고리> <그룹> <이름>
+                                      → 호스트 toml 의 mods.<카테고리>.<그룹>.<이름> 불리언을 true/false 로 출력(없으면 false)
+  set-mod-bool <toml> <카테고리> <그룹> <이름> <true|false>
+                                      → 호스트 toml 의 [mods.<카테고리>.<그룹>] 표 안에 불리언을 설정(헤더 바로 뒤에 삽입/교체,
+                                        표가 없으면 새로 만듦), 다시 읽어 검증. 줄 끝에 덧붙이지 않는다(마지막 표로 들어가는 사고 방지)
 """
 
 import sys
@@ -269,7 +274,61 @@ def cmd_disk_labels(args):
     print(extract_label(boot_dev), extract_label(disk_dev))
 
 
+def cmd_mod_bool(args):
+    repo_tmp, host, cat, grp, name = args[:5]
+    path = os.path.join(repo_tmp, "hosts", f"{host}.toml")
+    try:
+        with open(path, "rb") as f:
+            h = tomllib.load(f)
+        v = h.get("mods", {}).get(cat, {}).get(grp, {}).get(name, False)
+    except Exception:
+        v = False
+    print("true" if v is True else "false")
+
+
+def _set_mod_bool_text(text, cat, grp, name, value):
+    """TOML 텍스트에서 [mods.cat.grp] 표 안의 `name = value` 를 설정한 새 텍스트를 돌려준다."""
+    header = re.compile(r"^\s*\[mods\.%s\.%s\]\s*(#.*)?$" % (re.escape(cat), re.escape(grp)))
+    any_header = re.compile(r"^\s*\[")
+    key = re.compile(r"^\s*%s\s*=" % re.escape(name))
+    val = "true" if value else "false"
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if header.match(line):
+            j = i + 1
+            while j < len(lines) and not any_header.match(lines[j]):
+                if key.match(lines[j]):
+                    lines[j] = f"{name} = {val}"
+                    return "\n".join(lines)
+                j += 1
+            lines.insert(i + 1, f"{name} = {val}")
+            return "\n".join(lines)
+    if text and not text.endswith("\n"):
+        text += "\n"
+    return text + f"\n[mods.{cat}.{grp}]\n{name} = {val}\n"
+
+
+def cmd_set_mod_bool(args):
+    path, cat, grp, name, value = args[:5]
+    if value not in ("true", "false"):
+        print("오류: 값은 true 또는 false", file=sys.stderr)
+        sys.exit(1)
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read()
+    new = _set_mod_bool_text(text, cat, grp, name, value == "true")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(new)
+    with open(path, "rb") as f:
+        d = tomllib.load(f)
+    got = d.get("mods", {}).get(cat, {}).get(grp, {}).get(name)
+    if got is not (value == "true"):
+        print(f"오류: {path} 에 mods.{cat}.{grp}.{name} 설정 검증 실패(읽은 값: {got!r})", file=sys.stderr)
+        sys.exit(1)
+
+
 SUBCOMMANDS = {
+    "mod-bool":     cmd_mod_bool,
+    "set-mod-bool": cmd_set_mod_bool,
     "check-repo":   cmd_check_repo,
     "update-repo":  cmd_update_repo,
     "sync-remote":  cmd_sync_remote,

@@ -18,6 +18,7 @@ ask_partitions() {
     FORMAT_BOOT=""
     FORMAT_ROOT=""
     _WIPE=false
+    _LUKS=false  # 파티션이 바뀌면 암호화 선택도 다시 묻는다(ask_luks)
 
     while true; do
         read -rp "$(_log_prompt)파티션 모드 — 1=기존 사용, 2=신규 생성 [2]: " _PART_MODE

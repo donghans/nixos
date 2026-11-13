@@ -1,0 +1,29 @@
+parted /dev/sda --script mkpart ESP fat32 100GiB 101GiB
+parted /dev/sda --script set 3 esp on
+parted /dev/sda --script mkpart primary 101GiB 200GiB
+udevadm settle --timeout=10
+mkfs.fat -F 32 -n boot /dev/sda3
+mkfs.btrfs -L nixos -f /dev/sda4
+mount /dev/sda4 /mnt
+btrfs subvolume create /mnt/@
+btrfs subvolume create /mnt/@home
+btrfs subvolume create /mnt/@nix
+btrfs subvolume create /mnt/@log
+umount /mnt
+mount -o subvol=@,noatime,compress=zstd,space_cache=v2 /dev/sda4 /mnt
+mkdir -p /mnt/home /mnt/nix /mnt/var/log /mnt/boot
+mount -o subvol=@home,noatime,compress=zstd,space_cache=v2 /dev/sda4 /mnt/home
+mount -o subvol=@nix,noatime,compress=zstd,space_cache=v2 /dev/sda4 /mnt/nix
+mount -o subvol=@log,noatime,compress=zstd,space_cache=v2 /dev/sda4 /mnt/var/log
+mount -o fmask=0137,dmask=0027 /dev/sda3 /mnt/boot
+STUB _move_repo
+STUB _create_host_profile
+STUB _setup_ssh_pubkey
+STUB _resolve_metadata
+STUB _extract_username
+STUB _prepare_build_dir
+STUB _generate_hw_config
+STUB _install_nixos
+STUB _post_process
+STUB _save_ssh_pem
+STUB _commit_ssh_files

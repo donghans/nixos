@@ -1,0 +1,31 @@
+parted /dev/nvme0n1 --script mklabel gpt
+parted /dev/nvme0n1 --script mkpart ESP fat32 1MiB 1025MiB
+parted /dev/nvme0n1 --script set 1 esp on
+parted /dev/nvme0n1 --script mkpart primary 1025MiB 100%
+udevadm settle --timeout=10
+mkfs.fat -F 32 -n boot /dev/nvme0n1p1
+mkfs.btrfs -L nixos -f /dev/nvme0n1p2
+mount /dev/nvme0n1p2 /mnt
+btrfs subvolume create /mnt/@
+btrfs subvolume create /mnt/@home
+btrfs subvolume create /mnt/@nix
+btrfs subvolume create /mnt/@log
+btrfs quota enable -s /mnt
+umount /mnt
+mount -o subvol=@,noatime,compress=zstd,space_cache=v2 /dev/nvme0n1p2 /mnt
+mkdir -p /mnt/home /mnt/nix /mnt/var/log /mnt/boot
+mount -o subvol=@home,noatime,compress=zstd,space_cache=v2 /dev/nvme0n1p2 /mnt/home
+mount -o subvol=@nix,noatime,compress=zstd,space_cache=v2 /dev/nvme0n1p2 /mnt/nix
+mount -o subvol=@log,noatime,compress=zstd,space_cache=v2 /dev/nvme0n1p2 /mnt/var/log
+mount -o fmask=0137,dmask=0027 /dev/nvme0n1p1 /mnt/boot
+STUB _move_repo
+STUB _create_host_profile
+STUB _setup_ssh_pubkey
+STUB _resolve_metadata
+STUB _extract_username
+STUB _prepare_build_dir
+STUB _generate_hw_config
+STUB _install_nixos
+STUB _post_process
+STUB _save_ssh_pem
+STUB _commit_ssh_files

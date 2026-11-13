@@ -89,6 +89,8 @@ select_host() {
         _HOST_TYPE=""
         _HOST_PRESET_FROM_REPO=""
         _HOST_USERNAME=""
+        _IS_LAPTOP=false
+        _REFIND=false
         local _hinput
         read -rp "$(_log_prompt)새 호스트명: " _hinput
         HOST="${_hinput:-}"
@@ -110,6 +112,9 @@ select_host() {
         _HOST_TYPE=$(echo "$host_data" | grep "^${HOST}|" | cut -d'|' -f2)
         _HOST_PRESET_FROM_REPO=$(echo "$host_data" | grep "^${HOST}|" | cut -d'|' -f3)
         _PRESET="$_HOST_PRESET_FROM_REPO"
+        _IS_LAPTOP=false
+        [ "$_HOST_TYPE" = "laptop" ] && _IS_LAPTOP=true
+        _REFIND=$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" mod-bool "$REPO_TMP" "$HOST" sys services refind 2>/dev/null || echo false)
     fi
 }
 
@@ -184,6 +189,66 @@ ask_ssh_access() {
             log_msg "Config" "SSH 키: 없음 (비밀번호 인증)"
         fi
     fi
+}
+
+# 신규 호스트(서버 제외): 노트북인지 묻는다. 예면 toml 에 type = "laptop" 과 refind = true 를 쓴다.
+ask_laptop() {
+    [ "${_HOST_IS_NEW:-false}" = true ] || return 0
+    if [ "${_PRESET:-}" = "server" ]; then
+        _IS_LAPTOP=false; _REFIND=false
+        return 0
+    fi
+    local _ans
+    printf "\n"
+    read -rp "$(_log_prompt)이 호스트는 노트북입니까? (rEFInd 부트 메뉴를 함께 설정합니다) (y/N): " _ans
+    if [[ "${_ans:-N}" =~ ^[Yy]$ ]]; then
+        _IS_LAPTOP=true; _REFIND=true
+        log_msg "Config" "노트북: type = laptop, rEFInd 사용"
+    else
+        _IS_LAPTOP=false; _REFIND=false
+    fi
+}
+
+# LUKS 를 제안할 수 있는 상태인가: 서버 제외, 파티션 모드 2(신규 생성) + 전체 디스크 초기화일 때만.
+# (모드 1 은 cryptroot 파티션 이름이 없고, 여유 공간 사용은 기존 파티션과 라벨이 겹칠 수 있다 — plan/nixstrap-luks §3-1)
+_luks_eligible() {
+    [ "${_HOST_TYPE:-}" != "server" ] && [ "${_PRESET:-}" != "server" ] \
+        && [ "${_PART_MODE:-}" = "2" ] && [ "${_NEW_PARTITIONS:-false}" = true ] && [ "${_WIPE:-false}" = true ]
+}
+
+_luks_toml_wants() {
+    [ "${_HOST_IS_NEW:-false}" = true ] && return 1
+    [ "$(python3 "$SCRIPT_DIR/nixstrap.lib-repo.py" mod-bool "$REPO_TMP" "$HOST" sys services luks 2>/dev/null || echo false)" = true ]
+}
+
+# 디스크 암호화(LUKS2) 질문. 기본 아니오 — Enter 만 치던 기존 설치 흐름을 바꾸지 않는다.
+ask_luks() {
+    _LUKS=false
+    _luks_eligible || return 0
+    local _ans
+    printf "\n"
+    if [ "$_IS_VM" = true ]; then
+        log_msg "Notice" "가상화 환경입니다 — 시험용이 아니라면 LUKS 는 보통 필요 없습니다."
+    fi
+    log_msg "Notice" "디스크 암호화(LUKS2): 복구 암호(영어 8단어)를 설치 직전에 생성해 화면에 한 번 보여 줍니다. 종이 등에 기록해야 합니다."
+    read -rp "$(_log_prompt)디스크를 LUKS2 로 암호화하시겠습니까? (y/N): " _ans
+    [[ "${_ans:-N}" =~ ^[Yy]$ ]] && _LUKS=true
+    log_msg "Config" "LUKS: $_LUKS"
+    return 0
+}
+
+# 설치 진행 전 정합성 검사 (review_loop Enter, 암호 생성 직전). 어긋나면 이유를 말하고 return 1.
+validate_luks_state() {
+    if [ "$_LUKS" = true ] && ! _luks_eligible; then
+        log_msg "Error" "LUKS 는 '신규 파티션 생성 + 전체 디스크 초기화' 데스크톱·노트북 설치에서만 가능합니다. 항목 3 을 수정하거나 LUKS 를 끄세요."
+        return 1
+    fi
+    if [ "$_LUKS" != true ] && _luks_toml_wants; then
+        log_msg "Error" "hosts/$HOST.toml 에 luks = true 가 있는데 이번 설치는 암호화하지 않습니다(평문 디스크 + LUKS 기대 빌드 = 부팅 불가)."
+        log_msg "Error" "항목 3 에서 '신규 생성 + 전체 디스크'를 고르고 LUKS 를 켜거나, 호스트 toml 의 luks 를 먼저 바꾸세요."
+        return 1
+    fi
+    return 0
 }
 
 ask_password() {
@@ -269,6 +334,9 @@ show_summary() {
         if [[ "${_WIPE:-false}" == "true" ]]; then
             printf "     %-11s   ${RED}전체 디스크 초기화${NC}\n" ""
         fi
+        if [[ "${_LUKS:-false}" == "true" ]]; then
+            printf "     %-11s   ${RED}LUKS2 암호화${NC} (복구 암호는 설치 직전에 생성)\n" ""
+        fi
     else
         printf "  3. %-11s:  %s\n" "파티션" "(미설정)"
     fi
@@ -283,6 +351,9 @@ show_summary() {
         esac
     else
         printf "  4. %-11s:  %s  (레포에서)\n" "프리셋" "${_HOST_PRESET_FROM_REPO:-?}"
+    fi
+    if [ "${_REFIND:-false}" = true ]; then
+        printf "     %-11s   rEFInd 부트 메뉴: 사용\n" ""
     fi
     printf "  %s\n" "─────────────────────────────────────────────"
 }
@@ -314,6 +385,10 @@ save_params() {
         printf '_SSH_ACCESS_MODE=%s\n'             "$_SSH_ACCESS_MODE"
         printf '_SSH_KEY_FILE=%s\n'               "$_SSH_KEY_FILE"
         printf '_SSH_KEY_GENERATED=%s\n'          "$_SSH_KEY_GENERATED"
+        # 선택만 저장한다. 복구 암호는 어디에도 저장하지 않는다.
+        printf '_LUKS=%s\n'                        "$_LUKS"
+        printf '_IS_LAPTOP=%s\n'                   "$_IS_LAPTOP"
+        printf '_REFIND=%s\n'                      "$_REFIND"
     } > "$PARAMS_FILE"
     log_msg "Config" "세션 저장: $PARAMS_FILE"
 }
@@ -372,6 +447,7 @@ review_loop() {
                     log_msg "Error" "파티션 정보가 불완전합니다. 항목 3을 수정하세요."
                     continue
                 fi
+                validate_luks_state || continue
                 save_params
                 break
                 ;;
@@ -391,18 +467,22 @@ review_loop() {
             1)
                 ask_repo_and_clone
                 select_host
-                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_state_version; ask_ssh_access; fi
+                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_state_version; ask_ssh_access; ask_laptop; fi
+                ask_luks
                 ;;
             2)
                 select_host
-                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_state_version; ask_ssh_access; fi
+                if [ "$_HOST_IS_NEW" = true ]; then ask_preset; ask_state_version; ask_ssh_access; ask_laptop; fi
+                ask_luks
                 ;;
-            3) ask_partitions ;;
+            3) ask_partitions; ask_luks ;;
             4)
                 if [ "$_HOST_IS_NEW" = true ]; then
                     ask_preset
                     ask_state_version
                     ask_ssh_access
+                    ask_laptop
+                    ask_luks
                 else
                     log_msg "Notice" "기존 호스트의 프리셋은 레포에서 고정됩니다."
                 fi
