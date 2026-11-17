@@ -10,6 +10,7 @@
 mkMod __curPos "rEFInd 메뉴(nix 관리): 본체·설정·검정 테마를 ESP 에 둔다" ({
   cfg,
   config,
+  inputs,
   lib,
   pkgs,
   ...
@@ -57,6 +58,36 @@ mkMod __curPos "rEFInd 메뉴(nix 관리): 본체·설정·검정 테마를 ESP 
     python3 ${../../_tools/refind-theme/gen.py} ${theme} $out/themes/refind-black --sel-alpha ${toString cfg.selectionAlpha}
   '';
   esp = config.boot.loader.efi.efiSysMountPoint;
+  # lanzaboote(Secure Boot, plan boot-security S5) 용 `lzbt` 래퍼. lanzaboote 는 systemd-boot 설치 경로(`extraInstallCommands`)를 쓰지 않고
+  # `boot.loader.external.installHook`(= lzbt install …)을 쓰므로, 진짜 lzbt 를 그대로 부른 뒤 성공하면 rEFInd 트리를 ESP 에 복사하고 본체를 db 키로 서명한다.
+  # 인자 형식(lanzaboote nix/modules/lanzaboote.nix 의 mkInstallCommand): `install … --public-key=P --private-key=K <ESP> /nix/var/nix/profiles/system-*-link…` — 키 플래그 바로 뒤가 ESP.
+  # 인자를 못 알아보면 rEFInd 단계는 건너뛰되 실패로 알린다(조용히 넘어가지 않음).
+  realLzbt = inputs.lanzaboote.packages.${pkgs.stdenv.hostPlatform.system}.lzbt;
+  lzbtWithRefind = pkgs.writeShellApplication {
+    name = "lzbt";
+    runtimeInputs = [pkgs.coreutils pkgs.sbsigntool];
+    meta.mainProgram = "lzbt";
+    text = ''
+      ${realLzbt}/bin/lzbt "$@"
+      [ "''${1:-}" = install ] || exit 0
+      pub=""; key=""; dest=""; take=false
+      for a in "$@"; do
+        if $take; then dest=$a; take=false; continue; fi
+        case $a in
+          --public-key=*) pub=''${a#--public-key=} ;;
+          --private-key=*) key=''${a#--private-key=}; take=true ;;
+        esac
+      done
+      if [ -z "$pub" ] || [ -z "$key" ] || [ -z "$dest" ] || [ ! -d "$dest" ]; then
+        echo "refind: lzbt 인자에서 키·ESP 를 찾지 못해 rEFInd 설치를 건너뜁니다 (lanzaboote 인자 형식이 바뀌었는지 확인)" >&2
+        exit 1
+      fi
+      install -d "$dest/EFI/refind"
+      cp -rfT --no-preserve=mode,ownership ${tree} "$dest/EFI/refind"
+      sbsign --key "$key" --cert "$pub" --output "$dest/EFI/refind/refind_x64.efi" ${tree}/refind_x64.efi
+      echo "refind: rEFInd 를 $dest/EFI/refind 에 복사하고 서명했습니다"
+    '';
+  };
 in {
   options = {
     timeout = lib.mkOption {
@@ -81,14 +112,8 @@ in {
     };
   };
   os = lib.mkIf cfg.enable {
-    # lanzaboote 는 systemd-boot 를 끄고 `boot.loader.external.installHook` 을 쓰므로 아래 `extraInstallCommands` 가 돌지 않는다 — rEFInd 가 ESP 에 안 깔린 채로 조용히 넘어가지 않게 막는다.
-    # S5(Secure Boot)에서 hook 을 감싸 rEFInd 복사와 `sbctl sign` 을 넣은 뒤 이 assertion 을 지운다(plan boot-security S3c·S5).
-    assertions = [
-      {
-        assertion = !config.boot.lanzaboote.enable;
-        message = "refind mod: boot.lanzaboote(secure-boot mod)가 켜지면 이 mod 의 ESP 설치 명령이 실행되지 않습니다. S5 에서 installHook 을 감싸기 전에는 둘을 같이 켤 수 없습니다.";
-      }
-    ];
+    # lanzaboote 를 켜면 `boot.loader.systemd-boot.extraInstallCommands` 가 돌지 않으므로 lanzaboote 의 lzbt 를 래퍼로 바꿔 같은 일을 한다(위 lzbtWithRefind).
+    boot.lanzaboote.package = lib.mkIf config.boot.lanzaboote.enable (lib.mkForce lzbtWithRefind);
     boot.loader.systemd-boot.extraInstallCommands = ''
       ${pkgs.coreutils}/bin/install -d ${esp}/EFI/refind
       ${pkgs.coreutils}/bin/cp -rfT --no-preserve=mode,ownership ${tree} ${esp}/EFI/refind
