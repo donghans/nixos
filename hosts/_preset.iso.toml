@@ -57,7 +57,7 @@ embedctl      = false
 [mods.gui.utils]
 notify-logger   = true
 xarchiver       = false
-thunar          = false
+thunar          = true    # 설치 중 USB 파티션(sda1~3)을 GUI 로 마운트·해제하고 문서를 열기 위해(2026-11-17 사용자 요청; 시스템적 결정이 아니라 편의)
 wayvnc          = false
 office          = false
 media           = false
