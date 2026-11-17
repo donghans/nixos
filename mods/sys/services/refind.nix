@@ -33,7 +33,7 @@ mkMod __curPos "rEFInd 메뉴(nix 관리): 본체·설정·검정 테마를 ESP 
     mouse_speed 16
     use_graphics_for osx,linux,windows
     showtools shell, gdisk, memtest, mok_tool, apple_recovery, windows_recovery, about, hidden_tags, reboot, shutdown, firmware, fwupdate
-    dont_scan_dirs EFI/nixos,EFI/systemd
+    dont_scan_dirs EFI/nixos,EFI/systemd,EFI/Linux
     dont_scan_files bootx64.efi
     ${cfg.extraConfig}
 
@@ -69,13 +69,19 @@ mkMod __curPos "rEFInd 메뉴(nix 관리): 본체·설정·검정 테마를 ESP 
     meta.mainProgram = "lzbt";
     text = ''
       ${realLzbt}/bin/lzbt "$@"
-      [ "''${1:-}" = install ] || exit 0
-      pub=""; key=""; dest=""; take=false
+      # `-vv` 같은 앞쪽 플래그가 있어도 `install` 서브명령을 찾는다. 키 플래그 뒤의 첫 비플래그 인자가 ESP(`--pcrlock-directory=` 같은 다른 플래그가 끼어도 됨).
+      is_install=false
       for a in "$@"; do
-        if $take; then dest=$a; take=false; continue; fi
+        if [ "$a" = install ]; then is_install=true; fi
+      done
+      if ! $is_install; then exit 0; fi
+      pub=""; key=""; dest=""; seen_key=false
+      for a in "$@"; do
         case $a in
           --public-key=*) pub=''${a#--public-key=} ;;
-          --private-key=*) key=''${a#--private-key=}; take=true ;;
+          --private-key=*) key=''${a#--private-key=}; seen_key=true ;;
+          -*) ;;
+          *) if $seen_key && [ -z "$dest" ]; then dest=$a; fi ;;
         esac
       done
       if [ -z "$pub" ] || [ -z "$key" ] || [ -z "$dest" ] || [ ! -d "$dest" ]; then
