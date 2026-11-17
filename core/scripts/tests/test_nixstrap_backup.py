@@ -21,7 +21,7 @@ img = os.path.join(tmp, "d.img"); open(img, "wb").truncate(64 * 1024 * 1024)
 subprocess.run(["cryptsetup", "luksFormat", "--type", "luks2", "--batch-mode", "--pbkdf", "pbkdf2", "--pbkdf-force-iterations", "1000", "--key-file=-", img], input=b"x y z", check=True, capture_output=True)
 shim = os.path.join(tmp, "shim"); os.makedirs(shim)
 for name, body in {
-    # 설치 대상 디스크(/dev/nvme0n1)가 USB 인 경우를 흉내내 그 ESP 도 hotplug 로 보이게 한다(후보에서 빠져야 함).
+    # 설치 대상 디스크(/dev/nvme0n1)가 USB 인 경우를 흉내내 그 디스크를 hotplug 로 보이게 한다(그 파티션은 후보에서 빠져야 함).
     # /dev/sdc1 은 레이블이 없는 USB(예전 파서가 빠뜨리던 경우).
     "lsblk": 'case "$*" in *lJ*) cat "$LSBLK_JSON";; *PKNAME*) echo /dev/nvme0n1;; esac',
     "mount": 'echo "$@" >> "$CALLS"',
@@ -32,11 +32,17 @@ for name, body in {
     p = os.path.join(shim, name); open(p, "w").write("#!/usr/bin/env bash\n" + body + "\n"); os.chmod(p, 0o755)
 calls = os.path.join(tmp, "calls.txt"); opts = os.path.join(tmp, "opts.txt")
 lsblk_json = os.path.join(tmp, "lsblk.json")
+# 실제 lsblk 처럼: HOTPLUG 는 **디스크에만** true 이고 그 파티션은 false 다(2026-11-17 VM 리허설에서 확인 — 파티션의 hotplug 로 거르면 USB 가 전부 빠진다).
 open(lsblk_json, "w").write(json.dumps({"blockdevices": [
-    {"name": "/dev/sdb1", "size": "57G", "fstype": "exfat", "label": "Ventoy", "hotplug": True, "pkname": "/dev/sdb"},
-    {"name": "/dev/sdb2", "size": "32M", "fstype": "vfat", "label": "VTOYEFI", "hotplug": True, "pkname": "/dev/sdb"},
-    {"name": "/dev/sdc1", "size": "14G", "fstype": "exfat", "label": None, "hotplug": True, "pkname": "/dev/sdc"},
-    {"name": "/dev/nvme0n1p1", "size": "1G", "fstype": "vfat", "label": "ESP", "hotplug": True, "pkname": "/dev/nvme0n1"},
+    {"name": "/dev/sdb", "size": "57G", "fstype": None, "label": None, "hotplug": False, "rm": False, "tran": "usb", "pkname": None},   # VM 실측처럼 hotplug·rm 이 false 이고 tran 만 usb
+    {"name": "/dev/sdb1", "size": "57G", "fstype": "exfat", "label": "Ventoy", "hotplug": False, "pkname": "/dev/sdb"},
+    {"name": "/dev/sdb2", "size": "32M", "fstype": "vfat", "label": "VTOYEFI", "hotplug": False, "pkname": "/dev/sdb"},
+    {"name": "/dev/sdc", "size": "14G", "fstype": None, "label": None, "hotplug": True, "pkname": None},   # hotplug 만 true 인 경우
+    {"name": "/dev/sdc1", "size": "14G", "fstype": "exfat", "label": None, "hotplug": False, "pkname": "/dev/sdc"},
+    {"name": "/dev/sdd", "size": "500G", "fstype": None, "label": None, "hotplug": False, "pkname": None},
+    {"name": "/dev/sdd1", "size": "500G", "fstype": "ext4", "label": "internal", "hotplug": False, "pkname": "/dev/sdd"},
+    {"name": "/dev/nvme0n1", "size": "900G", "fstype": None, "label": None, "hotplug": True, "pkname": None},
+    {"name": "/dev/nvme0n1p1", "size": "1G", "fstype": "vfat", "label": "ESP", "hotplug": False, "pkname": "/dev/nvme0n1"},
     {"name": "/dev/nvme0n1p2", "size": "900G", "fstype": "crypto_LUKS", "label": None, "hotplug": False, "pkname": "/dev/nvme0n1"}]}))
 
 
@@ -74,6 +80,7 @@ check("슬롯 변경 후 재백업 안내", "다시 백업" in o)
 shown = open(opts).read()
 check("후보에 레이블 없는 USB(/dev/sdc1)가 있다(회귀)", "/dev/sdc1" in shown and "<레이블 없음>" in shown, shown)
 check("후보에 설치 대상 디스크의 파티션이 없다(회귀)", "nvme0n1" not in shown, shown)
+check("후보에 내장(hotplug 아닌) 디스크의 파티션이 없다", "/dev/sdd1" not in shown, shown)
 check("후보에 Ventoy 파티션이 있다", "/dev/sdb1" in shown and "Ventoy" in shown, shown)
 
 # 직접 경로(후보 3개 다음 인덱스 3 = '+ 이미 마운트된 디렉터리')

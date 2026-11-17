@@ -172,9 +172,13 @@ luks_offer_header_backup() {
         while IFS=$'\x1f' read -r _dev _size _fs _label; do
             [ -n "$_dev" ] || continue
             _devs+=("$_dev"); _labels+=("$(printf '%-18s %8s [%-6s] %s' "$_dev" "$_size" "$_fs" "${_label:-<레이블 없음>}")")
-        done < <(lsblk -lJpo NAME,SIZE,FSTYPE,LABEL,HOTPLUG,PKNAME 2>/dev/null | jq -r --arg pd "$_pdisk" '
-            .blockdevices[]
-            | select(.fstype != null and (.hotplug == true or .hotplug == 1 or .hotplug == "1"))
+        # lsblk 의 HOTPLUG 는 디스크에만 true 이고 그 파티션은 false 다(실측 2026-11-17) — 파티션 값으로 거르면 USB 가 전부 빠진다.
+        # 게다가 USB 디스크도 hotplug·rm 이 false 로 나올 수 있다(QEMU usb-storage 실측; 전송 방식 tran=usb 만 믿을 만하다).
+        # 그래서 hotplug·removable·tran=usb 인 디스크의 이름을 모은 뒤, 그 디스크 자신(파티션 테이블 없는 USB) 또는 그 파티션을 후보로 한다.
+        done < <(lsblk -lJpo NAME,SIZE,FSTYPE,LABEL,HOTPLUG,RM,TRAN,PKNAME 2>/dev/null | jq -r --arg pd "$_pdisk" '
+            (.blockdevices | map(select(.hotplug == true or .hotplug == 1 or .hotplug == "1" or .rm == true or .rm == 1 or .rm == "1" or .tran == "usb") | .name)) as $hp
+            | .blockdevices[]
+            | select(.fstype != null and ((.name | IN($hp[])) or ((.pkname // "") | IN($hp[]))))
             | select($pd == "" or (.pkname != $pd and .name != $pd))
             | [.name, .size, .fstype, (.label // "")] | join("\u001f")')
         _opts=("${_labels[@]}" "+ 이미 마운트된 디렉터리 경로 입력" "+ 다른 컴퓨터로 scp (user@host:경로)" "건너뜀")
