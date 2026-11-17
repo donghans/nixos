@@ -14,8 +14,8 @@ mkMod __curPos "Claude 공유 컨텍스트 저장소 (Postgres)" ({
 }: let
   # 접속을 허용할 tailnet 기기(허용 목록 — 비밀번호와 별개의 2중 장치). 새 기기를 쓰려면 여기에 tailnet IP 를 추가한다.
   # headscale 이 IP 를 재할당하면(재등록 시) 그 기기는 접속이 막힌다 — 조용히 실패하지 않고 인증 거부로 보인다(fail-closed).
-  #   100.64.0.4 msi-summit-me (확인: 2026-10-22 tailscale status)
-  allowedClients = ["100.64.0.4"]; # 서버 자신(100.64.0.1)은 소켓을 쓰므로 TCP 허용이 없다 — 컨테이너·VM 의 NAT 출구가 이 주소로 보여도 못 들어온다
+  #   100.64.0.43 msi-summit-me (재설치·재등록으로 2026-11-17 에 100.64.0.4 에서 변경 — headscale 노드 ID 47)
+  allowedClients = ["100.64.0.43"]; # 서버 자신(100.64.0.1)은 소켓을 쓰므로 TCP 허용이 없다 — 컨테이너·VM 의 NAT 출구가 이 주소로 보여도 못 들어온다
 in {
   os = lib.mkIf cfg.enable {
     services.postgresql = {
