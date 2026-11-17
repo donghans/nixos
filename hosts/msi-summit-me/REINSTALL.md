@@ -23,14 +23,14 @@
 
 1. Ventoy USB 를 꽂고 재부팅 → 부팅 메뉴(MSI 는 보통 `F11`, BIOS 는 `Del`) → USB 선택.
 2. Ventoy 메뉴에서 `ventoy-iso/nixos/nixos-26.05.20260611.a037402-x86_64-linux.iso`(2026-11-17 재빌드본) 선택.
-3. Secure Boot 가 켜져 Ventoy 가 안 뜨면 BIOS 에서 끕니다(`plan/boot-security` 도 서명 없는 상태로 설치합니다).
+3. Secure Boot 는 지금 꺼져 있습니다(`SecureBoot=0`, 2026-11-17 확인) — BIOS 에서 바꿀 것이 없습니다. 만약 Ventoy 가 안 뜨면 그때 BIOS 에서 Secure Boot 가 켜져 있는지 봅니다(`plan/boot-security` 는 S5 전까지 서명 없는 상태로 설치합니다).
 4. ISO 는 로그인 화면(tuigreet) 뒤 Hyprland 데스크톱입니다. 로그인 화면이 나오면 사용자 `nixos`(비밀번호 없음 — 미확인)로 들어가 **터미널 창을 엽니다**(단축키는 확인하지 못했습니다. 안 열리면 `Ctrl+Alt+F2` 의 TTY 를 씁니다).
 
 ## 2. ISO 안에서
 
 **네트워크**: 유선을 권장합니다. `ping -c1 github.com` 으로 확인. 무선이 필요하면 ISO 의 도구(`nmtui` 가 있으면 그것)로 연결합니다 — ISO 의 무선 도구는 확인하지 못했습니다.
 
-**이 문서 보기**: 가장 확실한 방법은 휴대폰·인쇄본입니다. ISO 안에서는 먼저 `sudo mount /dev/disk/by-label/Ventoy /mnt && cp /mnt/NIXOS-REINSTALL.md /tmp/ && sudo umount /mnt` 로 복사한 뒤 `less /tmp/NIXOS-REINSTALL.md`(`q` 로 종료)로 읽습니다. Ventoy 가 ISO 를 부팅하는 동안 이 파티션을 쓰고 있어 마운트가 되는지는 **확인하지 못했습니다** — 안 되면 휴대폰·인쇄본으로 진행하세요. 다른 화면에서 읽고 싶으면 TTY(`Ctrl+Alt+F2`, 돌아올 때 `Ctrl+Alt+F1` — 이 ISO 에서의 동작은 미확인)를 씁니다.
+**이 문서 보기**: 가장 확실한 방법은 휴대폰·인쇄본입니다. **Ventoy 파티션(`sda1`)은 ISO 부팅 중 ISO 용으로 연결되어 마운트할 수 없습니다**(2026-11-17 실제로 확인; 그래서 그 파티션에 둔 복사본은 ISO 안에서 못 읽습니다). USB 의 `sda3`(레이블 없는 40G exfat)에 복사본을 넣어 둔 경우에만 `sudo mount /dev/disk/by-uuid/F9BE-F365 /mnt && cp /mnt/NIXOS-REINSTALL.md /tmp/ && sudo umount /mnt` 후 `less /tmp/NIXOS-REINSTALL.md`(`q` 로 종료)로 읽습니다. 다른 화면에서 읽고 싶으면 TTY(`Ctrl+Alt+F2`, 돌아올 때 `Ctrl+Alt+F1` — 이 ISO 에서의 동작은 미확인)를 씁니다.
 
 **디스크 확인**: `lsblk` — 내장 NVMe 는 `nvme0n1`(약 **953.9G**), USB 는 약 57G `sdX`. 
 `fdisk` 로 먼저 비울 필요는 없습니다(nixstrap 이 `mklabel gpt` 와 전체 TRIM 을 합니다). 해도 상관없습니다(리허설에서 `fdisk` 의 `g`→`w` 로 비운 디스크에서 성공).
@@ -59,7 +59,7 @@
 **설치 대기**: `nixos-install`. 리허설(VM)은 9분, 실기는 커널 빌드 여부에 따라 훨씬 길 수 있습니다. 중간에 Ctrl+C 를 3~5초 안에 두 번 누르면 중단됩니다 — 하지 마세요.
 
 **헤더 백업 질문** (설치 직후, 기본 예): LUKS 헤더가 손상되면 복구 암호가 있어도 못 엽니다. 디스크 밖에 저장합니다.
-- 목록에 `Ventoy`(exfat, 약 17G) 파티션이 나오면 선택합니다. 실패하면 레이블 없는 40G exfat(`sda3`)도 후보입니다(내용은 본인이 압니다). **`VTOYEFI`(32M vfat)는 고르지 마세요.** 설치 USB 와 같은 USB 인데 부팅 중에도 마운트되는지는 **실기에서 확인하지 못했습니다.** 실패하면 `+ 다른 컴퓨터로 scp` 를 쓰거나 건너뛰고, 새 시스템에서 §4-4 로 합니다.
+- **`sda3`(레이블 없는 40G exfat)를 고르세요.** `sda1`(Ventoy)은 부팅 중이라 마운트되지 않습니다(실제 확인). `sda3` 은 Ventoy 가 쓰지 않는 파티션이라 마운트될 것으로 보이지만 ISO 안에서는 아직 시험하지 못했습니다. 기존 파일은 건드리지 않고 `luks-header-*.img` 한 파일만 추가됩니다. **`VTOYEFI`(32M vfat)는 고르지 마세요.** 실패하면 `+ 다른 컴퓨터로 scp` 를 쓰거나 건너뛰고, 새 시스템에서 §4-4 로 합니다.
 - 슬롯(TPM2/FIDO2 등)을 바꾸면 이 백업은 옛 암호로만 열립니다. 바꾼 뒤 다시 백업합니다.
 
 **설치 완료 화면**을 읽습니다: 「설치 사본의 hosts/msi-summit-me.toml 에만 luks = true 가 있고 원격 저장소에는 없습니다」. → **USB 를 뽑고**(꽂은 채면 펌웨어 부팅 순서에 따라 Ventoy 로 다시 들어갈 수 있습니다 — MSI 펌웨어 동작은 미확인) 재부팅합니다(재부팅은 직접). 이후 문서는 새 시스템의 저장소 사본으로 읽습니다.
