@@ -51,12 +51,13 @@ mkMod __curPos "rEFInd 메뉴(nix 관리): 본체·설정·검정 테마를 ESP 
     cp ${pkgs.refind}/share/refind/refind_x64.efi $out/refind_x64.efi
     cp ${refindConf} $out/refind.conf
     cp -r ${theme}/icons/128-48 $out/themes/refind-theme-regular/icons/128-48
-    # 수동 menuentry 는 항상 `vol_efi` 뱃지를 붙이는데(rEFInd refind/config.c) 이 테마에는 그 아이콘이 없어, 파일을 못 찾으면 rEFInd 가 검정-노랑 줄무늬 대체 이미지(icns.c DummyImage)를 그린다(2026-11-18).
-    # 옛 수동 설치의 `EFI/refind/icons/` 가 재설치로 사라지면서 보이기 시작함. 본체 패키지의 칩 모양 아이콘을 복사한다(마음에 안 들면 투명 32x32 로 바꾼다 — 테마의 vol_internal.png 처럼).
     cp ${theme}/fonts/source-code-pro-extralight-14.png $out/themes/refind-theme-regular/fonts/
     cp ${theme}/LICENSE $out/themes/refind-theme-regular/LICENSE
     chmod -R u+w $out
-    cp ${pkgs.refind}/share/refind/icons/vol_efi.png $out/themes/refind-theme-regular/icons/128-48/vol_efi.png
+    # 이 테마에는 `mouse.png`·`func_install.png` 가 없다. refind.conf 의 `enable_mouse` 가 켜져 있으면 rEFInd 는 마우스 포인터를 BuiltinIcon(mouse) 로 그리는데(refind/pointer.c),
+    # 아이콘 파일을 못 찾으면 검정-노랑 줄무늬 대체 이미지(icns.c DummyImage)를 그린다 — 2026-11 에 NixOS 아이콘 옆에 옅게 보이던 줄무늬의 원인(소스 확인, 화면 확인은 재부팅 뒤).
+    # (처음에는 vol_efi 뱃지로 오해했다: vol_efi 는 `firmware_bootnum` 항목에만 붙는다.) 본체 패키지의 아이콘을 복사한다.
+    cp ${pkgs.refind}/share/refind/icons/mouse.png ${pkgs.refind}/share/refind/icons/func_install.png $out/themes/refind-theme-regular/icons/128-48/
     # 원본 테마 구조(icons/128-48)를 gen.py 가 읽을 수 있게 같은 모양의 입력을 쓴다
     python3 ${../../_tools/refind-theme/gen.py} ${theme} $out/themes/refind-black --sel-alpha ${toString cfg.selectionAlpha}
   '';
