@@ -8,6 +8,7 @@ cpuCount   = 16
 luks = true
 kernel-lockdown = true   # unstable 커널 + 인증서 이미지 + 부팅 중 lockdown(integrity) — mods/sys/services/kernel-lockdown.nix, plan boot-security S3a
 secure-boot     = true   # lanzaboote 로 서명된 UKI·systemd-boot — plan s5-secure-boot-exec 단계 3 (SB 는 아직 BIOS 에서 꺼진 채)
+fwupd           = true   # dbx 등 갱신을 fwupdmgr 로 — mods/sys/services/fwupd.nix
 refind          = true   # rEFInd 메뉴를 nix 로 관리 — mods/sys/services/refind.nix, plan refind-theme §12
 tailpass = false
 netdata  = true
