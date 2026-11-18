@@ -9,7 +9,8 @@ mkHostConfiguration ({
   #    패키지 절전도 얕았다(pc10 47→28%, pc8 45→30%). 누적 계량기로 확인한 배터리 V×I 기준(posture 가 아닌 ctx 장부 #28, #31).
   #  - irqpoll 은 터치패드 먹통 대응이었으나 진짜 원인(idma64 가 IRQ 27 을 공유)을 module_blacklist 로 막아 필요가 없어졌다(3시간 정상).
   #  - pcie_aspm=off / acpi_osi=Linux 는 일반 노트북용 기본값으로 들어간 것이고 이 기기에서 검증된 적이 없다.
-  # 문제가 생기면(터치패드·키보드·밝기·PCIe 장치) 부팅 메뉴의 `legacy-quirks` 로 옛 구성으로 부팅할 수 있고, `with-*` 항목으로 인자를 하나씩 되살려 원인을 가릴 수 있다.
+  # 비상용 부팅 항목(specialisation `legacy-quirks`·`with-aspm-off`·`with-irqpoll`·`with-osi-linux`)은 한 번도 쓰이지 않아 2026-11-18 에 삭제했다(git log/blame 으로 복구 가능).
+  # 문제가 생기면(터치패드·키보드·밝기·PCIe 장치) 옛 인자 `pcie_aspm=off`·`acpi_osi=Linux`·`irqpoll` 을 `boot.kernelParams` 에 하나씩 넣은 세대로 원인을 가린다.
   # (목록을 통째로 지정하므로 확인은 `tr ' ' '\n' < /proc/cmdline`.)
   kernelBase = [
     "nowatchdog"
@@ -17,10 +18,9 @@ mkHostConfiguration ({
     "i915.enable_psr=1"
     "module_blacklist=idma64" # (아래 boot.kernelParams 주석 참고: idma64/IRQ 27 공유 → 터치패드 먹통의 진짜 원인 차단)
     # lockdown LSM 을 목록에 넣는다(kernel-lockdown mod 의 lockdown-engage-initrd 가 initrd 에서 `integrity` 로 올린다; `lockdown=integrity` 인자는 쓰지 않는다 — psr-force-initrd 가 debugfs 에 써야 해서, 2026-11-10 실기).
-    # specialisation(legacy-quirks·with-*)도 kernelBase 를 쓰므로 모두 lockdown 으로 뜬다(lockdown 없는 항목이 구멍이 되지 않게). lockdown 없는 부팅은 이전 세대(≤527)뿐이다.
+    # 모든 부팅 항목이 lockdown 으로 뜬다(lockdown 없는 항목이 구멍이 되지 않게).
     "lsm=lockdown,landlock,yama,bpf"
   ];
-  legacy = ["pcie_aspm=off" "acpi_osi=Linux" "irqpoll"];
 in {
   os = {
     imports = [
@@ -190,14 +190,6 @@ in {
         ${pkgs.coreutils}/bin/timeout 180 ${pkgs.bpftrace}/bin/bpftrace -e 'tracepoint:signal:signal_generate /args->sig == 9/ { printf("sender=%s pid=%d cg=%s target=%s pid=%d\n", comm, pid, cgroup_path(cgroup), args->comm, args->pid); }' || true
       '';
     };
-
-    # 부팅 메뉴(또는 `sudo bootctl set-oneshot nixos-generation-<N>-specialisation-<이름>.conf`)로 **한 번만** 고를 수 있는 항목(우선순위 40 = 기본의 mkForce 보다 높음):
-    #  legacy-quirks : 이전 기본(옛 인자 3개 모두) — 문제가 생겼을 때 비상용
-    #  with-aspm-off / with-irqpoll / with-osi-linux : 기본에 인자 **하나만** 되살림 — 문제가 생겼을 때 어느 인자가 필요한지 가리는 용도(반응형으로만 사용)
-    specialisation.legacy-quirks.configuration.boot.kernelParams = lib.mkOverride 40 (kernelBase ++ legacy);
-    specialisation.with-aspm-off.configuration.boot.kernelParams = lib.mkOverride 40 (kernelBase ++ ["pcie_aspm=off"]);
-    specialisation.with-irqpoll.configuration.boot.kernelParams = lib.mkOverride 40 (kernelBase ++ ["irqpoll"]);
-    specialisation.with-osi-linux.configuration.boot.kernelParams = lib.mkOverride 40 (kernelBase ++ ["acpi_osi=Linux"]);
 
     # (이유: TLP RUNTIME_PM_DENYLIST는 TLP 서비스 시작 후 적용되어 부팅 초기 probe 시점엔 늦음.
     #  kernel 6.18+ 에서 i2c_designware 모듈이 없어 disable_ps 파라미터도 무효가 됨.
