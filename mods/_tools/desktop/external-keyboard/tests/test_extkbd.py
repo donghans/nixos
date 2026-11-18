@@ -42,7 +42,7 @@ w(os.path.join(BIN, "policy"), '#!/bin/sh\necho run >> "$FAKE/policy.log"\n', 0o
 for n in ("udev_events.txt", "bluez_events.txt", "policy.log"):
     w(os.path.join(T, n))
 ENV = dict(os.environ, FAKE=T, EXTKBD_UDEVADM=os.path.join(BIN, "udevadm"), EXTKBD_BUSCTL=os.path.join(BIN, "busctl"), EXTKBD_GDBUS=os.path.join(BIN, "gdbus"),
-           EXTKBD_POLICY=os.path.join(BIN, "policy"), EXTKBD_DEV_INPUT=DEV, EXTKBD_SYSFS=SYS, EXTKBD_DEBOUNCE="0.3", PYTHONDONTWRITEBYTECODE="1")
+           EXTKBD_POLICY=os.path.join(BIN, "policy"), EXTKBD_DEV_INPUT=DEV, EXTKBD_DEV=DEV, EXTKBD_IGNORE_FILE=os.path.join(T, "ignore"), EXTKBD_SYSFS=SYS, EXTKBD_DEBOUNCE="0.3", PYTHONDONTWRITEBYTECODE="1")
 PY = [sys.executable, "-I", os.path.join(ROOT, "extkbd.py")]
 
 
@@ -132,6 +132,31 @@ check("status 출력: 외부 표시·이유·결론", st.returncode == 0 and "AU
 bluez(MAC, False); setup([B_INT, B_BT])
 st = run("status")
 check("status: 연결 끊김 이유와 결론", "연결 끊김" in st.stdout and "없음 (내장 키보드를 켬)" in st.stdout, st.stdout)
+
+# ───── 보안 키·무시 목록 (내장 키보드가 꺼지는 오판 방지) ─────
+# 노드 6: 보안 키(TrustKey)의 키보드 인터페이스(USB 3-3, ID_INPUT_KEYBOARD=1), hidraw0: 같은 USB 장치의 FIDO 인터페이스(udev 태그 security-device)
+P_KEY = "/devices/pci0000:00/0000:00:14.0/usb3/3-3/3-3:1.1/0003:311F:A7F9.000C/input/input60/event6"
+P_TOK = "/devices/pci0000:00/0000:00:14.0/usb3/3-3/3-3:1.0/0003:311F:A7F9.000B/hidraw/hidraw0"
+node(6, P_KEY, "TrustKey TrustKey T110")
+w(os.path.join(DEV, "hidraw0"))
+B_KEY = block(6, P_KEY, ID_INPUT_KEYBOARD="1", ID_BUS="usb", ID_VENDOR_ID="311f", ID_MODEL_ID="a7f9")
+B_TOK = "DEVPATH=%s\nDEVNAME=/dev/hidraw0\nSUBSYSTEM=hidraw\nID_BUS=usb\nTAGS=:seat:security-device:uaccess:\n" % P_TOK
+setup([B_INT, B_KEY, B_TOK])
+check("보안 키(같은 USB 장치에 security-device hidraw)의 키보드 인터페이스만 있으면 → 없음(내장 키보드를 켜 둠)", run("present").returncode == 1)
+st = run("status")
+check("status: 보안 키 이유와 [vid:pid] 표시", "보안 키" in st.stdout and "[311f:a7f9]" in st.stdout and "없음 (내장 키보드를 켬)" in st.stdout, st.stdout)
+setup([B_INT, B_KEY])
+check("대조: security-device hidraw 정보가 없으면 같은 노드가 USB 키보드로 판정됨 → 있음(그래서 위 시험은 태그 규칙을 지킨다)", run("present").returncode == 0)
+setup([B_INT, B_KEY, B_TOK, B_USB])
+check("보안 키가 다른 USB 장치(1-2)의 진짜 키보드까지 제외하지는 않음 → 있음", run("present").returncode == 0)
+w(os.path.join(T, "ignore"), "# 주석\nname:usb keyboard   # 이름 부분문자열(대소문자 무시)\n")
+setup([B_INT, B_USB]); check("무시 목록 name: 규칙 → 그 USB 키보드는 없음으로 판정", run("present").returncode == 1)
+w(os.path.join(T, "ignore"), "311f:A7F9\n")
+setup([B_INT, B_KEY]); check("무시 목록 vid:pid 규칙(대소문자 무시) → 없음", run("present").returncode == 1)
+w(os.path.join(T, "ignore"), "zz:yy\nname:\n")
+setup([B_INT, B_KEY]); check("형식이 틀린 무시 규칙은 버려지고 판정에 영향 없음 → 있음", run("present").returncode == 0)
+os.remove(os.path.join(T, "ignore"))
+os.remove(os.path.join(DEV, "event6")); os.remove(os.path.join(DEV, "hidraw0"))
 
 # ───── 감시 데몬 (프로세스 전체) ─────
 LOG = os.path.join(T, "policy.log")

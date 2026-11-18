@@ -42,6 +42,8 @@
 2. `ID_BUS` 가 `usb` 또는 `bluetooth` (내장 `i8042`, 플랫폼/ACPI/가상은 제외)
 3. 블루투스(`ID_BUS=bluetooth`)면 BlueZ 에서 그 MAC(노드의 `uniq`, 대문자 변환)의 `Connected` 가 true 로 **확인**돼야 한다. 확인하지 못하면(BlueZ 응답 없음, `uniq` 없음, 장치 목록에 없음) **없음으로 본다** — 판정이 불확실할 때는 내장 키보드를 켜 둔다(키보드가 모두 꺼진 상태가 가장 나쁜 결과이므로).
 4. 노드의 sysfs 경로가 지금 존재해야 한다(제거 직후의 낡은 정보 배제).
+5. **보안 키(FIDO 등)의 키보드 인터페이스가 아니어야 한다**(2026-11-19 추가). 보안 키는 USB 인터페이스가 둘이라(FIDO HID + OTP 입력용 키보드 HID) 키보드 노드가 하나 생기는데, 같은 USB 장치에 udev 태그 `security-device`(또는 `ID_SECURITY_TOKEN=1`)가 붙은 hidraw 인터페이스가 있으면 그 키보드 노드는 키보드로 보지 않는다. 안 그러면 FIDO2 키를 꽂는 순간 내장 키보드가 꺼진다(TrustKey T110 `311f:a7f9` 로 실측, `extkbd status` 에서 확인). 같은 칸에서 다른 USB 장치(진짜 키보드)는 제외하지 않는다.
+6. **사용자 무시 목록에 없어야 한다**: `~/.config/extkbd/ignore`(`$XDG_CONFIG_HOME` 기준, 환경변수 `EXTKBD_IGNORE_FILE` 로 변경). 줄마다 `vid:pid`(16진, 대소문자 무시) 또는 `name:부분문자열`(소문자 비교), `#` 뒤는 주석, 형식이 틀린 줄은 버린다. 마우스 수신기 등 키보드 인터페이스를 달고 있어 내장 키보드를 꺼 버리는 장치를 `extkbd status` 의 `[vid:pid]` 로 찾아 적는다(자동 판별은 하지 않는다 — 2.4G 키보드 수신기도 같은 모양이라 구분할 수 없다)
 
 판정 코드는 새로 만든 `mods/_tools/desktop/external-keyboard/extkbd.py`(표준 라이브러리만; 시험 `mods/_tools/desktop/external-keyboard/tests/test_extkbd.py`). 명령:
 - `extkbd present` — 있으면 종료 코드 0, 없으면 1. 정책이 부른다. **정책은 0 일 때만 "있음"으로 보고, 어떤 이유의 실패(예외·시간 초과·실행 파일 없음·사용법 오류 2)든 "없음"으로 본다**(내장 키보드를 켜 둠).

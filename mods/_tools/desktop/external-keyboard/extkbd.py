@@ -6,9 +6,12 @@
   extkbd watch     입력 장치 추가/제거와 블루투스 연결 변화를 지켜보다가 POLICY(hypr-input-policy)를 다시 실행(이벤트 구동, 폴링 없음)
 
 판정: ID_INPUT_KEYBOARD=1 이고 ID_BUS 가 usb|bluetooth 인 입력 노드. 블루투스는 BlueZ 에서 그 MAC(노드의 uniq)의 Connected 가 true 로 확인돼야 한다.
+제외: ① FIDO 등 보안 키 — 같은 USB 장치에 udev 태그 `security-device`(또는 ID_SECURITY_TOKEN=1) 인 hidraw 인터페이스가 있으면 그 장치의 키보드 인터페이스(OTP 입력용)는 키보드가 아니다.
+      ② 사용자 무시 목록(`~/.config/extkbd/ignore`): 줄마다 `vid:pid`(16진) 또는 `name:부분문자열`. 마우스 수신기가 키보드 인터페이스를 달고 있어 내장 키보드가 꺼질 때 `extkbd status` 의 [vid:pid] 를 적는다.
 """
 import json
 import os
+import re
 import select
 import subprocess
 import sys
@@ -19,6 +22,8 @@ BUSCTL = os.environ.get("EXTKBD_BUSCTL", "busctl")
 GDBUS = os.environ.get("EXTKBD_GDBUS", "gdbus")
 POLICY = os.environ.get("EXTKBD_POLICY", "hypr-input-policy")
 DEV_INPUT = os.environ.get("EXTKBD_DEV_INPUT", "/dev/input")
+DEV = os.environ.get("EXTKBD_DEV", "/dev")                    # hidraw 노드를 찾는 곳(보안 키 판별)
+IGNORE_FILE = os.environ.get("EXTKBD_IGNORE_FILE", os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config"), "extkbd", "ignore"))
 SYSFS = os.environ.get("EXTKBD_SYSFS", "/sys")
 DEBOUNCE = float(os.environ.get("EXTKBD_DEBOUNCE", "1.0"))   # 이벤트가 몰려 와도 정책은 마지막 이벤트 뒤 이만큼 지나 한 번만 실행
 EXTERNAL_BUSES = ("usb", "bluetooth")
@@ -43,16 +48,61 @@ def parse_blocks(text: str) -> list:
     return blocks
 
 
-def input_props() -> list:
-    """모든 입력 이벤트 노드의 udev 속성. 한 번의 호출로 읽는다(노드마다 부르면 느리다)."""
-    try:
-        nodes = sorted(os.path.join(DEV_INPUT, n) for n in os.listdir(DEV_INPUT) if n.startswith("event"))
-    except OSError:
-        return []
+def all_props() -> list:
+    """입력 이벤트 노드와 hidraw 노드의 udev 속성. 한 번의 호출로 읽는다(노드마다 부르면 느리다)."""
+    nodes = []
+    for base, prefix in ((DEV_INPUT, "event"), (DEV, "hidraw")):
+        try:
+            nodes += sorted(os.path.join(base, n) for n in os.listdir(base) if n.startswith(prefix))
+        except OSError:
+            pass
     if not nodes:
         return []
     out = subprocess.run([UDEVADM, "info", "-q", "property", *nodes], capture_output=True, text=True, timeout=10, check=True).stdout
-    return [b for b in parse_blocks(out) if b.get("SUBSYSTEM") == "input"]
+    return parse_blocks(out)
+
+
+def input_props() -> list:
+    return [b for b in all_props() if b.get("SUBSYSTEM") == "input"]
+
+
+_USBDEV = re.compile(r"^(.*?/usb\d+(?:/[0-9]+-[0-9.]+)+)/[0-9]+-[0-9.]+:[0-9]+\.[0-9]+(?:/|$)")
+
+
+def usb_device_path(devpath: str) -> str:
+    """인터페이스(…/3-3:1.0)가 속한 USB 장치(…/3-3)의 sysfs 경로. USB 가 아니면 빈 문자열."""
+    m = _USBDEV.match(devpath)
+    return m.group(1) if m else ""
+
+
+def token_usb_devices(props: list) -> set:
+    """보안 키(FIDO 등)의 hidraw 인터페이스가 달린 USB 장치 경로의 집합. 같은 장치의 다른 인터페이스(OTP 용 키보드)를 키보드로 오인하지 않으려는 것."""
+    res = set()
+    for b in props:
+        if b.get("SUBSYSTEM") != "hidraw":
+            continue
+        if "security-device" in b.get("TAGS", "").split(":") or b.get("ID_SECURITY_TOKEN") == "1":
+            d = usb_device_path(b.get("DEVPATH", ""))
+            if d:
+                res.add(d)
+    return res
+
+
+def load_ignore() -> list:
+    """사용자 무시 목록: [('id', 'vid:pid'), ('name', 소문자 부분문자열)]. 파일이 없거나 읽지 못하면 빈 목록."""
+    try:
+        with open(IGNORE_FILE) as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return []
+    rules = []
+    for ln in lines:
+        ln = ln.split("#", 1)[0].strip()
+        if ln.lower().startswith("name:") and ln[5:].strip():
+            rules.append(("name", ln[5:].strip().lower()))
+        elif re.fullmatch(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{4}", ln):
+            rules.append(("id", ln.lower()))
+    return rules
 
 
 def bt_connected():
@@ -80,8 +130,8 @@ def sysfs_attr(devpath: str, name: str) -> str:
         return ""
 
 
-def classify(props: dict, bt) -> tuple:
-    """(외부 키보드 여부, 이유). bt 는 bt_connected() 의 값."""
+def classify(props: dict, bt, token_devs=frozenset(), ignore=()) -> tuple:
+    """(외부 키보드 여부, 이유). bt 는 bt_connected() 의 값. token_devs: 보안 키가 달린 USB 장치 경로, ignore: 사용자 무시 규칙."""
     if props.get("ID_INPUT_KEYBOARD") != "1":
         return False, "키보드 아님"
     bus = props.get("ID_BUS", "")
@@ -90,6 +140,13 @@ def classify(props: dict, bt) -> tuple:
     devpath = props.get("DEVPATH", "")
     if not os.path.isdir(os.path.join(SYSFS, devpath.lstrip("/"))):
         return False, "노드가 이미 사라짐"
+    vidpid = f"{props.get('ID_VENDOR_ID', '')}:{props.get('ID_MODEL_ID', '')}".lower()
+    nm = sysfs_attr(devpath, "name").lower()
+    for kind, val in ignore:
+        if (kind == "id" and val == vidpid) or (kind == "name" and val in nm):
+            return False, f"무시 목록({kind}:{val})"
+    if bus == "usb" and usb_device_path(devpath) in token_devs:
+        return False, "보안 키(FIDO 등)의 키보드 인터페이스 — 같은 USB 장치에 security-device 가 있음"
     if bus == "usb":
         return True, "USB"
     mac = sysfs_attr(devpath, "uniq").upper()
@@ -103,13 +160,16 @@ def classify(props: dict, bt) -> tuple:
 
 
 def scan() -> list:
-    """[(노드, 이름, 버스, 외부 키보드 여부, 이유)] — ID_INPUT_KEYBOARD=1 인 노드만."""
-    props = [p for p in input_props() if p.get("ID_INPUT_KEYBOARD") == "1"]
+    """[(노드, 이름, 버스, 외부 키보드 여부, 이유, vid:pid)] — ID_INPUT_KEYBOARD=1 인 노드만."""
+    allp = all_props()
+    props = [p for p in allp if p.get("SUBSYSTEM") == "input" and p.get("ID_INPUT_KEYBOARD") == "1"]
     bt = bt_connected() if any(p.get("ID_BUS") == "bluetooth" for p in props) else {}
+    tokens, ignore = token_usb_devices(allp), load_ignore()
     rows = []
     for p in props:
-        ext, why = classify(p, bt)
-        rows.append((p.get("DEVNAME", "?"), sysfs_attr(p.get("DEVPATH", ""), "name") or "?", p.get("ID_BUS", "?"), ext, why))
+        ext, why = classify(p, bt, tokens, ignore)
+        vp = f"{p.get('ID_VENDOR_ID', '')}:{p.get('ID_MODEL_ID', '')}".strip(":")
+        rows.append((p.get("DEVNAME", "?"), sysfs_attr(p.get("DEVPATH", ""), "name") or "?", p.get("ID_BUS", "?"), ext, why, vp))
     return rows
 
 
@@ -126,8 +186,8 @@ def cmd_status() -> int:
     except Exception as e:
         print(f"입력 장치를 읽지 못함: {e}")
         return 1
-    for node, name, bus, ext, why in rows:
-        print(f"{'외부' if ext else '    '} {node:<20} {bus:<10} {name}  — {why}")
+    for node, name, bus, ext, why, vp in rows:
+        print(f"{'외부' if ext else '    '} {node:<20} {bus:<10} {name}{f' [{vp}]' if vp else ''}  — {why}")
     print("→ 외부 키보드:", "있음 (내장 키보드를 끔)" if any(r[3] for r in rows) else "없음 (내장 키보드를 켬)")
     return 0
 
