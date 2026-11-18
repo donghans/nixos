@@ -140,6 +140,7 @@ in {
     #   수정: 직접 연결된 서브넷(main 의 구체적 경로)이 tailscale 경로보다 먼저 이기게 하는 규칙(우선순위 5260 = tailscale 5250 과 5270 사이; `suppress_prefixlength 0` 은 main 의 기본 경로만 제외).
     #   LAN 밖(집·핫스팟)에서는 main 에 그 경로가 없어 table 52 로 내려가므로 원격 접근(프린터 등)은 그대로다.
     mods.sys.services.tailscale.acceptRoutes = true;
+    mods.sys.services.luks.fido2 = true; # LUKS 슬롯 1 = FIDO2(TrustKey T110, 2026-11-19 등록) — 암호 8단어 입력을 PIN+터치로. 복구 암호(슬롯 0)는 그대로.
     systemd.services.tailscale-lan-first = {
       description = "Prefer directly connected LAN subnets over tailscale subnet routes";
       wantedBy = ["multi-user.target"];

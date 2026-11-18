@@ -29,6 +29,15 @@ mkMod __curPos "LUKS2 루트(systemd initrd) 골격 (S4 에서 켬)" ({
       default = [];
       description = "Extra crypttab options, e.g. [\"fido2-device=auto\"] or [\"tpm2-device=auto\"].";
     };
+    fido2 = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        initrd 에서 FIDO2 보안 키(LUKS 헤더에 `systemd-cryptenroll --fido2-device=auto` 로 등록한 슬롯)로 푼다(crypttab `fido2-device=auto`).
+        키가 없으면 `token-timeout`(기본 30초) 뒤 암호 입력으로 넘어간다 — 복구 암호 슬롯은 그대로 둔다. nixpkgs 에 같은 구성의 시험(systemd-initrd-luks-fido2)이 있다.
+        주의: FIDO2 는 부팅 체인을 확인하지 않는다(가짜 initrd 도 PIN·터치를 받으면 해제용 값을 얻는다). 체인 보호는 Secure Boot + BIOS 암호가 맡는다(hosts/msi-summit-me/SECURE-BOOT.md §2-10).
+      '';
+    };
     deviceTimeoutSec = lib.mkOption {
       type = lib.types.ints.positive;
       default = 600;
@@ -44,7 +53,7 @@ mkMod __curPos "LUKS2 루트(systemd initrd) 골격 (S4 에서 켬)" ({
     # 오입력해도 포기하지 않고 암호창을 계속 다시 띄운다(crypttab `tries=0`). 기본(3회)이면 3번 틀린 뒤 암호창이 사라지고 타임아웃 뒤 emergency 화면에서 Enter 를 눌러야 재시도된다(2026-11-18 VM 시험).
     boot.initrd.luks.devices.${cfg.name} = {
       inherit (cfg) device allowDiscards;
-      crypttabExtraOpts = ["tries=0"] ++ cfg.crypttabExtraOpts;
+      crypttabExtraOpts = ["tries=0"] ++ lib.optional cfg.fido2 "fido2-device=auto" ++ cfg.crypttabExtraOpts;
     };
     boot.initrd.systemd.settings.Manager.DefaultDeviceTimeoutSec = cfg.deviceTimeoutSec;
   };
