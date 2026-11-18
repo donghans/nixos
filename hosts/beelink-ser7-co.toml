@@ -3,6 +3,6 @@ preset     = "workstation"
 bootDevice = "/dev/disk/by-uuid/C125-54BB"
 
 [mods.sys.services]
-tailpass = true
+tailpass = false   # 지금은 시험하지 않아 끔(2026-11-18). 다시 켜기 전에 mods/_tools/services/tailpass/sync.sh 로 .deb 를 vendoring 해야 nixup check 가 통과한다
 llm-ctx = true   # Claude 공유 컨텍스트 저장소(Postgres) 서버 — 접속은 tailnet 의 beelink-ser7-co:5432
 qa-desktop = true   # incus VM qa-desktop(화면 확인용 QA 데스크톱) 사용 규칙을 Claude 전역 지침에 넣는다
