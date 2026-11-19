@@ -228,6 +228,8 @@ def _confirm_chain_change(what, tpm=False):
     else:
         print("※ 이 변경은 Secure Boot 상태(PCR 7)를 바꿔 TPM+PIN 등록이 깨질 수 있습니다. 적용 뒤 **자리를 비우지 말고 바로 재부팅**해서 복구 암호를 한 번 입력하고 TPM 을 다시 등록해야 합니다.")
     print("   집처럼 안전한 곳에서, 곁에 낯선 사람이 없고, 끝나면 바로 재부팅할 수 있을 때만 하세요.")
+    print("   [왜] 변경 순간부터 재부팅까지는 기기가 새 상태와 TPM 이 아는 옛 상태가 어긋난 구간이고, 그 사이에 남이 손대면 구별할 수 없습니다.")
+    print("        또 이 구간을 중간에 끊고 재부팅하면 TPM 이 열리지 않아 복구 암호를 입력해야 합니다.")
     if _ask(f"그렇다면 '{HOME_ACK}' 를 그대로 입력하세요: ") != HOME_ACK:
         print("취소 — 아무 것도 바꾸지 않았습니다.", file=sys.stderr)
         return False
@@ -460,6 +462,7 @@ def cmd_tpm_refresh_policy(args):
     print("TPM 정책을 지금의 Secure Boot 상태(다음 부팅에 측정될 값)로 갱신합니다.")
     print("※ 내가 방금 직접 한 변경(dbx 갱신 등)일 때만 하세요. 모르는 변경을 받아들이면 TPM 이 침해를 감지하지 못합니다.")
     print("   그런 변경이 없었다면 하지 말고, 신뢰 USB 로 점검하세요(SECURE-BOOT.md §2-10).")
+    print("   [왜] TPM 이 부팅 상태가 달라졌다고 거부하는 것이 침해를 알리는 신호입니다. 정책을 갱신하면 그 신호가 꺼져, 바뀐 상태를 '정상'으로 받아들이게 됩니다.")
     if _ask(f"그렇다면 '{REFRESH_ACK}' 를 그대로 입력하세요: ") != REFRESH_ACK:
         print("취소 — 아무 것도 바꾸지 않았습니다.", file=sys.stderr)
         sys.exit(1)
@@ -483,6 +486,8 @@ def cmd_tpm_enroll(args):
         _die("이미 TPM2 슬롯이 있다 — 바꾸려면 --replace(기존 TPM2 슬롯을 지우고 다시 등록)")
     print("지금의 부팅 상태(Secure Boot 키·dbx 등)를 TPM 이 받아들일 기준으로 등록합니다.")
     print("※ 신뢰 USB 점검을 마쳤고, 이 부팅이 내가 아는 정상 상태일 때만 하세요. PIN 은 이 부팅에만 쓰는 별도 구절로 정하세요.")
+    print("   [왜] 지금 상태를 '정상'이라고 TPM 에 새기는 일입니다. 이미 변조된 상태에서 하면 변조된 상태가 기준이 되어 이후 감지되지 않습니다.")
+    print("   PIN 을 따로 정하는 이유: 복구 암호와 같으면 가짜 화면에 한 번 입력한 것으로 둘 다 노출됩니다.")
     if _ask(f"그렇다면 '{TRUST_ACK}' 를 그대로 입력하세요: ") != TRUST_ACK:
         print("취소 — 아무 것도 바꾸지 않았습니다.", file=sys.stderr)
         sys.exit(1)
@@ -644,6 +649,7 @@ def cmd_luks_restore(args):
         print(f"현재 장치의 헤더를 읽지 못했습니다(손상됐다면 정상). 백업 파일 UUID: {new_uuid}")
     print(f"{dev} 의 현재 헤더를 {bak} 로 덮어씁니다. 이 장치의 현재 키슬롯은 사라집니다(되돌릴 수 없음).")
     if differ:
+        print("[왜 경고하나] LUKS 헤더에는 이 디스크를 여는 키슬롯이 들어 있어, 다른 디스크의 헤더로 덮으면 지금 데이터를 풀 키가 없어집니다.")
         print("경고: UUID 가 다릅니다 — 다른 디스크의 백업일 수 있습니다. 그 디스크의 헤더로 덮으면 이 장치의 데이터는 열리지 않게 됩니다.")
         if input("그래도 덮으려면 'overwrite' 를 입력하세요: ") != "overwrite":
             _die("중단합니다(변경 없음).")
@@ -977,6 +983,7 @@ def cmd_luks_reseal(args):
     new_pw = _record_new_passphrase(dev)
     # ── 3. 장치 경로 확인 ──
     print()
+    print("[왜 묻나] 디스크 전체를 다시 암호화하는 동안 정전·강제 종료가 나면 복구 수단이 없을 수 있어, 디스크 밖 백업이 유일한 보험입니다.")
     print("※ 정전·강제 종료가 reencrypt 의 후반부에 일어나면 cryptsetup 으로도 복구하지 못하고 디스크가 잠길 수 있다(2026-11-19 VM 시험에서 재현).")
     print("  그래서 이 디스크 안에만 있는 소중한 데이터는 먼저 디스크 밖에 백업해 두어야 한다. 앞쪽에서 끊긴 경우는 --resume 으로 이어서 끝난다.")
     if _ask(f"소중한 데이터를 디스크 밖에 백업해 두었습니까? 계속하려면 '{BACKUP_ACK}' 를 그대로 입력하세요: ") != BACKUP_ACK:
@@ -1135,6 +1142,9 @@ def cmd_recover(args):
         _die(f"/dev/mapper/{RECOVER_MAPPER} 가 이미 열려 있다 — 상태를 알 수 없는 환경에서는 진행하지 않는다(닫고 다시)")
 
     # 2. 갈래 질문 — 복구 암호/FIDO2 를 입력했으면 이 도구로는 부족하다(PIN 은 세지 않는다: plan §7 #6)
+    print("\n[왜 묻나] 가짜 부팅 화면(부팅 파일 변조)에 복구 암호나 FIDO2 PIN+터치를 입력했다면, 그 값이 공격자에게 넘어갔을 수 있습니다.")
+    print("          그러면 ESP 를 새로 만들어도 디스크 키 자체가 노출된 것이라 부족하고, 마스터키 교체(전부 엎기)가 필요합니다.")
+    print("          (TPM 의 PIN 은 TPM 이 있는 이 기기에서만 쓸 수 있어 여기서는 세지 않습니다. '모르겠음'은 안전한 쪽으로 보아 여기서 멈춥니다.)")
     ans = _ask("이상한 부팅 화면에 복구 암호(8단어)나 FIDO2 PIN+터치를 입력한 적이 있습니까? [예/아니오/모르겠음]: ").strip()
     if ans != "아니오":
         _recover_b_branch()
@@ -1174,6 +1184,7 @@ def cmd_recover(args):
             _die("증거 경로가 ESP 와 같은 장치다 — 다른 USB 를 쓰세요")
         print("\nESP 로 보이는 장치:")
         print(_x("lsblk", ["-o", "NAME,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINT", esp_dev]).stdout)
+        print("[왜 확인하나] 이 단계 뒤에 이 장치를 통째로 포맷합니다. 장치 이름이 USB 등 다른 디스크를 가리키는 실수를 막으려고 경로를 직접 치게 합니다.")
         if _ask(f"이 장치가 이 기기의 ESP 가 맞으면 장치 경로를 그대로 입력하세요 ({esp_dev}): ").strip() != esp_dev:
             print("취소 — 아무 것도 바꾸지 않았습니다.", file=sys.stderr)
             sys.exit(1)
@@ -1212,6 +1223,7 @@ def cmd_recover(args):
 
         # 6. 포맷 — 되돌릴 수 없다. 같은 라벨·볼륨 ID(fstab 의 UUID 마운트 유지), 파티션 GUID 는 GPT 라 그대로(UEFI 항목 유지)
         print(f"\nESP({esp_dev})를 포맷합니다 — 내용만 지우면 조작된 FAT 구조가 남을 수 있어서입니다. 라벨 '{label}'·볼륨 ID {info.get('UUID', '')} 는 유지합니다.")
+        print("[왜 확인하나] 포맷하면 ESP 의 모든 파일(Windows 부팅 항목 등 nix 가 만들지 않은 것 포함)이 사라집니다. 방금 저장한 증거 tar 에서만 꺼낼 수 있습니다." if evidence else "[왜 확인하나] 포맷하면 ESP 의 모든 파일이 사라지고, --no-evidence 로 증거를 남기지 않았으므로 되돌릴 방법이 없습니다.")
         if _ask(f"되돌릴 수 없습니다. 계속하려면 '{FORMAT_ACK}' 를 입력하세요: ").strip() != FORMAT_ACK:
             print("취소 — 포맷하지 않았습니다.", file=sys.stderr)
             sys.exit(1)
