@@ -64,7 +64,7 @@
     '';
   };
 
-  # nixseal(plan/nixseal): ISO 에서는 luks·status 만 쓴다(sb 는 sbctl·서명 키가 있는 설치본 전용). 헤더 백업·복원·키슬롯 조회 용.
+  # nixseal(plan/nixseal): ISO 에서는 luks·status 만 쓴다(sb·tpm 은 sbctl·서명 키·pcrlock 정책이 있는 설치본 전용). 헤더 백업·복원·키슬롯 조회 용.
   nixseal = pkgs.writeShellApplication {
     name = "nixseal";
     runtimeInputs = [pkgs.python3 pkgs.cryptsetup pkgs.util-linux pkgs.coreutils pkgs.qrencode];

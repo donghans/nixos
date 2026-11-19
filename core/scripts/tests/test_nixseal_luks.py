@@ -147,6 +147,168 @@ os.remove(dbxp)
 open(fw_state, "w").write("x")
 rc = run_sb(M.cmd_sb_dbx_update)
 check("dbx-update: dbx 가 비어 있으면 거부(먼저 sb dbx)·update 안 함", rc == 1 and "update -y" not in fw_calls())
+
+# ── tpm(pcrlock): 가짜 systemd-pcrlock·systemd-cryptenroll 로 확인 절차·호출 순서·PCR 7 누락 처리를 시험한다(root·TPM 불필요) ──
+import contextlib, json
+
+
+def run_sb_out(fn, *a):
+    """run_sb 와 같지만 (종료코드, stdout, stderr) 를 돌려준다."""
+    o, e = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(o), contextlib.redirect_stderr(e):
+            fn(list(a))
+        rc = 0
+    except SystemExit as x:
+        rc = x.code or 0
+    return rc, o.getvalue(), e.getvalue()
+
+
+pl_log = os.path.join(fake, "pcrlock.log")
+pl_mode = os.path.join(fake, "pcrlock.mode")   # 비어 있으면 정상 / "nopcr7" = PCR 7 빠진 출력 / "fail:<서브명령>" = 그 서브명령 실패
+fake_pl = os.path.join(fake, "systemd-pcrlock")
+with open(fake_pl, "w") as f:
+    f.write("""#!/bin/sh
+echo "$1" >> %s
+mode=$(cat %s 2>/dev/null)
+if [ "$mode" = "fail:$1" ]; then echo "boom $1" >&2; exit 1; fi
+if [ "$1" = make-policy ]; then
+  if [ "$mode" = nopcr7 ]; then echo "PCRs in protection mask: 3 (external-config), 15 (system-identity)"
+  else echo "PCRs in protection mask: 3 (external-config), 7 (secure-boot-policy), 15 (system-identity)"; fi
+fi
+exit 0
+""" % (pl_log, pl_mode))
+os.chmod(fake_pl, 0o755)
+ce_log = os.path.join(fake, "cryptenroll.log")
+fake_ce = os.path.join(fake, "systemd-cryptenroll")
+with open(fake_ce, "w") as f:
+    f.write("#!/bin/sh\necho \"$@\" >> %s\nexit 0\n" % ce_log)
+os.chmod(fake_ce, 0o755)
+M.NIXSEAL_PCRLOCK = None
+os.environ["NIXSEAL_PCRLOCK"] = fake_pl
+M.CRYPTENROLL = fake_ce
+M.PCRLOCK_JSON = os.path.join(fake, "pcrlock.json")
+M.ESP_CRED_DIR = os.path.join(fake, "esp-cred"); os.makedirs(M.ESP_CRED_DIR)
+synced = []
+_real_sync = os.sync
+os.sync = lambda: synced.append(1)
+
+
+def pl_calls():
+    return open(pl_log).read().split() if os.path.exists(pl_log) else []
+
+
+def ce_calls():
+    return open(ce_log).read() if os.path.exists(ce_log) else ""
+
+
+def reset_tpm():
+    for fp in (pl_log, pl_mode, ce_log):
+        if os.path.exists(fp):
+            os.remove(fp)
+    synced.clear()
+
+
+def set_mode(m):
+    open(pl_mode, "w").write(m)
+
+
+# refresh-policy
+reset_tpm(); M._ask = lambda p: "아니오"
+rc, _, _ = run_sb_out(M.cmd_tpm_refresh_policy)
+check("refresh-policy: 확인이 틀리면 pcrlock 을 부르지 않음", rc == 1 and pl_calls() == [], str(pl_calls()))
+M._ask = lambda p: M.REFRESH_ACK
+rc, _, _ = run_sb_out(M.cmd_tpm_refresh_policy)
+check("refresh-policy: 확인 뒤 lock-secureboot-policy → lock-secureboot-authority → make-policy 순서", rc == 0 and pl_calls() == ["lock-secureboot-policy", "lock-secureboot-authority", "make-policy"], str(pl_calls()))
+check("refresh-policy: 성공하면 sync(ESP 의 credential flush)", synced == [1], str(synced))
+reset_tpm(); set_mode("nopcr7")
+rc, _, err = run_sb_out(M.cmd_tpm_refresh_policy)
+check("refresh-policy: 결과에 PCR 7 이 없으면 실패(종료 1)·원인(pcrphase 유닛) 안내", rc == 1 and "PCR 7" in err and "pcrphase" in err and "refresh-policy" in err, f"{rc} {err[:200]}")
+reset_tpm(); set_mode("fail:lock-secureboot-policy")
+rc, _, err = run_sb_out(M.cmd_tpm_refresh_policy)
+check("refresh-policy: 첫 단계가 실패하면 make-policy 를 부르지 않고 종료 1", rc == 1 and pl_calls() == ["lock-secureboot-policy"] and "재부팅하지 마세요" in err, f"{rc} {pl_calls()}")
+reset_tpm(); set_mode("fail:make-policy")
+rc, _, _ = run_sb_out(M.cmd_tpm_refresh_policy)
+check("refresh-policy: make-policy 실패는 종료 1·sync 안 함", rc == 1 and synced == [], f"{rc} {synced}")
+check("refresh-policy: 알 수 없는 인자 거부(종료 2)", run_sb(M.cmd_tpm_refresh_policy, "--yes") == 2)
+reset_tpm(); os.environ["NIXSEAL_PCRLOCK"] = os.path.join(fake, "없는-pcrlock")
+rc, _, err = run_sb_out(M.cmd_tpm_refresh_policy)
+check("refresh-policy: pcrlock 바이너리가 없으면 종료 1(예외로 죽지 않음)", rc == 1 and "systemd-pcrlock" in err, f"{rc} {err[:120]}")
+os.environ["NIXSEAL_PCRLOCK"] = fake_pl
+
+# dbx-update/dbx 와의 연결: TPM 슬롯이 있을 때만, 변경 뒤에 정책 갱신
+_real_has_tpm = M._has_tpm_slot
+M._has_tpm_slot = lambda dev=None: True
+M._ask = lambda p: M.HOME_ACK
+put("dbx", M.G_DB, b"\x22" * 10); open(fw_state, "w").write("x")
+if os.path.exists(fw_log): os.remove(fw_log)
+reset_tpm()
+rc, out, _ = run_sb_out(M.cmd_sb_dbx_update)
+check("dbx-update(TPM 있음): fwupdmgr update 뒤에 정책 갱신 3단계를 이어서 부름", rc == 0 and "update -y" in fw_calls() and pl_calls() == ["lock-secureboot-policy", "lock-secureboot-authority", "make-policy"], f"{rc} {pl_calls()}")
+check("dbx-update(TPM 있음): 확인 문구가 「이어서 정책 갱신」을 알림", "정책을 이어서 갱신" in out, out[:300])
+open(fw_state, "w").write("x"); os.remove(fw_log); reset_tpm(); set_mode("fail:make-policy")
+rc, _, err = run_sb_out(M.cmd_sb_dbx_update)
+check("dbx-update(TPM 있음): 변경은 됐는데 정책 갱신이 실패하면 종료 1·「재부팅하지 마세요」 안내", rc == 1 and "update -y" in fw_calls() and "재부팅하지 마세요" in err and "이미 적용" in err, f"{rc} {err[:200]}")
+open(fw_state, "w").write("x"); os.remove(fw_log); reset_tpm()
+M._ask = lambda p: "아니오"
+rc, _, _ = run_sb_out(M.cmd_sb_dbx_update)
+check("dbx-update(TPM 있음): 확인이 틀리면 update 도 pcrlock 도 부르지 않음", rc == 1 and "update -y" not in fw_calls() and pl_calls() == [], f"{pl_calls()}")
+M._has_tpm_slot = lambda dev=None: False
+M._ask = lambda p: M.HOME_ACK
+open(fw_state, "w").write("x"); reset_tpm()
+rc, out, _ = run_sb_out(M.cmd_sb_dbx_update)
+check("dbx-update(TPM 없음): 정책 갱신을 부르지 않고 복구 암호 안내", rc == 0 and pl_calls() == [] and "복구 암호" in out, f"{pl_calls()}")
+# sb dbx(빈 dbx 채우기)도 같은 연결
+M._has_tpm_slot = lambda dev=None: True
+os.remove(dbxp); reset_tpm()
+rc, _, _ = run_sb_out(M.cmd_sb_dbx)
+check("sb dbx(TPM 있음): dbx 를 채운 뒤 정책 갱신", rc == 0 and os.path.exists(dbxp) and pl_calls()[-1:] == ["make-policy"], f"{rc} {pl_calls()}")
+os.remove(dbxp); reset_tpm(); set_mode("fail:make-policy")
+rc, _, err = run_sb_out(M.cmd_sb_dbx)
+check("sb dbx(TPM 있음): 정책 갱신 실패는 종료 1", rc == 1 and "재부팅하지 마세요" in err, f"{rc}")
+M._has_tpm_slot = lambda dev=None: False
+os.remove(dbxp); reset_tpm()
+rc, _, _ = run_sb_out(M.cmd_sb_dbx)
+check("sb dbx(TPM 없음): 정책 갱신을 부르지 않음", rc == 0 and pl_calls() == [], f"{pl_calls()}")
+put("dbx", M.G_DB, b"\x22" * 10)
+
+# enroll
+dev_file = os.path.join(fake, "fakedev"); open(dev_file, "w").write("x")
+reset_tpm(); M._ask = lambda p: "아니오"; M._has_tpm_slot = lambda dev=None: False
+rc, _, _ = run_sb_out(M.cmd_tpm_enroll, dev_file)
+check("enroll: 확인이 틀리면 정책도 슬롯도 건드리지 않음", rc == 1 and pl_calls() == [] and ce_calls() == "")
+M._ask = lambda p: M.TRUST_ACK
+rc, _, _ = run_sb_out(M.cmd_tpm_enroll, dev_file)
+args = ce_calls().split()
+check("enroll: 정책 갱신 → systemd-cryptenroll(--tpm2-pcrlock=<정책>·--tpm2-with-pin=yes·장치)", rc == 0 and pl_calls()[-1:] == ["make-policy"] and "--tpm2-with-pin=yes" in args and f"--tpm2-pcrlock={M.PCRLOCK_JSON}" in args and args[-1] == dev_file and "--wipe-slot=tpm2" not in args, f"{rc} {args}")
+reset_tpm(); set_mode("nopcr7")
+rc, _, _ = run_sb_out(M.cmd_tpm_enroll, dev_file)
+check("enroll: 정책에 PCR 7 이 없으면 슬롯을 등록하지 않음", rc == 1 and ce_calls() == "", ce_calls())
+reset_tpm(); M._has_tpm_slot = lambda dev=None: True
+rc, _, err = run_sb_out(M.cmd_tpm_enroll, dev_file)
+check("enroll: 이미 TPM2 슬롯이 있으면 --replace 없이는 거부", rc == 1 and ce_calls() == "" and "--replace" in err, f"{rc}")
+rc, _, _ = run_sb_out(M.cmd_tpm_enroll, "--replace", dev_file)
+check("enroll --replace: 기존 TPM2 슬롯을 지우고 다시 등록(--wipe-slot=tpm2)", rc == 0 and "--wipe-slot=tpm2" in ce_calls().split(), ce_calls())
+check("enroll: 알 수 없는 옵션 거부(종료 2)", run_sb(M.cmd_tpm_enroll, "--force", dev_file) == 2)
+M.CRYPTROOT = os.path.join(fake, "없는-cryptroot")
+check("enroll: 장치를 못 찾으면 종료 2", run_sb(M.cmd_tpm_enroll) == 2)
+
+# status
+M._has_tpm_slot = lambda dev=None: True
+rc, out, _ = run_sb_out(M.cmd_tpm_status, dev_file)
+check("status: 정책 파일이 없으면 그렇게 말함", rc == 0 and "정책 파일: 없음" in out, out)
+open(M.PCRLOCK_JSON, "w").write(json.dumps({"pcrValues": [{"pcr": 3, "values": ["a"]}, {"pcr": 15, "values": ["b"]}]}))
+rc, out, _ = run_sb_out(M.cmd_tpm_status, dev_file)
+check("status: PCR 7 이 정책에 없으면 경고", "[3, 15]" in out and "경고" in out and "PCR 7" in out, out)
+open(M.PCRLOCK_JSON, "w").write(json.dumps({"pcrValues": [{"pcr": 7, "values": ["a"]}]}))
+open(os.path.join(M.ESP_CRED_DIR, "pcrlock.abc.cred"), "w").write("x")
+rc, out, _ = run_sb_out(M.cmd_tpm_status, dev_file)
+check("status: PCR 7 이 있으면 경고 없음, ESP credential 수를 보여 줌", "경고" not in out and "1개" in out and "pcrlock.abc.cred" in out, out)
+open(M.PCRLOCK_JSON, "w").write("깨진 json")
+check("status: 깨진 정책 파일도 예외 없이 처리", run_sb_out(M.cmd_tpm_status, dev_file)[0] == 0)
+check("_has_tpm_slot: 장치가 없으면 False(TPM 을 쓰지 않는 것으로 봄)", _real_has_tpm() is False and _real_has_tpm(os.path.join(fake, "없는-장치")) is False)
+os.sync = _real_sync
+M._has_tpm_slot = _real_has_tpm
 shutil.rmtree(fake, ignore_errors=True)
 
 if shutil.which("cryptsetup") is None:
@@ -323,6 +485,16 @@ else:
     check("reseal: 옛 FIDO2 토큰 정리", toks == [], str(toks))
     check("reseal: 백업은 끝난 뒤 초기 상태 하나만(되돌림용은 삭제)", len(left) == 1 and left[0].startswith("luks-header-") and subprocess.run(["cryptsetup", "isLuks", os.path.join(rb, left[0])]).returncode == 0, str(left))
     check("reseal: 끝난 뒤 백업은 새 복구 암호로 열림", opens(os.path.join(rb, left[0]), NEWPW) if left else False)
+
+# 실제 LUKS 이미지: systemd-tpm2 토큰이 있을 때만 _has_tpm_slot 이 True
+ti = os.path.join(tmp, "tpmtok.img")
+subprocess.run(["truncate", "-s", "20M", ti], check=True)
+subprocess.run(["cryptsetup", "luksFormat", "-q", "--type", "luks2", "--pbkdf", "pbkdf2", "--pbkdf-force-iterations", "1000", "--key-file=-", ti], input=b"pw", check=True, capture_output=True)
+check("_has_tpm_slot: 토큰이 없는 실제 LUKS 이미지는 False", _real_has_tpm(ti) is False)
+tj = os.path.join(tmp, "tpmtok.json")
+open(tj, "w").write('{"type":"systemd-tpm2","keyslots":["0"],"tpm2-blob":"AA==","tpm2-pcrs":[],"tpm2-pcr-bank":"sha256","tpm2-primary-alg":"ecc","tpm2-policy-hash":"AA==","tpm2-pin":true}')
+subprocess.run(["cryptsetup", "token", "import", "--json-file", tj, ti], check=True, capture_output=True, stdin=subprocess.DEVNULL)
+check("_has_tpm_slot: systemd-tpm2 토큰이 있으면 True", _real_has_tpm(ti) is True)
 
 shutil.rmtree(tmp, ignore_errors=True)
 print(f"\nnixseal {n['ok']} 통과 / {n['bad']} 실패")

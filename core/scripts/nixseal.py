@@ -10,6 +10,9 @@
                                                    자동으로 하지 않는다 — dbx 가 바뀌면 PCR 7 이 달라져 TPM 등록이 깨지므로, 알림(sb-notify)을 보고 직접 한다
                                                    (집이고 낯선 사람이 없는지·바로 재부팅할 수 있는지 먼저 확인을 묻는다)
   nixseal sb dbx-update                            fwupd 의 dbx 등 갱신을 확인하고, 같은 확인을 거친 뒤 적용(fwupdmgr update)
+  nixseal tpm status [장치]                        TPM2 슬롯·정책 파일(보호 PCR)·ESP 의 정책 credential 요약(PCR 7 이 빠졌으면 경고)
+  nixseal tpm enroll [--replace] [장치]            복구 암호로 연 상태에서 TPM2+PIN 슬롯 등록(PIN 은 이 부팅에만 쓰는 별도 구절). --replace: 기존 TPM2 슬롯 교체
+  nixseal tpm refresh-policy                       Secure Boot 를 직접 바꾼 직후, 재부팅 전에 TPM 정책을 새 상태로 갱신(「내가 한 변경」 확인). sb dbx·dbx-update 는 TPM 슬롯이 있으면 이것을 이어서 부른다
   nixseal luks slots <장치|백업파일>               키슬롯·토큰 요약
   nixseal luks backup <장치|파일> <대상디렉터리> [--name 접두사]   헤더 백업(파일명에 장치 UUID·시각, 권한 0400)
   nixseal luks verify <장치|백업파일> [--passphrase]              LUKS 헤더인지 확인(+ 암호를 숨겨 입력받아 열림 검사)
@@ -18,7 +21,7 @@
                                                    백업 디렉터리는 마운트한 USB 등(RAM 디스크는 거부), 충전기 연결 필수, 도중에 끄지 말 것
   nixseal luks reseal --resume <장치>              중단된 reseal 을 이어서 끝냄(새 복구 암호 필요)   (자세한 안내: nixseal luks reseal --help)
 
-환경변수(시험·nix 래퍼용): CRYPTSETUP, SBCTL, NIXSEAL_EFIVARS(기본 /sys/firmware/efi/efivars), NIXSEAL_PKI(기본 /var/lib/sbctl),
+환경변수(시험·nix 래퍼용): CRYPTSETUP, SBCTL, NIXSEAL_PCRLOCK, NIXSEAL_PCRLOCK_JSON, NIXSEAL_ESP_CRED, NIXSEAL_CRYPTENROLL, NIXSEAL_EFIVARS(기본 /sys/firmware/efi/efivars), NIXSEAL_PKI(기본 /var/lib/sbctl),
   NIXSEAL_DBX(내장 DBXUpdate.bin 경로), NIXSEAL_FWUPD_DIR(기본 /var/lib/fwupd-check), NIXSEAL_SELF(sudo 로 다시 실행할 래퍼 경로), NIXSEAL_NO_SUDO(시험용).
 
 주의(헤더 백업은 「그 시점의 암호/키슬롯으로 열리는 헤더」다): 이후 슬롯을 추가·삭제·변경하면 옛 백업은 옛 암호로만 열린다.
@@ -211,10 +214,14 @@ def apply_dbx(binpath):
     print(f"dbx 크기: {_fmt(var_size('dbx', G_DB))}바이트. 이후 갱신은 fwupdmgr 로.")
 
 
-def _confirm_chain_change(what):
+def _confirm_chain_change(what, tpm=False):
     """Secure Boot 상태(PCR 7)를 바꾸는 작업 전 확인. 집처럼 안전한 곳·낯선 사람 없음·끝난 뒤 바로 재부팅할 수 있을 때만 진행한다."""
     print(what)
-    print("※ 이 변경은 Secure Boot 상태(PCR 7)를 바꿔 TPM+PIN 등록이 깨질 수 있습니다. 적용 뒤 **자리를 비우지 말고 바로 재부팅**해서 복구 암호를 한 번 입력하고 TPM 을 다시 등록해야 합니다.")
+    if tpm:
+        print("※ 이 변경은 Secure Boot 상태(PCR 7)를 바꿉니다. TPM+PIN 을 쓰는 중이라, 변경 직후 **같은 명령 안에서 TPM 정책을 이어서 갱신**합니다 — 끝날 때까지 기다리고, 끝나면 바로 재부팅하세요.")
+        print("   정책 갱신은 재부팅 전에만 가능합니다(재부팅한 뒤에는 복구 암호 + 재등록뿐).")
+    else:
+        print("※ 이 변경은 Secure Boot 상태(PCR 7)를 바꿔 TPM+PIN 등록이 깨질 수 있습니다. 적용 뒤 **자리를 비우지 말고 바로 재부팅**해서 복구 암호를 한 번 입력하고 TPM 을 다시 등록해야 합니다.")
     print("   집처럼 안전한 곳에서, 곁에 낯선 사람이 없고, 끝나면 바로 재부팅할 수 있을 때만 하세요.")
     if _ask(f"그렇다면 '{HOME_ACK}' 를 그대로 입력하세요: ") != HOME_ACK:
         print("취소 — 아무 것도 바꾸지 않았습니다.", file=sys.stderr)
@@ -233,14 +240,15 @@ def _dbx_fill():
     if not DBX_BUNDLED or not os.path.isfile(DBX_BUNDLED):
         print(f"내장 DBXUpdate 를 찾지 못함({DBX_BUNDLED or '미설정'})", file=sys.stderr)
         return 1
-    if not _confirm_chain_change("dbx 가 비어 있어 내장 DBXUpdate 로 채우려 합니다(커밋 고정, 펌웨어가 KEK 서명을 검증)."):
+    tpm = _has_tpm_slot()
+    if not _confirm_chain_change("dbx 가 비어 있어 내장 DBXUpdate 로 채우려 합니다(커밋 고정, 펌웨어가 KEK 서명을 검증).", tpm):
         return 1
     try:
         apply_dbx(DBX_BUNDLED)
     except OSError as e:
         print(f"dbx 쓰기 실패: {e}", file=sys.stderr)
         return 1
-    return 0
+    return 0 if _after_chain_change(tpm) else 1
 
 
 def cmd_sb_dbx(args):
@@ -263,7 +271,8 @@ def cmd_sb_dbx_update(args):
         return
     if r.returncode != 0:
         _die(f"{FWUPDMGR} get-updates 실패(rc={r.returncode})")
-    if not _confirm_chain_change("위 fwupd 갱신을 적용하려 합니다(dbx 등 Secure Boot 데이터베이스)."):
+    tpm = _has_tpm_slot()
+    if not _confirm_chain_change("위 fwupd 갱신을 적용하려 합니다(dbx 등 Secure Boot 데이터베이스).", tpm):
         sys.exit(1)
     if subprocess.run([FWUPDMGR, "update", "-y", "--no-reboot-check"]).returncode != 0:
         _die("fwupdmgr update 실패")
@@ -273,7 +282,12 @@ def cmd_sb_dbx_update(args):
             f.write(after.stdout + after.stderr)
     except OSError:
         pass
-    print("적용했습니다. 이제 자리를 비우지 말고 바로 재부팅하세요 → 복구 암호 입력 → TPM+PIN 을 쓰는 중이면 다시 등록.")
+    if tpm:
+        if not _after_chain_change(tpm):
+            sys.exit(1)
+        print("적용했습니다. 이제 자리를 비우지 말고 바로 재부팅하세요 → PIN 만으로 열립니다.")
+    else:
+        print("적용했습니다. 이제 자리를 비우지 말고 바로 재부팅하세요 → 복구 암호 입력 → TPM+PIN 을 쓰는 중이면 다시 등록.")
 
 
 def cmd_sb_enroll(args):
@@ -292,6 +306,151 @@ def cmd_sb_enroll(args):
     print("키 등록 완료.")
     print("다음: BIOS 에서 Secure Boot Support 를 Enabled 로 바꾸고 저장 후 부팅. dbx 가 비어 있으면 로그인 때 알림이 뜬다 — 직접 채우려면 nixseal sb dbx(TPM+PIN 을 쓰는 중이면 등록이 깨질 수 있음).")
     print("그 뒤 nixseal sb status 로 확인.")
+
+
+# ───────────────────────── TPM2+PIN (tpm, pcrlock) ─────────────────────────
+# 근거: plan/boot-security 6-S6·6-S6a(VM 시험 core/scripts/tests/vm). 정책(NV 인덱스)은 「현재 PCR 상태가 옛 정책을 만족할 때만」 갱신된다 —
+# 그래서 Secure Boot 변경(dbx 등)과 정책 갱신은 재부팅 전에 한 번에 끝내야 한다. 놓치면 복구 암호 + 재등록(remove-policy)뿐이다.
+
+def _find_pcrlock():
+    env = os.environ.get("NIXSEAL_PCRLOCK")
+    if env:
+        return env
+    return shutil.which("systemd-pcrlock") or "/run/current-system/sw/lib/systemd/systemd-pcrlock"
+
+
+PCRLOCK_JSON = os.environ.get("NIXSEAL_PCRLOCK_JSON", "/var/lib/systemd/pcrlock.json")
+ESP_CRED_DIR = os.environ.get("NIXSEAL_ESP_CRED", "/boot/loader/credentials")
+CRYPTENROLL = os.environ.get("NIXSEAL_CRYPTENROLL", "systemd-cryptenroll")
+REFRESH_ACK = "내가 한 변경"
+TRUST_ACK = "이 상태를 신뢰"
+RETRY_HINT = "※ 아직 재부팅하지 마세요 — 재부팅 전이면 `nixseal tpm refresh-policy` 를 다시 해서 마칠 수 있습니다. 재부팅하면 갱신이 거부되고 복구 암호 + 재등록(remove-policy)뿐입니다."
+
+
+def _luks_dev(args):
+    return args[0] if args else (CRYPTROOT if os.path.exists(CRYPTROOT) else "")
+
+
+def _has_tpm_slot(dev=None):
+    """장치에 systemd-tpm2 토큰이 있는가. 장치를 못 찾거나 읽지 못하면 False(= TPM 을 쓰지 않는 것으로 본다)."""
+    dev = dev or _luks_dev([])
+    if not dev:
+        return False
+    r = _cs(["luksDump", dev])
+    return r.returncode == 0 and any(k == "systemd-tpm2" for _, k in parse_slots(r.stdout.decode(errors="replace"))["tokens"])
+
+
+def _pcrlock_refresh():
+    """현재 EFI 변수로 다음 부팅의 PCR 7 을 예측해 정책을 갱신한다. 성공하면 True. 결과에 PCR 7 이 없으면 False(보호가 조용히 빠진 것)."""
+    pl = _find_pcrlock()
+    out = ""
+    for sub in ("lock-secureboot-policy", "lock-secureboot-authority", "make-policy"):
+        try:
+            r = subprocess.run([pl, sub], capture_output=True, text=True)
+        except OSError as e:
+            print(f"systemd-pcrlock 을 실행하지 못함({pl}): {e}", file=sys.stderr)
+            return False
+        out = r.stdout + r.stderr
+        if r.returncode != 0:
+            print(f"systemd-pcrlock {sub} 실패(rc={r.returncode}):\n{out.strip()}", file=sys.stderr)
+            return False
+    try:
+        os.sync()  # ESP(vfat) 의 credential 이 디스크에 내려가야 한다(VM 시험에서 빠뜨리면 정책이 사라졌다)
+    except OSError:
+        pass
+    if not re.search(r"PCRs in protection mask:.*\b7 \(", out):
+        print("정책에서 PCR 7(Secure Boot 정책)이 빠졌습니다 — 이 상태로는 Secure Boot 변경을 TPM 이 감지하지 못합니다.\n"
+              "initrd 에 systemd-pcrphase-initrd·systemd-pcrosseparator 유닛이 켜져 있는지 확인하세요(plan/boot-security 6-S6a ②).", file=sys.stderr)
+        print(out.strip(), file=sys.stderr)
+        return False
+    return True
+
+
+def _pcrlock_pcrs():
+    """정책 파일이 보호하는 PCR 번호 목록(없거나 못 읽으면 None)."""
+    import json
+    try:
+        with open(PCRLOCK_JSON) as f:
+            return sorted(p["pcr"] for p in json.load(f)["pcrValues"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def cmd_tpm_status(args):
+    _need_root(["tpm", "status"] + args)
+    dev = _luks_dev(args)
+    print("== TPM+PIN(pcrlock) ==")
+    if dev:
+        print(f"장치: {dev} — TPM2 슬롯: " + ("있음" if _has_tpm_slot(dev) else "없음"))
+    else:
+        print(f"장치를 찾지 못함({CRYPTROOT} 없음) — nixseal tpm status <장치>")
+    pcrs = _pcrlock_pcrs()
+    if pcrs is None:
+        print(f"정책 파일: 없음/읽지 못함({PCRLOCK_JSON})")
+    else:
+        print(f"정책 파일: {PCRLOCK_JSON} — 보호 PCR {pcrs}")
+        if 7 not in pcrs:
+            print("  경고: PCR 7(Secure Boot 정책)이 없습니다 — Secure Boot 변경을 TPM 이 감지하지 못합니다.")
+    creds = sorted(glob.glob(os.path.join(ESP_CRED_DIR, "pcrlock.*.cred")))
+    print(f"ESP 의 정책 credential: {len(creds)}개" + ("" if not creds else " — " + ", ".join(os.path.basename(c) for c in creds)))
+    if not creds:
+        print("  (initrd 가 TPM 으로 열려면 이 파일이 필요합니다 — nixseal tpm refresh-policy)")
+
+
+def cmd_tpm_refresh_policy(args):
+    """Secure Boot 상태를 바꾼 직후, 재부팅 전에 TPM 정책을 새 상태에 맞춘다. 사용자가 한 변경일 때만."""
+    _need_root(["tpm", "refresh-policy"] + args)
+    if args:
+        _die(f"알 수 없는 인자: {args[0]} (사용법: nixseal tpm refresh-policy)", 2)
+    print("TPM 정책을 지금의 Secure Boot 상태(다음 부팅에 측정될 값)로 갱신합니다.")
+    print("※ 내가 방금 직접 한 변경(dbx 갱신 등)일 때만 하세요. 모르는 변경을 받아들이면 TPM 이 침해를 감지하지 못합니다.")
+    print("   그런 변경이 없었다면 하지 말고, 신뢰 USB 로 점검하세요(SECURE-BOOT.md §2-10).")
+    if _ask(f"그렇다면 '{REFRESH_ACK}' 를 그대로 입력하세요: ") != REFRESH_ACK:
+        print("취소 — 아무 것도 바꾸지 않았습니다.", file=sys.stderr)
+        sys.exit(1)
+    if not _pcrlock_refresh():
+        print(RETRY_HINT, file=sys.stderr)
+        sys.exit(1)
+    print("정책을 갱신했습니다. 재부팅하면 PIN 만으로 열립니다.")
+
+
+def cmd_tpm_enroll(args):
+    """복구 암호로 연 상태에서 TPM2+PIN 슬롯을 등록한다(PIN 은 이 부팅에만 쓰는 별도 구절)."""
+    _need_root(["tpm", "enroll"] + args)
+    replace = "--replace" in args
+    rest = [a for a in args if a != "--replace"]
+    if any(a.startswith("-") for a in rest) or len(rest) > 1:
+        _die("사용: nixseal tpm enroll [--replace] [장치]", 2)
+    dev = _luks_dev(rest)
+    if not dev:
+        _die(f"장치를 찾지 못함({CRYPTROOT} 없음) — nixseal tpm enroll <장치>", 2)
+    if _has_tpm_slot(dev) and not replace:
+        _die("이미 TPM2 슬롯이 있다 — 바꾸려면 --replace(기존 TPM2 슬롯을 지우고 다시 등록)")
+    print("지금의 부팅 상태(Secure Boot 키·dbx 등)를 TPM 이 받아들일 기준으로 등록합니다.")
+    print("※ 신뢰 USB 점검을 마쳤고, 이 부팅이 내가 아는 정상 상태일 때만 하세요. PIN 은 이 부팅에만 쓰는 별도 구절로 정하세요.")
+    if _ask(f"그렇다면 '{TRUST_ACK}' 를 그대로 입력하세요: ") != TRUST_ACK:
+        print("취소 — 아무 것도 바꾸지 않았습니다.", file=sys.stderr)
+        sys.exit(1)
+    if not _pcrlock_refresh():
+        _die("정책을 만들지 못해 등록하지 않았다(위 메시지 참고)")
+    cmd = [CRYPTENROLL] + (["--wipe-slot=tpm2"] if replace else []) + ["--tpm2-device=auto", f"--tpm2-pcrlock={PCRLOCK_JSON}", "--tpm2-with-pin=yes", dev]
+    print("복구 암호를 묻고, 이어서 새 PIN 을 두 번 묻습니다.")
+    if subprocess.run(cmd).returncode != 0:
+        _die("systemd-cryptenroll 실패 — 슬롯은 바뀌지 않았을 수 있다(nixseal tpm status)")
+    print("등록했습니다. 다음 재부팅에서 PIN 만으로 열리는지 확인하세요(복구 암호는 그대로 남아 있습니다).")
+
+
+def _after_chain_change(tpm):
+    """Secure Boot 변경(dbx 등)이 끝난 직후, TPM 슬롯이 있으면 같은 확인 안에서 정책을 이어서 갱신한다. 실패하면 False."""
+    if not tpm:
+        return True
+    print("이어서 TPM 정책을 갱신합니다.")
+    if _pcrlock_refresh():
+        print("정책을 갱신했습니다. 재부팅하면 PIN 만으로 열립니다.")
+        return True
+    print("※ Secure Boot 변경은 이미 적용됐지만 TPM 정책 갱신에 실패했습니다.", file=sys.stderr)
+    print(RETRY_HINT, file=sys.stderr)
+    return False
 
 
 # ───────────────────────── LUKS (luks) ─────────────────────────
@@ -804,6 +963,7 @@ def cmd_status(args):
     print_slots(dev)
 
 
+TPM = {"status": cmd_tpm_status, "enroll": cmd_tpm_enroll, "refresh-policy": cmd_tpm_refresh_policy}
 SB = {"status": cmd_sb_status, "verify": cmd_sb_verify, "backup-esp": cmd_sb_backup_esp, "enroll": cmd_sb_enroll, "dbx": cmd_sb_dbx, "dbx-update": cmd_sb_dbx_update}
 LUKS = {"slots": cmd_luks_slots, "backup": cmd_luks_backup, "verify": cmd_luks_verify, "restore": cmd_luks_restore, "reseal": cmd_luks_reseal}
 
@@ -815,7 +975,7 @@ def main(argv):
     if argv[0] == "status":
         cmd_status(argv[1:])
         return 0
-    group = {"sb": SB, "luks": LUKS}.get(argv[0])
+    group = {"sb": SB, "luks": LUKS, "tpm": TPM}.get(argv[0])
     if group is not None and (len(argv) < 2 or argv[1] in ("help", "-h", "--help")):
         print(__doc__)
         return 0

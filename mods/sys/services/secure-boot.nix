@@ -27,6 +27,7 @@ mkMod __curPos "Secure Boot(lanzaboote) 골격: systemd-boot 를 끄고 서명�
     text = ''
       export NIXSEAL_PKI=${cfg.pkiBundle}
       export NIXSEAL_DBX=${dbxInit}
+      export NIXSEAL_PCRLOCK=${pkgs.systemd}/lib/systemd/systemd-pcrlock
       export NIXSEAL_SELF="$0"
       exec python3 -I ${../../../core/scripts/nixseal.py} "$@"
     '';
