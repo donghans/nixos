@@ -10,6 +10,9 @@
                                                    자동으로 하지 않는다 — dbx 가 바뀌면 PCR 7 이 달라져 TPM 등록이 깨지므로, 알림(sb-notify)을 보고 직접 한다
                                                    (집이고 낯선 사람이 없는지·바로 재부팅할 수 있는지 먼저 확인을 묻는다)
   nixseal sb dbx-update                            fwupd 의 dbx 등 갱신을 확인하고, 같은 확인을 거친 뒤 적용(fwupdmgr update)
+  nixseal recover --evidence-dir <USB 경로> [--no-evidence] [--evidence-image] [--from-backup <esp-backup-*.tar>] [--root <장치>] [--pki <대상 안 경로>]
+                                                   **ISO(신뢰 USB) 전용.** 의심스러운 ESP 를 증거로 보관 → 같은 라벨·볼륨 ID 로 포맷 → 루트의 서명 키로 재생성(--from-backup 이면 지정한 백업 복원).
+                                                   복구 암호·FIDO2 를 이상한 화면에 입력했을 수 있으면 멈춘다(전부 엎기: nixseal luks reseal). TPM 은 건드리지 않고 첫 부팅 뒤 할 일을 안내한다
   nixseal tpm status [장치]                        TPM2 슬롯·정책 파일(보호 PCR)·ESP 의 정책 credential 요약(PCR 7 이 빠졌으면 경고)
   nixseal tpm enroll [--replace] [장치]            복구 암호로 연 상태에서 TPM2+PIN 슬롯 등록(PIN 은 이 부팅에만 쓰는 별도 구절). --replace: 기존 TPM2 슬롯 교체
   nixseal tpm refresh-policy [--force]             Secure Boot 를 직접 바꾼 직후, 재부팅 전에 TPM 정책을 새 상태로 갱신(「내가 한 변경」 확인). sb dbx·dbx-update 는 TPM 슬롯이 있으면 이것을 이어서 부른다
@@ -28,9 +31,11 @@
 보관할 백업은 복구 암호만 등록된 초기 상태 하나면 된다(마스터키·복구 암호를 바꿀 때만 새로 찍는다). FIDO2·TPM 은 복구 암호로 연 뒤 다시 등록한다.
 exFAT/FAT 매체는 0400 권한이 의미가 없으니 평문 접근이 가능한 매체임을 알고 쓴다(헤더 자체는 암호 없이 데이터를 열 수 없다).
 """
+import contextlib
 import datetime
 import getpass
 import glob
+import io
 import os
 import pwd
 import re
@@ -1015,6 +1020,237 @@ def cmd_status(args):
     print_slots(dev)
 
 
+# ───────────────────────── 복구 (recover, ISO 전용) ─────────────────────────
+# 계획: ctx plan/nixseal-recover. 신뢰 USB(ISO)에서 의심스러운 ESP 를 증거로 남기고, 같은 라벨·볼륨 ID 로 포맷한 뒤 루트의 서명 키로 다시 만든다.
+# TPM 은 건드리지 않는다(ISO 는 Secure Boot 를 끄고 부팅해 PCR 이 대상 시스템과 달라 정책을 갱신할 수 없다) — 첫 부팅 뒤 할 일을 안내만 한다.
+
+MNT = os.environ.get("NIXSEAL_MNT", "/mnt")
+RAM_FS = ("tmpfs", "ramfs", "overlay", "squashfs", "devtmpfs")
+FORMAT_ACK = "포맷"
+RECOVER_MAPPER = "cryptroot"   # fstab 의 장치 이름(/dev/mapper/cryptroot)과 같아야 마운트가 맞는다
+
+
+def _x(name, args, capture=True, input_text=None):
+    """외부 명령 실행(시험에서 바꿔 끼울 수 있는 한 지점). 못 찾으면 종료 코드 127 의 결과를 돌려준다(예외로 죽지 않음)."""
+    exe = {"cryptsetup": CRYPTSETUP, "sbctl": SBCTL}.get(name) or os.environ.get("NIXSEAL_" + name.upper().replace("-", "_"), name)
+    try:
+        return subprocess.run([exe] + list(args), capture_output=capture, text=True, input=input_text)
+    except OSError as e:
+        return subprocess.CompletedProcess([exe] + list(args), 127, "", str(e))
+
+
+def _in_iso():
+    """ISO(RAM 위 루트)에서 실행 중인가 — 설치된 시스템에서 실수로 돌리지 않게. (판별 규칙은 ISO 에서 확인 필요: plan/nixseal-recover §8)"""
+    return _x("findmnt", ["-no", "FSTYPE", "/"]).stdout.strip() in RAM_FS
+
+
+def _fs_of(path):
+    r = _x("findmnt", ["-no", "FSTYPE,SOURCE", "-T", path])
+    parts = r.stdout.split()
+    return (parts[0], parts[1] if len(parts) > 1 else "") if r.returncode == 0 and parts else ("", "")
+
+
+def _blkid(dev):
+    r = _x("blkid", ["-o", "export", dev])
+    return dict(l.split("=", 1) for l in r.stdout.splitlines() if "=" in l) if r.returncode == 0 else {}
+
+
+def _parse_fstab(path):
+    out = []
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.split("#")[0].strip()
+                parts = line.split()
+                if len(parts) >= 4:
+                    out.append((parts[0], parts[1], parts[2], parts[3]))
+    except OSError:
+        pass
+    return out
+
+
+def _recover_b_branch():
+    print("\n이상한 화면에 복구 암호나 FIDO2(PIN+터치)를 입력했을 수 있으면, 이 도구로 되돌릴 수 없는 것이 있습니다 —")
+    print("부팅 파일 안에 백도어가 있었다면 이미 디스크 키가 새어 나갔을 수 있어 ESP 를 새로 만드는 것만으로는 부족합니다.")
+    print("→ 「전부 엎기」(마스터키 교체 + 새 복구 암호 + 키 재등록)가 필요합니다: SECURE-BOOT.md §2-10, nixseal luks reseal --help")
+    print("아무 것도 바꾸지 않고 멈춥니다.")
+
+
+RECOVER_NEXT = """
+== 이제 사람이 할 일 (자동으로 할 수 없음) ==
+1. BIOS: Secure Boot Mode = Custom, Factory Default Key Provisioning = Disabled. 키가 지워졌으면 Setup Mode 에서
+   `NIXSEAL_PKI=<대상>/var/lib/sbctl nixseal sb enroll` 로 다시 등록한 뒤 Secure Boot = Enabled. BIOS 관리자 암호를 설정(또는 재설정).
+2. 첫 부팅은 **복구 암호**로 엽니다(TPM 은 이 ISO 에서 다시 맞출 수 없습니다).
+3. 부팅된 시스템에서: `nixseal sb status` 로 확인 → TPM+PIN 을 쓰는 중이면
+   · 상태(Secure Boot 키·dbx)가 그대로였다면 `nixseal tpm refresh-policy`(ESP 에 credential 이 없으면 자동으로 다시 씀)
+   · 바뀌었다면(침해 의심 포함) `sudo systemd-pcrlock remove-policy` 후 `nixseal tpm enroll --replace`(PIN 은 새로 정하세요 — 노출됐을 수 있음)
+4. 증거 tar 에서 nix 가 만들지 않는 것(Windows 의 EFI/Microsoft, EFI/nixos-iso, 사용자가 둔 rEFInd 드라이버 등)을 골라 되돌립니다.
+5. 복구 매체·서명 키 백업이 그대로인지 확인.
+"""
+
+
+def _recover_cleanup(mapper_open):
+    _x("umount", ["-R", MNT])
+    if mapper_open:
+        _x("cryptsetup", ["close", RECOVER_MAPPER])
+
+
+def cmd_recover(args):
+    """ISO 에서: 의심스러운 ESP → 증거 보관 → (같은 라벨·볼륨 ID 로) 포맷 → 서명 키로 재생성(또는 --from-backup) → NVRAM 확인 → 안내."""
+    _need_root(["recover"] + args)
+    root = os.environ.get("NIXSEAL_RECOVER_ROOT", CRYPTROOT)
+    evid_dir, evidence, evid_image, from_backup, pki = None, True, False, None, "/var/lib/sbctl"
+    it = iter(args)
+    for a in it:
+        if a == "--root":
+            root = next(it, "")
+        elif a == "--evidence-dir":
+            evid_dir = next(it, "")
+        elif a == "--no-evidence":
+            evidence = False
+        elif a == "--evidence-image":
+            evid_image = True
+        elif a == "--from-backup":
+            from_backup = next(it, "")
+        elif a == "--pki":
+            pki = next(it, "")
+        else:
+            _die(f"알 수 없는 옵션: {a} (nixseal --help)", 2)
+    if not _in_iso():
+        _die("ISO(신뢰 USB)로 부팅한 환경이 아니다 — 설치된 시스템에서는 돌리지 않는다(실행 중인 시스템의 ESP 를 포맷하게 된다). 복구용 ISO 로 부팅해서 실행하세요.")
+    if from_backup is not None:
+        if not os.path.isfile(from_backup):
+            _die(f"백업 tar 가 없다: {from_backup}", 2)
+        if not os.path.basename(from_backup).startswith("esp-backup-"):
+            _die("esp-backup-* 파일만 복원할 수 있다(esp-evidence-* 는 의심스러운 ESP 의 증거라 되돌리면 안 된다)", 2)
+    if evidence:
+        if not evid_dir:
+            _die("증거를 보관할 위치가 필요하다: --evidence-dir <USB 경로> (원치 않으면 --no-evidence)", 2)
+        if not os.path.isdir(evid_dir):
+            _die(f"증거 경로가 디렉터리가 아니다: {evid_dir}", 2)
+        fst, _src = _fs_of(evid_dir)
+        if not fst or fst in RAM_FS:
+            _die(f"증거 경로가 저장 매체가 아니다({fst or '알 수 없음'}) — RAM 에 두면 재부팅하면 사라진다. USB 를 마운트해 그 경로를 주세요")
+    if _x("cryptsetup", ["status", RECOVER_MAPPER]).returncode == 0:
+        _die(f"/dev/mapper/{RECOVER_MAPPER} 가 이미 열려 있다 — 상태를 알 수 없는 환경에서는 진행하지 않는다(닫고 다시)")
+
+    # 2. 갈래 질문 — 복구 암호/FIDO2 를 입력했으면 이 도구로는 부족하다(PIN 은 세지 않는다: plan §7 #6)
+    ans = _ask("이상한 부팅 화면에 복구 암호(8단어)나 FIDO2 PIN+터치를 입력한 적이 있습니까? [예/아니오/모르겠음]: ").strip()
+    if ans != "아니오":
+        _recover_b_branch()
+        sys.exit(3)
+
+    # 3. 루트 열기·마운트(ESP 제외)
+    print(f"\n루트를 엽니다: {root} → /dev/mapper/{RECOVER_MAPPER} (복구 암호 입력)")
+    if _x("cryptsetup", ["open", root, RECOVER_MAPPER], capture=False).returncode != 0:
+        _die("루트를 열지 못했다(암호 오류·장치 없음)")
+    opened = True
+    try:
+        os.makedirs(MNT, exist_ok=True)
+        r = _x("mount", ["-o", "subvol=@", f"/dev/mapper/{RECOVER_MAPPER}", MNT])
+        if r.returncode != 0:
+            _die(f"루트를 마운트하지 못했다: {r.stderr.strip()}")
+        fstab = _parse_fstab(os.path.join(MNT, "etc/fstab"))
+        esp_entry = next((e for e in fstab if e[1] == "/boot"), None)
+        if esp_entry is None:
+            _die("대상의 /etc/fstab 에서 /boot(ESP) 항목을 찾지 못했다")
+        for dev, mp, fstype, opts in sorted(fstab, key=lambda e: e[1].count("/")):
+            if mp in ("/", "/boot") or fstype in ("swap", "vfat") or mp == "none":
+                continue
+            _x("mount", ["--mkdir", "-o", opts, dev, MNT + mp])
+        if not os.path.exists(os.path.join(MNT, "etc/NIXOS")):
+            _die("대상이 NixOS 루트가 아니다(/etc/NIXOS 없음) — ESP 는 건드리지 않았다")
+        key = os.path.join(MNT, pki.lstrip("/"), "keys/db/db.key")
+        if from_backup is None and not os.path.exists(key):
+            _die(f"서명 키가 없다({key}) — 재생성할 수 없다. ESP 는 건드리지 않았다. 키 백업에서 되돌리거나(SECURE-BOOT.md §2-6) --from-backup 으로 esp-backup 을 지정하세요")
+
+        # 4. ESP 장치 확정(읽기 전용으로 마운트)
+        esp_dev = os.path.realpath(esp_entry[0]) if os.path.exists(esp_entry[0]) else esp_entry[0]
+        info = _blkid(esp_dev)
+        if info.get("TYPE") != "vfat":
+            _die(f"fstab 의 ESP 장치({esp_entry[0]} → {esp_dev})가 vfat 이 아니다({info.get('TYPE') or '읽지 못함'}) — 건드리지 않았다")
+        fst_ev, src_ev = _fs_of(evid_dir) if evid_dir else ("", "")
+        if evid_dir and os.path.realpath(src_ev) == esp_dev:
+            _die("증거 경로가 ESP 와 같은 장치다 — 다른 USB 를 쓰세요")
+        print("\nESP 로 보이는 장치:")
+        print(_x("lsblk", ["-o", "NAME,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINT", esp_dev]).stdout)
+        if _ask(f"이 장치가 이 기기의 ESP 가 맞으면 장치 경로를 그대로 입력하세요 ({esp_dev}): ").strip() != esp_dev:
+            print("취소 — 아무 것도 바꾸지 않았습니다.", file=sys.stderr)
+            sys.exit(1)
+        os.makedirs(os.path.join(MNT, "boot"), exist_ok=True)
+        if _x("mount", ["-t", "vfat", "-o", "ro,nodev,nosuid,noexec,fmask=0137,dmask=0027", esp_dev, os.path.join(MNT, "boot")]).returncode != 0:
+            _die("ESP 를 읽기 전용으로 마운트하지 못했다(파일시스템이 심하게 손상됐을 수 있음) — 건드리지 않았다")
+
+        # 5. 증거 보관(실패하면 중단 — ESP 는 그대로)
+        if evidence:
+            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            tar_path = os.path.join(evid_dir, f"esp-evidence-{stamp}.tar")
+            if _x("tar", ["-C", os.path.join(MNT, "boot"), "-cf", tar_path, "."]).returncode != 0 or not os.path.exists(tar_path) or os.path.getsize(tar_path) == 0:
+                _die("증거 tar 를 저장하지 못했다 — ESP 는 그대로 둔다")
+            if _x("tar", ["-tf", tar_path]).returncode != 0:
+                _die("저장한 증거 tar 를 읽을 수 없다 — ESP 는 그대로 둔다")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                try:
+                    sb_status(full=shutil.which(SBCTL) is not None)
+                except Exception as e:  # 증거 수집 실패가 복구를 막지는 않는다
+                    print(f"(nixseal status 실패: {e})")
+            meta = (f"# esp-evidence {stamp}\n# 포맷 전 ESP 의 라벨·볼륨 ID(같은 값으로 다시 포맷한다)\n"
+                    f"device={esp_dev}\nLABEL={info.get('LABEL', '')}\nUUID={info.get('UUID', '')}\n\n"
+                    f"== efibootmgr -v ==\n{_x('efibootmgr', ['-v']).stdout}\n== nixseal status ==\n{buf.getvalue()}\n"
+                    f"== lsblk ==\n{_x('lsblk', ['-o', 'NAME,SIZE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINT']).stdout}\n")
+            with open(os.path.join(evid_dir, f"esp-evidence-{stamp}.txt"), "w") as f:
+                f.write(meta)
+            if evid_image:
+                size = int((_x("blockdev", ["--getsize64", esp_dev]).stdout or "0").strip() or 0)
+                if size and shutil.disk_usage(evid_dir).free < size + (64 << 20):
+                    _die("증거 이미지를 둘 USB 공간이 부족하다 — --evidence-image 를 빼거나 큰 USB 를 쓰세요(ESP 는 그대로)")
+                if _x("dd", [f"if={esp_dev}", f"of={os.path.join(evid_dir, f'esp-evidence-{stamp}.img')}", "bs=4M", "conv=fsync", "status=none"]).returncode != 0:
+                    _die("증거 이미지를 저장하지 못했다 — ESP 는 그대로 둔다")
+            print(f"증거 저장: {tar_path} (+ .txt{', .img' if evid_image else ''})")
+        label, volid = info.get("LABEL", ""), info.get("UUID", "").replace("-", "")
+
+        # 6. 포맷 — 되돌릴 수 없다. 같은 라벨·볼륨 ID(fstab 의 UUID 마운트 유지), 파티션 GUID 는 GPT 라 그대로(UEFI 항목 유지)
+        print(f"\nESP({esp_dev})를 포맷합니다 — 내용만 지우면 조작된 FAT 구조가 남을 수 있어서입니다. 라벨 '{label}'·볼륨 ID {info.get('UUID', '')} 는 유지합니다.")
+        if _ask(f"되돌릴 수 없습니다. 계속하려면 '{FORMAT_ACK}' 를 입력하세요: ").strip() != FORMAT_ACK:
+            print("취소 — 포맷하지 않았습니다.", file=sys.stderr)
+            sys.exit(1)
+        boot = os.path.join(MNT, "boot")
+        if _x("umount", [boot]).returncode != 0:
+            _die("ESP 를 내리지 못했다 — 포맷하지 않았다")
+        if _x("mountpoint", ["-q", boot]).returncode == 0:
+            _die("ESP 가 아직 마운트돼 있다 — 포맷하지 않았다")
+        mk = ["-F", "32"] + (["-n", label] if label else []) + (["-i", volid] if volid else []) + [esp_dev]
+        if _x("mkfs.vfat", mk).returncode != 0:
+            _die("mkfs.vfat 실패 — ESP 가 비어 있거나 반쯤 만들어졌을 수 있다. 같은 명령으로 다시 시도하세요(증거는 저장됨)")
+        if _x("mount", ["-t", "vfat", "-o", "nodev,nosuid,noexec,fmask=0077,dmask=0077", esp_dev, boot]).returncode != 0 or _x("mountpoint", ["-q", boot]).returncode != 0:
+            _die("새 ESP 를 마운트하지 못했다")
+
+        # 7. 재생성 또는 지정한 백업 복원
+        if from_backup is not None:
+            if _x("tar", ["-xf", from_backup, "-C", boot, "--no-same-owner"]).returncode != 0:
+                _die("백업 복원 실패 — ESP 는 비어 있다. 다시 시도하세요")
+            print(f"백업을 복원했습니다: {from_backup} (오래됐을 수 있습니다 — 신뢰는 직접 판단하세요)")
+        else:
+            r = _x("nixos-enter", ["--root", MNT, "-c", "/nix/var/nix/profiles/system/bin/switch-to-configuration boot"], capture=False)
+            if r.returncode != 0:
+                print("\n재생성에 실패했습니다. ESP 는 비어 있습니다(루트·서명 키는 그대로).", file=sys.stderr)
+                print("→ 원인을 고쳐 다시 실행하거나, 오래돼도 괜찮다면 지정해 복원: nixseal recover --from-backup <esp-backup-*.tar> [--evidence-dir …]", file=sys.stderr)
+                sys.exit(1)
+
+        # 8. 검증·NVRAM
+        rv = _x("nixos-enter", ["--root", MNT, "-c", "sbctl verify"])
+        print("\n== sbctl verify ==\n" + (rv.stdout or rv.stderr or "(출력 없음)"))
+        uki = glob.glob(os.path.join(boot, "EFI/Linux/*.efi"))
+        if not uki:
+            print("경고: ESP 에 UKI(EFI/Linux/*.efi)가 없다 — 이대로는 부팅되지 않을 수 있다", file=sys.stderr)
+        print("== efibootmgr -v ==\n" + _x("efibootmgr", ["-v"]).stdout)
+        print("rEFInd 항목이 없거나 BootOrder 가 이상하면 SECURE-BOOT.md §2-1 의 efibootmgr 절차로 등록하세요(낯선 항목은 직접 확인 후 삭제 — 이 도구는 지우지 않습니다).")
+        print(RECOVER_NEXT)
+    finally:
+        _recover_cleanup(opened)
+
+
 TPM = {"status": cmd_tpm_status, "enroll": cmd_tpm_enroll, "refresh-policy": cmd_tpm_refresh_policy}
 SB = {"status": cmd_sb_status, "verify": cmd_sb_verify, "backup-esp": cmd_sb_backup_esp, "enroll": cmd_sb_enroll, "dbx": cmd_sb_dbx, "dbx-update": cmd_sb_dbx_update}
 LUKS = {"slots": cmd_luks_slots, "backup": cmd_luks_backup, "verify": cmd_luks_verify, "restore": cmd_luks_restore, "reseal": cmd_luks_reseal}
@@ -1026,6 +1262,9 @@ def main(argv):
         return 0
     if argv[0] == "status":
         cmd_status(argv[1:])
+        return 0
+    if argv[0] == "recover":
+        cmd_recover(argv[1:])
         return 0
     group = {"sb": SB, "luks": LUKS, "tpm": TPM}.get(argv[0])
     if group is not None and (len(argv) < 2 or argv[1] in ("help", "-h", "--help")):

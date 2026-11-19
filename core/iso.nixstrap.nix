@@ -64,10 +64,12 @@
     '';
   };
 
-  # nixseal(plan/nixseal): ISO 에서는 luks·status 만 쓴다(sb·tpm 은 sbctl·서명 키·pcrlock 정책이 있는 설치본 전용). 헤더 백업·복원·키슬롯 조회 용.
+  # nixseal(plan/nixseal): ISO 에서는 luks·status·recover 를 쓴다(sb·tpm 은 sbctl·서명 키·pcrlock 정책이 있는 설치본 전용).
+  # recover(plan/nixseal-recover)가 부르는 도구: mount·umount·mountpoint·findmnt·lsblk·blkid(util-linux)·dd(coreutils)·tar·mkfs.vfat(dosfstools)·
+  # efibootmgr·nixos-enter(nixos-install-tools)·sbctl(대상의 sbctl 은 chroot 안에서 쓰고, 여기 것은 status 출력용)·cryptsetup·btrfs-progs(서브볼륨 마운트).
   nixseal = pkgs.writeShellApplication {
     name = "nixseal";
-    runtimeInputs = [pkgs.python3 pkgs.cryptsetup pkgs.util-linux pkgs.coreutils pkgs.qrencode];
+    runtimeInputs = [pkgs.python3 pkgs.cryptsetup pkgs.util-linux pkgs.coreutils pkgs.qrencode pkgs.gnutar pkgs.dosfstools pkgs.efibootmgr pkgs.btrfs-progs pkgs.nixos-install-tools pkgs.sbctl];
     text = ''
       exec python3 -I ${nixstrap-libs}/nixseal.py "$@"
     '';

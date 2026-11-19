@@ -35,7 +35,7 @@ in {
     boot.initrd.systemd.enable = true;
     virtualisation.tpm.enable = true;
     virtualisation.emptyDiskImages = [64];
-    environment.systemPackages = [pkgs.cryptsetup pkgs.tpm2-tools pkgs.efitools pkgs.openssl];
+    environment.systemPackages = [pkgs.cryptsetup pkgs.tpm2-tools pkgs.efitools pkgs.openssl pkgs.dosfstools];
 
     # 데이터 볼륨(/dev/vdb)을 initrd 에서 TPM+PIN 으로 연다. 열리지 않아도 부팅은 계속(nofail).
     boot.initrd.luks.devices.cryptdata = {
@@ -155,8 +155,16 @@ in {
               machine.wait_until_succeeds("mount | grep -q 'cryptdata on /data'", timeout=60)
         ''
         else ''
-          with subtest("E1: ESP 를 통째로 비우고 부트로더를 재생성한 뒤 정책을 다시 만들면 PIN 으로 열린다"):
-              machine.succeed("rm -rf /boot/* /boot/.[!.]* 2>/dev/null; test -z \"$(ls -A /boot)\"")
+          with subtest("E1: ESP 를 같은 라벨·볼륨 ID 로 포맷하고 부트로더를 재생성한 뒤 정책을 다시 만들면 PIN 으로 열린다"):
+              # nixseal recover 와 같은 방식: 기존 라벨·볼륨 ID 를 읽어 두고, 내리고, 같은 값으로 포맷하고, 다시 마운트
+              info = machine.succeed("blkid -o export /dev/vda1")
+              label = [l.split("=", 1)[1] for l in info.splitlines() if l.startswith("LABEL=")]
+              volid = [l.split("=", 1)[1] for l in info.splitlines() if l.startswith("UUID=")][0].replace("-", "")
+              machine.succeed("umount /boot")
+              machine.succeed("mkfs.vfat -F 32 " + ("-n " + label[0] + " " if label else "") + "-i " + volid + " /dev/vda1")
+              machine.succeed("mount /boot")
+              machine.succeed("test -z \"$(ls -A /boot)\"")
+              assert ("UUID=" + volid[:4] + "-" + volid[4:]) in machine.succeed("blkid -o export /dev/vda1"), "볼륨 ID 가 유지되지 않았다"
               machine.succeed("sh /etc/esp-install 2>&1")
               machine.succeed("ls /boot/EFI/Linux/*.efi")
               # 상태(PCR)가 그대로라 예측이 옛 정책과 같다 → 보통의 make-policy 는 「skipping update」 로 ESP 에 아무 것도 쓰지 않는다
