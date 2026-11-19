@@ -34,7 +34,46 @@ let
       globalTimeout = 15 * 60;
       extraBaseModules = {imports = [lz.nixosModules.lanzaboote] ++ lz.inputs.nixpkgs.lib.optional shim repoShim;};
     };
+  # recover 시험: ISO 와 같은 nixseal 래퍼 + lanzaboote 가 깔린 대상 시스템(저장소 nixpkgs 로 평가)
+  mkRecover = let
+    pkgs = repoPkgs;
+    target =
+      (import "${pkgs.path}/nixos" {
+        system = "x86_64-linux";
+        configuration = {lib, ...}: {
+          imports = [lz.nixosModules.lanzaboote];
+          boot.loader.systemd-boot.enable = lib.mkForce false;
+          boot.loader.efi.canTouchEfiVariables = false;
+          boot.lanzaboote = {
+            enable = true;
+            pkiBundle = "/var/lib/sbctl";
+          };
+          boot.initrd.systemd.enable = true;
+          boot.initrd.luks.devices.cryptroot.device = "/dev/disk/by-uuid/aaaaaaaa-0000-4000-8000-000000000001";
+          fileSystems."/" = {
+            device = "/dev/mapper/cryptroot";
+            fsType = "btrfs";
+            options = ["subvol=@"];
+          };
+          fileSystems."/boot" = {
+            device = "/dev/disk/by-uuid/1234-ABCD";
+            fsType = "vfat";
+          };
+          system.stateVersion = "26.05";
+        };
+      }).config.system.build.toplevel;
+    nixseal = import ../../../lib/nixseal-iso.nix {
+      inherit pkgs;
+      script = ../../nixseal.py;
+    };
+  in
+    pkgs.testers.runNixOSTest {
+      imports = [./sb-recover.nix];
+      _module.args = {inherit lz nixseal target;};
+      globalTimeout = 20 * 60;
+    };
 in {
+  recover = mkRecover;
   positive = mk repoPkgs true "positive";
   negative = mk repoPkgs true "negative";
   esp = mk repoPkgs true "esp";

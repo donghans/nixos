@@ -1062,6 +1062,26 @@ def _blkid(dev):
     return dict(l.split("=", 1) for l in r.stdout.splitlines() if "=" in l) if r.returncode == 0 else {}
 
 
+def _in_root(root, rel):
+    """root 안의 rel 경로를 root 를 벗어나지 않게 심볼릭 링크까지 따라가 실제 경로로 돌려준다.
+    NixOS 의 /etc/fstab 은 /etc/static/fstab 으로 가는 절대 링크라, 그냥 열면 ISO 쪽 경로를 가리켜 대상의 파일을 못 찾는다(VM 시험으로 확인)."""
+    cur = os.path.join(root, rel.lstrip("/"))
+    for _ in range(40):
+        parts = os.path.relpath(cur, root).split(os.sep)
+        for i in range(1, len(parts) + 1):
+            part = os.path.join(root, *parts[:i])
+            if os.path.islink(part):
+                tgt = os.readlink(part)
+                base = root if os.path.isabs(tgt) else os.path.dirname(part)
+                cur = os.path.normpath(os.path.join(base, tgt.lstrip("/") if os.path.isabs(tgt) else tgt, *parts[i:]))
+                if cur != root and not cur.startswith(root.rstrip("/") + "/"):
+                    cur = os.path.join(root, os.path.relpath(cur, "/"))  # .. 로 밖으로 나가면 root 로 되돌린다
+                break
+        else:
+            return cur
+    return cur
+
+
 def _parse_fstab(path):
     out = []
     try:
@@ -1160,7 +1180,7 @@ def cmd_recover(args):
         r = _x("mount", ["-o", "subvol=@", f"/dev/mapper/{RECOVER_MAPPER}", MNT])
         if r.returncode != 0:
             _die(f"루트를 마운트하지 못했다: {r.stderr.strip()}")
-        fstab = _parse_fstab(os.path.join(MNT, "etc/fstab"))
+        fstab = _parse_fstab(_in_root(MNT, "etc/fstab"))
         esp_entry = next((e for e in fstab if e[1] == "/boot"), None)
         if esp_entry is None:
             _die("대상의 /etc/fstab 에서 /boot(ESP) 항목을 찾지 못했다")
@@ -1170,7 +1190,7 @@ def cmd_recover(args):
             _x("mount", ["--mkdir", "-o", opts, dev, MNT + mp])
         if not os.path.exists(os.path.join(MNT, "etc/NIXOS")):
             _die("대상이 NixOS 루트가 아니다(/etc/NIXOS 없음) — ESP 는 건드리지 않았다")
-        key = os.path.join(MNT, pki.lstrip("/"), "keys/db/db.key")
+        key = _in_root(MNT, os.path.join(pki, "keys/db/db.key"))
         if from_backup is None and not os.path.exists(key):
             _die(f"서명 키가 없다({key}) — 재생성할 수 없다. ESP 는 건드리지 않았다. 키 백업에서 되돌리거나(SECURE-BOOT.md §2-6) --from-backup 으로 esp-backup 을 지정하세요")
 
@@ -1196,8 +1216,9 @@ def cmd_recover(args):
         if evidence:
             stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             tar_path = os.path.join(evid_dir, f"esp-evidence-{stamp}.tar")
-            if _x("tar", ["-C", os.path.join(MNT, "boot"), "-cf", tar_path, "."]).returncode != 0 or not os.path.exists(tar_path) or os.path.getsize(tar_path) == 0:
-                _die("증거 tar 를 저장하지 못했다 — ESP 는 그대로 둔다")
+            rt = _x("tar", ["-C", os.path.join(MNT, "boot"), "-cf", tar_path, "."])
+            if rt.returncode != 0 or not os.path.exists(tar_path) or os.path.getsize(tar_path) == 0:
+                _die(f"증거 tar 를 저장하지 못했다(tar 종료 {rt.returncode}: {(rt.stderr or '').strip()[:300]}) — ESP 는 그대로 둔다")
             if _x("tar", ["-tf", tar_path]).returncode != 0:
                 _die("저장한 증거 tar 를 읽을 수 없다 — ESP 는 그대로 둔다")
             buf = io.StringIO()

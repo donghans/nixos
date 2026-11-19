@@ -287,5 +287,15 @@ order = wd.names()
 check("불변식: 루트 열기 → ESP 읽기전용 마운트 → 증거 → 포맷", order.index("cryptsetup") < [i for i, c in enumerate(wd.calls) if c[0] == "mount" and "vfat" in c[1]][0] < wd.idx("tar", "-cf") < wd.idx("mkfs.vfat"))
 wd.done()
 
+# ── NixOS 의 /etc/fstab 은 /etc/static/fstab(절대 링크)이라 대상 루트 안에서 따라가야 한다(실제 VM 시험에서 놓쳤던 버그) ──
+_d = tempfile.mkdtemp()
+os.makedirs(_d + "/etc"); os.makedirs(_d + "/nix/store/x/etc")
+open(_d + "/nix/store/x/etc/fstab", "w").write("UUID=1 /boot vfat umask=0077 0 0\n")
+os.symlink("/nix/store/x/etc", _d + "/etc/static"); os.symlink("/etc/static/fstab", _d + "/etc/fstab")
+check("fstab 이 절대 링크여도 대상 루트 안에서 찾는다", [e[1] for e in M._parse_fstab(M._in_root(_d, "etc/fstab"))] == ["/boot"])
+os.symlink("../../../../etc/shadow", _d + "/etc/evil")
+check("루트 밖으로 나가는 링크는 루트 안으로 가둔다", M._in_root(_d, "etc/evil").startswith(_d + "/"))
+shutil.rmtree(_d)
+
 print(f"\nnixseal-recover {n['ok']} 통과 / {n['bad']} 실패")
 sys.exit(1 if n["bad"] else 0)
