@@ -37,6 +37,17 @@ mkMod __curPos "embedctl: MS-1592 노트북의 EC 상태(충전 상한·성능 �
     exec ${pyUi} -I ${dir}/embedctlui.py "$@"
   '';
 in {
+  # 앱 런처(SUPER+Space, wofi)에서도 열리도록 등록(터미널 앱이라 uwsm 이 xdg-terminal-exec 로 kitty 에 띄움) — usageui·procui 와 같은 방식
+  hm.xdg.desktopEntries.embedctlui = {
+    name = "EC Control";
+    genericName = "Charge limit, performance mode, Cooler Boost";
+    comment = "MS-1592 EC state (charge limit, turbo/comfort/eco, Cooler Boost) via msi-ec sysfs";
+    exec = "${embedctlui}/bin/embedctlui";
+    terminal = true;
+    categories = ["System" "Settings"];
+    icon = "preferences-system-power";
+  };
+
   os = {
     # msi-ec 를 올리는 곳은 kernel-lockdown mod 뿐이다 — 없이 켜면 /sys/devices/platform/msi-ec 가 없어 embedctl 이 읽기도 쓰기도 못 한다(plan/embedctl-lockdown 결정 8).
     # 펌웨어가 msi-ec 허용 목록 밖이 되는 경우는 빌드로 못 잡으므로 embedctl 이 실행 때 게이트 `no_msi_ec` 로 이유를 밝힌다.
