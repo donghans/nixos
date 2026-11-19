@@ -27,12 +27,12 @@
 
 ### 2-2. BIOS 업데이트·CMOS 배터리 방전·`Load Defaults` 뒤 키가 공장값으로 돌아갔다
 - 증상: Secure Boot 를 켜 둔 채면 우리 서명이 신뢰되지 않아 부팅 실패, 꺼져 있으면 정상 부팅. `secureboot-doctor status` 에서 PK·KEK 가 "공장 기본값과 같음".
-- 대응(키를 다시 등록): ① BIOS: Secure Boot Support=Disabled 로 먼저 부팅 → ② BIOS `Factory Default Key Provisioning`=Disabled, `Reset To Setup Mode` 실행 후 **Save & Exit** → ③ 부팅(Setup Mode 에서는 서명 없어도 부팅) → ④ `sudo secureboot-doctor enroll`(= `sbctl enroll-keys --microsoft --firmware-builtin`) → ⑤ BIOS: Secure Boot Support=Enabled, Save & Exit → ⑥ `secureboot-doctor status` 로 확인 → ⑦ dbx 가 비면 §2-3.
+- 대응(키를 다시 등록): ① BIOS: Secure Boot Support=Disabled 로 먼저 부팅 → ② BIOS `Factory Default Key Provisioning`=Disabled, `Reset To Setup Mode` 실행 후 **Save & Exit** → ③ 부팅(Setup Mode 에서는 서명 없어도 부팅) → ④ `sudo secureboot-doctor enroll`(= `sbctl enroll-keys --microsoft --firmware-builtin` 뒤, dbx 가 없으면 **내장 DBXUpdate 로 자동으로 채움**; dbx 를 건드리지 않으려면 `--no-dbx`) → ⑤ BIOS: Secure Boot Support=Enabled, Save & Exit → ⑥ `secureboot-doctor status` 로 확인(dbx 가 채워졌는지 포함). 자동 채우기가 실패했으면(종료 코드 2) §2-3.
 
 ### 2-3. `dbx` 가 비었다 (`secureboot-doctor status` 에서 dbx 없음)
 - 원인: `Reset To Setup Mode`/`Clear Keys` 가 dbx 를 지웠고 `sbctl enroll-keys` 는 복원하지 않는다.
-- 주의(2026-11-18 VM 시험): **fwupd 는 dbx 가 없으면 `Device … has no firmware version` 으로 설치를 거부한다(`--force` 도 소용없음).** 처음 한 번은 직접 채워야 한다.
-- 대응: 최신 DBXUpdate 파일을 받는다 — LVFS cab(`fwupdmgr get-updates` 의 `Release` 항목 URL 또는 https://github.com/microsoft/secureboot_objects `PostSignedObjects/DBX/amd64/DBXUpdate.bin`) → `sudo secureboot-doctor dbx-init <파일>`(.bin 또는 .cab). 펌웨어가 KEK 서명을 검증하므로 위조 파일은 거부된다. 이후 갱신은 §3.
+- 주의(2026-11-18 VM 시험): **fwupd 는 dbx 가 없으면 `Device … has no firmware version` 으로 설치를 거부한다(`--force` 도 소용없음).** 이유(fwupd `plugins/uefi-dbx/fu-uefi-dbx-device.c` 확인, 2026-11-19): 버전을 「dbx 의 마지막 Microsoft SHA256 항목」을 LVFS·quirk 목록과 대조해 정하는데, 변수가 없으면 `version_raw=0` 으로 끝나 버전이 안 정해진다(항목 개수로 세던 것은 옛 `org.uefi.dbx` 방식). 처음 한 번은 직접 채워야 한다.
+- 대응: `sudo secureboot-doctor dbx-init`(파일 생략 = 저장소에 커밋·해시 고정된 내장 DBXUpdate, `mods/sys/services/secure-boot.nix` 의 `dbxInit`; 오래된 파일이어도 처음 채우기에는 충분하고 이후는 fwupd 가 올린다). 최신 파일을 직접 쓰려면 받는다 — LVFS cab(`fwupdmgr get-updates` 의 `Release` 항목 URL 또는 https://github.com/microsoft/secureboot_objects `PostSignedObjects/DBX/amd64/DBXUpdate.bin`) → `sudo secureboot-doctor dbx-init <파일>`(.bin 또는 .cab). 펌웨어가 KEK 서명을 검증하므로 위조 파일은 거부된다. 이후 갱신은 §3.
 
 ### 2-4. `secureboot-doctor verify` 에 서명 안 됨이 있다
 - `EFI/nixos/kernel-*.efi` 는 정상(서명 UKI 의 해시로 검증).

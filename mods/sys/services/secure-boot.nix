@@ -5,13 +5,20 @@
 #  - **rEFInd mod 와 함께 쓰려면**: lanzaboote 는 `systemd-boot` 설치 경로 대신 `boot.loader.external.installHook` 을 써서 refind mod 의 `extraInstallCommands` 가 **돌지 않는다**
 #    (그래서 refind mod 가 `boot.lanzaboote.package` 를 `lzbt` 래퍼로 바꿔 lzbt 뒤에 rEFInd 복사와 sbsign 을 한다 — mods/sys/services/refind.nix).
 #  - 서명 키 백업 위치(plan D10)가 정해지기 전에는 켜지 않는다.
-#  - 켜면 점검·복구 보조 명령 `secureboot-doctor` 가 함께 설치된다(상태·검증·ESP 백업·키 등록·빈 dbx 채우기). 운영 지침과 상황별 대응은 `hosts/msi-summit-me/SECURE-BOOT.md`.
+#  - 켜면 점검·복구 보조 명령 `secureboot-doctor` 가 함께 설치된다(상태·검증·ESP 백업·키 등록(+빈 dbx 채우기)). 운영 지침과 상황별 대응은 `hosts/msi-summit-me/SECURE-BOOT.md`.
 mkMod __curPos "Secure Boot(lanzaboote) 골격: systemd-boot 를 끄고 서명된 UKI 를 둔다 (S5 에서 켬)" ({
   cfg,
   lib,
   pkgs,
   ...
 }: let
+  # 빈 dbx 를 처음 채울 때 쓰는 Microsoft DBXUpdate(KEK 서명된 공개 해시 목록, 비밀 없음). 커밋·해시 고정이라 한 번 받으면 store 에 남아 오프라인에서도 쓴다.
+  # 출처 microsoft/secureboot_objects (BSD-2-Clause-Patent, Copyright Microsoft Corporation). 이후 갱신은 fwupd 가 한다.
+  # 2026-11-19 확인: 이 파일의 서명 목록(21292바이트)은 msi-summit-me 에 이미 적용된 dbx 와 바이트 단위로 같다.
+  dbxInit = pkgs.fetchurl {
+    url = "https://raw.githubusercontent.com/microsoft/secureboot_objects/f75f97f6da5ca70ac23c7daf12cac069131601aa/PostSignedObjects/DBX/amd64/DBXUpdate.bin";
+    hash = "sha256-IInjEl5hE3bLRDJrV2VnQlVEOySE+I3pclGTnRgFX2g=";
+  };
   doctor = pkgs.writeShellApplication {
     name = "secureboot-doctor";
     runtimeInputs = [pkgs.sbctl pkgs.coreutils pkgs.util-linux pkgs.gnugrep pkgs.gawk pkgs.gnutar pkgs.python3 pkgs.p7zip pkgs.systemd];
@@ -20,6 +27,7 @@ mkMod __curPos "Secure Boot(lanzaboote) 골격: systemd-boot 를 끄고 서명�
       G_GLOBAL=8be4df61-93ca-11d2-aa0d-00e098032b8c   # EFI_GLOBAL_VARIABLE (PK, KEK, SecureBoot, SetupMode, *Default)
       G_DB=d719b2cb-3d3a-4596-a3bc-dad00e67656f        # EFI_IMAGE_SECURITY_DATABASE (db, dbx)
       PKI=${cfg.pkiBundle}
+      DBX_BUNDLED=${dbxInit}
 
       need_root() {
         if [ "$(id -u)" -ne 0 ]; then exec sudo "$0" "$@"; fi
@@ -54,7 +62,7 @@ mkMod __curPos "Secure Boot(lanzaboote) 골격: systemd-boot 를 끄고 서명�
         done
         printf '%-4s %8s\n' db "$(var_size db "$G_DB")"
         dbx_note=""
-        if [ ! -e "$EFIVARS/dbx-$G_DB" ]; then dbx_note='← 없음: secureboot-doctor dbx-init <DBXUpdate.bin|.cab> 로 채운다'; fi
+        if [ ! -e "$EFIVARS/dbx-$G_DB" ]; then dbx_note='← 없음: secureboot-doctor dbx-init 으로 채운다(내장 DBXUpdate)'; fi
         printf '%-4s %8s  %s\n' dbx "$(var_size dbx "$G_DB")" "$dbx_note"
         echo
         echo "== 서명 키(디스크) =="
@@ -101,35 +109,8 @@ mkMod __curPos "Secure Boot(lanzaboote) 골격: systemd-boot 를 끄고 서명�
         echo "복구용 USB 에도 복사해 둘 것."
       }
 
-      cmd_enroll() {
-        need_root enroll
-        if [ "$(var_byte SetupMode "$G_GLOBAL")" != 1 ]; then
-          echo "Setup Mode 가 아니다. BIOS 에서: Factory Default Key Provisioning=Disabled → Reset To Setup Mode → 저장 후 부팅. (SECURE-BOOT.md 참고)" >&2
-          exit 1
-        fi
-        sbctl enroll-keys --microsoft --firmware-builtin
-        echo "등록 완료. BIOS 에서 Secure Boot Support 를 Enabled 로 바꾸고, dbx 가 없으면 secureboot-doctor dbx-init 을 한다."
-      }
-
-      cmd_dbx_init() {
-        need_root dbx-init "$@"
-        src=''${1:-}
-        if [ -z "$src" ]; then echo "사용법: secureboot-doctor dbx-init <DBXUpdate*.bin|*.cab>" >&2; exit 1; fi
-        if [ -e "$EFIVARS/dbx-$G_DB" ]; then
-          echo "dbx 가 이미 있다. 갱신은 fwupdmgr(refresh → get-updates → update)로 한다." >&2
-          exit 1
-        fi
-        tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-        case "$src" in
-          *.cab) 7z x -y "$src" -o"$tmp" >/dev/null; bin=$(find "$tmp" -name '*.bin' | head -1) ;;
-          *) bin=$src ;;
-        esac
-        [ -f "''${bin:-}" ] || { echo "dbx 파일(.bin)을 찾지 못함" >&2; exit 1; }
-        echo "적용할 파일: $bin ($(stat -c %s "$bin")바이트, sha256 $(sha256sum "$bin" | cut -c1-16)…)"
-        echo "펌웨어가 KEK 서명을 검증한다(위조 파일은 거부됨). 되돌리려면 Setup Mode 가 필요하다."
-        read -r -p "진행할까요? [y/N] " yn
-        [ "$yn" = y ] || { echo "취소"; exit 1; }
-        python3 - "$bin" "$EFIVARS/dbx-$G_DB" <<'PY'
+      apply_dbx() { # DBXUpdate .bin 경로 -> dbx 변수가 없을 때 처음 한 번 채운다
+        python3 - "$1" "$EFIVARS/dbx-$G_DB" <<'PY'
       import os, struct, sys
       data = open(sys.argv[1], 'rb').read()
       attr = 0x01 | 0x02 | 0x04 | 0x20 | 0x40  # NV|BS|RT|TIME_BASED_AUTH|APPEND_WRITE
@@ -143,14 +124,66 @@ mkMod __curPos "Secure Boot(lanzaboote) 골격: systemd-boot 를 끄고 서명�
         echo "dbx 크기: $(var_size dbx "$G_DB")바이트. 이후 갱신은 fwupdmgr 로."
       }
 
+      cmd_enroll() {
+        need_root enroll "$@"
+        with_dbx=1
+        for a in "$@"; do
+          case "$a" in
+            --no-dbx) with_dbx=0 ;;
+            *) echo "알 수 없는 옵션: $a (사용법: secureboot-doctor enroll [--no-dbx])" >&2; exit 1 ;;
+          esac
+        done
+        if [ "$(var_byte SetupMode "$G_GLOBAL")" != 1 ]; then
+          echo "Setup Mode 가 아니다. BIOS 에서: Factory Default Key Provisioning=Disabled → Reset To Setup Mode → 저장 후 부팅. (SECURE-BOOT.md 참고)" >&2
+          exit 1
+        fi
+        echo "== 1/2 키 등록 =="
+        sbctl enroll-keys --microsoft --firmware-builtin
+        echo "키 등록 완료."
+        echo "== 2/2 dbx =="
+        if [ "$with_dbx" = 0 ]; then
+          echo "--no-dbx: 건너뜀. 필요하면 secureboot-doctor dbx-init 으로 채운다."
+        elif [ -e "$EFIVARS/dbx-$G_DB" ]; then
+          echo "dbx 가 이미 있어 건너뜀($(var_size dbx "$G_DB")바이트). 갱신은 fwupdmgr 로."
+        else
+          echo "dbx 가 없어 내장 DBXUpdate 로 채운다(커밋 고정, 펌웨어가 KEK 서명을 검증)."
+          if ! apply_dbx "$DBX_BUNDLED"; then
+            echo "dbx 채우기 실패 — 키 등록은 끝났다. 수동: secureboot-doctor dbx-init <DBXUpdate.bin|.cab>" >&2
+            exit 2
+          fi
+        fi
+        echo "다음: BIOS 에서 Secure Boot Support 를 Enabled 로 바꾸고 저장 후 부팅, secureboot-doctor status 로 확인."
+      }
+
+      cmd_dbx_init() {
+        need_root dbx-init "$@"
+        src=''${1:-$DBX_BUNDLED}
+        if [ -e "$EFIVARS/dbx-$G_DB" ]; then
+          echo "dbx 가 이미 있다. 갱신은 fwupdmgr(refresh → get-updates → update)로 한다." >&2
+          exit 1
+        fi
+        tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+        case "$src" in
+          *.cab) 7z x -y "$src" -o"$tmp" >/dev/null; bin=$(find "$tmp" -name '*.bin' | head -1) ;;
+          *) bin=$src ;;
+        esac
+        [ -f "''${bin:-}" ] || { echo "dbx 파일(.bin)을 찾지 못함" >&2; exit 1; }
+        if [ "$src" = "$DBX_BUNDLED" ]; then echo "파일 인자가 없어 내장 DBXUpdate 를 쓴다."; fi
+        echo "적용할 파일: $bin ($(stat -c %s "$bin")바이트, sha256 $(sha256sum "$bin" | cut -c1-16)…)"
+        echo "펌웨어가 KEK 서명을 검증한다(위조 파일은 거부됨). 되돌리려면 Setup Mode 가 필요하다."
+        read -r -p "진행할까요? [y/N] " yn
+        [ "$yn" = y ] || { echo "취소"; exit 1; }
+        apply_dbx "$bin"
+      }
+
       cmd_help() {
         cat <<'EOF2'
       secureboot-doctor — Secure Boot 점검·복구 보조 (필요하면 sudo 로 다시 실행한다)
         status        상태 요약: SB·SetupMode, PK/KEK/db/dbx, 서명 키, ESP 서명, 백업, dbx 갱신
         verify        sbctl verify (ESP 의 EFI 파일 서명 확인)
         backup-esp [경로]   ESP(/boot) 전체를 tar 로 백업(기본 ~/esp-backup-YYYYMMDD.tar)
-        enroll        Setup Mode 에서 키 등록(sbctl enroll-keys --microsoft --firmware-builtin)
-        dbx-init <파일>     dbx 가 없을 때 DBXUpdate .bin/.cab 를 처음 한 번 채운다
+        enroll [--no-dbx]   Setup Mode 에서 키 등록(sbctl enroll-keys --microsoft --firmware-builtin) 뒤 dbx 가 없으면 내장 DBXUpdate 로 채움
+        dbx-init [파일]     dbx 가 없을 때 DBXUpdate .bin/.cab 를 처음 한 번 채운다(파일 생략 = 내장본)
       상황별 대응: hosts/msi-summit-me/SECURE-BOOT.md
       빠른 복구: 부팅이 안 되면 BIOS(Del/F2)에서 Secure Boot Support 를 Disabled 로 → 부팅 → secureboot-doctor status
       EOF2
@@ -160,7 +193,7 @@ mkMod __curPos "Secure Boot(lanzaboote) 골격: systemd-boot 를 끄고 서명�
         status) cmd_status ;;
         verify) cmd_verify ;;
         backup-esp) shift; cmd_backup_esp "$@" ;;
-        enroll) cmd_enroll ;;
+        enroll) shift; cmd_enroll "$@" ;;
         dbx-init) shift; cmd_dbx_init "$@" ;;
         help|-h|--help) cmd_help ;;
         *) echo "알 수 없는 명령: $1" >&2; cmd_help; exit 1 ;;
