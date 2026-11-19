@@ -12,8 +12,21 @@ cmd = [QEMU + "/bin/qemu-system-x86_64", "-enable-kvm", "-cpu", "host", "-machin
        "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF}/FV/OVMF_CODE.fd", "-drive", f"if=pflash,format=raw,file={WORK}/vars.fd",
        "-cdrom", ISO, "-boot", "order=d",
        "-drive", f"file={TGT},format=raw,if=virtio,snapshot=on", "-drive", f"file={USB},format=raw,if=virtio,snapshot=on",
-       "-display", "none", "-serial", f"unix:{sock_path},server,nowait", "-monitor", "none", "-no-reboot"]
+       "-display", "none", "-serial", f"unix:{sock_path},server,nowait", "-no-reboot",
+       # 모니터를 끄면(-monitor none) QEMU 에게 종료를 부탁할 통로가 없다 — 사람이 손으로 끌 때 쓰도록 QMP 소켓을 둔다
+       "-qmp", f"unix:{WORK}/qmp.sock,server,nowait"]
 qp = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+# 정리: 시험이 어떻게 끝나든(실패·예외·Ctrl-C·SIGTERM) 이 하네스가 띄운 QEMU 를 남기지 않는다.
+import atexit, signal
+def _cleanup():
+    if qp.poll() is None:
+        qp.terminate()
+        try: qp.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            qp.kill(); qp.wait()
+atexit.register(_cleanup)
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # sys.exit 이라야 atexit 가 돈다
 for _ in range(50):
     if os.path.exists(sock_path): break
     time.sleep(0.2)
