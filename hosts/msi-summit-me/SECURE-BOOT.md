@@ -5,7 +5,7 @@
 
 ## 0. 한눈에
 - 구성: UEFI 펌웨어(Secure Boot) → **rEFInd**(서명, 메뉴) → **systemd-boot**(서명) → **lanzaboote 서명 UKI**(`EFI/Linux`, 세대마다) → LUKS 암호 → NixOS(lockdown `integrity`).
-- 점검 명령: `nixseal sb status`(상태 요약), `verify`, `backup-esp`, `enroll`(키만 등록), `dbx`(빈 dbx 채우기)·`dbx-update`(fwupd 갱신 적용) — **둘 다 자동으로 하지 않고**, dbx 가 바뀌면 TPM 등록이 깨지므로 로그인 때 뜨는 알림(`sb-notify`)을 보고 직접 한다. 시작 전에 「집이고 곁에 낯선 사람이 없는지·바로 재부팅할 수 있는지」 확인을 묻는다. 도움말은 `nixseal help`·`nixseal sb help`. LUKS 쪽은 `nixseal luks slots|backup|verify|restore|reseal`, 한 화면 요약은 `nixseal status`. (Secure Boot 모듈을 켜면 설치된다: `mods/sys/services/secure-boot.nix`)
+- 점검 명령: `nixseal sb status`(상태 요약), `verify`, `backup-esp`, `enroll`(키만 등록), `dbx`(빈 dbx 채우기)·`dbx-update`(fwupd 갱신 적용) — **둘 다 자동으로 하지 않고**, dbx 가 바뀌면 TPM 등록이 깨지므로 로그인 때 뜨는 알림(`sb-notify`)을 보고 직접 한다. 시작 전에 「집이고 곁에 낯선 사람이 없는지·바로 재부팅할 수 있는지」 확인을 묻는다. 도움말은 `nixseal help`·`nixseal sb help`. LUKS 쪽은 `nixseal luks slots|backup|verify|restore|reseal`, TPM+PIN 은 `nixseal tpm status|enroll|refresh-policy`(§2-13), ESP 가 의심스러울 때는 ISO 에서 `nixseal recover`(§2-8), 한 화면 요약은 `nixseal status`. (Secure Boot 모듈을 켜면 설치된다: `mods/sys/services/secure-boot.nix`)
 - 가장 빠른 탈출구: 부팅이 안 되면 **BIOS(Del/F2) → Secure Boot Support = Disabled** → 부팅 → `nixseal sb status`. (키는 그대로 남아도 된다.)
 - 복구 USB(Ventoy)의 `RECOVERY-secureboot-20261117.txt`·`RECOVERY-addendum-20261118.txt`: ESP 되돌리기·ISO 부팅 절차. **Secure Boot 가 켜진 동안은 이 USB 가 안 뜰 수 있다** → 끄고 들어간다.
 
@@ -50,8 +50,18 @@
 2. 서명 키: 기존 노트북 키를 복원해서 쓰거나(단순) 새로 만든다(`sbctl create-keys`). 백업은 비밀번호로 암호화해서 오프디스크에.
 3. BIOS 순서: Secure Boot Mode=Custom → `Factory Default Key Provisioning`=Disabled → `Reset To Setup Mode` → 저장 → NixOS 부팅 → `nixseal sb enroll` → Secure Boot Support=Enabled → dbx 가 없으면 §2-3, 있으면 `fwupdmgr`(§3).
 
-### 2-8. ESP 가 지워졌거나 손상됐다 (미시험 — USB 연습은 읽기 전용 확인까지)
-- 복구 USB → ISO(Secure Boot 끔) → LUKS 열기 → `/mnt/boot` 에 `esp-backup-*.tar` 복원(USB `RECOVERY-secureboot-20261117.txt` [B]). 또는 NixOS 를 `nixos-enter` 로 열어 `nixup os --stage` 로 lanzaboote 가 ESP 를 다시 만들게 한다(키는 `/var/lib/sbctl` 에 있어야 함).
+### 2-8. ESP 가 지워졌거나 손상됐다, 또는 의심스럽다 — `nixseal recover` (2026-11-20 구현, VM 시험 통과 · 실기 USB·실제 ISO 부팅은 미시험)
+- **언제**: ESP(부팅 파일)가 지워졌거나, 변조가 의심되거나(§2-10), 부팅이 평소와 다르다. 복구 암호·FIDO2 를 이상한 화면에 **입력하지 않았을 때**의 도구다 — 입력했다면 디스크 키가 이미 노출됐을 수 있어 ESP 를 새로 만드는 것으로는 부족하고 §2-12(전부 엎기)가 필요하다. 도구가 처음에 이를 묻고, 「아니오」 외의 답이면 아무것도 바꾸지 않고 종료 코드 3 으로 멈춘다.
+- **준비**: 신뢰 USB(NixOS ISO)로 부팅(Secure Boot 는 끈다 — ISO 가 안 뜬다). **증거를 둘 USB 를 마운트**한다(RAM 디스크 `/tmp` 는 거부, ESP 와 같은 장치도 거부). 현재 복구 암호(8단어).
+- **실행**: `sudo nixseal recover --evidence-dir <마운트한 USB 경로>` (옵션: `--evidence-image` ESP 통째 이미지도 보관 · `--from-backup <esp-backup-*.tar>` 재생성 대신 그 백업으로 복원 · `--root <장치>`)
+  1. 질문 「이상한 부팅 화면에 복구 암호·FIDO2 를 입력한 적이 있나」 → **아니오**.
+  2. 루트를 열고(복구 암호) 대상이 NixOS 인지·서명 키가 있는지 확인. 하나라도 틀리면 ESP 는 건드리지 않는다.
+  3. ESP 장치 경로를 직접 입력해 확인 → ESP 를 **읽기 전용**으로 마운트 → **증거 tar(+ 라벨·볼륨 ID·efibootmgr·상태 txt)를 USB 에 저장하고 읽어서 검증**(실패하면 중단).
+  4. 「포맷」 입력 → 같은 라벨·볼륨 ID 로 **다시 포맷**(내용만 지우면 조작된 FAT 구조가 남을 수 있다) → `nixos-enter` 로 `switch-to-configuration boot` 를 돌려 서명 키로 UKI·systemd-boot 를 재생성 → `sbctl verify`·`efibootmgr -v` 출력.
+  5. 재생성에 실패하면 ESP 는 비어 있다. **자동으로 백업을 되돌리지 않고** 명령 힌트만 낸다 → 원인을 고쳐 다시 하거나, 오래돼도 괜찮다면 `--from-backup` 으로 지정(`esp-evidence-*` 는 의심스러운 ESP 라 복원을 거부한다).
+- **끝난 뒤(사람이 한다, 도구가 끝에 같은 안내를 출력한다)**: BIOS(Secure Boot Mode = Custom, Factory Default Key Provisioning = Disabled, 키가 지워졌으면 §2-2) → 첫 부팅은 **복구 암호**로 연다(ISO 에서는 TPM 정책을 다시 맞출 수 없다 — Secure Boot·PCR 이 다르다) → TPM+PIN 을 쓰는 중이면 상태가 그대로였다면 `nixseal tpm refresh-policy`(ESP 에 credential 이 없으면 자동으로 다시 씀), 바뀌었다면 `systemd-pcrlock remove-policy` + `nixseal tpm enroll --replace`(PIN 은 새로 정한다) → 증거 tar 에서 nix 가 만들지 않는 것(Windows 의 `EFI/Microsoft` 등)을 골라 되돌린다.
+- **시험으로 확인한 것(VM, 2026-11-20)**: LUKS2+btrfs(`@`)+vfat ESP+lanzaboote 가 설치된 대상 디스크에서 낯선 파일·변조된 UKI 가 있는 ESP 를 포맷·재생성해 파일 구성이 설치 직후와 같아졌고, 라벨·볼륨 ID 가 유지됐다. ISO 가 아닌 환경·「예」 답변은 ESP 를 건드리지 않고 거부됐다. **미시험**: 실제 USB, 실제 ISO 부팅 상태의 전체 흐름, BIOS NVRAM 항목(VM 은 BIOS 라 `efibootmgr` 이 없다).
+- 옛 방식(수동): ISO → LUKS 열기 → `/mnt/boot` 에 `esp-backup-*.tar` 복원(USB `RECOVERY-secureboot-20261117.txt` [B]) 또는 `nixos-enter` 로 `nixup os --stage`. 백업은 오래돼 보안 수정이 빠졌을 수 있어 재생성이 우선이다.
 
 ### 2-9. 이전 세대로 돌아가고 싶다 (미시험)
 - systemd-boot 메뉴에서 이전 세대를 고른다. lanzaboote 는 모든 세대를 서명 UKI 로 만든다(`nixup clean` 으로 지운 세대는 없다). 실기로 부팅해 본 것은 최신 세대뿐이다.
@@ -70,7 +80,7 @@
 **TPM+PIN, FIDO2+PIN 차이**
 - TPM+PIN: 부팅 체인이 바뀌면 TPM 이 열쇠를 내주지 않아 가짜 코드가 아무것도 못 얻는다. 단 BIOS 업데이트·dbx 갱신·Secure Boot 키 변경도 PCR 7 을 바꿔 재등록이 필요하다(lanzaboote 의 `measuredBoot`·`pcrlock` 옵션이 있으나 실제로 쓰지 않음).
 - **TPM+PIN 이 정상적으로 깨지는 경로(PCR 7 을 정책으로 쓸 때, 2026-11-19 정리 — 일반 지식·미시험)**: ① dbx·db·KEK 변경(`nixseal sb dbx`, `fwupdmgr update` — 둘 다 알림을 보고 **내가 직접** 하므로 예상된 변경) ② BIOS·펌웨어 업데이트 ③ CMOS 초기화(배터리 탈착·방전: 설정과 보안 암호가 초기화되고 키가 공장값으로 돌아갈 수 있음) ④ Secure Boot 키 재등록(`nixseal sb enroll`) ⑤ 이 노트북에서 Windows 를 부팅할 때 Windows Update 가 db·dbx 를 서비스함. 커널·initrd 업데이트는 같은 키로 서명하므로 PCR 7 을 바꾸지 않는다(PCR 4·11 에 묶으면 매번 깨지므로 그렇게 하지 않는다 — D3). **규칙: TPM 이 안 풀리는데 위 ①~⑤ 를 직전에 내가 한 적이 없으면 복구 암호를 입력하지 않고 신뢰 USB 로 점검한다.** 예상된 변경 직후의 첫 부팅이라면 복구 암호를 한 번 입력하고 TPM 을 다시 등록한다 — 그때는 변경한 뒤 **자리를 비우지 말고 바로 재부팅**한다(그 사이에 부팅 체인이 바꿔치기될 틈을 없애려고).
-- **dbx 변경과 TPM 갱신을 한 번에(2026-11-19 문서 확인, 미시험)**: `systemd-pcrlock`(systemd 260.1 에 있음, 문서에 「experimental」)이 이 용도다. `lock-secureboot-policy` 가 **현재 EFI 변수(SecureBoot·PK·KEK·db·dbx)로 다음 부팅의 PCR 7 측정값을 미리 계산**하고, `make-policy` 가 그 예측으로 TPM NV 인덱스의 정책을 갱신한다. LUKS 슬롯을 `systemd-cryptenroll --tpm2-pcrlock=…`(+`--tpm2-with-pin=yes`)로 등록해 두면 **슬롯은 그대로이고 정책만 갱신**되므로, 흐름은 「dbx 갱신(`nixseal sb dbx-update`) → `systemd-pcrlock lock-secureboot-policy && systemd-pcrlock make-policy` → 재부팅(복구 암호 없이 PIN 으로 열림)」이 된다(문서는 SecureBoot 정책을 바꾸기 전에 `unlock-firmware-config` 를 권한다). **아직 TPM+PIN(S6)이 없어서 구현·시험하지 않았다.** S6 때 swtpm VM 에서 이 흐름(변경 → 정책 갱신 → 재부팅 → PIN 만으로 열림)을 먼저 재현하고, 되면 `dbx-update` 끝에 정책 갱신을 붙인다. 안 되면(예측이 어긋나면) 지금처럼 복구 암호 한 번 + 재등록.
+- **dbx 변경과 TPM 갱신을 한 번에(2026-11-19 VM 시험 통과, 실기 미시험)**: `systemd-pcrlock` 이 이 용도다(§2-13 에 절차). 변경 직후 **재부팅 전에** 정책을 갱신하면 복구 암호 없이 PIN 만으로 열린다. 갱신 없이 재부팅하면 TPM 이 거부하고 그 뒤에는 정책 갱신도 거부된다(`remove-policy` + 복구 암호 재등록뿐) — 그래서 `nixseal sb dbx-update`·`sb dbx` 는 TPM 슬롯이 있으면 변경 직후 같은 확인 안에서 정책을 이어서 갱신한다.
 - FIDO2+PIN: 보안키는 **부팅 체인을 확인하지 않는다.** 가짜 initrd 도 사용자가 PIN 과 터치를 하면 해제용 값(hmac-secret 출력)을 받아 갈 수 있다(복제는 못 함). 체인 보호는 Secure Boot + BIOS 암호가 전부 맡는다. LUKS 슬롯은 OR 이라 TPM 슬롯과 FIDO2 슬롯을 같이 두면 체인에 묶이지 않은 FIDO2 가 우회로가 된다.
 - 선택 사항: `tpm2-totp`(PCR 7 에 묶은 6자리 코드를 암호창 전에 표시, 폰과 비교)로 이상 신호를 눈에 띄게 할 수 있다. systemd initrd 에 서비스를 직접 만들어야 하고 시험하지 않았다.
 
@@ -102,6 +112,15 @@
   - 디스크 안에만 있는 소중한 데이터를 디스크 밖에 백업하지 않은 채 시작하지 않는다(위 정전 위험).
   - 설치된 시스템 위에서 하려고 우회하지 않는다(거부되는 것이 정상이다).
 - **시험하지 못한 것**: 실제 NVMe 디스크에서의 소요 시간과 후반부 위험 구간의 실제 길이(위 VM 시험은 1GB·4GB 가상 디스크), 실제 FIDO2/TPM 슬롯(토큰은 가짜 JSON 으로만 시험), 실제 USB 로 ISO 부팅(ISO 이미지를 QEMU/UEFI VM 에서 시리얼 콘솔로 부팅해 가상 디스크에 reseal 전체를 돌려 데이터 보존까지 확인했다 — 2026-11-19, 그 ISO 는 마지막 문구 수정 전 빌드).
+
+### 2-13. TPM+PIN — 등록·정책 갱신·재등록 (`nixseal tpm`, 2026-11-20 — VM(swtpm) 시험 통과, **실기 등록 전**)
+- **켜기(사용자, 한 번)**: `hosts/msi-summit-me.nix` 에 `mods.sys.services.luks.tpm2 = true`(+ `tpmFailWarning` 기본 켜짐) → `nixup os` → **재부팅**(initrd 의 측정 유닛이 켜진 부팅에서 정책을 만들어야 PCR 7 이 보호 대상에 남는다. 빠지면 에러 없이 PCR 7 이 정책에서 빠진다) → 복구 암호로 연 상태에서 `nixseal tpm status`(PCR 7 이 있어야 함) → `sudo nixseal tpm enroll`(복구 암호, 이어서 **새 PIN 두 번** — 복구 암호·FIDO2 PIN 과 다른 구절) → 재부팅해 PIN 만으로 열리는지 확인. 복구 암호 슬롯은 그대로 남는다.
+- **상태를 바꿀 때(dbx·db·KEK·키 재등록)**: 변경과 정책 갱신을 **재부팅 전에 한 번에** 한다. `nixseal sb dbx-update` 등이 알아서 이어서 갱신한다. 중간에 끊겼으면 **재부팅하지 말고** `nixseal tpm refresh-policy` 를 다시 한다(재부팅하면 갱신이 거부된다).
+- **TPM 이 거부했을 때**: 부팅 화면에 영어 경고(`WARNING: the TPM refused to unlock this disk`)가 먼저 뜬다. 직전에 내가 SB 상태를 바꾼 적이 없으면 **복구 암호를 입력하지 않고** 전원을 끄고 신뢰 USB 로 점검한다(§2-10). 내가 한 변경이면 복구 암호로 열고 → 상태가 그대로면 `nixseal tpm refresh-policy`, 이미 재부팅해 거부됐다면 `sudo systemd-pcrlock remove-policy` 후 `nixseal tpm enroll --replace`.
+- **ESP 를 비웠거나 새로 만든 뒤**: 정책 credential(`loader/credentials/pcrlock.*.cred`)이 ESP 에 없으면 TPM 이 「Couldn't find pcrlock policy」로 거부한다. 복구 암호로 부팅해 `nixseal tpm refresh-policy`(PCR 상태가 그대로일 때 — credential 이 없으면 `--force` 를 자동으로 붙인다). `make-policy` 는 예측이 같으면 「skipping update」 하고 ESP 에 아무것도 쓰지 않으므로 `--force` 가 필요하다.
+- **`nixseal tpm` 이 확인을 묻는 이유**: 정책 갱신은 「지금 상태를 정상으로 받아들이겠다」는 선언이라, 모르는 변경 뒤에 하면 TPM 이 침해를 감지하지 못하게 된다. 그래서 `내가 한 변경` / `이 상태를 신뢰` 를 직접 입력하게 한다. upstream 의 자동 pcrlock 서비스(`systemd-pcrlock-secureboot-policy.service` 등)는 같은 이유로 켜지 않는다.
+- **시험하지 못한 것**: 실기 TPM(PIN 오입력 잠금, 펌웨어가 PCR 7 에 남기는 이벤트 차이), 실제 DBXUpdate 교체, `fwupdmgr update` 가 dbx 외 항목(PCR 0·2 를 바꾸는 펌웨어)을 섞어 적용하는 경우, 정책 갱신 직후 비정상 종료. nixpkgs 를 올릴 때는 `core/scripts/tests/vm` 의 `-A positive-lzpkgs` 시험을 먼저 돌린다(systemd 버전별 유닛 차이).
+- **`luks.fido2` 와 함께 켜면**: LUKS 슬롯은 OR 이라 TPM 이 거부한 부팅에서도 FIDO2 가 열 수 있다(체인 검사 우회). FIDO2 를 ISO 에서만 편의로 쓸 거라면 설치본에서는 `luks.fido2 = false`(설정이 둘 다 켜면 경고한다).
 
 ## 3. dbx 갱신 (fwupd)
 - 설정: `mods/sys/services/fwupd.nix`(매시간 타이머는 끔, **시간 기반 타이머 없음**). NetworkManager 가 연결(`up`)되거나 인터넷이 확인(`connectivity-change`=FULL)되면 훅이 `fwupd-stale-refresh` 를 시작하고, 이번 부팅에서 확인을 마쳤다는 표시(`/run/fwupd-check-done`)가 있으면 바로 끝난다(`refresh` 가 필요했는데 못 받았으면 표시를 남기지 않아 다음 연결 때 다시 시도). **마지막 새로 받기가 14일보다 오래됐을 때만** `fwupdmgr refresh`(네트워크 필요)를 하고, 갱신 유무(`get-updates`)는 매번 확인해 `/var/lib/fwupd-check/last-result` 에 남긴다. 갱신이 있으면 로그인 때와 결과가 바뀔 때 알림(`sb-notify`, 알림 센터에서 명령 복사)이 뜬다. **설치는 자동으로 하지 않는다.**
