@@ -161,7 +161,7 @@ luks_offer_header_backup() {
     log_msg "Notice" "LUKS 헤더가 손상되면 복구 암호가 있어도 데이터를 열 수 없습니다. 헤더를 디스크 밖(USB 등)에 백업해 두는 것을 권장합니다."
     read -rp "$(_log_prompt)지금 헤더를 백업하시겠습니까? (Y/n): " _ans || _ans=n
     if [[ "${_ans:-Y}" =~ ^[Nn]$ ]]; then
-        log_msg "Notice" "백업 건너뜀 — 나중에 'luksctl.py backup-header $_part <디렉터리>' 로 할 수 있습니다."
+        log_msg "Notice" "백업 건너뜀 — 나중에 'nixseal.py luks backup $_part <디렉터리>' 로 할 수 있습니다."
         return 0
     fi
     while true; do
@@ -188,14 +188,14 @@ luks_offer_header_backup() {
         if [ "$_sel" -eq "${#_devs[@]}" ]; then
             read -rp "$(_log_prompt)디렉터리 경로: " _target || _target=""
             if [ -d "$_target" ]; then
-                _out=$(python3 "$SCRIPT_DIR/luksctl.py" backup-header "$_part" "$_target") || _out=""
+                _out=$(python3 "$SCRIPT_DIR/nixseal.py" luks backup "$_part" "$_target") || _out=""
             else
                 log_msg "Error" "디렉터리가 아닙니다: $_target"
             fi
         elif [ "$_sel" -eq "$(( ${#_devs[@]} + 1 ))" ]; then
             read -rp "$(_log_prompt)scp 대상 (예: user@host:/path/): " _target || _target=""
             _tmpdir=$(mktemp -d /tmp/luks-hdr-XXXXXX)
-            _out=$(python3 "$SCRIPT_DIR/luksctl.py" backup-header "$_part" "$_tmpdir") || _out=""
+            _out=$(python3 "$SCRIPT_DIR/nixseal.py" luks backup "$_part" "$_tmpdir") || _out=""
             if [ -n "$_out" ] && [ -n "$_target" ]; then
                 scp -- "$_out" "$_target" || { log_msg "Error" "scp 실패"; _out=""; }
             else
@@ -203,12 +203,12 @@ luks_offer_header_backup() {
             fi
             rm -rf "$_tmpdir"
         elif [ "$_sel" -eq "$(( ${#_devs[@]} + 2 ))" ]; then
-            log_msg "Notice" "백업 건너뜀 — 나중에 'luksctl.py backup-header $_part <디렉터리>' 로 할 수 있습니다."
+            log_msg "Notice" "백업 건너뜀 — 나중에 'nixseal.py luks backup $_part <디렉터리>' 로 할 수 있습니다."
             return 0
         else
             _mnt=$(mktemp -d /tmp/luks-hdr-mnt-XXXXXX)
             if mount "${_devs[$_sel]}" "$_mnt"; then
-                _out=$(python3 "$SCRIPT_DIR/luksctl.py" backup-header "$_part" "$_mnt") || _out=""
+                _out=$(python3 "$SCRIPT_DIR/nixseal.py" luks backup "$_part" "$_mnt") || _out=""
                 sync
                 umount "$_mnt" || log_msg "Notice" "umount 실패: $_mnt (수동으로 정리하세요)"
             else
@@ -218,7 +218,7 @@ luks_offer_header_backup() {
         fi
         if [ -n "$_out" ]; then
             log_msg "Success" "헤더 백업 완료: ${_out##*/}"
-            log_msg "Notice" "※ TPM2/FIDO2 등으로 슬롯을 바꾸면 이 백업은 옛 암호로만 열립니다 — 그 뒤 다시 백업하세요."
+            log_msg "Notice" "※ 이 백업은 복구 암호만 등록된 초기 상태입니다. FIDO2 등을 나중에 추가해도 이 백업 하나면 충분합니다(복구 암호로 연 뒤 다시 등록). 복구 암호나 마스터키를 바꾼 뒤에만 새로 백업하세요."
             return 0
         fi
         read -rp "$(_log_prompt)백업에 실패했습니다. 다시 시도하시겠습니까? (Y/n): " _ans || _ans=n

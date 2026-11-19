@@ -15,7 +15,7 @@
     cp ${./scripts/nixstrap.lib-repo.py}     $out/nixstrap.lib-repo.py
     cp ${./scripts/nixstrap.lib-part.py}     $out/nixstrap.lib-part.py
     cp ${./scripts/nixstrap.lib-luks.py}     $out/nixstrap.lib-luks.py
-    cp ${./scripts/luksctl.py}               $out/luksctl.py
+    cp ${./scripts/nixseal.py}               $out/nixseal.py
     cp ${./scripts/nixstrap.lib-luks.sh}     $out/nixstrap.lib-luks.sh
     cp ${./scripts/nixstrap.data-eff-large.txt} $out/nixstrap.data-eff-large.txt
   '';
@@ -63,6 +63,15 @@
       runHook postCheck
     '';
   };
+
+  # nixseal(plan/nixseal): ISO 에서는 luks·status 만 쓴다(sb 는 sbctl·서명 키가 있는 설치본 전용). 헤더 백업·복원·키슬롯 조회 용.
+  nixseal = pkgs.writeShellApplication {
+    name = "nixseal";
+    runtimeInputs = [pkgs.python3 pkgs.cryptsetup pkgs.util-linux pkgs.coreutils pkgs.qrencode];
+    text = ''
+      exec python3 -I ${nixstrap-libs}/nixseal.py "$@"
+    '';
+  };
 in {
   # nixstrap 안내 메시지 (kitty 터미널: 한국어, 그 외: 영어)
   programs.zsh.interactiveShellInit = lib.mkAfter ''
@@ -97,7 +106,7 @@ in {
     fi
   '';
 
-  environment.systemPackages = [nixstrap-wrapped];
+  environment.systemPackages = [nixstrap-wrapped nixseal];
 
   environment.shellAliases = {
     nixstrap = "sudo -E nixstrap-wrapped";

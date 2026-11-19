@@ -90,10 +90,10 @@
    beelink 는 키 인증이 기본이지만 키보드-인터랙티브(비밀번호)도 받습니다(`ssh -v` 로 확인, 실제 로그인은 미시험).
 4. **LUKS 헤더 백업 확인** (설치 중 백업을 건너뛰었거나 실패했으면 지금 합니다):
    ```
-   sudo python3 ~/nixos/core/scripts/luksctl.py slots /dev/disk/by-partlabel/cryptroot
-   sudo python3 ~/nixos/core/scripts/luksctl.py backup-header /dev/disk/by-partlabel/cryptroot <USB 마운트 경로>
+   sudo nixseal luks slots /dev/disk/by-partlabel/cryptroot
+   sudo nixseal luks backup /dev/disk/by-partlabel/cryptroot <USB 마운트 경로>
    ```
-   `FileNotFoundError … 'cryptsetup'` 오류가 나면 cryptsetup 이 PATH 에 없는 것입니다(LUKS 루트가 있는 시스템에는 보통 들어 있다고 nixpkgs 소스에서 확인했으나 `sudo` 환경의 PATH 는 미확인). 그때는 `sudo CRYPTSETUP=$(nix build --no-link --print-out-paths nixpkgs#cryptsetup)/bin/cryptsetup python3 …` 로 경로를 지정합니다(`luksctl.py` 가 `CRYPTSETUP` 환경변수를 읽음).
+   `nixseal` 래퍼는 `cryptsetup` 을 PATH 에 넣어 주므로 따로 챙길 것이 없습니다. 아직 `nixseal` 이 없는 옛 ISO 에서는 `python3 -I <저장소>/core/scripts/nixseal.py luks …` 로 실행합니다.
 5. **데이터 복원** (beelink `~/backup-msi-summit-me-20261110`, Claude 가 도와줄 수 있음 — 파일 내용·목록은 대화에 출력하지 않음). `~/nixos` 에서 실행합니다:
    ```
    cd ~/nixos
@@ -111,7 +111,7 @@
 
 - **암호 입력 화면이 안 나오거나 키보드가 안 먹음**(LUKS·lockdown·i915 initrd 조합은 실기에서 처음 봅니다): 데이터는 beelink 번들이 있으니 ISO 로 다시 부팅해 같은 절차로 재설치할 수 있습니다. 먼저 `Ctrl+Alt+Del` 후 외장 USB 키보드를 시도해 보세요.
 - **복구 암호가 안 열림**: 대소문자·공백, 철자, 종이의 8단어 순서를 확인합니다(부팅 때는 정규화하지 않습니다). 설치 때 정규화되어 열린 경우라도 부팅 프롬프트는 그대로 비교합니다.
-- **헤더가 의심스러움**: ISO 에서(네트워크 필요) `sudo -i` 로 root 셸을 연 뒤 `git clone https://github.com/donghans/nixos /tmp/nx && nix shell nixpkgs#python3 nixpkgs#cryptsetup -c python3 /tmp/nx/core/scripts/luksctl.py verify /dev/nvme0n1p2` → 백업이 있으면 같은 방식으로 `restore-header`(장치 경로를 직접 입력해야 진행, 열린 매퍼가 있으면 거부).
+- **헤더가 의심스러움**: ISO 에서(네트워크 필요) `sudo -i` 로 root 셸을 연 뒤 `git clone https://github.com/donghans/nixos /tmp/nx && nix shell nixpkgs#python3 nixpkgs#cryptsetup -c python3 -I /tmp/nx/core/scripts/nixseal.py luks verify /dev/nvme0n1p2`(새 ISO 에는 `nixseal luks verify …` 가 들어 있음) → 백업이 있으면 같은 방식으로 `luks restore`(장치 경로를 직접 입력해야 진행, 열린 매퍼가 있으면 거부).
 - **설치가 중간에 멈춤/실패**: 같은 디스크로 `nixstrap` 을 다시 실행해도 됩니다(열린 매퍼를 정리합니다). 암호는 **새로 생성**되므로 옛 종이는 버리고 새로 적습니다.
 - **rEFInd 가 안 보임**: BIOS 부팅 메뉴에서 `rEFInd` 또는 `Linux Boot Manager` 를 고릅니다(NVRAM 이 비면 `EFI/BOOT/BOOTX64.EFI` 로 폴백해 NixOS 는 부팅됩니다).
 - 이 문서·도구에 오류를 발견하면 알려 주세요(리허설은 VM 에서만 했습니다: 실제 NVMe TRIM·MSI 펌웨어·실제 USB 의 `lsblk` 값·스크롤백 삭제·LUKS 암호 화면+키보드는 실기에서 처음입니다).

@@ -230,6 +230,7 @@ _luks_final_notice() {
     printf "\n"
     log_msg "Notice" "디스크가 LUKS2 로 암호화되었습니다. 첫 부팅에서 복구 암호(영어 단어)를 입력해야 합니다."
     log_msg "Notice" "설치 사본의 hosts/$HOST.toml 에만 luks = true 가 있고 원격 저장소에는 없습니다 — 새 시스템에서 커밋·push 하세요."
+    log_msg "Notice" "FIDO2 보안 키로 푸시려면 (첫 부팅 뒤): sudo systemd-cryptenroll --fido2-device=auto --fido2-with-client-pin=yes --fido2-with-user-presence=yes /dev/disk/by-partlabel/cryptroot"
 }
 
 _setup_ssh_pubkey() {
