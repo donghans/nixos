@@ -5,23 +5,11 @@
 {
   lz,
   nixseal,
+  scenario ? "run", # "prep": 대상 디스크만 만들고 끈다(ISO 부팅 시험용 디스크 이미지를 얻는 데 쓴다 — 샌드박스 밖에서 driver 를 돌려 vm-state 의 qcow2 를 가져간다)
   target, # 대상 시스템의 toplevel(lanzaboote + LUKS 루트 + btrfs @ + vfat /boot)
   ...
-}: {
-  name = "sb-recover";
-  nodes.rescue = {
-    lib,
-    pkgs,
-    ...
-  }: {
-    virtualisation.memorySize = 3072;
-    virtualisation.emptyDiskImages = [4096 1024]; # vdb: 대상 디스크, vdc: 증거를 둘 「USB」
-    virtualisation.additionalPaths = [target];
-    environment.systemPackages = [nixseal pkgs.parted pkgs.btrfs-progs pkgs.dosfstools pkgs.cryptsetup pkgs.sbctl pkgs.e2fsprogs pkgs.openssl];
-    nix.settings.substituters = lib.mkForce [];
-  };
-
-  testScript = ''
+}: let
+  prepScript = ''
     CS_SHIM = """#!/bin/sh
     if [ "$1" = open ]; then shift; exec cryptsetup open --key-file /root/pw "$@"; fi
     exec cryptsetup "$@"
@@ -63,7 +51,7 @@
     rescue.succeed("cryptsetup luksFormat --batch-mode --type luks2 --uuid aaaaaaaa-0000-4000-8000-000000000001 --pbkdf pbkdf2 --pbkdf-force-iterations 1000 --key-file /root/pw /dev/vdb2")
     rescue.succeed("cryptsetup open --key-file /root/pw /dev/vdb2 cryptroot")
     rescue.succeed("mkfs.btrfs -q /dev/mapper/cryptroot; mount /dev/mapper/cryptroot /mnt; btrfs subvolume create /mnt/@; umount /mnt")
-    rescue.succeed("mount -o subvol=@ /dev/mapper/cryptroot /mnt; mkfs.vfat -F 32 -n NIXBOOT -i 1234ABCD /dev/vdb1; mkdir -p /mnt/boot; mount /dev/vdb1 /mnt/boot")
+    rescue.succeed("mount -o subvol=@ /dev/mapper/cryptroot /mnt; mkfs.vfat -F 32 -n NIXBOOT -i 1234ABCD /dev/vdb1; mkdir -p /mnt/boot; udevadm settle; mount -t vfat /dev/vdb1 /mnt/boot")
     # 서명 키: lanzaboote 는 <pkiBundle>/keys/db/db.{key,pem} 만 읽는다(sbctl 은 이 환경에서 /mnt 아래에 못 써서 openssl 로 만든다)
     rescue.succeed("d=/mnt/var/lib/sbctl/keys/db; mkdir -p $d; openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj /CN=test-db/ -keyout $d/db.key -out $d/db.pem; ls $d")
     rescue.succeed("nixos-install --root /mnt --system ${target} --no-root-passwd --no-channel-copy 2>&1 | tail -20")
@@ -76,6 +64,9 @@
     detach_target()
     assert esp_has("EFI/Linux/evil.efi")
 
+  '';
+
+  checkScript = ''
     # ── 1. ISO 가 아닌 환경(이 VM 의 / 는 ext4): 거부하고 아무것도 바꾸지 않는다 ──
     recover("아니오\\n", env="LC_ALL=C.UTF-8 CRYPTSETUP=/root/cs-shim")
     assert rc() != 0 and esp_has("EFI/Linux/evil.efi"), rescue.succeed("cat /tmp/out")
@@ -108,4 +99,30 @@
     assert rc() == 0, rescue.succeed("cat /tmp/out")
     assert not esp_has("EFI/Linux/evil2.efi") and esp_has("EFI")
   '';
+prepExport = ''
+
+    # prep: 대상 디스크·USB 이미지를 호스트 공유 디렉터리로 꺼낸다(driver 는 끝나면 vm-state 를 지운다) — 호스트가 PREP_TAKE 파일을 만들 때까지 기다린다
+    rescue.succeed("sync; umount /usb; dd if=/dev/vdb bs=4M 2>/dev/null | gzip -1 > /tmp/shared/target.img.gz; dd if=/dev/vdc bs=4M 2>/dev/null | gzip -1 > /tmp/shared/usb.img.gz; ls -la /tmp/shared/")
+    # 9p 위 cp(copy_from_vm)는 너무 느려 쓰지 않는다 — 호스트의 공유 디렉터리(rescue.shared_dir)에서 바로 가져가도록 이 파일이 생길 때까지 기다린다
+    import os
+    print("SHARED_DIR=" + str(rescue.shared_dir), flush=True)
+    import time
+    while not os.path.exists(os.environ["PREP_TAKE"]):
+        time.sleep(2)
+    rescue.shutdown()
+  '';
+in {
+  name = "sb-recover";
+  nodes.rescue = {
+    lib,
+    pkgs,
+    ...
+  }: {
+    virtualisation.memorySize = 3072;
+    virtualisation.emptyDiskImages = [4096 1024]; # vdb: 대상 디스크, vdc: 증거를 둘 「USB」
+    virtualisation.additionalPaths = [target];
+    environment.systemPackages = [nixseal pkgs.parted pkgs.btrfs-progs pkgs.dosfstools pkgs.cryptsetup pkgs.sbctl pkgs.e2fsprogs pkgs.openssl];
+    nix.settings.substituters = lib.mkForce [];
+  };
+  testScript = prepScript + (if scenario == "prep" then prepExport else checkScript);
 }

@@ -35,7 +35,7 @@ let
       extraBaseModules = {imports = [lz.nixosModules.lanzaboote] ++ lz.inputs.nixpkgs.lib.optional shim repoShim;};
     };
   # recover 시험: ISO 와 같은 nixseal 래퍼 + lanzaboote 가 깔린 대상 시스템(저장소 nixpkgs 로 평가)
-  mkRecover = let
+  mkRecover = scenario: let
     pkgs = repoPkgs;
     target =
       (import "${pkgs.path}/nixos" {
@@ -69,11 +69,12 @@ let
   in
     pkgs.testers.runNixOSTest {
       imports = [./sb-recover.nix];
-      _module.args = {inherit lz nixseal target;};
+      _module.args = {inherit lz nixseal target scenario;};
       globalTimeout = 20 * 60;
     };
 in {
-  recover = mkRecover;
+  recover = mkRecover "run";
+  recoverprep = mkRecover "prep"; # 대상 디스크 이미지 준비만(ISO 부팅 시험용)
   positive = mk repoPkgs true "positive";
   negative = mk repoPkgs true "negative";
   esp = mk repoPkgs true "esp";
