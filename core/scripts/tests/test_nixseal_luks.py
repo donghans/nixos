@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """nixseal 시험(luks 헤더 백업·복원 + sb 변수·enroll·dbx 논리) — 실제 cryptsetup 으로 일반 파일 이미지(root 불필요)에서 백업→손상→복원을 돌린다.
 cryptsetup 이 PATH 에 없으면 건너뜀(종료 0). 실행: nix shell nixpkgs#cryptsetup -c python3 -I core/scripts/tests/test_nixseal_luks.py"""
-import importlib.util, os, shutil, stat, subprocess, sys, tempfile
+import glob, importlib.util, os, shutil, stat, subprocess, sys, tempfile
 
 SCRIPTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LC = os.path.join(SCRIPTS, "nixseal.py")
@@ -169,7 +169,7 @@ pl_mode = os.path.join(fake, "pcrlock.mode")   # 비어 있으면 정상 / "nopc
 fake_pl = os.path.join(fake, "systemd-pcrlock")
 with open(fake_pl, "w") as f:
     f.write("""#!/bin/sh
-echo "$1" >> %s
+echo "$*" >> %s
 mode=$(cat %s 2>/dev/null)
 if [ "$mode" = "fail:$1" ]; then echo "boom $1" >&2; exit 1; fi
 if [ "$1" = make-policy ]; then
@@ -195,7 +195,7 @@ os.sync = lambda: synced.append(1)
 
 
 def pl_calls():
-    return open(pl_log).read().split() if os.path.exists(pl_log) else []
+    return open(pl_log).read().splitlines() if os.path.exists(pl_log) else []
 
 
 def ce_calls():
@@ -214,6 +214,8 @@ def set_mode(m):
 
 
 # refresh-policy
+_real_has_tpm = M._has_tpm_slot   # 실제 함수(아래에서 가짜로 바꾸기 전에 보존)
+_luks_dev_real = M._luks_dev
 reset_tpm(); M._ask = lambda p: "아니오"
 rc, _, _ = run_sb_out(M.cmd_tpm_refresh_policy)
 check("refresh-policy: 확인이 틀리면 pcrlock 을 부르지 않음", rc == 1 and pl_calls() == [], str(pl_calls()))
@@ -231,13 +233,28 @@ reset_tpm(); set_mode("fail:make-policy")
 rc, _, _ = run_sb_out(M.cmd_tpm_refresh_policy)
 check("refresh-policy: make-policy 실패는 종료 1·sync 안 함", rc == 1 and synced == [], f"{rc} {synced}")
 check("refresh-policy: 알 수 없는 인자 거부(종료 2)", run_sb(M.cmd_tpm_refresh_policy, "--yes") == 2)
+# ESP 를 비운 뒤 복구: 예측이 같으면 make-policy 는 아무 것도 안 쓰므로 --force 가 필요하다
+reset_tpm(); M._ask = lambda p: M.REFRESH_ACK; M._has_tpm_slot = lambda dev=None: True
+for fp in glob.glob(os.path.join(M.ESP_CRED_DIR, "*")): os.remove(fp)
+rc, out, _ = run_sb_out(M.cmd_tpm_refresh_policy)
+check("refresh-policy: TPM 슬롯이 있는데 ESP 에 credential 이 없으면 자동으로 make-policy --force", rc == 0 and pl_calls()[-1] == "make-policy --force" and "credential 이 없습니다" in out, f"{rc} {pl_calls()}")
+reset_tpm(); open(os.path.join(M.ESP_CRED_DIR, "pcrlock.x.cred"), "w").write("x")
+rc, _, _ = run_sb_out(M.cmd_tpm_refresh_policy)
+check("refresh-policy: credential 이 있으면 --force 없이(상태가 같으면 make-policy 가 알아서 건너뜀)", rc == 0 and pl_calls()[-1] == "make-policy", str(pl_calls()))
+reset_tpm()
+rc, _, _ = run_sb_out(M.cmd_tpm_refresh_policy, "--force")
+check("refresh-policy --force: credential 이 있어도 강제", rc == 0 and pl_calls()[-1] == "make-policy --force", str(pl_calls()))
+reset_tpm(); M._has_tpm_slot = lambda dev=None: False
+os.remove(os.path.join(M.ESP_CRED_DIR, "pcrlock.x.cred"))
+rc, _, _ = run_sb_out(M.cmd_tpm_refresh_policy)
+check("refresh-policy: TPM 슬롯이 없으면 credential 이 없어도 강제하지 않음", rc == 0 and pl_calls()[-1] == "make-policy", str(pl_calls()))
+reset_tpm()
 reset_tpm(); os.environ["NIXSEAL_PCRLOCK"] = os.path.join(fake, "없는-pcrlock")
 rc, _, err = run_sb_out(M.cmd_tpm_refresh_policy)
 check("refresh-policy: pcrlock 바이너리가 없으면 종료 1(예외로 죽지 않음)", rc == 1 and "systemd-pcrlock" in err, f"{rc} {err[:120]}")
 os.environ["NIXSEAL_PCRLOCK"] = fake_pl
 
 # dbx-update/dbx 와의 연결: TPM 슬롯이 있을 때만, 변경 뒤에 정책 갱신
-_real_has_tpm = M._has_tpm_slot
 M._has_tpm_slot = lambda dev=None: True
 M._ask = lambda p: M.HOME_ACK
 put("dbx", M.G_DB, b"\x22" * 10); open(fw_state, "w").write("x")
@@ -272,6 +289,36 @@ rc, _, _ = run_sb_out(M.cmd_sb_dbx)
 check("sb dbx(TPM 없음): 정책 갱신을 부르지 않음", rc == 0 and pl_calls() == [], f"{pl_calls()}")
 put("dbx", M.G_DB, b"\x22" * 10)
 
+# TPM 슬롯 유무를 「확인하지 못한」 경우(장치를 못 찾음/luksDump 실패): 조용히 건너뛰지 않고 경고한다
+fake_blkid = os.path.join(fake, "blkid"); blk_out = os.path.join(fake, "blkid.out")
+with open(fake_blkid, "w") as f:
+    f.write("#!/bin/sh\ncat %s 2>/dev/null\nexit 0\n" % blk_out)
+os.chmod(fake_blkid, 0o755)
+M.BLKID = fake_blkid; M.CRYPTROOT = os.path.join(fake, "없는-cryptroot")
+open(blk_out, "w").write("/dev/nvme0n1p9\n")
+check("_luks_dev: by-partlabel 이 없어도 LUKS 장치가 정확히 하나면 그것을 씀", _luks_dev_real([]) == "/dev/nvme0n1p9")
+open(blk_out, "w").write("/dev/a\n/dev/b\n")
+check("_luks_dev: LUKS 장치가 둘 이상이면 고르지 않음(빈 값)", _luks_dev_real([]) == "")
+open(blk_out, "w").write("")
+check("_luks_dev: 없으면 빈 값·인자가 있으면 인자", _luks_dev_real([]) == "" and _luks_dev_real(["/dev/x"]) == "/dev/x")
+_real_has_tpm(); check("_has_tpm_slot: 장치를 못 찾으면 False 이면서 「확인 못 함」 표시", M._tpm_unknown is True)
+M._has_tpm_slot = lambda dev=None: False; M._tpm_unknown = True
+M._ask = lambda p: M.HOME_ACK; open(fw_state, "w").write("x"); reset_tpm()
+rc, _, err = run_sb_out(M.cmd_sb_dbx_update)
+check("dbx-update: TPM 슬롯을 확인하지 못하면 경고(refresh-policy 안내)하고 정책 갱신은 부르지 않음", rc == 0 and "확인하지 못했습니다" in err and "refresh-policy" in err and pl_calls() == [], f"{rc} {err[:150]}")
+# fwupdmgr update 가 실패해도 dbx 가 이미 바뀌었을 수 있다 — TPM 슬롯이 있으면 안내
+fake_fw2 = os.path.join(fake, "fwupdmgr-fail")
+with open(fake_fw2, "w") as f:
+    f.write("#!/bin/sh\nif [ \"$1\" = get-updates ]; then echo '  New version: 20990101'; exit 0; fi\nexit 1\n")
+os.chmod(fake_fw2, 0o755)
+M._tpm_unknown = False; M._has_tpm_slot = lambda dev=None: True; M.FWUPDMGR = fake_fw2; reset_tpm()
+rc, _, err = run_sb_out(M.cmd_sb_dbx_update)
+check("dbx-update(TPM 있음): update 가 실패해도 「이미 적용됐을 수 있다·refresh-policy」 안내", rc == 1 and "이미 적용" in err and "refresh-policy" in err, f"{rc} {err[:150]}")
+M._has_tpm_slot = lambda dev=None: False; reset_tpm()
+rc, _, err = run_sb_out(M.cmd_sb_dbx_update)
+check("dbx-update(TPM 없음·확인됨): update 실패는 그냥 종료 1(불필요한 안내 없음)", rc == 1 and "이미 적용" not in err, err[:100])
+M.FWUPDMGR = fake_fw; M._tpm_unknown = False
+
 # enroll
 dev_file = os.path.join(fake, "fakedev"); open(dev_file, "w").write("x")
 reset_tpm(); M._ask = lambda p: "아니오"; M._has_tpm_slot = lambda dev=None: False
@@ -280,7 +327,7 @@ check("enroll: 확인이 틀리면 정책도 슬롯도 건드리지 않음", rc 
 M._ask = lambda p: M.TRUST_ACK
 rc, _, _ = run_sb_out(M.cmd_tpm_enroll, dev_file)
 args = ce_calls().split()
-check("enroll: 정책 갱신 → systemd-cryptenroll(--tpm2-pcrlock=<정책>·--tpm2-with-pin=yes·장치)", rc == 0 and pl_calls()[-1:] == ["make-policy"] and "--tpm2-with-pin=yes" in args and f"--tpm2-pcrlock={M.PCRLOCK_JSON}" in args and args[-1] == dev_file and "--wipe-slot=tpm2" not in args, f"{rc} {args}")
+check("enroll: 정책 갱신(ESP 에 credential 이 없으니 --force) → systemd-cryptenroll(--tpm2-pcrlock=<정책>·--tpm2-with-pin=yes·장치)", rc == 0 and pl_calls()[-1:] == ["make-policy --force"] and "--tpm2-with-pin=yes" in args and f"--tpm2-pcrlock={M.PCRLOCK_JSON}" in args and args[-1] == dev_file and "--wipe-slot=tpm2" not in args, f"{rc} {args}")
 reset_tpm(); set_mode("nopcr7")
 rc, _, _ = run_sb_out(M.cmd_tpm_enroll, dev_file)
 check("enroll: 정책에 PCR 7 이 없으면 슬롯을 등록하지 않음", rc == 1 and ce_calls() == "", ce_calls())
@@ -289,6 +336,14 @@ rc, _, err = run_sb_out(M.cmd_tpm_enroll, dev_file)
 check("enroll: 이미 TPM2 슬롯이 있으면 --replace 없이는 거부", rc == 1 and ce_calls() == "" and "--replace" in err, f"{rc}")
 rc, _, _ = run_sb_out(M.cmd_tpm_enroll, "--replace", dev_file)
 check("enroll --replace: 기존 TPM2 슬롯을 지우고 다시 등록(--wipe-slot=tpm2)", rc == 0 and "--wipe-slot=tpm2" in ce_calls().split(), ce_calls())
+# 등록 직후 ESP 에 credential 이 없으면 경고(fake pcrlock 은 파일을 쓰지 않는다)
+reset_tpm(); M._has_tpm_slot = lambda dev=None: False
+rc, out, err = run_sb_out(M.cmd_tpm_enroll, dev_file)
+check("enroll: 등록 뒤 ESP 에 credential 이 없으면 경고", rc == 0 and "credential 이 없습니다" in err, err[:200])
+reset_tpm(); open(os.path.join(M.ESP_CRED_DIR, "pcrlock.z.cred"), "w").write("x")
+rc, out, err = run_sb_out(M.cmd_tpm_enroll, dev_file)
+check("enroll: credential 이 있으면 --force 없이·경고 없이", rc == 0 and pl_calls()[-1:] == ["make-policy"] and "credential 이 없습니다" not in err, f"{pl_calls()} {err[:100]}")
+os.remove(os.path.join(M.ESP_CRED_DIR, "pcrlock.z.cred"))
 check("enroll: 알 수 없는 옵션 거부(종료 2)", run_sb(M.cmd_tpm_enroll, "--force", dev_file) == 2)
 M.CRYPTROOT = os.path.join(fake, "없는-cryptroot")
 check("enroll: 장치를 못 찾으면 종료 2", run_sb(M.cmd_tpm_enroll) == 2)

@@ -66,6 +66,10 @@ mkMod __curPos "LUKS2 루트(systemd initrd) 골격 (S4 에서 켬)" ({
   };
   os = lib.mkIf cfg.enable (lib.mkMerge [
     {
+      warnings = lib.optional (cfg.tpm2 && cfg.fido2) ''
+        mods.sys.services.luks: tpm2 와 fido2 를 initrd 에 함께 켰다 — TPM 이 정책 불일치로 거부한 부팅에서도 FIDO2(PIN+터치)로 풀린다(침해 가능한 부팅에서의 우회).
+        FIDO2 를 ISO(복구 환경)에서만 편의용으로 쓸 거라면 fido2 = false 로 둔다(FIDO2 슬롯은 헤더에 남아 ISO 에서 쓸 수 있다). 자세히: hosts/msi-summit-me/SECURE-BOOT.md §2-10.
+      '';
       boot.initrd.systemd.enable = true;
       # 오입력해도 포기하지 않고 암호창을 계속 다시 띄운다(crypttab `tries=0`). 기본(3회)이면 3번 틀린 뒤 암호창이 사라지고 타임아웃 뒤 emergency 화면에서 Enter 를 눌러야 재시도된다(2026-11-18 VM 시험).
       boot.initrd.luks.devices.${cfg.name} = {

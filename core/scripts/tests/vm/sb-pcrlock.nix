@@ -65,6 +65,8 @@ in {
 
     environment.etc.machine-id.text = "0123456789abcdef0123456789abcdef\n";
     # dbx 를 바꿀 때 서명에 쓰는 시험용 KEK(lanzaboote 시험 고정 키)
+    # E1: ESP 를 비운 뒤 부트로더(서명된 UKI)를 다시 만드는 명령 — 업스트림 image.nix 가 ESP 를 만들 때와 같은 호출
+    environment.etc."esp-install".text = "${config.boot.lanzaboote.installCommand} --public-key /var/lib/lanzaboote-test-fixture/keys/db/db.pem --private-key /var/lib/lanzaboote-test-fixture/keys/db/db.key /boot /nix/var/nix/profiles/system-1-link\n";
     environment.etc."test-kek".source = "${lz}/nix/tests/fixtures/uefi-keys/keys/KEK";
   };
 
@@ -74,9 +76,10 @@ in {
       KEK = "/etc/test-kek"
       DBX = "/sys/firmware/efi/efivars/dbx-d719b2cb-3d3a-4596-a3bc-dad00e67656f"
 
-      def pcr_refresh():
-          # 현재 EFI 변수로 「다음 부팅」의 PCR 7 을 예측해 정책(NV·ESP 의 credential)을 갱신한다
-          for sub in ["lock-secureboot-policy", "lock-secureboot-authority", "make-policy"]:
+      def pcr_refresh(force=False):
+          # 현재 EFI 변수로 「다음 부팅」의 PCR 7 을 예측해 정책(NV·ESP 의 credential)을 갱신한다.
+          # 예측이 현재 정책과 같으면 make-policy 는 아무 것도 안 하고(ESP 의 credential 도 안 씀) 끝난다 — 비운 ESP 를 되살리려면 --force.
+          for sub in ["lock-secureboot-policy", "lock-secureboot-authority", "make-policy" + (" --force" if force else "")]:
               machine.succeed("${pcrlock} " + sub + " 2>&1")
           machine.succeed("sync")
 
@@ -125,7 +128,8 @@ in {
               machine.wait_for_unit("multi-user.target")
               machine.wait_until_succeeds("mount | grep -q 'cryptdata on /data'", timeout=60)
         ''
-        else ''
+        else if scenario == "negative"
+        then ''
           with subtest("B: 음성 — dbx 만 바꾸고 정책을 갱신하지 않으면 TPM 이 거부한다"):
               dbx_change()
               reboot()
@@ -145,6 +149,35 @@ in {
               machine.succeed("${pcrlock} remove-policy 2>&1")
               pcr_refresh()
               machine.succeed("PASSWORD=supersecret NEWPIN=1234 systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrlock=/var/lib/systemd/pcrlock.json --tpm2-with-pin=yes /dev/vdb 2>&1")
+              reboot()
+              unlock_with_pin()
+              machine.wait_for_unit("multi-user.target")
+              machine.wait_until_succeeds("mount | grep -q 'cryptdata on /data'", timeout=60)
+        ''
+        else ''
+          with subtest("E1: ESP 를 통째로 비우고 부트로더를 재생성한 뒤 정책을 다시 만들면 PIN 으로 열린다"):
+              machine.succeed("rm -rf /boot/* /boot/.[!.]* 2>/dev/null; test -z \"$(ls -A /boot)\"")
+              machine.succeed("sh /etc/esp-install 2>&1")
+              machine.succeed("ls /boot/EFI/Linux/*.efi")
+              # 상태(PCR)가 그대로라 예측이 옛 정책과 같다 → 보통의 make-policy 는 「skipping update」 로 ESP 에 아무 것도 쓰지 않는다
+              out = machine.succeed("${pcrlock} lock-secureboot-policy 2>&1; ${pcrlock} lock-secureboot-authority 2>&1; ${pcrlock} make-policy 2>&1")
+              assert "skipping update" in out, out
+              machine.fail("ls /boot/loader/credentials/pcrlock.*.cred")
+              pcr_refresh(force=True)      # --force 가 있어야 ESP 의 credential 이 다시 써진다
+              machine.succeed("ls /boot/loader/credentials/pcrlock.*.cred")
+              reboot()
+              unlock_with_pin()
+              machine.wait_for_unit("multi-user.target")
+              machine.wait_until_succeeds("mount | grep -q 'cryptdata on /data'", timeout=60)
+
+          with subtest("E2: ESP 에 정책 credential 만 없으면 TPM 으로 못 열지만, 복구 암호로 부팅한 뒤 정책만 다시 만들면 재등록 없이 복구된다"):
+              machine.succeed("rm -f /boot/loader/credentials/pcrlock.*.cred; sync")
+              reboot()
+              unlock_with_pin()
+              machine.wait_for_console_text("find pcrlock policy")
+              machine.wait_for_unit("multi-user.target")
+              assert not data_mounted(), "credential 이 없는데 열렸다"
+              pcr_refresh(force=True)      # PCR 은 변하지 않았으니 옛 정책을 만족한다 → NV 는 그대로, ESP 의 credential 만 다시 쓰임(--force)
               reboot()
               unlock_with_pin()
               machine.wait_for_unit("multi-user.target")

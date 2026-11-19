@@ -37,6 +37,7 @@ let
 in {
   positive = mk repoPkgs true "positive";
   negative = mk repoPkgs true "negative";
+  esp = mk repoPkgs true "esp";
   # lanzaboote 의 nixpkgs 가 가진 더 새로운 systemd(261.x)로도 — 앞으로 nixpkgs 를 올릴 때 미리 확인
   positive-lzpkgs = mk lzPkgs false "positive";
   negative-lzpkgs = mk lzPkgs false "negative";
