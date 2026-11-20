@@ -66,6 +66,14 @@ mkMod __curPos "LUKS2 루트(systemd initrd) 골격 (S4 에서 켬)" ({
   };
   os = lib.mkIf cfg.enable (lib.mkMerge [
     {
+      # 설정끼리의 모순만 잡는다(실제 디스크·TPM·BIOS 상태는 `nixseal doctor` 가 본다 — plan/boot-doctor-keyring).
+      # 「/ 가 /dev/mapper/<name> 이어야 한다」는 검사는 일부러 넣지 않았다: 이 저장소는 diskDevice(by-label/nixos)로 마운트하고 LUKS 를 열면 안쪽 btrfs 레이블이 나타난다.
+      assertions = [
+        {
+          assertion = !cfg.tpm2 || lib.versionAtLeast config.systemd.package.version "255";
+          message = "mods.sys.services.luks.tpm2: systemd-pcrlock 은 systemd 255 부터 있다(현재 ${config.systemd.package.version}). tpm2 를 끄거나 systemd 를 올려라.";
+        }
+      ];
       warnings = lib.optional (cfg.tpm2 && cfg.fido2) ''
         mods.sys.services.luks: tpm2 와 fido2 를 initrd 에 함께 켰다 — TPM 이 정책 불일치로 거부한 부팅에서도 FIDO2(PIN+터치)로 풀린다(침해 가능한 부팅에서의 우회).
         FIDO2 를 ISO(복구 환경)에서만 편의용으로 쓸 거라면 fido2 = false 로 둔다(FIDO2 슬롯은 헤더에 남아 ISO 에서 쓸 수 있다). 자세히: hosts/msi-summit-me/SECURE-BOOT.md §2-10.

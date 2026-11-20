@@ -10,8 +10,14 @@ mkMod __curPos "Secure Boot(lanzaboote) 골격: systemd-boot 를 끄고 서명�
   cfg,
   lib,
   pkgs,
+  config,
   ...
 }: let
+  luksCfg = config.mods.sys.services.luks;
+  b = x:
+    if x
+    then "1"
+    else "0";
   # 빈 dbx 를 처음 채울 때 쓰는 Microsoft DBXUpdate(KEK 서명된 공개 해시 목록, 비밀 없음). 커밋·해시 고정이라 한 번 받으면 store 에 남아 오프라인에서도 쓴다.
   # 출처 microsoft/secureboot_objects (BSD-2-Clause-Patent, Copyright Microsoft Corporation). 이후 갱신은 fwupd 가 한다.
   # 2026-11-19 확인: 이 파일의 서명 목록(21292바이트)은 msi-summit-me 에 이미 적용된 dbx 와 바이트 단위로 같다.
@@ -29,6 +35,12 @@ mkMod __curPos "Secure Boot(lanzaboote) 골격: systemd-boot 를 끄고 서명�
       export NIXSEAL_DBX=${dbxInit}
       export NIXSEAL_PCRLOCK=${pkgs.systemd}/lib/systemd/systemd-pcrlock
       export NIXSEAL_SELF="$0"
+      # `nixseal doctor` 가 「선언 ↔ 실제」를 비교할 선언 값(plan/boot-doctor-keyring). 값이 없으면 doctor 는 그 칸을 건너뛴다.
+      export NIXSEAL_DECL_SB=1
+      export NIXSEAL_DECL_LUKS=${lib.optionalString luksCfg.enable luksCfg.name}
+      export NIXSEAL_DECL_LUKS_DEV=${lib.optionalString luksCfg.enable luksCfg.device}
+      export NIXSEAL_DECL_TPM2=${b (luksCfg.enable && luksCfg.tpm2)}
+      export NIXSEAL_DECL_FIDO2=${b (luksCfg.enable && luksCfg.fido2)}
       exec python3 -I ${../../../core/scripts/nixseal.py} "$@"
     '';
   };
@@ -41,6 +53,12 @@ in {
     };
   };
   os = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = lib.hasPrefix "/" cfg.pkiBundle && !(lib.hasPrefix "/nix/store" cfg.pkiBundle);
+        message = "mods.sys.services.secure-boot.pkiBundle(${cfg.pkiBundle}): 서명 개인키 폴더는 절대 경로여야 하고 /nix/store 아래이면 안 된다(store 는 누구나 읽을 수 있어 개인키가 샌다).";
+      }
+    ];
     boot.loader.systemd-boot.enable = lib.mkForce false;
     boot.lanzaboote = {
       enable = true;

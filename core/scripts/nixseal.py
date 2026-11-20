@@ -3,6 +3,8 @@
 
 사용:
   nixseal status                                   Secure Boot + LUKS 슬롯 한 화면 요약
+  nixseal doctor [--brief]                         nix 가 선언한 상태(luks·tpm2·fido2·secure-boot)와 실제(루트 암호화·LUKS 슬롯·pcrlock 정책·펌웨어 SB)를 비교해 어긋남을 알림(읽기 전용).
+                                                   FAIL = 다음 부팅이 깨지거나 보호가 조용히 빠짐. nixup 이 배포 직후 자동으로 부른다(선언 값은 래퍼가 환경변수로 줌)
   nixseal sb status|verify                         SB·SetupMode, PK/KEK/db/dbx, 서명 키, ESP 서명, 백업, dbx 갱신 / sbctl verify
   nixseal sb backup-esp [경로]                     ESP(/boot) 전체를 tar 로 백업(기본 ~/esp-backup-YYYYMMDD.tar)
   nixseal sb enroll [--no-firmware-builtin]        Setup Mode 에서 키만 등록(sbctl enroll-keys --microsoft --firmware-builtin)
@@ -25,7 +27,8 @@
   nixseal luks reseal --resume <장치>              중단된 reseal 을 이어서 끝냄(새 복구 암호 필요)   (자세한 안내: nixseal luks reseal --help)
 
 환경변수(시험·nix 래퍼용): CRYPTSETUP, SBCTL, NIXSEAL_PCRLOCK, NIXSEAL_PCRLOCK_JSON, NIXSEAL_ESP_CRED, NIXSEAL_CRYPTENROLL, NIXSEAL_EFIVARS(기본 /sys/firmware/efi/efivars), NIXSEAL_PKI(기본 /var/lib/sbctl),
-  NIXSEAL_DBX(내장 DBXUpdate.bin 경로), NIXSEAL_FWUPD_DIR(기본 /var/lib/fwupd-check), NIXSEAL_SELF(sudo 로 다시 실행할 래퍼 경로), NIXSEAL_NO_SUDO(시험용).
+  NIXSEAL_DBX(내장 DBXUpdate.bin 경로), NIXSEAL_FWUPD_DIR(기본 /var/lib/fwupd-check), NIXSEAL_SELF(sudo 로 다시 실행할 래퍼 경로), NIXSEAL_NO_SUDO(시험용),
+  NIXSEAL_DECL_SB|LUKS|LUKS_DEV|TPM2|FIDO2(doctor 가 비교할 nix 선언 — 없으면 그 칸을 건너뜀. LUKS 는 「빈 값 = luks 없음 선언」과 「설정 안 함 = 모름」이 다르다).
 
 주의(헤더 백업은 「그 시점의 암호/키슬롯으로 열리는 헤더」다): 이후 슬롯을 추가·삭제·변경하면 옛 백업은 옛 암호로만 열린다.
 보관할 백업은 복구 암호만 등록된 초기 상태 하나면 된다(마스터키·복구 암호를 바꿀 때만 새로 찍는다). FIDO2·TPM 은 복구 암호로 연 뒤 다시 등록한다.
@@ -1289,6 +1292,143 @@ SB = {"status": cmd_sb_status, "verify": cmd_sb_verify, "backup-esp": cmd_sb_bac
 LUKS = {"slots": cmd_luks_slots, "backup": cmd_luks_backup, "verify": cmd_luks_verify, "restore": cmd_luks_restore, "reseal": cmd_luks_reseal}
 
 
+# ───────────────────────── 선언 ↔ 실제 점검 (doctor) ─────────────────────────
+# 계획: ctx plan/boot-doctor-keyring. nix 의 선언(luks·tpm2·fido2·secure-boot)과 실제 상태가 어긋나면 알린다. 읽기 전용 — 아무 것도 바꾸지 않는다.
+# 판정(_judge)은 외부 명령 없이 돌아가는 순수 함수이고, 사실 수집(_gather_facts)만 명령·파일을 읽는다.
+
+def _decl():
+    """래퍼가 환경변수로 준 선언. 값이 없으면 None(= 모름 → 그 칸은 건너뜀). luks 는 "" = 「luks 없음」 선언, "<이름>" = 선언."""
+    e = os.environ
+
+    def flag(k):
+        v = e.get(k)
+        return None if v is None else v == "1"
+
+    return {"sb": flag("NIXSEAL_DECL_SB"), "tpm2": flag("NIXSEAL_DECL_TPM2"), "fido2": flag("NIXSEAL_DECL_FIDO2"),
+            "luks": e.get("NIXSEAL_DECL_LUKS"), "luks_dev": e.get("NIXSEAL_DECL_LUKS_DEV") or None}
+
+
+def _dm_is_crypt(src):
+    """장치가 dm-crypt(LUKS) 매퍼인가. 권한이 필요 없는 sysfs(/sys/class/block/dm-N/dm/uuid 의 「CRYPT-」 접두)로 본다 —
+    cryptsetup status 는 비루트에서 권한 오류로 실패해 「암호화 아님」으로 오판했다(오탐 FAIL). 매퍼가 아니면 False, 읽지 못하면 None."""
+    if not src.startswith("/dev/mapper/"):
+        return False
+    try:
+        with open(f"/sys/class/block/{os.path.basename(os.path.realpath(src))}/dm/uuid") as fh:
+            return fh.read().startswith("CRYPT-")
+    except OSError:
+        return None
+
+
+def _gather_facts(decl):
+    """실제 상태를 읽는다. 읽지 못한 항목은 None(= 확인하지 못함 — 「정상」으로 취급하지 않는다)."""
+    f = {"root_src": None, "root_crypt": None, "sb_on": None, "setup_mode": None, "tokens": None, "policy_pcrs": None, "creds": None, "luks_dev": None}
+    r = _x("findmnt", ["-no", "SOURCE", "--nofsroot", "/"])
+    if r.returncode == 0 and r.stdout.strip():
+        f["root_src"] = r.stdout.strip().splitlines()[0].strip()
+        f["root_crypt"] = _dm_is_crypt(f["root_src"])
+    f["sb_on"] = var_byte("SecureBoot", G_GLOBAL)
+    f["setup_mode"] = var_byte("SetupMode", G_GLOBAL)
+    dev = decl.get("luks_dev") if decl.get("luks_dev") and os.path.exists(decl["luks_dev"]) else _luks_dev([])
+    f["luks_dev"] = dev or None
+    if dev:
+        try:
+            d = _cs(["luksDump", dev])
+            if d.returncode == 0:
+                f["tokens"] = {k for _, k in parse_slots(d.stdout.decode(errors="replace"))["tokens"]}
+        except OSError:
+            pass
+    f["policy_pcrs"] = _pcrlock_pcrs()
+    f["creds"] = len(_esp_credentials())
+    return f
+
+
+def _judge(decl, f):
+    """(심각도, 한 줄) 목록. 심각도: FAIL(다음 부팅이 깨지거나 보호가 조용히 빠짐) · WARN · INFO · OK. 선언이 None 인 칸은 판정하지 않는다."""
+    out = []
+    add = lambda sev, msg: out.append((sev, msg))
+    # ── LUKS 루트 ──
+    luks = decl.get("luks")
+    if luks is not None:
+        if f["root_src"] is None or f["root_crypt"] is None:
+            add("INFO", "루트 장치가 암호화(dm-crypt)인지 확인하지 못했다(findmnt/sysfs 읽기 실패) — 암호화 여부를 비교하지 못함")
+        elif luks:
+            if f["root_crypt"]:
+                add("OK", f"루트가 암호화 장치({f['root_src']}) 위에 있다(선언 luks={luks})")
+            else:
+                add("FAIL", f"luks 를 선언했는데({luks}) 지금 루트({f['root_src']})는 암호화 장치가 아니다 — 재부팅하면 initrd 가 LUKS 장치를 열려다 실패해 부팅이 안 된다. "
+                            "디스크가 실제로 LUKS 인지 확인하고, 아니라면 선언을 되돌려라(암호화 안 된 디스크에 luks 를 켜려면 재설치가 필요하다)")
+        else:
+            if f["root_crypt"]:
+                add("FAIL", f"luks 를 선언하지 않았는데 지금 루트({f['root_src']})가 암호화 장치다 — initrd 에 crypttab 이 없어 재부팅하면 루트를 열지 못한다. luks 선언을 켜라")
+            else:
+                add("OK", "luks 선언 없음, 루트도 암호화되지 않음")
+    # ── 슬롯(TPM2·FIDO2) ──
+    tk = f["tokens"]
+    if (decl.get("tpm2") is not None or decl.get("fido2") is not None) and luks != "":
+        if tk is None:
+            add("INFO", f"LUKS 헤더를 읽지 못해({f['luks_dev'] or '장치 없음'}) TPM2·FIDO2 슬롯이 있는지 확인하지 못했다")
+        else:
+            has_tpm, has_fido = "systemd-tpm2" in tk, "systemd-fido2" in tk
+            if decl.get("tpm2") is True and not has_tpm:
+                add("INFO", "tpm2 를 선언했지만 TPM2 슬롯이 아직 없다 — 지금은 복구 암호(또는 FIDO2)로 풀린다. 복구 암호로 연 상태에서 `nixseal tpm enroll` (SECURE-BOOT.md §2-13)")
+            elif decl.get("tpm2") is False and has_tpm:
+                add("WARN", "TPM2 슬롯이 있는데 tpm2 를 선언하지 않았다 — initrd 가 TPM 을 시도하지 않아 슬롯이 쓰이지 않는다(암호로만 풀림). 쓸 거면 tpm2 선언을 켜고, 안 쓸 거면 슬롯을 지워라")
+            elif decl.get("tpm2") is True and has_tpm:
+                pcrs = f["policy_pcrs"]
+                if pcrs is None:
+                    add("FAIL", "TPM2 슬롯이 있는데 pcrlock 정책 파일을 읽지 못했다(/var/lib/systemd/pcrlock.json) — TPM 이 거부해 복구 암호로만 열린다. 재부팅 전에 `nixseal tpm refresh-policy`")
+                elif 7 not in pcrs:
+                    add("FAIL", f"TPM 정책이 PCR 7(Secure Boot 정책)을 보호하지 않는다(보호 PCR {pcrs}) — Secure Boot 변경을 TPM 이 감지하지 못한다(조용히 약해진 상태). "
+                                "initrd 에 systemd-pcrphase-initrd·systemd-pcrosseparator 가 켜졌는지 확인하고 재등록: `nixseal tpm status`")
+                elif not f["creds"]:
+                    add("FAIL", "ESP 에 pcrlock 정책 credential(loader/credentials/pcrlock.*.cred)이 없다 — 다음 부팅에서 TPM 이 「policy not found」로 거부한다. `nixseal tpm refresh-policy`")
+                else:
+                    add("OK", f"TPM2 슬롯 있음 · 정책이 PCR 7 을 보호(보호 PCR {pcrs}) · ESP 에 credential {f['creds']}개")
+            elif decl.get("tpm2") is False and not has_tpm:
+                add("OK", "TPM2 선언 없음, 슬롯도 없음")
+            if decl.get("fido2") is True and not has_fido:
+                add("INFO", "fido2 를 선언했지만 FIDO2 슬롯이 없다 — 암호로 풀린다. `systemd-cryptenroll --fido2-device=auto` 로 등록")
+            elif decl.get("fido2") is False and has_fido:
+                add("INFO", "FIDO2 슬롯이 있고 fido2 선언은 꺼져 있다 — initrd 는 쓰지 않고 ISO 등에서만 쓸 수 있다(의도라면 정상)")
+            elif decl.get("fido2") is True and has_fido:
+                add("OK", "FIDO2 슬롯 있음(선언과 일치)")
+    if decl.get("tpm2") and decl.get("fido2"):
+        add("WARN", "tpm2 와 fido2 를 함께 켰다 — TPM 이 정책 불일치로 거부한 부팅에서도 FIDO2(PIN+터치)로 풀린다(체인 검사 우회). FIDO2 를 ISO 에서만 쓸 거면 fido2 선언을 꺼라(SECURE-BOOT.md §2-10)")
+    # ── Secure Boot ──
+    if decl.get("sb") is not None:
+        sb, sm = f["sb_on"], f["setup_mode"]
+        if sb is None:
+            add("INFO", "펌웨어 Secure Boot 상태를 읽지 못했다(UEFI 가 아니거나 efivarfs 없음)")
+        elif decl["sb"] and sb != 1:
+            add("WARN", "secure-boot 를 선언했는데 펌웨어의 Secure Boot 가 꺼져 있다 — 부팅 파일은 서명되지만 아무도 검사하지 않는다(보호 없음). BIOS 에서 켜라")
+        elif decl["sb"] and sm == 1:
+            add("WARN", "secure-boot 를 선언했는데 펌웨어가 Setup Mode 다(키가 등록되지 않음) — 키를 등록해야 보호가 시작된다: `nixseal sb enroll`")
+        elif decl["sb"]:
+            add("OK", "펌웨어 Secure Boot 켜짐(User Mode) — 선언과 일치")
+        elif sb == 1:
+            add("FAIL", "secure-boot 를 선언하지 않았는데 펌웨어의 Secure Boot 가 켜져 있다 — 서명되지 않은 부팅 파일(systemd-boot)은 다음 부팅에서 Access Denied 로 거부된다. secure-boot 선언을 켜라")
+        else:
+            add("OK", "secure-boot 선언 없음, 펌웨어도 꺼져 있음")
+    return out
+
+
+def cmd_doctor(args):
+    _need_root(["doctor"] + args)
+    brief = "--brief" in args
+    decl = _decl()
+    if all(v is None for v in decl.values()):
+        print("doctor: 선언 값이 없다(nix 래퍼 없이 실행) — 비교할 선언이 없어 점검하지 않았다.")
+        return 0
+    res = _judge(decl, _gather_facts(decl))
+    shown = [r for r in res if not (brief and r[0] == "OK")]
+    if shown:
+        print("== nixseal doctor (선언 ↔ 실제) ==")
+        for sev, msg in shown:
+            print(f"[{sev}] {msg}")
+    return 1 if any(s == "FAIL" for s, _ in res) else 0
+
+
 def main(argv):
     if not argv or argv[0] in ("help", "-h", "--help"):
         print(__doc__)
@@ -1299,6 +1439,8 @@ def main(argv):
     if argv[0] == "recover":
         cmd_recover(argv[1:])
         return 0
+    if argv[0] == "doctor":
+        return cmd_doctor(argv[1:])
     group = {"sb": SB, "luks": LUKS, "tpm": TPM}.get(argv[0])
     if group is not None and (len(argv) < 2 or argv[1] in ("help", "-h", "--help")):
         print(__doc__)
