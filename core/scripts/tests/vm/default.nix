@@ -3,6 +3,7 @@
 #
 #   cd core/scripts/tests/vm && nix-build default.nix -A positive --no-out-link             # 저장소(core/flake.lock)의 nixpkgs — 실제 호스트와 같은 systemd
 #   cd core/scripts/tests/vm && nix-build default.nix -A negative --no-out-link
+#   cd core/scripts/tests/vm && nix-build default.nix -A doctor --no-out-link               # nixseal doctor(선언 ↔ 실제)
 #   cd core/scripts/tests/vm && nix-build default.nix -A positive-lzpkgs --no-out-link      # lanzaboote 의 nixpkgs(더 새로운 systemd 261.x)로(올리기 전 확인)
 #
 # lanzaboote 모듈·시험 모듈(common/·fixtures/)은 core/flake.lock 이 고정한 lanzaboote 리비전을 쓴다.
@@ -78,6 +79,7 @@ in {
   positive = mk repoPkgs true "positive";
   negative = mk repoPkgs true "negative";
   esp = mk repoPkgs true "esp";
+  doctor = mk repoPkgs true "doctor"; # nixseal doctor 가 실제 장치·TPM·펌웨어에서 선언과 어긋남을 잡는지(plan/boot-doctor-keyring)
   # lanzaboote 의 nixpkgs 가 가진 더 새로운 systemd(261.x)로도 — 앞으로 nixpkgs 를 올릴 때 미리 확인
   positive-lzpkgs = mk lzPkgs false "positive";
   negative-lzpkgs = mk lzPkgs false "negative";

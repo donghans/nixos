@@ -5,6 +5,8 @@
 #   positive … A(등록 직후 PIN 으로 열림) → C(dbx 를 바꾸고 「재부팅 전에」 정책 갱신 → PIN 으로 열림)
 #   negative … A → B(dbx 만 바꾸고 갱신 안 함 → TPM 이 거부) → D1(그 상태에선 정책 갱신도 거부됨)
 #              → D2(remove-policy + 복구 암호로 재등록 → PIN 으로 열림)
+#   esp      … E1·E2(ESP 를 포맷·재생성, credential 만 없어짐)
+#   doctor   … `nixseal doctor` 가 실제 장치·TPM·펌웨어에서 선언과 어긋남을 잡는다(X1~X8). 기준선 A 뒤에 재부팅 없이 진행(plan/boot-doctor-keyring)
 #
 # 이 틀이 제대로 돌려면 필요한 것(시행착오로 확인 — 빠뜨리면 조용히 실패한다; 해당 설정은 core/lib/luks-tpm2.nix 에 있고 luks mod 와 공유):
 #   - lanzaboote 스텁이 ESP 의 \loader\credentials\pcrlock.*.cred 를 initrd 로 넘긴다. 그 파일은 `make-policy` 가 쓴다.
@@ -22,6 +24,11 @@
 }: let
   common = "${lz}/nix/tests/lanzaboote/common";
   pcrlock = "${pkgs.systemd}/lib/systemd/systemd-pcrlock";
+  # doctor 시나리오: 실제 nixseal(ISO 와 같은 래퍼)로 시험한다
+  nixseal = import ../../../lib/nixseal-iso.nix {
+    inherit pkgs;
+    script = ../../nixseal.py;
+  };
 in {
   name = "sb-pcrlock-${scenario}";
 
@@ -35,7 +42,9 @@ in {
     boot.initrd.systemd.enable = true;
     virtualisation.tpm.enable = true;
     virtualisation.emptyDiskImages = [64];
-    environment.systemPackages = [pkgs.cryptsetup pkgs.tpm2-tools pkgs.efitools pkgs.openssl pkgs.dosfstools];
+    environment.systemPackages =
+      [pkgs.cryptsetup pkgs.tpm2-tools pkgs.efitools pkgs.openssl pkgs.dosfstools]
+      ++ lib.optionals (scenario == "doctor") [nixseal pkgs.jq];
 
     # 데이터 볼륨(/dev/vdb)을 initrd 에서 TPM+PIN 으로 연다. 열리지 않아도 부팅은 계속(nofail).
     boot.initrd.luks.devices.cryptdata = {
@@ -153,6 +162,59 @@ in {
               unlock_with_pin()
               machine.wait_for_unit("multi-user.target")
               machine.wait_until_succeeds("mount | grep -q 'cryptdata on /data'", timeout=60)
+        ''
+        else if scenario == "doctor"
+        then ''
+          def doctor(env, args=""):
+              # 선언(nix 래퍼가 주는 값)을 환경변수로 직접 준다. 데이터 볼륨 /dev/vdb 가 LUKS(TPM2 슬롯) 이고 루트(/)는 평문이다.
+              st, out = machine.execute("env " + env + " nixseal doctor " + args + " 2>&1")
+              print("doctor[" + env + "] rc=" + str(st) + "\n" + out)
+              return st, out
+
+          BASE = "NIXSEAL_DECL_SB=1 NIXSEAL_DECL_TPM2=1 NIXSEAL_DECL_FIDO2=0 NIXSEAL_DECL_LUKS_DEV=/dev/vdb"   # luks(루트) 선언은 안 줌 = 모름 → 루트 칸은 건너뜀
+
+          with subtest("X0: 기준선 — 슬롯·정책(PCR 7)·credential·펌웨어 SB 가 정상이면 FAIL·WARN 없이 종료 0"):
+              st, out = doctor(BASE)
+              assert st == 0, out
+              assert "[OK] TPM2 슬롯 있음" in out and "PCR 7" in out, out
+              assert "[OK] 펌웨어 Secure Boot 켜짐" in out, out
+              assert "[FAIL]" not in out and "[WARN]" not in out, out
+
+          with subtest("X1: luks 를 선언했는데 루트(/)는 암호화 장치가 아니다 → FAIL, 종료 1"):
+              st, out = doctor(BASE + " NIXSEAL_DECL_LUKS=cryptroot")
+              assert st == 1 and "[FAIL] luks 를 선언했는데" in out, out
+
+          with subtest("X1b: luks 없음을 선언했고 루트도 평문이면 FAIL 이 아니다"):
+              st, out = doctor("NIXSEAL_DECL_LUKS= NIXSEAL_DECL_SB=1")
+              assert st == 0 and "[FAIL]" not in out, out
+
+          with subtest("X3: TPM2 슬롯이 있는데 tpm2 를 선언하지 않았다 → WARN(종료는 0)"):
+              st, out = doctor("NIXSEAL_DECL_SB=1 NIXSEAL_DECL_TPM2=0 NIXSEAL_DECL_LUKS_DEV=/dev/vdb")
+              assert st == 0 and "[WARN] TPM2 슬롯이 있는데 tpm2 를 선언하지 않았다" in out, out
+
+          with subtest("X4: secure-boot 를 선언하지 않았는데 펌웨어 Secure Boot 가 켜져 있다 → FAIL"):
+              st, out = doctor("NIXSEAL_DECL_SB=0")
+              assert st == 1 and "[FAIL] secure-boot 를 선언하지 않았는데" in out, out
+
+          with subtest("X5: 정책 파일에서 PCR 7 이 빠졌다 → FAIL(조용한 약화)"):
+              machine.succeed("jq '.pcrValues |= map(select(.pcr != 7))' /var/lib/systemd/pcrlock.json > /tmp/pcrlock-no7.json")
+              st, out = doctor(BASE + " NIXSEAL_PCRLOCK_JSON=/tmp/pcrlock-no7.json")
+              assert st == 1 and "PCR 7(Secure Boot 정책)을 보호하지 않는다" in out, out
+
+          with subtest("X6: ESP 에 정책 credential 이 없다 → FAIL"):
+              machine.succeed("mkdir -p /tmp/emptycred")
+              st, out = doctor(BASE + " NIXSEAL_ESP_CRED=/tmp/emptycred")
+              assert st == 1 and "credential" in out and "[FAIL]" in out, out
+
+          with subtest("X7: 정책(pcrlock.json)을 지우면(remove-policy) 슬롯만 남아 FAIL"):
+              machine.succeed("${pcrlock} remove-policy 2>&1")
+              st, out = doctor(BASE)
+              assert st == 1 and "[FAIL] TPM2 슬롯이 있는데 pcrlock 정책 파일을 읽지 못했다" in out, out
+
+          with subtest("X8: TPM2 슬롯이 없고 tpm2 를 선언했다 → INFO(등록 안내), FAIL 아님"):
+              machine.succeed("PASSWORD=supersecret systemd-cryptenroll --wipe-slot=tpm2 /dev/vdb 2>&1")
+              st, out = doctor(BASE)
+              assert st == 0 and "[INFO] tpm2 를 선언했지만 TPM2 슬롯이 아직 없다" in out and "[FAIL]" not in out, out
         ''
         else ''
           with subtest("E1: ESP 를 같은 라벨·볼륨 ID 로 포맷하고 부트로더를 재생성한 뒤 정책을 다시 만들면 PIN 으로 열린다"):

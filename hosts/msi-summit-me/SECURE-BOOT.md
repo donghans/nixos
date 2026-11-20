@@ -6,6 +6,7 @@
 ## 0. 한눈에
 - 구성: UEFI 펌웨어(Secure Boot) → **rEFInd**(서명, 메뉴) → **systemd-boot**(서명) → **lanzaboote 서명 UKI**(`EFI/Linux`, 세대마다) → LUKS 암호 → NixOS(lockdown `integrity`).
 - 점검 명령: `nixseal sb status`(상태 요약), `verify`, `backup-esp`, `enroll`(키만 등록), `dbx`(빈 dbx 채우기)·`dbx-update`(fwupd 갱신 적용) — **둘 다 자동으로 하지 않고**, dbx 가 바뀌면 TPM 등록이 깨지므로 로그인 때 뜨는 알림(`sb-notify`)을 보고 직접 한다. 시작 전에 「집이고 곁에 낯선 사람이 없는지·바로 재부팅할 수 있는지」 확인을 묻는다. 도움말은 `nixseal help`·`nixseal sb help`. LUKS 쪽은 `nixseal luks slots|backup|verify|restore|reseal`, TPM+PIN 은 `nixseal tpm status|enroll|refresh-policy`(§2-13), ESP 가 의심스러울 때는 ISO 에서 `nixseal recover`(§2-8), 한 화면 요약은 `nixseal status`. (Secure Boot 모듈을 켜면 설치된다: `mods/sys/services/secure-boot.nix`)
+- **선언-실제 점검**: `sudo nixseal doctor` — nix 가 선언한 상태(luks·tpm2·fido2·secure-boot)와 실제(루트 암호화·LUKS 슬롯·pcrlock 정책·펌웨어 Secure Boot)가 어긋나면 알린다(읽기 전용, §2-14). `nixup` 이 배포 직후 부를 수 있다(계획 `plan/boot-doctor-keyring` §7-1 결정 후).
 - 가장 빠른 탈출구: 부팅이 안 되면 **BIOS(Del/F2) → Secure Boot Support = Disabled** → 부팅 → `nixseal sb status`. (키는 그대로 남아도 된다.)
 - 복구 USB(Ventoy)의 `RECOVERY-secureboot-20261117.txt`·`RECOVERY-addendum-20261118.txt`: ESP 되돌리기·ISO 부팅 절차. **Secure Boot 가 켜진 동안은 이 USB 가 안 뜰 수 있다** → 끄고 들어간다.
 
@@ -121,6 +122,12 @@
 - **`nixseal tpm` 이 확인을 묻는 이유**: 정책 갱신은 「지금 상태를 정상으로 받아들이겠다」는 선언이라, 모르는 변경 뒤에 하면 TPM 이 침해를 감지하지 못하게 된다. 그래서 `내가 한 변경` / `이 상태를 신뢰` 를 직접 입력하게 한다. upstream 의 자동 pcrlock 서비스(`systemd-pcrlock-secureboot-policy.service` 등)는 같은 이유로 켜지 않는다.
 - **시험하지 못한 것**: 실기 TPM(PIN 오입력 잠금, 펌웨어가 PCR 7 에 남기는 이벤트 차이), 실제 DBXUpdate 교체, `fwupdmgr update` 가 dbx 외 항목(PCR 0·2 를 바꾸는 펌웨어)을 섞어 적용하는 경우, 정책 갱신 직후 비정상 종료. nixpkgs 를 올릴 때는 `core/scripts/tests/vm` 의 `-A positive-lzpkgs` 시험을 먼저 돌린다(systemd 버전별 유닛 차이).
 - **`luks.fido2` 와 함께 켜면**: LUKS 슬롯은 OR 이라 TPM 이 거부한 부팅에서도 FIDO2 가 열 수 있다(체인 검사 우회). FIDO2 를 ISO 에서만 편의로 쓸 거라면 설치본에서는 `luks.fido2 = false`(설정이 둘 다 켜면 경고한다).
+
+### 2-14. `nixseal doctor` — 선언(nix)과 실제 상태가 어긋났는지 (2026-11-20, 단위 시험 48건 + VM 시험 `-A doctor` 통과 · 실기는 비루트로 한 번 돌려 봄)
+- **왜 필요한가**: 부트 보안은 세 층이다 — ① BIOS·펌웨어(nix 가 못 건드림) ② 디스크·TPM 안의 상태(LUKS 슬롯, pcrlock 정책 — 명령으로 한 번 만듦) ③ nix 선언(`luks`·`secure-boot` 스위치). 선언만 바뀌고 실제가 안 따라가면(또는 반대) 재부팅 때 부팅이 안 되거나, 에러 없이 보호가 약해진다. nix `assertions` 는 **설정끼리의 모순**만 잡는다(예: `pkiBundle` 이 `/nix/store` 아래, systemd 255 미만에서 `tpm2`). 실제 디스크·TPM·BIOS 상태는 `doctor` 가 본다.
+- **심각도**: `FAIL` = 다음 부팅이 깨지거나 보호가 조용히 빠짐(예: luks 를 선언했는데 지금 루트가 암호화 장치가 아님 — 재부팅하면 initrd 가 열 장치가 없음 / TPM 슬롯이 있는데 정책에 PCR 7 이 없음 / ESP 에 정책 credential 이 없음 / secure-boot 선언이 없는데 펌웨어는 켜짐). `WARN` = 의도와 다를 가능성(슬롯은 있는데 선언이 꺼짐, `tpm2`+`fido2` 동시, 펌웨어 SB 꺼짐·Setup Mode). `INFO` = 알려 주는 것(예: `tpm2` 선언만 있고 슬롯이 아직 없음 → `nixseal tpm enroll`). 확인하지 못한 항목은 **정상으로 치지 않고 INFO**.
+- **쓰는 법**: `sudo nixseal doctor [--brief]`(FAIL 이 있으면 종료 1). 선언 값은 nix 래퍼가 환경변수(`NIXSEAL_DECL_*`)로 준다 — 값이 없으면 그 칸은 건너뛴다. 비루트로 돌리면 LUKS 헤더·ESP 를 못 읽어 INFO 가 늘어난다.
+- **한계**: ① `nixseal` 은 `secure-boot` 가 켜진 호스트에만 설치된다(luks 만 켠 호스트에는 없음). ② 새 세대의 initrd 에 측정 유닛(`systemd-pcrphase-initrd`·`systemd-pcrosseparator`)이 들어갔는지는 보지 않는다 — nixpkgs 를 올릴 때 `-A positive-lzpkgs` VM 시험이 맡는다(없으면 PCR 7 이 정책에서 조용히 빠진다). ③ 슬롯의 비밀 자체는 읽지 않는다. ④ `luks` 를 켠 상태로 암호화 안 된 디스크에 배포하는 것 자체는 막지 못한다(FAIL 로 알릴 뿐 — 배포 직후, 재부팅 전에 읽어야 의미가 있다).
 
 ## 3. dbx 갱신 (fwupd)
 - 설정: `mods/sys/services/fwupd.nix`(매시간 타이머는 끔, **시간 기반 타이머 없음**). NetworkManager 가 연결(`up`)되거나 인터넷이 확인(`connectivity-change`=FULL)되면 훅이 `fwupd-stale-refresh` 를 시작하고, 이번 부팅에서 확인을 마쳤다는 표시(`/run/fwupd-check-done`)가 있으면 바로 끝난다(`refresh` 가 필요했는데 못 받았으면 표시를 남기지 않아 다음 연결 때 다시 시도). **마지막 새로 받기가 14일보다 오래됐을 때만** `fwupdmgr refresh`(네트워크 필요)를 하고, 갱신 유무(`get-updates`)는 매번 확인해 `/var/lib/fwupd-check/last-result` 에 남긴다. 갱신이 있으면 로그인 때와 결과가 바뀔 때 알림(`sb-notify`, 알림 센터에서 명령 복사)이 뜬다. **설치는 자동으로 하지 않는다.**
