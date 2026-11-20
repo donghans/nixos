@@ -79,6 +79,7 @@ in {
   positive = mk repoPkgs true "positive";
   negative = mk repoPkgs true "negative";
   esp = mk repoPkgs true "esp";
+  tpmlogin = mk repoPkgs true "tpmlogin"; # 봉인된 계정 비밀번호로 부팅 직후 로그인·키링 자동 해제(plan/boot-doctor-keyring §11-B)
   doctor = mk repoPkgs true "doctor"; # nixseal doctor 가 실제 장치·TPM·펌웨어에서 선언과 어긋남을 잡는지(plan/boot-doctor-keyring)
   # lanzaboote 의 nixpkgs 가 가진 더 새로운 systemd(261.x)로도 — 앞으로 nixpkgs 를 올릴 때 미리 확인
   positive-lzpkgs = mk lzPkgs false "positive";

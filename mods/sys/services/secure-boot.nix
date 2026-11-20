@@ -14,6 +14,7 @@ mkMod __curPos "Secure Boot(lanzaboote) 골격: systemd-boot 를 끄고 서명�
   ...
 }: let
   luksCfg = config.mods.sys.services.luks;
+  tlCfg = config.mods.sys.services.tpm-login;
   b = x:
     if x
     then "1"
@@ -29,7 +30,7 @@ mkMod __curPos "Secure Boot(lanzaboote) 골격: systemd-boot 를 끄고 서명�
   # 이 래퍼가 PATH(runtimeInputs)와 nix 가 정하는 값(pkiBundle·내장 dbx)을 환경변수로 준다. NIXSEAL_SELF 는 root 가 아닐 때 sudo 로 다시 실행할 경로.
   nixseal = pkgs.writeShellApplication {
     name = "nixseal";
-    runtimeInputs = [pkgs.sbctl pkgs.coreutils pkgs.util-linux pkgs.gnugrep pkgs.gawk pkgs.gnutar pkgs.python3 pkgs.systemd pkgs.cryptsetup pkgs.fwupd];
+    runtimeInputs = [pkgs.sbctl pkgs.coreutils pkgs.util-linux pkgs.gnugrep pkgs.gawk pkgs.gnutar pkgs.python3 pkgs.systemd pkgs.cryptsetup pkgs.fwupd pkgs.tpm2-tools pkgs.openssl];
     text = ''
       export NIXSEAL_PKI=${cfg.pkiBundle}
       export NIXSEAL_DBX=${dbxInit}
@@ -41,6 +42,7 @@ mkMod __curPos "Secure Boot(lanzaboote) 골격: systemd-boot 를 끄고 서명�
       export NIXSEAL_DECL_LUKS_DEV=${lib.optionalString luksCfg.enable luksCfg.device}
       export NIXSEAL_DECL_TPM2=${b (luksCfg.enable && luksCfg.tpm2)}
       export NIXSEAL_DECL_FIDO2=${b (luksCfg.enable && luksCfg.fido2)}
+      export NIXSEAL_DECL_TPMLOGIN=${lib.optionalString tlCfg.enable tlCfg.user}
       exec python3 -I ${../../../core/scripts/nixseal.py} "$@"
     '';
   };

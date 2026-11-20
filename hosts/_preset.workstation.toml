@@ -32,6 +32,7 @@ kernel-lockdown       = false   # unstable 커널 + lockdown(integrity) — 호�
 refind                = false   # rEFInd 메뉴를 nix 로 설치·관리(노트북에서 켠다)
 secure-boot           = false   # Secure Boot(lanzaboote) 골격 — S5 에서 msi-summit-me 가 켠다(plan boot-security S3c)
 luks                  = false   # LUKS2 루트(systemd initrd) 골격 — S4 에서 msi-summit-me 가 켠다(plan boot-security S3c)
+tpm-login             = false   # TPM+PIN 부팅 직후 greetd 로그인·키링 자동 해제(봉인된 비밀번호) — 기본 꺼짐(plan boot-doctor-keyring §11-B)
 fwupd                 = false   # LVFS 펌웨어·Secure Boot dbx 갱신 도구(노트북에서 켠다 — plan s5-secure-boot-exec §6)
 
 [mods.gui]

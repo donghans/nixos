@@ -18,6 +18,9 @@
   nixseal tpm status [장치]                        TPM2 슬롯·정책 파일(보호 PCR)·ESP 의 정책 credential 요약(PCR 7 이 빠졌으면 경고)
   nixseal tpm enroll [--replace] [장치]            복구 암호로 연 상태에서 TPM2+PIN 슬롯 등록(PIN 은 이 부팅에만 쓰는 별도 구절). --replace: 기존 TPM2 슬롯 교체
   nixseal tpm refresh-policy [--force]             Secure Boot 를 직접 바꾼 직후, 재부팅 전에 TPM 정책을 새 상태로 갱신(「내가 한 변경」 확인). sb dbx·dbx-update 는 TPM 슬롯이 있으면 이것을 이어서 부른다
+  nixseal pw seal [--user 계정] [--stdin]         (TPM+PIN 부팅 직후 로그인·키링 자동 해제용) 계정 비밀번호 P 를 TPM 에 봉인한다 — 인증값은 부팅 PIN 의 SHA-256.
+                                                   부팅 PIN 은 로그인 비밀번호로 쓰이지 않고 P 를 푸는 열쇠일 뿐이다(mods.sys.services.tpm-login, SECURE-BOOT.md §2-15)
+  nixseal pw status|test|remove [--user 계정]     봉인 상태(블롭·실패 표지) / PIN 으로 풀어 계정 비밀번호와 맞는지 확인(오입력은 TPM 카운터를 올린다) / 봉인 삭제
   nixseal luks slots <장치|백업파일>               키슬롯·토큰 요약
   nixseal luks backup <장치|파일> <대상디렉터리> [--name 접두사]   헤더 백업(파일명에 장치 UUID·시각, 권한 0400)
   nixseal luks verify <장치|백업파일> [--passphrase]              LUKS 헤더인지 확인(+ 암호를 숨겨 입력받아 열림 검사)
@@ -28,6 +31,7 @@
 
 환경변수(시험·nix 래퍼용): CRYPTSETUP, SBCTL, NIXSEAL_PCRLOCK, NIXSEAL_PCRLOCK_JSON, NIXSEAL_ESP_CRED, NIXSEAL_CRYPTENROLL, NIXSEAL_EFIVARS(기본 /sys/firmware/efi/efivars), NIXSEAL_PKI(기본 /var/lib/sbctl),
   NIXSEAL_DBX(내장 DBXUpdate.bin 경로), NIXSEAL_FWUPD_DIR(기본 /var/lib/fwupd-check), NIXSEAL_SELF(sudo 로 다시 실행할 래퍼 경로), NIXSEAL_NO_SUDO(시험용),
+  NIXSEAL_PWSEAL_DIR(기본 /var/lib/nixseal/pwseal), NIXSEAL_TPM2_*·NIXSEAL_UNIX_CHKPWD(시험용), NIXSEAL_DECL_TPMLOGIN(doctor: 봉인 로그인 계정),
   NIXSEAL_DECL_SB|LUKS|LUKS_DEV|TPM2|FIDO2(doctor 가 비교할 nix 선언 — 없으면 그 칸을 건너뜀. LUKS 는 「빈 값 = luks 없음 선언」과 「설정 안 함 = 모름」이 다르다).
 
 주의(헤더 백업은 「그 시점의 암호/키슬롯으로 열리는 헤더」다): 이후 슬롯을 추가·삭제·변경하면 옛 백업은 옛 암호로만 열린다.
@@ -38,6 +42,7 @@ import contextlib
 import datetime
 import getpass
 import glob
+import hashlib
 import io
 import os
 import pwd
@@ -45,6 +50,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 CRYPTSETUP = os.environ.get("CRYPTSETUP", "cryptsetup")
@@ -388,12 +394,65 @@ UNKNOWN_TPM_NOTE = ("※ LUKS 장치를 찾지 못하거나 읽지 못해 TPM �
                     "재부팅하기 전에 `nixseal tpm refresh-policy` 를 직접 하세요(재부팅하면 복구 암호 + 재등록).")
 
 
+PCRLOCK_D = os.environ.get("NIXSEAL_PCRLOCK_D", "/var/lib/pcrlock.d")
+VARIANT_BOOT_FILE = os.environ.get("NIXSEAL_VARIANT_BOOT", "/var/lib/nixseal/pcrlock-variants-boot")
+BOOT_ID_FILE = os.environ.get("NIXSEAL_BOOT_ID_FILE", "/proc/sys/kernel/random/boot_id")
+
+
+def _read_text(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _secureboot_policy_dir():
+    d = sorted(glob.glob(os.path.join(PCRLOCK_D, "*-secureboot-policy.pcrlock.d")))
+    return d[0] if d else None
+
+
+def _read_bytes(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _keep_previous_state_variant(prev):
+    """Secure Boot 정책 구성요소를 다시 만든 직후 호출한다(prev = 다시 만들기 전의 generated.pcrlock 내용).
+    **dbx 등을 바꾼 직후 재부팅 전에 정책을 갱신하면 그냥은 PCR 7 이 정책에서 빠진다** — 이번 부팅의 측정 로그에는 바꾸기 전 값이 있어 새로 만든 구성요소와 맞지 않기 때문이다
+    (VM 실험 2026-11-20). 바꾸기 전 상태를 변종(old-<해시>.pcrlock)으로 남기면 로그가 그 변종과 맞아 PCR 7 이 남고, 재부팅 뒤(새 상태)에도 정책이 통과한다.
+    변종은 그 부팅 동안만 유효하다 — 다음 부팅의 첫 갱신에서 지운다(안 지우면 옛 상태가 영구히 허용된다). 변종을 둔 부팅은 VARIANT_BOOT_FILE 에 기록한다."""
+    d = _secureboot_policy_dir()
+    if d is None:
+        return
+    new = _read_bytes(os.path.join(d, "generated.pcrlock"))
+    boot = _read_text(BOOT_ID_FILE)
+    if _read_text(VARIANT_BOOT_FILE) != boot:   # 다른 부팅에서 만든 변종 — 이번 부팅의 로그와 무관하다
+        for v in glob.glob(os.path.join(d, "old-*.pcrlock")):
+            with contextlib.suppress(OSError):
+                os.remove(v)
+    if prev is not None and new is not None and prev != new:
+        try:
+            with open(os.path.join(d, "old-" + hashlib.sha256(prev).hexdigest()[:12] + ".pcrlock"), "wb") as f:
+                f.write(prev)
+            os.makedirs(os.path.dirname(VARIANT_BOOT_FILE), exist_ok=True)
+            with open(VARIANT_BOOT_FILE, "w") as f:
+                f.write((boot or "") + "\n")
+        except OSError as e:
+            print(f"경고: 이전 상태 변종을 저장하지 못했다({e}) — PCR 7 이 정책에서 빠질 수 있습니다.", file=sys.stderr)
+
+
 def _pcrlock_refresh(force=False):
     """현재 EFI 변수로 다음 부팅의 PCR 7 을 예측해 정책을 갱신한다. 성공하면 True. 결과에 PCR 7 이 없으면 False(보호가 조용히 빠진 것).
     force: 예측이 현재 정책과 같아도 다시 쓴다. make-policy 는 같으면 「skipping update」 하고 ESP 의 credential 도 안 쓰므로,
     ESP 를 비웠거나 credential 이 없어졌을 때는 이것이 있어야 복구된다(VM 시험 E1·E2)."""
     pl = _find_pcrlock()
     out = ""
+    _d0 = _secureboot_policy_dir()
+    prev_generated = _read_bytes(os.path.join(_d0, "generated.pcrlock")) if _d0 else None
     for sub in ("lock-secureboot-policy", "lock-secureboot-authority", "make-policy"):
         try:
             r = subprocess.run([pl, sub] + (["--force"] if force and sub == "make-policy" else []), capture_output=True, text=True)
@@ -404,15 +463,20 @@ def _pcrlock_refresh(force=False):
         if r.returncode != 0:
             print(f"systemd-pcrlock {sub} 실패(rc={r.returncode}):\n{out.strip()}", file=sys.stderr)
             return False
+        if sub == "lock-secureboot-policy":
+            _keep_previous_state_variant(prev_generated)
     try:
         os.sync()  # ESP(vfat) 의 credential 이 디스크에 내려가야 한다(VM 시험에서 빠뜨리면 정책이 사라졌다)
     except OSError:
         pass
     if not re.search(r"PCRs in protection mask:.*\b7 \(", out):
         print("정책에서 PCR 7(Secure Boot 정책)이 빠졌습니다 — 이 상태로는 Secure Boot 변경을 TPM 이 감지하지 못합니다.\n"
-              "initrd 에 systemd-pcrphase-initrd·systemd-pcrosseparator 유닛이 켜져 있는지 확인하세요(plan/boot-security 6-S6a ②).", file=sys.stderr)
+              "원인 ① initrd 에 systemd-pcrphase-initrd·systemd-pcrosseparator 유닛이 꺼져 있다(`mods.sys.services.luks.tpm2 = true` 인지 확인, plan/boot-security 6-S6a ②).\n"
+              "원인 ② Secure Boot 변수를 바꾼 뒤 바꾸기 전 상태가 기록돼 있지 않아 이번 부팅의 로그와 맞는 상태가 없다(정책을 한 번도 만들지 않은 채 바꿨다) — "
+              "이미 바꿨다면 재부팅(복구 암호로 열림)한 뒤 `nixseal tpm refresh-policy` 를 다시 하세요.", file=sys.stderr)
         print(out.strip(), file=sys.stderr)
         return False
+    _record_fingerprint()   # 정책을 만든 시점의 Secure Boot 지문 — doctor 가 「갱신 없이 상태가 바뀜」을 알아본다
     return True
 
 
@@ -1292,9 +1356,301 @@ SB = {"status": cmd_sb_status, "verify": cmd_sb_verify, "backup-esp": cmd_sb_bac
 LUKS = {"slots": cmd_luks_slots, "backup": cmd_luks_backup, "verify": cmd_luks_verify, "restore": cmd_luks_restore, "reseal": cmd_luks_reseal}
 
 
+# ───────────────────────── 봉인된 로그인 비밀번호 (pw) ─────────────────────────
+# 계획: ctx plan/boot-doctor-keyring §11-B. 계정 비밀번호 P 를 TPM 에 봉인한다(인증값 = SHA-256(부팅 PIN)). 부팅 직후 root 서비스(core/lib/tpm-login.nix)가
+# 캐시된 부팅 PIN 으로 P 를 풀어 PAM 에 준다 — 부팅 PIN 자체는 로그인 비밀번호로 쓰이지 않는다. 비밀(PIN·P)은 명령줄·환경변수에 넣지 않고 stdin·0600 임시 파일로만 다룬다.
+
+PWSEAL_DIR = os.environ.get("NIXSEAL_PWSEAL_DIR", "/var/lib/nixseal/pwseal")
+TPMRM = os.environ.get("NIXSEAL_TPMRM", "/dev/tpmrm0")
+SRK_ATTRS = "restricted|decrypt|fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda"   # 서비스(core/lib/tpm-login.nix)와 같은 부모 키 템플릿 — 같은 템플릿이면 결정적(VM 실험)
+SEAL_ACK = "교체"
+REMOVE_ACK = "삭제"
+
+
+def _tpm(name, args, input_bytes=None):
+    """tpm2-tools 실행(시험에서 바꿔 끼울 수 있는 한 지점). 못 찾으면 종료 코드 127 의 결과를 돌려준다."""
+    exe = os.environ.get("NIXSEAL_" + name.upper(), name)
+    env = dict(os.environ)
+    env.setdefault("TPM2TOOLS_TCTI", "device:/dev/tpmrm0")
+    try:
+        return subprocess.run([exe] + list(args), input=input_bytes, capture_output=True, env=env)
+    except OSError as e:
+        return subprocess.CompletedProcess([exe] + list(args), 127, b"", str(e).encode())
+
+
+def _pw_auth(pin):
+    """TPM 인증값 = SHA-256(PIN): 길이·문자 제한을 없앤다(인증값은 해시 길이 32바이트가 상한 — VM 실험)."""
+    return hashlib.sha256(pin.encode()).digest()
+
+
+def _chkpwd(user, pw):
+    """P 가 지금 그 계정의 비밀번호인지(unix_chkpwd). 확인 수단이 없으면 None."""
+    exe = os.environ.get("NIXSEAL_UNIX_CHKPWD") or ("/run/wrappers/bin/unix_chkpwd" if os.path.exists("/run/wrappers/bin/unix_chkpwd") else shutil.which("unix_chkpwd"))
+    if not exe:
+        return None
+    try:
+        return subprocess.run([exe, user, "nullok"], input=pw.encode() + b"\0", capture_output=True).returncode == 0
+    except OSError:
+        return None
+
+
+def _pw_paths(user):
+    return os.path.join(PWSEAL_DIR, user + ".pub"), os.path.join(PWSEAL_DIR, user + ".priv"), os.path.join(PWSEAL_DIR, user + ".failed")
+
+
+def _pw_user(args):
+    """봉인 대상 계정: --user > nix 선언(NIXSEAL_DECL_TPMLOGIN) > sudo 를 부른 사용자."""
+    user = None
+    if "--user" in args:
+        i = args.index("--user")
+        user = args[i + 1] if i + 1 < len(args) else None
+    user = user or os.environ.get("NIXSEAL_DECL_TPMLOGIN") or os.environ.get("SUDO_USER")
+    if not user or user == "root":
+        _die("봉인할 계정을 정할 수 없다 — --user <계정> 을 주세요", 2)
+    try:
+        pwd.getpwnam(user)
+    except KeyError:
+        _die(f"계정 {user} 이(가) 없다", 2)
+    return user
+
+
+def _pw_unseal(work, pub, priv, pin):
+    """블롭을 로드하고 PIN 으로 푼다 → (rc, 비밀 또는 None, 오류 문자열). 서비스와 같은 순서(부모 키 → 로드 → 암호화 세션 → 해제)."""
+    prim = os.path.join(work, "prim.ctx")
+    r = _tpm("tpm2_createprimary", ["-C", "o", "-c", prim, "-G", "ecc256:aes128cfb", "-a", SRK_ATTRS])
+    if r.returncode:
+        return r.returncode, None, "TPM 의 부모 키를 만들지 못했다: " + r.stderr.decode(errors="replace").strip()[-200:]
+    seal = os.path.join(work, "seal.ctx")
+    r = _tpm("tpm2_load", ["-C", prim, "-u", pub, "-r", priv, "-c", seal])
+    if r.returncode:
+        return r.returncode, None, "봉인 블롭을 TPM 에 올리지 못했다(TPM 초기화나 블롭 손상): " + r.stderr.decode(errors="replace").strip()[-200:]
+    sess = os.path.join(work, "sess.ctx")
+    r = _tpm("tpm2_startauthsession", ["--hmac-session", "-S", sess])
+    if r.returncode:
+        return r.returncode, None, "TPM 암호화 세션을 만들지 못했다"
+    out = os.path.join(work, "p.out")
+    r = _tpm("tpm2_unseal", ["-c", seal, "-p", f"session:{sess}+file:-", "-o", out], input_bytes=_pw_auth(pin))
+    _tpm("tpm2_flushcontext", [sess])
+    if r.returncode:
+        return r.returncode, None, r.stderr.decode(errors="replace")
+    try:
+        with open(out, "rb") as f:
+            return 0, f.read().decode(), ""
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(out)
+
+
+def _pw_classify(err):
+    if "authorization HMAC check failed" in err:
+        return "bad-pin"
+    if "DA lockout" in err:
+        return "lockout"
+    return "other"
+
+
+def _pw_workdir():
+    d = tempfile.mkdtemp(prefix="nixseal-pw.", dir="/run" if os.path.isdir("/run") and os.access("/run", os.W_OK) else None)
+    os.chmod(d, 0o700)
+    return d
+
+
+def _pw_read_secrets(args, what_pin, what_pw, confirm_pw):
+    """--stdin 이면 stdin 에서 PIN·P(각 한 줄), 아니면 숨겨 입력받는다."""
+    if "--stdin" in args:
+        lines = sys.stdin.read().split("\n")
+        pin = lines[0] if lines else ""
+        pw = lines[1] if len(lines) > 1 else ""
+        return pin, pw
+    pin = _ask_secret(what_pin)
+    pw = _ask_secret(what_pw)
+    if confirm_pw and _ask_secret("같은 계정 비밀번호를 한 번 더: ") != pw:
+        _die("두 번 입력한 계정 비밀번호가 다르다 — 아무 것도 바꾸지 않았다")
+    return pin, pw
+
+
+def cmd_pw_seal(args):
+    _need_root(["pw", "seal"] + args)
+    user = _pw_user(args)
+    if not os.path.exists(TPMRM):
+        _die(f"TPM 장치({TPMRM})가 없다 — TPM2 가 켜진 기기에서만 쓸 수 있다")
+    pub, priv, failed = _pw_paths(user)
+    existing = os.path.exists(pub) or os.path.exists(priv)
+    print(f"계정 {user} 의 비밀번호를 TPM 에 봉인합니다(부팅 PIN 으로 풀림).")
+    print("   [왜] 부팅 때 입력하는 TPM PIN 을 로그인 비밀번호로 재사용하면 PIN 이 곧 계정 비밀번호가 되어 서로의 보호가 합쳐집니다.")
+    print("   그래서 PIN 은 이 봉인을 푸는 열쇠로만 쓰고, 로그인에는 따로 정한 강한 계정 비밀번호가 쓰입니다. 계정 비밀번호는 지금 그대로이며 여전히 직접 입력해 로그인할 수 있습니다.")
+    if existing and "--stdin" not in args:
+        print("   이미 봉인이 있습니다 — 이 작업은 그것을 새 값으로 교체합니다.")
+        if _ask(f"교체하려면 '{SEAL_ACK}' 를 그대로 입력하세요: ") != SEAL_ACK:
+            print("취소 — 아무 것도 바꾸지 않았습니다.", file=sys.stderr)
+            sys.exit(1)
+    if "--stdin" not in args:
+        print("   [왜] PIN 은 `nixseal tpm enroll` 때 정한 TPM PIN 과 **같아야** 합니다. 다르면 다음 부팅에서 해제가 실패하고 TPM 의 오입력 카운터(LUKS 의 TPM 해제와 공유)가 1 오릅니다.")
+    pin, pw = _pw_read_secrets(args, "TPM PIN(부팅 때 입력하는 PIN): ", f"계정 {user} 의 비밀번호: ", True)
+    if not pin or not pw:
+        _die("PIN 과 계정 비밀번호는 비어 있을 수 없다 — 아무 것도 바꾸지 않았다")
+    ok = _chkpwd(user, pw)
+    if ok is None:
+        _die("계정 비밀번호가 맞는지 확인할 수단(unix_chkpwd)이 없어 봉인하지 않았다")
+    if not ok:
+        _die(f"입력한 비밀번호가 계정 {user} 의 현재 비밀번호와 다르다 — 아무 것도 바꾸지 않았다(틀린 값을 봉인하면 부팅마다 로그인이 한 번 실패한다)")
+    work = _pw_workdir()
+    try:
+        prim = os.path.join(work, "prim.ctx")
+        r = _tpm("tpm2_createprimary", ["-C", "o", "-c", prim, "-G", "ecc256:aes128cfb", "-a", SRK_ATTRS])
+        if r.returncode:
+            _die("TPM 의 부모 키를 만들지 못했다: " + r.stderr.decode(errors="replace").strip()[-200:])
+        pin_file = os.path.join(work, "p.in")
+        fd = os.open(pin_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(pw.encode())
+        npub, npriv = os.path.join(work, "s.pub"), os.path.join(work, "s.priv")
+        # 속성은 기본값(= 오입력 잠금 DA 켜짐)을 그대로 쓴다: -a 를 주면 기본이 통째로 대체된다(VM 실험)
+        r = _tpm("tpm2_create", ["-C", prim, "-i", pin_file, "-p", "file:-", "-u", npub, "-r", npriv], input_bytes=_pw_auth(pin))
+        with contextlib.suppress(OSError):
+            os.remove(pin_file)
+        if r.returncode:
+            _die("TPM 에 봉인하지 못했다: " + r.stderr.decode(errors="replace").strip()[-200:])
+        # 방금 만든 블롭이 이 PIN 으로 풀리는지 확인한다(성공은 오입력 카운터를 올리지 않는다)
+        rc, got, err = _pw_unseal(work, npub, npriv, pin)
+        if rc or got != pw:
+            _die("봉인한 직후 풀어 보니 맞지 않는다 — 저장하지 않았다: " + (err.strip()[-200:] or "값 불일치"))
+        os.makedirs(PWSEAL_DIR, mode=0o700, exist_ok=True)
+        os.chmod(PWSEAL_DIR, 0o700)
+        for src, dst in ((npub, pub), (npriv, priv)):
+            tmp = dst + ".new"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as f, open(src, "rb") as g:
+                f.write(g.read())
+            os.replace(tmp, dst)
+        with contextlib.suppress(OSError):
+            os.remove(failed)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    print(f"봉인했습니다({pub}). 다음 부팅(TPM PIN 입력) 직후 로그인 화면에서 비밀번호를 묻지 않고 로그인되고 키링이 열립니다.")
+    print("※ 키링의 비밀번호도 이 계정 비밀번호와 같아야 키링이 열립니다. TPM PIN 이나 계정 비밀번호를 바꾸면 이 명령을 다시 하세요.")
+
+
+def cmd_pw_status(args):
+    _need_root(["pw", "status"] + args)
+    user = _pw_user(args)
+    pub, priv, failed = _pw_paths(user)
+    print(f"== 봉인된 로그인 비밀번호({user}) ==")
+    print("블롭: " + ("있음" if os.path.exists(pub) and os.path.exists(priv) else "없음 — nixseal pw seal"))
+    try:
+        with open(failed) as f:
+            mark = f.read().strip()
+        print(f"실패 표지: {mark}")
+        kind = mark.split()[0] if mark else ""
+        if kind == "bad-pin":
+            print("  지난 부팅에서 PIN 이 봉인할 때의 PIN 과 달라 풀지 못했습니다(TPM 오입력 카운터 +1). 같은 오입력을 반복하지 않으려고 이후 부팅은 시도하지 않습니다 → 현재 TPM PIN 으로 nixseal pw seal")
+        elif kind == "stale":
+            print("  봉인된 비밀번호가 지금의 계정 비밀번호와 다릅니다(비밀번호를 바꾼 뒤 갱신하지 않음) → nixseal pw seal")
+    except OSError:
+        print("실패 표지: 없음")
+
+
+def cmd_pw_test(args):
+    _need_root(["pw", "test"] + args)
+    user = _pw_user(args)
+    pub, priv, failed = _pw_paths(user)
+    if not (os.path.exists(pub) and os.path.exists(priv)):
+        _die("봉인이 없다 — nixseal pw seal")
+    print("지금 TPM PIN 으로 봉인을 풀어 보고 계정 비밀번호와 맞는지 확인합니다(비밀번호는 출력하지 않습니다).")
+    print("   [왜] 부팅 때까지 기다리지 않고 PIN·비밀번호가 맞는지 미리 확인하기 위해서입니다. 단 PIN 을 틀리게 입력하면 TPM 의 오입력 카운터가 1 오르며 LUKS 의 TPM 해제와 공유됩니다.")
+    pin = _ask_secret("TPM PIN: ")
+    work = _pw_workdir()
+    try:
+        rc, got, err = _pw_unseal(work, pub, priv, pin)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    if rc:
+        kind = _pw_classify(err)
+        if kind == "bad-pin":
+            _die("PIN 이 봉인할 때의 PIN 과 다르다(TPM 오입력 카운터가 1 올랐다). 현재 TPM PIN 으로 nixseal pw seal 을 다시 하세요")
+        if kind == "lockout":
+            _die("TPM 이 오입력 잠금 상태다 — 잠시 뒤 다시 하거나 `sudo tpm2_dictionarylockout --clear-lockout`(TPM 소유자 확인 후)")
+        _die("풀지 못했다: " + err.strip()[-200:])
+    ok = _chkpwd(user, got)
+    if ok is None:
+        _die("풀었지만 계정 비밀번호와 맞는지 확인할 수단(unix_chkpwd)이 없다")
+    if not ok:
+        _die(f"풀렸지만 지금의 계정 {user} 비밀번호와 다르다(비밀번호를 바꾼 뒤 봉인을 갱신하지 않음) — nixseal pw seal")
+    print("정상: PIN 으로 풀리고 계정 비밀번호와 일치합니다.")
+
+
+def cmd_pw_remove(args):
+    _need_root(["pw", "remove"] + args)
+    user = _pw_user(args)
+    pub, priv, failed = _pw_paths(user)
+    found = [p for p in (pub, priv, failed) if os.path.exists(p)]
+    if not found:
+        print("봉인이 없다 — 지울 것이 없습니다.")
+        return
+    print(f"계정 {user} 의 봉인(블롭·표지)을 지웁니다: " + ", ".join(found))
+    print("   [왜] 지워도 계정 비밀번호는 그대로이며 직접 입력해 로그인할 수 있습니다. 다만 부팅 직후 자동 로그인은 다시 봉인하기 전까지 되지 않습니다.")
+    if "--yes" not in args and _ask(f"지우려면 '{REMOVE_ACK}' 를 그대로 입력하세요: ") != REMOVE_ACK:
+        print("취소 — 아무 것도 바꾸지 않았습니다.", file=sys.stderr)
+        sys.exit(1)
+    for p in found:
+        with contextlib.suppress(OSError):
+            os.remove(p)
+    print("지웠습니다.")
+
+
+PW = {"seal": cmd_pw_seal, "status": cmd_pw_status, "test": cmd_pw_test, "remove": cmd_pw_remove}
+
+
 # ───────────────────────── 선언 ↔ 실제 점검 (doctor) ─────────────────────────
 # 계획: ctx plan/boot-doctor-keyring. nix 의 선언(luks·tpm2·fido2·secure-boot)과 실제 상태가 어긋나면 알린다. 읽기 전용 — 아무 것도 바꾸지 않는다.
 # 판정(_judge)은 외부 명령 없이 돌아가는 순수 함수이고, 사실 수집(_gather_facts)만 명령·파일을 읽는다.
+# 모든 FAIL·WARN·INFO 는 「원인 · → 할 일(명령) · → nix(수정 위치)」 형식이다(시험이 형식을 강제한다).
+
+FP_FILE = os.environ.get("NIXSEAL_FP_FILE", "/var/lib/nixseal/sb-fingerprint")
+ESP_MNT = os.environ.get("NIXSEAL_ESP_MNT", "/boot")
+
+
+def _sb_fingerprint():
+    """Secure Boot 변수(PK·KEK·db·dbx·SecureBoot·SetupMode)의 SHA-256 지문. 정책을 만든 시점과 지금이 같은지 비교하는 데 쓴다.
+    (systemd-pcrlock predict 는 읽기 전용 비교에 쓸 수 없다 — plan/boot-doctor-keyring §11-A.) 읽지 못하면 None."""
+    import hashlib
+    h = hashlib.sha256()
+    seen = False
+    for name, guid in (("PK", G_GLOBAL), ("KEK", G_GLOBAL), ("db", G_DB), ("dbx", G_DB), ("SecureBoot", G_GLOBAL), ("SetupMode", G_GLOBAL)):
+        try:
+            with open(var_path(name, guid), "rb") as f:
+                body = f.read()[4:]
+            seen = True
+        except FileNotFoundError:
+            body = b"<absent>"
+        except OSError:
+            return None
+        h.update(name.encode() + b"\0" + hashlib.sha256(body).digest())
+    return h.hexdigest() if seen else None
+
+
+def _record_fingerprint():
+    """정책을 (다시) 만든 직후 그 시점의 Secure Boot 지문을 남긴다 — doctor 가 「정책 갱신 없이 상태가 바뀜」을 알아보게."""
+    fp = _sb_fingerprint()
+    if fp is None:
+        return
+    try:
+        os.makedirs(os.path.dirname(FP_FILE), exist_ok=True)
+        with open(FP_FILE, "w") as f:
+            f.write(fp + "\n")
+    except OSError as e:
+        print(f"경고: Secure Boot 지문을 기록하지 못했다({e}) — doctor 가 정책 갱신 누락을 알리지 못합니다.", file=sys.stderr)
+
+
+def _h(cause, do=None, nix=None):
+    """doctor 메시지 형식: 원인 + 할 일(명령) + nix 수정 위치."""
+    s = cause
+    if do:
+        s += "\n    → 할 일: " + do
+    if nix:
+        s += "\n    → nix: " + nix
+    return s
+
 
 def _decl():
     """래퍼가 환경변수로 준 선언. 값이 없으면 None(= 모름 → 그 칸은 건너뜀). luks 는 "" = 「luks 없음」 선언, "<이름>" = 선언."""
@@ -1305,7 +1661,8 @@ def _decl():
         return None if v is None else v == "1"
 
     return {"sb": flag("NIXSEAL_DECL_SB"), "tpm2": flag("NIXSEAL_DECL_TPM2"), "fido2": flag("NIXSEAL_DECL_FIDO2"),
-            "luks": e.get("NIXSEAL_DECL_LUKS"), "luks_dev": e.get("NIXSEAL_DECL_LUKS_DEV") or None}
+            "luks": e.get("NIXSEAL_DECL_LUKS"), "luks_dev": e.get("NIXSEAL_DECL_LUKS_DEV") or None,
+            "tplogin": e.get("NIXSEAL_DECL_TPMLOGIN")}   # 봉인 로그인 계정("" = 선언 없음, 없으면 모름)
 
 
 def _dm_is_crypt(src):
@@ -1322,7 +1679,8 @@ def _dm_is_crypt(src):
 
 def _gather_facts(decl):
     """실제 상태를 읽는다. 읽지 못한 항목은 None(= 확인하지 못함 — 「정상」으로 취급하지 않는다)."""
-    f = {"root_src": None, "root_crypt": None, "sb_on": None, "setup_mode": None, "tokens": None, "policy_pcrs": None, "creds": None, "luks_dev": None}
+    f = {"root_src": None, "root_crypt": None, "sb_on": None, "setup_mode": None, "tokens": None, "policy_pcrs": None, "creds": None,
+         "luks_dev": None, "policy_exists": False, "fp_now": None, "fp_saved": None, "is_root": os.geteuid() == 0}
     r = _x("findmnt", ["-no", "SOURCE", "--nofsroot", "/"])
     if r.returncode == 0 and r.stdout.strip():
         f["root_src"] = r.stdout.strip().splitlines()[0].strip()
@@ -1338,76 +1696,157 @@ def _gather_facts(decl):
                 f["tokens"] = {k for _, k in parse_slots(d.stdout.decode(errors="replace"))["tokens"]}
         except OSError:
             pass
+    f["policy_exists"] = os.path.exists(PCRLOCK_JSON)
     f["policy_pcrs"] = _pcrlock_pcrs()
-    f["creds"] = len(_esp_credentials())
+    # ESP 가 마운트돼 있지 않으면 credential 이 「없다」가 아니라 「확인하지 못했다」
+    f["creds"] = len(_esp_credentials()) if (os.path.ismount(ESP_MNT) or os.path.isdir(ESP_CRED_DIR)) else None
+    tl = decl.get("tplogin")
+    if tl is not None:
+        users = [tl] if tl else sorted({os.path.basename(p)[:-4] for p in glob.glob(os.path.join(PWSEAL_DIR, "*.pub"))})
+        f["pw"] = {}
+        for u in users:
+            pub, priv, failed = _pw_paths(u)
+            mark = None
+            try:
+                with open(failed) as fh:
+                    words = fh.read().split()
+                mark = words[0] if words else "unknown"
+            except OSError:
+                pass
+            f["pw"][u] = {"blob": os.path.exists(pub) and os.path.exists(priv), "mark": mark}
+    f["fp_now"] = _sb_fingerprint()
+    try:
+        with open(FP_FILE) as fh:
+            f["fp_saved"] = fh.read().strip() or None
+    except OSError:
+        pass
     return f
 
 
 def _judge(decl, f):
-    """(심각도, 한 줄) 목록. 심각도: FAIL(다음 부팅이 깨지거나 보호가 조용히 빠짐) · WARN · INFO · OK. 선언이 None 인 칸은 판정하지 않는다."""
+    """(심각도, 메시지) 목록. 심각도: FAIL(다음 부팅이 깨지거나 보호가 조용히 빠짐) · WARN · INFO · OK. 선언이 None 인 칸은 판정하지 않는다."""
     out = []
     add = lambda sev, msg: out.append((sev, msg))
+    root_hint = None if f.get("is_root", True) else "루트가 아니라 읽지 못했을 수 있다 — `sudo nixseal doctor`"
     # ── LUKS 루트 ──
     luks = decl.get("luks")
     if luks is not None:
         if f["root_src"] is None or f["root_crypt"] is None:
-            add("INFO", "루트 장치가 암호화(dm-crypt)인지 확인하지 못했다(findmnt/sysfs 읽기 실패) — 암호화 여부를 비교하지 못함")
+            add("INFO", _h("루트 장치가 암호화(dm-crypt)인지 확인하지 못했다(findmnt/sysfs 읽기 실패) — 암호화 여부를 비교하지 못함", do="`findmnt /` 와 `lsblk -f` 로 직접 확인"))
         elif luks:
             if f["root_crypt"]:
                 add("OK", f"루트가 암호화 장치({f['root_src']}) 위에 있다(선언 luks={luks})")
             else:
-                add("FAIL", f"luks 를 선언했는데({luks}) 지금 루트({f['root_src']})는 암호화 장치가 아니다 — 재부팅하면 initrd 가 LUKS 장치를 열려다 실패해 부팅이 안 된다. "
-                            "디스크가 실제로 LUKS 인지 확인하고, 아니라면 선언을 되돌려라(암호화 안 된 디스크에 luks 를 켜려면 재설치가 필요하다)")
+                add("FAIL", _h(f"luks 를 선언했는데({luks}) 지금 루트({f['root_src']})는 암호화 장치가 아니다 — 재부팅하면 initrd 가 LUKS 장치를 열려다 실패해 부팅이 안 된다",
+                               do="재부팅하지 말고 `lsblk -f` 로 루트가 LUKS 위인지 확인. 암호화 안 된 디스크라면 선언을 되돌리고 `nixup os`(암호화 디스크로 바꾸려면 재설치 — plan/boot-security S4)",
+                               nix="hosts/<호스트>.toml 의 `luks = true` → `false`"))
         else:
             if f["root_crypt"]:
-                add("FAIL", f"luks 를 선언하지 않았는데 지금 루트({f['root_src']})가 암호화 장치다 — initrd 에 crypttab 이 없어 재부팅하면 루트를 열지 못한다. luks 선언을 켜라")
+                add("FAIL", _h(f"luks 를 선언하지 않았는데 지금 루트({f['root_src']})가 암호화 장치다 — initrd 에 crypttab 이 없어 재부팅하면 루트를 열지 못한다",
+                               do="재부팅하지 말고 선언을 켜고 `nixup os`",
+                               nix="hosts/<호스트>.toml 의 `luks = true` (+ `mods.sys.services.luks.device` 가 실제 LUKS 파티션 경로인지)"))
             else:
                 add("OK", "luks 선언 없음, 루트도 암호화되지 않음")
     # ── 슬롯(TPM2·FIDO2) ──
     tk = f["tokens"]
     if (decl.get("tpm2") is not None or decl.get("fido2") is not None) and luks != "":
         if tk is None:
-            add("INFO", f"LUKS 헤더를 읽지 못해({f['luks_dev'] or '장치 없음'}) TPM2·FIDO2 슬롯이 있는지 확인하지 못했다")
+            if not f["luks_dev"]:
+                add("INFO", _h("LUKS 장치를 찾지 못했거나 둘 이상이라 하나로 정할 수 없어 TPM2·FIDO2 슬롯이 있는지 확인하지 못했다",
+                               do="`lsblk -f` 로 LUKS 파티션을 확인", nix="`mods.sys.services.luks.device`(hosts/<호스트>.nix)가 실제 LUKS 파티션 경로인지"))
+            else:
+                add("INFO", _h(f"LUKS 헤더를 읽지 못해({f['luks_dev']}) TPM2·FIDO2 슬롯이 있는지 확인하지 못했다", do=root_hint or "`sudo cryptsetup luksDump " + f["luks_dev"] + "` 로 직접 확인"))
         else:
             has_tpm, has_fido = "systemd-tpm2" in tk, "systemd-fido2" in tk
+            dev = f["luks_dev"] or "<장치>"
             if decl.get("tpm2") is True and not has_tpm:
-                add("INFO", "tpm2 를 선언했지만 TPM2 슬롯이 아직 없다 — 지금은 복구 암호(또는 FIDO2)로 풀린다. 복구 암호로 연 상태에서 `nixseal tpm enroll` (SECURE-BOOT.md §2-13)")
+                add("INFO", _h("tpm2 를 선언했지만 TPM2 슬롯이 아직 없다 — 지금은 복구 암호(또는 FIDO2)로 풀린다",
+                               do="복구 암호로 연 상태에서 `sudo nixseal tpm enroll`(SECURE-BOOT.md §2-13)"))
             elif decl.get("tpm2") is False and has_tpm:
-                add("WARN", "TPM2 슬롯이 있는데 tpm2 를 선언하지 않았다 — initrd 가 TPM 을 시도하지 않아 슬롯이 쓰이지 않는다(암호로만 풀림). 쓸 거면 tpm2 선언을 켜고, 안 쓸 거면 슬롯을 지워라")
+                add("WARN", _h("TPM2 슬롯이 있는데 tpm2 를 선언하지 않았다 — initrd 가 TPM 을 시도하지 않아 슬롯이 쓰이지 않는다(암호로만 풀림)",
+                               do=f"쓸 거면 선언을 켜고 `nixup os` 후 재부팅, 안 쓸 거면 `sudo systemd-cryptenroll --wipe-slot=tpm2 {dev}`",
+                               nix="hosts/<호스트>.nix 에 `mods.sys.services.luks.tpm2 = true`"))
             elif decl.get("tpm2") is True and has_tpm:
-                pcrs = f["policy_pcrs"]
+                pcrs, creds = f["policy_pcrs"], f["creds"]
                 if pcrs is None:
-                    add("FAIL", "TPM2 슬롯이 있는데 pcrlock 정책 파일을 읽지 못했다(/var/lib/systemd/pcrlock.json) — TPM 이 거부해 복구 암호로만 열린다. 재부팅 전에 `nixseal tpm refresh-policy`")
+                    add("FAIL", _h("TPM2 슬롯이 있는데 pcrlock 정책 파일을 읽지 못했다(/var/lib/systemd/pcrlock.json) — TPM 이 거부해 복구 암호로만 열린다",
+                                   do="재부팅 전이면 `sudo nixseal tpm refresh-policy`. 이미 재부팅해 복구 암호로 열었다면 `sudo nixseal tpm enroll --replace`"))
                 elif 7 not in pcrs:
-                    add("FAIL", f"TPM 정책이 PCR 7(Secure Boot 정책)을 보호하지 않는다(보호 PCR {pcrs}) — Secure Boot 변경을 TPM 이 감지하지 못한다(조용히 약해진 상태). "
-                                "initrd 에 systemd-pcrphase-initrd·systemd-pcrosseparator 가 켜졌는지 확인하고 재등록: `nixseal tpm status`")
-                elif not f["creds"]:
-                    add("FAIL", "ESP 에 pcrlock 정책 credential(loader/credentials/pcrlock.*.cred)이 없다 — 다음 부팅에서 TPM 이 「policy not found」로 거부한다. `nixseal tpm refresh-policy`")
+                    add("FAIL", _h(f"TPM 정책이 PCR 7(Secure Boot 정책)을 보호하지 않는다(보호 PCR {pcrs}) — Secure Boot 변경을 TPM 이 감지하지 못한다(조용히 약해진 상태)",
+                                   do="`mods.sys.services.luks.tpm2 = true` 인지 확인(initrd 측정 유닛이 따라 켜짐) → `nixup os` → 재부팅 → `sudo systemd-pcrlock remove-policy` → `sudo nixseal tpm enroll --replace`",
+                                   nix="core/lib/luks-tpm2.nix 의 systemd-pcrphase-initrd·systemd-pcrosseparator(tpm2 선언이 켬)"))
+                elif creds is None:
+                    add("INFO", _h(f"ESP({ESP_MNT})가 마운트되어 있지 않아 정책 credential 이 있는지 확인하지 못했다", do=f"`sudo mount {ESP_MNT}` 후 다시 실행"))
+                elif not creds:
+                    add("FAIL", _h("ESP 에 pcrlock 정책 credential(loader/credentials/pcrlock.*.cred)이 없다 — 다음 부팅에서 TPM 이 「policy not found」로 거부한다",
+                                   do="`sudo nixseal tpm refresh-policy`(credential 이 없으면 자동으로 --force)"))
                 else:
-                    add("OK", f"TPM2 슬롯 있음 · 정책이 PCR 7 을 보호(보호 PCR {pcrs}) · ESP 에 credential {f['creds']}개")
+                    add("OK", f"TPM2 슬롯 있음 · 정책이 PCR 7 을 보호(보호 PCR {pcrs}) · ESP 에 credential {creds}개")
+                    if f.get("fp_now") is None:
+                        add("INFO", _h("펌웨어 Secure Boot 변수를 읽지 못해 정책이 현재 상태와 맞는지 확인하지 못했다", do="UEFI 로 부팅했는지, `findmnt /sys/firmware/efi/efivars` 로 efivarfs 가 마운트돼 있는지 확인"))
+                    elif f.get("fp_saved") is None:
+                        add("INFO", _h("정책을 만든 시점의 Secure Boot 지문이 기록돼 있지 않아 정책 갱신 누락을 확인하지 못한다",
+                                       do="지금 상태가 내가 아는 정상이라면 `sudo nixseal tpm refresh-policy`(지문이 기록됨)"))
+                    elif f["fp_now"] != f["fp_saved"]:
+                        add("FAIL", _h("정책을 마지막으로 만든 뒤 Secure Boot 키·dbx 가 바뀌었다 — 이대로 재부팅하면 TPM 이 거부한다",
+                                       do="내가 직접 한 변경(dbx 갱신 등)이면 **재부팅 전에** `sudo nixseal tpm refresh-policy`. 기억에 없는 변경이면 복구 암호를 입력하지 말고 신뢰 USB 로 점검(SECURE-BOOT.md §2-10)"))
+                    else:
+                        add("OK", "정책을 만든 뒤 Secure Boot 키·dbx 가 바뀌지 않았다(지문 일치)")
             elif decl.get("tpm2") is False and not has_tpm:
                 add("OK", "TPM2 선언 없음, 슬롯도 없음")
+            if not has_tpm and f.get("policy_exists") and decl.get("tpm2") is not None:
+                add("WARN", _h("pcrlock 정책(NV 인덱스)은 남아 있는데 TPM2 슬롯이 없다 — 쓰이지 않는 정책이 TPM 자리를 차지한다",
+                               do="쓰지 않을 거면 `sudo systemd-pcrlock remove-policy`, 쓸 거면 `sudo nixseal tpm enroll`"))
             if decl.get("fido2") is True and not has_fido:
-                add("INFO", "fido2 를 선언했지만 FIDO2 슬롯이 없다 — 암호로 풀린다. `systemd-cryptenroll --fido2-device=auto` 로 등록")
+                add("INFO", _h("fido2 를 선언했지만 FIDO2 슬롯이 없다 — 암호로 풀린다", do=f"`sudo systemd-cryptenroll --fido2-device=auto {dev}`"))
             elif decl.get("fido2") is False and has_fido:
-                add("INFO", "FIDO2 슬롯이 있고 fido2 선언은 꺼져 있다 — initrd 는 쓰지 않고 ISO 등에서만 쓸 수 있다(의도라면 정상)")
+                add("INFO", _h("FIDO2 슬롯이 있고 fido2 선언은 꺼져 있다 — initrd 는 쓰지 않고 ISO 등에서만 쓸 수 있다(의도라면 정상)",
+                               do="initrd 에서도 쓰려면 선언을 켜고 `nixup os`", nix="`mods.sys.services.luks.fido2 = true`"))
             elif decl.get("fido2") is True and has_fido:
                 add("OK", "FIDO2 슬롯 있음(선언과 일치)")
     if decl.get("tpm2") and decl.get("fido2"):
-        add("WARN", "tpm2 와 fido2 를 함께 켰다 — TPM 이 정책 불일치로 거부한 부팅에서도 FIDO2(PIN+터치)로 풀린다(체인 검사 우회). FIDO2 를 ISO 에서만 쓸 거면 fido2 선언을 꺼라(SECURE-BOOT.md §2-10)")
+        add("WARN", _h("tpm2 와 fido2 를 함께 켰다 — TPM 이 정책 불일치로 거부한 부팅에서도 FIDO2(PIN+터치)로 풀린다(체인 검사 우회)",
+                       do="FIDO2 를 ISO 에서만 쓸 거면 선언을 끈다(슬롯은 헤더에 남아 ISO 에서 쓸 수 있다). 둘 다 쓸 거면 우회를 감수(SECURE-BOOT.md §2-10)",
+                       nix="hosts/<호스트>.nix 의 `mods.sys.services.luks.fido2 = false`"))
+    # ── 봉인된 로그인 비밀번호(tpm-login) ──
+    tl = decl.get("tplogin")
+    if tl is not None:
+        pw = f.get("pw", {})
+        if tl:
+            s = pw.get(tl, {"blob": False, "mark": None})
+            if not s["blob"]:
+                add("INFO", _h(f"tpm-login 을 선언했지만 계정 {tl} 의 봉인된 비밀번호가 없다 — 지금은 평소처럼 비밀번호를 묻는다", do=f"`sudo nixseal pw seal --user {tl}`(현재 TPM PIN 과 계정 비밀번호가 필요)"))
+            elif s["mark"] == "bad-pin":
+                add("WARN", _h(f"지난 부팅에서 계정 {tl} 의 봉인된 비밀번호를 풀지 못했다 — 부팅 PIN 이 봉인할 때의 PIN 과 달랐다(TPM 오입력 카운터가 1 올랐고, 같은 오입력을 반복하지 않으려고 이후 부팅은 시도하지 않는다)",
+                               do=f"현재 TPM PIN 으로 `sudo nixseal pw seal --user {tl}` 을 다시(PIN 을 바꿨다면 새 PIN 으로)"))
+            elif s["mark"] == "stale":
+                add("WARN", _h(f"계정 {tl} 의 봉인된 비밀번호가 지금의 계정 비밀번호와 다르다 — 계정 비밀번호를 바꾼 뒤 봉인을 갱신하지 않았다(자동 로그인이 되지 않는다)",
+                               do=f"`sudo nixseal pw seal --user {tl}`"))
+            elif s["mark"]:
+                add("WARN", _h(f"계정 {tl} 의 봉인 해제가 지난 부팅에서 실패했다(표지: {s['mark']})", do=f"`sudo nixseal pw status --user {tl}` 로 확인하고 `sudo nixseal pw seal --user {tl}`"))
+            else:
+                add("OK", f"계정 {tl} 의 봉인된 비밀번호가 있고 지난 부팅의 실패 표지가 없다")
+        else:
+            left = [u for u, s in pw.items() if s["blob"]]
+            if left:
+                add("INFO", _h("봉인된 비밀번호가 남아 있는데 tpm-login 이 꺼져 있다 — 쓰이지 않는 봉인이다(" + ", ".join(left) + ")",
+                               do="쓰지 않을 거면 `sudo nixseal pw remove --user <계정>`", nix="쓸 거면 `mods.sys.services.tpm-login.enable = true`(+ `user`)"))
     # ── Secure Boot ──
     if decl.get("sb") is not None:
         sb, sm = f["sb_on"], f["setup_mode"]
         if sb is None:
-            add("INFO", "펌웨어 Secure Boot 상태를 읽지 못했다(UEFI 가 아니거나 efivarfs 없음)")
+            add("INFO", _h("펌웨어 Secure Boot 상태를 읽지 못했다(UEFI 가 아니거나 efivarfs 없음)", do="UEFI 로 부팅했는지, `findmnt /sys/firmware/efi/efivars` 로 efivarfs 가 마운트돼 있는지 확인"))
         elif decl["sb"] and sb != 1:
-            add("WARN", "secure-boot 를 선언했는데 펌웨어의 Secure Boot 가 꺼져 있다 — 부팅 파일은 서명되지만 아무도 검사하지 않는다(보호 없음). BIOS 에서 켜라")
+            add("WARN", _h("secure-boot 를 선언했는데 펌웨어의 Secure Boot 가 꺼져 있다 — 부팅 파일은 서명되지만 아무도 검사하지 않는다(보호 없음)",
+                           do="BIOS(F2/Del) → Secure Boot = Enabled 로 켠 뒤 `sudo nixseal sb status` 로 확인"))
         elif decl["sb"] and sm == 1:
-            add("WARN", "secure-boot 를 선언했는데 펌웨어가 Setup Mode 다(키가 등록되지 않음) — 키를 등록해야 보호가 시작된다: `nixseal sb enroll`")
+            add("WARN", _h("secure-boot 를 선언했는데 펌웨어가 Setup Mode 다(키가 등록되지 않음) — 키를 등록해야 보호가 시작된다", do="`sudo nixseal sb enroll`"))
         elif decl["sb"]:
             add("OK", "펌웨어 Secure Boot 켜짐(User Mode) — 선언과 일치")
         elif sb == 1:
-            add("FAIL", "secure-boot 를 선언하지 않았는데 펌웨어의 Secure Boot 가 켜져 있다 — 서명되지 않은 부팅 파일(systemd-boot)은 다음 부팅에서 Access Denied 로 거부된다. secure-boot 선언을 켜라")
+            add("FAIL", _h("secure-boot 를 선언하지 않았는데 펌웨어의 Secure Boot 가 켜져 있다 — 서명되지 않은 부팅 파일(systemd-boot)은 다음 부팅에서 Access Denied 로 거부된다",
+                           do="재부팅하지 말고 선언을 켜고 `nixup os`(서명된 부팅 파일을 만든다). 급하면 BIOS 에서 Secure Boot 를 끄고 `sudo nixseal sb verify`",
+                           nix="hosts/<호스트>.toml 의 `secure-boot = true`"))
         else:
             add("OK", "secure-boot 선언 없음, 펌웨어도 꺼져 있음")
     return out
@@ -1441,7 +1880,7 @@ def main(argv):
         return 0
     if argv[0] == "doctor":
         return cmd_doctor(argv[1:])
-    group = {"sb": SB, "luks": LUKS, "tpm": TPM}.get(argv[0])
+    group = {"sb": SB, "luks": LUKS, "tpm": TPM, "pw": PW}.get(argv[0])
     if group is not None and (len(argv) < 2 or argv[1] in ("help", "-h", "--help")):
         print(__doc__)
         return 0
