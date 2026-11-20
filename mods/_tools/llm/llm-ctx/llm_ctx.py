@@ -192,6 +192,41 @@ def ingest_transcript(conn, path):
         return len(rows)
 
 
+def reparse_queued(conn, path, apply=False):
+    """이미 읽고 지나간 파일에서 「사람이 작업 도중 보낸 메시지」(`queued_command`, origin=human)만 다시 읽어 빠진 행을 채운다.
+    `ingest` 와 같은 advisory 락을 잡고, `ingest_state`(오프셋)는 건드리지 않으며, 기존 행은 `ON CONFLICT (uuid) DO NOTHING` 이라 안 바뀐다.
+    본 기록(서브에이전트 파일 아님)만 대상이다. 반환: 새로 들어갈(apply=True 면 들어간) 행 수, -1 = 다른 프로세스가 처리 중이라 건너뜀."""
+    prov = agents.provider_for_path(path)
+    if prov.subagent_id(path):
+        return 0
+    with conn.transaction():
+        cur = conn.cursor()
+        cur.execute("SELECT pg_try_advisory_xact_lock(%s)", (lock_key(path),))
+        if not cur.fetchone()[0]:
+            return -1
+        with open(path, "rb") as f:
+            lines = [l for l in f.read().decode("utf-8", "replace").splitlines() if "queued_command" in l]
+        rows = [r for r in (prov.parse_line(l, None) for l in lines) if r and r["sid"]]
+        if not rows:
+            return 0
+        have = {u for (u,) in cur.execute("SELECT uuid FROM messages WHERE uuid = ANY(%s)", ([r["uuid"] for r in rows],)).fetchall()}
+        rows = [r for r in rows if r["uuid"] not in have]
+        if not apply or not rows:
+            return len(rows)
+        for r in rows:
+            r["raw"] = Jsonb(r["raw"]); r["host"] = HOST
+        by_sid = {}
+        for r in rows:
+            s = by_sid.setdefault(r["sid"], dict(cwd=None, ver=None, first=r["ts"], last=r["ts"], branch=None))
+            s["cwd"] = r["cwd"] or s["cwd"]; s["ver"] = r["ver"] or s["ver"]; s["branch"] = r["branch"] or s["branch"]
+            if r["ts"]:
+                s["first"] = min(filter(None, [s["first"], r["ts"]])); s["last"] = max(filter(None, [s["last"], r["ts"]]))
+        for sid, s in by_sid.items():
+            upsert_session(cur, sid, s["cwd"], path, s["ver"], s["first"], s["last"], s["branch"])
+        cur.executemany(INSERT_MSG, rows)
+        return len(rows)
+
+
 def backfill_accounts(conn, path=None, apply=False):
     """OTel 원본(events.jsonl)의 요청별 계정(`user.account_uuid`·`user.email`)으로 `usage_events.account_id/email` 이 NULL 인 행을 채운다.
     apply=False 면 쓰지 않고 건수만 센다. 반환 dict(read=원본 api_request 수, with_account=계정이 있는 수, matched=DB 에 있고 NULL 이던 행 수, updated=갱신한 행 수, accounts={uuid: 건수}).
@@ -392,6 +427,21 @@ def cmd_hook(a):
 def cmd_ingest(a):
     conn = connect(timeout=10)
     files = agents.all_transcript_files(HOME)
+    if a.reparse_queued:      # 소급: 사람이 작업 도중 보낸 메시지(queued_command)만. 기본은 건수만 센다(--apply 로 넣는다)
+        tot = skipped = 0
+        for f in files:
+            try:
+                n = reparse_queued(conn, f, apply=a.apply)
+            except Exception as e:
+                print(f"! {f}: {type(e).__name__}: {e}", file=sys.stderr)
+                continue
+            if n < 0:
+                skipped += 1
+            tot += max(n, 0)
+        conn.commit()
+        print(f"queued_command(사람) 소급: 본 기록 {len(files)}개 중 {'추가 ' + str(tot) + '행' if a.apply else '추가될 행 ' + str(tot) + '개(--apply 로 넣는다)'}"
+              + (f" · 다른 프로세스가 처리 중이라 건너뜀 {skipped}개" if skipped else ""))
+        return 0
     if not a.all:
         cut = time.time() - a.days * 86400
         files = [f for f in files if os.path.getmtime(f) >= cut]
@@ -483,6 +533,12 @@ def cmd_search(a):
         common += " AND m.role = %s"; cargs.append(a.role)
     if a.days:
         common += " AND m.ts > now() - make_interval(days => %s)"; cargs.append(a.days)
+    for pat in (getattr(a, "not_", None) or []):     # --not: 본문이 이 정규식(대소문자 무시)에 맞으면 뺀다(반복 가능)
+        common += " AND m.text !~* %s"; cargs.append(pat)
+    by = getattr(a, "by", None)
+    if by and not getattr(a, "count", False):
+        sys.exit("--by 는 --count 와 함께 쓴다")
+    key = {"day": "to_char(m.ts AT TIME ZONE %s, 'YYYY-MM-DD')", "session": "left(m.session_id, 8)", "kind": "m.kind"}[by or "day"]
     sql = f"""SELECT m.ts, m.session_id, m.role, m.kind, s.host, s.repo_url, s.branch, m.text
              FROM messages m JOIN sessions s USING (session_id)
              WHERE {where}{common}"""
@@ -491,13 +547,29 @@ def cmd_search(a):
         import ctxdata as cd
         sql += " AND NOT (m.kind = 'prompt' AND coalesce(m.text, '') ~ %s)"; args.append(cd.AUTO_RE)
         sql += " AND NOT m.is_sidechain"      # 서브에이전트에게 준 브리프(role=user 로 저장됨)는 사람 말이 아니다
-    sql += " ORDER BY m.ts DESC LIMIT %s"; args.append(a.limit)
+    counting = bool(getattr(a, "count", False))
+    if counting:      # 본문 없이 건수만 — 위와 같은 필터가 고른 행 집합을 그대로 센다(--by day|session|kind, 기본 day; day 는 --tz 기준 날짜)
+        sql = sql.replace("SELECT m.ts, m.session_id, m.role, m.kind, s.host, s.repo_url, s.branch, m.text", f"SELECT {key} AS k, count(*)", 1)
+        if (by or "day") == "day":
+            args = [a.tz] + args
+        sql += " GROUP BY 1 ORDER BY 1 DESC"
+    else:
+        sql += " ORDER BY m.ts DESC LIMIT %s"; args.append(a.limit)
     with connect(readonly=True) as c:
         mk = _masker(a, c)
-        if mk.hits(q):
+        if mk.hits(q) or any(mk.hits(p) for p in (getattr(a, "not_", None) or [])):
             sys.exit("검색어에 등록된 비밀이 들어 있어 검색하지 않는다(존재 여부가 드러나므로)")
         n = 0
-        for ts, sid, role, kind, host, rurl, br, text in c.execute(sql, args):
+        if counting:
+            rows = c.execute(sql, args).fetchall()
+            for k, cnt in rows:
+                print(f"{k}\t{cnt}")
+                n += cnt
+            print(f"합계\t{n}")
+            rows = []
+        else:
+            rows = c.execute(sql, args)
+        for ts, sid, role, kind, host, rurl, br, text in rows:
             n += 1
             t = mk.text(text or "")                         # 치환을 먼저 하고 자른다(경계에서 잘린 비밀 조각이 남지 않게)
             i = t.lower().find(q.lower())
@@ -829,7 +901,34 @@ def cmd_usage(a):
     return 0
 
 
+SECRET_TABLES = ("secrets", "secret_ignores")   # cmd_sql 의 차단과 같은 취지: 등록표는 이름·열도 안내하지 않는다
+
+
+def cmd_sql_schema(a):
+    """`ctx sql --tables` / `--columns <표>` — public 스키마의 표·열 안내(읽기 전용). 비밀 등록표는 목록에서 뺀다."""
+    with connect(readonly=True) as c:
+        if a.tables:
+            for (t,) in c.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type IN ('BASE TABLE','VIEW') "
+                                  "AND NOT (table_name = ANY(%s)) ORDER BY 1", (list(SECRET_TABLES),)):
+                print(t)
+            return 0
+        t = a.columns.strip().lower().removeprefix("public.").strip('"')
+        if t in SECRET_TABLES:
+            _human_only("비밀 등록표(secrets) 열 조회")
+        rows = c.execute("SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name=%s "
+                         "ORDER BY ordinal_position", (t,)).fetchall()
+        if not rows:
+            sys.exit(f"표 {t!r} 이(가) 없다 — `ctx sql --tables` 로 목록을 본다")
+        for name, typ, nul in rows:
+            print(f"{name}\t{typ}\t{'NULL 가능' if nul == 'YES' else 'NOT NULL'}")
+    return 0
+
+
 def cmd_sql(a):
+    if a.tables or a.columns:
+        return cmd_sql_schema(a)
+    if not a.query:
+        sys.exit("SQL 을 주거나 --tables / --columns <표> 를 쓴다")
     if re.search(r"(?:\bfrom|\bjoin|\bupdate|\binto|\btable|,|\()\s*(?:public\s*\.\s*)?\"?secrets\"?\b|\bsecret_ignores\b", a.query, re.I):
         _human_only("비밀 등록표(secrets) 조회")   # 값이 치환되더라도 substring 등으로 조각이 새므로 막는다(`donghans secret list` 로 이름·길이를 본다)
     with connect(readonly=True) as c:
@@ -1311,8 +1410,10 @@ def main():
     ctx = top.add_parser("ctx", help="대화·사용량 공유 저장소").add_subparsers(dest="cmd", required=True)
     p = ctx.add_parser("hook"); p.add_argument("event"); p.set_defaults(f=cmd_hook)
     p = ctx.add_parser("backfill-accounts", help="OTel 원본(events.jsonl)으로 usage_events 의 계정 열을 채운다(기본 dry-run)"); p.add_argument("--apply", action="store_true"); p.add_argument("--file"); p.set_defaults(f=cmd_backfill_accounts)
-    p = ctx.add_parser("ingest"); p.add_argument("--days", type=int, default=2); p.add_argument("--all", action="store_true"); p.add_argument("--no-otel", action="store_true"); p.set_defaults(f=cmd_ingest)
-    p = ctx.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--session", help="세션 ID 앞자리로 한정"); p.add_argument("--kind", help="검색할 메시지 종류(쉼표 목록 또는 all). 기본 prompt,response — tool_use·tool_result(명령 호출·결과)·other 는 지정해야 검색된다"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.add_argument("--include-excluded", action="store_true"); p.set_defaults(f=cmd_search)
+    p = ctx.add_parser("ingest"); p.add_argument("--days", type=int, default=2); p.add_argument("--all", action="store_true"); p.add_argument("--no-otel", action="store_true"); p.add_argument("--reparse-queued", action="store_true", help="이미 읽은 파일에서 사람이 작업 도중 보낸 메시지(queued_command)만 다시 읽어 빠진 행을 채운다(기본 건수만, --apply 로 넣음)"); p.add_argument("--apply", action="store_true"); p.set_defaults(f=cmd_ingest)
+    p = ctx.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--session", help="세션 ID 앞자리로 한정"); p.add_argument("--kind", help="검색할 메시지 종류(쉼표 목록 또는 all). 기본 prompt,response — tool_use·tool_result(명령 호출·결과)·other 는 지정해야 검색된다"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.add_argument("--include-excluded", action="store_true")
+    p.add_argument("--count", action="store_true", help="본문 대신 건수만(같은 필터가 고른 행). --by 로 묶는 기준 지정"); p.add_argument("--by", choices=["day", "session", "kind"], help="--count 의 묶음 기준(기본 day)")
+    p.add_argument("--tz", default="Asia/Seoul", help="--count --by day 의 날짜 기준 시간대(기본 Asia/Seoul)"); p.add_argument("--not", dest="not_", action="append", metavar="정규식", help="본문이 이 정규식(대소문자 무시)에 맞으면 제외(반복 가능)"); p.set_defaults(f=cmd_search)
     p = ctx.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.add_argument("--include-excluded", action="store_true"); p.set_defaults(f=cmd_recent)
     p = ctx.add_parser("session"); p.add_argument("sid"); p.add_argument("--n", type=int); p.add_argument("--full", action="store_true"); p.add_argument("--from", dest="from_uuid"); p.add_argument("--to", dest="to_uuid"); p.set_defaults(f=cmd_session)
     p = ctx.add_parser("msg", help="한 메시지의 완전한 본문(도구 호출 포함)"); p.add_argument("uuid", help="메시지 uuid 앞자리(ctx session 출력의 8자 등)"); p.add_argument("--max", type=int, default=8000, help="출력 글자 수 상한(기본 8000)"); p.add_argument("--all", action="store_true", help="상한 없이 전부"); p.add_argument("--session", help="(에이전트 셸) 파일을 둘 세션 ID(기본: 환경변수 CLAUDE_CODE_SESSION_ID)"); p.set_defaults(f=cmd_msg)
@@ -1322,7 +1423,7 @@ def main():
     p = ctx.add_parser("usage"); p.add_argument("--days", type=int, default=7); p.add_argument("--include-excluded", action="store_true"); p.set_defaults(f=cmd_usage)
     p = ctx.add_parser("session-exclude", help="시험 세션을 집계(사용량·검색·최근)에서 제외/복원 — plan(읽기 전용) → 사용자 확인 → apply --token"); p.add_argument("action", choices=["plan", "apply", "restore", "list"]); p.add_argument("sid", nargs="*", help="세션 ID(접두 가능)"); p.add_argument("--reason"); p.add_argument("--token", help="plan 이 보인 토큰(같은 목록일 때만 apply)"); p.set_defaults(f=cmd_session_exclude)
     p = ctx.add_parser("limits", help="계정별 한도(5h/7d) 창별 최고 사용률"); p.add_argument("--days", type=int, default=14); p.add_argument("--limit", type=int, default=20); p.set_defaults(f=cmd_limits)
-    p = ctx.add_parser("sql"); p.add_argument("query"); p.add_argument("--limit", type=int, default=50, help="출력 행 수 상한(넘으면 표지)"); p.add_argument("--cell", type=int, default=1000, help="셀 하나의 출력 글자 수 상한(0 = 무제한; 넘으면 [잘림: …] 표지)"); p.set_defaults(f=cmd_sql)
+    p = ctx.add_parser("sql"); p.add_argument("query", nargs="?"); p.add_argument("--tables", action="store_true", help="조회할 수 있는 표 목록(비밀 등록표 제외)"); p.add_argument("--columns", metavar="표", help="그 표의 열 이름·형");  p.add_argument("--limit", type=int, default=50, help="출력 행 수 상한(넘으면 표지)"); p.add_argument("--cell", type=int, default=1000, help="셀 하나의 출력 글자 수 상한(0 = 무제한; 넘으면 [잘림: …] 표지)"); p.set_defaults(f=cmd_sql)
     ctx_doccli.register(ctx, argparse.Namespace(norm_repo=norm_repo, git_meta=git_meta, connect=connect, load_masker=cs.load_masker, HOST=HOST, human_only=_human_only, is_human=is_human))
     ho = top.add_parser("handoff", help="인수인계 문서 업/다운").add_subparsers(dest="cmd", required=True)
     p = ho.add_parser("put"); p.add_argument("--session", required=True); p.add_argument("--doc", required=True); p.add_argument("--note", default=""); p.set_defaults(f=cmd_handoff_put)

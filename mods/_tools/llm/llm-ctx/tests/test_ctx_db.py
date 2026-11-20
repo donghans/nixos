@@ -395,6 +395,76 @@ try:
     r = cli("ctx", "session-exclude", "restore", SID[:8])
     check("restore: 복원, recent 에 다시 보임", r.returncode == 0 and SID in cli("ctx", "recent", "--limit", "50").stdout, r.stdout + r.stderr)
 
+    # --- 집계(--count/--by/--not)·스키마 안내(--tables/--columns)·작업 도중 보낸 사람 메시지 수집·소급
+    SID3 = "33333333-aaaa-bbbb-cccc-000000000003"
+    t3 = os.path.join(HOME, ".claude/projects/-tmp-proj", SID3 + ".jsonl")
+    def ln3(i, text, ts, role="user"):
+        return json.dumps({"uuid": f"c{i:07d}-0000-0000-0000-000000000000", "sessionId": SID3, "type": role, "timestamp": ts, "cwd": "/tmp/proj",
+                           "message": {"role": role, "content": text}}, ensure_ascii=False)
+    def att3(i, prompt, kind):
+        return json.dumps({"type": "attachment", "uuid": f"d{i:07d}-0000-0000-0000-000000000000", "sessionId": SID3, "timestamp": "2026-10-03T02:00:00.000Z", "cwd": "/tmp/proj",
+                           "isSidechain": False, "attachment": {"type": "queued_command", "prompt": prompt, "commandMode": "prompt", "origin": {"kind": kind}}}, ensure_ascii=False)
+    lines3 = [ln3(1, "집계문구 하나", "2026-10-02T01:00:00Z"), ln3(2, "집계문구 둘 grep 으로 조회", "2026-10-02T02:00:00Z"), ln3(3, "집계문구 셋", "2026-10-03T01:00:00Z"),
+              ln3(4, "<task-notification>집계문구 알림</task-notification>", "2026-10-03T03:00:00Z"),
+              att3(5, "중간개입유일문구 사람이 작업 중 보냄", "human"), att3(6, "<cross-session-message from=\"x\">피어유일문구", "peer"), att3(7, "<task-notification>알림유일문구", "task-notification")]
+    open(t3, "w").write("\n".join(lines3) + "\n")
+    check("작업 도중 메시지 줄이 섞인 기록 적재: 일반 4 + 사람 1(peer·알림은 안 받음)", cc.ingest_transcript(conn, t3) == 5)
+    conn.commit()
+    r = cli("ctx", "search", "중간개입유일문구", "--role", "user")
+    check("search --role user: 사용자가 작업 도중 보낸 메시지(queued_command human)가 검색된다", "중간개입유일문구" in r.stdout and "user/prompt" in r.stdout, r.stdout + r.stderr)
+    r = cli("ctx", "search", "피어유일문구", "--kind", "all"); r2 = cli("ctx", "search", "알림유일문구", "--kind", "all")
+    check("peer(에이전트 간)·task-notification 첨부는 저장되지 않는다(사용자 발언 통계·대조 오염 방지)", "피어유일문구" not in r.stdout and "알림유일문구" not in r2.stdout, r.stdout + r2.stdout)
+    r = cli("ctx", "search", "--count", "집계문구")
+    check("search --count: 날짜(KST)별 건수 + 합계, 본문은 안 나온다(알림 포함 4건=2일에 2, 3일에 2)", r.returncode == 0 and "2026-10-03\t2" in r.stdout and "2026-10-02\t2" in r.stdout and "합계\t4" in r.stdout and "집계문구 하나" not in r.stdout, r.stdout + r.stderr)
+    r = cli("ctx", "search", "--count", "집계문구", "--not", "grep")
+    check("search --count --not: 제외 정규식에 맞는 행을 뺀다(같은 필터가 센 행 집합)", "합계\t3" in r.stdout and "2026-10-02\t1" in r.stdout, r.stdout)
+    r = cli("ctx", "search", "--count", "집계문구", "--not", "GREP", "--not", "셋")
+    check("search --count --not 반복·대소문자 무시", "합계\t2" in r.stdout, r.stdout)
+    r = cli("ctx", "search", "--count", "--by", "session", "--role", "user", "집계문구")
+    check("search --count --role user: 자동 메시지(알림)는 세지 않는다 + --by session", "합계\t3" in r.stdout and SID3[:8] in r.stdout, r.stdout)
+    r = cli("ctx", "search", "--count", "--by", "kind", "집계문구", "--kind", "prompt")
+    check("search --count --by kind", "prompt\t4" in r.stdout, r.stdout)
+    n_rows = cli("ctx", "search", "집계문구", "--not", "grep", "--limit", "50").stdout.count("user/prompt")
+    check("--count 합계와 같은 필터의 본문 검색 행 수가 같다", n_rows == 3, str(n_rows))
+    r = cli("ctx", "search", "집계문구")
+    check("기존 출력 불변: 옵션 없이는 본문 검색(건수 표 없음)", "user/prompt" in r.stdout and "합계" not in r.stdout, r.stdout)
+    r = cli("ctx", "search", "--by", "day", "집계문구")
+    check("--by 는 --count 없이 쓰면 거부", r.returncode != 0 and "--count" in r.stderr + r.stdout, r.stdout + r.stderr)
+    r = cli("ctx", "search", "--count", "집계문구", "--not", PW)
+    check("--not 패턴에 등록된 비밀이 있으면 거부", r.returncode != 0 and PW not in r.stdout + r.stderr, r.stdout + r.stderr)
+    r = cli("ctx", "sql", "--tables")
+    check("sql --tables: public 표 목록, 비밀 등록표(secrets·secret_ignores)는 없다", r.returncode == 0 and "messages" in r.stdout.split() and "secrets" not in r.stdout.split() and "secret_ignores" not in r.stdout.split(), r.stdout + r.stderr)
+    r = cli("ctx", "sql", "--columns", "messages")
+    cols = [l.split("\t")[0] for l in r.stdout.splitlines()]
+    sch_cols = re.search(r"CREATE TABLE IF NOT EXISTS messages \((.*?)\n\);", schema_text, re.S)
+    check("sql --columns messages: schema.sql 의 열과 같다", r.returncode == 0 and all(c in cols for c in ("uuid", "session_id", "ts", "role", "kind", "text", "is_sidechain")) and (not sch_cols or all(c in cols for c in re.findall(r"^\s+([a-z_]+)\s", sch_cols.group(1), re.M) if c not in ("primary", "unique", "foreign", "constraint"))), r.stdout)
+    r = cli("ctx", "sql", "--columns", "secrets"); r2 = cli("ctx", "sql", "--columns", "public.SECRET_IGNORES")
+    check("sql --columns: 비밀 등록표 열은 사람만(비 TTY 거부)", r.returncode != 0 and r2.returncode != 0 and "value" not in r.stdout + r2.stdout, r.stdout + r.stderr + r2.stdout)
+    r = cli("ctx", "sql", "--columns", "nosuchtable")
+    check("sql --columns: 없는 표는 안내와 함께 실패", r.returncode != 0 and "--tables" in r.stderr + r.stdout)
+    # 소급: 옛 코드가 읽고 지나간 파일(오프셋이 파일 끝, 행 없음)에서 사람 메시지만 채운다
+    SID4 = "44444444-aaaa-bbbb-cccc-000000000004"
+    t4 = os.path.join(HOME, ".claude/projects/-tmp-proj", SID4 + ".jsonl")
+    L4 = [json.dumps({"uuid": "e0000001-0000-0000-0000-000000000000", "sessionId": SID4, "type": "user", "timestamp": "2026-10-04T01:00:00Z", "cwd": "/tmp/proj", "message": {"role": "user", "content": "소급 일반 줄"}}, ensure_ascii=False),
+          json.dumps({"type": "attachment", "uuid": "e0000002-0000-0000-0000-000000000000", "sessionId": SID4, "timestamp": "2026-10-04T01:01:00Z", "cwd": "/tmp/proj", "isSidechain": False,
+                      "attachment": {"type": "queued_command", "prompt": "소급유일문구", "commandMode": "prompt", "origin": {"kind": "human"}}}, ensure_ascii=False),
+          json.dumps({"type": "attachment", "uuid": "e0000003-0000-0000-0000-000000000000", "sessionId": SID4, "timestamp": "2026-10-04T01:02:00Z", "cwd": "/tmp/proj", "isSidechain": False,
+                      "attachment": {"type": "queued_command", "prompt": "<cross-session-message>소급피어", "commandMode": "prompt", "origin": {"kind": "peer"}}}, ensure_ascii=False)]
+    open(t4, "w").write("\n".join(L4) + "\n")
+    conn.execute("INSERT INTO ingest_state (host, path, byte_offset) VALUES (%s,%s,%s)", (cc.INGEST_HOST, t4, os.path.getsize(t4))); conn.commit()
+    check("(준비) 오프셋이 끝인 파일은 ingest 가 아무것도 안 읽는다", cc.ingest_transcript(conn, t4) == 0); conn.commit()
+    r = cli("ctx", "ingest", "--reparse-queued", "--no-otel")
+    off0 = conn.execute("SELECT byte_offset FROM ingest_state WHERE path=%s", (t4,)).fetchone()[0]; conn.commit()
+    check("ingest --reparse-queued: 기본은 건수만(1행 추가 예정), DB 는 그대로", r.returncode == 0 and "추가될 행 1개" in r.stdout and "소급유일문구" not in cli("ctx", "search", "소급유일문구", "--role", "user").stdout, r.stdout + r.stderr)
+    r = cli("ctx", "ingest", "--reparse-queued", "--apply")
+    check("--apply: 사람 메시지 1행만 추가(peer 는 안 넣음), 검색됨", r.returncode == 0 and "추가 1행" in r.stdout and "소급유일문구" in cli("ctx", "search", "소급유일문구", "--role", "user").stdout and "소급피어" not in cli("ctx", "search", "소급피어", "--kind", "all").stdout, r.stdout + r.stderr)
+    off1 = conn.execute("SELECT byte_offset FROM ingest_state WHERE path=%s", (t4,)).fetchone()[0]; conn.commit()
+    check("소급은 ingest_state(오프셋)를 바꾸지 않고, 일반 줄은 건드리지 않는다", off0 == off1 == os.path.getsize(t4) and conn.execute("SELECT count(*) FROM messages WHERE session_id=%s", (SID4,)).fetchone()[0] == 1, f"{off0} {off1}")
+    conn.commit()
+    r = cli("ctx", "ingest", "--reparse-queued", "--apply")
+    check("소급을 되풀이해도 중복 행이 없다(추가 0행)", "추가 0행" in r.stdout and conn.execute("SELECT count(*) FROM messages WHERE session_id=%s", (SID4,)).fetchone()[0] == 1, r.stdout + r.stderr)
+    conn.commit()
+
     # --- 표가 없는 옛 DB 에서도 조회 명령은 동작(마이그레이션 전 호환)
     conn.execute("DROP TABLE secrets"); conn.execute("DROP TABLE secret_ignores"); conn.commit()
     r = cli("ctx", "session", SID[:8])

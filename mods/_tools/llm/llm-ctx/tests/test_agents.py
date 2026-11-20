@@ -102,5 +102,25 @@ try:
 finally:
     del agents.PROVIDERS["fake"]
 check("어댑터를 빼면 원래대로", agents.all_transcript_files(TMP) == files and agents.provider_for_path("/h/.fake/x.log") is claude)
+
+# ---------------------------------------------------------------- 작업 도중 보낸 메시지(attachment/queued_command) — 사람(origin=human)만 사용자 발언으로 받는다
+def att(prompt, kind, uuid="a1", **extra):
+    a = {"type": "queued_command", "prompt": prompt, "commandMode": "prompt", "origin": ({"kind": kind} if kind else None)}
+    a = {k: v for k, v in a.items() if v is not None}
+    return json.dumps({"type": "attachment", "uuid": uuid, "sessionId": "S1", "parentUuid": "p0", "timestamp": "2026-11-20T01:00:00.000Z",
+                       "cwd": "/tmp/proj", "gitBranch": "main", "version": "2.1.0", "isSidechain": extra.get("side", False), "attachment": a}, ensure_ascii=False)
+r = claude.parse_line(att("덧붙이지 말고 뜯어고쳐", "human", "a-human"), None)
+check("queued_command(human): role=user·kind=prompt 행으로 수집(본문·세션·시각·cwd·branch)",
+      r and r["uuid"] == "a-human" and r["role"] == "user" and r["kind"] == "prompt" and r["text"] == "덧붙이지 말고 뜯어고쳐" and r["sid"] == "S1"
+      and r["ts"] == "2026-11-20T01:00:00.000Z" and r["cwd"] == "/tmp/proj" and r["branch"] == "main" and r["side"] is False and r["raw"].get("attachment"), str(r))
+check("queued_command(peer): 에이전트 간 메시지는 사용자 발언으로 받지 않는다", claude.parse_line(att("<cross-session-message from=\"x\">안녕", "peer"), None) is None)
+check("queued_command(task-notification·coordinator·origin 없음): 받지 않는다", all(claude.parse_line(att("<task-notification>x", k), None) is None for k in ("task-notification", "coordinator", None)))
+check("attachment 의 다른 종류·prompt 가 문자열이 아닌 것은 무시", claude.parse_line(json.dumps({"type": "attachment", "uuid": "z", "sessionId": "S1", "attachment": {"type": "hook_success"}}), None) is None
+      and claude.parse_line(att(["x"], "human"), None) is None)
+check("full_text: 첨부 줄의 raw 에서 사람 메시지 본문을 돌려준다(ctx msg --all 이 빈 본문이 되지 않게)", claude.full_text(json.loads(att("본문 전체", "human"))) == "본문 전체"
+      and claude.full_text(json.loads(att("<cross-session-message>x", "peer"))) == "")
+check("기존 줄 분류는 그대로(일반 user 문자열·tool_result)", claude.parse_line(json.dumps({"type": "user", "uuid": "u", "sessionId": "S1", "message": {"role": "user", "content": "안녕"}}), None)["kind"] == "prompt"
+      and claude.parse_line(json.dumps({"type": "user", "uuid": "t", "sessionId": "S1", "message": {"role": "user", "content": [{"type": "tool_result", "content": "x"}]}}), None)["kind"] == "tool_result")
+
 import shutil; shutil.rmtree(TMP, ignore_errors=True)
 finish("agents")

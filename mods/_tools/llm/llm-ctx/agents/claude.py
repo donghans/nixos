@@ -68,12 +68,40 @@ def full_text(raw):
     그 줄의 완전한 본문은 원본 대화 파일(`~/.claude/projects`)에만 있다. 키 순서는 DB(jsonb) 에서 바뀌어 원본과 다를 수 있다."""
     if not isinstance(raw, dict) or raw.get("truncated"):
         return None
+    queued = human_queued_prompt(raw)
+    if queued is not None:      # 작업 도중 보낸 사람 메시지(첨부 줄에는 message 가 없다)
+        return queued.replace("\x00", "")
     msg = raw.get("message") or {}
     if msg:
         text = blocks_text(msg.get("content"), caps=(None, None))[1]
     else:
         text = raw.get("content") if isinstance(raw.get("content"), str) else ""
     return (text or "").replace("\x00", "")
+
+
+def human_queued_prompt(d):
+    """원본 줄(dict)이 「사람이 작업 도중 보낸 메시지」(`attachment.type=queued_command`, `origin.kind=human`)면 그 글, 아니면 None.
+    같은 첨부에 에이전트 간 메시지(`origin.kind=peer`, `<cross-session-message …>`)·작업 알림(`task-notification`)·`coordinator` 가 섞여 있으니
+    `origin.kind` 가 human 인 것만 사람 말이다(peer 는 `--role user` 의 자동 메시지 필터를 통과해 사용자 발언으로 둔갑한다)."""
+    a = d.get("attachment") if isinstance(d, dict) else None
+    if not isinstance(a, dict) or a.get("type") != "queued_command":
+        return None
+    if (a.get("origin") or {}).get("kind") != "human" or not isinstance(a.get("prompt"), str):
+        return None
+    return a["prompt"]
+
+
+def _queued_prompt_row(d, line, agent_id):
+    from . import MAX_RAW, MAX_TEXT
+    text = human_queued_prompt(d)
+    if text is None or not d.get("uuid"):
+        return None
+    raw = line if len(line) <= MAX_RAW else None
+    return dict(uuid=d["uuid"], sid=d.get("sessionId"), parent=d.get("parentUuid"), ts=d.get("timestamp"), role="user", kind="prompt",
+                side=bool(d.get("isSidechain")), agent=agent_id or d.get("agentId"), pid=None,
+                cwd=d.get("cwd"), branch=d.get("gitBranch"), model=None, ver=d.get("version"), it=None, ot=None, cr=None, cc=None,
+                text=text[:MAX_TEXT].replace("\x00", ""),
+                raw=json.loads(raw) if raw else {"truncated": True, "size": len(line), "head": line[:2000]})
 
 
 def parse_line(line, agent_id):
@@ -83,6 +111,8 @@ def parse_line(line, agent_id):
         d = json.loads(line)
     except Exception:
         return None
+    if isinstance(d, dict) and d.get("type") == "attachment":
+        return _queued_prompt_row(d, line, agent_id)
     if not isinstance(d, dict) or not d.get("uuid") or d.get("type") not in ("user", "assistant", "system"):
         return None
     msg = d.get("message") or {}
