@@ -3,7 +3,7 @@
 
 사용:
   nixseal status                                   Secure Boot + LUKS 슬롯 한 화면 요약
-  nixseal doctor [--brief]                         nix 가 선언한 상태(luks·tpm2·fido2·secure-boot)와 실제(루트 암호화·LUKS 슬롯·pcrlock 정책·펌웨어 SB)를 비교해 어긋남을 알림(읽기 전용).
+  nixseal doctor [--brief] [--guide]                       nix 가 선언한 상태(luks·tpm2·fido2·secure-boot)와 실제(루트 암호화·LUKS 슬롯·pcrlock 정책·펌웨어 SB)를 비교해 어긋남을 알림(읽기 전용).
                                                    FAIL = 다음 부팅이 깨지거나 보호가 조용히 빠짐. nixup 이 배포 직후 자동으로 부른다(선언 값은 래퍼가 환경변수로 줌)
   nixseal sb status|verify                         SB·SetupMode, PK/KEK/db/dbx, 서명 키, ESP 서명, 백업, dbx 갱신 / sbctl verify
   nixseal sb backup-esp [경로]                     ESP(/boot) 전체를 tar 로 백업(기본 ~/esp-backup-YYYYMMDD.tar)
@@ -1852,6 +1852,58 @@ def _judge(decl, f):
     return out
 
 
+def _guide(decl, f):
+    """`doctor --guide`: 판정 목록 아래에 붙이는 설명 — 부팅 순서, 계층끼리의 보완 관계, 켜고 끌 수 있는 것의 전/후·장단점.
+    현재 상태 표시는 facts 에서 가져오고, 읽지 못한 칸은 「확인 못함」이라고 쓴다(정상으로 취급하지 않는다)."""
+    tk = f.get("tokens")
+    tpm_slot = None if tk is None else "systemd-tpm2" in tk
+    fido_slot = None if tk is None else "systemd-fido2" in tk
+
+    def yn(v, yes="있음", no="없음"):
+        return "확인 못함" if v is None else (yes if v else no)
+
+    sb = f.get("sb_on")
+    pcrs = f.get("policy_pcrs")
+    pw = f.get("pw") or {}
+    tl = decl.get("tplogin")
+    sealed = any(s["blob"] for s in pw.values())
+    L = ["", "== 전체 그림 (doctor --guide) ==", "",
+         "[부팅 순서와 지금 상태]",
+         f"  ① 펌웨어(UEFI)      서명된 부팅 파일만 실행하고, 그 상태를 TPM 의 PCR 7 에 기록한다.        지금: Secure Boot {yn(None if sb is None else sb == 1, '켜짐', '꺼짐')}",
+         "  ② 부팅 파일(UKI)    nix(lanzaboote)가 커널·initrd·명령줄을 한 파일로 묶어 서명해 ESP 에 둔다.   (nixup os 때마다 새로 서명)",
+         f"  ③ initrd: 루트 열기  슬롯을 TPM2(PIN) → FIDO2 → 복구 암호 순으로 시도한다.                 지금: TPM2 슬롯 {yn(tpm_slot)} · FIDO2 슬롯 {yn(fido_slot)} · 정책 보호 PCR {pcrs if pcrs is not None else '확인 못함'}",
+         "      TPM 은 「이번 부팅의 측정값이 정책과 같을 때만」 PIN 을 받아 열쇠를 내준다. 다르면 거부하고 다음 슬롯(복구 암호)으로 넘어간다.",
+         "  ④ 루트 마운트 뒤     (tpm-login 을 켰다면) 서비스가 방금 쓴 PIN 으로 TPM 에 봉인한 로그인 비밀번호를 풀어 둔다. 로그인 화면보다 먼저 한 번만.",
+         f"                                                                                          지금: 봉인 로그인 {'선언 없음' if not tl and tl is not None else ('선언 안 됨(모름)' if tl is None else (f'선언됨, 봉인 ' + yn(sealed)))}",
+         "  ⑤ greetd 로그인      풀어 둔 비밀번호가 있으면 입력 없이, 없으면 평소처럼 비밀번호를 묻는다. 로그인되면 gnome-keyring 도 같이 열린다.",
+         "",
+         "[계층이 서로 메우는 것 — 하나만 있을 때의 구멍]",
+         "  Secure Boot 만      서명 안 된 부팅 파일은 막지만 디스크는 평문이다(분실 시 읽힘).",
+         "  LUKS 만             디스크는 암호화되지만 ESP 의 부팅 파일을 바꿔치기해 암호 입력을 가로채는 공격(evil maid)을 못 막는다.",
+         "  LUKS + 암호만       위 공격에 약하고, 부팅마다 긴 암호를 쳐야 한다.",
+         "  LUKS + Secure Boot + TPM(PIN)   TPM 이 정상 체인일 때만 열쇠를 내주고 PIN 이 짧은 대신 오입력 횟수가 TPM 에서 제한된다.",
+         "  복구 암호·FIDO2     TPM 이 거부한 부팅에서도 열 수 있는 안전망이자, 그 검사를 우회하는 길이다(필요하지만 약점이기도 하다).",
+         "",
+         "[켜고 끌 수 있는 것: 전 → 후]"]
+    L += [
+        "  A. TPM2 슬롯(luks.tpm2 + `nixseal tpm enroll`)",
+        "     전: 매 부팅 긴 복구 암호 입력, 부팅 체인 검사 없음.   후: 짧은 PIN, 체인이 바뀌면(dbx·키·UKI 구성) 거부 → 복구 암호.",
+        "     특징: dbx·Secure Boot 키를 바꾸면 **재부팅 전에** `nixseal tpm refresh-policy` 를 해야 한다(안 하면 다음 부팅에 복구 암호). doctor 가 이 누락을 잡는다.",
+        "  B. 봉인 로그인(tpm-login + `nixseal pw seal`)",
+        "     전: 부팅 PIN 후 로그인 화면에서 계정 비밀번호를 또 입력.   후: PIN 하나로 로그인·키링까지, 계정 비밀번호는 PIN 과 별개의 강한 값.",
+        "     특징: 부팅 PIN 을 바꾸거나 계정 비밀번호를 바꾸면 봉인을 다시 해야 한다(안 하면 평소 입력으로 돌아갈 뿐 잠기지는 않는다).",
+        "     한계: 풀린 비밀번호가 커널 키링에 120초 머무는 동안 로그인 화면에서 사용자 이름만 제출해도 로그인된다. 계정 하나만, TPM PIN 오입력 카운터는 LUKS 와 공유.",
+        "  C. FIDO2 병행(luks.fido2)",
+        "     전: TPM 이 거부하면 복구 암호.   후: 키+PIN+터치로도 열림(복구 암호보다 쓰기 쉬움).   특징: TPM 체인 검사를 우회하는 길이 하나 더 생긴다.",
+        "  D. 봉인 로그인을 PCR 정책에도 묶기(아직 구현되지 않음)",
+        "     전: 봉인된 비밀번호는 PIN 만 알면 풀린다(이 컴퓨터의 TPM 에서).   후: 정상 부팅 체인일 때만 풀림.",
+        "     특징: dbx·키·펌웨어 변경 뒤 매번 다시 봉인해야 하고, 막히면 평소 입력으로 돌아간다. 얻는 것은 「디스크가 이미 열린 뒤 다른 경로로 블롭을 얻은 경우」의 방어라 효과가 좁다.",
+        "",
+        "  각 항목의 자세한 절차·한계: hosts/msi-summit-me/SECURE-BOOT.md §2-10(정책 갱신)·§2-13(TPM 등록)·§2-15(봉인 로그인).",
+    ]
+    return L
+
+
 def cmd_doctor(args):
     _need_root(["doctor"] + args)
     brief = "--brief" in args
@@ -1859,12 +1911,15 @@ def cmd_doctor(args):
     if all(v is None for v in decl.values()):
         print("doctor: 선언 값이 없다(nix 래퍼 없이 실행) — 비교할 선언이 없어 점검하지 않았다.")
         return 0
-    res = _judge(decl, _gather_facts(decl))
+    facts = _gather_facts(decl)
+    res = _judge(decl, facts)
     shown = [r for r in res if not (brief and r[0] == "OK")]
     if shown:
         print("== nixseal doctor (선언 ↔ 실제) ==")
         for sev, msg in shown:
             print(f"[{sev}] {msg}")
+    if "--guide" in args:
+        print("\n".join(_guide(decl, facts)))
     return 1 if any(s == "FAIL" for s, _ in res) else 0
 
 

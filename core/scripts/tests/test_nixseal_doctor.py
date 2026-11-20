@@ -288,5 +288,13 @@ for k in [k for k in os.environ if k.startswith("NIXSEAL_DECL_")]:
 rc, out = run_doctor({})
 check("선언 값 없음 → 점검하지 않았다고 말하고 종료 0", rc == 0 and "점검하지 않았다" in out, out)
 
+# ── doctor --guide: 현재 상태 칸이 사실을 따르고, 읽지 못한 칸을 「있음」으로 쓰지 않는다 ──
+g_ok = "\n".join(M._guide(decl(tplogin="alice"), facts(pw={"alice": {"blob": True, "mark": None}})))
+check("guide: 정상 사실 → 켜짐·슬롯 있음·봉인 있음", "Secure Boot 켜짐" in g_ok and "TPM2 슬롯 있음" in g_ok and "봉인 있음" in g_ok, g_ok)
+g_un = "\n".join(M._guide(decl(tplogin=None), facts(sb_on=None, tokens=None, policy_pcrs=None)))
+check("guide: 읽지 못한 칸은 「확인 못함」(정상으로 쓰지 않음)", "Secure Boot 확인 못함" in g_un and "TPM2 슬롯 확인 못함" in g_un and "켜짐" not in g_un.split("[계층")[0], g_un)
+g_off = "\n".join(M._guide(decl(tplogin=""), facts(sb_on=0, tokens=set())))
+check("guide: 꺼짐·슬롯 없음·봉인 선언 없음", "Secure Boot 꺼짐" in g_off and "TPM2 슬롯 없음" in g_off and "선언 없음" in g_off, g_off)
+
 print(f"{n['ok']} 통과, {n['bad']} 실패")
 sys.exit(1 if n["bad"] else 0)
