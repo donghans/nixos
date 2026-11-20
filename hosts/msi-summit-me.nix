@@ -141,6 +141,9 @@ in {
     #   LAN 밖(집·핫스팟)에서는 main 에 그 경로가 없어 table 52 로 내려가므로 원격 접근(프린터 등)은 그대로다.
     mods.sys.services.tailscale.acceptRoutes = true;
     mods.sys.services.luks.fido2 = true; # LUKS 슬롯 1 = FIDO2(TrustKey T110, 2026-11-19 등록) — 암호 8단어 입력을 PIN+터치로. 복구 암호(슬롯 0)는 그대로.
+    # initrd 가 TPM2 슬롯을 시도하게 한다(crypttab tpm2-device=auto + pcrlock 측정 유닛). 슬롯은 아직 없다 — 재부팅 뒤 `sudo nixseal tpm enroll` 로 등록(SECURE-BOOT.md §2-13).
+    #   슬롯이 없으면 이 옵션은 아무 일도 하지 않고 기존 FIDO2·복구 암호로 풀린다. fido2 와 함께 켜면 빌드 때 경고가 나온다(TPM 거부 뒤 FIDO2 우회) — 정책 결정 전까지 알려진 상태.
+    mods.sys.services.luks.tpm2 = true;
     systemd.services.tailscale-lan-first = {
       description = "Prefer directly connected LAN subnets over tailscale subnet routes";
       wantedBy = ["multi-user.target"];
