@@ -34,8 +34,13 @@ in {
     #  깨지는 것: QEMU 에 `aio=io_uring` 을 **명시**한 경우, io_uring 을 필수로 쓰는 앱. 불편하면 이 줄을 지우거나 1 로 바꾼다.)
     boot.kernel.sysctl."kernel.io_uring_disabled" = 2;
 
-    # llm-utils-project 관련 테스트를 위해 임시로 열어둔 포트
-    networking.firewall.allowedTCPPorts = [7681];
+    # 호스트 서비스 노출 정리(plan security-roadmap P1, BH-N2·N3·N4 — 2026-11-21 사용자 확정·구현 허락)
+    # - 7681: llm-utils-project 시험용으로 열어 두었던 포트를 닫는다(수신 대기 프로세스도 없었다).
+    # - incusbr0: 신뢰 인터페이스에서 빼고 DHCP·DNS·ICMP 만 허용 / incus API(8443) 닫기.
+    # - LLMNR(5355): 로컬 이름 질의 스푸핑 면이라 끈다(mDNS 는 그대로).
+    mods.sys.services.incus.trustGuestBridge = false;
+    mods.sys.services.incus.exposeApi = false;
+    services.resolved.settings.Resolve.LLMNR = "false";
 
     # == SSH (beelink-ser7-co 한 대만) ==
     # (목적: 데스크톱에서 이 노트북을 원격 조작/시험. 다른 tailnet 사용자·기기에는 열지 않는다)
