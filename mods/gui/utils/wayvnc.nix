@@ -34,9 +34,9 @@ mkModOf "mods.gui" __curPos "wayvnc (Tailscale 전용 VNC 원격 데스크톱)" 
         echo "wayvnc-tailnet: tailscale IPv4 주소를 얻지 못해 시작하지 않는다(0.0.0.0 으로 열지 않음)" >&2
         exit 1
       fi
-      cfg="''${XDG_RUNTIME_DIR:-/tmp}/wayvnc-tailnet.conf"
-      printf 'address=%s\nport=%s\nenable_auth=false\n' "$ip" ${toString cfg.port} > "$cfg"
-      exec ${pkgs.wayvnc}/bin/wayvnc -r --config="$cfg"
+      # 설정 파일을 만들지 않고 주소·포트를 인자로 넘긴다(파일 쓰기가 실패해 wayvnc 가 기본 주소로 뜨는 일이
+      # 없도록 — 처음 버전은 /run/user 가 가득 차 설정이 비어 127.0.0.1 로 떴다). 인증은 기본값(꺼짐).
+      exec ${pkgs.wayvnc}/bin/wayvnc -r "$ip" ${toString cfg.port}
     '';
   in {
     home.packages = [pkgs.wayvnc];
