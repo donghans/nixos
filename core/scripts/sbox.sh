@@ -1,25 +1,28 @@
 #!/usr/bin/env bash
-# 격리 개발 VM(devbr0)을 일회용으로 만들고 지우는 호스트용 스크립트 (plan dev-sandbox-pilot §11, 로드맵 P6)
+# sbox — 일회용 격리 환경(devbr0)을 만들고 꺼내고 지우는 호스트용 스크립트 (plan dev-sandbox-pilot §11·§15, 로드맵 P6)
+# 종류(--kind): vm = nixos OS 단위 시험용 VM(구현됨). ct = 프로젝트용 컨테이너(미구현, 시험 전 — §15). 종류는 필수 인자이고 기본값이 없다.
+# 이름: sbox-vm-<이름> / sbox-ct-<프로젝트>-<이름>, 골든은 sbox-golden-vm(VM 전용). VM 안 사용자 이름은 그대로 devvm.
 #
-#   devvm.sh create [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 devvm-YYMMDD-HHMM)
-#   devvm.sh bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
-#   devvm.sh import BUNDLE                             번들을 호스트 저장소의 refs/devvm/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
-#   devvm.sh destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
-#   devvm.sh golden [SRC_INSTANCE]                     SRC(기본 dev-nixos)를 정상 종료 후 복제해 골든(devvm-golden@gold)을 새로 만듦
-#   devvm.sh rebuild-golden [--stale-ok]               ISO+nixstrap(NIXSTRAP_AUTO)로 골든을 처음부터 새로 만듦(약 15분)
-#   devvm.sh list                                      devvm-* VM 목록
+#   sbox.sh create --kind vm|ct [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
+#   sbox.sh bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
+#   sbox.sh import BUNDLE                             번들을 호스트 저장소의 refs/sbox/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
+#   sbox.sh destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
+#   sbox.sh golden [SRC_INSTANCE]                     SRC(기본 dev-nixos)를 정상 종료 후 복제해 골든(sbox-golden-vm@gold)을 새로 만듦
+#   sbox.sh rebuild-golden [--stale-ok]               ISO+nixstrap(NIXSTRAP_AUTO)로 골든을 처음부터 새로 만듦(약 15분)
+#   sbox.sh list                                      sbox-* 인스턴스 목록
+#   sbox.sh iso [--stale-ok]                          설치 ISO 만 미리 빌드(캐시면 약 20초, nixstrap 수정 직후면 약 7분)
 #
 # 전제·한계
 #  - 호스트(msi-summit-me) 전용: incus 사용 권한, devbr0 브리지, nix-serve(10.100.1.1:5000) 필요.
 #  - 제어 채널은 incus exec(에이전트) — ssh 로의 전환은 별도 단계(plan §11).
 #  - 캐시 등록은 VM 의 /etc/nix/nix.conf 심볼릭 링크를 파일로 바꾸는 방식이라 VM 안에서 `nixup`(시스템 적용)을 하면 되돌아간다.
-#    그때는 `devvm.sh cache NAME` 으로 다시 등록한다.
-#  - 토큰은 VM 의 tmpfs(/run/devvm-claude/token)에만 둔다(재부팅하면 사라짐). 값은 명령줄·디스크에 남기지 않는다.
+#    그때는 `sbox.sh cache NAME` 으로 다시 등록한다.
+#  - 토큰은 VM 의 tmpfs(/run/sbox-claude/token)에만 둔다(재부팅하면 사라짐). 값은 명령줄·디스크에 남기지 않는다.
 set -euo pipefail
 
-GOLDEN_INST="${DEVVM_GOLDEN_INST:-devvm-golden}"   # 정지 상태로만 둔다. 스냅샷 gold 가 복제 원본
+GOLDEN_INST="${SBOX_GOLDEN_INST:-sbox-golden-vm}"   # 정지 상태로만 둔다. 스냅샷 gold 가 복제 원본
 GOLDEN_SNAP="gold"
-GOLDEN_SRC_DEFAULT="${DEVVM_GOLDEN_SRC:-dev-nixos}"
+GOLDEN_SRC_DEFAULT="${SBOX_GOLDEN_SRC:-dev-nixos}"
 NETWORK="devbr0"
 CACHE_URL="http://10.100.1.1:5000"
 CACHE_KEY_DEFAULT="devbr0-nix-serve:V+CdKcL1BZ5sgn4t7xsRsffYkG11gkjcqRThEp51034="
@@ -30,30 +33,30 @@ VM_GID=""
 VM_IDS_FOR=""
 VM_HOME="/home/$VM_USER"
 VM_REPO="$VM_HOME/nixos"
-TOKEN_PATH="/run/devvm-claude/token"
-BUNDLE_DIR="${DEVVM_BUNDLE_DIR:-$HOME/.local/share/devvm/bundles}"
+TOKEN_PATH="/run/sbox-claude/token"
+BUNDLE_DIR="${SBOX_BUNDLE_DIR:-$HOME/.local/share/sbox/bundles}"
 # 골든에 처음부터 있는 파일(nixstrap 이 만든 호스트 파일·nixup 이 매번 건드리는 락)은 「미커밋 변경」으로 세지 않는다
-DIRTY_IGNORE="${DEVVM_DIRTY_IGNORE:-^(( M)|(\?\?)) (\.locks/_rolling\.lock|hosts/dev-nixos\.(nix|toml))$}"
+DIRTY_IGNORE="${SBOX_DIRTY_IGNORE:-^(( M)|(\?\?)) (\.locks/_rolling\.lock|hosts/dev-nixos\.(nix|toml))$}"
 VM_PATH="/run/wrappers/bin:/run/current-system/sw/bin:/bin" # incus exec 의 PATH 는 비어 있다(함정)
 
-AUDIT_LOG="${DEVVM_AUDIT_LOG:-$HOME/.local/state/devvm/audit.log}"
+AUDIT_LOG="${SBOX_AUDIT_LOG:-$HOME/.local/state/sbox/audit.log}"
 
-# 감사 기록: 한 줄 JSON(시각·이벤트·VM·상세)을 남기고 데스크톱 알림을 보낸다(앱 이름 `devvm` — 알림 센터 `notif` 에 모인다).
+# 감사 기록: 한 줄 JSON(시각·이벤트·VM·상세)을 남기고 데스크톱 알림을 보낸다(앱 이름 `sbox` — 알림 센터 `notif` 에 모인다).
 # 수준: info(생성·삭제·번들 등 평시 기록) / critical(실패·--force 같이 눈에 띄어야 하는 것 — 알림 센터의 「시스템 문제」로 분류됨).
 # 비밀 값은 넣지 않는다(토큰은 「주입했다」는 사실과 바이트 수만).
 audit() { # audit LEVEL EVENT NAME DETAIL
     local level=$1 event=$2 name=${3:-} detail=${4:-}
     mkdir -p "$(dirname "$AUDIT_LOG")"
-    python3 -c 'import json,sys,time;print(json.dumps({"ts":time.strftime("%Y-%m-%dT%H:%M:%S%z"),"level":sys.argv[1],"event":sys.argv[2],"vm":sys.argv[3],"detail":sys.argv[4]},ensure_ascii=False))' \
+    python3 -c 'import json,sys,time;print(json.dumps({"ts":time.strftime("%Y-%m-%dT%H:%M:%S%z"),"level":sys.argv[1],"event":sys.argv[2],"vm":sys.argv[3],"kind":("vm" if sys.argv[3].startswith(("sbox-vm-","sbox-golden-vm")) else "ct" if sys.argv[3].startswith("sbox-ct-") else ""),"detail":sys.argv[4]},ensure_ascii=False))' \
         "$level" "$event" "$name" "$detail" >>"$AUDIT_LOG" 2>/dev/null || true
     if command -v notify-send >/dev/null 2>&1; then
         local urg=normal; [[ $level == critical ]] && urg=critical
-        notify-send -a devvm -u "$urg" "devvm $event${name:+: $name}" "$detail" >/dev/null 2>&1 || true
+        notify-send -a sbox -u "$urg" "sbox $event${name:+: $name}" "$detail" >/dev/null 2>&1 || true
     fi
 }
 
-die() { printf 'devvm: %s\n' "$*" >&2; audit critical error "${DEVVM_CUR:-}" "$*"; exit 1; }
-say() { printf 'devvm: %s\n' "$*" >&2; }
+die() { printf 'sbox: %s\n' "$*" >&2; audit critical error "${SBOX_CUR:-}" "$*"; exit 1; }
+say() { printf 'sbox: %s\n' "$*" >&2; }
 
 vmx() { # vmx NAME CMD… — VM 안에서 root 로 실행
     local name=$1; shift
@@ -81,11 +84,15 @@ vmu() { # vmu NAME CMD… — VM 안에서 devvm 사용자로 실행
 }
 
 check_name() {
-    DEVVM_CUR=${1:-}
-    [[ "${1:-}" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "VM 이름이 필요합니다(소문자·숫자·하이픈)"
-    # 사람이 쓰는 상시 VM·다른 인스턴스를 실수로 건드리지 않게 devvm- 접두사만 허용
+    SBOX_CUR=${1:-}
+    [[ "${1:-}" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "인스턴스 이름이 필요합니다(소문자·숫자·하이픈)"
     [[ "$1" != "$GOLDEN_INST" ]] || die "$GOLDEN_INST 는 골든 원본이라 이 명령으로 다루지 않습니다"
-    [[ "$1" == devvm-* ]] || die "이 스크립트는 devvm- 로 시작하는 VM 만 다룹니다(받은 이름: $1)"
+    # 사람이 쓰는 상시 VM·다른 인스턴스를 실수로 건드리지 않게 sbox-vm- 접두사만 허용. 종류별 정책은 이름에서 정해진다(plan §15 조건 ②).
+    case "$1" in
+        sbox-vm-*) ;;
+        sbox-ct-*) die "ct 종류(컨테이너)는 아직 구현 전입니다 — 시험 전(plan dev-sandbox-pilot §15)" ;;
+        *) die "이 스크립트는 sbox-vm-<이름> 인스턴스만 다룹니다(받은 이름: $1)" ;;
+    esac
 }
 
 wait_agent() {
@@ -122,25 +129,42 @@ cmd_golden() {
     audit info golden "$GOLDEN_INST" "$src 정상 종료 복제 → $GOLDEN_INST@$GOLDEN_SNAP"
 }
 
-cmd_rebuild_golden() {
-    local stale_ok=0
-    [[ ${1:-} == --stale-ok ]] && stale_ok=1
-    incus info "$GOLDEN_INST" >/dev/null 2>&1 && die "$GOLDEN_INST 가 이미 있습니다 — 다른 이름은 DEVVM_GOLDEN_INST=… 로, 교체는 'incus delete -f' 를 직접(파괴적)"
-    local repo build_dir=${XDG_CACHE_HOME:-$HOME/.cache}/nixos/build
+build_iso() { # build_iso STALE_OK — ISO 를 빌드(변경 없으면 캐시)하고 경로를 ISO_PATH 에 둔다
+    local stale_ok=$1 repo build_dir=${XDG_CACHE_HOME:-$HOME/.cache}/nixos/build
     repo=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
     # 빌드 사본(.build 는 nixup 이 만든 사본)이 낡았으면 ISO 의 nixstrap 도 낡다 — 먼저 `nixup check` 로 갱신
     if ((!stale_ok)) && ! diff -q "$build_dir/core/scripts/nixstrap.sh" "$repo/core/scripts/nixstrap.sh" >/dev/null 2>&1; then
         die "빌드 사본($build_dir)의 nixstrap.sh 가 저장소와 다릅니다 — 'nixup check' 로 갱신하거나 --stale-ok"
     fi
-    local t0=$SECONDS iso_link=${XDG_CACHE_HOME:-$HOME/.cache}/nixos/dev-iso iso
+    if ((!stale_ok)) && ! diff -q "$build_dir/core/scripts/nixstrap.task-install.sh" "$repo/core/scripts/nixstrap.task-install.sh" >/dev/null 2>&1; then
+        die "빌드 사본($build_dir)의 nixstrap.task-install.sh 가 저장소와 다릅니다 — 'nixup check' 로 갱신하거나 --stale-ok"
+    fi
+    local t0=$SECONDS iso_link=${XDG_CACHE_HOME:-$HOME/.cache}/nixos/dev-iso
     say "ISO 빌드(변경 없으면 캐시)"
     nix build "path:$build_dir#nixosConfigurations.custom-iso.config.system.build.isoImage" --impure --out-link "$iso_link" >&2 \
         || die "ISO 빌드 실패"
-    iso=$(find "$(readlink -f "$iso_link")/iso" -maxdepth 1 -name '*.iso' 2>/dev/null | head -1)
-    [[ -r $iso ]] || die "ISO 파일을 찾지 못했습니다($iso_link)"
-    say "ISO 준비 완료($((SECONDS - t0))초): $iso"
+    ISO_PATH=$(find "$(readlink -f "$iso_link")/iso" -maxdepth 1 -name '*.iso' 2>/dev/null | head -1)
+    [[ -r $ISO_PATH ]] || die "ISO 파일을 찾지 못했습니다($iso_link)"
+    say "ISO 준비 완료($((SECONDS - t0))초): $ISO_PATH"
+}
 
-    DEVVM_CUR=$GOLDEN_INST
+cmd_iso() { # 미리 빌드해 두면 rebuild-golden 이 ISO 대기 없이(약 20초) 시작한다. 결과는 ~/.cache/nixos/dev-iso 에 GC 루트로 남는다
+    local stale_ok=0
+    [[ ${1:-} == --stale-ok ]] && stale_ok=1
+    build_iso "$stale_ok"
+    audit info iso "" "$ISO_PATH"
+}
+
+cmd_rebuild_golden() {
+    local stale_ok=0
+    [[ ${1:-} == --stale-ok ]] && stale_ok=1
+    incus info "$GOLDEN_INST" >/dev/null 2>&1 && die "$GOLDEN_INST 가 이미 있습니다 — 다른 이름은 SBOX_GOLDEN_INST=… 로, 교체는 'incus delete -f' 를 직접(파괴적)"
+    local repo t0=$SECONDS iso
+    repo=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
+    build_iso "$stale_ok"
+    iso=$ISO_PATH
+
+    SBOX_CUR=$GOLDEN_INST
     local t_init=$SECONDS
     # 같은 이름의 VM 을 지운 직후 곧바로 만들면 실패하거나 오래 멈춘 적이 있다(2026-11-22 두 번, 원인은 삭제 지연 경합으로 추정) —
     # 오류를 숨기지 않고 보여 주며 최대 3번 재시도한다.
@@ -197,7 +221,7 @@ PARAMS_EOF
     # 비밀번호: 무작위로 만들어 표준입력으로만 넘긴다(저장·출력 안 함). VM 안 Claude 가 sudo 를 못 쓰게 하는 방침과 같다 —
     # 관리가 필요하면 호스트에서 incus exec(root) 로 하거나 passwd 로 새로 정한다.
     local log
-    log=${DEVVM_INSTALL_LOG:-$HOME/.local/state/devvm/rebuild-golden-$(date +%y%m%d-%H%M%S).log}
+    log=${SBOX_INSTALL_LOG:-$HOME/.local/state/sbox/rebuild-golden-$(date +%y%m%d-%H%M%S).log}
     mkdir -p "$(dirname "$log")"
     say "nixstrap 자동 설치 시작(로그 $log)"
     # 설치 중에도 호스트 nix-serve 캐시를 쓴다(공개 캐시에 없는 로컬 빌드물을 재빌드하지 않게). 라이브 환경의 root 는 신뢰 사용자라 NIX_CONFIG 가 먹는다.
@@ -296,8 +320,8 @@ cmd_token() {
     # shellcheck disable=SC2016  # $VM_CLAUDE_TOKEN·$1.. 는 donghans secret run 이 띄운 셸이 펼친다(명령줄에 값이 없게)
     donghans secret run --env VM_CLAUDE_TOKEN -- sh -c '
         printf %s "$VM_CLAUDE_TOKEN" | incus exec "$1" --env PATH="$2" -- sh -c "
-            set -e; umask 077; mkdir -p /run/devvm-claude; cat > $3
-            chown -R $4:$5 /run/devvm-claude; chmod 700 /run/devvm-claude"
+            set -e; umask 077; mkdir -p /run/sbox-claude; cat > $3
+            chown -R $4:$5 /run/sbox-claude; chmod 700 /run/sbox-claude"
     ' sh "$name" "$VM_PATH" "$TOKEN_PATH" "$VM_UID" "$VM_GID"
     local bytes
     bytes=$(vmx "$name" sh -c "wc -c < $TOKEN_PATH")
@@ -307,20 +331,28 @@ cmd_token() {
 }
 
 cmd_create() {
-    local name="" cache=1 token=1 home=1
+    local name="" cache=1 token=1 home=1 kind=""
     while (($#)); do
         case $1 in
             --no-cache) cache=0 ;;
             --no-token) token=0 ;;
             --no-home) home=0 ;;
+            --kind) shift; kind=${1:-} ;;
             -*) die "알 수 없는 옵션: $1" ;;
             *) name=$1 ;;
         esac
         shift
     done
-    [[ -n $name ]] || name="devvm-$(date +%y%m%d-%H%M)"
+    # 종류는 필수·기본값 없음: 빠뜨리면 실패한다(VM 용 보안 가정이 컨테이너로 번지지 않게 — plan §15 조건 ①)
+    case "$kind" in
+        vm) ;;
+        ct) die "ct 종류(컨테이너)는 아직 구현 전입니다 — 시험 전(plan dev-sandbox-pilot §15)" ;;
+        "") die "--kind vm|ct 가 필요합니다(기본값 없음)" ;;
+        *) die "알 수 없는 종류: $kind (vm|ct)" ;;
+    esac
+    [[ -n $name ]] || name="sbox-vm-$(date +%y%m%d-%H%M)"
     check_name "$name"
-    incus info "$GOLDEN_INST" >/dev/null 2>&1 || die "골든 $GOLDEN_INST 가 없습니다 — 먼저 'devvm.sh golden'"
+    incus info "$GOLDEN_INST" >/dev/null 2>&1 || die "골든 $GOLDEN_INST 가 없습니다 — 먼저 'sbox.sh golden'"
     incus info "$name" >/dev/null 2>&1 && die "$name 은 이미 있습니다"
     incus network show "$NETWORK" >/dev/null 2>&1 || die "브리지 $NETWORK 가 없습니다"
 
@@ -359,7 +391,7 @@ cmd_bundle() {
     if [[ -n $dirty ]]; then
         say "미커밋 변경 $(wc -l <<<"$dirty")건 — 번들에 들어가지 않습니다:"
         head -20 <<<"$dirty" | while IFS= read -r l; do printf '    %s\n' "$l"; done >&2
-        DEVVM_DIRTY=1
+        SBOX_DIRTY=1
     fi
     vmu "$name" git -C "$VM_REPO" bundle create - --all >"$out" 2>/dev/null || { rm -f "$out"; die "번들 생성 실패"; }
     [[ -s $out ]] || { rm -f "$out"; die "번들이 비었습니다"; }
@@ -380,15 +412,15 @@ cmd_import() {
     [[ $vm =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "번들 이름에서 VM 이름을 알 수 없습니다($base)"
     git -C "$repo" bundle verify "$bundle" >/dev/null 2>&1 || die "번들 검증 실패 — 필요한 선행 커밋이 호스트 저장소에 없거나 파일이 깨졌습니다"
     # 별도 ref 로만 받는다: 호스트의 브랜치·작업 트리는 건드리지 않는다. VM 안 내용은 신뢰하지 않으므로 사람이 보고 cherry-pick/병합한다.
-    git -C "$repo" fetch --quiet "$bundle" "refs/heads/*:refs/devvm/$vm/*" || die "fetch 실패"
-    say "가져옴: refs/devvm/$vm/*  (호스트 작업 트리·브랜치는 그대로)"
+    git -C "$repo" fetch --quiet "$bundle" "refs/heads/*:refs/sbox/$vm/*" || die "fetch 실패"
+    say "가져옴: refs/sbox/$vm/*  (호스트 작업 트리·브랜치는 그대로)"
     local ref
     while IFS= read -r ref; do
         say "── $ref : 호스트 HEAD 에 없는 커밋"
         git -C "$repo" log --oneline --no-decorate "HEAD..$ref" | head -30 >&2
-    done < <(git -C "$repo" for-each-ref --format='%(refname)' "refs/devvm/$vm/")
-    say "검토: git log HEAD..refs/devvm/$vm/<브랜치> · 반영: git cherry-pick / git merge --no-ff (사람이 확인한 뒤)"
-    audit info import "$vm" "$bundle → refs/devvm/$vm/*"
+    done < <(git -C "$repo" for-each-ref --format='%(refname)' "refs/sbox/$vm/")
+    say "검토: git log HEAD..refs/sbox/$vm/<브랜치> · 반영: git cherry-pick / git merge --no-ff (사람이 확인한 뒤)"
+    audit info import "$vm" "$bundle → refs/sbox/$vm/*"
 }
 
 cmd_destroy() {
@@ -404,12 +436,12 @@ cmd_destroy() {
     done
     check_name "$name"
     incus info "$name" >/dev/null 2>&1 || die "$name 이 없습니다"
-    DEVVM_DIRTY=0
+    SBOX_DIRTY=0
     if ((force)); then
         say "--force: 번들 없이 지웁니다"
     else
         cmd_bundle "$name"
-        if ((DEVVM_DIRTY)) && ((!discard)); then
+        if ((SBOX_DIRTY)) && ((!discard)); then
             die "미커밋 변경이 있어 지우지 않습니다 — VM 안에서 커밋 후 다시 하거나 --discard-dirty (번들은 $BUNDLE_OUT 에 저장됨)"
         fi
     fi
@@ -422,7 +454,7 @@ cmd_destroy() {
     say "삭제 완료: $name"
 }
 
-cmd_list() { incus list '^devvm-' -c ns4 -f compact; }
+cmd_list() { incus list '^sbox-' -c ns4 -f compact; }
 
 case "${1:-}" in
     create) shift; cmd_create "$@" ;;
@@ -431,6 +463,7 @@ case "${1:-}" in
     import) shift; cmd_import "${1:-}" ;;
     golden) shift; cmd_golden "$@" ;;
     rebuild-golden) shift; cmd_rebuild_golden "$@" ;;
+    iso) shift; cmd_iso "$@" ;;
     cache) shift; cmd_cache "${1:-}" ;;
     token) shift; cmd_token "${1:-}" ;;
     home) shift; cmd_home "${1:-}" ;;
