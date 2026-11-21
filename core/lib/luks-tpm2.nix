@@ -15,45 +15,50 @@
   kernelModules ? ["tpm_tis" "tpm_crb"],
 }: let
   warnScript = pkgs.writeShellScript "tpm-fail-warning" ''
-      journalctl -f -n0 -o cat -u systemd-cryptsetup@${name}.service | grep -m1 -q "does not match current system state" || exit 0
-      echo
-      echo "=================================================================="
-      echo " WARNING: the TPM refused to unlock this disk."
-      echo " The boot state (Secure Boot keys / dbx / firmware / boot files)"
-      echo " differs from what was registered."
-      echo
-      echo " If you did NOT just change them yourself, do NOT type the recovery"
-      echo " passphrase. Power off and check with your trusted USB (nixseal)."
-      echo "=================================================================="
-      echo
+    journalctl -f -n0 -o cat -u systemd-cryptsetup@${name}.service | grep -m1 -q "does not match current system state" || exit 0
+    echo
+    echo "=================================================================="
+    echo " WARNING: the TPM refused to unlock this disk."
+    echo " The boot state (Secure Boot keys / dbx / firmware / boot files)"
+    echo " differs from what was registered."
+    echo
+    echo " If you did NOT just change them yourself, do NOT type the recovery"
+    echo " passphrase. Power off and check with your trusted USB (nixseal)."
+    echo "=================================================================="
+    echo
   '';
   # systemd 261 부터 `750-os-separator` pcrlock 컴포넌트(PCR 0~7·9·12~14)와 그 측정 유닛이 생겼다. 260.x 에는 둘 다 없다(유닛 파일이 없어 initrd 빌드가 실패한다).
   # 261 에서 이 유닛이 없으면 make-policy 가 PCR 7 을 조용히 뺀다(VM 시험 확인). 260.1 에서는 아래 VM 시험(저장소 nixpkgs)이 PCR 7 유지를 확인한다.
   hasOsSeparator = lib.versionAtLeast config.systemd.package.version "261";
 in {
   boot.initrd.availableKernelModules = kernelModules;
-  boot.initrd.systemd.storePaths = [
-    "${config.systemd.package}/lib/systemd/systemd-pcrextend"
-    "${pkgs.tpm2-tss}/lib"
-    "${pkgs.openssl.out}/lib"
-  ] ++ lib.optional failWarning warnScript;
+  boot.initrd.systemd.storePaths =
+    [
+      "${config.systemd.package}/lib/systemd/systemd-pcrextend"
+      "${pkgs.tpm2-tss}/lib"
+      "${pkgs.openssl.out}/lib"
+    ]
+    ++ lib.optional failWarning warnScript;
   boot.initrd.systemd.additionalUpstreamUnits = ["systemd-pcrphase-initrd.service"] ++ lib.optional hasOsSeparator "systemd-pcrosseparator.service";
-  boot.initrd.systemd.services = {
-    systemd-pcrphase-initrd.wantedBy = ["initrd.target"];
-  } // lib.optionalAttrs hasOsSeparator {
-    systemd-pcrosseparator.wantedBy = ["initrd.target"];
-  } // lib.optionalAttrs failWarning {
-    tpm-fail-warning = {
-      description = "Warn when the TPM refuses to unlock the disk";
-      wantedBy = ["initrd.target"];
-      unitConfig.DefaultDependencies = false;
-      serviceConfig = {
-        Type = "simple";
-        ExecStart = "${warnScript}";
-        StandardOutput = "journal+console"; # 화면(콘솔)에 뜨고 저널에도 남는다
+  boot.initrd.systemd.services =
+    {
+      systemd-pcrphase-initrd.wantedBy = ["initrd.target"];
+    }
+    // lib.optionalAttrs hasOsSeparator {
+      systemd-pcrosseparator.wantedBy = ["initrd.target"];
+    }
+    // lib.optionalAttrs failWarning {
+      tpm-fail-warning = {
+        description = "Warn when the TPM refuses to unlock the disk";
+        wantedBy = ["initrd.target"];
+        unitConfig.DefaultDependencies = false;
+        serviceConfig = {
+          Type = "simple";
+          ExecStart = "${warnScript}";
+          StandardOutput = "journal+console"; # 화면(콘솔)에 뜨고 저널에도 남는다
+        };
       };
     };
-  };
   systemd.additionalUpstreamSystemUnits = ["systemd-pcrphase.service" "systemd-pcrphase-sysinit.service"];
   environment.etc.systemd-pcrlock-builtin = {
     target = "pcrlock.d";

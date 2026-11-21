@@ -20,8 +20,15 @@ let
   }) {system = "x86_64-linux";};
   lzPkgs = lz.inputs.nixpkgs.legacyPackages.x86_64-linux;
   # 저장소 nixpkgs(26.05)와 틀(lanzaboote 의 common/)의 차이를 메우는 shim: image.repart.enable 옵션(26.05 에는 없음)·OVMF.
-  repoShim = {lib, pkgs, ...}: {
-    options.image.repart.enable = lib.mkOption {type = lib.types.bool; default = true;};
+  repoShim = {
+    lib,
+    pkgs,
+    ...
+  }: {
+    options.image.repart.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+    };
     # 26.05 에서는 TPM(TCG)·Secure Boot 가 들어 있는 OVMFFull 을 명시해야 한다(새 nixpkgs 는 기본 OVMF 에 들어 있다)
     config.virtualisation = {
       efi.OVMF = pkgs.OVMFFull;

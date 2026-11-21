@@ -99,7 +99,7 @@
     assert rc() == 0, rescue.succeed("cat /tmp/out")
     assert not esp_has("EFI/Linux/evil2.efi") and esp_has("EFI")
   '';
-prepExport = ''
+  prepExport = ''
 
     # prep: 대상 디스크·USB 이미지를 호스트 공유 디렉터리로 꺼낸다(driver 는 끝나면 vm-state 를 지운다) — 호스트가 PREP_TAKE 파일을 만들 때까지 기다린다
     rescue.succeed("sync; umount /usb; dd if=/dev/vdb bs=4M 2>/dev/null | gzip -1 > /tmp/shared/target.img.gz; dd if=/dev/vdc bs=4M 2>/dev/null | gzip -1 > /tmp/shared/usb.img.gz; ls -la /tmp/shared/")
@@ -124,5 +124,11 @@ in {
     environment.systemPackages = [nixseal pkgs.parted pkgs.btrfs-progs pkgs.dosfstools pkgs.cryptsetup pkgs.sbctl pkgs.e2fsprogs pkgs.openssl];
     nix.settings.substituters = lib.mkForce [];
   };
-  testScript = prepScript + (if scenario == "prep" then prepExport else checkScript);
+  testScript =
+    prepScript
+    + (
+      if scenario == "prep"
+      then prepExport
+      else checkScript
+    );
 }
