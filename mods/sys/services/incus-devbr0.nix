@@ -15,7 +15,18 @@
 # 못 시험한 것(S1 적용 뒤 프로브로 확인): nixos-fw 와의 결합, UDP DNS/DHCP 실동작, FORWARD/NAT, incus 가 브리지에 자동으로 넣는 규칙(ipv4.firewall)과의 중복.
 # 되돌리는 법: 호스트 toml 의 `incus-devbr0` 를 false 로 하고 nixup. preseed 는 네트워크를 지우지 않으므로 VM 을 지운 뒤 `incus network delete devbr0`.
 {mkMod, ...}:
-mkMod __curPos "격리 개발 VM 용 incus 브리지(devbr0)와 호스트 방화벽" ({config, ...}: {
+mkMod __curPos "격리 개발 VM 용 incus 브리지(devbr0)와 호스트 방화벽" ({
+  config,
+  lib,
+  ...
+}: let
+  # devbr0 전용 Nix 캐시(nix-serve-devbr0.nix, 포트 5000) 예외. 그 모듈이 같은 hook+priority(-10)의
+  # 별도 nft 표를 만들면 devbr0-guard 의 마지막 `drop` 과 평가 순서가 보장되지 않아(둘 다 바뀔 수 있음:
+  # 어느 쪽이 먼저 돌지 nftables 가 보증 안 함) 2026-11-22 접속 안 됨으로 재현됨 → 같은 체인 안에 직접 둔다.
+  nixServeCacheRule = lib.optionalString config.mods.sys.services.nix-serve-devbr0.enable ''
+    iifname "devbr0" ip daddr 10.100.1.1 tcp dport 5000 accept
+  '';
+in {
   os = {
     assertions = [
       {
@@ -55,6 +66,7 @@ mkMod __curPos "격리 개발 VM 용 incus 브리지(devbr0)와 호스트 방화
           iifname "devbr0" udp dport 67 accept
           iifname "devbr0" ip daddr 10.100.1.1 udp dport 53 accept
           iifname "devbr0" ip daddr 10.100.1.1 tcp dport 53 accept
+          ${nixServeCacheRule}
           iifname "devbr0" drop
         }
         chain forward {
@@ -71,6 +83,7 @@ mkMod __curPos "격리 개발 VM 용 incus 브리지(devbr0)와 호스트 방화
       iifname "devbr0" udp dport 67 accept
       iifname "devbr0" ip daddr 10.100.1.1 udp dport 53 accept
       iifname "devbr0" ip daddr 10.100.1.1 tcp dport 53 accept
+      ${nixServeCacheRule}
     '';
 
     # VM→인터넷 TCP 단편화 방지(incus.nix 의 mss-clamp 는 incusbr0 만 대상이라 devbr0 용을 따로 둔다 — 같은 표의 체인을 중복 정의하지 않으려고 별도 표).

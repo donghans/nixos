@@ -39,21 +39,8 @@ mkMod __curPos "devbr0 전용 Nix 바이너리 캐시(호스트 스토어를 VM 
       bindAddress = "10.100.1.1"; # devbr0 브리지 주소에만 — 다른 인터페이스에는 안 들림
       port = 5000;
       secretKeyFile = "/var/lib/nix-serve-devbr0/cache-priv-key.pem";
-      openFirewall = false; # 아래 devbr0-guard 전용 예외로 대신한다(다른 인터페이스에는 안 염)
+      openFirewall = false; # 방화벽 예외는 incus-devbr0.nix 의 devbr0-guard 체인 안에 직접 둔다(이 모듈의 enable 을 그 모듈이 읽음) —
+      # 별도 nft 표로 두면 devbr0-guard 의 마지막 drop 과 같은 hook+priority 라 평가 순서가 보장되지 않아 2026-11-22 접속 안 됨으로 재현됨.
     };
-
-    # incus-devbr0.nix 의 devbr0-guard 표와 같은 패턴(DNS 예외와 동일한 방식)으로 5000(캐시)만 더 연다.
-    networking.nftables.tables.nix-serve-devbr0-guard = {
-      family = "inet";
-      content = ''
-        chain input {
-          type filter hook input priority -10; policy accept;
-          iifname "devbr0" ip daddr 10.100.1.1 tcp dport 5000 accept
-        }
-      '';
-    };
-    networking.firewall.extraInputRules = ''
-      iifname "devbr0" ip daddr 10.100.1.1 tcp dport 5000 accept
-    '';
   };
 })
