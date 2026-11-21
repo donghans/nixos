@@ -3,8 +3,10 @@
 #
 #   devvm.sh create [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 devvm-YYMMDD-HHMM)
 #   devvm.sh bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
+#   devvm.sh import BUNDLE                             번들을 호스트 저장소의 refs/devvm/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
 #   devvm.sh destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
 #   devvm.sh golden [SRC_INSTANCE]                     SRC(기본 dev-nixos)를 정상 종료 후 복제해 골든(devvm-golden@gold)을 새로 만듦
+#   devvm.sh rebuild-golden [--stale-ok]               ISO+nixstrap(NIXSTRAP_AUTO)로 골든을 처음부터 새로 만듦(약 15분)
 #   devvm.sh list                                      devvm-* VM 목록
 #
 # 전제·한계
@@ -15,7 +17,7 @@
 #  - 토큰은 VM 의 tmpfs(/run/devvm-claude/token)에만 둔다(재부팅하면 사라짐). 값은 명령줄·디스크에 남기지 않는다.
 set -euo pipefail
 
-GOLDEN_INST="devvm-golden"   # 정지 상태로만 둔다. 스냅샷 gold 가 복제 원본
+GOLDEN_INST="${DEVVM_GOLDEN_INST:-devvm-golden}"   # 정지 상태로만 둔다. 스냅샷 gold 가 복제 원본
 GOLDEN_SNAP="gold"
 GOLDEN_SRC_DEFAULT="${DEVVM_GOLDEN_SRC:-dev-nixos}"
 NETWORK="devbr0"
@@ -23,15 +25,16 @@ CACHE_URL="http://10.100.1.1:5000"
 CACHE_KEY_DEFAULT="devbr0-nix-serve:V+CdKcL1BZ5sgn4t7xsRsffYkG11gkjcqRThEp51034="
 CACHE_PUB_FILE="/var/lib/nix-serve-devbr0/cache-pub-key.pem"
 VM_USER="devvm"
-VM_UID=1001
-VM_GID=100
+VM_UID=""   # VM 마다 다르다(다시 만든 골든은 1000, 이름을 바꿔 만든 옛 골든은 1001) — resolve_ids 가 VM 안에서 조회한다
+VM_GID=""
+VM_IDS_FOR=""
 VM_HOME="/home/$VM_USER"
 VM_REPO="$VM_HOME/nixos"
 TOKEN_PATH="/run/devvm-claude/token"
 BUNDLE_DIR="${DEVVM_BUNDLE_DIR:-$HOME/.local/share/devvm/bundles}"
 # 골든에 처음부터 있는 파일(nixstrap 이 만든 호스트 파일·nixup 이 매번 건드리는 락)은 「미커밋 변경」으로 세지 않는다
 DIRTY_IGNORE="${DEVVM_DIRTY_IGNORE:-^(( M)|(\?\?)) (\.locks/_rolling\.lock|hosts/dev-nixos\.(nix|toml))$}"
-VM_PATH="/run/current-system/sw/bin:/bin" # incus exec 의 PATH 는 비어 있다(함정)
+VM_PATH="/run/wrappers/bin:/run/current-system/sw/bin:/bin" # incus exec 의 PATH 는 비어 있다(함정)
 
 AUDIT_LOG="${DEVVM_AUDIT_LOG:-$HOME/.local/state/devvm/audit.log}"
 
@@ -56,9 +59,25 @@ vmx() { # vmx NAME CMD… — VM 안에서 root 로 실행
     local name=$1; shift
     incus exec "$name" --env "PATH=$VM_PATH" -- "$@"
 }
+vmx_env() { # vmx_env NAME VAR=VAL… -- CMD… — 표준입력을 그대로 넘기며 환경변수를 주고 root 로 실행
+    local name=$1; shift
+    local -a envs=(--env "PATH=$VM_PATH")
+    while [[ ${1:-} != -- ]]; do envs+=(--env "$1"); shift; done
+    shift
+    incus exec "$name" "${envs[@]}" -- "$@"
+}
+resolve_ids() { # resolve_ids NAME — VM 안 devvm 사용자의 uid·gid 를 조회해 둔다(VM 별 1회)
+    [[ $VM_IDS_FOR == "$1" ]] && return 0
+    VM_UID=$(incus exec "$1" --env "PATH=$VM_PATH" -- id -u "$VM_USER") || die "$1 에서 사용자 $VM_USER 를 찾지 못했습니다"
+    VM_GID=$(incus exec "$1" --env "PATH=$VM_PATH" -- id -g "$VM_USER")
+    VM_IDS_FOR=$1
+}
 vmu() { # vmu NAME CMD… — VM 안에서 devvm 사용자로 실행
     local name=$1; shift
-    incus exec "$name" --user "$VM_UID" --group "$VM_GID" --env "HOME=$VM_HOME" --env "PATH=$VM_PATH" -- "$@"
+    resolve_ids "$name"
+    local -a extra=()
+    [[ -n ${NIX_CFG:-} ]] && extra=(--env "NIX_CONFIG=$NIX_CFG")
+    incus exec "$name" --user "$VM_UID" --group "$VM_GID" --env "HOME=$VM_HOME" --env "PATH=$VM_PATH" "${extra[@]}" -- "$@"
 }
 
 check_name() {
@@ -70,12 +89,18 @@ check_name() {
 }
 
 wait_agent() {
-    local name=$1
+    local name=$1 ok=0
     for _ in $(seq 1 90); do
-        if vmx "$name" true >/dev/null 2>&1; then return 0; fi
+        if vmx "$name" true >/dev/null 2>&1; then ok=1; break; fi
         sleep 2
     done
-    die "$name 의 에이전트가 180초 안에 응답하지 않았습니다"
+    ((ok)) || die "$name 의 에이전트가 180초 안에 응답하지 않았습니다"
+    # 에이전트는 DHCP 보다 먼저 응답한다 — 기본 경로(=네트워크)가 생길 때까지 최대 60초 더 기다린다
+    for _ in $(seq 1 30); do
+        vmx "$name" sh -c 'ip route 2>/dev/null | grep -q "^default"' >/dev/null 2>&1 && return 0
+        sleep 2
+    done
+    die "$name 의 네트워크(기본 경로)가 60초 안에 올라오지 않았습니다"
 }
 
 cmd_golden() {
@@ -97,13 +122,129 @@ cmd_golden() {
     audit info golden "$GOLDEN_INST" "$src 정상 종료 복제 → $GOLDEN_INST@$GOLDEN_SNAP"
 }
 
-cmd_cache() {
-    local name=$1 key=$CACHE_KEY_DEFAULT
-    check_name "$name"
+cmd_rebuild_golden() {
+    local stale_ok=0
+    [[ ${1:-} == --stale-ok ]] && stale_ok=1
+    incus info "$GOLDEN_INST" >/dev/null 2>&1 && die "$GOLDEN_INST 가 이미 있습니다 — 다른 이름은 DEVVM_GOLDEN_INST=… 로, 교체는 'incus delete -f' 를 직접(파괴적)"
+    local repo build_dir=${XDG_CACHE_HOME:-$HOME/.cache}/nixos/build
+    repo=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
+    # 빌드 사본(.build 는 nixup 이 만든 사본)이 낡았으면 ISO 의 nixstrap 도 낡다 — 먼저 `nixup check` 로 갱신
+    if ((!stale_ok)) && ! diff -q "$build_dir/core/scripts/nixstrap.sh" "$repo/core/scripts/nixstrap.sh" >/dev/null 2>&1; then
+        die "빌드 사본($build_dir)의 nixstrap.sh 가 저장소와 다릅니다 — 'nixup check' 로 갱신하거나 --stale-ok"
+    fi
+    local t0=$SECONDS iso_link=${XDG_CACHE_HOME:-$HOME/.cache}/nixos/dev-iso iso
+    say "ISO 빌드(변경 없으면 캐시)"
+    nix build "path:$build_dir#nixosConfigurations.custom-iso.config.system.build.isoImage" --impure --out-link "$iso_link" >&2 \
+        || die "ISO 빌드 실패"
+    iso=$(find "$(readlink -f "$iso_link")/iso" -maxdepth 1 -name '*.iso' 2>/dev/null | head -1)
+    [[ -r $iso ]] || die "ISO 파일을 찾지 못했습니다($iso_link)"
+    say "ISO 준비 완료($((SECONDS - t0))초): $iso"
+
+    DEVVM_CUR=$GOLDEN_INST
+    local t_init=$SECONDS
+    # 같은 이름의 VM 을 지운 직후 곧바로 만들면 실패하거나 오래 멈춘 적이 있다(2026-11-22 두 번, 원인은 삭제 지연 경합으로 추정) —
+    # 오류를 숨기지 않고 보여 주며 최대 3번 재시도한다.
+    local _try _err
+    for _try in 1 2 3; do
+        if _err=$(timeout 120 incus init --empty --vm "$GOLDEN_INST" -n "$NETWORK" -c limits.cpu=4 -c limits.memory=8GiB \
+            -c security.secureboot=false -d root,size=120GiB 2>&1); then break; fi
+        say "incus init 실패($_try/3): ${_err##*$'\n'}"
+        incus delete -f "$GOLDEN_INST" >/dev/null 2>&1 || true
+        sleep 10
+        [[ $_try == 3 ]] && die "incus init 3회 실패($GOLDEN_INST): ${_err##*$'\n'}"
+    done
+    say "incus init $((SECONDS - t_init))초"
+    incus config device add "$GOLDEN_INST" iso disk source="$iso" boot.priority=10 >/dev/null
+    incus start "$GOLDEN_INST"
+    wait_agent "$GOLDEN_INST"
+
+    # PARAMS_FILE: 선택값을 미리 적는다(nixstrap 의 save_params 형식). 디스크 전체 삭제는 이 빈 VM 의 가상 디스크(sda)에만 적용된다.
+    # 부트 영역 끝값은 호스트에서 같은 스크립트로 계산한다(ISO 의 기본 PATH 에는 python3 가 없고 nixstrap-wrapped 만 자기 PATH 에 넣어 쓴다)
+    local boot_end
+    boot_end=$(python3 "$repo/core/scripts/nixstrap.lib-part.py" boot-end 1MiB 1GiB) || die "boot-end 계산 실패"
+    [[ $(vmx "$GOLDEN_INST" sh -c 'lsblk -dno SIZE,TYPE /dev/sda') == *disk* ]] || die "/dev/sda 가 없습니다"
+    vmx "$GOLDEN_INST" sh -c "cat > /root/nixstrap-params.env" <<PARAMS_EOF
+NIXOS_REPO=donghans/nixos
+HOST=dev-nixos
+_HOST_IS_NEW=true
+_HOST_TYPE=
+_HOST_PRESET_FROM_REPO=
+_PRESET=workstation
+_STATE_VERSION=
+_HOST_USERNAME=$VM_USER
+_PART_MODE=2
+_NEW_PARTITIONS=true
+BOOT_PART=/dev/sda1
+ROOT_PART=/dev/sda2
+FORMAT_BOOT=y
+FORMAT_ROOT=y
+_DISK=/dev/sda
+_WIPE=true
+_PART_START=1MiB
+_PART_END=100%
+_BOOT_SIZE=1GiB
+_BOOT_END=$boot_end
+_NEW_BOOT_NUM=1
+_NEW_ROOT_NUM=2
+_SSH_ACCESS_MODE=
+_SSH_KEY_FILE=
+_SSH_KEY_GENERATED=false
+_LUKS=false
+_IS_LAPTOP=false
+_REFIND=false
+PARAMS_EOF
+    audit info rebuild-golden "$GOLDEN_INST" "ISO 부팅·params 주입 완료, nixstrap 시작($((SECONDS - t0))초)"
+    # 비밀번호: 무작위로 만들어 표준입력으로만 넘긴다(저장·출력 안 함). VM 안 Claude 가 sudo 를 못 쓰게 하는 방침과 같다 —
+    # 관리가 필요하면 호스트에서 incus exec(root) 로 하거나 passwd 로 새로 정한다.
+    local log
+    log=${DEVVM_INSTALL_LOG:-$HOME/.local/state/devvm/rebuild-golden-$(date +%y%m%d-%H%M%S).log}
+    mkdir -p "$(dirname "$log")"
+    say "nixstrap 자동 설치 시작(로그 $log)"
+    # 설치 중에도 호스트 nix-serve 캐시를 쓴다(공개 캐시에 없는 로컬 빌드물을 재빌드하지 않게). 라이브 환경의 root 는 신뢰 사용자라 NIX_CONFIG 가 먹는다.
+    local nixcfg
+    nixcfg=$(printf 'extra-substituters = %s\nextra-trusted-public-keys = %s' "$CACHE_URL" "$(cache_key)")
+    # 에이전트는 DHCP 보다 먼저 응답하므로 네트워크가 올라올 때까지 최대 60초 기다린다
+    local _n up=0
+    for _n in $(seq 1 30); do
+        vmx "$GOLDEN_INST" curl -sf --max-time 3 "$CACHE_URL/nix-cache-info" >/dev/null 2>&1 && { up=1; break; }
+        sleep 2
+    done
+    ((up)) || die "라이브 환경에서 캐시($CACHE_URL)에 닿지 않습니다(60초 대기)"
+    if ! head -c 18 /dev/urandom | base64 | vmx_env "$GOLDEN_INST" NIXSTRAP_AUTO=1 TERM=dumb "NIX_CONFIG=$nixcfg" -- nixstrap-wrapped >"$log" 2>&1; then
+        die "nixstrap 설치 실패 — 로그: $log (VM $GOLDEN_INST 는 남겨 둡니다)"
+    fi
+    say "설치 끝($((SECONDS - t0))초) — 재부팅"
+    incus stop "$GOLDEN_INST"
+    incus config device remove "$GOLDEN_INST" iso
+    incus config set "$GOLDEN_INST" raw.qemu="-cpu host,-vmx"
+    incus start "$GOLDEN_INST"
+    wait_agent "$GOLDEN_INST"
+    # 홈이 설치 중에 적용되지 않았으면 여기서 적용
+    if ! vmu "$GOLDEN_INST" test -x "$VM_HOME/.nix-profile/bin/claude"; then
+        say "설치 중 홈 적용이 안 됐음 — 재부팅 뒤 nixup home"
+        home_apply "$GOLDEN_INST"
+    fi
+    vmu "$GOLDEN_INST" test -x "$VM_HOME/.nix-profile/bin/claude" || die "골든에 claude 가 없습니다"
+    vmx "$GOLDEN_INST" sh -c "rm -f $VM_HOME/.nixstrap-first-run; sync"
+    incus stop "$GOLDEN_INST"
+    incus snapshot create "$GOLDEN_INST" "$GOLDEN_SNAP"
+    audit info rebuild-golden "$GOLDEN_INST" "처음부터 재생성 완료($((SECONDS - t0))초)"
+    say "완료: $GOLDEN_INST@$GOLDEN_SNAP ($((SECONDS - t0))초)"
+}
+
+cache_key() { # 호스트 nix-serve 의 공개키(읽을 수 있으면 호스트 파일, 아니면 기본값)
+    local key=$CACHE_KEY_DEFAULT
     if [[ -r $CACHE_PUB_FILE ]]; then
         key=$(<"$CACHE_PUB_FILE")
         [[ $key == "$CACHE_KEY_DEFAULT" ]] || say "주의: 호스트 공개키가 기본값과 다릅니다 — 호스트 키($CACHE_PUB_FILE)를 씁니다"
     fi
+    printf '%s' "$key"
+}
+
+cmd_cache() {
+    local name=$1 key
+    check_name "$name"
+    key=$(cache_key)
     # nix.conf 는 /etc/static 으로의 심볼릭 링크(읽기 전용) — 파일로 바꾸고 extra-* 한 줄씩 덧붙인다. 이미 있으면 건너뜀.
     # shellcheck disable=SC2016  # 작은따옴표 안의 $1·$2 는 VM 쪽 셸이 펼친다
     vmx "$name" sh -c '
@@ -123,9 +264,20 @@ cmd_cache() {
     fi
 }
 
-cmd_home() {
+cmd_home() { check_name "${1:-}"; home_apply "$1"; }
+
+home_apply() { # 이름 규칙 검사 없이 홈 적용(rebuild-golden 이 골든 이름으로도 부른다)
     local name=$1
-    check_name "$name"
+    resolve_ids "$name"
+    # nixup 은 ~/.cache/nixos/build/hardware.nix 가 없으면 sudo 로 만들려 한다 — 터미널이 없어 실패하므로 root 가 미리 만들어 둔다.
+    vmx "$name" sh -c "
+        set -e
+        d=$VM_HOME/.cache/nixos/build; mkdir -p \$d
+        [ -s \$d/hardware.nix ] || nixos-generate-config --no-filesystems --show-hardware-config > \$d/hardware.nix
+        chown -R $VM_UID:$VM_GID $VM_HOME/.cache" || { audit critical home "$name" "hardware.nix 준비 실패"; return 0; }
+    # 호스트 nix-serve 캐시를 이 호출에만 적용한다(NIX_CONFIG — devvm 은 wheel 이라 신뢰 사용자). 이미지·nix.conf 는 건드리지 않는다.
+    local NIX_CFG
+    NIX_CFG=$(printf 'extra-substituters = %s\nextra-trusted-public-keys = %s' "$CACHE_URL" "$(cache_key)")
     # 골든에는 홈 프로필이 이미 있어 보통 몇 초 안에 끝난다. 실패해도 생성 전체를 막지는 않고 critical 로 알린다.
     if vmu "$name" sh -c "cd $VM_REPO && USER=$VM_USER nixup home" >/dev/null 2>&1; then
         vmu "$name" test -x "$VM_HOME/.nix-profile/bin/claude" || { audit critical home "$name" "nixup home 은 끝났으나 claude 가 없음"; return 0; }
@@ -139,6 +291,7 @@ cmd_token() {
     local name=$1
     check_name "$name"
     command -v donghans >/dev/null || die "donghans 명령이 없습니다"
+    resolve_ids "$name"
     # 값은 환경변수 → 표준입력으로만 흐른다(명령줄에 없음). 파일은 VM tmpfs, 0600, devvm 소유.
     # shellcheck disable=SC2016  # $VM_CLAUDE_TOKEN·$1.. 는 donghans secret run 이 띄운 셸이 펼친다(명령줄에 값이 없게)
     donghans secret run --env VM_CLAUDE_TOKEN -- sh -c '
@@ -179,7 +332,7 @@ cmd_create() {
     wait_agent "$name"
     # 골든은 같은 호스트명·머신 ID 를 물려받는다 — 같은 시기에 여러 대를 띄워도 DHCP 는 MAC 으로 구분되므로 두고 간다.
 
-    ((home)) && cmd_home "$name"
+    ((home)) && home_apply "$name"
     ((cache)) && cmd_cache "$name"
     ((token)) && cmd_token "$name"
 
@@ -215,6 +368,27 @@ cmd_bundle() {
     audit info bundle "$name" "$out"
     say "번들 저장: $out ($(du -h "$out" | cut -f1))"
     BUNDLE_OUT=$out
+}
+
+cmd_import() {
+    local bundle=${1:-}
+    [[ -r $bundle ]] || die "읽을 수 있는 번들 파일이 필요합니다: ${bundle:-(없음)}"
+    local repo base vm
+    repo=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)
+    base=$(basename "$bundle" .bundle)
+    vm=${base%-[0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]}
+    [[ $vm =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "번들 이름에서 VM 이름을 알 수 없습니다($base)"
+    git -C "$repo" bundle verify "$bundle" >/dev/null 2>&1 || die "번들 검증 실패 — 필요한 선행 커밋이 호스트 저장소에 없거나 파일이 깨졌습니다"
+    # 별도 ref 로만 받는다: 호스트의 브랜치·작업 트리는 건드리지 않는다. VM 안 내용은 신뢰하지 않으므로 사람이 보고 cherry-pick/병합한다.
+    git -C "$repo" fetch --quiet "$bundle" "refs/heads/*:refs/devvm/$vm/*" || die "fetch 실패"
+    say "가져옴: refs/devvm/$vm/*  (호스트 작업 트리·브랜치는 그대로)"
+    local ref
+    while IFS= read -r ref; do
+        say "── $ref : 호스트 HEAD 에 없는 커밋"
+        git -C "$repo" log --oneline --no-decorate "HEAD..$ref" | head -30 >&2
+    done < <(git -C "$repo" for-each-ref --format='%(refname)' "refs/devvm/$vm/")
+    say "검토: git log HEAD..refs/devvm/$vm/<브랜치> · 반영: git cherry-pick / git merge --no-ff (사람이 확인한 뒤)"
+    audit info import "$vm" "$bundle → refs/devvm/$vm/*"
 }
 
 cmd_destroy() {
@@ -254,7 +428,9 @@ case "${1:-}" in
     create) shift; cmd_create "$@" ;;
     bundle) shift; cmd_bundle "${1:-}" ;;
     destroy) shift; cmd_destroy "$@" ;;
+    import) shift; cmd_import "${1:-}" ;;
     golden) shift; cmd_golden "$@" ;;
+    rebuild-golden) shift; cmd_rebuild_golden "$@" ;;
     cache) shift; cmd_cache "${1:-}" ;;
     token) shift; cmd_token "${1:-}" ;;
     home) shift; cmd_home "${1:-}" ;;
