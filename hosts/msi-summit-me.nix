@@ -29,6 +29,11 @@ in {
       ./msi-summit-me/io-cost.nix
     ];
 
+    # (목적: io_uring 으로 열리는 커널 공격면을 막는다 — 값 2 = root 포함 전부 금지. 1 = 일반 사용자만 금지)
+    # (확인: plan/dev-sandbox §5·§8 T1~T4 — 호스트 값 2 에서 저장소 VM 시험 4종·nixos 시험 VM·incus VM·incus.service 재시작이 통과했다.
+    #  깨지는 것: QEMU 에 `aio=io_uring` 을 **명시**한 경우, io_uring 을 필수로 쓰는 앱. 불편하면 이 줄을 지우거나 1 로 바꾼다.)
+    boot.kernel.sysctl."kernel.io_uring_disabled" = 2;
+
     # llm-utils-project 관련 테스트를 위해 임시로 열어둔 포트
     networking.firewall.allowedTCPPorts = [7681];
 
