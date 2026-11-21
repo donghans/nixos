@@ -114,6 +114,14 @@ Show subcommand help:
     nixup clean --help
     nixup help clean
 .fi
+.SH ENVIRONMENT
+.TP
+.B NIXUP_REVIEW=1
+After each build, also write a human-readable summary and files for an AI review
+(\fIsummary.md\fR, \fIsummary.html\fR, \fIfull.json\fR, \fIchangelogs.json\fR, \fIprompt.md\fR)
+to \fI~/.local/state/nixup-review/<time>/\fR using \fInixup.review.py\fR.
+Compares the old and new system, and the lock files (\fIcore/flake.lock\fR, \fI.locks/*.lock\fR) against git HEAD.
+Changelog text is not downloaded (links only).
 .SH FILES
 .TP
 .I .env

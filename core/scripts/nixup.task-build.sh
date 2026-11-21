@@ -21,6 +21,13 @@ _show_nvd_diff() {
     else
         log_msg "Notice" "패키지 변경 없음 ($label)"
     fi
+
+    # NIXUP_REVIEW=1 이면 변화를 보기 쉬운 요약·AI 전달용 파일로도 남긴다(~/.local/state/nixup-review/<시각>/). 실패해도 배포는 계속한다.
+    if [ "${NIXUP_REVIEW:-0}" = "1" ]; then
+        log_exec "review" ">" "nixup.review ($label)"
+        python3 -B "$SCRIPT_DIR/nixup.review.py" "$old_store" "$new_store" --repo "$NIXOS_PATH" || log_msg "Notice" "변경 검토 파일 생성 실패 ($label)"
+        log_exec "review" "<" "nixup.review ($label)"
+    fi
 }
 
 # nix build + nom --json 필터 모드 래퍼

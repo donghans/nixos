@@ -38,6 +38,11 @@ NixOS update utility
   nixup check                   전체 호스트 완전 검사
   nixup check --fast            현재 호스트만 빠른 검사
 
+환경 변수:
+  NIXUP_REVIEW=1                빌드 직후 변화를 보기 쉬운 요약·AI 전달용 파일로 남김
+                                (~/.local/state/nixup-review/<시각>/ — summary.md·full.json·prompt.md 등)
+                                예: NIXUP_REVIEW=1 nixup os --build   (적용 없이 검토 파일만)
+
 서브커맨드별 도움말: nixup SUBCOMMAND --help
 EOF
 }
