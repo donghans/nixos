@@ -67,12 +67,17 @@ in {
           iifname "devbr0" ip daddr 10.100.1.1 udp dport 53 accept
           iifname "devbr0" ip daddr 10.100.1.1 tcp dport 53 accept
           ${nixServeCacheRule}
+          # 막힌 시도의 흔적(커널 로그 → journald): 초당 폭주해도 로그는 분당 6건(+순간 10건)까지만. 접두사로 grep 한다:
+          #   journalctl -k | grep 'devbr0-guard'  (plan dev-sandbox-pilot §13 — 가시성 보강 2)
+          iifname "devbr0" limit rate 6/minute burst 10 packets log prefix "devbr0-guard drop-input: " level warn
           iifname "devbr0" drop
         }
         chain forward {
           type filter hook forward priority -10; policy accept;
+          iifname "devbr0" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } limit rate 6/minute burst 10 packets log prefix "devbr0-guard drop-forward-private: " level warn
           iifname "devbr0" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } drop
           oifname "devbr0" iifname != "devbr0" ct state established,related accept
+          oifname "devbr0" iifname != "devbr0" limit rate 6/minute burst 10 packets log prefix "devbr0-guard drop-forward-in: " level warn
           oifname "devbr0" iifname != "devbr0" drop
         }
       '';
