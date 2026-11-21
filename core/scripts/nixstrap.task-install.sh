@@ -447,6 +447,49 @@ _post_process() {
     fi
 }
 
+# 설치 직후 홈(home-manager)까지 적용을 시도한다. 성공하면 첫 로그인 안내 마커(.nixstrap-first-run)도 nixup 이 지운다.
+# 왜 시도만 하나: home-manager 는 standalone(커밋 508f302)이라 OS 설치와 별개 단계이며, 설치 중 chroot(nixos-enter)에는
+# 사용자 세션·systemd --user 가 없어 일부 활성화 단계가 실패할 수 있다(2026-11-22 기준 실제 동작은 시험 전 미확인).
+# 실패해도 설치는 성공으로 두고 기존 안내(재부팅 → nixup home)를 그대로 남긴다.
+_HOME_APPLIED=false
+_try_home_apply() {
+    [ "${NIXSTRAP_SKIP_HOME:-}" = "1" ] && return 0
+    log_msg "Done" "사용자 '$USERNAME' 의 홈 환경 적용(nixup home) 시도 중... (실패해도 설치는 유효합니다)"
+    local _sw=/nix/var/nix/profiles/system/sw/bin
+    # chroot 에는 setuid sudo 래퍼가 없어 nixup 이 스스로 hardware.nix 를 만들 수 없다(2026-11-22 시험: "sudo must be owned by uid 0").
+    # 설치 단계가 이미 만든 같은 hardware.nix 를 nixup 이 찾는 사용자 캐시에 미리 넣고, 로그 디렉터리도 root 로 만들어 둔다.
+    local _hw_cache="/mnt/home/$USERNAME/.cache/nixos/build"
+    mkdir -p "$_hw_cache" /mnt/var/log/nixup
+    cp "$BUILD_DIR/hardware.nix" "$_hw_cache/hardware.nix"
+    nixos-enter --root /mnt --command "chown -R $USERNAME:users /home/$USERNAME/.cache && chown -R $USERNAME:users /var/log/nixup && chmod 775 /var/log/nixup"
+    # 외부에서 NIX_CONFIG(예: 호스트 nix-serve 캐시)를 줬으면 chroot 안의 nixup 에도 넘긴다(여러 줄 값이라 파일로 전달)
+    local _nixcfg_file=/tmp/.nixstrap-nixcfg
+    if [ -n "${NIX_CONFIG:-}" ]; then printf '%s' "$NIX_CONFIG" > "/mnt$_nixcfg_file"; else rm -f "/mnt$_nixcfg_file"; fi
+    # (아래 --command 문자열 안에서 mkdir -p /run/binfmt 를 하는 이유: 설치된 시스템의 nix.conf 가 /run/binfmt 를 빌드 샌드박스 경로로 요구하는데
+    #  chroot 에는 없다 — 2026-11-22 시험에서 빌드가 시작도 못 하고 경로 속성 조회 오류로 실패했다. 주석을 문자열 안에 두면 따옴표가 깨지니 밖에 둔다.)
+    if timeout 1800 nixos-enter --root /mnt --command "
+        set -e
+        export PATH=$_sw:/run/current-system/sw/bin:\$PATH
+        [ -s $_nixcfg_file ] && export NIX_CONFIG=\"\$(cat $_nixcfg_file)\"
+        mkdir -p /run/binfmt
+        nix-daemon & _dp=\$!
+        trap 'kill \$_dp 2>/dev/null || true' EXIT
+        sleep 3
+        su $USERNAME -s /bin/sh -c 'cd \$HOME/nixos && USER=$USERNAME nixup home'
+    "; then
+        if [ ! -e "/mnt/home/$USERNAME/.nixstrap-first-run" ]; then
+            _HOME_APPLIED=true
+            log_msg "Success" "홈 환경 적용 완료 — 재부팅 후 'nixup home' 은 필요 없습니다."
+        else
+            log_msg "Notice" "nixup home 은 끝났으나 첫 실행 마커가 남아 있습니다 — 재부팅 후 'nixup home' 을 한 번 실행하세요."
+        fi
+        rm -f "/mnt$_nixcfg_file"
+    else
+        rm -f "/mnt$_nixcfg_file"
+        log_msg "Notice" "설치 중 홈 적용 실패 — 설치는 정상입니다. 재부팅 → TTY 로그인 → 'nixup home' 으로 적용하세요."
+    fi
+}
+
 phase2_execute() {
     _cleanup_mounts         # 1. 이전 마운트 정리
     _read_disk_labels       # 2. TOML → nixstrap.lib-repo.py disk-labels → BOOT_LABEL, DISK_LABEL
@@ -465,6 +508,7 @@ phase2_execute() {
     _generate_hw_config     # 13. hardware.nix → BUILD_DIR에 직접 생성
     _install_nixos          # 14. nixos-install
     _post_process           # 15. mv, chown, symlink
+    _try_home_apply         # 15b. 홈(home-manager) 적용 시도 — 실패해도 설치는 유효
     _register_refind        # 16. rEFInd NVRAM 항목 등록 (_REFIND 호스트만)
     _save_ssh_pem           # 17. PEM → ~/.ssh/ (generate-key 모드만)
     _commit_ssh_files       # 18. pub key + TOML 커밋 + push 시도
@@ -473,5 +517,9 @@ phase2_execute() {
     _luks_header_backup
     _luks_final_notice
     echo ""
-    log_msg "Success" "설치 완료. 재부팅 → TTY 로그인 → 'nixup home' → 재로그인."
+    if [ "$_HOME_APPLIED" = true ]; then
+        log_msg "Success" "설치 완료. 재부팅하면 홈 환경까지 적용된 상태입니다."
+    else
+        log_msg "Success" "설치 완료. 재부팅 → TTY 로그인 → 'nixup home' → 재로그인."
+    fi
 }

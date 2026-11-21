@@ -121,7 +121,23 @@ if _VIRT_TYPE=$(systemd-detect-virt 2>/dev/null); then
 fi
 
 # -- Phase 1: 입력 수집 --
-if load_params; then
+# 자동 모드(NIXSTRAP_AUTO=1): 미리 만든 PARAMS_FILE 로 모든 선택을 대신하고 비밀번호만 표준입력 첫 줄에서 읽는다.
+# 목적: 일회용 VM 골든 이미지 생성 같은 비대화형 설치(devvm.sh rebuild-golden). 대화형 사용은 영향 없음.
+# - 비밀번호는 표준입력으로만 받는다(파일·환경변수·인자에 두지 않는다). 서버·워크스테이션 구분 없이 비어 있으면 거부.
+# - 디스크 전체 삭제 같은 파괴적 선택도 PARAMS_FILE 의 값을 그대로 따른다 → 이 모드는 사람이 직접 켠 때만 쓴다.
+# - LUKS 는 복구 암호를 사람이 기록해야 하므로 지원하지 않는다.
+if [ "${NIXSTRAP_AUTO:-}" = "1" ]; then
+    [ -f "$PARAMS_FILE" ] || { log_msg "Error" "NIXSTRAP_AUTO=1 인데 $PARAMS_FILE 가 없습니다."; exit 1; }
+    # shellcheck disable=SC1090
+    source "$PARAMS_FILE"
+    ensure_repo_present || exit 1
+    [ "${_LUKS:-false}" = "true" ] && { log_msg "Error" "자동 모드는 LUKS 를 지원하지 않습니다."; exit 1; }
+    [ -n "${HOST:-}" ] || { log_msg "Error" "PARAMS_FILE 에 HOST 가 없습니다."; exit 1; }
+    { [ -n "${BOOT_PART:-}" ] && [ -n "${ROOT_PART:-}" ]; } || { log_msg "Error" "PARAMS_FILE 의 파티션 정보가 불완전합니다."; exit 1; }
+    IFS= read -r _USER_PASSWORD || true
+    [ -n "$_USER_PASSWORD" ] || { log_msg "Error" "자동 모드: 표준입력 첫 줄에 비밀번호가 필요합니다."; exit 1; }
+    log_msg "Config" "자동 모드 — $PARAMS_FILE 로 진행(호스트 $HOST, 비밀번호는 표준입력)"
+elif load_params; then
     ensure_repo_present || exit 1
 else
     if [ -n "${NIXOS_REPO_PATH:-}" ]; then
@@ -137,8 +153,10 @@ else
     ask_partitions
     ask_luks
 fi
-review_loop
-ask_password
+if [ "${NIXSTRAP_AUTO:-}" != "1" ]; then
+    review_loop
+    ask_password
+fi
 if [ "$_LUKS" = true ]; then
     validate_luks_state || exit 1
     luks_generate_and_confirm "$_DISK" || exit 1
