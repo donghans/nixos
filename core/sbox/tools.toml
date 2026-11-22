@@ -34,7 +34,7 @@ desc = "Node.js (공식 tarball)"
 resolver = { type = "node-index" }
 url = "https://nodejs.org/dist/v{version}/node-v{version}-linux-x64.tar.xz"
 checksum = { type = "sums-file", url = "https://nodejs.org/dist/v{version}/SHASUMS256.txt", name = "node-v{version}-linux-x64.tar.xz" }
-signature = { type = "none", note = "Node 는 SHASUMS256.txt.sig·릴리스 키가 공개돼 있다 — 검증 추가는 후속(S43)" }
+signature = { type = "none", note = "SHASUMS256.txt 의 .asc·.sig 가 있음(직접 확인) — 릴리스 담당자가 여럿이라 허용할 키 지문 목록이 필요(독립 출처: nodejs/node README). 검증 추가는 S43" }
 archive = { type = "tar", strip = 1 }
 links = { node = "bin/node", npm = "bin/npm", npx = "bin/npx", corepack = "bin/corepack" }
 
@@ -44,7 +44,7 @@ desc = "Go (공식 go.dev/dl 아카이브)"
 resolver = { type = "go-json" }
 url = "https://go.dev/dl/{file}"
 checksum = { type = "go-json" }
-signature = { type = "none", note = "go.dev/dl 의 JSON 해시를 HTTPS 로 읽음(공식 서명 파일은 확인하지 못함)" }
+signature = { type = "none", note = "go.dev/dl 의 JSON 해시를 HTTPS 로 읽음. **정정(2026-11-22)**: 각 아카이브에 GPG 서명(.asc)이 실제로 있다(서명 키 주 키 EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796 「Google Inc. (Linux Packages Signing Authority)」, 서명용 하위 키는 순환) — 검증 추가는 S43. 이전에 「확인하지 못함」이라 쓴 것은 확인하지 않고 쓴 것이었다" }
 archive = { type = "tar", strip = 1 }
 links = { go = "bin/go", gofmt = "bin/gofmt" }
 
@@ -74,7 +74,7 @@ desc = "Docker Compose v2+ (공식 GitHub 릴리스 단일 바이너리, docker 
 resolver = { type = "github-release", repo = "docker/compose", tag_prefix = "v" }
 url = "https://github.com/docker/compose/releases/download/v{version}/docker-compose-linux-x86_64"
 checksum = { type = "sums-file", url = "https://github.com/docker/compose/releases/download/v{version}/checksums.txt", name = "docker-compose-linux-x86_64" }
-signature = { type = "none", note = "릴리스에 Sigstore 번들(.sigstore.json)·provenance 가 있다 — cosign 검증은 후속(S50). 지금은 HTTPS(GitHub)+TOFU" }
+signature = { type = "none", note = "릴리스의 .sigstore.json(SLSA provenance, in-toto)을 cosign 으로 검증하면 통과(직접 시험: 서명 신원 https://github.com/docker/github-builder/.github/workflows/bake.yml, 1바이트 변조는 거부) — 카탈로그 반영은 S50. 지금은 HTTPS(GitHub)+TOFU" }
 archive = { type = "binary", name = "docker-compose" }
 links = { docker-compose = "docker-compose", "/usr/local/lib/docker/cli-plugins/docker-compose" = "docker-compose" }
 
@@ -84,6 +84,6 @@ desc = "uv (Python 패키지·프로젝트 관리자, 공식 GitHub 릴리스)"
 resolver = { type = "github-release", repo = "astral-sh/uv", tag_prefix = "" }
 url = "https://github.com/astral-sh/uv/releases/download/{version}/uv-x86_64-unknown-linux-gnu.tar.gz"
 checksum = { type = "sums-file", url = "https://github.com/astral-sh/uv/releases/download/{version}/uv-x86_64-unknown-linux-gnu.tar.gz.sha256", name = "uv-x86_64-unknown-linux-gnu.tar.gz" }
-signature = { type = "none", note = "릴리스에 .sha256 만 있고 GPG 서명은 확인하지 못함(GitHub 아티팩트 증명 가능성은 미확인, S50) — HTTPS(GitHub)+TOFU" }
+signature = { type = "none", note = "GitHub 아티팩트 증명(API /attestations/sha256:<해시>)에 SLSA provenance 번들이 있고 cosign 검증이 통과함(직접 시험) — 카탈로그 반영은 S50. 지금은 HTTPS(GitHub)+TOFU" }
 archive = { type = "tar", strip = 1 }
 links = { uv = "uv", uvx = "uvx" }
