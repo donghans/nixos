@@ -166,8 +166,8 @@ cmd_rebuild_golden() {
 
     SBOX_CUR=$GOLDEN_INST
     local t_init=$SECONDS
-    # 같은 이름의 VM 을 지운 직후 곧바로 만들면 실패하거나 오래 멈춘 적이 있다(2026-11-22 두 번, 원인은 삭제 지연 경합으로 추정) —
-    # 오류를 숨기지 않고 보여 주며 최대 3번 재시도한다.
+    # incus 생성 클라이언트가 응답 없이 수십 분 멈추거나 실패한 적이 있다(2026-11-22 네 번, 원인 미확인 — 같은 이름 재사용만의 문제는 아님:
+    # 새 이름으로도 재현). 오류를 숨기지 않고 보여 주며 시간 제한 후 최대 3번 재시도한다.
     local _try _err
     for _try in 1 2 3; do
         if _err=$(timeout 120 incus init --empty --vm "$GOLDEN_INST" -n "$NETWORK" -c limits.cpu=4 -c limits.memory=8GiB \
@@ -357,7 +357,7 @@ cmd_create() {
     incus network show "$NETWORK" >/dev/null 2>&1 || die "브리지 $NETWORK 가 없습니다"
 
     say "생성: $name ← $GOLDEN_INST@$GOLDEN_SNAP (스냅샷 복제, vmx 마스킹 켬 = 중첩 가상화 기본 꺼짐)"
-    # 같은 이름을 지운 직후 다시 만들면 incus 클라이언트가 수십 분 멈춘 적이 있다(2026-11-22 세 번 재현 — 이름 재사용 경합) —
+    # incus 클라이언트가 수십 분 멈춘 적이 있다(2026-11-22 네 번, 원인 미확인 — 새 이름으로도 재현) —
     # 시간 제한을 두고 실패하면 반쯤 만들어진 것을 지운 뒤 재시도한다.
     local _try _err
     for _try in 1 2 3; do
