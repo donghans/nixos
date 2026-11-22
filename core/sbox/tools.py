@@ -11,7 +11,9 @@
 
 서브명령(표준출력은 기계가 읽는 한 줄 또는 JSON):
   catalog                      카탈로그의 도구·역할·설명(JSON)
-  resolve TOOL [SPEC]          SPEC(22, 22.11, 22.11.0, latest, stable, lts) → 정확한 버전(de 는 SPEC 생략 시 latest)
+  resolve TOOL [SPEC]          SPEC(22, 22.11, 22.11.0, latest, stable, lts) → 정확한 버전(de 는 SPEC 생략 시 latest).
+                               움직이는 스펙(latest·lts·stable·메이저·메이저.마이너)은 공개된 지 SBOX_TOOLS_MIN_AGE_DAYS(기본 7, 0=끔)일 미만 버전을 건너뛴다(쿨다운, S55) —
+                               정확한 X.Y.Z 와 Python(pbs)·Claude 채널에는 적용 안 함
   fetch TOOL VERSION           내려받기·검증·풀기 → 풀린 폴더 경로
   links TOOL                   컨테이너 /usr/local/bin 에 만들 링크(이름 → 폴더 안 상대 경로, JSON)
   prune TOOL [--keep V]        표준입력으로 받은 「쓰이는 폴더 경로」 목록에 없는 옛 버전을 지움(--keep 은 남길 버전) → 지운 버전 목록
@@ -31,6 +33,8 @@
 검증: 체크섬 출처(HTTPS)와 받은 파일을 대조하고, 처음 본 (도구, 버전, 파일)의 해시를 잠금 파일(`~/.config/sbox/tools.lock`)에 적는다(TOFU).
 이후엔 잠금 값과 다르면 거부한다. 카탈로그에 서명(gpg-detached)이 선언돼 있으면 체크섬 문서를 gpg 로 검증하고 주 키 지문이 선언값과 같아야 통과한다.
 """
+import calendar
+import email.utils
 import hashlib
 import json
 import os
@@ -82,6 +86,130 @@ def vtuple(v):
 
 
 # ---------- 해석(resolver) ----------
+# ---------- 릴리스 최소 연령(쿨다운, S55) ----------
+def _min_age_days():
+    try:
+        return float(os.environ.get("SBOX_TOOLS_MIN_AGE_DAYS", "7"))
+    except ValueError:
+        fail("SBOX_TOOLS_MIN_AGE_DAYS 는 숫자(일)여야 합니다 — 0 이면 쿨다운을 끕니다")
+
+
+def _epoch(s):
+    """YYYY-MM-DD · ISO(2026-11-17T09:57:55Z) · YYYYMMDD(pbs 태그) · HTTP 날짜(Last-Modified) → 에포크 초. 읽지 못하면 None."""
+    if not s:
+        return None
+    s = str(s).strip()
+    try:
+        if re.fullmatch(r"\d{8}", s):
+            return calendar.timegm(time.strptime(s, "%Y%m%d"))
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s[:10]) and (len(s) == 10 or s[10] in "T "):
+            return calendar.timegm(time.strptime(s[:19] if len(s) >= 19 else s[:10], "%Y-%m-%dT%H:%M:%S" if len(s) >= 19 and s[10] == "T" else "%Y-%m-%d"))
+        return email.utils.parsedate_to_datetime(s).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+def _is_moving(spec):
+    """움직이는 가리킴(latest·lts·stable·메이저·메이저.마이너)인가 — 정확한 X.Y.Z 는 사용자가 직접 고른 것이라 쿨다운 대상이 아니다."""
+    return spec in ("latest", "lts", "stable") or bool(re.fullmatch(r"\d+(\.\d+)?", spec))
+
+
+def pick_aged(cands, min_days, now=None):
+    """cands: [(버전, 공개 에포크 초 또는 None)] 를 **새것부터** 훑는 이터러블(게으르게 소비). 공개된 지 min_days 일 이상인 첫 후보를 고른다.
+    반환 (버전 또는 None, 알림 문구 리스트, 건너뛴 더 새 버전들). 날짜를 못 읽은 후보는 막지 않고(안 보이는 안전이 되지 않게) 「날짜 불명 — 쿨다운 미적용」으로 알린다. min_days<=0 이면 첫 후보."""
+    now = time.time() if now is None else now
+    notes, first, skipped = [], None, []
+    for v, ts in cands:
+        if first is None:
+            first = v
+        if min_days <= 0:
+            return v, notes, []
+        if ts is None:
+            return v, notes + [f"{v}: 공개 날짜를 읽지 못해 쿨다운을 적용하지 못했습니다(날짜 불명)"], [sv for sv, _ in skipped]
+        age = (now - ts) / 86400
+        if age >= min_days:
+            if skipped:
+                notes.append("쿨다운 " + f"{min_days:g}일: " + ", ".join(f"{sv}(공개 {sa:.1f}일)" for sv, sa in skipped) + f" 는 건너뛰고 {v}(공개 {age:.1f}일) 를 고릅니다")
+            return v, notes, [sv for sv, _ in skipped]
+        skipped.append((v, age))
+    return None, notes + ([f"쿨다운 {min_days:g}일을 넘긴 후보가 없습니다(가장 새 {first})"] if first else ["후보가 없습니다"]), []
+
+
+def _node_cands(spec):
+    for e in json.loads(http(NODE_INDEX)):  # 최신순
+        v = e["version"].lstrip("v")
+        if not EXACT.fullmatch(v):
+            continue  # alpha·rc 제외
+        if (spec == "lts" and e.get("lts")) or (spec != "lts" and (v == spec or v.startswith(spec + "."))):
+            yield v, _epoch(e.get("date"))
+
+
+def _github_cands(r, spec):
+    pre = r.get("tag_prefix", "")
+    items = []
+    for x in json.loads(http(f"https://api.github.com/repos/{r['repo']}/releases?per_page=100")):
+        v = x["tag_name"].removeprefix(pre)
+        if x.get("prerelease") or x.get("draft") or not x["tag_name"].startswith(pre) or not re.fullmatch(r"\d+\.\d+\.\d+", v):
+            continue
+        if spec == "latest" or v == spec or v.startswith(spec + "."):
+            items.append((v, _epoch(x.get("published_at"))))
+    return sorted(items, key=lambda c: vtuple(c[0]), reverse=True)
+
+
+def _head_date(url):
+    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "sbox-tools/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310 — 카탈로그가 고정한 https 주소
+            return _epoch(r.headers.get("Last-Modified"))
+    except OSError:
+        return None
+
+
+def _go_cands(spec):
+    for e in _go_entries():  # 최신순 — go.dev JSON 에는 날짜가 없어 아카이브의 Last-Modified 를 쓴다(게으르게: 고를 때까지만 조회)
+        v = e["version"].removeprefix("go")
+        if spec == "latest" or v == spec or v.startswith(spec + "."):
+            yield v, _head_date(f"https://dl.google.com/go/go{v}.linux-amd64.tar.gz")
+
+
+def _rust_cands(spec):
+    """stable → 채널 문서의 최신 + 한 마이너씩 낮춘 문서들(최대 4개), X.Y → 그 문서 하나. 문서의 date 가 공개일."""
+    def doc(name):
+        try:
+            d = tomllib.loads(http(f"https://static.rust-lang.org/dist/{name}").decode())
+        except OSError:
+            return None
+        return d["pkg"]["rust"]["version"].split()[0], _epoch(d.get("date"))
+    if re.fullmatch(r"\d+\.\d+", spec):
+        c = doc(f"channel-rust-{spec}.toml")
+        if c:
+            yield c
+        return
+    first = doc("channel-rust-stable.toml")
+    if not first:
+        return
+    yield first
+    major, minor = (int(x) for x in first[0].split(".")[:2])
+    for m in range(minor - 1, max(minor - 4, -1), -1):
+        c = doc(f"channel-rust-{major}.{m}.toml")
+        if c:
+            yield c
+
+
+COOLDOWN_TYPES = ("node-index", "go-json", "github-release", "rust-channel")   # pbs(Python)는 제외 — 같은 버전이 여러 날짜 태그에 있고 fetch 가 가장 새 태그를 다시 고르므로 버전만 골라서는 쿨다운이 안 된다(한계, S55)
+
+
+def _cooldown_resolve(name, r, typ, spec):
+    cands = {"node-index": lambda: _node_cands(spec), "go-json": lambda: _go_cands(spec), "github-release": lambda: _github_cands(r, spec),
+             "rust-channel": lambda: _rust_cands(spec)}[typ]()
+    v, notes, skipped = pick_aged(cands, _min_age_days())
+    for n in notes:
+        print(f"sbox-tools: {name} {spec}: {n}", file=sys.stderr)
+    if v is None:
+        fail(f"{name} {spec}: 공개된 지 {_min_age_days():g}일 이상인 버전이 없습니다 — 정확한 X.Y.Z 로 지정하거나 SBOX_TOOLS_MIN_AGE_DAYS=0 으로 끄세요")
+    return v, skipped
+
+
 def resolve(name, spec=None):
     t = tool(name)
     r = t.get("resolver") or {}
@@ -91,7 +219,10 @@ def resolve(name, spec=None):
         if not spec:
             fail(f"{name}: 스펙이 필요합니다(re 도구는 생략할 수 없음)")
     spec = str(spec).lstrip("v")
-    if typ == "node-index":
+    cooled = []   # 쿨다운이 건너뛴 더 새 버전들 — 롤백 방지가 「이전에 본 버전이 낮아진 이유」로 설명받는다
+    if typ in COOLDOWN_TYPES and _is_moving(spec) and _min_age_days() > 0:
+        v, cooled = _cooldown_resolve(name, r, typ, spec)
+    elif typ == "node-index":
         v = _node_resolve(spec)
     elif typ == "go-json":
         v = _go_resolve(spec)
@@ -107,14 +238,14 @@ def resolve(name, spec=None):
         v = spec
     if not EXACT.fullmatch(v):
         fail(f"{name}: 해석한 버전이 올바르지 않습니다: {spec} → {v!r}")
-    _rollback_guard(name, spec, v, moving=(typ == "channel-file" and spec in r.get("channels", [])) or spec in ("latest", "lts", "stable"))
+    _rollback_guard(name, spec, v, moving=(typ == "channel-file" and spec in r.get("channels", [])) or spec in ("latest", "lts", "stable"), explained=cooled)
     mn = t.get("min_version")
     if mn and vtuple(v) < vtuple(mn):
         fail(f"{name} {v} 는 최소 버전 {mn} 보다 낮습니다(서명 없는 옛 릴리스 등) — 거부")
     return v
 
 
-def _rollback_guard(name, spec, v, moving):
+def _rollback_guard(name, spec, v, moving, explained=()):
     """움직이는 가리킴(latest·lts·채널 이름)이 **본 적 있는 최고 버전보다 낮은 버전**을 가리키면 거부한다(롤백·다운그레이드 방어, S47).
     채널 파일은 서명이 없어 공격자가 옛 서명 릴리스를 가리키게 해도 서명 검증은 통과하기 때문이다. 공급자의 정상 롤백이면
     SBOX_TOOLS_ALLOW_DOWNGRADE=1 로 한 번 허용한다. 고정 버전(정확한 X.Y.Z 스펙)에는 적용하지 않는다."""
@@ -123,6 +254,8 @@ def _rollback_guard(name, spec, v, moving):
     key = f"_max/{name}/{spec}"
     lock = load_lock()
     prev = lock.get(key)
+    if prev and vtuple(v) < vtuple(prev) and prev in explained:
+        return  # 이전에 본 더 높은 버전은 이번에 쿨다운이 건너뛴 후보다 — 롤백이 아니라 쿨다운이 낮춘 것(기준선은 그대로 둔다)
     if prev and vtuple(v) < vtuple(prev) and os.environ.get("SBOX_TOOLS_ALLOW_DOWNGRADE") != "1":
         fail(f"{name} {spec} 가 이전에 본 {prev} 보다 낮은 {v} 를 가리킵니다 — 롤백 공격이거나 공급자의 정상 롤백입니다. "
              f"확인 뒤 SBOX_TOOLS_ALLOW_DOWNGRADE=1 로 다시 실행하세요")
