@@ -8,7 +8,7 @@
 #   sbox.sh create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
 #   (ct 만) create 에 --from-repo DIR | --manifest F | --tool TOOL[=SPEC] (반복) | --update 를 주면 만든 직후 도구 층을 자동 적용 — 같은 매니페스트로 다시 만들면 같은 버전
 #   sbox.sh tools NAME [--from-repo DIR|--manifest F] [--update] [node=22]  컨테이너에 읽기 전용 도구 층 붙임(호스트가 받아 sha256 검증, 버전은 매니페스트에 고정, v1: node)
-#   sbox.sh llm AGENT NAME [--dir D] [--bypass] [--attach] [--version V] [--update]  안(vm·ct)에서 tmux 로 LLM 에이전트 대화형 세션 시작(정의 core/sbox/llm.toml, 첫 실행 안내 미리 처리·남으면 경고). `sbox.sh claude` 는 `llm claude` 의 별칭
+#   sbox.sh llm AGENT NAME [--dir D] [--bypass] [--attach] [--version V] [--update]  안(vm·ct)에서 tmux 로 LLM 에이전트 대화형 세션 시작(정의 core/sbox/llm.toml, 첫 실행 안내 미리 처리·남으면 경고).
 #   sbox.sh bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
 #   sbox.sh import BUNDLE                             번들을 호스트 저장소의 refs/sbox/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
 #   sbox.sh destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
@@ -786,7 +786,6 @@ case "${1:-}" in
     token) shift; cmd_token "${1:-}" "${2:-}" ;;
     home) shift; cmd_home "${1:-}" ;;
     llm) shift; cmd_llm "$@" ;;
-    claude) shift; echo "sbox: 'sbox.sh claude' 는 'sbox.sh llm claude' 의 별칭입니다" >&2; cmd_llm claude "$@" ;;
     tools) shift; cmd_tools "$@" ;;
     list) cmd_list ;;
     *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
