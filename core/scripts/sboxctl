@@ -8,6 +8,8 @@
 #   sboxctl create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
 #   (ct 만) create 에 --from-repo DIR | --manifest F | --tool TOOL[=SPEC] (반복) | --update 를 주면 만든 직후 도구 층을 자동 적용 — 같은 매니페스트로 다시 만들면 같은 버전
 #   sboxctl tools NAME [--from-repo DIR|--manifest F] [--update] [node=22]  컨테이너에 읽기 전용 도구 층 붙임(호스트가 받아 sha256 검증, 버전은 매니페스트에 고정, v1: node)
+#   sboxctl docker NAME [--from-repo DIR|--manifest F] [--update] [--no-compose]  컨테이너(ct, --nesting 필수) 안에 rootless Docker 설치(공식 apt, 키는 호스트가 고정 보관·교차 확인, 버전은 쿨다운 적용·매니페스트에 고정, Compose 는 도구 층)
+#   (ct 만) create 는 --from-repo/--manifest 로 compose·Dockerfile 이 감지되거나 매니페스트에 [resolved.docker] 가 있으면 --nesting 을 자동으로 켜고 Docker 까지 설치(--docker 로 강제, --no-docker 로 끔)
 #   sboxctl llm AGENT NAME [--dir D] [--bypass] [--attach] [--version V] [--update]  안(vm·ct)에서 tmux 로 LLM 에이전트 대화형 세션 시작(정의 core/sbox/llm.toml, 첫 실행 안내 미리 처리·남으면 경고).
 #   sboxctl bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
 #   sboxctl import BUNDLE                             번들을 호스트 저장소의 refs/sbox/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
@@ -422,13 +424,17 @@ print(" ".join(a["address"] for a in d.get("eth0",{}).get("addresses",[]) if a["
     if ((${#TOOLS_ARGS[@]})); then
         # 도구 층 자동 적용 — 매니페스트의 [resolved] 가 정확한 버전을 고정하므로 이 컨테이너를 지우고 다시 만들어도 같은 버전이 들어간다
         cmd_tools "$name" "${TOOLS_ARGS[@]}" || die "$name 은 만들어졌지만 도구 층 적용에 실패했습니다 — 'sboxctl tools $name …' 로 다시 시도하세요"
-    else
+    fi
+    if ((${DOCKER:-0})); then
+        cmd_docker "$name" "${DOCKER_ARGS[@]}" || die "$name 은 만들어졌지만 Docker 설치에 실패했습니다 — 'sboxctl docker $name …' 로 다시 시도하세요"
+    fi
+    if ((${#TOOLS_ARGS[@]} == 0)); then
         say "알림: 도구(Node·Go·Rust·Python·Compose·uv)는 'sboxctl tools $name --from-repo <저장소>' 또는 create 의 --from-repo/--tool 로 읽기 전용 도구 층을 붙입니다"
     fi
 }
 
 cmd_create() {
-    local name="" cache=1 token=1 home=1 kind="" flavor="" release="" legacy=0 nesting=0 cpu=2 mem=2GiB
+    local name="" cache=1 token=1 home=1 kind="" flavor="" release="" legacy=0 nesting=0 cpu=2 mem=2GiB docker=auto
     TOOLS_ARGS=()   # ct 전용: 만든 직후 도구 층에 넘길 인자(--from-repo·--manifest·--tool·--update) — 다시 만들 때 같은 버전이 재적용되게
     while (($#)); do
         case $1 in
@@ -436,6 +442,8 @@ cmd_create() {
             --manifest) TOOLS_ARGS+=(--manifest "${2:?}"); shift ;;
             --tool) TOOLS_ARGS+=("${2:?}"); shift ;;
             --update) TOOLS_ARGS+=(--update) ;;
+            --docker) docker=1 ;;
+            --no-docker) docker=0 ;;
             --no-cache) cache=0 ;;
             --no-token) token=0 ;;
             --no-home) home=0 ;;
@@ -454,7 +462,27 @@ cmd_create() {
     # 종류는 필수·기본값 없음: 빠뜨리면 실패한다(VM 용 보안 가정이 컨테이너로 번지지 않게 — plan §15 조건 ①)
     case "$kind" in
         vm) ;;
-        ct) create_ct "$name" "$flavor" "$release" "$legacy" "$nesting" "$cpu" "$mem" "$token"; return ;;
+        ct)
+            # 필요한 도구를 같이 초기화: Docker 가 필요하면(감지·매니페스트·--docker) nesting 을 켜고 만든 뒤 설치한다
+            DOCKER_ARGS=()
+            local _repo="" _man="" _i _w=""
+            for ((_i = 0; _i < ${#TOOLS_ARGS[@]}; _i++)); do
+                case ${TOOLS_ARGS[_i]} in
+                    --from-repo) _repo=${TOOLS_ARGS[_i+1]}; DOCKER_ARGS+=(--from-repo "$_repo") ;;
+                    --manifest) _man=${TOOLS_ARGS[_i+1]}; DOCKER_ARGS+=(--manifest "$_man") ;;
+                    --update) DOCKER_ARGS+=(--update) ;;
+                esac
+            done
+            [[ -z $_man && -n $_repo ]] && _man="$HOME/.config/sbox/manifests/$(basename "${_repo%/}").toml"
+            if [[ $docker == auto ]]; then
+                docker=0
+                if _w=$(python3 "$SBOX_DIR/dockerctl.py" wanted ${_repo:+--repo "$_repo"} ${_man:+--manifest "$_man"}); then
+                    docker=1; say "Docker 필요 감지(${_w#yes }) — nesting 을 켜고 만든 뒤 rootless Docker 를 설치합니다(끄려면 --no-docker)"
+                fi
+            fi
+            ((docker)) && nesting=1
+            DOCKER=$docker
+            create_ct "$name" "$flavor" "$release" "$legacy" "$nesting" "$cpu" "$mem" "$token"; return ;;
         "") die "--kind vm|ct 가 필요합니다(기본값 없음)" ;;
         *) die "알 수 없는 종류: $kind (vm|ct)" ;;
     esac
@@ -667,6 +695,71 @@ for i in json.load(sys.stdin):
     done <<<"$lines"
 }
 
+# ct 안 rootless Docker (plan dev-sandbox-pilot §29-15, S53·S19·S55). 호스트는 Docker 저장소에서 온 것을 실행하지 않는다 —
+# dockerctl.py 가 키(고정 보관·독립 출처 교차 확인)와 설치 버전(쿨다운 적용)을 정해 주면, 이 함수가 키·저장소 파일을 ct 에 써 넣고 ct 안 root 의 apt 가 설치한다(서명은 apt 가 고정 키로 검증).
+# 사용: docker NAME [--from-repo DIR | --manifest FILE] [--update] [--no-compose]   — ct 전용, 만들 때 --nesting 이 있어야 한다
+cmd_docker() {
+    local name=${1:-}; shift || true
+    [[ -n $name ]] || die "사용법: sboxctl docker NAME [--from-repo DIR | --manifest FILE] [--update] [--no-compose]"
+    check_name "$name"
+    [[ $NAME_KIND == ct ]] || die "Docker 설치는 컨테이너(ct)만 지원합니다(vm 은 nixos 설정으로)"
+    incus info "$name" >/dev/null 2>&1 </dev/null || die "$name 이 없습니다"
+    local manifest="" update="" compose=1
+    while (($#)); do
+        case $1 in
+            --from-repo) manifest="$HOME/.config/sbox/manifests/$(basename "${2:?}" | sed 's#/*$##').toml"; shift ;;
+            --manifest) manifest=${2:?}; shift ;;
+            --update) update=--update ;;
+            --no-compose) compose=0 ;;
+            *) die "docker: 알 수 없는 인자 $1" ;;
+        esac
+        shift
+    done
+    [[ $(incus config get "$name" security.nesting </dev/null) == true ]] \
+        || die "$name 은 security.nesting 이 꺼져 있습니다 — rootless Docker 에 필요합니다(만들 때 --nesting). 이 컨테이너를 지우고 --nesting 으로 다시 만드세요"
+    local osinfo distro codename arch
+    osinfo=$(incus exec "$name" --env "PATH=$CT_PATH" -- sh -c '. /etc/os-release; printf "%s %s %s" "$ID" "$VERSION_CODENAME" "$(dpkg --print-architecture)"' </dev/null) \
+        || die "$name 의 OS 정보를 읽지 못했습니다"
+    read -r distro codename arch <<<"$osinfo"
+    # 호스트에서: 키 고정·교차 확인 + 쿨다운을 적용한 설치 버전 선택(+ 매니페스트에 고정)
+    local plan_json
+    plan_json=$(python3 "$SBOX_DIR/dockerctl.py" plan --distro "$distro" --codename "$codename" --arch "$arch" ${manifest:+--manifest "$manifest"} $update) || die "Docker 설치 계획 실패"
+    local key_file sources dv cv
+    key_file=$(printf '%s' "$plan_json" | python3 -c 'import sys,json;print(json.load(sys.stdin)["key_file"])')
+    sources=$(printf '%s' "$plan_json" | python3 -c 'import sys,json;print(json.load(sys.stdin)["sources"],end="")')
+    dv=$(printf '%s' "$plan_json" | python3 -c 'import sys,json;print(json.load(sys.stdin)["versions"]["docker-ce"])')
+    cv=$(printf '%s' "$plan_json" | python3 -c 'import sys,json;print(json.load(sys.stdin)["versions"]["containerd.io"])')
+    printf '%s' "$plan_json" | python3 -c 'import sys,json
+for n in json.load(sys.stdin)["notes"]: print("sbox: "+n, file=sys.stderr)'
+    say "Docker: docker-ce $dv, containerd.io $cv ($distro $codename) → $name"
+    [[ -z $manifest ]] && say "알림: --from-repo·--manifest 가 없어 이 버전이 어디에도 고정되지 않습니다(같은 매니페스트로 다시 만들어도 같은 버전을 보장하려면 지정하세요)"
+    local ex=(incus exec "$name" --env "PATH=$CT_PATH" --env DEBIAN_FRONTEND=noninteractive --)
+    # 1) https 저장소를 읽을 최소 부품 → 키·저장소 파일(호스트가 만든 것) 기록 → 이미 고정돼 있으면 풀었다가 다시 고정
+    "${ex[@]}" sh -ec 'apt-mark unhold docker-ce docker-ce-cli docker-ce-rootless-extras containerd.io >/dev/null 2>&1 || true
+        apt-get update -qq
+        apt-get install -y -qq --no-install-recommends ca-certificates uidmap dbus-user-session >/dev/null' </dev/null || die "기본 부품 설치 실패"
+    incus file push "$key_file" "$name/etc/apt/keyrings/docker.asc" --create-dirs --uid 0 --gid 0 --mode 0644 </dev/null >/dev/null || die "키 파일 기록 실패"
+    printf '%s' "$sources" | "${ex[@]}" sh -c 'cat > /etc/apt/sources.list.d/docker.sources' || die "저장소 파일 기록 실패"
+    # 2) 정확한 버전으로 설치(추천 패키지 제외 — apt 의 compose 플러그인이 딸려 오지 않게), 고정, rootful 서비스 끄기
+    "${ex[@]}" sh -ec 'apt-get update -qq
+        apt-get install -y -qq --no-install-recommends --allow-downgrades "docker-ce=$1" "docker-ce-cli=$1" "docker-ce-rootless-extras=$1" "containerd.io=$2" >/dev/null
+        apt-mark hold docker-ce docker-ce-cli docker-ce-rootless-extras containerd.io >/dev/null
+        systemctl disable --now docker.service docker.socket >/dev/null 2>&1 || true
+        loginctl enable-linger sbox' _ "$dv" "$cv" </dev/null \
+        || die "Docker 패키지 설치 실패($name) — 시도한 버전 docker-ce $dv, containerd.io $cv"
+    # 3) 사용자 sbox 의 rootless 서비스(사용자 systemd 가 올라올 때까지 기다림)
+    "${ex[@]}" sh -c 'U=$(id -u sbox); for _ in $(seq 1 30); do [ -S /run/user/$U/bus ] && exit 0; sleep 1; done; exit 1' </dev/null || die "sbox 사용자 세션이 올라오지 않았습니다(linger)"
+    "${ex[@]}" su -s /bin/sh sbox -c 'U=$(id -u); export XDG_RUNTIME_DIR=/run/user/$U DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$U/bus HOME=/home/sbox PATH=/usr/bin:/bin:/usr/sbin:/sbin
+        dockerd-rootless-setuptool.sh install >/dev/null 2>&1 && systemctl --user is-active docker >/dev/null' </dev/null || die "rootless 설정 실패 — ct 안에서 'su - sbox -c dockerd-rootless-setuptool.sh install' 출력을 보세요"
+    # 4) Compose 는 도구 층(Sigstore 검증) 것을 쓴다 — apt 의 compose 플러그인은 설치하지 않음
+    if ((compose)); then
+        incus exec "$name" --env "PATH=$CT_PATH" -- test -e /usr/local/lib/docker/cli-plugins/docker-compose </dev/null 2>/dev/null \
+            || { if [[ -n $manifest && -f $manifest ]]; then cmd_tools "$name" --manifest "$manifest" compose=latest; else cmd_tools "$name" compose=latest; fi; } || say "경고: 도구 층 Compose 연결 실패 — 'sboxctl tools $name compose=latest' 로 다시 시도하세요"
+    fi
+    audit info docker "$name" "rootless Docker: docker-ce $dv, containerd.io $cv (${distro} ${codename}), 키 고정 ${key_file##*/}, apt-mark hold"
+    say "완료: $name — rootless Docker(docker-ce $dv). sbox 사용자로 'docker info'(Security Options: rootless). 올리려면 'sboxctl docker $name --update'(쿨다운 다시 적용)"
+}
+
 # 안에서 LLM 코딩 에이전트 대화형 세션을 tmux 로 시작한다(vm·ct 공통) — 에이전트별 정의는 core/sbox/llm.toml(plan dev-sandbox-pilot §29-10).
 # 첫 실행 안내를 설정 병합으로 미리 처리한다(claude: 테마·보안 안내·폴더 신뢰·bypass 경고 — §23 S42).
 #  vm: 에이전트는 홈 설정이 깐 것을 쓰고 tmux 는 nix shell 로.  ct: tmux 는 root 가 apt 로, 에이전트는 도구 층(호스트 검증)으로 설치.
@@ -788,6 +881,7 @@ case "${1:-}" in
     home) shift; cmd_home "${1:-}" ;;
     llm) shift; cmd_llm "$@" ;;
     tools) shift; cmd_tools "$@" ;;
+    docker) shift; cmd_docker "$@" ;;
     depwatch) shift; python3 "$SBOX_DIR/depwatch.py" "$@" ;;
     list) cmd_list ;;
     *) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' >&2; exit 2 ;;

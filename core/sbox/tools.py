@@ -23,7 +23,7 @@
   ct-check                     CT 로그(Cert Spotter)로 공식 배포 호스트의 인증서 발급 이력을 보고 처음 보는 발급 CA 가 나오면 경고
   crosscheck-status            waybar custom 모듈용 JSON(주기가 지나면 due, 불일치·경고가 있으면 alert, 정상이면 빈 텍스트)
   periodic [--force]           주기 점검 한 번(타이머가 매일 호출): 각 점검이 자기 주기가 지났을 때만 실행 — ct-check 매주 · pincheck 매월 · crosscheck-run 은 crosscheck.toml 의 interval
-  pincheck [TOOL]              서명 키 지문이 독립된 출처(키 파일·키 서버·과거 웹 아카이브·지문 목록)에서도 확인되는지 점검(JSON, 실패 시 종료코드 1)
+  pincheck [TOOL]              서명 키 지문이 독립된 출처(키 파일·키 서버·과거 웹 아카이브·지문 목록)에서도 확인되는지 점검(JSON, 실패 시 종료코드 1). `apt-key:docker` 도 포함
   infer REPO                   프로젝트 파일(.nvmrc·package.json engines·go.mod)에서 버전 추론 → JSON
   effective MANIFEST           매니페스트의 [override] 가 [inferred] 를 덮은 최종 도구 표 → JSON
   plan [--repo DIR] [--manifest FILE] [--update] [--tool T=SPEC ...]
@@ -69,9 +69,18 @@ def http(url):
         return r.read()
 
 
-def catalog():
+def _load_catalog():
     with open(CATALOG, "rb") as f:
         return tomllib.load(f)
+
+
+def catalog():
+    """도구 목록. `[apt-key.*]`(apt 저장소 서명 키 — 도구 층이 아니라 dockerctl 이 쓴다)는 도구가 아니므로 뺀다."""
+    return {k: v for k, v in _load_catalog().items() if k != "apt-key"}
+
+
+def aptkeys():
+    return _load_catalog().get("apt-key") or {}
 
 
 def tool(name):
@@ -695,8 +704,9 @@ def pincheck(only=None):
     ok_all = True
     work = tempfile.mkdtemp(prefix="pincheck-")
     try:
-        for name, t in catalog().items():
-            sg = t.get("signature") or {}
+        entries = [(n, t.get("signature") or {}) for n, t in catalog().items()]
+        entries += [(f"apt-key:{n}", dict(k, type="gpg-detached")) for n, k in aptkeys().items()]   # apt 서명 키도 같은 규칙(독립 출처 N곳)으로 점검
+        for name, sg in entries:
             if sg.get("type") != "gpg-detached" or (only and name != only):
                 continue
             fprs = _norm_fprs(sg)
@@ -1080,7 +1090,7 @@ def write_manifest(path, project, repo, inferred, override, resolved, tier=None)
         lines.append(f"{k} = {q(v['spec'])}  # 출처: {v['source']}".replace("\n", " "))
     lines += ["", "[override]"] + [f"{k} = {q(v)}" for k, v in sorted(override.items())]
     for k, v in sorted(resolved.items()):
-        lines += ["", f"[resolved.{k}]", f"spec = {q(v['spec'])}", f"version = {q(v['version'])}"]
+        lines += ["", f"[resolved.{k}]", f"spec = {q(v['spec'])}", f"version = {q(v['version'])}"] + [f"{kk} = {q(vv)}" for kk, vv in v.items() if kk not in ("spec", "version")]   # 추가 키(docker 의 containerd 등)도 보존
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -1143,6 +1153,8 @@ def plan(a):
             how = "새로 해석" + (" (--update)" if update else "")
         resolved[k] = {"spec": spec, "version": ver}
         out[k] = {"spec": spec, "version": ver, "source": src, "how": how, "role": "re"}
+    if resolved_old.get("docker"):
+        resolved["docker"] = resolved_old["docker"]   # 도구 층이 아닌 항목([resolved.docker], dockerctl.py 가 씀)은 다시 쓸 때 그대로 보존
     write_manifest(path, project, repo, inferred, override, resolved, tier=(old.get("project") or {}).get("tier"))  # 등급은 사람이 정한 값 — 다시 쓸 때 보존(안 하면 critical 이 조용히 general 로 돌아감)
     return {"manifest": path, "tools": out, "unsupported": unsupported}
 

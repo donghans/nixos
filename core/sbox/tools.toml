@@ -211,3 +211,21 @@ strip = 1
 python3 = "bin/python3"
 python = "bin/python3"
 pip3 = "bin/pip3"
+
+# ── apt 서명 키(도구 층이 아니라 `dockerctl.py` 가 쓴다 — plan dev-sandbox-pilot §29-15, S53) ──
+# Docker 공식 apt 저장소의 서명 키. 호스트가 이 키를 sbox 에 **고정 보관**하고(~/.config/sbox/docker/docker.asc) ct 에 써 넣는다(ct 가 직접 받지 않음).
+# 고정하는 순간(첫 사용·재고정)과 `pincheck`(매월)에 독립 출처로 교차 확인한다. 키 파일은 「`pub` 레코드가 정확히 하나이고 그 지문이 아래 값」이어야 한다(하위 서명 키는 주 키에 묶임).
+[apt-key.docker]
+fingerprints = ["9DC858229FC7DD38854AE2D88D81803C0EBFCD88"]
+min_independent = 3
+note = "주 키 「Docker Release (CE deb)」, 2017-02-22 생성·만료 없음. 키서버는 지문↔내용 일치만 보증하고, 「이 지문이 Docker 의 것」은 2018 년 키 스냅샷과 제3자 코드 4곳이 같은 값을 쓴다는 데서 온다(§29-15)"
+key_sources = [
+  { type = "url", label = "download.docker.com 키 파일(Docker 자신)", url = "https://download.docker.com/linux/debian/gpg" },
+  { type = "keyserver", label = "keyserver.ubuntu.com", url = "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x{fingerprint}" },
+  { type = "keyserver", label = "keys.openpgp.org", url = "https://keys.openpgp.org/vks/v1/by-fingerprint/{fingerprint}" },
+  { type = "wayback", label = "download.docker.com 키 파일 2018 스냅샷(시간차)", url = "https://download.docker.com/linux/debian/gpg", timestamp = "20180627152141" },
+  { type = "list", label = "GoogleCloudPlatform/cloud-builders(javac/Dockerfile)", url = "https://raw.githubusercontent.com/GoogleCloudPlatform/cloud-builders/master/javac/Dockerfile" },
+  { type = "list", label = "puppetlabs-kubernetes(manifests/repos.pp)", url = "https://raw.githubusercontent.com/puppetlabs/puppetlabs-kubernetes/main/manifests/repos.pp" },
+  { type = "list", label = "elastic/fleet-server(multipass-cloud-init.tpl)", url = "https://raw.githubusercontent.com/elastic/fleet-server/main/dev-tools/multipass-cloud-init.tpl" },
+  { type = "list", label = "sassoftware/viya4-iac-azure(cloud-config)", url = "https://raw.githubusercontent.com/sassoftware/viya4-iac-azure/main/files/cloud-init/jump/cloud-config" },
+]
