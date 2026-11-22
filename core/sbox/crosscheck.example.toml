@@ -1,0 +1,22 @@
+# 망 관점(vantage) 교차 확인 설정 예시 — 이 파일을 ~/.config/sbox/crosscheck.toml 로 복사해 고쳐 쓴다(저장소에는 개인 호스트 정보를 넣지 않는다).
+# 설계·한계: ctx plan/dev-sandbox-pilot §29-7. 실행: `python3 ~/nixos/core/sbox/tools.py crosscheck-run` (waybar 모듈이 주기를 알려 준다).
+#
+# interval  주기 알림 간격: weekly(7일) | monthly(30일, 기본) | quarterly(91일)
+interval = "monthly"
+
+# vantage 종류
+#   local   이 호스트의 지금 망(집 유선 등) — 기준 관점
+#   ssh     원격 호스트에서 탐침을 실행(스크립트를 표준입력으로 흘려 보내 원격에 파일을 남기지 않음). 키 인증(BatchMode)만.
+#           예: 다른 ISP·다른 지역의 클라우드 인스턴스(AWS 등)·tailnet 의 다른 PC. Tailscale exit node 로 이 호스트의 경로를 바꾸는 대신
+#               exit node 가 되는 인스턴스에 ssh 로 들어가 거기서 실행하는 쪽이 호스트 라우팅을 건드리지 않아 안전하다
+#   manual  사람이 그 망(휴대폰 핫스팟 등)에 연결한 뒤 직접 실행: `tools.py probe --label hotspot` → 저장된 파일을
+#           `tools.py crosscheck <기준 파일> <핫스팟 파일>` 로 비교(자동 실행에서는 건너뜀)
+[vantage.local]
+kind = "local"
+
+# [vantage.cloud]
+# kind = "ssh"
+# target = "user@host-or-tailnet-name"
+
+# [vantage.hotspot]
+# kind = "manual"

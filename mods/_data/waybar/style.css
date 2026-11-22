@@ -135,6 +135,17 @@ window#waybar {
   color: #000000;
 }
 
+/* 도구 서명·망 교차검증 주기 알림(sbox): due = 기한 지남(노랑), alert = 불일치·CT 경고(빨강) */
+#custom-trustcheck {
+  padding: 0 8px;
+}
+#custom-trustcheck.due {
+  color: #f1fa8c;
+}
+#custom-trustcheck.alert {
+  color: #ff5555;
+}
+
 /* 실패한 서비스 경고 (notif health): 문제가 있을 때만 나타남 */
 #custom-health {
   padding: 0 8px;

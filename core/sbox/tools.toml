@@ -12,19 +12,30 @@
 #   role        re | de
 #   desc        한 줄 설명
 #   resolver    스펙(22·1.23·latest·stable·정확한 버전)을 정확한 버전으로 바꾸는 방법
-#                 type = "node-index"   Node 의 index.json (메이저·메이저.마이너 스펙, lts)
-#                 type = "go-json"      go.dev/dl 의 JSON (1.23 → 최신 1.23.x, latest)
-#                 type = "channel-file" 채널 이름(latest·stable)이 파일 이름인 주소 → 버전 문자열
+#                 type = "node-index"     Node 의 index.json (메이저·메이저.마이너 스펙, lts)
+#                 type = "go-json"        go.dev/dl 의 JSON (1.23 → 최신 1.23.x, latest)
+#                 type = "channel-file"   채널 이름(latest·stable)이 파일 이름인 주소 → 버전 문자열
+#                 type = "github-release" GitHub 릴리스 목록(정식만, repo·tag_prefix)
+#                 type = "rust-channel"   Rust 채널 문서(stable·X.Y·X.Y.Z)
+#                 type = "pbs"            python-build-standalone(스펙 3.12 → 최신 릴리스 안의 최신 3.12.x, 날짜 태그는 {tag})
 #                 (생략) 정확한 버전 X.Y.Z 만 허용
 #   min_version 이보다 낮은 버전은 거부(서명이 없는 옛 릴리스 등)
-#   url         산출물 주소. 치환: {version} {file}
+#   url         산출물 주소. 치환: {version} {file} {tag}
 #   checksum    산출물 해시를 어디서 읽나
 #                 type = "sums-file"     줄 끝이 파일 이름인 SHASUMS 형식(주소 url, 이름 name)
-#                 type = "json-manifest" JSON 의 점 경로(path, {platform} 치환) — 주소 url
+#                 type = "single-hash"   주소가 해시 한 줄만 돌려주는 형식
+#                 type = "json-manifest" JSON(format = "toml" 이면 TOML)의 점 경로(path) — 주소 url
 #                 type = "go-json"       resolver 의 같은 JSON 에서
-#   signature   체크섬 문서(위 checksum 의 url 이 가리키는 파일)를 서명으로 보증하는 방법
-#                 type = "gpg-detached"  분리 서명(sig_url)을 gpg 로 검증하고 **주 키 지문(fingerprint)이 같아야** 통과, 키는 key_url
+#                 cross = [ {…}, … ]     **다채널 교차 확인**: 다른 출처의 해시가 하나라도 다르면 중단
+#   signature   서명으로 무엇을 보증하나(target) — doc(체크섬 문서, 기본) | artifact(받은 파일 자체)
+#                 type = "gpg-detached"  분리 서명(sig_url)을 gpg 로 검증하고 **주 키 지문이 fingerprints(허용 목록) 중 하나여야** 통과.
+#                                        공개키는 key_url(s) 로 받거나, key_lookup 템플릿으로 서명에 적힌 서명자 키만 받아 옴
+#                 type = "sigstore"      Sigstore 증명(in-toto)을 cosign 으로 검증: OIDC 발급자(issuer)와 워크플로 신원(identity_regexp,
+#                                        **가능한 한 좁게**)이 맞고 투명성 로그에 포함되며 산출물 해시가 증명의 subject 와 같아야 통과.
+#                                        번들은 릴리스 자산(bundle_from = asset, bundle_url) 또는 GitHub 증명 API(github-attestations, repo)
 #                 type = "none"          없음(HTTPS + 처음 본 해시 잠금(TOFU)만) — 이유를 note 에 적는다
+#                 key_sources = [ … ]    **`tools.py pincheck`** 가 지문을 독립 출처(url·keyserver·wayback·list)에서 교차 확인하는 목록
+#                                        (min_independent 곳 이상에서 확인돼야 통과, 기본 2)
 #   archive     type = "tar"(strip = 맨 앞 폴더 개수) | "binary"(name = 저장할 파일 이름)
 #   links       컨테이너 /usr/local/bin 에 만들 링크 이름 = 도구 폴더 안 상대 경로
 
@@ -34,19 +45,51 @@ desc = "Node.js (공식 tarball)"
 resolver = { type = "node-index" }
 url = "https://nodejs.org/dist/v{version}/node-v{version}-linux-x64.tar.xz"
 checksum = { type = "sums-file", url = "https://nodejs.org/dist/v{version}/SHASUMS256.txt", name = "node-v{version}-linux-x64.tar.xz" }
-signature = { type = "none", note = "SHASUMS256.txt 의 .asc·.sig 가 있음(직접 확인) — 릴리스 담당자가 여럿이라 허용할 키 지문 목록이 필요(독립 출처: nodejs/node README). 검증 추가는 S43" }
-archive = { type = "tar", strip = 1 }
-links = { node = "bin/node", npm = "bin/npm", npx = "bin/npx", corepack = "bin/corepack" }
+[node.signature]
+type = "gpg-detached"
+target = "doc"
+sig_url = "https://nodejs.org/dist/v{version}/SHASUMS256.txt.sig"
+key_lookup = "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x{fingerprint}"
+note = "허용 지문 29개 = nodejs/node README 의 릴리스 키 목록(2026-11-22) — 목록은 nodejs/release-keys 저장소 keys.list 와도 일치(pincheck 로 확인). 서명자 키는 서명에 적힌 지문으로 키 서버에서 받는다"
+fingerprints = ["108F52B48DB57BB0CC439B2997B01419BD92F80A", "114F43EE0176B71C7BC219DD50A3051F888C628D", "141F07595B7B3FFE74309A937405533BE57C7D57", "1C050899334244A8AF75E53792EF661D867B9DFA", "4ED778F539E3634C779C87C6D7062848A1AB005C", "56730D5401028683275BD23C23EFEFE93C4CFFFE", "5BE8A3F6C8A5C01D106C0AD820B1A390B168D356", "61FC681DFB92A079F1685E77973F295594EC4689", "655F3B5C1FB3FA8D1A0CA6BDE4A7D232B936D2FD", "71DCFD284A79C3B38668286BC97EC7A07EDE3FC1", "74F12602B6F1C4E913FAA37AD3A89613643B6201", "77984A986EBC2AA786BC0F66B01FBB92821C587A", "7937DFD2AB06298B2293C3187D33FF9D0246406D", "890C08DB8579162FEE0DF9DB8BEAB4DFCF555EF4", "8FCCA13FEF1D0C2E91008E09770F7A9A5AE15600", "93C7E9E91B49E432C2F75674B0A78B0A6C481CF6", "94AE36675C464D64BAFA68DD7434390BDBE9B9C5", "9554F04D7259F04124DE6B476D5A82AC7E37093B", "A363A499291CBBC940DD62E41F10027AF002F8B0", "A48C2BEE680E841632CD4E44F07496B3EB3C1762", "B9AE9905FFD7803F25714661B63B535A4C206CA9", "B9E2F5981AA6E0CD28160D9FF13993A75599653C", "C0D6248439F1D5604AAFFB4021D900FFDB233756", "C4F0DFFF4E8C1A8236409D08E73BC641CC11F4C8", "C82FA3AE1CBEDC6BE46B9360C43CEC45C17AB93C", "CC68F5A3106FF448322E48ED27F5E38D5B0A215F", "DD792F5973C6DE52C432CBDAC77ABFA00DDBF2B7", "DD8F2338BAE7501E3DD5AC78C273792F7D83545D", "FD3A5288F042B6850C66B31F09FE44734EB7990E"]
+key_sources = [
+  { type = "list", label = "nodejs/node README", url = "https://raw.githubusercontent.com/nodejs/node/main/README.md" },
+  { type = "list", label = "nodejs/release-keys keys.list", url = "https://raw.githubusercontent.com/nodejs/release-keys/main/keys.list" },
+]
+[node.archive]
+type = "tar"
+strip = 1
+[node.links]
+node = "bin/node"
+npm = "bin/npm"
+npx = "bin/npx"
+corepack = "bin/corepack"
 
 [go]
 role = "re"
 desc = "Go (공식 go.dev/dl 아카이브)"
 resolver = { type = "go-json" }
 url = "https://go.dev/dl/{file}"
-checksum = { type = "go-json" }
-signature = { type = "none", note = "go.dev/dl 의 JSON 해시를 HTTPS 로 읽음. **정정(2026-11-22)**: 각 아카이브에 GPG 서명(.asc)이 실제로 있다(서명 키 주 키 EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796 「Google Inc. (Linux Packages Signing Authority)」, 서명용 하위 키는 순환) — 검증 추가는 S43. 이전에 「확인하지 못함」이라 쓴 것은 확인하지 않고 쓴 것이었다" }
-archive = { type = "tar", strip = 1 }
-links = { go = "bin/go", gofmt = "bin/gofmt" }
+checksum = { type = "go-json", cross = [ { type = "single-hash", url = "https://dl.google.com/go/{file}.sha256" } ] }
+[go.signature]
+type = "gpg-detached"
+target = "artifact"
+sig_url = "https://go.dev/dl/{file}.asc"
+key_lookup = "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x{fingerprint}"
+fingerprints = ["EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796"]
+note = "주 키 「Google Inc. (Linux Packages Signing Authority)」, 서명용 하위 키는 순환(주 키 지문을 고정). go.dev 는 공개키 안내가 없어 독립 출처로 교차 확인(pincheck). 체크섬은 go.dev JSON 과 dl.google.com .sha256 두 채널이 같아야 한다"
+key_sources = [
+  { type = "keyserver", label = "keyserver.ubuntu.com", url = "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x{fingerprint}" },
+  { type = "keyserver", label = "keys.openpgp.org", url = "https://keys.openpgp.org/vks/v1/by-fingerprint/{fingerprint}" },
+  { type = "url", label = "dl.google.com Google Linux 서명 키 파일(다른 제품 채널)", url = "https://dl.google.com/linux/linux_signing_key.pub" },
+  { type = "wayback", label = "dl.google.com 키 파일 2019 스냅샷(시간차)", url = "https://dl.google.com/linux/linux_signing_key.pub", timestamp = "20190207232740" },
+]
+[go.archive]
+type = "tar"
+strip = 1
+[go.links]
+go = "bin/go"
+gofmt = "bin/gofmt"
 
 [claude]
 role = "de"
@@ -55,18 +98,56 @@ min_version = "2.1.89"
 resolver = { type = "channel-file", url = "https://downloads.claude.ai/claude-code-releases/{channel}", channels = ["latest", "stable"], default = "stable" }
 url = "https://downloads.claude.ai/claude-code-releases/{version}/linux-x64/claude"
 checksum = { type = "json-manifest", url = "https://downloads.claude.ai/claude-code-releases/{version}/manifest.json", path = "platforms.linux-x64.checksum" }
-signature = { type = "gpg-detached", sig_url = "https://downloads.claude.ai/claude-code-releases/{version}/manifest.json.sig", key_url = "https://downloads.claude.ai/keys/claude-code.asc", fingerprint = "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE", note = "지문은 공식 문서 code.claude.com/docs/en/setup 의 값(2026-11-22)" }
-archive = { type = "binary", name = "claude" }
-links = { claude = "claude" }
+[claude.signature]
+type = "gpg-detached"
+target = "doc"
+sig_url = "https://downloads.claude.ai/claude-code-releases/{version}/manifest.json.sig"
+key_url = "https://downloads.claude.ai/keys/claude-code.asc"
+fingerprints = ["31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"]
+note = "지문은 공식 문서 code.claude.com/docs/en/setup 의 값(2026-11-22) — pincheck 가 키 파일·키 서버·문서에서 교차 확인"
+key_sources = [
+  { type = "url", label = "downloads.claude.ai 키 파일", url = "https://downloads.claude.ai/keys/claude-code.asc" },
+  { type = "list", label = "공식 문서(setup)", url = "https://code.claude.com/docs/en/setup" },
+  { type = "keyserver", label = "keyserver.ubuntu.com", url = "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x{fingerprint}" },
+  { type = "keyserver", label = "keys.openpgp.org", url = "https://keys.openpgp.org/vks/v1/by-fingerprint/{fingerprint}" },
+]
+[claude.archive]
+type = "binary"
+name = "claude"
+[claude.links]
+claude = "claude"
 
 [rust]
 role = "re"
 desc = "Rust 툴체인 (공식 static.rust-lang.org: rustc·cargo·rust-std·clippy·rustfmt, rust-docs 제외)"
 resolver = { type = "rust-channel" }
 checksum = { type = "rust-channel-doc", url = "https://static.rust-lang.org/dist/channel-rust-{version}.toml" }
-signature = { type = "gpg-detached", sig_url = "https://static.rust-lang.org/dist/channel-rust-{version}.toml.asc", key_url = "https://static.rust-lang.org/rust-key.gpg.ascii", fingerprint = "108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE", note = "지문은 static.rust-lang.org 의 키 파일에서 읽고 실제 채널 문서 서명으로 일치를 확인한 값(2026-11-22) — 공식 문서에는 지문이 적혀 있지 않고 keybase 를 안내함, 독립 출처 교차 확인은 S48" }
-archive = { type = "rust-installer", target = "x86_64-unknown-linux-gnu", pkgs = ["rust", "clippy-preview", "rustfmt-preview"], without = { rust = "rust-docs" } }
-links = { cargo = "bin/cargo", rustc = "bin/rustc", rustdoc = "bin/rustdoc", rustfmt = "bin/rustfmt", cargo-fmt = "bin/cargo-fmt", cargo-clippy = "bin/cargo-clippy", clippy-driver = "bin/clippy-driver" }
+[rust.signature]
+type = "gpg-detached"
+target = "doc"
+sig_url = "https://static.rust-lang.org/dist/channel-rust-{version}.toml.asc"
+key_url = "https://static.rust-lang.org/rust-key.gpg.ascii"
+fingerprints = ["108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE"]
+note = "공식 문서(forge)는 지문을 적지 않고 keybase 로 안내 — 키 파일·키 서버 2곳·2018 웹 아카이브 스냅샷(바이트 동일)으로 교차 확인(pincheck)"
+key_sources = [
+  { type = "url", label = "static.rust-lang.org 키 파일", url = "https://static.rust-lang.org/rust-key.gpg.ascii" },
+  { type = "keyserver", label = "keyserver.ubuntu.com", url = "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x{fingerprint}" },
+  { type = "keyserver", label = "keys.openpgp.org", url = "https://keys.openpgp.org/vks/v1/by-fingerprint/{fingerprint}" },
+  { type = "wayback", label = "웹 아카이브 최초 스냅샷(2018, 시간차)", url = "https://static.rust-lang.org/rust-key.gpg.ascii" },
+]
+[rust.archive]
+type = "rust-installer"
+target = "x86_64-unknown-linux-gnu"
+pkgs = ["rust", "clippy-preview", "rustfmt-preview"]
+without = { rust = "rust-docs" }
+[rust.links]
+cargo = "bin/cargo"
+rustc = "bin/rustc"
+rustdoc = "bin/rustdoc"
+rustfmt = "bin/rustfmt"
+cargo-fmt = "bin/cargo-fmt"
+cargo-clippy = "bin/cargo-clippy"
+clippy-driver = "bin/clippy-driver"
 
 [compose]
 role = "re"
@@ -74,9 +155,19 @@ desc = "Docker Compose v2+ (공식 GitHub 릴리스 단일 바이너리, docker 
 resolver = { type = "github-release", repo = "docker/compose", tag_prefix = "v" }
 url = "https://github.com/docker/compose/releases/download/v{version}/docker-compose-linux-x86_64"
 checksum = { type = "sums-file", url = "https://github.com/docker/compose/releases/download/v{version}/checksums.txt", name = "docker-compose-linux-x86_64" }
-signature = { type = "none", note = "릴리스의 .sigstore.json(SLSA provenance, in-toto)을 cosign 으로 검증하면 통과(직접 시험: 서명 신원 https://github.com/docker/github-builder/.github/workflows/bake.yml, 1바이트 변조는 거부) — 카탈로그 반영은 S50. 지금은 HTTPS(GitHub)+TOFU" }
-archive = { type = "binary", name = "docker-compose" }
-links = { docker-compose = "docker-compose", "/usr/local/lib/docker/cli-plugins/docker-compose" = "docker-compose" }
+[compose.signature]
+type = "sigstore"
+bundle_from = "asset"
+bundle_url = "https://github.com/docker/compose/releases/download/v{version}/docker-compose-linux-x86_64.sigstore.json"
+issuer = "https://token.actions.githubusercontent.com"
+identity_regexp = "^https://github.com/docker/github-builder/\\.github/workflows/bake\\.yml@"
+note = "서명 신원은 docker/compose 저장소가 아니라 Docker 의 공유 빌더(docker/github-builder bake.yml) — 직접 시험으로 확인(2026-11-22). 공유 빌더의 취약점은 이를 쓰는 모든 프로젝트에 번진다"
+[compose.archive]
+type = "binary"
+name = "docker-compose"
+[compose.links]
+docker-compose = "docker-compose"
+"/usr/local/lib/docker/cli-plugins/docker-compose" = "docker-compose"
 
 [uv]
 role = "re"
@@ -84,6 +175,39 @@ desc = "uv (Python 패키지·프로젝트 관리자, 공식 GitHub 릴리스)"
 resolver = { type = "github-release", repo = "astral-sh/uv", tag_prefix = "" }
 url = "https://github.com/astral-sh/uv/releases/download/{version}/uv-x86_64-unknown-linux-gnu.tar.gz"
 checksum = { type = "sums-file", url = "https://github.com/astral-sh/uv/releases/download/{version}/uv-x86_64-unknown-linux-gnu.tar.gz.sha256", name = "uv-x86_64-unknown-linux-gnu.tar.gz" }
-signature = { type = "none", note = "GitHub 아티팩트 증명(API /attestations/sha256:<해시>)에 SLSA provenance 번들이 있고 cosign 검증이 통과함(직접 시험) — 카탈로그 반영은 S50. 지금은 HTTPS(GitHub)+TOFU" }
-archive = { type = "tar", strip = 1 }
-links = { uv = "uv", uvx = "uvx" }
+[uv.signature]
+type = "sigstore"
+bundle_from = "github-attestations"
+repo = "astral-sh/uv"
+predicate_type = "https://slsa.dev/provenance/v1"
+issuer = "https://token.actions.githubusercontent.com"
+identity_regexp = "^https://github.com/astral-sh/uv/\\.github/workflows/release\\.yml@refs/heads/main$"
+note = "신원은 인증서 SAN 을 직접 읽어(2026-11-22) 워크플로·참조까지 고정. 릴리스 워크플로가 main 에서 돈다는 점이 한계(main 에 악성 커밋이 들어가면 통과)"
+[uv.archive]
+type = "tar"
+strip = 1
+[uv.links]
+uv = "uv"
+uvx = "uvx"
+
+[python]
+role = "re"
+desc = "Python 인터프리터 (astral-sh/python-build-standalone install_only 빌드, 공식 GitHub 릴리스)"
+resolver = { type = "pbs" }
+url = "https://github.com/astral-sh/python-build-standalone/releases/download/{tag}/cpython-{version}%2B{tag}-x86_64-unknown-linux-gnu-install_only.tar.gz"
+checksum = { type = "sums-file", url = "https://github.com/astral-sh/python-build-standalone/releases/download/{tag}/SHA256SUMS", name = "cpython-{version}+{tag}-x86_64-unknown-linux-gnu-install_only.tar.gz" }
+[python.signature]
+type = "sigstore"
+bundle_from = "github-attestations"
+repo = "astral-sh/python-build-standalone"
+predicate_type = "https://slsa.dev/provenance/v1"
+issuer = "https://token.actions.githubusercontent.com"
+identity_regexp = "^https://github.com/astral-sh/python-build-standalone/\\.github/workflows/release\\.yml@refs/heads/main$"
+note = "SLSA provenance 번들을 GitHub 증명 API 에서 받아 cosign 으로 검증(직접 시험 2026-11-22)"
+[python.archive]
+type = "tar"
+strip = 1
+[python.links]
+python3 = "bin/python3"
+python = "bin/python3"
+pip3 = "bin/pip3"

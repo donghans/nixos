@@ -15,6 +15,12 @@
   fetch TOOL VERSION           내려받기·검증·풀기 → 풀린 폴더 경로
   links TOOL                   컨테이너 /usr/local/bin 에 만들 링크(이름 → 폴더 안 상대 경로, JSON)
   prune TOOL [--keep V]        표준입력으로 받은 「쓰이는 폴더 경로」 목록에 없는 옛 버전을 지움(--keep 은 남길 버전) → 지운 버전 목록
+  probe [--label L] [--out F]  이 망에서 신뢰 출발점 URL 들(채널·인덱스·서명 키·키 출처)의 본문 해시와 TLS 인증서를 기록(JSON 파일) — probe.py
+  crosscheck F1 F2 …           여러 망(집 유선·핫스팟·클라우드)에서 만든 probe 결과를 비교 — 본문이 다르면 mismatch(종료코드 1)
+  crosscheck-run [VANTAGE…]    ~/.config/sbox/crosscheck.toml 의 vantage(local·ssh·manual)별로 probe 를 실행·비교하고 상태에 기록
+  ct-check                     CT 로그(Cert Spotter)로 공식 배포 호스트의 인증서 발급 이력을 보고 처음 보는 발급 CA 가 나오면 경고
+  crosscheck-status            waybar custom 모듈용 JSON(주기가 지나면 due, 불일치·경고가 있으면 alert, 정상이면 빈 텍스트)
+  pincheck [TOOL]              서명 키 지문이 독립된 출처(키 파일·키 서버·과거 웹 아카이브·지문 목록)에서도 확인되는지 점검(JSON, 실패 시 종료코드 1)
   infer REPO                   프로젝트 파일(.nvmrc·package.json engines·go.mod)에서 버전 추론 → JSON
   effective MANIFEST           매니페스트의 [override] 가 [inferred] 를 덮은 최종 도구 표 → JSON
   plan [--repo DIR] [--manifest FILE] [--update] [--tool T=SPEC ...]
@@ -34,7 +40,9 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import tomllib
+import urllib.parse
 import urllib.request
 
 CACHE = os.path.expanduser(os.environ.get("SBOX_TOOLS_CACHE", "~/.cache/sbox/tools"))
@@ -51,7 +59,8 @@ def fail(msg):
 
 
 def http(url):
-    with urllib.request.urlopen(url, timeout=120) as r:  # noqa: S310 — 카탈로그가 고정한 https 주소
+    req = urllib.request.Request(url, headers={"User-Agent": "sbox-tools/1.0"})  # 일반 클라이언트 이름(일부 사이트는 기본 파이썬 UA 를 막음)
+    with urllib.request.urlopen(req, timeout=120) as r:  # noqa: S310 — 카탈로그가 고정한 https 주소
         return r.read()
 
 
@@ -89,6 +98,8 @@ def resolve(name, spec=None):
         v = _github_resolve(r, spec)
     elif typ == "rust-channel":
         v = _rust_resolve(spec)
+    elif typ == "pbs":
+        v = _pbs_resolve(spec)
     elif typ == "channel-file" and spec in r.get("channels", []):
         v = http(r["url"].format(channel=spec)).decode().strip()
     else:
@@ -166,6 +177,47 @@ def _rust_resolve(spec):
     return d["pkg"]["rust"]["version"].split()[0]
 
 
+_PBS_SUMS = {}
+
+
+def _pbs_tags():
+    rels = json.loads(http("https://api.github.com/repos/astral-sh/python-build-standalone/releases?per_page=12"))
+    return [x["tag_name"] for x in rels if not x.get("prerelease") and not x.get("draft")]
+
+
+def _pbs_versions(tag):
+    if tag not in _PBS_SUMS:
+        _PBS_SUMS[tag] = http(f"https://github.com/astral-sh/python-build-standalone/releases/download/{tag}/SHA256SUMS").decode()
+    pat = re.compile(r"cpython-(\d+\.\d+\.\d+)\+%s-x86_64-unknown-linux-gnu-install_only\.tar\.gz$" % re.escape(tag), re.M)
+    return sorted({m.group(1) for m in pat.finditer(_PBS_SUMS[tag])}, key=vtuple)
+
+
+def _pbs_resolve(spec):
+    """가장 새 릴리스(날짜 태그)에 들어 있는 install_only 빌드 중 스펙(latest·3.12·3.12.16)에 맞는 최신 버전."""
+    tag = _pbs_tags()[0]
+    vers = _pbs_versions(tag)
+    if spec == "latest":
+        ok = vers
+    else:
+        ok = [v for v in vers if v == spec or v.startswith(spec + ".")]
+    if not ok:
+        fail(f"python {spec} 에 맞는 빌드가 최신 릴리스({tag})에 없습니다 — 오래된 패치는 정확한 X.Y.Z 로 지정(최근 12개 릴리스 안에서 찾음)")
+    return ok[-1]
+
+
+def _pbs_tag(version):
+    for tag in _pbs_tags():
+        if version in _pbs_versions(tag):
+            return tag
+    fail(f"python {version} 빌드가 최근 12개 릴리스에 없습니다")
+
+
+def _extra_fmt(t, version):
+    if (t.get("resolver") or {}).get("type") == "pbs":
+        return {"tag": _pbs_tag(version)}
+    return {}
+
+
 def _go_entries():
     return [e for e in json.loads(http(GO_JSON)) if e.get("stable")]
 
@@ -206,59 +258,108 @@ def gpg_cmd():
     fail("gpg 도 nix 도 없습니다")
 
 
-def verify_gpg(doc, sig, key, fingerprint, workdir):
-    """분리 서명 검증. 주 키 지문이 fingerprint 와 같아야 통과한다(VALIDSIG 의 마지막 필드)."""
-    p = {n: os.path.join(workdir, n) for n in ("doc", "doc.sig", "key.asc")}
-    for n, data in (("doc", doc), ("doc.sig", sig), ("key.asc", key)):
-        open(p[n], "wb").write(data)
+def _norm_fprs(sg):
+    f = sg.get("fingerprints") or ([sg["fingerprint"]] if sg.get("fingerprint") else [])
+    if not f:
+        fail("서명 선언에 fingerprint(s) 가 없습니다")
+    return [x.replace(" ", "").upper() for x in f]
+
+
+def verify_gpg(doc_path, sig_bytes, sg, workdir):
+    """분리 서명 검증. 서명 주 키 지문이 선언한 허용 목록(fingerprints) 중 하나여야 통과한다(VALIDSIG 의 마지막 필드).
+    공개키는 key_url(s) 에서 받거나(고정 키), key_lookup 템플릿으로 **서명에 적힌 서명자 키**만 받아 온다(허용 지문이 많을 때)."""
+    allowed = set(_norm_fprs(sg))
+    sigp = os.path.join(workdir, "doc.sig")
+    open(sigp, "wb").write(sig_bytes)
     home = os.path.join(workdir, "gnupg")
     os.makedirs(home, mode=0o700, exist_ok=True)
     g = gpg_cmd() + ["--homedir", home, "--batch", "--no-tty"]
-    r = subprocess.run(g + ["--import", p["key.asc"]], capture_output=True, text=True)
-    if r.returncode != 0:
-        fail(f"공개키 가져오기 실패: {r.stderr.strip()[:200]}")
-    r = subprocess.run(g + ["--status-fd", "1", "--verify", p["doc.sig"], p["doc"]], capture_output=True, text=True)
+    keys = []
+    for u in (sg.get("key_urls") or ([sg["key_url"]] if sg.get("key_url") else [])):
+        keys.append(http(u))
+    if sg.get("key_lookup"):
+        r = subprocess.run(g + ["--list-packets", sigp], capture_output=True, text=True)
+        m = re.search(r"issuer fpr v\d (\w{40})", r.stdout + r.stderr)
+        if not m:
+            fail("서명에서 서명자 지문을 읽지 못했습니다")
+        keys.append(http(sg["key_lookup"].format(fingerprint=m.group(1))))
+    if not keys:
+        fail("공개키 출처(key_url·key_lookup)가 선언돼 있지 않습니다")
+    for i, k in enumerate(keys):
+        kp = os.path.join(workdir, f"key{i}.asc")
+        open(kp, "wb").write(k)
+        r = subprocess.run(g + ["--import", kp], capture_output=True, text=True)
+        if r.returncode != 0:
+            fail(f"공개키 가져오기 실패: {r.stderr.strip()[:200]}")
+    r = subprocess.run(g + ["--status-fd", "1", "--verify", sigp, doc_path], capture_output=True, text=True)
     prim = None
     for ln in r.stdout.splitlines():
         if ln.startswith("[GNUPG:] VALIDSIG"):
             prim = ln.split()[-1].upper()
         if ln.startswith(("[GNUPG:] BADSIG", "[GNUPG:] ERRSIG")):
             fail(f"서명 검증 실패: {ln}")
-    if prim != fingerprint.upper():
-        fail(f"서명 주 키 지문이 선언값과 다릅니다(받은 {prim}, 선언 {fingerprint}) — 중단")
+    if prim not in allowed:
+        fail(f"서명 주 키 지문이 허용 목록에 없습니다(받은 {prim}, 허용 {len(allowed)}개 중) — 중단")
+
+
+def cosign_cmd():
+    if shutil.which("cosign"):
+        return ["cosign"]
+    if shutil.which("nix"):
+        return ["nix", "shell", "nixpkgs#cosign", "-c", "cosign"]
+    fail("cosign 도 nix 도 없습니다")
+
+
+def verify_sigstore(art_path, sha, version, sg, workdir):
+    """Sigstore 증명(in-toto) 검증: 번들을 받아 cosign 이 인증서 신원(OIDC 발급자·워크플로 SAN 정규식)과 투명성 로그 포함, 산출물 해시 일치를 확인한다."""
+    bpath = os.path.join(workdir, "bundle.json")
+    src = sg.get("bundle_from", "asset")
+    if src == "asset":
+        open(bpath, "wb").write(http(sg["bundle_url"].format(version=version)))
+    elif src == "github-attestations":
+        d = json.loads(http(f"https://api.github.com/repos/{sg['repo']}/attestations/sha256:{sha}"))
+        want = sg.get("predicate_type", "https://slsa.dev/provenance/v1")
+        pick = None
+        for x in d.get("attestations", []):
+            pl = json.loads(__import__("base64").b64decode(x["bundle"]["dsseEnvelope"]["payload"]))
+            if pl.get("predicateType") == want:
+                pick = x["bundle"]
+                break
+        if not pick:
+            fail(f"GitHub 증명에 {want} 종류가 없습니다({sg['repo']}, {sha[:12]})")
+        json.dump(pick, open(bpath, "w"))
+    else:
+        fail(f"알 수 없는 번들 출처: {src}")
+    cmd = cosign_cmd() + ["verify-blob-attestation", "--bundle", bpath, "--new-bundle-format", "--type", sg.get("predicate_type_cosign", "slsaprovenance1"),
+                          "--certificate-oidc-issuer", sg["issuer"], "--certificate-identity-regexp", sg["identity_regexp"], art_path]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        fail(f"Sigstore 검증 실패: {(r.stderr or r.stdout).strip().splitlines()[-1][:300]}")
 
 
 # ---------- 체크섬 출처 ----------
-def expected_hash(name, t, version, workdir):
-    """(sha256, 산출물 파일 이름) 을 돌려준다. 카탈로그에 서명이 선언돼 있으면 체크섬 문서를 먼저 서명 검증한다."""
-    c = t["checksum"]
+def _one_hash(name, c, version, fname_hint=None, extra=None):
+    """체크섬 출처 하나에서 (해시, 파일 이름)과 원문 문서를 읽는다. 서명 검증은 호출자가 한다."""
     typ = c["type"]
-    fmt = {"version": version}
+    fmt = {"version": version, "file": fname_hint or "", **(extra or {})}
     if typ == "go-json":
         want_file = f"go{version}.linux-amd64.tar.gz"
         for e in json.loads(http(GO_JSON)):
             if e["version"] == f"go{version}":
                 for f in e["files"]:
                     if f["filename"] == want_file and f.get("sha256"):
-                        return f["sha256"], want_file
+                        return f["sha256"], want_file, None
         fail(f"go.dev JSON 에 {want_file} 의 해시가 없습니다")
     doc = http(c["url"].format(**fmt))
-    sg = t.get("signature") or {"type": "none"}
-    if sg["type"] == "gpg-detached":
-        verify_gpg(doc, http(sg["sig_url"].format(**fmt)), http(sg["key_url"]), sg["fingerprint"], workdir)
-    elif sg["type"] != "none":
-        fail(f"{name}: 알 수 없는 서명 방식 {sg['type']}")
+    if typ == "single-hash":  # 주소가 해시 한 줄(뒤에 이름이 있어도 됨)만 돌려주는 형식
+        return doc.decode().split()[0], fname_hint, doc
     if typ == "sums-file":
         fname = c["name"].format(**fmt)
-        want = None
         for ln in doc.decode().splitlines():
             parts = ln.split(None, 1)
-            if len(parts) == 2 and parts[1].strip().lstrip("*") == fname:  # 「해시  이름」·「해시 *이름」(바이너리 표시) 둘 다
-                want = parts[0]
-                break
-        if not want:
-            fail(f"체크섬 문서에 {fname} 이 없습니다")
-        return want, fname
+            if len(parts) == 2 and parts[1].strip().lstrip("*") == fname:  # 「해시  이름」·「해시 *이름」 둘 다
+                return parts[0], fname, doc
+        fail(f"체크섬 문서에 {fname} 이 없습니다")
     if typ == "json-manifest":
         cur = tomllib.loads(doc.decode()) if c.get("format") == "toml" else json.loads(doc)
         if cur.get("version") not in (None, version):
@@ -267,8 +368,29 @@ def expected_hash(name, t, version, workdir):
             cur = (cur or {}).get(k)
         if not isinstance(cur, str):
             fail(f"manifest 에서 {c['path']} 를 찾지 못했습니다")
-        return cur, None
+        return cur, None, doc
     fail(f"알 수 없는 체크섬 방식: {typ}")
+
+
+def expected_hash(name, t, version, workdir):
+    """(sha256, 산출물 파일 이름) 을 돌려준다. 서명이 target=doc 이면 체크섬 문서를 먼저 서명 검증하고,
+    checksum.cross 에 선언된 다른 출처가 있으면 **모두 같은 해시여야** 한다(다채널 교차 확인)."""
+    c = t["checksum"]
+    sg = t.get("signature") or {"type": "none"}
+    extra = _extra_fmt(t, version)
+    want, fname, doc = _one_hash(name, c, version, None, extra)
+    fmt = {"version": version, "file": fname or "", **extra}
+    if sg["type"] == "gpg-detached" and sg.get("target", "doc") == "doc":
+        dp = os.path.join(workdir, "doc")
+        open(dp, "wb").write(doc if doc is not None else b"")
+        verify_gpg(dp, http(sg["sig_url"].format(**fmt)), sg, workdir)
+    elif sg["type"] not in ("none", "gpg-detached", "sigstore"):
+        fail(f"{name}: 알 수 없는 서명 방식 {sg['type']}")
+    for i, cc in enumerate(c.get("cross") or []):
+        other, _, _ = _one_hash(name, cc, version, fname, extra)
+        if other != want:
+            fail(f"{name}: 체크섬 교차 확인 불일치(출처 0 = {want[:16]}…, 교차 {i + 1} = {other[:16]}…) — 중단")
+    return want, fname
 
 
 # ---------- 받기·풀기 ----------
@@ -312,7 +434,7 @@ def fetch(name, version):
         want, fname = expected_hash(name, t, version, tmp)
         if not re.fullmatch(r"[a-f0-9]{64}", want):
             fail(f"체크섬 형식이 올바르지 않습니다: {want!r}")
-        url = t["url"].format(version=version, file=fname or "")
+        url = t["url"].format(version=version, file=fname or "", **_extra_fmt(t, version))
         key = f"{name}/{version}/{os.path.basename(url)}"
         lock = load_lock()
         if key in lock and lock[key] != want:
@@ -328,6 +450,11 @@ def fetch(name, version):
                 out.write(b)
         if h.hexdigest() != want:
             fail(f"sha256 불일치: 받은 {h.hexdigest()} ≠ 공식 {want}")
+        sg = t.get("signature") or {"type": "none"}
+        if sg["type"] == "gpg-detached" and sg.get("target") == "artifact":
+            verify_gpg(art, http(sg["sig_url"].format(version=version, file=fname or "")), sg, tmp)
+        elif sg["type"] == "sigstore":
+            verify_sigstore(art, want, version, sg, tmp)
         if key not in lock:
             lock[key] = want
             save_lock(lock)
@@ -379,7 +506,9 @@ def _fetch_rust(name, t, version, tmp, final):
     c, sg, a = t["checksum"], t["signature"], t["archive"]
     fmt = {"version": version}
     doc = http(c["url"].format(**fmt))
-    verify_gpg(doc, http(sg["sig_url"].format(**fmt)), http(sg["key_url"]), sg["fingerprint"], tmp)
+    dp = os.path.join(tmp, "doc")
+    open(dp, "wb").write(doc)
+    verify_gpg(dp, http(sg["sig_url"].format(**fmt)), sg, tmp)
     d = tomllib.loads(doc.decode())
     if not d["pkg"]["rust"]["version"].startswith(version + " "):
         fail(f"채널 문서의 rust 버전이 다릅니다: {d['pkg']['rust']['version']} ≠ {version}")
@@ -416,6 +545,266 @@ def _fetch_rust(name, t, version, tmp, final):
             fail(f"{pkg} 설치기 실패: {(r.stderr or r.stdout).strip()[-300:]}")
         os.remove(art)
         shutil.rmtree(ex, ignore_errors=True)
+
+
+def _gpg_fprs(data, workdir, tag):
+    p = os.path.join(workdir, f"pc-{tag}.asc")
+    open(p, "wb").write(data)
+    r = subprocess.run(gpg_cmd() + ["--show-keys", "--with-colons", p], capture_output=True, text=True)
+    return {ln.split(":")[9].upper() for ln in r.stdout.splitlines() if ln.startswith("fpr:")}
+
+
+def pincheck(only=None):
+    """서명 키 지문이 **서로 독립된 출처**에서도 확인되는지 점검한다(카탈로그 signature.key_sources).
+    출처 종류: url(키 파일) · keyserver(템플릿) · wayback(과거 스냅샷 — 시간차 채널) · list(지문이 적힌 텍스트·README)."""
+    out = {}
+    ok_all = True
+    work = tempfile.mkdtemp(prefix="pincheck-")
+    try:
+        for name, t in catalog().items():
+            sg = t.get("signature") or {}
+            if sg.get("type") != "gpg-detached" or (only and name != only):
+                continue
+            fprs = _norm_fprs(sg)
+            rows = []
+            for i, src in enumerate(sg.get("key_sources") or []):
+                kind, label = src["type"], src.get("label", src["type"])
+                found, note = set(), ""
+                try:
+                    if kind == "url":
+                        found = _gpg_fprs(http(src["url"]), work, f"{name}{i}")
+                    elif kind == "keyserver":
+                        for f in fprs[:3]:
+                            found |= _gpg_fprs(http(src["url"].format(fingerprint=f)), work, f"{name}{i}{f[:6]}")
+                    elif kind == "wayback":
+                        ts = src.get("timestamp")
+                        if not ts:
+                            cdx = json.loads(http("http://web.archive.org/cdx/search/cdx?url=%s&output=json&limit=1&filter=statuscode:200" % src["url"].split("://", 1)[1]))
+                            if len(cdx) < 2:
+                                raise RuntimeError("스냅샷 없음")
+                            ts = cdx[1][1]
+                        note = f"스냅샷 {ts[:4]}-{ts[4:6]}-{ts[6:8]}"
+                        found = _gpg_fprs(http(f"https://web.archive.org/web/{ts}id_/{src['url']}"), work, f"{name}{i}")
+                    elif kind == "list":
+                        txt = http(src["url"]).decode("utf-8", "ignore").upper().replace(" ", "")
+                        found = {f for f in fprs if f in txt}
+                    else:
+                        raise RuntimeError(f"알 수 없는 출처 종류 {kind}")
+                except Exception as e:  # 한 출처의 실패가 전체 점검을 멈추지 않게
+                    note = f"실패: {str(e)[:80]}"
+                rows.append({"source": label, "kind": kind, "matched": sorted(f for f in fprs if f in found), "note": note})
+            need = int(sg.get("min_independent", 2))
+            covered = {f: sum(1 for r in rows if f in r["matched"]) for f in fprs}
+            ok = all(c >= need for c in covered.values())  # 허용 지문마다 독립 출처 need 곳 이상에서 확인돼야 통과
+            ok_all &= ok
+            out[name] = {"fingerprints": len(fprs), "required_independent_sources": need, "ok": ok, "sources": rows}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return out, ok_all
+
+
+# ---------- 망 관점(vantage) 교차 확인·CT 감시·주기 알림 ----------
+STATE = os.path.expanduser(os.environ.get("SBOX_XCHECK_STATE", "~/.local/state/sbox/crosscheck.json"))
+XCFG = os.path.expanduser(os.environ.get("SBOX_XCHECK_CONFIG", "~/.config/sbox/crosscheck.toml"))
+RUNS = os.path.expanduser(os.environ.get("SBOX_XCHECK_RUNS", "~/.local/state/sbox/crosscheck"))
+INTERVAL_DAYS = {"weekly": 7, "monthly": 30, "quarterly": 91}
+PROBE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "probe.py")
+
+
+def probe_urls():
+    """카탈로그에서 「신뢰의 출발점」이 되는 공개 주소를 모은다: 버전 가리킴(채널·인덱스) · 서명 키 파일 · 키 출처. (산출물 자체는 크므로 제외)"""
+    urls = []
+    for name, t in catalog().items():
+        r = t.get("resolver") or {}
+        if r.get("type") == "channel-file":
+            urls += [r["url"].format(channel=c) for c in r.get("channels", [])]
+        elif r.get("type") == "node-index":
+            urls.append(NODE_INDEX)
+        elif r.get("type") == "go-json":
+            urls.append(GO_JSON)
+        elif r.get("type") == "rust-channel":
+            urls.append("https://static.rust-lang.org/dist/channel-rust-stable.toml")
+        sg = t.get("signature") or {}
+        urls += list(sg.get("key_urls") or ([sg["key_url"]] if sg.get("key_url") else []))
+        urls += [k["url"] for k in sg.get("key_sources", []) if k["type"] in ("url", "list")]
+    seen, out = set(), []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
+def ct_domains():
+    """CT 감시 대상 도메인: 카탈로그가 직접 접속하는 공식 배포 호스트(제3자 서비스·거대 공용 호스트는 제외)."""
+    skip = {"github.com", "api.github.com", "raw.githubusercontent.com", "keyserver.ubuntu.com", "keys.openpgp.org", "web.archive.org"}
+    hosts = set()
+    for u in probe_urls():
+        h = urllib.parse.urlsplit(u).hostname
+        if h and h not in skip:
+            hosts.add(h)
+    hosts |= {"nodejs.org", "go.dev", "downloads.claude.ai"}
+    return sorted(hosts)
+
+
+def load_xcfg():
+    cfg = {"interval": "monthly", "vantages": {"local": {"kind": "local"}}}
+    if os.path.isfile(XCFG):
+        with open(XCFG, "rb") as f:
+            user = tomllib.load(f)
+        cfg["interval"] = user.get("interval", cfg["interval"])
+        if user.get("vantage"):
+            cfg["vantages"] = user["vantage"]
+    if cfg["interval"] not in INTERVAL_DAYS:
+        fail(f"crosscheck.toml 의 interval 은 {'·'.join(INTERVAL_DAYS)} 중 하나여야 합니다: {cfg['interval']}")
+    return cfg
+
+
+def load_state():
+    try:
+        with open(STATE, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+def save_state(st):
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    tmp = STATE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(st, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, STATE)
+
+
+def run_probe(vantage, label):
+    """한 관점에서 탐침을 실행해 결과(dict)를 돌려준다. kind: local(이 호스트의 지금 망) · ssh(원격 호스트에서 — 클라우드 인스턴스·다른 망의 PC) · manual(사람이 그 망에 접속해 직접 실행, 여기서는 건너뜀)."""
+    kind = vantage.get("kind")
+    urls = json.dumps(probe_urls())
+    if kind == "local":
+        r = subprocess.run([sys.executable, PROBE, urls, label], capture_output=True, text=True, timeout=600)
+    elif kind == "ssh":
+        # 탐침 스크립트를 표준입력으로 흘려 보내 원격에서 실행한다(원격에 파일을 남기지 않음). BatchMode: 암호 질문 없이 실패
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", vantage["target"], "python3", "-", urls, label],
+                           stdin=open(PROBE, "rb"), capture_output=True, text=True, timeout=600)
+    else:
+        return None
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or r.stdout).strip()[-200:] or f"종료코드 {r.returncode}")
+    return json.loads(r.stdout)
+
+
+def compare_probes(runs):
+    """여러 관점의 탐침 결과를 URL 별로 비교한다. 본문 해시가 다르면 mismatch(경고), 발급 CA 가 다르면 warn, 인증서 자체만 다르면 info(CDN 은 지점마다 다른 인증서를 줄 수 있음)."""
+    findings = []
+    by_url = {}
+    for run in runs:
+        for r in run["results"]:
+            by_url.setdefault(r["url"], []).append((run["label"], r))
+    for url, items in by_url.items():
+        ok = [(l, r) for l, r in items if "sha256" in r]
+        bad = [(l, r) for l, r in items if "error" in r]
+        for l, r in bad:
+            findings.append({"level": "warn", "url": url, "msg": f"{l}: 접속 실패 — {r['error']}"})
+        if len({r["sha256"] for _, r in ok}) > 1:
+            findings.append({"level": "mismatch", "url": url, "msg": "관점마다 본문이 다름: " + ", ".join(f"{l}={r['sha256'][:10]}" for l, r in ok)})
+    hosts = {}
+    for run in runs:
+        for h, v in run["hosts"].items():
+            hosts.setdefault(h, []).append((run["label"], v.get("tls", {})))
+    for h, items in hosts.items():
+        issuers = {t.get("issuer") for _, t in items if t.get("issuer")}
+        certs = {t.get("cert_sha256") for _, t in items if t.get("cert_sha256")}
+        if len(issuers) > 1:
+            findings.append({"level": "warn", "url": h, "msg": "관점마다 발급 CA 가 다름: " + ", ".join(f"{l}={t.get('issuer')}" for l, t in items)})
+        elif len(certs) > 1:
+            findings.append({"level": "info", "url": h, "msg": "같은 CA 의 서로 다른 인증서(CDN 지점 차이일 수 있음)"})
+    return findings
+
+
+def crosscheck_run(names=None):
+    cfg = load_xcfg()
+    names = names or list(cfg["vantages"])
+    runs, skipped, failed = [], [], []
+    os.makedirs(RUNS, exist_ok=True)
+    stamp = time.strftime("%Y%m%dT%H%M%S")
+    for n in names:
+        v = cfg["vantages"].get(n)
+        if not v:
+            fail(f"vantage 설정에 없는 이름: {n}")
+        try:
+            res = run_probe(v, n)
+        except Exception as e:  # noqa: BLE001 — 한 관점의 실패가 나머지를 막지 않게
+            failed.append(f"{n}: {e}")
+            continue
+        if res is None:
+            skipped.append(n)
+            continue
+        runs.append(res)
+        json.dump(res, open(os.path.join(RUNS, f"{stamp}-{n}.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    # 수동 관점(핫스팟 등)으로 저장해 둔 가장 최근 결과도 비교에 넣는다(저장 파일 이름: <시각>-<이름>.json)
+    findings = compare_probes(runs) if len(runs) >= 2 else []
+    st = load_state()
+    st["last_run"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    st["last_vantages"] = [r["label"] for r in runs]
+    st["last_findings"] = [f for f in findings if f["level"] in ("mismatch", "warn")]
+    st["interval"] = cfg["interval"]
+    save_state(st)
+    return {"vantages_ok": [r["label"] for r in runs], "skipped_manual": skipped, "failed": failed, "findings": findings,
+            "note": "관점이 2개 미만이라 비교하지 못했습니다" if len(runs) < 2 else ""}
+
+
+def ct_check(update=True):
+    """Cert Spotter(CT 로그 모니터)로 카탈로그 호스트의 인증서 발급 이력을 조회하고, **처음 보는 발급 CA** 가 생기면 알린다(첫 실행은 기준선만 저장)."""
+    st = load_state()
+    ct = st.setdefault("ct", {})
+    alerts, report = [], {}
+    for dom in ct_domains():
+        try:
+            d = json.loads(http(f"https://api.certspotter.com/v1/issuances?domain={dom}&include_subdomains=false&expand=issuer"))
+        except Exception as e:  # noqa: BLE001
+            report[dom] = {"error": str(e)[:80]}
+            continue
+        issuers = sorted({x["issuer"]["friendly_name"] for x in d})
+        newest = max((x["not_before"] for x in d), default="")
+        prev = ct.get(dom)
+        if prev:
+            new_iss = [i for i in issuers if i not in prev["issuers"]]
+            if new_iss:
+                alerts.append(f"{dom}: 처음 보는 발급 CA {new_iss} (최근 발급 {newest})")
+        report[dom] = {"certs": len(d), "issuers": issuers, "newest": newest, "baseline": prev is None}
+        ct[dom] = {"issuers": sorted(set(issuers) | set((prev or {}).get("issuers", []))), "newest": newest}
+    if update:
+        st["last_ct"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        st["ct_alerts"] = alerts
+        save_state(st)
+    return {"domains": report, "alerts": alerts}
+
+
+def status_waybar():
+    """waybar custom 모듈용 JSON. 주기 안에 있으면 빈 텍스트(모듈이 사라짐), 기한이 지나면 due, 불일치·CT 경고가 있으면 alert."""
+    st = load_state()
+    try:
+        cfg = load_xcfg()
+        interval = cfg["interval"]
+    except SystemExit:
+        interval = "monthly"
+    days = INTERVAL_DAYS[interval]
+    now = time.time()
+    last = None
+    if st.get("last_run"):
+        try:
+            last = time.mktime(time.strptime(st["last_run"][:19], "%Y-%m-%dT%H:%M:%S"))
+        except ValueError:
+            last = None
+    problems = [f["msg"] for f in st.get("last_findings", []) if f["level"] == "mismatch"] + list(st.get("ct_alerts", []))
+    if problems:
+        return {"text": "󰒃 신뢰 교차검증 경고", "class": "alert", "tooltip": "\n".join(problems[:6])}
+    if last is None:
+        return {"text": "󰒃 교차검증 미실행", "class": "due", "tooltip": f"`tools.py crosscheck-run` 로 처음 실행하세요(주기 {interval})"}
+    age = (now - last) / 86400
+    if age >= days:
+        return {"text": f"󰒃 교차검증 {int(age)}일", "class": "due", "tooltip": f"마지막 실행 {int(age)}일 전(주기 {interval}) — `tools.py crosscheck-run`"}
+    return {"text": "", "class": "ok", "tooltip": f"교차검증 정상({int(age)}일 전, 주기 {interval})"}
 
 
 def prune(name, keep, used):
@@ -461,6 +850,11 @@ def infer(repo):
             elif ch:
                 out["rust_unsupported"] = {"spec": ch, "source": f"{rt} (nightly·beta 등은 도구 층 미지원 — 수동 필요)"}
             break
+    pv = os.path.join(repo, ".python-version")
+    if os.path.isfile(pv):
+        m = re.match(r"\s*(\d+\.\d+(?:\.\d+)?)", open(pv, encoding="utf-8").read())
+        if m:
+            out["python"] = {"spec": m.group(1), "source": ".python-version"}
     gm = os.path.join(repo, "go.mod")
     if os.path.isfile(gm):
         txt = open(gm, encoding="utf-8").read()
@@ -577,6 +971,32 @@ def main(a):
         keep = a[3] if len(a) >= 4 and a[2] == "--keep" else None
         used = [ln.strip() for ln in sys.stdin if ln.strip()]
         print(" ".join(prune(a[1], keep, used)))
+    elif a and a[0] == "probe":
+        label = a[a.index("--label") + 1] if "--label" in a else "manual"
+        res = json.loads(subprocess.run([sys.executable, PROBE, json.dumps(probe_urls()), label], capture_output=True, text=True, check=True).stdout)
+        out = a[a.index("--out") + 1] if "--out" in a else os.path.join(RUNS, f"{time.strftime('%Y%m%dT%H%M%S')}-{label}.json")
+        os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+        json.dump(res, open(out, "w", encoding="utf-8"), ensure_ascii=False)
+        print(out)
+    elif a and a[0] == "crosscheck":
+        runs = [json.load(open(f, encoding="utf-8")) for f in a[1:]]
+        fs = compare_probes(runs)
+        print(json.dumps({"files": len(runs), "findings": fs}, ensure_ascii=False, indent=1))
+        sys.exit(1 if any(f["level"] == "mismatch" for f in fs) else 0)
+    elif a and a[0] == "crosscheck-run":
+        res = crosscheck_run(a[1:] or None)
+        print(json.dumps(res, ensure_ascii=False, indent=1))
+        sys.exit(1 if any(f["level"] == "mismatch" for f in res["findings"]) else 0)
+    elif a and a[0] == "ct-check":
+        res = ct_check()
+        print(json.dumps(res, ensure_ascii=False, indent=1))
+        sys.exit(1 if res["alerts"] else 0)
+    elif a and a[0] == "crosscheck-status":
+        print(json.dumps(status_waybar(), ensure_ascii=False))
+    elif a and a[0] == "pincheck":
+        res, ok = pincheck(a[1] if len(a) > 1 else None)
+        print(json.dumps(res, ensure_ascii=False, indent=1))
+        sys.exit(0 if ok else 1)
     elif len(a) == 2 and a[0] == "infer":
         print(json.dumps(infer(a[1]), ensure_ascii=False))
     elif len(a) == 2 and a[0] == "effective":
