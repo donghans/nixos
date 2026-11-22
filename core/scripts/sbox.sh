@@ -6,6 +6,7 @@
 #   sbox.sh create --kind ct --flavor debian|ubuntu [--release R] [--legacy] [--nesting] [--cpu N] [--memory M] [NAME]  컨테이너 생성(v1)
 #   sbox.sh releases [flavor]                          쓸 수 있는 릴리스 표(core/sbox/releases.toml)
 #   sbox.sh create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
+#   (ct 만) create 에 --from-repo DIR | --manifest F | --tool TOOL[=SPEC] (반복) | --update 를 주면 만든 직후 도구 층을 자동 적용 — 같은 매니페스트로 다시 만들면 같은 버전
 #   sbox.sh tools NAME [--from-repo DIR|--manifest F] [--update] [node=22]  컨테이너에 읽기 전용 도구 층 붙임(호스트가 받아 sha256 검증, 버전은 매니페스트에 고정, v1: node)
 #   sbox.sh claude NAME [--dir D] [--bypass] [--attach] [--claude-version V] [--update]  안(vm·ct)에서 tmux 로 Claude 대화형 세션 시작(첫 실행 안내를 미리 처리·남으면 경고)
 #   sbox.sh bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
@@ -414,13 +415,23 @@ d=json.load(sys.stdin)[0]["state"]["network"]
 print(" ".join(a["address"] for a in d.get("eth0",{}).get("addresses",[]) if a["family"]=="inet"))')
     audit info create "$name" "컨테이너 images:$image, ${flavor} ${ver}(${key}) ${status}, $ip, 비특권, cpu $cpu·메모리 $mem"
     say "완료: $name  ($ip) — 사용자 $VM_USER(sudo 없음), 토큰은 $TOKEN_PATH(tmpfs)"
-    say "알림: Node 등은 'sbox.sh tools $name --from-repo <저장소>' 로 읽기 전용 도구 층을 붙입니다(S5 v1: node 만)"
+    if ((${#TOOLS_ARGS[@]})); then
+        # 도구 층 자동 적용 — 매니페스트의 [resolved] 가 정확한 버전을 고정하므로 이 컨테이너를 지우고 다시 만들어도 같은 버전이 들어간다
+        cmd_tools "$name" "${TOOLS_ARGS[@]}" || die "$name 은 만들어졌지만 도구 층 적용에 실패했습니다 — 'sbox.sh tools $name …' 로 다시 시도하세요"
+    else
+        say "알림: 도구(Node·Go·Rust·Python·Compose·uv)는 'sbox.sh tools $name --from-repo <저장소>' 또는 create 의 --from-repo/--tool 로 읽기 전용 도구 층을 붙입니다"
+    fi
 }
 
 cmd_create() {
     local name="" cache=1 token=1 home=1 kind="" flavor="" release="" legacy=0 nesting=0 cpu=2 mem=2GiB
+    TOOLS_ARGS=()   # ct 전용: 만든 직후 도구 층에 넘길 인자(--from-repo·--manifest·--tool·--update) — 다시 만들 때 같은 버전이 재적용되게
     while (($#)); do
         case $1 in
+            --from-repo) TOOLS_ARGS+=(--from-repo "${2:?}"); shift ;;
+            --manifest) TOOLS_ARGS+=(--manifest "${2:?}"); shift ;;
+            --tool) TOOLS_ARGS+=("${2:?}"); shift ;;
+            --update) TOOLS_ARGS+=(--update) ;;
             --no-cache) cache=0 ;;
             --no-token) token=0 ;;
             --no-home) home=0 ;;
@@ -443,6 +454,7 @@ cmd_create() {
         "") die "--kind vm|ct 가 필요합니다(기본값 없음)" ;;
         *) die "알 수 없는 종류: $kind (vm|ct)" ;;
     esac
+    ((${#TOOLS_ARGS[@]})) && die "--from-repo·--manifest·--tool·--update 는 ct(컨테이너) 전용입니다 — vm 은 nixos 설정으로 도구를 관리합니다"
     [[ -z $flavor || $flavor == nixos ]] || die "vm 종류는 nixos 만 구현돼 있습니다(받은 flavor: $flavor)"
     [[ -n $name ]] || name="sbox-vm-$(date +%y%m%d-%H%M)"
     check_name "$name"
