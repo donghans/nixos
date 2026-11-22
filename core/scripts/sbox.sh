@@ -171,7 +171,7 @@ cmd_rebuild_golden() {
     local _try _err
     for _try in 1 2 3; do
         if _err=$(timeout 120 incus init --empty --vm "$GOLDEN_INST" -n "$NETWORK" -c limits.cpu=4 -c limits.memory=8GiB \
-            -c security.secureboot=false -d root,size=120GiB 2>&1); then break; fi
+            -c security.secureboot=false -d root,size=120GiB 2>&1 </dev/null); then break; fi
         say "incus init 실패($_try/3): ${_err##*$'\n'}"
         incus delete -f "$GOLDEN_INST" >/dev/null 2>&1 || true
         sleep 10
@@ -361,7 +361,7 @@ cmd_create() {
     # 시간 제한을 두고 실패하면 반쯤 만들어진 것을 지운 뒤 재시도한다.
     local _try _err
     for _try in 1 2 3; do
-        if _err=$(timeout 180 incus copy "$GOLDEN_INST/$GOLDEN_SNAP" "$name" 2>&1); then break; fi
+        if _err=$(timeout 180 incus copy "$GOLDEN_INST/$GOLDEN_SNAP" "$name" 2>&1 </dev/null); then break; fi
         say "incus copy 실패($_try/3): ${_err##*$'\n'}"
         incus delete -f "$name" >/dev/null 2>&1 || true
         sleep 10
