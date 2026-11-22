@@ -50,6 +50,20 @@ check("hasInstallScript 패키지는 install-script, 이름이 근거에 나옴"
 check("정상 프로젝트는 발견 없음", kinds("clean") == [], kinds("clean"))
 check("한 단계 아래 package.json 도 보고 node_modules 는 제외", kinds("nested") == ["no-lock"], kinds("nested"))
 
+# 실제 저장소(genple)에서 드러난 두 경우: 깊은 위치의 package.json 도 보고, 워크스페이스 멤버는 상위 락을 쓴다(오탐 방지)
+lockfile = {"lockfileVersion": 3, "packages": {"": {"name": "r"}}}
+mk(os.path.join(repos, "ws"), {
+    "package.json": {"name": "r", "workspaces": ["client", "packages/*"]}, "package-lock.json": lockfile,
+    "client/package.json": {"name": "client"}, "packages/a/package.json": {"name": "a"},
+    "other/package.json": {"name": "other"},               # 워크스페이스에 안 들어간 하위 프로젝트 — 락 없음으로 잡혀야 함
+    "deep/x/y/package.json": {"name": "y"}})               # 깊이 3 — 놓치면 안 됨
+ws = sorted(f["id"] for f in depwatch.npm_findings(os.path.join(repos, "ws")))
+mk(os.path.join(repos, "vend"), {"package.json": {"name": "v"}, "package-lock.json": lockfile, "vendor/lib/package.json": {"name": "lib"}, "app/package.json": {"name": "app"}})
+vf = {f["id"]: f["severity"] for f in depwatch.npm_findings(os.path.join(repos, "vend"))}
+check("vendor 하위의 락 없음은 info 로 낮추고 일반 하위는 warn 유지", vf == {"npm.no-lock:vendor/lib": "info", "npm.no-lock:app": "warn"}, vf)
+check("워크스페이스 멤버(client·packages/*)는 상위 락 사용 — 오탐 없음, 멤버가 아닌 other·깊은 deep/x/y 는 no-lock",
+      ws == ["npm.no-lock:deep/x/y", "npm.no-lock:other"], ws)
+
 # ② tier 보존 — plan() 은 inferred 가 비는 저장소(.nvmrc 등 없음)로 돌려 네트워크 해석을 피한다
 os.makedirs(depwatch.MANIFESTS, exist_ok=True)
 tools.plan(["--repo", os.path.join(repos, "scripts")])

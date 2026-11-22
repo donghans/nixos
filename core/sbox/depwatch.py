@@ -13,7 +13,7 @@ ctl 공통 봉투(`ctlkit`)는 `--json` 출력 때만 지연 import 한다(저�
   report [--project P]         팀 제안서 자료(신호별 건수·근거·저장소에 넣을 만한 규칙)
   tier NAME general|critical   매니페스트 [project] 의 tier 줄만 수정(파일을 되쓰지 않음)
 
-한계: 스캔 대상은 호스트 쪽 저장소의 정적 상태(커밋된 락·선언)이며, ct 안에서 방금 설치된 의존성이 아니다. npm 만 지원(락 파일 존재·package-lock.json 의 hasInstallScript).
+한계: 스캔 대상은 호스트 쪽 저장소의 정적 상태(커밋된 락·선언)이며, ct 안에서 방금 설치된 의존성이 아니다. npm 만 지원(락 파일 존재·package-lock.json 의 hasInstallScript). 깊이 6 단계까지, 상위 디렉터리의 workspaces 선언에 속한 멤버는 상위 락을 쓴다.
 """
 import json
 import os
@@ -27,6 +27,7 @@ TIERS = ("general", "critical")
 LOCKS = ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml")
 SKIP_DIRS = {"node_modules"}
 NAME_CAP = 20
+VENDOR_DIRS = {"vendor", "vendors", "third_party", "third-party"}   # 복사해 둔 외부 소스 — 락 없음은 info 로 낮춘다(실측: genple 의 vendor/genoffice)
 
 
 def now():
@@ -49,34 +50,63 @@ def save_state(st):
     os.replace(tmp, STATE)
 
 
+MAX_DEPTH = 6
+
+
 def _pkg_dirs(repo):
-    """package.json 이 있는 디렉터리: 저장소 루트 + 한 단계 아래(node_modules·숨김 폴더 제외)."""
+    """package.json 이 있는 모든 디렉터리(저장소 루트 기준 상대 경로, 깊이 MAX_DEPTH 까지). node_modules·숨김 폴더는 들어가지 않는다."""
     out = []
-    if os.path.isfile(os.path.join(repo, "package.json")):
-        out.append("")
-    try:
-        names = sorted(os.listdir(repo))
-    except OSError:
-        return out
-    for n in names:
-        if n in SKIP_DIRS or n.startswith("."):
-            continue
-        if os.path.isfile(os.path.join(repo, n, "package.json")):
-            out.append(n)
+    base_depth = repo.rstrip(os.sep).count(os.sep)
+    for root, dirs, files in os.walk(repo):
+        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
+        if root.count(os.sep) - base_depth >= MAX_DEPTH:
+            dirs[:] = []
+        if "package.json" in files:
+            out.append(os.path.relpath(root, repo) if root != repo else "")
     return out
 
 
+def _workspace_patterns(pkg_json_path):
+    try:
+        with open(pkg_json_path, encoding="utf-8") as f:
+            ws = json.load(f).get("workspaces")
+    except (OSError, ValueError):
+        return []
+    if isinstance(ws, dict):
+        ws = ws.get("packages")
+    return [w for w in ws if isinstance(w, str)] if isinstance(ws, list) else []
+
+
+def _covered_by_workspace_lock(repo, rel):
+    """rel 이 상위 디렉터리의 워크스페이스 멤버이고 그 상위에 락 파일이 있으면 그 상위 상대 경로를, 아니면 None."""
+    import fnmatch  # noqa: PLC0415
+    parts = rel.split(os.sep) if rel else []
+    for i in range(len(parts) - 1, -1, -1):
+        anc = os.sep.join(parts[:i])
+        d = os.path.join(repo, anc) if anc else repo
+        pats = _workspace_patterns(os.path.join(d, "package.json"))
+        if not pats or not any(os.path.isfile(os.path.join(d, n)) for n in LOCKS):
+            continue
+        member = os.sep.join(parts[i:])
+        if any(fnmatch.fnmatch(member, pt.rstrip("/")) for pt in pats):
+            return anc or "."
+    return None
+
+
 def npm_findings(repo):
-    """repo 아래 npm 위험 신호. 프로젝트 파일은 읽기만 한다."""
+    """repo 아래 npm 위험 신호. 프로젝트 파일은 읽기만 한다. 락 파일은 그 디렉터리에 있거나, 상위 디렉터리의 workspaces 선언에 속한 멤버면 상위의 것을 쓴다."""
     found = []
     for rel in _pkg_dirs(repo):
         d = os.path.join(repo, rel) if rel else repo
         label = rel or "."
         locks = [n for n in LOCKS if os.path.isfile(os.path.join(d, n))]
         if not locks:
-            found.append({"id": f"npm.no-lock:{label}", "kind": "no-lock", "severity": "warn",
-                          "msg": f"{label}: package.json 이 있는데 락 파일이 없음 — 설치할 때마다 버전이 달라질 수 있음",
-                          "evidence": "package.json 만 있음 (package-lock.json·npm-shrinkwrap.json·yarn.lock·pnpm-lock.yaml 없음)"})
+            if _covered_by_workspace_lock(repo, rel):
+                continue  # 워크스페이스 멤버 — 락은 상위 디렉터리의 것
+            vend = any(x in VENDOR_DIRS for x in label.split(os.sep))
+            found.append({"id": f"npm.no-lock:{label}", "kind": "no-lock", "severity": "info" if vend else "warn",
+                          "msg": f"{label}: package.json 이 있는데 락 파일이 없음 — 설치할 때마다 버전이 달라질 수 있음" + (" (vendor 하위 — 소스를 복사해 둔 곳이라 독립 설치 대상이 아닐 수 있어 info)" if vend else ""),
+                          "evidence": "package.json 만 있음 (package-lock.json·npm-shrinkwrap.json·yarn.lock·pnpm-lock.yaml 없음, 상위 워크스페이스 락도 아님)"})
             continue
         pl = os.path.join(d, "package-lock.json")
         if not os.path.isfile(pl):
