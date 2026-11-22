@@ -1,0 +1,59 @@
+# sbox 도구 목록(카탈로그) — 도구마다 코드를 짜지 않고 여기에 「어디서 받고, 무엇으로 검증하고, 어떻게 푸는가」를 선언한다.
+# 엔진: core/sbox/tools.py. 설계·근거: ctx plan/dev-sandbox-pilot §29(도구 층)·§29-3(역할별 버전 정책·추상화).
+#
+# 역할(role) — 버전 정책이 다르다(사용자 방침 2026-11-22):
+#   re  실행환경(Runtime Environment): 프로젝트를 **실행**하는 데 쓰는 것(Node·Go·Rust·Python·Compose·Docker·DB…).
+#       버전은 프로젝트 매니페스트에 **고정**(처음 풀린 정확한 버전을 [resolved] 에 기록, --update 로만 다시 해석).
+#   de  개발환경(Development Environment): 프로젝트를 **유지보수하는 도구**(Claude Code·에디터·린터 성격).
+#       **항상 최신**(스펙을 안 주면 latest). 새 버전을 받으면 **호스트 캐시의 옛 버전은 정리**한다(어느 컨테이너도 쓰지 않는 것만).
+#
+# 필드
+#   role        re | de
+#   desc        한 줄 설명
+#   resolver    스펙(22·1.23·latest·stable·정확한 버전)을 정확한 버전으로 바꾸는 방법
+#                 type = "node-index"   Node 의 index.json (메이저·메이저.마이너 스펙, lts)
+#                 type = "go-json"      go.dev/dl 의 JSON (1.23 → 최신 1.23.x, latest)
+#                 type = "channel-file" 채널 이름(latest·stable)이 파일 이름인 주소 → 버전 문자열
+#                 (생략) 정확한 버전 X.Y.Z 만 허용
+#   min_version 이보다 낮은 버전은 거부(서명이 없는 옛 릴리스 등)
+#   url         산출물 주소. 치환: {version} {file}
+#   checksum    산출물 해시를 어디서 읽나
+#                 type = "sums-file"     줄 끝이 파일 이름인 SHASUMS 형식(주소 url, 이름 name)
+#                 type = "json-manifest" JSON 의 점 경로(path, {platform} 치환) — 주소 url
+#                 type = "go-json"       resolver 의 같은 JSON 에서
+#   signature   체크섬 문서(위 checksum 의 url 이 가리키는 파일)를 서명으로 보증하는 방법
+#                 type = "gpg-detached"  분리 서명(sig_url)을 gpg 로 검증하고 **주 키 지문(fingerprint)이 같아야** 통과, 키는 key_url
+#                 type = "none"          없음(HTTPS + 처음 본 해시 잠금(TOFU)만) — 이유를 note 에 적는다
+#   archive     type = "tar"(strip = 맨 앞 폴더 개수) | "binary"(name = 저장할 파일 이름)
+#   links       컨테이너 /usr/local/bin 에 만들 링크 이름 = 도구 폴더 안 상대 경로
+
+[node]
+role = "re"
+desc = "Node.js (공식 tarball)"
+resolver = { type = "node-index" }
+url = "https://nodejs.org/dist/v{version}/node-v{version}-linux-x64.tar.xz"
+checksum = { type = "sums-file", url = "https://nodejs.org/dist/v{version}/SHASUMS256.txt", name = "node-v{version}-linux-x64.tar.xz" }
+signature = { type = "none", note = "Node 는 SHASUMS256.txt.sig·릴리스 키가 공개돼 있다 — 검증 추가는 후속(S43)" }
+archive = { type = "tar", strip = 1 }
+links = { node = "bin/node", npm = "bin/npm", npx = "bin/npx", corepack = "bin/corepack" }
+
+[go]
+role = "re"
+desc = "Go (공식 go.dev/dl 아카이브)"
+resolver = { type = "go-json" }
+url = "https://go.dev/dl/{file}"
+checksum = { type = "go-json" }
+signature = { type = "none", note = "go.dev/dl 의 JSON 해시를 HTTPS 로 읽음(공식 서명 파일은 확인하지 못함)" }
+archive = { type = "tar", strip = 1 }
+links = { go = "bin/go", gofmt = "bin/gofmt" }
+
+[claude]
+role = "de"
+desc = "Claude Code (공식 네이티브 바이너리)"
+min_version = "2.1.89"
+resolver = { type = "channel-file", url = "https://downloads.claude.ai/claude-code-releases/{channel}", channels = ["latest", "stable"], default = "latest" }
+url = "https://downloads.claude.ai/claude-code-releases/{version}/linux-x64/claude"
+checksum = { type = "json-manifest", url = "https://downloads.claude.ai/claude-code-releases/{version}/manifest.json", path = "platforms.linux-x64.checksum" }
+signature = { type = "gpg-detached", sig_url = "https://downloads.claude.ai/claude-code-releases/{version}/manifest.json.sig", key_url = "https://downloads.claude.ai/keys/claude-code.asc", fingerprint = "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE", note = "지문은 공식 문서 code.claude.com/docs/en/setup 의 값(2026-11-22)" }
+archive = { type = "binary", name = "claude" }
+links = { claude = "claude" }

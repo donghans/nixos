@@ -7,7 +7,7 @@
 #   sbox.sh releases [flavor]                          쓸 수 있는 릴리스 표(core/sbox/releases.toml)
 #   sbox.sh create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
 #   sbox.sh tools NAME [--from-repo DIR|--manifest F] [--update] [node=22]  컨테이너에 읽기 전용 도구 층 붙임(호스트가 받아 sha256 검증, 버전은 매니페스트에 고정, v1: node)
-#   sbox.sh claude NAME [--dir D] [--bypass] [--attach] [--claude-version V]  안(vm·ct)에서 tmux 로 Claude 대화형 세션 시작(첫 실행 안내를 미리 처리·남으면 경고)
+#   sbox.sh claude NAME [--dir D] [--bypass] [--attach] [--claude-version V] [--update]  안(vm·ct)에서 tmux 로 Claude 대화형 세션 시작(첫 실행 안내를 미리 처리·남으면 경고)
 #   sbox.sh bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
 #   sbox.sh import BUNDLE                             번들을 호스트 저장소의 refs/sbox/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
 #   sbox.sh destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
@@ -583,9 +583,9 @@ cmd_destroy() {
 #  (22 같은 느슨한 스펙이 나중에 다른 패치로 조용히 바뀌지 않음). 다시 해석하려면 --update. TOOL=SPEC 은 매니페스트에 [override] 로 기록된다.
 cmd_tools() {
     local name=${1:-}; shift || true
-    [[ -n $name ]] || die "사용법: sbox.sh tools NAME [--from-repo DIR | --manifest FILE] [--update] [node=22 ...]"
+    [[ -n $name ]] || die "사용법: sbox.sh tools NAME [--from-repo DIR | --manifest FILE] [--update] [TOOL[=SPEC] ...]  (도구 목록: python3 core/sbox/tools.py catalog)"
     check_name "$name"
-    [[ $NAME_KIND == ct ]] || die "도구 층 v1 은 컨테이너(ct)만 지원합니다"
+    [[ $NAME_KIND == ct ]] || die "도구 층은 컨테이너(ct)만 지원합니다"
     incus info "$name" >/dev/null 2>&1 </dev/null || die "$name 이 없습니다"
     local -a pargs=() inline=()
     local a
@@ -595,65 +595,77 @@ cmd_tools() {
             --from-repo) pargs+=(--repo "${1:?}"); shift ;;
             --manifest) pargs+=(--manifest "${1:?}"); shift ;;
             --update) pargs+=(--update) ;;
-            *=*) inline+=("$a"); pargs+=(--tool "$a") ;;
-            *) die "알 수 없는 인자: $a" ;;
+            *) inline+=("$a"); pargs+=(--tool "$a") ;;   # TOOL=SPEC, 또는 de 도구는 이름만(최신)
         esac
     done
-    local plan
+    local lines k spec ver src how
     if printf '%s\n' "${pargs[@]}" | grep -qE '^--(repo|manifest)$'; then
-        plan=$(python3 "$SBOX_DIR/tools.py" plan "${pargs[@]}") || die "매니페스트 계획 실패"
+        lines=$(python3 "$SBOX_DIR/tools.py" plan "${pargs[@]}" | python3 -c 'import sys,json
+d=json.load(sys.stdin)
+if d["manifest"]: print("매니페스트:", d["manifest"], file=sys.stderr)
+for k,v in d["tools"].items(): print("\x1f".join([k,v["spec"],v["version"],v["source"],v["how"]]))') || die "매니페스트 계획 실패"
     else
-        ((${#inline[@]})) || die "설치할 도구가 없습니다(--from-repo·--manifest 또는 TOOL=SPEC 필요)"
-        local -a t=(); for a in "${inline[@]}"; do t+=(--tool "$a"); done
-        # 매니페스트 없이 일회성 — 임시 이름의 매니페스트를 만들지 않으려 resolve 만 쓴다
-        plan='{"manifest":"","tools":{'
-        local first=1 k spec ver
+        ((${#inline[@]})) || die "설치할 도구가 없습니다(--from-repo·--manifest 또는 TOOL[=SPEC] 필요)"
+        lines=""
         for a in "${inline[@]}"; do
-            k=${a%%=*}; spec=${a#*=}
-            [[ $k == node || $k == claude ]] || die "도구 층이 지원하지 않는 도구입니다(받은 도구: $k, 지원: node·claude)"
-            ver=$(python3 "$SBOX_DIR/tools.py" resolve "$k" "$spec") || die "$k $spec 버전 해석 실패"
-            ((first)) || plan+=","; first=0
-            plan+="\"$k\":{\"spec\":\"$spec\",\"version\":\"$ver\",\"source\":\"인자\",\"how\":\"일회성\"}"
+            k=${a%%=*}; spec=""; [[ $a == *=* ]] && spec=${a#*=}
+            ver=$(python3 "$SBOX_DIR/tools.py" resolve "$k" $spec) || die "$k ${spec:-(최신)} 버전 해석 실패"
+            lines+="$k"$'\x1f'"${spec:-latest}"$'\x1f'"$ver"$'\x1f'"인자"$'\x1f'"일회성"$'\n'
         done
-        plan+='}}'
     fi
-    local k spec ver src how dir dev
+    local dir dev role links d
     while IFS=$'\x1f' read -r k spec ver src how; do
-        [[ $k == node || $k == claude ]] || die "도구 층이 지원하지 않는 도구입니다(받은 도구: $k, 지원: node·claude)"
+        [[ -n $k ]] || continue
+        links=$(python3 "$SBOX_DIR/tools.py" links "$k") || die "$k 는 카탈로그에 없는 도구입니다"
         say "도구: $k $spec → $ver ($src, $how)"
         dir=$(python3 "$SBOX_DIR/tools.py" fetch "$k" "$ver") || die "$k $ver 받기·검증 실패"
         dev="tools-$k-${ver//./_}"
+        # 컨테이너 하나 = 도구마다 버전 한 벌 — 같은 도구의 다른 버전 장치는 뺀다
+        for d in $(incus config device list "$name" </dev/null | grep "^tools-$k-" || true); do
+            [[ $d == "$dev" ]] || incus config device remove "$name" "$d" </dev/null >/dev/null || die "옛 장치 제거 실패($d)"
+        done
         if ! incus config device show "$name" </dev/null | grep -q "^$dev:"; then
-            incus config device add "$name" "$dev" disk source="$dir" path="/opt/tools/$k/$ver" readonly=true </dev/null \
+            incus config device add "$name" "$dev" disk source="$dir" path="/opt/tools/$k/$ver" readonly=true </dev/null >/dev/null \
                 || die "읽기 전용 장치 추가 실패($dev)"
         fi
-        incus exec "$name" --env "PATH=$CT_PATH" -- sh -c "if [ $k = claude ]; then ln -sfn /opt/tools/claude/$ver/claude /usr/local/bin/claude; else for b in node npm npx corepack; do ln -sfn /opt/tools/$k/$ver/bin/\$b /usr/local/bin/\$b; done; fi" </dev/null \
-            || die "/usr/local/bin 연결 실패"
+        # /usr/local/bin 링크 — 이름과 대상은 카탈로그(links)가 정한다
+        python3 -c 'import sys,json
+k,v=sys.argv[1],sys.argv[2]
+for n,rel in json.loads(sys.argv[3]).items(): print(f"ln -sfn /opt/tools/{k}/{v}/{rel} /usr/local/bin/{n}")' "$k" "$ver" "$links" \
+            | incus exec "$name" --env "PATH=$CT_PATH" -- sh || die "/usr/local/bin 연결 실패"
         audit info tools "$name" "$k $ver 읽기 전용 마운트(스펙 $spec, $src, $how)"
         say "완료: $k $ver — /opt/tools/$k/$ver (읽기 전용), /usr/local/bin 에 연결"
-    done < <(printf '%s' "$plan" | python3 -c 'import sys,json
-d=json.load(sys.stdin)
-if d["manifest"]: print("매니페스트:", d["manifest"], file=sys.stderr)
-for k,v in d["tools"].items(): print("\x1f".join([k,v["spec"],v["version"],v["source"],v["how"]]))')
+        # de(개발환경) 도구는 항상 최신 — 어느 인스턴스도 쓰지 않는 옛 버전은 호스트 캐시에서 정리한다
+        role=$(python3 "$SBOX_DIR/tools.py" catalog | python3 -c 'import sys,json;print(json.load(sys.stdin)["'"$k"'"]["role"])')
+        if [[ $role == de ]]; then
+            local gone
+            gone=$(incus list -f json </dev/null | python3 -c 'import sys,json
+for i in json.load(sys.stdin):
+    for d in (i.get("devices") or {}).values():
+        if d.get("type")=="disk" and d.get("source"): print(d["source"])' | python3 "$SBOX_DIR/tools.py" prune "$k" --keep "$ver")
+            [[ -z $gone ]] || say "정리: 쓰이지 않는 옛 $k 버전 삭제 — $gone"
+        fi
+    done <<<"$lines"
 }
 
 # 안에서 Claude Code 대화형 세션을 tmux 로 시작한다(vm·ct 공통) — 첫 실행 안내(테마·보안 안내·폴더 신뢰·bypass 경고)를 설정 병합으로 미리 처리한다(plan dev-sandbox-pilot §23 S42).
 #  vm: Claude 는 홈 설정이 깐 것을 쓰고 tmux 는 nix shell 로 쓴다.  ct: tmux 는 root 가 apt 로, Claude 는 도구 층의 Node 로 sbox 사용자 홈(~/.npm-global)에 npm 설치(없을 때만).
-# 사용: claude NAME [--dir 폴더] [--bypass] [--attach] [--claude-version V]   (--bypass: 권한 확인 생략 모드 — 일회용 환경 안에서만 쓰는 용도)
+# 사용: claude NAME [--dir 폴더] [--bypass] [--attach] [--claude-version V] [--update]   (--bypass: 권한 확인 생략 모드 — 일회용 환경 안에서만 쓰는 용도)
 claude_tmux() { # claude_tmux NAME ARGS… — 종류에 맞게 tmux 를 sbox 사용자로 실행
     local name=$1; shift
     if [[ $NAME_KIND == vm ]]; then vmu "$name" nix shell nixpkgs#tmux -c tmux "$@"; else vmu "$name" tmux "$@"; fi
 }
 cmd_claude() {
     local name=${1:-}; shift || true
-    [[ -n $name ]] || die "사용법: sbox.sh claude NAME [--dir 폴더] [--bypass] [--attach] [--claude-version V]"
-    local dir="$VM_HOME/work" bypass=0 attach=0 cver=""
+    [[ -n $name ]] || die "사용법: sbox.sh claude NAME [--dir 폴더] [--bypass] [--attach] [--claude-version V] [--update]"
+    local dir="$VM_HOME/work" bypass=0 attach=0 cver="" update=0
     while (($#)); do
         case $1 in
             --dir) dir=${2:?}; shift ;;
             --bypass) bypass=1 ;;
             --attach) attach=1 ;;
             --claude-version) cver=${2:?}; shift ;;
+            --update) update=1 ;;
             *) die "알 수 없는 인자: $1" ;;
         esac
         shift
@@ -666,9 +678,10 @@ cmd_claude() {
     if [[ $NAME_KIND == ct ]]; then
         vmx "$name" sh -c 'command -v tmux >/dev/null 2>&1 || { apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux >/dev/null; }' </dev/null \
             || die "tmux 설치 실패(컨테이너 안 apt)"
-        # Claude 는 공식 네이티브 바이너리 — 호스트가 서명된 manifest(GPG, 고정 지문)·SHA256 으로 검증해 읽기 전용으로 마운트(S46). 기본 채널 stable.
-        if ! incus exec "$name" --env "PATH=$CT_PATH" -- sh -c 'test -x /usr/local/bin/claude' </dev/null; then
-            cmd_tools "$name" "claude=${cver:-stable}" || die "도구 층 Claude 설치 실패"
+        # Claude 는 개발환경(de) 도구 — 공식 네이티브 바이너리를 호스트가 서명된 manifest(GPG)·SHA256 으로 검증해 읽기 전용 마운트(S46).
+        # 항상 최신(사용자 방침): 없을 때 또는 --update 일 때 최신으로 받고 쓰이지 않는 옛 버전은 정리한다. 특정 버전이 필요하면 --claude-version.
+        if ((update)) || ! incus exec "$name" --env "PATH=$CT_PATH" -- sh -c 'test -x /usr/local/bin/claude' </dev/null; then
+            cmd_tools "$name" "claude${cver:+=$cver}" || die "도구 층 Claude 설치 실패"
         fi
     fi
     # 첫 실행 설정 병합(기존 값은 보존): ~/.claude.json 의 온보딩 완료·폴더 신뢰, ~/.claude/settings.json 의 테마·(bypass 면) 경고 생략
