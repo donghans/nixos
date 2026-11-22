@@ -7,6 +7,7 @@
 #   sbox.sh releases [flavor]                          쓸 수 있는 릴리스 표(core/sbox/releases.toml)
 #   sbox.sh create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
 #   sbox.sh tools NAME [--from-repo DIR|--manifest F] [--update] [node=22]  컨테이너에 읽기 전용 도구 층 붙임(호스트가 받아 sha256 검증, 버전은 매니페스트에 고정, v1: node)
+#   sbox.sh claude NAME [--dir D] [--bypass] [--attach]  VM 안 tmux 에서 Claude 대화형 세션 시작(첫 실행 안내를 미리 처리)
 #   sbox.sh bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
 #   sbox.sh import BUNDLE                             번들을 호스트 저장소의 refs/sbox/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
 #   sbox.sh destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
@@ -636,6 +637,61 @@ if d["manifest"]: print("매니페스트:", d["manifest"], file=sys.stderr)
 for k,v in d["tools"].items(): print("\x1f".join([k,v["spec"],v["version"],v["source"],v["how"]]))')
 }
 
+# VM 안에서 Claude Code 대화형 세션을 tmux 로 시작한다 — 첫 실행 안내(테마·보안 안내·폴더 신뢰·bypass 경고)를 미리 처리하고,
+# VM 에 tmux 가 없어 nix shell 로 쓴다(S20 에서 발견한 두 가지 — plan dev-sandbox-pilot §23 S42).
+# 사용: claude NAME [--dir 폴더] [--bypass] [--attach]    (--bypass: 권한 확인 생략 모드 — 일회용 VM 안에서만 쓰는 용도)
+cmd_claude() {
+    local name=${1:-}; shift || true
+    [[ -n $name ]] || die "사용법: sbox.sh claude NAME [--dir 폴더] [--bypass] [--attach]"
+    local dir="$VM_HOME/work" bypass=0 attach=0
+    while (($#)); do
+        case $1 in
+            --dir) dir=${2:?}; shift ;;
+            --bypass) bypass=1 ;;
+            --attach) attach=1 ;;
+            *) die "알 수 없는 인자: $1" ;;
+        esac
+        shift
+    done
+    check_name "$name"; require_vm
+    [[ $dir == /home/$VM_USER/* ]] || die "--dir 은 VM 안 /home/$VM_USER/ 아래여야 합니다(받은 값: $dir)"
+    vmu "$name" test -s "$TOKEN_PATH" </dev/null || die "토큰이 없습니다 — 'sbox.sh token $name' 으로 주입하세요"
+    vmu "$name" mkdir -p "$dir" </dev/null
+    # 첫 실행 설정 병합(기존 값은 보존): ~/.claude.json 의 온보딩 완료·폴더 신뢰, ~/.claude/settings.json 의 테마·(bypass 면) 경고 생략
+    local f
+    for f in .claude.json .claude/settings.json; do
+        { vmu "$name" sh -c "cat \"\$HOME/$f\" 2>/dev/null || echo '{}'" </dev/null \
+            | python3 -c 'import sys,json
+f,d,b=sys.argv[1],sys.argv[2],sys.argv[3]=="1"
+try: j=json.load(sys.stdin)
+except ValueError: j={}
+if f==".claude.json":
+    j["hasCompletedOnboarding"]=True
+    j.setdefault("projects",{}).setdefault(d,{})["hasTrustDialogAccepted"]=True
+else:
+    j.setdefault("theme","auto")
+    if b: j["skipDangerousModePermissionPrompt"]=True
+print(json.dumps(j))' "$f" "$dir" "$bypass" \
+            | vmu "$name" sh -c "umask 077; mkdir -p \"\$HOME/.claude\"; cat > \"\$HOME/$f.new\" && mv \"\$HOME/$f.new\" \"\$HOME/$f\""; } \
+            || die "$f 설정 병합 실패"
+    done
+    local flags=""; ((bypass)) && flags="--dangerously-skip-permissions"
+    local out
+    out=$(vmu "$name" nix shell nixpkgs#tmux -c sh -s -- "$dir" "$TOKEN_PATH" "$flags" <<'REMOTE'
+dir=$1; tok=$2; flags=$3
+tmux has-session -t claude 2>/dev/null && { echo "이미 실행 중"; exit 0; }
+cd "$dir" || exit 1
+tmux new-session -d -s claude -x 200 -y 50 "CLAUDE_CODE_OAUTH_TOKEN=\$(cat $tok) exec claude $flags"
+echo "시작함"
+REMOTE
+    ) || die "tmux 세션 시작 실패"
+    audit info claude "$name" "tmux 세션 claude: $out (dir $dir, bypass=$bypass)"
+    say "Claude 세션 $out — 붙기: incus exec $name --user $VM_UID --env HOME=$VM_HOME --env PATH=$VM_PATH -- nix shell nixpkgs#tmux -c tmux attach -t claude  (떼기: Ctrl-b d)"
+    if ((attach)); then
+        vmu "$name" nix shell nixpkgs#tmux -c tmux attach -t claude
+    fi
+}
+
 cmd_list() { incus list '^sbox-' -c ns4 -f compact; }
 
 case "${1:-}" in
@@ -650,6 +706,7 @@ case "${1:-}" in
     cache) shift; cmd_cache "${1:-}" ;;
     token) shift; cmd_token "${1:-}" ;;
     home) shift; cmd_home "${1:-}" ;;
+    claude) shift; cmd_claude "$@" ;;
     tools) shift; cmd_tools "$@" ;;
     list) cmd_list ;;
     *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
