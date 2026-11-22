@@ -6,6 +6,7 @@
 #   sbox.sh create --kind ct --flavor debian|ubuntu [--release R] [--legacy] [--nesting] [--cpu N] [--memory M] [NAME]  컨테이너 생성(v1)
 #   sbox.sh releases [flavor]                          쓸 수 있는 릴리스 표(core/sbox/releases.toml)
 #   sbox.sh create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
+#   sbox.sh tools NAME [--from-repo DIR|--manifest F] [--update] [node=22]  컨테이너에 읽기 전용 도구 층 붙임(호스트가 받아 sha256 검증, 버전은 매니페스트에 고정, v1: node)
 #   sbox.sh bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
 #   sbox.sh import BUNDLE                             번들을 호스트 저장소의 refs/sbox/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
 #   sbox.sh destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
@@ -412,7 +413,7 @@ d=json.load(sys.stdin)[0]["state"]["network"]
 print(" ".join(a["address"] for a in d.get("eth0",{}).get("addresses",[]) if a["family"]=="inet"))')
     audit info create "$name" "컨테이너 images:$image, ${flavor} ${ver}(${key}) ${status}, $ip, 비특권, cpu $cpu·메모리 $mem"
     say "완료: $name  ($ip) — 사용자 $VM_USER(sudo 없음), 토큰은 $TOKEN_PATH(tmpfs)"
-    say "알림: Claude Code·Node 같은 도구는 아직 깔려 있지 않습니다(체크리스트 S5 도구 층)"
+    say "알림: Node 등은 'sbox.sh tools $name --from-repo <저장소>' 로 읽기 전용 도구 층을 붙입니다(S5 v1: node 만)"
 }
 
 cmd_create() {
@@ -575,6 +576,66 @@ cmd_destroy() {
     say "삭제 완료: $name"
 }
 
+# 도구 층 v1 (plan dev-sandbox-pilot §29, S5·S34): 호스트가 공식 파일을 받아 sha256 검증 → 컨테이너에 읽기 전용으로만 마운트.
+# 사용: tools NAME [--from-repo DIR | --manifest FILE] [--update] [TOOL=SPEC ...]   (v1: node 만)
+#  --from-repo/--manifest 는 ~/.config/sbox/manifests/<프로젝트>.toml 을 만들거나 갱신하고 **정확한 버전을 [resolved] 에 고정**한다
+#  (22 같은 느슨한 스펙이 나중에 다른 패치로 조용히 바뀌지 않음). 다시 해석하려면 --update. TOOL=SPEC 은 매니페스트에 [override] 로 기록된다.
+cmd_tools() {
+    local name=${1:-}; shift || true
+    [[ -n $name ]] || die "사용법: sbox.sh tools NAME [--from-repo DIR | --manifest FILE] [--update] [node=22 ...]"
+    check_name "$name"
+    [[ $NAME_KIND == ct ]] || die "도구 층 v1 은 컨테이너(ct)만 지원합니다"
+    incus info "$name" >/dev/null 2>&1 </dev/null || die "$name 이 없습니다"
+    local -a pargs=() inline=()
+    local a
+    while (($#)); do
+        a=$1; shift
+        case $a in
+            --from-repo) pargs+=(--repo "${1:?}"); shift ;;
+            --manifest) pargs+=(--manifest "${1:?}"); shift ;;
+            --update) pargs+=(--update) ;;
+            *=*) inline+=("$a"); pargs+=(--tool "$a") ;;
+            *) die "알 수 없는 인자: $a" ;;
+        esac
+    done
+    local plan
+    if printf '%s\n' "${pargs[@]}" | grep -qE '^--(repo|manifest)$'; then
+        plan=$(python3 "$SBOX_DIR/tools.py" plan "${pargs[@]}") || die "매니페스트 계획 실패"
+    else
+        ((${#inline[@]})) || die "설치할 도구가 없습니다(--from-repo·--manifest 또는 TOOL=SPEC 필요)"
+        local -a t=(); for a in "${inline[@]}"; do t+=(--tool "$a"); done
+        # 매니페스트 없이 일회성 — 임시 이름의 매니페스트를 만들지 않으려 resolve 만 쓴다
+        plan='{"manifest":"","tools":{'
+        local first=1 k spec ver
+        for a in "${inline[@]}"; do
+            k=${a%%=*}; spec=${a#*=}
+            [[ $k == node ]] || die "도구 층 v1 은 node 만 지원합니다(받은 도구: $k)"
+            ver=$(python3 "$SBOX_DIR/tools.py" resolve "$k" "$spec") || die "$k $spec 버전 해석 실패"
+            ((first)) || plan+=","; first=0
+            plan+="\"$k\":{\"spec\":\"$spec\",\"version\":\"$ver\",\"source\":\"인자\",\"how\":\"일회성\"}"
+        done
+        plan+='}}'
+    fi
+    local k spec ver src how dir dev
+    while IFS=$'\x1f' read -r k spec ver src how; do
+        [[ $k == node ]] || die "도구 층 v1 은 node 만 지원합니다(받은 도구: $k)"
+        say "도구: $k $spec → $ver ($src, $how)"
+        dir=$(python3 "$SBOX_DIR/tools.py" fetch "$k" "$ver") || die "$k $ver 받기·검증 실패"
+        dev="tools-$k-${ver//./_}"
+        if ! incus config device show "$name" </dev/null | grep -q "^$dev:"; then
+            incus config device add "$name" "$dev" disk source="$dir" path="/opt/tools/$k/$ver" readonly=true </dev/null \
+                || die "읽기 전용 장치 추가 실패($dev)"
+        fi
+        incus exec "$name" --env "PATH=$CT_PATH" -- sh -c "for b in node npm npx corepack; do ln -sfn /opt/tools/$k/$ver/bin/\$b /usr/local/bin/\$b; done" </dev/null \
+            || die "/usr/local/bin 연결 실패"
+        audit info tools "$name" "$k $ver 읽기 전용 마운트(스펙 $spec, $src, $how)"
+        say "완료: $k $ver — /opt/tools/$k/$ver (읽기 전용), /usr/local/bin 에 연결"
+    done < <(printf '%s' "$plan" | python3 -c 'import sys,json
+d=json.load(sys.stdin)
+if d["manifest"]: print("매니페스트:", d["manifest"], file=sys.stderr)
+for k,v in d["tools"].items(): print("\x1f".join([k,v["spec"],v["version"],v["source"],v["how"]]))')
+}
+
 cmd_list() { incus list '^sbox-' -c ns4 -f compact; }
 
 case "${1:-}" in
@@ -589,6 +650,7 @@ case "${1:-}" in
     cache) shift; cmd_cache "${1:-}" ;;
     token) shift; cmd_token "${1:-}" ;;
     home) shift; cmd_home "${1:-}" ;;
+    tools) shift; cmd_tools "$@" ;;
     list) cmd_list ;;
     *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac
