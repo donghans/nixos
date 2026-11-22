@@ -23,7 +23,7 @@ mkMod __curPos "Incus hypervisor" ({
   };
   os = lib.mkMerge [
     (lib.mkIf (cfg.enable && !cfg.trustGuestBridge) {
-      # incusbr0 INPUT 허용목록. nixos-fw(trustedInterfaces 였음)보다 먼저(-10) 평가되는 별도 표 — devbr0-guard 와 같은 구조(incus-devbr0.nix 주석).
+      # incusbr0 INPUT 허용목록. nixos-fw(trustedInterfaces 였음)보다 먼저(-10) 평가되는 별도 표 — sbox-guard 와 같은 구조(incus-sbox.nix 주석).
       # FORWARD(게스트 → LAN·tailnet) 차단은 여기서 하지 않는다: qa-desktop·win11 영향 점검 뒤 별도 결정(BH-N2 추가 결정).
       networking.nftables.tables.incusbr0-guard = {
         family = "inet";

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# sbox — 일회용 격리 환경(devbr0)을 만들고 꺼내고 지우는 호스트용 스크립트 (plan dev-sandbox-pilot §11·§15, 로드맵 P6)
+# sbox — 일회용 격리 환경(sboxbr0)을 만들고 꺼내고 지우는 호스트용 스크립트 (plan dev-sandbox-pilot §11·§15, 로드맵 P6)
 # 종류(--kind): vm = nixos OS 단위 시험용 VM(구현됨). ct = 프로젝트용 컨테이너(미구현, 시험 전 — §15). 종류는 필수 인자이고 기본값이 없다.
-# 이름: sbox-vm-<이름> / sbox-ct-<프로젝트>-<이름>, 골든은 sbox-golden-vm(VM 전용). VM 안 사용자 이름은 그대로 devvm.
+# 이름: sbox-vm-<이름> / sbox-ct-<프로젝트>-<이름>, 골든은 sbox-golden-vm(VM 전용). VM 안 사용자 이름은 sbox, 호스트명은 sbox-nixos(2026-11-22 devvm·dev-nixos 에서 변경).
 #
 #   sbox.sh create --kind vm|ct [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
 #   sbox.sh bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
@@ -13,7 +13,7 @@
 #   sbox.sh iso [--stale-ok]                          설치 ISO 만 미리 빌드(캐시면 약 20초, nixstrap 수정 직후면 약 7분)
 #
 # 전제·한계
-#  - 호스트(msi-summit-me) 전용: incus 사용 권한, devbr0 브리지, nix-serve(10.100.1.1:5000) 필요.
+#  - 호스트(msi-summit-me) 전용: incus 사용 권한, sboxbr0 브리지, nix-serve(10.100.1.1:5000) 필요.
 #  - 제어 채널은 incus exec(에이전트) — ssh 로의 전환은 별도 단계(plan §11).
 #  - 캐시 등록은 VM 의 /etc/nix/nix.conf 심볼릭 링크를 파일로 바꾸는 방식이라 VM 안에서 `nixup`(시스템 적용)을 하면 되돌아간다.
 #    그때는 `sbox.sh cache NAME` 으로 다시 등록한다.
@@ -23,11 +23,11 @@ set -euo pipefail
 GOLDEN_INST="${SBOX_GOLDEN_INST:-sbox-golden-vm}"   # 정지 상태로만 둔다. 스냅샷 gold 가 복제 원본
 GOLDEN_SNAP="gold"
 GOLDEN_SRC_DEFAULT="${SBOX_GOLDEN_SRC:-dev-nixos}"
-NETWORK="devbr0"
+NETWORK="sboxbr0"
 CACHE_URL="http://10.100.1.1:5000"
 CACHE_KEY_DEFAULT="devbr0-nix-serve:V+CdKcL1BZ5sgn4t7xsRsffYkG11gkjcqRThEp51034="
 CACHE_PUB_FILE="/var/lib/nix-serve-devbr0/cache-pub-key.pem"
-VM_USER="devvm"
+VM_USER="sbox"
 VM_UID=""   # VM 마다 다르다(다시 만든 골든은 1000, 이름을 바꿔 만든 옛 골든은 1001) — resolve_ids 가 VM 안에서 조회한다
 VM_GID=""
 VM_IDS_FOR=""
@@ -36,7 +36,7 @@ VM_REPO="$VM_HOME/nixos"
 TOKEN_PATH="/run/sbox-claude/token"
 BUNDLE_DIR="${SBOX_BUNDLE_DIR:-$HOME/.local/share/sbox/bundles}"
 # 골든에 처음부터 있는 파일(nixstrap 이 만든 호스트 파일·nixup 이 매번 건드리는 락)은 「미커밋 변경」으로 세지 않는다
-DIRTY_IGNORE="${SBOX_DIRTY_IGNORE:-^(( M)|(\?\?)) (\.locks/_rolling\.lock|hosts/dev-nixos\.(nix|toml))$}"
+DIRTY_IGNORE="${SBOX_DIRTY_IGNORE:-^(( M)|(\?\?)) (\.locks/_rolling\.lock|hosts/sbox-nixos\.(nix|toml))$}"
 VM_PATH="/run/wrappers/bin:/run/current-system/sw/bin:/bin" # incus exec 의 PATH 는 비어 있다(함정)
 
 AUDIT_LOG="${SBOX_AUDIT_LOG:-$HOME/.local/state/sbox/audit.log}"
@@ -69,13 +69,13 @@ vmx_env() { # vmx_env NAME VAR=VAL… -- CMD… — 표준입력을 그대로 �
     shift
     incus exec "$name" "${envs[@]}" -- "$@"
 }
-resolve_ids() { # resolve_ids NAME — VM 안 devvm 사용자의 uid·gid 를 조회해 둔다(VM 별 1회)
+resolve_ids() { # resolve_ids NAME — VM 안 sbox 사용자의 uid·gid 를 조회해 둔다(VM 별 1회)
     [[ $VM_IDS_FOR == "$1" ]] && return 0
     VM_UID=$(incus exec "$1" --env "PATH=$VM_PATH" -- id -u "$VM_USER") || die "$1 에서 사용자 $VM_USER 를 찾지 못했습니다"
     VM_GID=$(incus exec "$1" --env "PATH=$VM_PATH" -- id -g "$VM_USER")
     VM_IDS_FOR=$1
 }
-vmu() { # vmu NAME CMD… — VM 안에서 devvm 사용자로 실행
+vmu() { # vmu NAME CMD… — VM 안에서 sbox 사용자로 실행
     local name=$1; shift
     resolve_ids "$name"
     local -a extra=()
@@ -189,7 +189,7 @@ cmd_rebuild_golden() {
     [[ $(vmx "$GOLDEN_INST" sh -c 'lsblk -dno SIZE,TYPE /dev/sda') == *disk* ]] || die "/dev/sda 가 없습니다"
     vmx "$GOLDEN_INST" sh -c "cat > /root/nixstrap-params.env" <<PARAMS_EOF
 NIXOS_REPO=donghans/nixos
-HOST=dev-nixos
+HOST=sbox-nixos
 _HOST_IS_NEW=true
 _HOST_TYPE=
 _HOST_PRESET_FROM_REPO=
@@ -284,7 +284,7 @@ cmd_cache() {
         say "캐시 등록·접근 확인 완료($CACHE_URL)"
         audit info cache "$name" "$CACHE_URL 등록·접근 확인"
     else
-        die "캐시 등록은 했으나 VM 에서 $CACHE_URL 에 닿지 않습니다(호스트 nix-serve·devbr0-guard 확인)"
+        die "캐시 등록은 했으나 VM 에서 $CACHE_URL 에 닿지 않습니다(호스트 nix-serve·sbox-guard 확인)"
     fi
 }
 
@@ -299,7 +299,7 @@ home_apply() { # 이름 규칙 검사 없이 홈 적용(rebuild-golden 이 골�
         d=$VM_HOME/.cache/nixos/build; mkdir -p \$d
         [ -s \$d/hardware.nix ] || nixos-generate-config --no-filesystems --show-hardware-config > \$d/hardware.nix
         chown -R $VM_UID:$VM_GID $VM_HOME/.cache" || { audit critical home "$name" "hardware.nix 준비 실패"; return 0; }
-    # 호스트 nix-serve 캐시를 이 호출에만 적용한다(NIX_CONFIG — devvm 은 wheel 이라 신뢰 사용자). 이미지·nix.conf 는 건드리지 않는다.
+    # 호스트 nix-serve 캐시를 이 호출에만 적용한다(NIX_CONFIG — sbox 사용자는 wheel 이라 신뢰 사용자). 이미지·nix.conf 는 건드리지 않는다.
     local NIX_CFG
     NIX_CFG=$(printf 'extra-substituters = %s\nextra-trusted-public-keys = %s' "$CACHE_URL" "$(cache_key)")
     # 골든에는 홈 프로필이 이미 있어 보통 몇 초 안에 끝난다. 실패해도 생성 전체를 막지는 않고 critical 로 알린다.
@@ -316,7 +316,7 @@ cmd_token() {
     check_name "$name"
     command -v donghans >/dev/null || die "donghans 명령이 없습니다"
     resolve_ids "$name"
-    # 값은 환경변수 → 표준입력으로만 흐른다(명령줄에 없음). 파일은 VM tmpfs, 0600, devvm 소유.
+    # 값은 환경변수 → 표준입력으로만 흐른다(명령줄에 없음). 파일은 VM tmpfs, 0600, sbox 소유.
     # shellcheck disable=SC2016  # $VM_CLAUDE_TOKEN·$1.. 는 donghans secret run 이 띄운 셸이 펼친다(명령줄에 값이 없게)
     donghans secret run --env VM_CLAUDE_TOKEN -- sh -c '
         printf %s "$VM_CLAUDE_TOKEN" | incus exec "$1" --env PATH="$2" -- sh -c "
