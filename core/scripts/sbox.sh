@@ -578,7 +578,7 @@ cmd_destroy() {
 }
 
 # 도구 층 v1 (plan dev-sandbox-pilot §29, S5·S34): 호스트가 공식 파일을 받아 sha256 검증 → 컨테이너에 읽기 전용으로만 마운트.
-# 사용: tools NAME [--from-repo DIR | --manifest FILE] [--update] [TOOL=SPEC ...]   (v1: node 만)
+# 사용: tools NAME [--from-repo DIR | --manifest FILE] [--update] [TOOL=SPEC ...]   (node·claude)
 #  --from-repo/--manifest 는 ~/.config/sbox/manifests/<프로젝트>.toml 을 만들거나 갱신하고 **정확한 버전을 [resolved] 에 고정**한다
 #  (22 같은 느슨한 스펙이 나중에 다른 패치로 조용히 바뀌지 않음). 다시 해석하려면 --update. TOOL=SPEC 은 매니페스트에 [override] 로 기록된다.
 cmd_tools() {
@@ -610,7 +610,7 @@ cmd_tools() {
         local first=1 k spec ver
         for a in "${inline[@]}"; do
             k=${a%%=*}; spec=${a#*=}
-            [[ $k == node ]] || die "도구 층 v1 은 node 만 지원합니다(받은 도구: $k)"
+            [[ $k == node || $k == claude ]] || die "도구 층이 지원하지 않는 도구입니다(받은 도구: $k, 지원: node·claude)"
             ver=$(python3 "$SBOX_DIR/tools.py" resolve "$k" "$spec") || die "$k $spec 버전 해석 실패"
             ((first)) || plan+=","; first=0
             plan+="\"$k\":{\"spec\":\"$spec\",\"version\":\"$ver\",\"source\":\"인자\",\"how\":\"일회성\"}"
@@ -619,7 +619,7 @@ cmd_tools() {
     fi
     local k spec ver src how dir dev
     while IFS=$'\x1f' read -r k spec ver src how; do
-        [[ $k == node ]] || die "도구 층 v1 은 node 만 지원합니다(받은 도구: $k)"
+        [[ $k == node || $k == claude ]] || die "도구 층이 지원하지 않는 도구입니다(받은 도구: $k, 지원: node·claude)"
         say "도구: $k $spec → $ver ($src, $how)"
         dir=$(python3 "$SBOX_DIR/tools.py" fetch "$k" "$ver") || die "$k $ver 받기·검증 실패"
         dev="tools-$k-${ver//./_}"
@@ -627,7 +627,7 @@ cmd_tools() {
             incus config device add "$name" "$dev" disk source="$dir" path="/opt/tools/$k/$ver" readonly=true </dev/null \
                 || die "읽기 전용 장치 추가 실패($dev)"
         fi
-        incus exec "$name" --env "PATH=$CT_PATH" -- sh -c "for b in node npm npx corepack; do ln -sfn /opt/tools/$k/$ver/bin/\$b /usr/local/bin/\$b; done" </dev/null \
+        incus exec "$name" --env "PATH=$CT_PATH" -- sh -c "if [ $k = claude ]; then ln -sfn /opt/tools/claude/$ver/claude /usr/local/bin/claude; else for b in node npm npx corepack; do ln -sfn /opt/tools/$k/$ver/bin/\$b /usr/local/bin/\$b; done; fi" </dev/null \
             || die "/usr/local/bin 연결 실패"
         audit info tools "$name" "$k $ver 읽기 전용 마운트(스펙 $spec, $src, $how)"
         say "완료: $k $ver — /opt/tools/$k/$ver (읽기 전용), /usr/local/bin 에 연결"
@@ -662,15 +662,14 @@ cmd_claude() {
     [[ $dir == /home/$VM_USER/* ]] || die "--dir 은 안쪽 /home/$VM_USER/ 아래여야 합니다(받은 값: $dir)"
     vmu "$name" test -s "$TOKEN_PATH" </dev/null || die "토큰이 없습니다 — 'sbox.sh token $name' 으로 주입하세요"
     vmu "$name" mkdir -p "$dir" </dev/null
-    local pathpre=""
+    local pathpre="DISABLE_AUTOUPDATER=1 "   # 읽기 전용 마운트라 자동 갱신은 못 하고, 하려다 실패 메시지만 낸다 — 끈다
     if [[ $NAME_KIND == ct ]]; then
         vmx "$name" sh -c 'command -v tmux >/dev/null 2>&1 || { apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux >/dev/null; }' </dev/null \
             || die "tmux 설치 실패(컨테이너 안 apt)"
-        vmu "$name" sh -c 'test -x "$HOME/.npm-global/bin/claude" || command -v npm >/dev/null' </dev/null \
-            || die "Claude 도, Node 도 없습니다 — 먼저 'sbox.sh tools $name node=22' 로 도구 층을 붙이세요"
-        vmu "$name" sh -c "test -x \"\$HOME/.npm-global/bin/claude\" || { mkdir -p \"\$HOME/.npm-global\" && npm config set prefix \"\$HOME/.npm-global\" && npm install -g @anthropic-ai/claude-code${cver:+@$cver} >/dev/null 2>&1; }" </dev/null \
-            || die "Claude npm 설치 실패"
-        pathpre='PATH=$HOME/.npm-global/bin:$PATH '
+        # Claude 는 공식 네이티브 바이너리 — 호스트가 서명된 manifest(GPG, 고정 지문)·SHA256 으로 검증해 읽기 전용으로 마운트(S46). 기본 채널 stable.
+        if ! incus exec "$name" --env "PATH=$CT_PATH" -- sh -c 'test -x /usr/local/bin/claude' </dev/null; then
+            cmd_tools "$name" "claude=${cver:-stable}" || die "도구 층 Claude 설치 실패"
+        fi
     fi
     # 첫 실행 설정 병합(기존 값은 보존): ~/.claude.json 의 온보딩 완료·폴더 신뢰, ~/.claude/settings.json 의 테마·(bypass 면) 경고 생략
     local f

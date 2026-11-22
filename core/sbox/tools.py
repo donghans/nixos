@@ -7,6 +7,7 @@
 서브명령(표준출력은 기계가 읽는 한 줄 또는 JSON):
   resolve TOOL SPEC            SPEC(22, 22.11, 22.11.0, lts) → 정확한 버전
   fetch TOOL VERSION           내려받기·검증·풀기 → 풀린 폴더 경로
+  (지원 도구: node — 공식 tarball+SHASUMS256 / claude — 공식 네이티브 바이너리+GPG 서명 manifest)
   infer REPO                   프로젝트 파일(.nvmrc·package.json engines)에서 버전 추론 → JSON
   effective MANIFEST           매니페스트의 [override] 가 [inferred] 를 덮은 최종 도구 표 → JSON
   plan [--repo DIR] [--manifest FILE] [--update] [--tool T=SPEC ...]
@@ -18,6 +19,8 @@
 서명(GPG) 검증은 하지 않는다 — v1 한계, 문서 §29 에 기록.
 """
 import hashlib
+import shutil
+import subprocess
 import json
 import os
 import re
@@ -30,6 +33,12 @@ import urllib.request
 CACHE = os.path.expanduser(os.environ.get("SBOX_TOOLS_CACHE", "~/.cache/sbox/tools"))
 LOCK = os.path.expanduser(os.environ.get("SBOX_TOOLS_LOCK", "~/.config/sbox/tools.lock"))
 NODE_DIST = "https://nodejs.org/dist"
+CLAUDE_BASE = "https://downloads.claude.ai/claude-code-releases"
+CLAUDE_KEY_URL = "https://downloads.claude.ai/keys/claude-code.asc"
+# 공식 문서(code.claude.com/docs/en/setup 「Verify the manifest signature」, 2026-11-22 확인)가 적은 릴리스 서명 키 지문. 코드에 고정한다.
+CLAUDE_KEY_FPR = "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
+CLAUDE_PLATFORM = "linux-x64"
+SUPPORTED = ("node", "claude")
 
 
 def fail(msg):
@@ -111,6 +120,95 @@ def node_fetch(version):
             if not os.path.islink(p):
                 os.chmod(p, os.stat(p).st_mode & ~0o222)
     os.chmod(dest, os.stat(dest).st_mode & ~0o222)
+    return dest
+
+
+def gpg_cmd():
+    """gpg 가 호스트에 없으면 일회성으로 nix shell nixpkgs#gnupg 를 쓴다(전역 지침: 임의 설치 금지)."""
+    if shutil.which("gpg"):
+        return ["gpg"]
+    if shutil.which("nix"):
+        return ["nix", "shell", "nixpkgs#gnupg", "-c", "gpg"]
+    fail("gpg 도 nix 도 없습니다")
+
+
+def claude_resolve(spec):
+    spec = str(spec).lstrip("v")
+    if spec in ("latest", "stable"):
+        v = http(f"{CLAUDE_BASE}/{spec}").decode().strip()
+    else:
+        v = spec
+    if not re.fullmatch(r"\d+\.\d+\.\d+", v):
+        fail(f"claude 버전 표기가 올바르지 않습니다: {spec} → {v!r}")
+    maj = tuple(int(x) for x in v.split("."))
+    if maj < (2, 1, 89):
+        fail(f"claude {v} 는 서명된 manifest 가 없는 옛 릴리스입니다(2.1.89 부터 서명) — 거부")
+    return v
+
+
+def claude_verify_manifest(version, workdir):
+    """manifest.json 을 내려받아 분리 서명을 gpg 로 검증하고(주 키 지문이 고정값과 같아야 함) 파싱한 dict 를 돌려준다."""
+    mpath = os.path.join(workdir, "manifest.json")
+    open(mpath, "wb").write(http(f"{CLAUDE_BASE}/{version}/manifest.json"))
+    open(mpath + ".sig", "wb").write(http(f"{CLAUDE_BASE}/{version}/manifest.json.sig"))
+    keyfile = os.path.join(workdir, "key.asc")
+    open(keyfile, "wb").write(http(CLAUDE_KEY_URL))
+    home = os.path.join(workdir, "gnupg")
+    os.makedirs(home, mode=0o700)
+    g = gpg_cmd() + ["--homedir", home, "--batch", "--no-tty"]
+    r = subprocess.run(g + ["--import", keyfile], capture_output=True, text=True)
+    if r.returncode != 0:
+        fail(f"공개키 가져오기 실패: {r.stderr.strip()[:200]}")
+    r = subprocess.run(g + ["--status-fd", "1", "--verify", mpath + ".sig", mpath], capture_output=True, text=True)
+    prim = None
+    for ln in r.stdout.splitlines():
+        if ln.startswith("[GNUPG:] VALIDSIG"):
+            prim = ln.split()[-1].upper()  # 마지막 필드가 주 키 지문
+        if ln.startswith("[GNUPG:] BADSIG") or ln.startswith("[GNUPG:] ERRSIG"):
+            fail(f"manifest 서명 검증 실패: {ln}")
+    if prim != CLAUDE_KEY_FPR:
+        fail(f"manifest 서명 주 키 지문이 고정값과 다릅니다(받은 {prim}, 고정 {CLAUDE_KEY_FPR}) — 중단")
+    return json.load(open(mpath, encoding="utf-8"))
+
+
+def claude_fetch(version):
+    dest = os.path.join(CACHE, "claude", version)
+    if os.path.isfile(os.path.join(dest, "claude")):
+        return dest
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    tmp = tempfile.mkdtemp(dir=os.path.dirname(dest), prefix=".x-")
+    try:
+        m = claude_verify_manifest(version, tmp)
+        if m.get("version") != version:
+            fail(f"manifest 버전 불일치: {m.get('version')} ≠ {version}")
+        plat = (m.get("platforms") or {}).get(CLAUDE_PLATFORM) or {}
+        want = plat.get("checksum", "")
+        if not re.fullmatch(r"[a-f0-9]{64}", want):
+            fail(f"manifest 에 {CLAUDE_PLATFORM} 체크섬이 없습니다")
+        key = f"claude/{version}/{CLAUDE_PLATFORM}"
+        lock = load_lock()
+        if key in lock and lock[key] != want:
+            fail(f"잠금 해시와 서명된 manifest 가 다릅니다({key}) — 중단")
+        h = hashlib.sha256()
+        binp = os.path.join(tmp, "claude")
+        with urllib.request.urlopen(f"{CLAUDE_BASE}/{version}/{CLAUDE_PLATFORM}/claude", timeout=120) as r, open(binp, "wb") as out:  # noqa: S310
+            while True:
+                b = r.read(1 << 20)
+                if not b:
+                    break
+                h.update(b)
+                out.write(b)
+        if h.hexdigest() != want:
+            fail(f"sha256 불일치: 받은 {h.hexdigest()} ≠ 서명된 manifest {want}")
+        if key not in lock:
+            lock[key] = want
+            save_lock(lock)
+        os.chmod(binp, 0o555)
+        os.makedirs(dest)
+        os.replace(binp, os.path.join(dest, "claude"))
+        os.chmod(dest, 0o555)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)  # gnupg 작업 폴더 포함
     return dest
 
 
@@ -199,16 +297,19 @@ def plan(a):
     effective_spec.update(override)
     out, resolved = {}, {}
     for k, spec in effective_spec.items():
-        if k != "node":
-            fail(f"v1 은 node 만 지원합니다: {k}")
+        if k not in SUPPORTED:
+            fail(f"지원하지 않는 도구: {k} (지원: {', '.join(SUPPORTED)})")
         prev = resolved_old.get(k) or {}
         if not update and prev.get("spec") == spec and prev.get("version"):
             ver, how = prev["version"], "고정값 재사용"
         else:
-            ver = spec.lstrip("v") if re.fullmatch(r"v?\d+\.\d+\.\d+", spec) else node_resolve(spec)
+            if re.fullmatch(r"v?\d+\.\d+\.\d+", spec):
+                ver = spec.lstrip("v")
+            else:
+                ver = node_resolve(spec) if k == "node" else claude_resolve(spec)
             how = "새로 해석" + (" (--update)" if update else "")
         resolved[k] = {"spec": spec, "version": ver}
-        src = "override" if k in override else inferred[k]["source"]
+        src = "override" if k in override else inferred.get(k, {}).get("source", "인자")
         out[k] = {"spec": spec, "version": ver, "source": src, "how": how}
     write_manifest(path, project, repo, inferred, override, resolved)
     return {"manifest": path, "tools": out}
@@ -216,13 +317,13 @@ def plan(a):
 
 def main(a):
     if len(a) >= 3 and a[0] == "resolve":
-        if a[1] != "node":
-            fail(f"v1 은 node 만 지원합니다: {a[1]}")
-        print(node_resolve(a[2]))
+        if a[1] not in SUPPORTED:
+            fail(f"지원하지 않는 도구: {a[1]} (지원: {', '.join(SUPPORTED)})")
+        print(node_resolve(a[2]) if a[1] == "node" else claude_resolve(a[2]))
     elif len(a) == 3 and a[0] == "fetch":
-        if a[1] != "node":
-            fail(f"v1 은 node 만 지원합니다: {a[1]}")
-        print(node_fetch(a[2]))
+        if a[1] not in SUPPORTED:
+            fail(f"지원하지 않는 도구: {a[1]} (지원: {', '.join(SUPPORTED)})")
+        print(node_fetch(a[2]) if a[1] == "node" else claude_fetch(a[2]))
     elif len(a) == 2 and a[0] == "infer":
         print(json.dumps(infer(a[1]), ensure_ascii=False))
     elif a and a[0] == "plan":
