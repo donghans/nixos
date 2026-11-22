@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # sbox — 일회용 격리 환경(sboxbr0)을 만들고 꺼내고 지우는 호스트용 스크립트 (plan dev-sandbox-pilot §11·§15, 로드맵 P6)
-# 종류(--kind): vm = nixos OS 단위 시험용 VM(구현됨). ct = 프로젝트용 컨테이너(미구현, 시험 전 — §15). 종류는 필수 인자이고 기본값이 없다.
-# 이름: sbox-vm-<이름> / sbox-ct-<프로젝트>-<이름>, 골든은 sbox-golden-vm(VM 전용). VM 안 사용자 이름은 sbox, 호스트명은 sbox-nixos(2026-11-22 devvm·dev-nixos 에서 변경).
+# 종류(--kind): vm = nixos OS 단위 시험용 VM(구현됨). ct = 프로젝트용 컨테이너(v1: debian·ubuntu — §23 S1). 종류는 필수 인자이고 기본값이 없다.
+# 이름: sbox-vm-<이름> / sbox-ct-<flavor><버전(점 제거)>-<이름>(예 sbox-ct-debian13-proj), 골든은 sbox-golden-vm(VM 전용). VM 안 사용자 이름은 sbox, 호스트명은 sbox-nixos(2026-11-22 devvm·dev-nixos 에서 변경).
 #
-#   sbox.sh create --kind vm|ct [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
+#   sbox.sh create --kind ct --flavor debian|ubuntu [--release R] [--legacy] [--nesting] [--cpu N] [--memory M] [NAME]  컨테이너 생성(v1)
+#   sbox.sh releases [flavor]                          쓸 수 있는 릴리스 표(core/sbox/releases.toml)
+#   sbox.sh create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
 #   sbox.sh bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
 #   sbox.sh import BUNDLE                             번들을 호스트 저장소의 refs/sbox/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
 #   sbox.sh destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
@@ -38,6 +40,10 @@ BUNDLE_DIR="${SBOX_BUNDLE_DIR:-$HOME/.local/share/sbox/bundles}"
 # 골든에 처음부터 있는 파일(nixstrap 이 만든 호스트 파일·nixup 이 매번 건드리는 락)은 「미커밋 변경」으로 세지 않는다
 DIRTY_IGNORE="${SBOX_DIRTY_IGNORE:-^(( M)|(\?\?)) (\.locks/_rolling\.lock|hosts/sbox-nixos\.(nix|toml))$}"
 VM_PATH="/run/wrappers/bin:/run/current-system/sw/bin:/bin" # incus exec 의 PATH 는 비어 있다(함정)
+CT_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" # 컨테이너(debian·ubuntu 등 FHS 배포판)용
+EXEC_PATH="$VM_PATH"   # vmx·vmu 등이 쓰는 PATH — check_name 이 종류에 맞게 바꾼다
+NAME_KIND=""           # check_name 이 vm|ct 로 채운다
+SBOX_DIR="$(dirname "$(readlink -f "$0")")/../sbox"   # releases.toml·release.py
 
 AUDIT_LOG="${SBOX_AUDIT_LOG:-$HOME/.local/state/sbox/audit.log}"
 
@@ -47,7 +53,7 @@ AUDIT_LOG="${SBOX_AUDIT_LOG:-$HOME/.local/state/sbox/audit.log}"
 audit() { # audit LEVEL EVENT NAME DETAIL
     local level=$1 event=$2 name=${3:-} detail=${4:-}
     mkdir -p "$(dirname "$AUDIT_LOG")"
-    python3 -c 'import json,sys,time;print(json.dumps({"ts":time.strftime("%Y-%m-%dT%H:%M:%S%z"),"level":sys.argv[1],"event":sys.argv[2],"vm":sys.argv[3],"kind":("vm" if sys.argv[3].startswith(("sbox-vm-","sbox-golden-vm")) else "ct" if sys.argv[3].startswith("sbox-ct-") else ""),"detail":sys.argv[4]},ensure_ascii=False))' \
+    python3 -c 'import json,sys,time,os;print(json.dumps({"ts":time.strftime("%Y-%m-%dT%H:%M:%S%z"),"level":sys.argv[1],"event":sys.argv[2],"vm":sys.argv[3],"kind":("vm" if sys.argv[3].startswith(("sbox-vm-","sbox-golden-vm")) else "ct" if sys.argv[3].startswith("sbox-ct-") else ""),"flavor":os.environ.get("AUDIT_FLAVOR",""),"release":os.environ.get("AUDIT_RELEASE",""),"eol":os.environ.get("AUDIT_EOL",""),"detail":sys.argv[4]},ensure_ascii=False))' \
         "$level" "$event" "$name" "$detail" >>"$AUDIT_LOG" 2>/dev/null || true
     if command -v notify-send >/dev/null 2>&1; then
         local urg=normal; [[ $level == critical ]] && urg=critical
@@ -60,19 +66,19 @@ say() { printf 'sbox: %s\n' "$*" >&2; }
 
 vmx() { # vmx NAME CMD… — VM 안에서 root 로 실행
     local name=$1; shift
-    incus exec "$name" --env "PATH=$VM_PATH" -- "$@"
+    incus exec "$name" --env "PATH=$EXEC_PATH" -- "$@"
 }
 vmx_env() { # vmx_env NAME VAR=VAL… -- CMD… — 표준입력을 그대로 넘기며 환경변수를 주고 root 로 실행
     local name=$1; shift
-    local -a envs=(--env "PATH=$VM_PATH")
+    local -a envs=(--env "PATH=$EXEC_PATH")
     while [[ ${1:-} != -- ]]; do envs+=(--env "$1"); shift; done
     shift
     incus exec "$name" "${envs[@]}" -- "$@"
 }
 resolve_ids() { # resolve_ids NAME — VM 안 sbox 사용자의 uid·gid 를 조회해 둔다(VM 별 1회)
     [[ $VM_IDS_FOR == "$1" ]] && return 0
-    VM_UID=$(incus exec "$1" --env "PATH=$VM_PATH" -- id -u "$VM_USER") || die "$1 에서 사용자 $VM_USER 를 찾지 못했습니다"
-    VM_GID=$(incus exec "$1" --env "PATH=$VM_PATH" -- id -g "$VM_USER")
+    VM_UID=$(incus exec "$1" --env "PATH=$EXEC_PATH" -- id -u "$VM_USER") || die "$1 에서 사용자 $VM_USER 를 찾지 못했습니다"
+    VM_GID=$(incus exec "$1" --env "PATH=$EXEC_PATH" -- id -g "$VM_USER")
     VM_IDS_FOR=$1
 }
 vmu() { # vmu NAME CMD… — VM 안에서 sbox 사용자로 실행
@@ -80,20 +86,22 @@ vmu() { # vmu NAME CMD… — VM 안에서 sbox 사용자로 실행
     resolve_ids "$name"
     local -a extra=()
     [[ -n ${NIX_CFG:-} ]] && extra=(--env "NIX_CONFIG=$NIX_CFG")
-    incus exec "$name" --user "$VM_UID" --group "$VM_GID" --env "HOME=$VM_HOME" --env "PATH=$VM_PATH" "${extra[@]}" -- "$@"
+    incus exec "$name" --user "$VM_UID" --group "$VM_GID" --env "HOME=$VM_HOME" --env "PATH=$EXEC_PATH" "${extra[@]}" -- "$@"
 }
 
 check_name() {
     SBOX_CUR=${1:-}
     [[ "${1:-}" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "인스턴스 이름이 필요합니다(소문자·숫자·하이픈)"
     [[ "$1" != "$GOLDEN_INST" ]] || die "$GOLDEN_INST 는 골든 원본이라 이 명령으로 다루지 않습니다"
-    # 사람이 쓰는 상시 VM·다른 인스턴스를 실수로 건드리지 않게 sbox-vm- 접두사만 허용. 종류별 정책은 이름에서 정해진다(plan §15 조건 ②).
+    # 사람이 쓰는 상시 VM·다른 인스턴스를 실수로 건드리지 않게 sbox-vm-·sbox-ct- 접두사만 허용. 종류별 정책은 이름에서 정해진다(plan §15 조건 ②).
     case "$1" in
-        sbox-vm-*) ;;
-        sbox-ct-*) die "ct 종류(컨테이너)는 아직 구현 전입니다 — 시험 전(plan dev-sandbox-pilot §15)" ;;
-        *) die "이 스크립트는 sbox-vm-<이름> 인스턴스만 다룹니다(받은 이름: $1)" ;;
+        sbox-vm-*) NAME_KIND=vm; EXEC_PATH=$VM_PATH ;;
+        sbox-ct-*) NAME_KIND=ct; EXEC_PATH=$CT_PATH ;;
+        *) die "이 스크립트는 sbox-vm-<이름>·sbox-ct-<flavor><버전>-<이름> 인스턴스만 다룹니다(받은 이름: $1)" ;;
     esac
 }
+
+require_vm() { [[ $NAME_KIND == vm ]] || die "이 명령은 vm 종류(nixos) 전용입니다 — $SBOX_CUR 는 $NAME_KIND"; }
 
 wait_agent() {
     local name=$1 ok=0
@@ -268,6 +276,7 @@ cache_key() { # 호스트 nix-serve 의 공개키(읽을 수 있으면 호스트
 cmd_cache() {
     local name=$1 key
     check_name "$name"
+    require_vm
     key=$(cache_key)
     # nix.conf 는 /etc/static 으로의 심볼릭 링크(읽기 전용) — 파일로 바꾸고 extra-* 한 줄씩 덧붙인다. 이미 있으면 건너뜀.
     # shellcheck disable=SC2016  # 작은따옴표 안의 $1·$2 는 VM 쪽 셸이 펼친다
@@ -288,7 +297,7 @@ cmd_cache() {
     fi
 }
 
-cmd_home() { check_name "${1:-}"; home_apply "$1"; }
+cmd_home() { check_name "${1:-}"; require_vm; home_apply "$1"; }
 
 home_apply() { # 이름 규칙 검사 없이 홈 적용(rebuild-golden 이 골든 이름으로도 부른다)
     local name=$1
@@ -322,7 +331,7 @@ cmd_token() {
         printf %s "$VM_CLAUDE_TOKEN" | incus exec "$1" --env PATH="$2" -- sh -c "
             set -e; umask 077; mkdir -p /run/sbox-claude; cat > $3
             chown -R $4:$5 /run/sbox-claude; chmod 700 /run/sbox-claude"
-    ' sh "$name" "$VM_PATH" "$TOKEN_PATH" "$VM_UID" "$VM_GID"
+    ' sh "$name" "$EXEC_PATH" "$TOKEN_PATH" "$VM_UID" "$VM_GID"
     local bytes
     bytes=$(vmx "$name" sh -c "wc -c < $TOKEN_PATH")
     [[ ${bytes//[[:space:]]/} -gt 20 ]] || die "토큰 파일이 비어 있거나 너무 짧습니다(${bytes}바이트)"
@@ -330,14 +339,96 @@ cmd_token() {
     say "토큰 주입 완료(tmpfs $TOKEN_PATH, ${bytes//[[:space:]]/}바이트, 값은 출력하지 않음)"
 }
 
+wait_ct() { # wait_ct NAME — 컨테이너가 exec 에 응답하고 기본 경로(네트워크)가 생길 때까지(최대 약 2분)
+    local n=$1 ok=0
+    for _ in $(seq 1 60); do
+        incus exec "$n" --env "PATH=$CT_PATH" -- true >/dev/null 2>&1 </dev/null && { ok=1; break; }
+        sleep 1
+    done
+    ((ok)) || die "$n 이 60초 안에 응답하지 않았습니다"
+    for _ in $(seq 1 60); do
+        incus exec "$n" --env "PATH=$CT_PATH" -- sh -c 'ip route 2>/dev/null | grep -q "^default"' >/dev/null 2>&1 </dev/null && return 0
+        sleep 1
+    done
+    die "$n 의 네트워크(기본 경로)가 60초 안에 올라오지 않았습니다"
+}
+
+# 컨테이너 종류 v1 (plan dev-sandbox-pilot §23 S1~S3). 정책: 비특권만, 비 root 사용자 sbox 에 sudo 없음, 종료된 릴리스는 --legacy 필요.
+create_ct() { # create_ct NAME FLAVOR RELEASE LEGACY NESTING CPU MEM TOKEN
+    local name=$1 flavor=$2 release=$3 legacy=$4 nesting=$5 cpu=$6 mem=$7 token=$8
+    [[ -n $flavor ]] || die "ct 종류는 --flavor 가 필요합니다(debian|ubuntu)"
+    case $flavor in
+        debian|ubuntu) ;;
+        arch|gentoo) die "$flavor 컨테이너는 아직 구현 전입니다(체크리스트 S7·S8)" ;;
+        *) die "알 수 없는 flavor: $flavor (debian|ubuntu)" ;;
+    esac
+    local info key ver status eol image note
+    info=$(python3 "$SBOX_DIR/release.py" resolve "$flavor" "$release") || die "릴리스 조회 실패"
+    IFS=$'\x1f' read -r key ver status eol image note <<<"$info"   # 탭이 아니라 \x1f — 빈 종료일이 합쳐지면 필드가 밀린다(2026-11-22 실제로 겪음)
+    export AUDIT_FLAVOR=$flavor AUDIT_RELEASE=$key AUDIT_EOL=false
+    say "릴리스: $flavor $ver($key) 상태 $status${eol:+, 종료일 $eol}${note:+ — $note}"
+    if [[ $status == eol ]]; then
+        ((legacy)) || die "$flavor $ver($key)는 지원이 끝난 릴리스입니다 — 레거시·마이그레이션 목적이면 --legacy 를 주세요"
+        AUDIT_EOL=true
+        say "경고: $flavor $ver($key)는 지원 종료 릴리스입니다(보안 패치 없음). 네트워크는 sbox-guard 안에서만 나갑니다."
+    fi
+    if [[ $image == build:* ]]; then
+        die "$flavor $ver($key)는 incus 이미지가 없어 직접 빌드해야 합니다(${image#build:}) — 방법은 plan dev-sandbox-pilot §22-3, 구현은 체크리스트 S9"
+    fi
+    local vclean=${ver//./}
+    local want="sbox-ct-$flavor$vclean-"
+    [[ -n $name ]] || name="$want$(date +%y%m%d-%H%M)"
+    [[ $name == "$want"* ]] || die "이름은 $want 로 시작해야 합니다(받은 이름: $name) — 규칙: sbox-ct-<flavor><버전(점 제거)>-<이름>"
+    check_name "$name"
+    incus info "$name" >/dev/null 2>&1 && die "$name 은 이미 있습니다"
+    incus network show "$NETWORK" >/dev/null 2>&1 || die "브리지 $NETWORK 가 없습니다"
+
+    say "생성: $name ← images:$image (비특권 컨테이너, cpu $cpu·메모리 $mem$( ((nesting)) && echo ', nesting' ))"
+    local -a opts=(-n "$NETWORK" -c "limits.cpu=$cpu" -c "limits.memory=$mem")
+    ((nesting)) && opts+=(-c security.nesting=true)
+    local _try _err
+    for _try in 1 2 3; do
+        if _err=$(timeout 180 incus init "images:$image" "$name" "${opts[@]}" 2>&1 </dev/null); then break; fi
+        say "incus init 실패($_try/3): ${_err##*$'\n'}"
+        incus delete -f "$name" >/dev/null 2>&1 </dev/null || true
+        sleep 10
+        [[ $_try == 3 ]] && die "incus init 3회 실패($name): ${_err##*$'\n'}"
+    done
+    # 정책 검사: 특권 컨테이너·호스트 장치 직결이 아닌지(프로필·인스턴스 합산 설정에서 확인). 어긋나면 만든 것을 지우고 거부.
+    if incus config show "$name" --expanded 2>/dev/null </dev/null | grep -qE '^\s*security\.privileged:\s*"?true'; then
+        incus delete -f "$name" >/dev/null 2>&1 </dev/null || true
+        die "정책 위반: 특권 컨테이너가 됐습니다 — 거부하고 삭제했습니다"
+    fi
+    incus start "$name" </dev/null
+    wait_ct "$name"
+    # 비 root 사용자 sbox: sudo 그룹에 넣지 않는다(Claude 에게 root 를 주지 않는 방침 — plan §15)
+    incus exec "$name" --env "PATH=$CT_PATH" -- sh -c "id $VM_USER >/dev/null 2>&1 || useradd -m -s /bin/bash $VM_USER" </dev/null \
+        || die "사용자 $VM_USER 생성 실패"
+    ((token)) && cmd_token "$name"
+
+    local ip
+    ip=$(incus list "$name" -f json </dev/null | python3 -c 'import sys,json
+d=json.load(sys.stdin)[0]["state"]["network"]
+print(" ".join(a["address"] for a in d.get("eth0",{}).get("addresses",[]) if a["family"]=="inet"))')
+    audit info create "$name" "컨테이너 images:$image, ${flavor} ${ver}(${key}) ${status}, $ip, 비특권, cpu $cpu·메모리 $mem"
+    say "완료: $name  ($ip) — 사용자 $VM_USER(sudo 없음), 토큰은 $TOKEN_PATH(tmpfs)"
+    say "알림: Claude Code·Node 같은 도구는 아직 깔려 있지 않습니다(체크리스트 S5 도구 층)"
+}
+
 cmd_create() {
-    local name="" cache=1 token=1 home=1 kind=""
+    local name="" cache=1 token=1 home=1 kind="" flavor="" release="" legacy=0 nesting=0 cpu=2 mem=2GiB
     while (($#)); do
         case $1 in
             --no-cache) cache=0 ;;
             --no-token) token=0 ;;
             --no-home) home=0 ;;
             --kind) shift; kind=${1:-} ;;
+            --flavor) shift; flavor=${1:-} ;;
+            --release) shift; release=${1:-} ;;
+            --legacy) legacy=1 ;;
+            --nesting) nesting=1 ;;
+            --cpu) shift; cpu=${1:-} ;;
+            --memory) shift; mem=${1:-} ;;
             -*) die "알 수 없는 옵션: $1" ;;
             *) name=$1 ;;
         esac
@@ -346,10 +437,11 @@ cmd_create() {
     # 종류는 필수·기본값 없음: 빠뜨리면 실패한다(VM 용 보안 가정이 컨테이너로 번지지 않게 — plan §15 조건 ①)
     case "$kind" in
         vm) ;;
-        ct) die "ct 종류(컨테이너)는 아직 구현 전입니다 — 시험 전(plan dev-sandbox-pilot §15)" ;;
+        ct) create_ct "$name" "$flavor" "$release" "$legacy" "$nesting" "$cpu" "$mem" "$token"; return ;;
         "") die "--kind vm|ct 가 필요합니다(기본값 없음)" ;;
         *) die "알 수 없는 종류: $kind (vm|ct)" ;;
     esac
+    [[ -z $flavor || $flavor == nixos ]] || die "vm 종류는 nixos 만 구현돼 있습니다(받은 flavor: $flavor)"
     [[ -n $name ]] || name="sbox-vm-$(date +%y%m%d-%H%M)"
     check_name "$name"
     incus info "$GOLDEN_INST" >/dev/null 2>&1 || die "골든 $GOLDEN_INST 가 없습니다 — 먼저 'sbox.sh golden'"
@@ -387,22 +479,34 @@ print(" ".join(a["address"] for a in d.get("eth0",{}).get("addresses",[]) if a["
 }
 
 cmd_bundle() {
-    local name=${1:-} force=${2:-}
+    local name="" repo_path=""
+    while (($#)); do
+        case $1 in
+            --repo) shift; repo_path=${1:-} ;;
+            -*) die "알 수 없는 옵션: $1" ;;
+            *) name=$1 ;;
+        esac
+        shift
+    done
     check_name "$name"
+    if [[ -z $repo_path ]]; then
+        [[ $NAME_KIND == vm ]] || die "ct 종류는 --repo <컨테이너 안 저장소 경로> 가 필요합니다(예: /home/$VM_USER/proj)"
+        repo_path=$VM_REPO
+    fi
     [[ $(incus list "$name" -f csv -c s) == RUNNING ]] || die "$name 이 실행 중이 아니라 번들을 꺼낼 수 없습니다"
-    vmu "$name" test -d "$VM_REPO/.git" || die "$VM_REPO 에 저장소가 없습니다"
+    vmu "$name" test -d "$repo_path/.git" || die "$repo_path 에 저장소가 없습니다"
     mkdir -p "$BUNDLE_DIR"
     local out
     out="$BUNDLE_DIR/$name-$(date +%y%m%d-%H%M%S).bundle"
     # 미커밋 변경은 번들에 안 들어간다 — 있으면 알린다(destroy 는 이것으로 거부)
     local dirty
-    dirty=$(vmu "$name" git -C "$VM_REPO" status --porcelain 2>/dev/null | grep -Ev "$DIRTY_IGNORE" || true)
+    dirty=$(vmu "$name" git -C "$repo_path" status --porcelain 2>/dev/null | grep -Ev "$DIRTY_IGNORE" || true)
     if [[ -n $dirty ]]; then
         say "미커밋 변경 $(wc -l <<<"$dirty")건 — 번들에 들어가지 않습니다:"
         head -20 <<<"$dirty" | while IFS= read -r l; do printf '    %s\n' "$l"; done >&2
         SBOX_DIRTY=1
     fi
-    vmu "$name" git -C "$VM_REPO" bundle create - --all >"$out" 2>/dev/null || { rm -f "$out"; die "번들 생성 실패"; }
+    vmu "$name" git -C "$repo_path" bundle create - --all >"$out" 2>/dev/null || { rm -f "$out"; die "번들 생성 실패"; }
     [[ -s $out ]] || { rm -f "$out"; die "번들이 비었습니다"; }
     (cd "$(dirname "$(readlink -f "$0")")/../.." && git bundle verify "$out" >/dev/null 2>&1) \
         || { say "경고: 호스트 저장소에서 verify 실패 — 번들은 남깁니다: $out"; }
@@ -433,9 +537,11 @@ cmd_import() {
 }
 
 cmd_destroy() {
-    local name="" force=0 discard=0
+    local name="" force=0 discard=0 repo_path="" nobundle=0
     while (($#)); do
         case $1 in
+            --repo) shift; repo_path=${1:-} ;;
+            --no-bundle) nobundle=1 ;;
             --force) force=1 ;;
             --discard-dirty) discard=1 ;;
             -*) die "알 수 없는 옵션: $1" ;;
@@ -448,8 +554,14 @@ cmd_destroy() {
     SBOX_DIRTY=0
     if ((force)); then
         say "--force: 번들 없이 지웁니다"
+    elif ((nobundle)); then
+        say "--no-bundle: 번들 없이 지웁니다(저장소가 없거나 필요 없다고 확인한 경우)"
+        audit info destroy-nobundle "$name" "번들 없이 삭제 요청"
     else
-        cmd_bundle "$name"
+        if [[ $NAME_KIND == ct && -z $repo_path ]]; then
+            die "ct 종류는 --repo <컨테이너 안 저장소 경로>(번들을 먼저 꺼냄) 또는 --no-bundle 이 필요합니다"
+        fi
+        if [[ -n $repo_path ]]; then cmd_bundle "$name" --repo "$repo_path"; else cmd_bundle "$name"; fi
         if ((SBOX_DIRTY)) && ((!discard)); then
             die "미커밋 변경이 있어 지우지 않습니다 — VM 안에서 커밋 후 다시 하거나 --discard-dirty (번들은 $BUNDLE_OUT 에 저장됨)"
         fi
@@ -467,7 +579,8 @@ cmd_list() { incus list '^sbox-' -c ns4 -f compact; }
 
 case "${1:-}" in
     create) shift; cmd_create "$@" ;;
-    bundle) shift; cmd_bundle "${1:-}" ;;
+    bundle) shift; cmd_bundle "$@" ;;
+    releases) shift; python3 "$SBOX_DIR/release.py" list "${1:-}" ;;
     destroy) shift; cmd_destroy "$@" ;;
     import) shift; cmd_import "${1:-}" ;;
     golden) shift; cmd_golden "$@" ;;

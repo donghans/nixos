@@ -1,0 +1,88 @@
+# sbox 릴리스 목록 — 바탕 OS(flavor) 별로 쓸 수 있는 버전과 지원 상태.
+# 근거·설계: plan dev-sandbox-pilot §21-2(버전 축)·§22-3(이미지가 없을 때 직접 빌드)·§23(체크리스트 S2).
+#
+# 필드
+#   version  사람이 쓰는 버전 번호(`--release 13`), 키가 코드네임(`--release trixie`)
+#   status   current | supported | lts | testing | eol
+#   eol      지원 종료일(알면). 없으면 빈 문자열 — 날짜의 출처를 note 에 적는다
+#   image    incus `images:` 별칭(예: debian/13) 또는 `build:<방법>`(incus 에 이미지가 없어 직접 빌드해야 하는 릴리스 — 아직 미구현)
+#   note     도구 호환·출처 등 메모
+#
+# 정책: status 가 eol 인 릴리스는 `--legacy` 를 줘야 만든다(레거시·마이그레이션 목적 — 사용자 의도 2026-11-22).
+#       incus 이미지 현황은 2026-11-22 `incus image list images:` 로 확인(x86_64, 컨테이너·VM 모두 제공).
+
+[debian]
+default = "trixie"
+
+[debian.release.trixie]
+version = "13"
+status = "current"
+eol = "2030-06-30"
+image = "debian/13"
+note = "LTS 종료일(debian.org 2026-11-22 확인). Playwright 는 최신 버전만 공식 인식(1.49.1 은 Debian 13 미인식)"
+
+[debian.release.bookworm]
+version = "12"
+status = "lts"
+eol = "2028-06-30"
+image = "debian/12"
+note = "일반 보안 지원 2026-07 종료, LTS 2028-06-30(debian.org). rustc 1.63 이라 rustup 필요(패키지 없음). Playwright 1.49.1 공식 지원"
+
+[debian.release.forky]
+version = "14"
+status = "testing"
+eol = ""
+image = "debian/14"
+note = "테스트(미정식) 릴리스. 컨테이너 안 os-release 가 \"forky/sid\" 로 보임(부팅 확인 2026-11-22)"
+
+[debian.release.bullseye]
+version = "11"
+status = "eol"
+eol = "2026-08-31"
+image = "build:mmdebstrap archive.debian.org"
+note = "LTS 종료 2026-08-31(검색 결과). incus 이미지 없음 — archive.debian.org 에서 직접 빌드(plan §22-3, 미시험)"
+
+[debian.release.buster]
+version = "10"
+status = "eol"
+eol = ""
+image = "build:mmdebstrap archive.debian.org"
+note = "incus 이미지 없음 — archive.debian.org(접근 확인)에서 직접 빌드(미시험)"
+
+[ubuntu]
+default = "noble"
+
+[ubuntu.release.noble]
+version = "24.04"
+status = "current"
+eol = ""
+image = "ubuntu/24.04"
+note = "LTS. 종료일은 이번 조사에서 확인하지 못함(제 지식: 2029). docker-compose-v2 2.40·rustup 패키지 있음"
+
+[ubuntu.release.jammy]
+version = "22.04"
+status = "supported"
+eol = ""
+image = "ubuntu/22.04"
+note = "종료일 미확인(제 지식: 2027). 이미지 있음"
+
+[ubuntu.release.resolute]
+version = "26.04"
+status = "current"
+eol = ""
+image = "ubuntu/26.04"
+note = "컨테이너 안 os-release 가 \"Ubuntu 26.04.1 LTS\" 로 확인됨(2026-11-22). 도구 호환은 시험 전"
+
+[ubuntu.release.stonking]
+version = "26.10"
+status = "testing"
+eol = ""
+image = "ubuntu/26.10"
+note = "중간 릴리스(단기 지원), 컨테이너 부팅 확인(2026-11-22). 도구 호환은 시험 전"
+
+[ubuntu.release.focal]
+version = "20.04"
+status = "eol"
+eol = ""
+image = "build:debootstrap archive.ubuntu.com"
+note = "incus 이미지 없음. archive.ubuntu.com 에 focal 이 아직 있음(접근 확인). 직접 빌드(plan §22-3, 미시험)"
