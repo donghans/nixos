@@ -4,8 +4,34 @@ mkPartOf "mods.gui" ({
   config,
   lib,
   ...
-}: {
+}: let
+  # sbox 를 쓰는 호스트(incus-sbox 가 켜진 호스트)에서만 도구 신뢰 점검 알림·타이머를 둔다
+  sboxHost = config.mods.sys.services.incus-sbox.enable;
+  sboxDir = ../../../core/sbox; # 디렉터리째 스토어로 복사 — tools.py 가 옆의 tools.toml·probe.py 를 읽는다
+  toolsPy = "${sboxDir}/tools.py";
+in {
   hm = {
+    # sbox 도구 신뢰 주기 점검(plan dev-sandbox-pilot §29-7, S57): 하루 한 번 깨어나 `tools.py periodic` 이 각 점검의 주기(CT 7일·키 지문 30일·교차검증은 crosscheck.toml)가
+    # 지났을 때만 외부에 접속한다. 결과는 ~/.local/state/sbox/crosscheck.json → 위 waybar custom/trustcheck. ssh 관점은 BatchMode 라 암호를 묻지 않는다.
+    # 끄기: 호스트 toml 의 incus-sbox 를 끄거나 이 두 블록을 지우고 nixup.
+    systemd.user.services.sbox-trustcheck = lib.mkIf sboxHost {
+      Unit.Description = "sbox tools trust periodic check (CT monitor, key pin, vantage cross-check)";
+      Service = {
+        Type = "oneshot";
+        Environment = ["PATH=${lib.makeBinPath [pkgs.openssh pkgs.gnupg]}"];
+        ExecStart = "${pkgs.python3}/bin/python3 ${toolsPy} periodic";
+      };
+    };
+    systemd.user.timers.sbox-trustcheck = lib.mkIf sboxHost {
+      Unit.Description = "sbox tools trust check schedule (daily)";
+      Timer = {
+        OnCalendar = "daily";
+        RandomizedDelaySec = "1h";
+        Persistent = true;
+      };
+      Install.WantedBy = ["timers.target"];
+    };
+
     # waybar 세션 시작
     wayland.windowManager.hyprland.settings.exec-once = lib.mkOrder 900 [
       "uwsm app -- sh -c 'sleep 2 && ${pkgs.waybar}/bin/waybar'"
@@ -30,7 +56,7 @@ mkPartOf "mods.gui" ({
       modules-right =
         ["tray"]
         # 도구 서명·망 교차검증의 주기 알림(sbox 도구 층): 기한이 지나거나 경고가 있을 때만 나타남(plan dev-sandbox-pilot §29-7)
-        ++ ["custom/trustcheck"]
+        ++ lib.optionals sboxHost ["custom/trustcheck"]
         # 실패한 서비스가 있을 때만 나타나는 경고(notif health 가 1분마다 확인, 클릭하면 알림 센터의 문제 화면)
         ++ lib.optionals config.services.custom-notify-logger.enable ["custom/health"]
         ++ (
@@ -46,7 +72,7 @@ mkPartOf "mods.gui" ({
       # (vkb 가 상태를 바꾸거나 사용 모드가 바뀔 때만 waybar 에 신호(RTMIN+8)를 보내 다시 그리므로 폴링이 없음. 한/영 전환은 시스템 트레이의 fcitx5 아이콘과 키보드 안의 한/영 키)
       # `tools.py crosscheck-status` 는 상태 파일(~/.local/state/sbox/crosscheck.json)만 읽는다 — 정상이면 빈 텍스트라 모듈이 사라진다
       "custom/trustcheck" = {
-        exec = "${pkgs.python3}/bin/python3 ${../../../core/sbox/tools.py} crosscheck-status";
+        exec = "${pkgs.python3}/bin/python3 ${toolsPy} crosscheck-status";
         return-type = "json";
         interval = 3600;
         tooltip = true;

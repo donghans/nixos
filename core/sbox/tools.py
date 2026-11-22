@@ -20,6 +20,7 @@
   crosscheck-run [VANTAGE…]    ~/.config/sbox/crosscheck.toml 의 vantage(local·ssh·manual)별로 probe 를 실행·비교하고 상태에 기록
   ct-check                     CT 로그(Cert Spotter)로 공식 배포 호스트의 인증서 발급 이력을 보고 처음 보는 발급 CA 가 나오면 경고
   crosscheck-status            waybar custom 모듈용 JSON(주기가 지나면 due, 불일치·경고가 있으면 alert, 정상이면 빈 텍스트)
+  periodic [--force]           주기 점검 한 번(타이머가 매일 호출): 각 점검이 자기 주기가 지났을 때만 실행 — ct-check 매주 · pincheck 매월 · crosscheck-run 은 crosscheck.toml 의 interval
   pincheck [TOOL]              서명 키 지문이 독립된 출처(키 파일·키 서버·과거 웹 아카이브·지문 목록)에서도 확인되는지 점검(JSON, 실패 시 종료코드 1)
   infer REPO                   프로젝트 파일(.nvmrc·package.json engines·go.mod)에서 버전 추론 → JSON
   effective MANIFEST           매니페스트의 [override] 가 [inferred] 를 덮은 최종 도구 표 → JSON
@@ -744,7 +745,8 @@ def crosscheck_run(names=None):
     # 수동 관점(핫스팟 등)으로 저장해 둔 가장 최근 결과도 비교에 넣는다(저장 파일 이름: <시각>-<이름>.json)
     findings = compare_probes(runs) if len(runs) >= 2 else []
     st = load_state()
-    st["last_run"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    if len(runs) >= 2:  # 관점이 하나뿐이면 비교가 안 됐으므로 「실행함」으로 치지 않는다(waybar 의 미실행 알림 유지)
+        st["last_run"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     st["last_vantages"] = [r["label"] for r in runs]
     st["last_findings"] = [f for f in findings if f["level"] in ("mismatch", "warn")]
     st["interval"] = cfg["interval"]
@@ -780,6 +782,54 @@ def ct_check(update=True):
     return {"domains": report, "alerts": alerts}
 
 
+PERIODIC_DAYS = {"ct": 7, "pincheck": 30}
+
+
+def _age_days(ts):
+    if not ts:
+        return None
+    try:
+        return (time.time() - time.mktime(time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S"))) / 86400
+    except ValueError:
+        return None
+
+
+def periodic(force=False):
+    """타이머가 매일 부르는 주기 점검. 점검마다 자기 주기가 지났을 때만 돌려 불필요한 외부 접속을 줄인다.
+    각 점검의 실패(네트워크 등)는 다른 점검을 막지 않는다. 경고는 상태 파일에 남아 waybar 가 보인다."""
+    cfg = load_xcfg()
+    done, errors = [], []
+    st = load_state()
+    due = lambda key, days: force or (_age_days(st.get(key)) is None or _age_days(st.get(key)) >= days)  # noqa: E731
+    if due("last_ct", PERIODIC_DAYS["ct"]):
+        try:
+            ct_check()
+            done.append("ct-check")
+        except BaseException as e:  # noqa: BLE001 — SystemExit(fail) 도 잡는다
+            errors.append(f"ct-check: {e}")
+    if due("last_pincheck", PERIODIC_DAYS["pincheck"]):
+        try:
+            res, ok = pincheck(None)
+            st = load_state()
+            st["last_pincheck"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+            st["pin_alerts"] = [f"{k}: 독립 출처 {sum(1 for r in v['sources'] if r['matched'])}/{v['required_independent_sources']} 만 확인됨"
+                                for k, v in res.items() if not v["ok"]]
+            save_state(st)
+            done.append("pincheck")
+        except BaseException as e:  # noqa: BLE001
+            errors.append(f"pincheck: {e}")
+    st = load_state()
+    auto = [n for n, v in cfg["vantages"].items() if v.get("kind") in ("local", "ssh")]
+    if len(auto) >= 2 and due("last_run", INTERVAL_DAYS[cfg["interval"]]):  # 자동 관점이 2개 미만이면 비교가 안 되므로 돌리지 않는다(waybar 알림이 사람의 설정을 재촉)
+        try:
+            res = crosscheck_run(auto)
+            done.append(f"crosscheck-run({','.join(res['vantages_ok']) or '관점 없음'})")
+            errors += res["failed"]
+        except BaseException as e:  # noqa: BLE001
+            errors.append(f"crosscheck-run: {e}")
+    return {"done": done, "errors": errors}
+
+
 def status_waybar():
     """waybar custom 모듈용 JSON. 주기 안에 있으면 빈 텍스트(모듈이 사라짐), 기한이 지나면 due, 불일치·CT 경고가 있으면 alert."""
     st = load_state()
@@ -796,7 +846,7 @@ def status_waybar():
             last = time.mktime(time.strptime(st["last_run"][:19], "%Y-%m-%dT%H:%M:%S"))
         except ValueError:
             last = None
-    problems = [f["msg"] for f in st.get("last_findings", []) if f["level"] == "mismatch"] + list(st.get("ct_alerts", []))
+    problems = [f["msg"] for f in st.get("last_findings", []) if f["level"] == "mismatch"] + list(st.get("ct_alerts", [])) + list(st.get("pin_alerts", []))
     if problems:
         return {"text": "󰒃 신뢰 교차검증 경고", "class": "alert", "tooltip": "\n".join(problems[:6])}
     if last is None:
@@ -991,6 +1041,10 @@ def main(a):
         res = ct_check()
         print(json.dumps(res, ensure_ascii=False, indent=1))
         sys.exit(1 if res["alerts"] else 0)
+    elif a and a[0] == "periodic":
+        res = periodic("--force" in a)
+        print(json.dumps(res, ensure_ascii=False))
+        sys.exit(1 if res["errors"] else 0)
     elif a and a[0] == "crosscheck-status":
         print(json.dumps(status_waybar(), ensure_ascii=False))
     elif a and a[0] == "pincheck":
