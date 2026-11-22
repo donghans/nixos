@@ -16,6 +16,7 @@
 #   sboxctl rebuild-golden [--stale-ok]               ISO+nixstrap(NIXSTRAP_AUTO)로 골든을 처음부터 새로 만듦(약 15분)
 #   sboxctl list                                      sbox-* 인스턴스 목록
 #   sboxctl iso [--stale-ok]                          설치 ISO 만 미리 빌드(캐시면 약 20초, nixstrap 수정 직후면 약 7분)
+#   sboxctl depwatch scan|list|report|tier NAME general|critical  프로젝트 의존성 위험 신호 점검(읽기 전용·감지만, plan sbox-depwatch) — list·report 는 --json(ctl 공통 봉투)
 #
 # 전제·한계
 #  - 호스트(msi-summit-me) 전용: incus 사용 권한, sboxbr0 브리지, nix-serve(10.100.1.1:5000) 필요.
@@ -787,6 +788,7 @@ case "${1:-}" in
     home) shift; cmd_home "${1:-}" ;;
     llm) shift; cmd_llm "$@" ;;
     tools) shift; cmd_tools "$@" ;;
+    depwatch) shift; python3 "$SBOX_DIR/depwatch.py" "$@" ;;
     list) cmd_list ;;
-    *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+    *) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac

@@ -818,6 +818,12 @@ def periodic(force=False):
             done.append("pincheck")
         except BaseException as e:  # noqa: BLE001
             errors.append(f"pincheck: {e}")
+    try:  # 의존성 감시(S56): 값싼 로컬 스캔이라 주기 판정 없이 매 실행마다. 실패해도 다른 점검을 막지 않는다
+        import depwatch  # noqa: PLC0415 — 같은 폴더(스토어 사본 포함), 표준 라이브러리만 쓴다
+        n = depwatch.scan()
+        done.append(f"depwatch({sum(n.values())}건)")
+    except BaseException as e:  # noqa: BLE001
+        errors.append(f"depwatch: {e}")
     st = load_state()
     auto = [n for n, v in cfg["vantages"].items() if v.get("kind") in ("local", "ssh")]
     if len(auto) >= 2 and due("last_run", INTERVAL_DAYS[cfg["interval"]]):  # 자동 관점이 2개 미만이면 비교가 안 되므로 돌리지 않는다(waybar 알림이 사람의 설정을 재촉)
@@ -933,10 +939,10 @@ def q(x):
     return json.dumps(str(x), ensure_ascii=False)
 
 
-def write_manifest(path, project, repo, inferred, override, resolved):
+def write_manifest(path, project, repo, inferred, override, resolved, tier=None):
     lines = ["# sbox 프로젝트 버전 매니페스트(plan dev-sandbox-pilot §29). [inferred]·[resolved] 는 sbox 가 다시 쓰고, [override] 는 사람이 씁니다.",
              "# [resolved] 는 re(실행환경) 도구만 — de(개발환경) 도구는 항상 최신이라 고정하지 않습니다.",
-             "[project]", f"name = {q(project)}", f"repo = {q(repo)}", "", "[inferred]"]
+             "[project]", f"name = {q(project)}", f"repo = {q(repo)}"] + ([f"tier = {q(tier)}"] if tier else []) + ["", "[inferred]"]
     for k, v in sorted(inferred.items()):
         lines.append(f"{k} = {q(v['spec'])}  # 출처: {v['source']}".replace("\n", " "))
     lines += ["", "[override]"] + [f"{k} = {q(v)}" for k, v in sorted(override.items())]
@@ -1004,7 +1010,7 @@ def plan(a):
             how = "새로 해석" + (" (--update)" if update else "")
         resolved[k] = {"spec": spec, "version": ver}
         out[k] = {"spec": spec, "version": ver, "source": src, "how": how, "role": "re"}
-    write_manifest(path, project, repo, inferred, override, resolved)
+    write_manifest(path, project, repo, inferred, override, resolved, tier=(old.get("project") or {}).get("tier"))  # 등급은 사람이 정한 값 — 다시 쓸 때 보존(안 하면 critical 이 조용히 general 로 돌아감)
     return {"manifest": path, "tools": out, "unsupported": unsupported}
 
 
