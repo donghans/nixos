@@ -58,3 +58,32 @@ checksum = { type = "json-manifest", url = "https://downloads.claude.ai/claude-c
 signature = { type = "gpg-detached", sig_url = "https://downloads.claude.ai/claude-code-releases/{version}/manifest.json.sig", key_url = "https://downloads.claude.ai/keys/claude-code.asc", fingerprint = "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE", note = "지문은 공식 문서 code.claude.com/docs/en/setup 의 값(2026-11-22)" }
 archive = { type = "binary", name = "claude" }
 links = { claude = "claude" }
+
+[rust]
+role = "re"
+desc = "Rust 툴체인 (공식 static.rust-lang.org: rustc·cargo·rust-std·clippy·rustfmt, rust-docs 제외)"
+resolver = { type = "rust-channel" }
+checksum = { type = "rust-channel-doc", url = "https://static.rust-lang.org/dist/channel-rust-{version}.toml" }
+signature = { type = "gpg-detached", sig_url = "https://static.rust-lang.org/dist/channel-rust-{version}.toml.asc", key_url = "https://static.rust-lang.org/rust-key.gpg.ascii", fingerprint = "108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE", note = "지문은 static.rust-lang.org 의 키 파일에서 읽고 실제 채널 문서 서명으로 일치를 확인한 값(2026-11-22) — 공식 문서에는 지문이 적혀 있지 않고 keybase 를 안내함, 독립 출처 교차 확인은 S48" }
+archive = { type = "rust-installer", target = "x86_64-unknown-linux-gnu", pkgs = ["rust", "clippy-preview", "rustfmt-preview"], without = { rust = "rust-docs" } }
+links = { cargo = "bin/cargo", rustc = "bin/rustc", rustdoc = "bin/rustdoc", rustfmt = "bin/rustfmt", cargo-fmt = "bin/cargo-fmt", cargo-clippy = "bin/cargo-clippy", clippy-driver = "bin/clippy-driver" }
+
+[compose]
+role = "re"
+desc = "Docker Compose v2+ (공식 GitHub 릴리스 단일 바이너리, docker CLI 플러그인으로도 연결)"
+resolver = { type = "github-release", repo = "docker/compose", tag_prefix = "v" }
+url = "https://github.com/docker/compose/releases/download/v{version}/docker-compose-linux-x86_64"
+checksum = { type = "sums-file", url = "https://github.com/docker/compose/releases/download/v{version}/checksums.txt", name = "docker-compose-linux-x86_64" }
+signature = { type = "none", note = "릴리스에 Sigstore 번들(.sigstore.json)·provenance 가 있다 — cosign 검증은 후속(S50). 지금은 HTTPS(GitHub)+TOFU" }
+archive = { type = "binary", name = "docker-compose" }
+links = { docker-compose = "docker-compose", "/usr/local/lib/docker/cli-plugins/docker-compose" = "docker-compose" }
+
+[uv]
+role = "re"
+desc = "uv (Python 패키지·프로젝트 관리자, 공식 GitHub 릴리스)"
+resolver = { type = "github-release", repo = "astral-sh/uv", tag_prefix = "" }
+url = "https://github.com/astral-sh/uv/releases/download/{version}/uv-x86_64-unknown-linux-gnu.tar.gz"
+checksum = { type = "sums-file", url = "https://github.com/astral-sh/uv/releases/download/{version}/uv-x86_64-unknown-linux-gnu.tar.gz.sha256", name = "uv-x86_64-unknown-linux-gnu.tar.gz" }
+signature = { type = "none", note = "릴리스에 .sha256 만 있고 GPG 서명은 확인하지 못함(GitHub 아티팩트 증명 가능성은 미확인, S50) — HTTPS(GitHub)+TOFU" }
+archive = { type = "tar", strip = 1 }
+links = { uv = "uv", uvx = "uvx" }

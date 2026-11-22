@@ -603,6 +603,7 @@ cmd_tools() {
         lines=$(python3 "$SBOX_DIR/tools.py" plan "${pargs[@]}" | python3 -c 'import sys,json
 d=json.load(sys.stdin)
 if d["manifest"]: print("매니페스트:", d["manifest"], file=sys.stderr)
+for u in d.get("unsupported",[]): print("경고: 도구 층 미지원 — 수동 필요:", u, file=sys.stderr)
 for k,v in d["tools"].items(): print("\x1f".join([k,v["spec"],v["version"],v["source"],v["how"]]))') || die "매니페스트 계획 실패"
     else
         ((${#inline[@]})) || die "설치할 도구가 없습니다(--from-repo·--manifest 또는 TOOL[=SPEC] 필요)"
@@ -631,7 +632,9 @@ for k,v in d["tools"].items(): print("\x1f".join([k,v["spec"],v["version"],v["so
         # /usr/local/bin 링크 — 이름과 대상은 카탈로그(links)가 정한다
         python3 -c 'import sys,json
 k,v=sys.argv[1],sys.argv[2]
-for n,rel in json.loads(sys.argv[3]).items(): print(f"ln -sfn /opt/tools/{k}/{v}/{rel} /usr/local/bin/{n}")' "$k" "$ver" "$links" \
+for n,rel in json.loads(sys.argv[3]).items():
+    dst = n if n.startswith("/") else "/usr/local/bin/"+n   # 절대 경로 이름은 그대로(예: docker CLI 플러그인 폴더)
+    print("mkdir -p $(dirname %s)" % dst); print(f"ln -sfn /opt/tools/{k}/{v}/{rel} {dst}")' "$k" "$ver" "$links" \
             | incus exec "$name" --env "PATH=$CT_PATH" -- sh || die "/usr/local/bin 연결 실패"
         audit info tools "$name" "$k $ver 읽기 전용 마운트(스펙 $spec, $src, $how)"
         say "완료: $k $ver — /opt/tools/$k/$ver (읽기 전용), /usr/local/bin 에 연결"

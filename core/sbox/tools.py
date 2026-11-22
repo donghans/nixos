@@ -85,13 +85,17 @@ def resolve(name, spec=None):
         v = _node_resolve(spec)
     elif typ == "go-json":
         v = _go_resolve(spec)
+    elif typ == "github-release":
+        v = _github_resolve(r, spec)
+    elif typ == "rust-channel":
+        v = _rust_resolve(spec)
     elif typ == "channel-file" and spec in r.get("channels", []):
         v = http(r["url"].format(channel=spec)).decode().strip()
     else:
         v = spec
     if not EXACT.fullmatch(v):
         fail(f"{name}: 해석한 버전이 올바르지 않습니다: {spec} → {v!r}")
-    _rollback_guard(name, spec, v, moving=(typ == "channel-file" and spec in r.get("channels", [])) or spec in ("latest", "lts"))
+    _rollback_guard(name, spec, v, moving=(typ == "channel-file" and spec in r.get("channels", [])) or spec in ("latest", "lts", "stable"))
     mn = t.get("min_version")
     if mn and vtuple(v) < vtuple(mn):
         fail(f"{name} {v} 는 최소 버전 {mn} 보다 낮습니다(서명 없는 옛 릴리스 등) — 거부")
@@ -130,6 +134,36 @@ def _node_resolve(spec):
         if v == spec or v.startswith(spec + "."):
             return v
     fail(f"node {spec} 에 맞는 버전이 없습니다")
+
+
+def _github_resolve(r, spec):
+    """GitHub 릴리스 목록(정식만)에서 스펙에 맞는 최신 버전. tag_prefix(예: v)는 떼고 돌려준다. 인증 없는 API(시간당 60회)."""
+    pre = r.get("tag_prefix", "")
+    rels = json.loads(http(f"https://api.github.com/repos/{r['repo']}/releases?per_page=100"))
+    vers = [x["tag_name"].removeprefix(pre) for x in rels if not x.get("prerelease") and not x.get("draft") and x["tag_name"].startswith(pre)]
+    vers = [v for v in vers if re.fullmatch(r"\d+\.\d+\.\d+", v)]
+    if spec == "latest":
+        if not vers:
+            fail(f"{r['repo']}: 정식 릴리스를 찾지 못했습니다")
+        return max(vers, key=vtuple)
+    ok = [v for v in vers if v == spec or v.startswith(spec + ".")]
+    if not ok:
+        fail(f"{r['repo']}: {spec} 에 맞는 릴리스가 최근 100개 안에 없습니다(오래된 버전은 정확한 X.Y.Z 로 지정)")
+    return max(ok, key=vtuple)
+
+
+def _rust_resolve(spec):
+    """stable·X.Y(최신 패치)·X.Y.Z → 정확한 Rust 버전. 채널 문서(서명 검증은 fetch 에서)의 [pkg.rust] version 을 읽는다."""
+    if re.fullmatch(r"\d+\.\d+\.\d+", spec):
+        return spec
+    if spec == "stable":
+        doc = "channel-rust-stable.toml"
+    elif re.fullmatch(r"\d+\.\d+", spec):
+        doc = f"channel-rust-{spec}.toml"
+    else:
+        fail(f"rust 스펙은 stable·X.Y·X.Y.Z 만 지원합니다(nightly·beta 제외): {spec}")
+    d = tomllib.loads(http(f"https://static.rust-lang.org/dist/{doc}").decode())
+    return d["pkg"]["rust"]["version"].split()[0]
 
 
 def _go_entries():
@@ -216,12 +250,17 @@ def expected_hash(name, t, version, workdir):
         fail(f"{name}: 알 수 없는 서명 방식 {sg['type']}")
     if typ == "sums-file":
         fname = c["name"].format(**fmt)
-        want = next((ln.split()[0] for ln in doc.decode().splitlines() if ln.endswith(" " + fname)), None)
+        want = None
+        for ln in doc.decode().splitlines():
+            parts = ln.split(None, 1)
+            if len(parts) == 2 and parts[1].strip().lstrip("*") == fname:  # 「해시  이름」·「해시 *이름」(바이너리 표시) 둘 다
+                want = parts[0]
+                break
         if not want:
             fail(f"체크섬 문서에 {fname} 이 없습니다")
         return want, fname
     if typ == "json-manifest":
-        cur = json.loads(doc)
+        cur = tomllib.loads(doc.decode()) if c.get("format") == "toml" else json.loads(doc)
         if cur.get("version") not in (None, version):
             fail(f"manifest 버전 불일치: {cur.get('version')} ≠ {version}")
         for k in c["path"].split("."):
@@ -261,6 +300,15 @@ def fetch(name, version):
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     tmp = tempfile.mkdtemp(dir=os.path.dirname(dest), prefix=".x-")
     try:
+        if t["archive"]["type"] == "rust-installer":
+            final = os.path.join(tmp, "final")
+            _fetch_rust(name, t, version, tmp, final)
+            for rel in (t.get("links") or {}).values():
+                if not os.path.lexists(os.path.join(final, rel)):
+                    fail(f"푼 결과에 링크 대상이 없습니다: {rel}")
+            os.replace(final, dest)
+            _make_readonly_tree(dest)
+            return dest
         want, fname = expected_hash(name, t, version, tmp)
         if not re.fullmatch(r"[a-f0-9]{64}", want):
             fail(f"체크섬 형식이 올바르지 않습니다: {want!r}")
@@ -314,6 +362,62 @@ def fetch(name, version):
     return dest
 
 
+def _download_hashed(url, out_path):
+    h = hashlib.sha256()
+    with urllib.request.urlopen(url, timeout=300) as r, open(out_path, "wb") as out:  # noqa: S310
+        while True:
+            b = r.read(1 << 20)
+            if not b:
+                break
+            h.update(b)
+            out.write(b)
+    return h.hexdigest()
+
+
+def _fetch_rust(name, t, version, tmp, final):
+    """Rust: 서명된 채널 문서(toml)의 패키지별 해시로 tar.xz 를 검증하고 각 설치기(install.sh)를 같은 prefix 로 실행한다."""
+    c, sg, a = t["checksum"], t["signature"], t["archive"]
+    fmt = {"version": version}
+    doc = http(c["url"].format(**fmt))
+    verify_gpg(doc, http(sg["sig_url"].format(**fmt)), http(sg["key_url"]), sg["fingerprint"], tmp)
+    d = tomllib.loads(doc.decode())
+    if not d["pkg"]["rust"]["version"].startswith(version + " "):
+        fail(f"채널 문서의 rust 버전이 다릅니다: {d['pkg']['rust']['version']} ≠ {version}")
+    triple = a.get("target", "x86_64-unknown-linux-gnu")
+    lock = load_lock()
+    os.makedirs(final)
+    for pkg in a["pkgs"]:
+        ent = d["pkg"][pkg]["target"][triple]
+        if not ent.get("available") or not ent.get("xz_url"):
+            fail(f"채널 문서에 {pkg} ({triple}) 가 없습니다")
+        url, want = ent["xz_url"], ent["xz_hash"]
+        key = f"{name}/{version}/{os.path.basename(url)}"
+        if key in lock and lock[key] != want:
+            fail(f"잠금 해시와 서명된 채널 문서가 다릅니다({key}) — 중단")
+        art = os.path.join(tmp, f"{pkg}.tar.xz")
+        got = _download_hashed(url, art)
+        if got != want:
+            fail(f"sha256 불일치({pkg}): 받은 {got} ≠ 서명된 문서 {want}")
+        if key not in lock:
+            lock[key] = want
+            save_lock(lock)
+        ex = os.path.join(tmp, f"ex-{pkg}")
+        with tarfile.open(art) as tf:
+            tf.extractall(ex, filter="data")
+        kids = os.listdir(ex)
+        if len(kids) != 1:
+            fail(f"{pkg} 압축 파일의 맨 앞 폴더가 하나가 아닙니다")
+        cmd = ["sh", os.path.join(ex, kids[0], "install.sh"), f"--prefix={final}", "--disable-ldconfig"]
+        wo = (a.get("without") or {}).get(pkg)
+        if wo:
+            cmd.append(f"--without={wo}")
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            fail(f"{pkg} 설치기 실패: {(r.stderr or r.stdout).strip()[-300:]}")
+        os.remove(art)
+        shutil.rmtree(ex, ignore_errors=True)
+
+
 def prune(name, keep, used):
     """CACHE/name/* 중 keep 이 아니고 used(경로 집합)에 없는 버전 폴더를 지운다."""
     base = os.path.join(CACHE, name)
@@ -346,6 +450,17 @@ def infer(repo):
         m = re.search(r"(\d+)", eng or "")
         if m:
             out["node"] = {"spec": m.group(1), "source": f"package.json engines.node ({eng})"}
+    for rt in ("rust-toolchain.toml", "rust-toolchain"):
+        rp = os.path.join(repo, rt)
+        if os.path.isfile(rp):
+            txt = open(rp, encoding="utf-8").read()
+            m = re.search(r'channel\s*=\s*"([^"]+)"', txt) or re.match(r"\s*([0-9a-z][^\s#]*)", txt)
+            ch = m.group(1) if m else ""
+            if re.fullmatch(r"\d+\.\d+(\.\d+)?|stable", ch):
+                out["rust"] = {"spec": ch, "source": rt}
+            elif ch:
+                out["rust_unsupported"] = {"spec": ch, "source": f"{rt} (nightly·beta 등은 도구 층 미지원 — 수동 필요)"}
+            break
     gm = os.path.join(repo, "go.mod")
     if os.path.isfile(gm):
         txt = open(gm, encoding="utf-8").read()
@@ -422,7 +537,14 @@ def plan(a):
     resolved_old = old.get("resolved") or {}
     effective_spec = {k: v["spec"] for k, v in inferred.items()}
     effective_spec.update(override)
-    out, resolved = {}, {}
+    out, resolved, unsupported = {}, {}, []
+    cat = catalog()
+    for k, spec in list(effective_spec.items()):
+        if k not in cat:  # 카탈로그에 없는 도구(예: rust nightly) — 막지 않고 알린다
+            unsupported.append(f"{k}={spec} ({inferred.get(k, {}).get('source', '인자')})")
+            del effective_spec[k]
+    for k in [k for k in inferred if k not in cat]:
+        del inferred[k]
     for k, spec in effective_spec.items():
         t = tool(k)
         src = "override" if k in override else inferred.get(k, {}).get("source", "인자")
@@ -439,7 +561,7 @@ def plan(a):
         resolved[k] = {"spec": spec, "version": ver}
         out[k] = {"spec": spec, "version": ver, "source": src, "how": how, "role": "re"}
     write_manifest(path, project, repo, inferred, override, resolved)
-    return {"manifest": path, "tools": out}
+    return {"manifest": path, "tools": out, "unsupported": unsupported}
 
 
 def main(a):
