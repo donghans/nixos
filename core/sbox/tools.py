@@ -1127,6 +1127,7 @@ def plan(a):
     inferred = infer(repo) if repo and os.path.isdir(repo) else {k: {"spec": v, "source": "기존 매니페스트"} for k, v in (old.get("inferred") or {}).items()}
     override = dict(old.get("override") or {})
     override.update(given)
+    docker_ov = override.pop("docker", None)   # 도구가 아니라 「Docker 를 쓰나」 선택 — dockerctl.py 가 읽는다. 도구 해석에서는 빼고 다시 쓸 때 되살린다
     resolved_old = old.get("resolved") or {}
     effective_spec = {k: v["spec"] for k, v in inferred.items()}
     effective_spec.update(override)
@@ -1155,6 +1156,8 @@ def plan(a):
         out[k] = {"spec": spec, "version": ver, "source": src, "how": how, "role": "re"}
     if resolved_old.get("docker"):
         resolved["docker"] = resolved_old["docker"]   # 도구 층이 아닌 항목([resolved.docker], dockerctl.py 가 씀)은 다시 쓸 때 그대로 보존
+    if docker_ov is not None:
+        override["docker"] = docker_ov
     write_manifest(path, project, repo, inferred, override, resolved, tier=(old.get("project") or {}).get("tier"))  # 등급은 사람이 정한 값 — 다시 쓸 때 보존(안 하면 critical 이 조용히 general 로 돌아감)
     return {"manifest": path, "tools": out, "unsupported": unsupported}
 

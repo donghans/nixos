@@ -4,7 +4,7 @@
 컨테이너에 쓸 설정 내용을 만들 뿐이다. 설치(apt)는 컨테이너 안 root 가 하고 서명은 apt 가 고정 키로 검증한다.
 
 서브명령(표준출력은 JSON 또는 한 줄):
-  wanted [--repo DIR] [--manifest F]   이 프로젝트가 Docker 를 쓰나(매니페스트에 [resolved.docker] 가 있거나 저장소에 compose·Dockerfile 이 있음) → 「yes <근거>」 / 「no」(종료코드 0/1)
+  wanted [--repo DIR] [--manifest F]   이 프로젝트가 Docker 를 쓰나(우선순위: 매니페스트 [override] docker = "yes"|"no" > [resolved.docker] 기록 > 저장소의 compose·Dockerfile) → 「yes <근거>」 / 「no」(종료코드 0/1)
   plan --distro debian|ubuntu --codename C --arch amd64 [--manifest F] [--update]
                                        키 고정(필요 시 독립 출처 교차 확인) + 쿨다운을 적용한 설치 버전 선택 → JSON(key_file·sources·versions·notes)
                                        --manifest 가 있고 [resolved.docker] 가 있으면 그 버전을 재사용(--update 로만 다시 고름), 새로 고르면 매니페스트에 기록
@@ -212,7 +212,26 @@ def detect_repo(repo):
     return None
 
 
+def read_override(path):
+    """사람이 매니페스트 [override] 에 적은 docker = "yes"|"no" (없으면 None)."""
+    if not (path and os.path.isfile(path)):
+        return None
+    with open(path, "rb") as f:
+        v = (tomllib.load(f).get("override") or {}).get("docker")
+    if v is None:
+        return None
+    if str(v).lower() not in ("yes", "no"):
+        fail(f"매니페스트 [override] docker 는 \"yes\" 또는 \"no\" 여야 합니다(받은 값: {v!r})")
+    return str(v).lower()
+
+
 def wanted(repo=None, manifest=None):
+    """우선순위: 매니페스트 [override] docker(사람이 정함) > [resolved.docker](이미 설치한 기록) > 저장소 감지. 명령 인자(--docker·--no-docker)는 sboxctl 이 이보다 먼저 적용한다."""
+    ov = read_override(manifest)
+    if ov == "no":
+        return None
+    if ov == "yes":
+        return "yes 매니페스트 [override] docker = \"yes\""
     if manifest and read_resolved(manifest).get("version"):
         return "yes 매니페스트에 [resolved.docker] 가 있음"
     if repo and os.path.isdir(repo):

@@ -85,6 +85,13 @@ check("깊이 3 아래의 compose 는 보지 않는다(비용·오탐 제한)", 
 open(os.path.join(R, "a", "docker-compose.prod.yml"), "w").close()
 check("깊이 2 이내의 docker-compose.*.yml 은 근거", (dockerctl.wanted(R) or "").startswith("yes"), dockerctl.wanted(R))
 check("매니페스트에 [resolved.docker] 가 있으면 저장소 없이도 필요", (dockerctl.wanted(None, mf) or "").startswith("yes"))
+mo = os.path.join(TMP, "ov.toml")
+open(mo, "w", encoding="utf-8").write('[project]\nname = "o"\nrepo = ""\n\n[override]\ndocker = "no"\n\n[resolved.docker]\nspec = "engine"\nversion = "5:1-1"\ncontainerd = "1-1"\n')
+check("[override] docker = \"no\" 는 [resolved.docker] 기록·저장소 감지보다 우선(영구히 끔)", dockerctl.wanted(R, mo) is None)
+open(mo, "w", encoding="utf-8").write('[project]\nname = "o"\nrepo = ""\n\n[override]\ndocker = "yes"\n')
+check("[override] docker = \"yes\" 는 저장소에 근거가 없어도 필요", (dockerctl.wanted(os.path.join(TMP, "nope"), mo) or "").startswith("yes"))
+tools.plan(["--manifest", mo])
+check("도구 층 plan 이 [override] docker 를 도구로 오인하지 않고(경고 없음) 다시 써도 보존", 'docker = "yes"' in open(mo, encoding="utf-8").read())
 check("둘 다 없으면 no(None)", dockerctl.wanted(os.path.join(TMP, "nope"), os.path.join(TMP, "nope.toml")) is None)
 
 # ① 키 규칙 — 임시 gpg 홈에 키를 만든다
