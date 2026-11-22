@@ -1631,7 +1631,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
             tb.add_row("(등록된 프로젝트 없음 — sboxctl tools --from-repo DIR 로 등록한 뒤 sboxctl depwatch scan)", "", "", "", "", key="")
         else:
             for r in d["rows"]:
-                tb.add_row(r["name"], r["tier"], str(r["warn"]), str(r["info"]), self._sbox_ts(r["scanned_at"]), key=r["name"])
+                tb.add_row(r["name"], r["tier"], "검사 안 함" if r["unchecked"] else str(r["warn"]), "-" if r["unchecked"] else str(r["info"]) + (" (일부만 검사)" if r["partial"] else ""), self._sbox_ts(r["scanned_at"]), key=r["name"])
         tb.styles.height = min(tb.row_count + 3, 12)
 
     def on_data_table_row_selected(self, ev: DataTable.RowSelected):

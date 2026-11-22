@@ -64,6 +64,15 @@ check("vendor 하위의 락 없음은 info 로 낮추고 일반 하위는 warn �
 check("워크스페이스 멤버(client·packages/*)는 상위 락 사용 — 오탐 없음, 멤버가 아닌 other·깊은 deep/x/y 는 no-lock",
       ws == ["npm.no-lock:deep/x/y", "npm.no-lock:other"], ws)
 
+# 적용되는 감지기가 없는 저장소(예: nix)는 「발견 0건」이 아니라 「검사 안 함」 알림이 붙는다 — 거짓 안심 방지
+mk(os.path.join(repos, "nixrepo"), {"flake.nix": "{}"})
+tools.plan(["--repo", os.path.join(repos, "nixrepo")])
+depwatch.scan()
+nx = depwatch.listing("nixrepo")["projects"]["nixrepo"]
+check("감지기 대상이 없는 저장소는 notes 에 「검사 안 함」", nx["findings"] == [] and any("검사 안 함" in x for x in nx["notes"]), nx)
+check("flake.nix 가 있으면 「flake 감지기 없음」(일부만 검사) 알림", any("flake" in x and "검사하지 않음" in x for x in nx["notes"]), nx)
+shutil.rmtree(os.path.join(depwatch.MANIFESTS, "nixrepo.toml"), ignore_errors=True) if os.path.isdir(os.path.join(depwatch.MANIFESTS, "nixrepo.toml")) else os.remove(os.path.join(depwatch.MANIFESTS, "nixrepo.toml"))
+
 # ② tier 보존 — plan() 은 inferred 가 비는 저장소(.nvmrc 등 없음)로 돌려 네트워크 해석을 피한다
 os.makedirs(depwatch.MANIFESTS, exist_ok=True)
 tools.plan(["--repo", os.path.join(repos, "scripts")])

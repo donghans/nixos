@@ -47,7 +47,9 @@ def load() -> dict:
         fs = p.get("findings") or []
         rows.append({"name": name, "tier": p.get("tier", "general"), "total": len(fs),
                      "warn": sum(1 for f in fs if f.get("severity") == "warn"), "info": sum(1 for f in fs if f.get("severity") != "warn"),
-                     "scanned_at": p.get("scanned_at")})
+                     "scanned_at": p.get("scanned_at"),
+                     "partial": bool(p.get("notes")),
+                     "unchecked": not fs and any("검사 안 함" in n for n in (p.get("notes") or []))})   # 적용 감지기 없음 — 0건을 「안전」으로 읽지 않게 표시
     rows.sort(key=lambda r: (r["tier"] != "critical", -r["warn"], r["name"]))   # critical 먼저, 경고 많은 순
     return {"available": True, "error": None, "scanned_at": data.get("scanned_at"), "rows": rows}
 

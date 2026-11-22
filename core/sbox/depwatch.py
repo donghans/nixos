@@ -27,6 +27,8 @@ TIERS = ("general", "critical")
 LOCKS = ("package-lock.json", "npm-shrinkwrap.json")   # npm 만(사용자 2026-11-23: yarn·pnpm 은 쓰지 않음 — 쓰게 되면 그때 추가)
 SKIP_DIRS = {"node_modules"}
 NAME_CAP = 20
+NO_FLAKE = "nix(flake) 감지기 없음 — flake.lock 입력(nixpkgs 등)은 검사하지 않음(발견 사항은 npm 쪽만)"
+NO_DETECTOR = "이 저장소에 적용되는 감지기가 없음(현재 npm 만 지원) — 발견 0건은 「안전」이 아니라 「검사 안 함」"
 VENDOR_DIRS = {"vendor", "vendors", "third_party", "third-party"}   # 복사해 둔 외부 소스 — 락 없음은 info 로 낮춘다(실측: genple 의 vendor/genoffice)
 
 
@@ -53,17 +55,21 @@ def save_state(st):
 MAX_DEPTH = 6
 
 
-def _pkg_dirs(repo):
-    """package.json 이 있는 모든 디렉터리(저장소 루트 기준 상대 경로, 깊이 MAX_DEPTH 까지). node_modules·숨김 폴더는 들어가지 않는다."""
+def _dirs_with(repo, fname):
+    """fname 파일이 있는 모든 디렉터리(저장소 루트 기준 상대 경로, 깊이 MAX_DEPTH 까지). node_modules·숨김 폴더는 들어가지 않는다."""
     out = []
     base_depth = repo.rstrip(os.sep).count(os.sep)
     for root, dirs, files in os.walk(repo):
         dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
         if root.count(os.sep) - base_depth >= MAX_DEPTH:
             dirs[:] = []
-        if "package.json" in files:
+        if fname in files:
             out.append(os.path.relpath(root, repo) if root != repo else "")
     return out
+
+
+def _pkg_dirs(repo):
+    return _dirs_with(repo, "package.json")
 
 
 def _workspace_patterns(pkg_json_path):
@@ -165,6 +171,10 @@ def scan():
             notes.append("저장소 경로가 없거나 디렉터리가 아님 — 스캔 건너뜀")
         else:
             findings = npm_findings(repo)
+            if _dirs_with(repo, "flake.nix"):   # 알려진 스택인데 감지기가 없는 것은 일부만 검사한다고 밝힌다
+                notes.append(NO_FLAKE)
+            if not _pkg_dirs(repo):   # 적용되는 감지기가 하나도 없음 — 발견 0건은 「안전」이 아니라 「검사 안 함」(예: nix 저장소). 거짓 안심 방지
+                notes.append(NO_DETECTOR)
         old = {f["id"]: f.get("first_seen") for f in (prev.get(name, {}).get("findings") or [])}
         t = now()
         for f in findings:
