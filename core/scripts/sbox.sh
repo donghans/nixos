@@ -357,7 +357,16 @@ cmd_create() {
     incus network show "$NETWORK" >/dev/null 2>&1 || die "브리지 $NETWORK 가 없습니다"
 
     say "생성: $name ← $GOLDEN_INST@$GOLDEN_SNAP (스냅샷 복제, vmx 마스킹 켬 = 중첩 가상화 기본 꺼짐)"
-    incus copy "$GOLDEN_INST/$GOLDEN_SNAP" "$name" >/dev/null 2>&1 || die "incus copy 실패($name)"
+    # 같은 이름을 지운 직후 다시 만들면 incus 클라이언트가 수십 분 멈춘 적이 있다(2026-11-22 세 번 재현 — 이름 재사용 경합) —
+    # 시간 제한을 두고 실패하면 반쯤 만들어진 것을 지운 뒤 재시도한다.
+    local _try _err
+    for _try in 1 2 3; do
+        if _err=$(timeout 180 incus copy "$GOLDEN_INST/$GOLDEN_SNAP" "$name" 2>&1); then break; fi
+        say "incus copy 실패($_try/3): ${_err##*$'\n'}"
+        incus delete -f "$name" >/dev/null 2>&1 || true
+        sleep 10
+        [[ $_try == 3 ]] && die "incus copy 3회 실패($name): ${_err##*$'\n'}"
+    done
     incus config set "$name" raw.qemu="-cpu host,-vmx"
     incus config device get "$name" eth0 network 2>/dev/null | grep -qx "$NETWORK" || die "$name 의 eth0 가 $NETWORK 에 붙어 있지 않습니다"
     incus start "$name"
