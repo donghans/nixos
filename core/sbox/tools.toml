@@ -5,7 +5,8 @@
 #   re  실행환경(Runtime Environment): 프로젝트를 **실행**하는 데 쓰는 것(Node·Go·Rust·Python·Compose·Docker·DB…).
 #       버전은 프로젝트 매니페스트에 **고정**(처음 풀린 정확한 버전을 [resolved] 에 기록, --update 로만 다시 해석).
 #   de  개발환경(Development Environment): 프로젝트를 **유지보수하는 도구**(Claude Code·에디터·린터 성격).
-#       **항상 최신**(스펙을 안 주면 latest). 새 버전을 받으면 **호스트 캐시의 옛 버전은 정리**한다(어느 컨테이너도 쓰지 않는 것만).
+#       **최신 채널을 따라간다**(스펙을 안 주면 resolver 의 default — Claude Code 는 stable ≈ 1주 지연, 사용자 방침 2026-11-22: 갓 나온 악성 릴리스에 바로 노출되는 것을 피함. latest 가 필요하면 claude=latest).
+#       새 버전을 받으면 **호스트 캐시의 옛 버전은 정리**한다(어느 컨테이너도 쓰지 않는 것만).
 #
 # 필드
 #   role        re | de
@@ -51,7 +52,7 @@ links = { go = "bin/go", gofmt = "bin/gofmt" }
 role = "de"
 desc = "Claude Code (공식 네이티브 바이너리)"
 min_version = "2.1.89"
-resolver = { type = "channel-file", url = "https://downloads.claude.ai/claude-code-releases/{channel}", channels = ["latest", "stable"], default = "latest" }
+resolver = { type = "channel-file", url = "https://downloads.claude.ai/claude-code-releases/{channel}", channels = ["latest", "stable"], default = "stable" }
 url = "https://downloads.claude.ai/claude-code-releases/{version}/linux-x64/claude"
 checksum = { type = "json-manifest", url = "https://downloads.claude.ai/claude-code-releases/{version}/manifest.json", path = "platforms.linux-x64.checksum" }
 signature = { type = "gpg-detached", sig_url = "https://downloads.claude.ai/claude-code-releases/{version}/manifest.json.sig", key_url = "https://downloads.claude.ai/keys/claude-code.asc", fingerprint = "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE", note = "지문은 공식 문서 code.claude.com/docs/en/setup 의 값(2026-11-22)" }

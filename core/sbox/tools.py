@@ -91,10 +91,29 @@ def resolve(name, spec=None):
         v = spec
     if not EXACT.fullmatch(v):
         fail(f"{name}: 해석한 버전이 올바르지 않습니다: {spec} → {v!r}")
+    _rollback_guard(name, spec, v, moving=(typ == "channel-file" and spec in r.get("channels", [])) or spec in ("latest", "lts"))
     mn = t.get("min_version")
     if mn and vtuple(v) < vtuple(mn):
         fail(f"{name} {v} 는 최소 버전 {mn} 보다 낮습니다(서명 없는 옛 릴리스 등) — 거부")
     return v
+
+
+def _rollback_guard(name, spec, v, moving):
+    """움직이는 가리킴(latest·lts·채널 이름)이 **본 적 있는 최고 버전보다 낮은 버전**을 가리키면 거부한다(롤백·다운그레이드 방어, S47).
+    채널 파일은 서명이 없어 공격자가 옛 서명 릴리스를 가리키게 해도 서명 검증은 통과하기 때문이다. 공급자의 정상 롤백이면
+    SBOX_TOOLS_ALLOW_DOWNGRADE=1 로 한 번 허용한다. 고정 버전(정확한 X.Y.Z 스펙)에는 적용하지 않는다."""
+    if not moving:
+        return
+    key = f"_max/{name}/{spec}"
+    lock = load_lock()
+    prev = lock.get(key)
+    if prev and vtuple(v) < vtuple(prev) and os.environ.get("SBOX_TOOLS_ALLOW_DOWNGRADE") != "1":
+        fail(f"{name} {spec} 가 이전에 본 {prev} 보다 낮은 {v} 를 가리킵니다 — 롤백 공격이거나 공급자의 정상 롤백입니다. "
+             f"확인 뒤 SBOX_TOOLS_ALLOW_DOWNGRADE=1 로 다시 실행하세요")
+    # 새 최고이거나, 사용자가 낮아진 것을 허용한 경우(그 값을 새 기준선으로 — 매번 환경변수를 줄 필요가 없게)
+    if not prev or vtuple(v) > vtuple(prev) or (vtuple(v) < vtuple(prev) and os.environ.get("SBOX_TOOLS_ALLOW_DOWNGRADE") == "1"):
+        lock[key] = v
+        save_lock(lock)
 
 
 def _node_resolve(spec):

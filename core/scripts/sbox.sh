@@ -635,7 +635,7 @@ for n,rel in json.loads(sys.argv[3]).items(): print(f"ln -sfn /opt/tools/{k}/{v}
             | incus exec "$name" --env "PATH=$CT_PATH" -- sh || die "/usr/local/bin 연결 실패"
         audit info tools "$name" "$k $ver 읽기 전용 마운트(스펙 $spec, $src, $how)"
         say "완료: $k $ver — /opt/tools/$k/$ver (읽기 전용), /usr/local/bin 에 연결"
-        # de(개발환경) 도구는 항상 최신 — 어느 인스턴스도 쓰지 않는 옛 버전은 호스트 캐시에서 정리한다
+        # de(개발환경) 도구는 최신 채널을 따라감 — 어느 인스턴스도 쓰지 않는 옛 버전은 호스트 캐시에서 정리한다
         role=$(python3 "$SBOX_DIR/tools.py" catalog | python3 -c 'import sys,json;print(json.load(sys.stdin)["'"$k"'"]["role"])')
         if [[ $role == de ]]; then
             local gone
@@ -679,7 +679,7 @@ cmd_claude() {
         vmx "$name" sh -c 'command -v tmux >/dev/null 2>&1 || { apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux >/dev/null; }' </dev/null \
             || die "tmux 설치 실패(컨테이너 안 apt)"
         # Claude 는 개발환경(de) 도구 — 공식 네이티브 바이너리를 호스트가 서명된 manifest(GPG)·SHA256 으로 검증해 읽기 전용 마운트(S46).
-        # 항상 최신(사용자 방침): 없을 때 또는 --update 일 때 최신으로 받고 쓰이지 않는 옛 버전은 정리한다. 특정 버전이 필요하면 --claude-version.
+        # 최신 채널(기본 stable ≈ 1주 지연, 사용자 방침): 없을 때 또는 --update 일 때 받고 쓰이지 않는 옛 버전은 정리한다. 특정 버전이 필요하면 --claude-version.
         if ((update)) || ! incus exec "$name" --env "PATH=$CT_PATH" -- sh -c 'test -x /usr/local/bin/claude' </dev/null; then
             cmd_tools "$name" "claude${cver:+=$cver}" || die "도구 층 Claude 설치 실패"
         fi
