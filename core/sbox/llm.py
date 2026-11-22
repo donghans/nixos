@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""sbox LLM 에이전트 정의(core/sbox/llm.toml) 조회 — sbox.sh 가 호출한다.
+"""sbox LLM 에이전트 정의(core/sbox/llm.toml) 조회 — sboxctl 이 호출한다.
   llm.py list                 정의된 에이전트와 설명
   llm.py get AGENT FIELD      필드 값(문자열이면 그대로, 목록이면 공백으로 이어서). 없으면 종료코드 1
 """

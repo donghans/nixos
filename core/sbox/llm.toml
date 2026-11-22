@@ -1,4 +1,4 @@
-# sbox 의 LLM 코딩 에이전트 정의 — `sbox.sh llm <에이전트> NAME` 이 이 파일을 읽어 컨테이너(ct)·VM 안에서 대화형 세션을 tmux 로 띄운다.
+# sbox 의 LLM 코딩 에이전트 정의 — `sboxctl llm <에이전트> NAME` 이 이 파일을 읽어 컨테이너(ct)·VM 안에서 대화형 세션을 tmux 로 띄운다.
 # 새 에이전트(codex·agy 등)를 붙이는 방법: ① core/sbox/tools.toml 에 도구 항목(role = "de", 공식 배포·서명 검증 방식)을 추가
 #   ② 이 파일에 같은 이름의 절을 추가 ③ 토큰이 필요하면 `donghans secret add <비밀 이름>` 으로 등록하고 아래 secret 에 적는다.
 #   에이전트마다 확인해야 할 것(에이전트의 공식 배포 방식·서명·인증 방식·첫 실행 화면)은 **추측으로 채우지 않는다**.
@@ -11,7 +11,7 @@
 #   bypass_flags    `--bypass` 를 주면 붙일 인자(권한 확인 생략 모드 — 일회용 환경 안에서만)
 #   token_env       토큰을 넘길 환경변수 이름 / token_path  VM·ct 안 tmpfs 경로 / secret  `donghans secret` 등록 이름
 #   env             세션 프로세스에 줄 환경변수(예: 읽기 전용 마운트라 자동 갱신 끄기)
-#   first_run       첫 실행 안내를 미리 처리하는 방식: "claude"(sbox.sh 에 구현됨) | "none"
+#   first_run       첫 실행 안내를 미리 처리하는 방식: "claude"(sboxctl 에 구현됨) | "none"
 #   dialog_patterns 세션 시작 12초 뒤 화면에 남으면 「첫 실행 안내가 남았다」고 경고할 문구(정규식, | 로 구분)
 #   version_cmd     버전을 묻는 명령
 

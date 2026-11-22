@@ -3,25 +3,25 @@
 # 종류(--kind): vm = nixos OS 단위 시험용 VM(구현됨). ct = 프로젝트용 컨테이너(v1: debian·ubuntu — §23 S1). 종류는 필수 인자이고 기본값이 없다.
 # 이름: sbox-vm-<이름> / sbox-ct-<flavor><버전(점 제거)>-<이름>(예 sbox-ct-debian13-proj), 골든은 sbox-golden-vm(VM 전용). VM 안 사용자 이름은 sbox, 호스트명은 sbox-nixos(2026-11-22 devvm·dev-nixos 에서 변경).
 #
-#   sbox.sh create --kind ct --flavor debian|ubuntu [--release R] [--legacy] [--nesting] [--cpu N] [--memory M] [NAME]  컨테이너 생성(v1)
-#   sbox.sh releases [flavor]                          쓸 수 있는 릴리스 표(core/sbox/releases.toml)
-#   sbox.sh create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
+#   sboxctl create --kind ct --flavor debian|ubuntu [--release R] [--legacy] [--nesting] [--cpu N] [--memory M] [NAME]  컨테이너 생성(v1)
+#   sboxctl releases [flavor]                          쓸 수 있는 릴리스 표(core/sbox/releases.toml)
+#   sboxctl create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
 #   (ct 만) create 에 --from-repo DIR | --manifest F | --tool TOOL[=SPEC] (반복) | --update 를 주면 만든 직후 도구 층을 자동 적용 — 같은 매니페스트로 다시 만들면 같은 버전
-#   sbox.sh tools NAME [--from-repo DIR|--manifest F] [--update] [node=22]  컨테이너에 읽기 전용 도구 층 붙임(호스트가 받아 sha256 검증, 버전은 매니페스트에 고정, v1: node)
-#   sbox.sh llm AGENT NAME [--dir D] [--bypass] [--attach] [--version V] [--update]  안(vm·ct)에서 tmux 로 LLM 에이전트 대화형 세션 시작(정의 core/sbox/llm.toml, 첫 실행 안내 미리 처리·남으면 경고).
-#   sbox.sh bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
-#   sbox.sh import BUNDLE                             번들을 호스트 저장소의 refs/sbox/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
-#   sbox.sh destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
-#   sbox.sh golden [SRC_INSTANCE]                     SRC(기본 dev-nixos)를 정상 종료 후 복제해 골든(sbox-golden-vm@gold)을 새로 만듦
-#   sbox.sh rebuild-golden [--stale-ok]               ISO+nixstrap(NIXSTRAP_AUTO)로 골든을 처음부터 새로 만듦(약 15분)
-#   sbox.sh list                                      sbox-* 인스턴스 목록
-#   sbox.sh iso [--stale-ok]                          설치 ISO 만 미리 빌드(캐시면 약 20초, nixstrap 수정 직후면 약 7분)
+#   sboxctl tools NAME [--from-repo DIR|--manifest F] [--update] [node=22]  컨테이너에 읽기 전용 도구 층 붙임(호스트가 받아 sha256 검증, 버전은 매니페스트에 고정, v1: node)
+#   sboxctl llm AGENT NAME [--dir D] [--bypass] [--attach] [--version V] [--update]  안(vm·ct)에서 tmux 로 LLM 에이전트 대화형 세션 시작(정의 core/sbox/llm.toml, 첫 실행 안내 미리 처리·남으면 경고).
+#   sboxctl bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
+#   sboxctl import BUNDLE                             번들을 호스트 저장소의 refs/sbox/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
+#   sboxctl destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
+#   sboxctl golden [SRC_INSTANCE]                     SRC(기본 dev-nixos)를 정상 종료 후 복제해 골든(sbox-golden-vm@gold)을 새로 만듦
+#   sboxctl rebuild-golden [--stale-ok]               ISO+nixstrap(NIXSTRAP_AUTO)로 골든을 처음부터 새로 만듦(약 15분)
+#   sboxctl list                                      sbox-* 인스턴스 목록
+#   sboxctl iso [--stale-ok]                          설치 ISO 만 미리 빌드(캐시면 약 20초, nixstrap 수정 직후면 약 7분)
 #
 # 전제·한계
 #  - 호스트(msi-summit-me) 전용: incus 사용 권한, sboxbr0 브리지, nix-serve(10.100.1.1:5000) 필요.
 #  - 제어 채널은 incus exec(에이전트) — ssh 로의 전환은 별도 단계(plan §11).
 #  - 캐시 등록은 VM 의 /etc/nix/nix.conf 심볼릭 링크를 파일로 바꾸는 방식이라 VM 안에서 `nixup`(시스템 적용)을 하면 되돌아간다.
-#    그때는 `sbox.sh cache NAME` 으로 다시 등록한다.
+#    그때는 `sboxctl cache NAME` 으로 다시 등록한다.
 #  - 토큰은 VM 의 tmpfs(/run/sbox-claude/token)에만 둔다(재부팅하면 사라짐). 값은 명령줄·디스크에 남기지 않는다.
 set -euo pipefail
 
@@ -420,9 +420,9 @@ print(" ".join(a["address"] for a in d.get("eth0",{}).get("addresses",[]) if a["
     say "완료: $name  ($ip) — 사용자 $VM_USER(sudo 없음), 토큰은 $TOKEN_PATH(tmpfs)"
     if ((${#TOOLS_ARGS[@]})); then
         # 도구 층 자동 적용 — 매니페스트의 [resolved] 가 정확한 버전을 고정하므로 이 컨테이너를 지우고 다시 만들어도 같은 버전이 들어간다
-        cmd_tools "$name" "${TOOLS_ARGS[@]}" || die "$name 은 만들어졌지만 도구 층 적용에 실패했습니다 — 'sbox.sh tools $name …' 로 다시 시도하세요"
+        cmd_tools "$name" "${TOOLS_ARGS[@]}" || die "$name 은 만들어졌지만 도구 층 적용에 실패했습니다 — 'sboxctl tools $name …' 로 다시 시도하세요"
     else
-        say "알림: 도구(Node·Go·Rust·Python·Compose·uv)는 'sbox.sh tools $name --from-repo <저장소>' 또는 create 의 --from-repo/--tool 로 읽기 전용 도구 층을 붙입니다"
+        say "알림: 도구(Node·Go·Rust·Python·Compose·uv)는 'sboxctl tools $name --from-repo <저장소>' 또는 create 의 --from-repo/--tool 로 읽기 전용 도구 층을 붙입니다"
     fi
 }
 
@@ -461,7 +461,7 @@ cmd_create() {
     [[ -z $flavor || $flavor == nixos ]] || die "vm 종류는 nixos 만 구현돼 있습니다(받은 flavor: $flavor)"
     [[ -n $name ]] || name="sbox-vm-$(date +%y%m%d-%H%M)"
     check_name "$name"
-    incus info "$GOLDEN_INST" >/dev/null 2>&1 || die "골든 $GOLDEN_INST 가 없습니다 — 먼저 'sbox.sh golden'"
+    incus info "$GOLDEN_INST" >/dev/null 2>&1 || die "골든 $GOLDEN_INST 가 없습니다 — 먼저 'sboxctl golden'"
     incus info "$name" >/dev/null 2>&1 && die "$name 은 이미 있습니다"
     incus network show "$NETWORK" >/dev/null 2>&1 || die "브리지 $NETWORK 가 없습니다"
 
@@ -598,7 +598,7 @@ cmd_destroy() {
 #  (22 같은 느슨한 스펙이 나중에 다른 패치로 조용히 바뀌지 않음). 다시 해석하려면 --update. TOOL=SPEC 은 매니페스트에 [override] 로 기록된다.
 cmd_tools() {
     local name=${1:-}; shift || true
-    [[ -n $name ]] || die "사용법: sbox.sh tools NAME [--from-repo DIR | --manifest FILE] [--update] [TOOL[=SPEC] ...]  (도구 목록: python3 core/sbox/tools.py catalog)"
+    [[ -n $name ]] || die "사용법: sboxctl tools NAME [--from-repo DIR | --manifest FILE] [--update] [TOOL[=SPEC] ...]  (도구 목록: python3 core/sbox/tools.py catalog)"
     check_name "$name"
     [[ $NAME_KIND == ct ]] || die "도구 층은 컨테이너(ct)만 지원합니다"
     incus info "$name" >/dev/null 2>&1 </dev/null || die "$name 이 없습니다"
@@ -677,7 +677,7 @@ llm_tmux() { # llm_tmux NAME ARGS… — 종류에 맞게 tmux 를 sbox 사용�
 }
 cmd_llm() {
     local agent=${1:-}; shift || true
-    [[ -n $agent ]] || die "사용법: sbox.sh llm AGENT NAME [--dir 폴더] [--bypass] [--attach] [--version V] [--update]  (정의된 에이전트: $(python3 "$SBOX_DIR/llm.py" list | cut -f1 | tr '\n' ' '))"
+    [[ -n $agent ]] || die "사용법: sboxctl llm AGENT NAME [--dir 폴더] [--bypass] [--attach] [--version V] [--update]  (정의된 에이전트: $(python3 "$SBOX_DIR/llm.py" list | cut -f1 | tr '\n' ' '))"
     local tool cmd bypass_flags token_env token_path envs first_run patterns
     tool=$(agent_get "$agent" tool) || exit 1
     cmd=$(agent_get "$agent" cmd) || exit 1
@@ -688,7 +688,7 @@ cmd_llm() {
     first_run=$(agent_get "$agent" first_run 2>/dev/null || echo none)
     patterns=$(agent_get "$agent" dialog_patterns 2>/dev/null || true)
     local name=${1:-}; shift || true
-    [[ -n $name ]] || die "사용법: sbox.sh llm $agent NAME [--dir 폴더] [--bypass] [--attach] [--version V] [--update]"
+    [[ -n $name ]] || die "사용법: sboxctl llm $agent NAME [--dir 폴더] [--bypass] [--attach] [--version V] [--update]"
     local dir="$VM_HOME/work" bypass=0 attach=0 ver_req="" update=0
     while (($#)); do
         case $1 in
@@ -704,7 +704,7 @@ cmd_llm() {
     check_name "$name"
     [[ $dir == /home/$VM_USER/* ]] || die "--dir 은 안쪽 /home/$VM_USER/ 아래여야 합니다(받은 값: $dir)"
     ((bypass)) && [[ -z $bypass_flags ]] && die "$agent 정의에 bypass_flags 가 없어 --bypass 를 쓸 수 없습니다"
-    vmu "$name" test -s "$token_path" </dev/null || die "토큰이 없습니다 — 'sbox.sh token $name $agent' 으로 주입하세요"
+    vmu "$name" test -s "$token_path" </dev/null || die "토큰이 없습니다 — 'sboxctl token $name $agent' 으로 주입하세요"
     vmu "$name" mkdir -p "$dir" </dev/null
     local pre="" e
     for e in $envs; do pre+="$e "; done   # 읽기 전용 마운트라 자동 갱신은 못 하고 실패 메시지만 낸다 — 정의의 env 로 끈다
@@ -760,12 +760,12 @@ echo "시작함"'
         pane=$(llm_tmux "$name" capture-pane -p -t "$agent" </dev/null 2>/dev/null || true)
         if grep -qiE "$patterns" <<<"$pane"; then
             audit critical llm "$name" "$agent 첫 실행 안내 화면이 남아 있음 — 버전 변화로 설정 병합 키가 어긋났을 수 있음"
-            say "경고: $agent 첫 실행 안내 화면이 남아 있습니다(설정 병합 키가 이 버전과 어긋났을 수 있음) — 붙어서 넘기고 core/scripts/sbox.sh·core/sbox/llm.toml 을 확인하세요"
+            say "경고: $agent 첫 실행 안내 화면이 남아 있습니다(설정 병합 키가 이 버전과 어긋났을 수 있음) — 붙어서 넘기고 core/scripts/sboxctl·core/sbox/llm.toml 을 확인하세요"
         fi
     fi
     local ver
     ver=$(vmu "$name" sh -c "PATH=\"\$HOME/.nix-profile/bin:\$PATH\"; $(agent_get "$agent" version_cmd 2>/dev/null || echo "$cmd --version") 2>/dev/null | head -1" </dev/null 2>/dev/null || true)
-    say "$agent 세션 $out${ver:+ ($ver)} — 붙기: sbox.sh llm $agent $name --attach  (떼기: Ctrl-b d)"
+    say "$agent 세션 $out${ver:+ ($ver)} — 붙기: sboxctl llm $agent $name --attach  (떼기: Ctrl-b d)"
     if ((attach)); then
         llm_tmux "$name" attach -t "$agent"
     fi

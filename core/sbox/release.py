@@ -6,7 +6,7 @@
   release.py list [<flavor>]                → 사람이 읽는 표
 
 <release> 는 코드네임(trixie)이나 버전(13, 24.04)이다. 생략하면 그 flavor 의 default.
-오류는 종료 코드 2 와 stderr 메시지로 알린다(sbox.sh 가 그대로 보여 준다).
+오류는 종료 코드 2 와 stderr 메시지로 알린다(sboxctl 이 그대로 보여 준다).
 """
 import sys
 import tomllib
