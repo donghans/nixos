@@ -60,6 +60,7 @@ import llmhost_view as hv
 import llmhost_ctl as hc
 import llmhost_artifacts as ha
 import llmlimit as ll
+import llmsbox as lsb
 
 TABS = [("dashboard", "대시보드"), ("search", "검색"), ("verify", "대조"), ("secrets", "비밀"), ("cands", "후보"), ("instr", "지침"), ("sessions", "세션"), ("cards", "카드"), ("host", "호스트"), ("limits", "한도")]
 
@@ -823,6 +824,30 @@ class InstrScreen(ModalScreen):
         self.query_one("#instr-body", Static).update(t)
 
 
+class SboxDepScreen(ModalScreen):
+    """sbox 의존성 감시 보고서 한 프로젝트(`sboxctl depwatch report` 그대로 — 팀에 가져갈 제안 자료). 읽기 전용. 화면의 글은 앱의 치환기를 거친다."""
+    BINDINGS = [Binding("escape", "close", "닫기")]
+
+    def __init__(self, app_ref, project: str):
+        super().__init__()
+        self.ctx_app, self.project = app_ref, project
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="stats-box"):
+            yield Static("", id="sboxdep-body")
+
+    def on_mount(self):
+        txt = lsb.report(self.project)
+        t = Text()
+        t.append(f"sbox 의존성 감시 — {self.project}   (Esc: 닫기 · 읽기 전용, 스캔·등급 변경은 터미널에서 sboxctl depwatch)\n\n", style="bold #33ccff")
+        for line in txt.splitlines():
+            t.append(self.ctx_app.masker().text(line) + "\n", style="bold #33ccff" if line.startswith("## ") else "#cfcfcf")
+        self.query_one("#sboxdep-body", Static).update(t)
+
+    def action_close(self):
+        self.dismiss()
+
+
 # ---------------------------------------------------------------- 앱
 class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, App):
     TITLE = "llmui — LLM 컨텍스트·세션 관리"
@@ -955,6 +980,7 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
                 yield Static("", id="stat-state", classes="state")
                 with VerticalScroll(id="dash-scroll"):
                     yield uikit.box(Static("", id="ovhead"), "전체 · 표별 용량")
+                    yield uikit.box(DataTable(id="sbox-dep", cursor_type="row", zebra_stripes=False), "sbox 의존성 경고 — Enter: 보고서")   # sboxctl 이 없는 호스트에서는 숨김(reload_sbox)
                     with Horizontal(id="dr1", classes="dash-row"):      # 얼마나 썼나: 비용 그래프 | 분류별
                         yield uikit.box(Static("", id="stat-trend-chart"), "비용 추이")
                         yield uikit.box(DataTable(id="stat-break", cursor_type="row"), "분류별")
@@ -1007,6 +1033,8 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
 
     def on_mount(self):
         self.query_one("#projects", DataTable).add_columns("저장소", "세션", "메시지", "프롬프트", "텍스트", "저장 용량", "마지막", "머신")
+        self.query_one("#sbox-dep", DataTable).add_columns("프로젝트", "등급", "경고", "참고", "마지막 스캔")
+        self.query_one("#sbox-dep").display = False
         self.query_one("#results", DataTable).add_columns("시각", "일치", "저장소", "세션", "제목", "내용")
         self.query_one("#vrepos", DataTable).add_columns("저장소", "건수", "세션", "최근", "대표 인용")
         self.query_one("#vhits", DataTable).add_columns("시각", "세션", "내용")
@@ -1575,7 +1603,36 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         for p in ov["projects"]:
             tb.add_row(short_repo(p["repo"]), f"{p['sessions']:,}", f"{p['messages']:,}", f"{p['prompts']:,}", cd.human_bytes(p["text_chars"]),
                        cd.human_bytes(p["stored_bytes"]), fmt_ts(p["last_ts"]), ",".join(p["hosts"]), key=p["repo"])
+        self.reload_sbox()
         self._fit_heights()
+
+    @staticmethod
+    def _sbox_ts(s) -> str:
+        """depwatch 의 ISO 시각 문자열(+0900 꼴) → 「MM-DD HH:MM」. 읽지 못하면 원문 앞부분."""
+        try:
+            return fmt_ts(datetime.fromisoformat(s))
+        except (TypeError, ValueError):
+            return str(s)[:16] if s else "-"
+
+    def reload_sbox(self):
+        """대시보드의 sbox 의존성 경고 상자. sboxctl 이 없으면 숨기고, 있으면 프로젝트별 건수(critical 먼저)를 보인다. DB 와 무관한 읽기 전용 조회라 실패해도 대시보드를 막지 않는다."""
+        tb = self.query_one("#sbox-dep", DataTable)
+        try:
+            d = lsb.load()
+        except Exception as e:  # noqa: BLE001 — 어댑터 예외가 대시보드를 죽이면 안 된다
+            d = {"available": True, "error": str(e), "scanned_at": None, "rows": []}
+        tb.display = bool(d["available"])
+        if not d["available"]:
+            return
+        tb.clear()
+        if d["error"]:
+            tb.add_row("(조회 실패)", "", "", "", d["error"][:80], key="")
+        elif not d["rows"]:
+            tb.add_row("(등록된 프로젝트 없음 — sboxctl tools --from-repo DIR 로 등록한 뒤 sboxctl depwatch scan)", "", "", "", "", key="")
+        else:
+            for r in d["rows"]:
+                tb.add_row(r["name"], r["tier"], str(r["warn"]), str(r["info"]), self._sbox_ts(r["scanned_at"]), key=r["name"])
+        tb.styles.height = min(tb.row_count + 3, 12)
 
     def on_data_table_row_selected(self, ev: DataTable.RowSelected):
         tid, key = ev.data_table.id, (ev.row_key.value if ev.row_key else None)
@@ -1605,6 +1662,8 @@ class LlmUI(lc.CardsMixin, ls.SessionsMixin, uikit.QuitMixin, uikit.HelpMixin, A
         elif tid == "instr-table" and key:
             repo, _, name = key.rpartition("|")
             self.push_screen(InstrScreen(self, repo, name))
+        elif tid == "sbox-dep" and key:
+            self.push_screen(SboxDepScreen(self, key))
         elif tid == "stat-sessions" and key:
             self.push_screen(SessionScreen(self, key, None))
 

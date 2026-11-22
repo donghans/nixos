@@ -287,7 +287,7 @@ def main(a):
             print(__doc__, file=sys.stderr)
             sys.exit(2)
     except (KeyError, ValueError, FileNotFoundError) as e:
-        msg = f"depwatch: {e}"
+        msg = f"depwatch: 스캔 기록에 없는 프로젝트: {e.args[0]} (sboxctl depwatch scan 을 먼저)" if isinstance(e, KeyError) else f"depwatch: {e}"
         if as_json:
             _emit(f"depwatch {cmd}", False, error=msg, code=1)
         else:
