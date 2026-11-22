@@ -7,7 +7,7 @@
 #   sbox.sh releases [flavor]                          쓸 수 있는 릴리스 표(core/sbox/releases.toml)
 #   sbox.sh create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
 #   sbox.sh tools NAME [--from-repo DIR|--manifest F] [--update] [node=22]  컨테이너에 읽기 전용 도구 층 붙임(호스트가 받아 sha256 검증, 버전은 매니페스트에 고정, v1: node)
-#   sbox.sh claude NAME [--dir D] [--bypass] [--attach]  VM 안 tmux 에서 Claude 대화형 세션 시작(첫 실행 안내를 미리 처리)
+#   sbox.sh claude NAME [--dir D] [--bypass] [--attach] [--claude-version V]  안(vm·ct)에서 tmux 로 Claude 대화형 세션 시작(첫 실행 안내를 미리 처리·남으면 경고)
 #   sbox.sh bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
 #   sbox.sh import BUNDLE                             번들을 호스트 저장소의 refs/sbox/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
 #   sbox.sh destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
@@ -637,26 +637,41 @@ if d["manifest"]: print("매니페스트:", d["manifest"], file=sys.stderr)
 for k,v in d["tools"].items(): print("\x1f".join([k,v["spec"],v["version"],v["source"],v["how"]]))')
 }
 
-# VM 안에서 Claude Code 대화형 세션을 tmux 로 시작한다 — 첫 실행 안내(테마·보안 안내·폴더 신뢰·bypass 경고)를 미리 처리하고,
-# VM 에 tmux 가 없어 nix shell 로 쓴다(S20 에서 발견한 두 가지 — plan dev-sandbox-pilot §23 S42).
-# 사용: claude NAME [--dir 폴더] [--bypass] [--attach]    (--bypass: 권한 확인 생략 모드 — 일회용 VM 안에서만 쓰는 용도)
+# 안에서 Claude Code 대화형 세션을 tmux 로 시작한다(vm·ct 공통) — 첫 실행 안내(테마·보안 안내·폴더 신뢰·bypass 경고)를 설정 병합으로 미리 처리한다(plan dev-sandbox-pilot §23 S42).
+#  vm: Claude 는 홈 설정이 깐 것을 쓰고 tmux 는 nix shell 로 쓴다.  ct: tmux 는 root 가 apt 로, Claude 는 도구 층의 Node 로 sbox 사용자 홈(~/.npm-global)에 npm 설치(없을 때만).
+# 사용: claude NAME [--dir 폴더] [--bypass] [--attach] [--claude-version V]   (--bypass: 권한 확인 생략 모드 — 일회용 환경 안에서만 쓰는 용도)
+claude_tmux() { # claude_tmux NAME ARGS… — 종류에 맞게 tmux 를 sbox 사용자로 실행
+    local name=$1; shift
+    if [[ $NAME_KIND == vm ]]; then vmu "$name" nix shell nixpkgs#tmux -c tmux "$@"; else vmu "$name" tmux "$@"; fi
+}
 cmd_claude() {
     local name=${1:-}; shift || true
-    [[ -n $name ]] || die "사용법: sbox.sh claude NAME [--dir 폴더] [--bypass] [--attach]"
-    local dir="$VM_HOME/work" bypass=0 attach=0
+    [[ -n $name ]] || die "사용법: sbox.sh claude NAME [--dir 폴더] [--bypass] [--attach] [--claude-version V]"
+    local dir="$VM_HOME/work" bypass=0 attach=0 cver=""
     while (($#)); do
         case $1 in
             --dir) dir=${2:?}; shift ;;
             --bypass) bypass=1 ;;
             --attach) attach=1 ;;
+            --claude-version) cver=${2:?}; shift ;;
             *) die "알 수 없는 인자: $1" ;;
         esac
         shift
     done
-    check_name "$name"; require_vm
-    [[ $dir == /home/$VM_USER/* ]] || die "--dir 은 VM 안 /home/$VM_USER/ 아래여야 합니다(받은 값: $dir)"
+    check_name "$name"
+    [[ $dir == /home/$VM_USER/* ]] || die "--dir 은 안쪽 /home/$VM_USER/ 아래여야 합니다(받은 값: $dir)"
     vmu "$name" test -s "$TOKEN_PATH" </dev/null || die "토큰이 없습니다 — 'sbox.sh token $name' 으로 주입하세요"
     vmu "$name" mkdir -p "$dir" </dev/null
+    local pathpre=""
+    if [[ $NAME_KIND == ct ]]; then
+        vmx "$name" sh -c 'command -v tmux >/dev/null 2>&1 || { apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux >/dev/null; }' </dev/null \
+            || die "tmux 설치 실패(컨테이너 안 apt)"
+        vmu "$name" sh -c 'test -x "$HOME/.npm-global/bin/claude" || command -v npm >/dev/null' </dev/null \
+            || die "Claude 도, Node 도 없습니다 — 먼저 'sbox.sh tools $name node=22' 로 도구 층을 붙이세요"
+        vmu "$name" sh -c "test -x \"\$HOME/.npm-global/bin/claude\" || { mkdir -p \"\$HOME/.npm-global\" && npm config set prefix \"\$HOME/.npm-global\" && npm install -g @anthropic-ai/claude-code${cver:+@$cver} >/dev/null 2>&1; }" </dev/null \
+            || die "Claude npm 설치 실패"
+        pathpre='PATH=$HOME/.npm-global/bin:$PATH '
+    fi
     # 첫 실행 설정 병합(기존 값은 보존): ~/.claude.json 의 온보딩 완료·폴더 신뢰, ~/.claude/settings.json 의 테마·(bypass 면) 경고 생략
     local f
     for f in .claude.json .claude/settings.json; do
@@ -676,19 +691,33 @@ print(json.dumps(j))' "$f" "$dir" "$bypass" \
             || die "$f 설정 병합 실패"
     done
     local flags=""; ((bypass)) && flags="--dangerously-skip-permissions"
-    local out
-    out=$(vmu "$name" nix shell nixpkgs#tmux -c sh -s -- "$dir" "$TOKEN_PATH" "$flags" <<'REMOTE'
-dir=$1; tok=$2; flags=$3
+    local start_script='dir=$1; tok=$2; flags=$3; pre=$4
 tmux has-session -t claude 2>/dev/null && { echo "이미 실행 중"; exit 0; }
 cd "$dir" || exit 1
-tmux new-session -d -s claude -x 200 -y 50 "CLAUDE_CODE_OAUTH_TOKEN=\$(cat $tok) exec claude $flags"
-echo "시작함"
-REMOTE
-    ) || die "tmux 세션 시작 실패"
+tmux new-session -d -s claude -x 200 -y 50 "${pre}CLAUDE_CODE_OAUTH_TOKEN=\$(cat $tok) exec claude $flags"
+echo "시작함"'
+    local out
+    if [[ $NAME_KIND == vm ]]; then
+        out=$(vmu "$name" nix shell nixpkgs#tmux -c sh -c "$start_script" sh "$dir" "$TOKEN_PATH" "$flags" "$pathpre") || die "tmux 세션 시작 실패"
+    else
+        out=$(vmu "$name" sh -c "$start_script" sh "$dir" "$TOKEN_PATH" "$flags" "$pathpre") || die "tmux 세션 시작 실패"
+    fi
     audit info claude "$name" "tmux 세션 claude: $out (dir $dir, bypass=$bypass)"
-    say "Claude 세션 $out — 붙기: incus exec $name --user $VM_UID --env HOME=$VM_HOME --env PATH=$VM_PATH -- nix shell nixpkgs#tmux -c tmux attach -t claude  (떼기: Ctrl-b d)"
+    # 첫 실행 안내 화면이 남아 있으면(Claude Code 버전이 바뀌어 설정 키가 달라졌을 수 있음) 알린다 — 안 알리면 사람이 붙었을 때 처음 알게 된다
+    if [[ $out == 시작함 ]]; then
+        sleep 12
+        local pane
+        pane=$(claude_tmux "$name" capture-pane -p -t claude </dev/null 2>/dev/null || true)
+        if grep -qiE "Choose the text style|Security notes|trust this folder|Bypass Permissions mode|Let.s get started|Press Enter to continue" <<<"$pane"; then
+            audit critical claude "$name" "첫 실행 안내 화면이 남아 있음 — Claude Code 버전 변화로 설정 병합 키가 어긋났을 수 있음"
+            say "경고: Claude 첫 실행 안내 화면이 남아 있습니다(설정 병합 키가 이 Claude Code 버전과 어긋났을 수 있음) — 붙어서 넘기고 core/scripts/sbox.sh 의 병합 키를 확인하세요"
+        fi
+    fi
+    local ver
+    ver=$(vmu "$name" sh -c 'PATH="$HOME/.npm-global/bin:$PATH"; command -v claude >/dev/null && claude --version 2>/dev/null | head -1' </dev/null 2>/dev/null || true)
+    say "Claude 세션 $out${ver:+ ($ver)} — 붙기: sbox.sh claude $name --attach  (떼기: Ctrl-b d)"
     if ((attach)); then
-        vmu "$name" nix shell nixpkgs#tmux -c tmux attach -t claude
+        claude_tmux "$name" attach -t claude
     fi
 }
 
