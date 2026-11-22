@@ -13,7 +13,7 @@ ctl 공통 봉투(`ctlkit`)는 `--json` 출력 때만 지연 import 한다(저�
   report [--project P]         팀 제안서 자료(신호별 건수·근거·저장소에 넣을 만한 규칙)
   tier NAME general|critical   매니페스트 [project] 의 tier 줄만 수정(파일을 되쓰지 않음)
 
-한계: 스캔 대상은 호스트 쪽 저장소의 정적 상태(커밋된 락·선언)이며, ct 안에서 방금 설치된 의존성이 아니다. npm 만 지원(락 파일 존재·package-lock.json 의 hasInstallScript). 깊이 6 단계까지, 상위 디렉터리의 workspaces 선언에 속한 멤버는 상위 락을 쓴다.
+한계: 스캔 대상은 호스트 쪽 저장소의 정적 상태(커밋된 락·선언)이며, ct 안에서 방금 설치된 의존성이 아니다. npm 만 지원(package-lock.json·npm-shrinkwrap.json 존재, package-lock.json 의 hasInstallScript). 깊이 6 단계까지, 상위 디렉터리의 workspaces 선언에 속한 멤버는 상위 락을 쓴다.
 """
 import json
 import os
@@ -24,7 +24,7 @@ import tomllib
 MANIFESTS = os.path.expanduser(os.environ.get("SBOX_MANIFESTS", "~/.config/sbox/manifests"))
 STATE = os.path.expanduser(os.environ.get("SBOX_DEPWATCH_STATE", "~/.local/state/sbox/depwatch.json"))
 TIERS = ("general", "critical")
-LOCKS = ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml")
+LOCKS = ("package-lock.json", "npm-shrinkwrap.json")   # npm 만(사용자 2026-11-23: yarn·pnpm 은 쓰지 않음 — 쓰게 되면 그때 추가)
 SKIP_DIRS = {"node_modules"}
 NAME_CAP = 20
 VENDOR_DIRS = {"vendor", "vendors", "third_party", "third-party"}   # 복사해 둔 외부 소스 — 락 없음은 info 로 낮춘다(실측: genple 의 vendor/genoffice)
@@ -106,11 +106,11 @@ def npm_findings(repo):
             vend = any(x in VENDOR_DIRS for x in label.split(os.sep))
             found.append({"id": f"npm.no-lock:{label}", "kind": "no-lock", "severity": "info" if vend else "warn",
                           "msg": f"{label}: package.json 이 있는데 락 파일이 없음 — 설치할 때마다 버전이 달라질 수 있음" + (" (vendor 하위 — 소스를 복사해 둔 곳이라 독립 설치 대상이 아닐 수 있어 info)" if vend else ""),
-                          "evidence": "package.json 만 있음 (package-lock.json·npm-shrinkwrap.json·yarn.lock·pnpm-lock.yaml 없음, 상위 워크스페이스 락도 아님)"})
+                          "evidence": "package.json 만 있음 (package-lock.json·npm-shrinkwrap.json 없음, 상위 워크스페이스 락도 아님)"})
             continue
         pl = os.path.join(d, "package-lock.json")
         if not os.path.isfile(pl):
-            continue  # yarn·pnpm 락은 설치 스크립트 표시를 읽지 않는다(한계)
+            continue  # npm-shrinkwrap.json 만 있는 경우는 설치 스크립트 표시를 읽지 않는다(한계)
         try:
             with open(pl, encoding="utf-8") as f:
                 lock = json.load(f)
