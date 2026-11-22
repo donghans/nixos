@@ -9,7 +9,7 @@
 #   (ct 만) create 에 --from-repo DIR | --manifest F | --tool TOOL[=SPEC] (반복) | --update 를 주면 만든 직후 도구 층을 자동 적용 — 같은 매니페스트로 다시 만들면 같은 버전
 #   sboxctl tools NAME [--from-repo DIR|--manifest F] [--update] [node=22]  컨테이너에 읽기 전용 도구 층 붙임(호스트가 받아 sha256 검증, 버전은 매니페스트에 고정, v1: node)
 #   sboxctl docker NAME [--from-repo DIR|--manifest F] [--update] [--no-compose]  컨테이너(ct, --nesting 필수) 안에 rootless Docker 설치(공식 apt, 키는 호스트가 고정 보관·교차 확인, 버전은 쿨다운 적용·매니페스트에 고정, Compose 는 도구 층)
-#   (ct 만) create 는 Docker 가 필요하면 --nesting 을 자동으로 켜고 Docker 까지 설치. 판정 우선순위: 명령 인자(--docker·--no-docker, 이번 한 번만) > 매니페스트 [override] docker = "yes"|"no"(사람이 정함, 영구) > [resolved.docker] 기록 > 저장소의 compose·Dockerfile 감지
+#   (ct 만) create 는 기본으로 --nesting 을 켜고 Docker 까지 설치한다(늘 쓰는 도구 — 사용자 2026-11-23). 끄려면 --no-docker(이번 한 번) 또는 매니페스트 [override] docker = "no"(영구)
 #   sboxctl llm AGENT NAME [--dir D] [--bypass] [--attach] [--version V] [--update]  안(vm·ct)에서 tmux 로 LLM 에이전트 대화형 세션 시작(정의 core/sbox/llm.toml, 첫 실행 안내 미리 처리·남으면 경고).
 #   sboxctl bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
 #   sboxctl import BUNDLE                             번들을 호스트 저장소의 refs/sbox/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
@@ -442,7 +442,6 @@ cmd_create() {
             --manifest) TOOLS_ARGS+=(--manifest "${2:?}"); shift ;;
             --tool) TOOLS_ARGS+=("${2:?}"); shift ;;
             --update) TOOLS_ARGS+=(--update) ;;
-            --docker) docker=1 ;;
             --no-docker) docker=0 ;;
             --no-cache) cache=0 ;;
             --no-token) token=0 ;;
@@ -463,9 +462,9 @@ cmd_create() {
     case "$kind" in
         vm) ;;
         ct)
-            # 필요한 도구를 같이 초기화: Docker 가 필요하면(감지·매니페스트·--docker) nesting 을 켜고 만든 뒤 설치한다
+            # 필요한 도구를 같이 초기화: Docker 는 기본으로 nesting 을 켜고 만든 뒤 설치한다(--no-docker·매니페스트 override 로 끔)
             DOCKER_ARGS=()
-            local _repo="" _man="" _i _w=""
+            local _repo="" _man="" _i
             for ((_i = 0; _i < ${#TOOLS_ARGS[@]}; _i++)); do
                 case ${TOOLS_ARGS[_i]} in
                     --from-repo) _repo=${TOOLS_ARGS[_i+1]}; DOCKER_ARGS+=(--from-repo "$_repo") ;;
@@ -475,10 +474,11 @@ cmd_create() {
             done
             [[ -z $_man && -n $_repo ]] && _man="$HOME/.config/sbox/manifests/$(basename "${_repo%/}").toml"
             if [[ $docker == auto ]]; then
-                docker=0
-                if _w=$(python3 "$SBOX_DIR/dockerctl.py" wanted ${_repo:+--repo "$_repo"} ${_man:+--manifest "$_man"}); then
-                    docker=1; say "Docker 필요 감지(${_w#yes }) — nesting 을 켜고 만든 뒤 rootless Docker 를 설치합니다(끄려면 --no-docker)"
-                fi
+                docker=1   # 기본 켬(늘 쓰는 도구) — 끄는 길은 --no-docker(이번 한 번) 또는 매니페스트 [override] docker = "no"(영구)
+                local _rc=0
+                python3 "$SBOX_DIR/dockerctl.py" wanted ${_man:+--manifest "$_man"} >/dev/null || _rc=$?
+                ((_rc <= 1)) || die "매니페스트의 [override] docker 값이 잘못됐습니다($_man)"
+                ((_rc == 0)) || { docker=0; say "매니페스트 [override] docker = \"no\" — Docker 를 설치하지 않습니다"; }
             fi
             ((docker)) && nesting=1
             DOCKER=$docker

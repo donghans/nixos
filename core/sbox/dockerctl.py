@@ -4,7 +4,7 @@
 컨테이너에 쓸 설정 내용을 만들 뿐이다. 설치(apt)는 컨테이너 안 root 가 하고 서명은 apt 가 고정 키로 검증한다.
 
 서브명령(표준출력은 JSON 또는 한 줄):
-  wanted [--repo DIR] [--manifest F]   이 프로젝트가 Docker 를 쓰나(우선순위: 매니페스트 [override] docker = "yes"|"no" > [resolved.docker] 기록 > 저장소의 compose·Dockerfile) → 「yes <근거>」 / 「no」(종료코드 0/1)
+  wanted [--manifest F]                Docker 를 설치하나: 기본 yes, 매니페스트 [override] docker = "no" 면 no(종료코드 0=설치/1=안 함/2=값 오류)
   plan --distro debian|ubuntu --codename C --arch amd64 [--manifest F] [--update]
                                        키 고정(필요 시 독립 출처 교차 확인) + 쿨다운을 적용한 설치 버전 선택 → JSON(key_file·sources·versions·notes)
                                        --manifest 가 있고 [resolved.docker] 가 있으면 그 버전을 재사용(--update 로만 다시 고름), 새로 고르면 매니페스트에 기록
@@ -33,8 +33,6 @@ BASE = "https://download.docker.com/linux"
 PKGS = ("docker-ce", "docker-ce-cli", "docker-ce-rootless-extras")   # 같은 버전 문자열로 맞춘다
 CONTAINERD = "containerd.io"
 KEYDIR = os.path.expanduser(os.environ.get("SBOX_DOCKER_KEYDIR", "~/.config/sbox/docker"))
-COMPOSE_NAMES = re.compile(r"^(docker-)?compose([.-][\w.-]+)?\.ya?ml$|^Dockerfile(\.[\w.-]+)?$")
-SKIP_DIRS = {".git", "node_modules", "vendor", "third_party", "target", "dist", "build", ".venv", "venv"}
 
 
 def fail(msg):
@@ -199,19 +197,6 @@ def plan(distro, codename, arch, manifest=None, update=False):
 
 
 # ---------- 필요 여부 ----------
-def detect_repo(repo):
-    """저장소 루트와 아래 두 단계까지에서 compose·Dockerfile 을 찾는다(vendor·의존성 폴더 제외). 첫 근거 경로를 돌려준다."""
-    root = os.path.abspath(repo)
-    for dirpath, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-        if dirpath[len(root):].count(os.sep) >= 2:
-            dirs[:] = []
-        for f in sorted(files):
-            if COMPOSE_NAMES.match(f):
-                return os.path.relpath(os.path.join(dirpath, f), root)
-    return None
-
-
 def read_override(path):
     """사람이 매니페스트 [override] 에 적은 docker = "yes"|"no" (없으면 None)."""
     if not (path and os.path.isfile(path)):
@@ -221,31 +206,21 @@ def read_override(path):
     if v is None:
         return None
     if str(v).lower() not in ("yes", "no"):
-        fail(f"매니페스트 [override] docker 는 \"yes\" 또는 \"no\" 여야 합니다(받은 값: {v!r})")
+        print(f"sbox-docker: 매니페스트 [override] docker 는 \"yes\" 또는 \"no\" 여야 합니다(받은 값: {v!r})", file=sys.stderr)
+        sys.exit(2)   # 1 은 「설치 안 함」과 겹치므로 오류는 2
     return str(v).lower()
 
 
-def wanted(repo=None, manifest=None):
-    """우선순위: 매니페스트 [override] docker(사람이 정함) > [resolved.docker](이미 설치한 기록) > 저장소 감지. 명령 인자(--docker·--no-docker)는 sboxctl 이 이보다 먼저 적용한다."""
-    ov = read_override(manifest)
-    if ov == "no":
-        return None
-    if ov == "yes":
-        return "yes 매니페스트 [override] docker = \"yes\""
-    if manifest and read_resolved(manifest).get("version"):
-        return "yes 매니페스트에 [resolved.docker] 가 있음"
-    if repo and os.path.isdir(repo):
-        hit = detect_repo(repo)
-        if hit:
-            return f"yes 저장소에 {hit}"
-    return None
+def wanted(manifest=None):
+    """Docker 는 기본으로 설치한다(늘 쓰는 도구). 매니페스트 [override] docker = "no" 일 때만 끈다(영구). 명령 인자 --no-docker 는 sboxctl 이 먼저 적용한다."""
+    return None if read_override(manifest) == "no" else "yes 기본"
 
 
 def main(a):
     def opt(n):
         return a[a.index(n) + 1] if n in a else None
     if a and a[0] == "wanted":
-        w = wanted(opt("--repo"), opt("--manifest"))
+        w = wanted(opt("--manifest"))
         print(w or "no")
         sys.exit(0 if w else 1)
     elif a and a[0] == "plan":

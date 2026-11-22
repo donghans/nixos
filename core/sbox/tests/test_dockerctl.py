@@ -4,7 +4,7 @@
  ① 키 규칙: `pub` 레코드가 정확히 하나이고 그 지문이 공식 값일 때만 통과 — 공식 키에 공격자 키를 하나 더 붙인 파일은 거부(「공식 지문이 파일 어딘가에 있다」로는 통과하면 안 됨)
  ② 버전 선택: apt 의 .deb 공개일이 쿨다운(7일)보다 젊은 docker-ce·containerd.io 는 건너뛰고, docker-ce 는 cli·rootless-extras 에 같은 버전이 있는 것만 고른다
  ③ 매니페스트: [resolved.docker] 갱신이 사람이 쓴 [override]·등급·다른 도구 구역을 건드리지 않고, 도구 층 plan 이 다시 써도 [resolved.docker] 를 잃지 않는다(재현성)
- ④ 필요 판정: compose·Dockerfile 은 의존성 폴더 밖에서만, 매니페스트의 고정 기록도 근거
+ ④ 설치 여부: 기본 켬, 매니페스트 [override] docker = \"no\" 만 영구히 끈다(고정 기록이 있어도)
 실행: python3 -I core/sbox/tests/test_dockerctl.py  (mods/_tools/run-tests.sh 의 sbox-dockerctl). gpg 가 없고 nix 도 없으면 ① 은 건너뛴다(알림)."""
 import os, shutil, subprocess, sys, tempfile, time
 
@@ -75,24 +75,19 @@ tools.plan(["--manifest", mf + "2"])
 t2 = open(mf + "2", encoding="utf-8").read()
 check("도구 층 plan 이 매니페스트를 다시 써도 [resolved.docker](containerd 포함)를 잃지 않는다", "[resolved.docker]" in t2 and "containerd" in t2 and "5:29.9.3-1" in t2, t2)
 
-# ④ 필요 판정
-R = os.path.join(TMP, "repo")
-os.makedirs(os.path.join(R, "node_modules", "x")); os.makedirs(os.path.join(R, "a", "b", "c"))
-open(os.path.join(R, "node_modules", "x", "Dockerfile"), "w").close()
-check("의존성 폴더 안의 Dockerfile 은 근거가 아니다", dockerctl.wanted(R) is None)
-open(os.path.join(R, "a", "b", "c", "compose.yaml"), "w").close()
-check("깊이 3 아래의 compose 는 보지 않는다(비용·오탐 제한)", dockerctl.wanted(R) is None)
-open(os.path.join(R, "a", "docker-compose.prod.yml"), "w").close()
-check("깊이 2 이내의 docker-compose.*.yml 은 근거", (dockerctl.wanted(R) or "").startswith("yes"), dockerctl.wanted(R))
-check("매니페스트에 [resolved.docker] 가 있으면 저장소 없이도 필요", (dockerctl.wanted(None, mf) or "").startswith("yes"))
+# ④ 설치 여부 — 기본 켬, 매니페스트 [override] docker = "no" 만 끈다
 mo = os.path.join(TMP, "ov.toml")
+check("매니페스트가 없어도 기본은 설치", (dockerctl.wanted(None) or "").startswith("yes") and (dockerctl.wanted(os.path.join(TMP, "nope.toml")) or "").startswith("yes"))
 open(mo, "w", encoding="utf-8").write('[project]\nname = "o"\nrepo = ""\n\n[override]\ndocker = "no"\n\n[resolved.docker]\nspec = "engine"\nversion = "5:1-1"\ncontainerd = "1-1"\n')
-check("[override] docker = \"no\" 는 [resolved.docker] 기록·저장소 감지보다 우선(영구히 끔)", dockerctl.wanted(R, mo) is None)
-open(mo, "w", encoding="utf-8").write('[project]\nname = "o"\nrepo = ""\n\n[override]\ndocker = "yes"\n')
-check("[override] docker = \"yes\" 는 저장소에 근거가 없어도 필요", (dockerctl.wanted(os.path.join(TMP, "nope"), mo) or "").startswith("yes"))
+check("[override] docker = \"no\" 는 [resolved.docker] 기록이 있어도 영구히 끈다", dockerctl.wanted(mo) is None)
+open(mo, "w", encoding="utf-8").write('[project]\nname = "o"\nrepo = ""\n\n[override]\ndocker = "maybe"\n')
+try:
+    dockerctl.wanted(mo); check("yes·no 가 아닌 값은 거부", False)
+except SystemExit:
+    check("yes·no 가 아닌 값은 거부(종료코드 2 — 「안 함」 1 과 구분)", True)
+open(mo, "w", encoding="utf-8").write('[project]\nname = "o"\nrepo = ""\n\n[override]\ndocker = "no"\n')
 tools.plan(["--manifest", mo])
-check("도구 층 plan 이 [override] docker 를 도구로 오인하지 않고(경고 없음) 다시 써도 보존", 'docker = "yes"' in open(mo, encoding="utf-8").read())
-check("둘 다 없으면 no(None)", dockerctl.wanted(os.path.join(TMP, "nope"), os.path.join(TMP, "nope.toml")) is None)
+check("도구 층 plan 이 [override] docker 를 도구로 오인하지 않고 다시 써도 보존", 'docker = "no"' in open(mo, encoding="utf-8").read())
 
 # ① 키 규칙 — 임시 gpg 홈에 키를 만든다
 if shutil.which("gpg") or shutil.which("nix"):
