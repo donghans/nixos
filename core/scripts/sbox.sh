@@ -8,7 +8,7 @@
 #   sbox.sh create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
 #   (ct 만) create 에 --from-repo DIR | --manifest F | --tool TOOL[=SPEC] (반복) | --update 를 주면 만든 직후 도구 층을 자동 적용 — 같은 매니페스트로 다시 만들면 같은 버전
 #   sbox.sh tools NAME [--from-repo DIR|--manifest F] [--update] [node=22]  컨테이너에 읽기 전용 도구 층 붙임(호스트가 받아 sha256 검증, 버전은 매니페스트에 고정, v1: node)
-#   sbox.sh claude NAME [--dir D] [--bypass] [--attach] [--claude-version V] [--update]  안(vm·ct)에서 tmux 로 Claude 대화형 세션 시작(첫 실행 안내를 미리 처리·남으면 경고)
+#   sbox.sh llm AGENT NAME [--dir D] [--bypass] [--attach] [--version V] [--update]  안(vm·ct)에서 tmux 로 LLM 에이전트 대화형 세션 시작(정의 core/sbox/llm.toml, 첫 실행 안내 미리 처리·남으면 경고). `sbox.sh claude` 는 `llm claude` 의 별칭
 #   sbox.sh bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
 #   sbox.sh import BUNDLE                             번들을 호스트 저장소의 refs/sbox/<VM>/* 로만 가져옴(병합·체크아웃 안 함) + 새 커밋 목록
 #   sbox.sh destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
@@ -323,23 +323,26 @@ home_apply() { # 이름 규칙 검사 없이 홈 적용(rebuild-golden 이 골�
     fi
 }
 
-cmd_token() {
-    local name=$1
+cmd_token() { # cmd_token NAME [AGENT] — 에이전트(기본 claude)의 토큰을 등록표에서 꺼내 안쪽 tmpfs 에 주입
+    local name=$1 agent=${2:-claude}
     check_name "$name"
     command -v donghans >/dev/null || die "donghans 명령이 없습니다"
+    local secret tpath
+    secret=$(agent_get "$agent" secret) || exit 1
+    tpath=$(agent_get "$agent" token_path) || exit 1
     resolve_ids "$name"
-    # 값은 환경변수 → 표준입력으로만 흐른다(명령줄에 없음). 파일은 VM tmpfs, 0600, sbox 소유.
-    # shellcheck disable=SC2016  # $VM_CLAUDE_TOKEN·$1.. 는 donghans secret run 이 띄운 셸이 펼친다(명령줄에 값이 없게)
-    donghans secret run --env VM_CLAUDE_TOKEN -- sh -c '
-        printf %s "$VM_CLAUDE_TOKEN" | incus exec "$1" --env PATH="$2" -- sh -c "
-            set -e; umask 077; mkdir -p /run/sbox-claude; cat > $3
-            chown -R $4:$5 /run/sbox-claude; chmod 700 /run/sbox-claude"
-    ' sh "$name" "$EXEC_PATH" "$TOKEN_PATH" "$VM_UID" "$VM_GID"
+    # 값은 환경변수 → 표준입력으로만 흐른다(명령줄에 없음). 파일은 안쪽 tmpfs, 0600, sbox 소유.
+    # shellcheck disable=SC2016  # $… 는 donghans secret run 이 띄운 셸이 펼친다(명령줄에 값이 없게). 비밀 이름 = 환경변수 이름
+    donghans secret run --env "$secret" -- sh -c '
+        printf %s "$(printenv "$6")" | incus exec "$1" --env PATH="$2" -- sh -c "
+            set -e; umask 077; d=\$(dirname $3); mkdir -p \$d; cat > $3
+            chown -R $4:$5 \$d; chmod 700 \$d"
+    ' sh "$name" "$EXEC_PATH" "$tpath" "$VM_UID" "$VM_GID" "$secret"
     local bytes
-    bytes=$(vmx "$name" sh -c "wc -c < $TOKEN_PATH")
+    bytes=$(vmx "$name" sh -c "wc -c < $tpath")
     [[ ${bytes//[[:space:]]/} -gt 20 ]] || die "토큰 파일이 비어 있거나 너무 짧습니다(${bytes}바이트)"
-    audit info token "$name" "VM_CLAUDE_TOKEN 주입(tmpfs, ${bytes//[[:space:]]/}바이트)"
-    say "토큰 주입 완료(tmpfs $TOKEN_PATH, ${bytes//[[:space:]]/}바이트, 값은 출력하지 않음)"
+    audit info token "$name" "$secret 주입($agent, tmpfs, ${bytes//[[:space:]]/}바이트)"
+    say "토큰 주입 완료($agent: tmpfs $tpath, ${bytes//[[:space:]]/}바이트, 값은 출력하지 않음)"
 }
 
 wait_ct() { # wait_ct NAME — 컨테이너가 exec 에 응답하고 기본 경로(네트워크)가 생길 때까지(최대 약 2분)
@@ -623,7 +626,7 @@ for k,v in d["tools"].items(): print("\x1f".join([k,v["spec"],v["version"],v["so
         for a in "${inline[@]}"; do
             k=${a%%=*}; spec=""; [[ $a == *=* ]] && spec=${a#*=}
             ver=$(python3 "$SBOX_DIR/tools.py" resolve "$k" $spec) || die "$k ${spec:-(최신)} 버전 해석 실패"
-            lines+="$k"$'\x1f'"${spec:-latest}"$'\x1f'"$ver"$'\x1f'"인자"$'\x1f'"일회성"$'\n'
+            lines+="$k"$'\x1f'"${spec:-(기본 채널)}"$'\x1f'"$ver"$'\x1f'"인자"$'\x1f'"일회성"$'\n'
         done
     fi
     local dir dev role links d
@@ -663,23 +666,36 @@ for i in json.load(sys.stdin):
     done <<<"$lines"
 }
 
-# 안에서 Claude Code 대화형 세션을 tmux 로 시작한다(vm·ct 공통) — 첫 실행 안내(테마·보안 안내·폴더 신뢰·bypass 경고)를 설정 병합으로 미리 처리한다(plan dev-sandbox-pilot §23 S42).
-#  vm: Claude 는 홈 설정이 깐 것을 쓰고 tmux 는 nix shell 로 쓴다.  ct: tmux 는 root 가 apt 로, Claude 는 도구 층의 Node 로 sbox 사용자 홈(~/.npm-global)에 npm 설치(없을 때만).
-# 사용: claude NAME [--dir 폴더] [--bypass] [--attach] [--claude-version V] [--update]   (--bypass: 권한 확인 생략 모드 — 일회용 환경 안에서만 쓰는 용도)
-claude_tmux() { # claude_tmux NAME ARGS… — 종류에 맞게 tmux 를 sbox 사용자로 실행
+# 안에서 LLM 코딩 에이전트 대화형 세션을 tmux 로 시작한다(vm·ct 공통) — 에이전트별 정의는 core/sbox/llm.toml(plan dev-sandbox-pilot §29-10).
+# 첫 실행 안내를 설정 병합으로 미리 처리한다(claude: 테마·보안 안내·폴더 신뢰·bypass 경고 — §23 S42).
+#  vm: 에이전트는 홈 설정이 깐 것을 쓰고 tmux 는 nix shell 로.  ct: tmux 는 root 가 apt 로, 에이전트는 도구 층(호스트 검증)으로 설치.
+# 사용: llm AGENT NAME [--dir 폴더] [--bypass] [--attach] [--version V] [--update]   (--bypass: 권한 확인 생략 모드 — 일회용 환경 안에서만)
+agent_get() { python3 "$SBOX_DIR/llm.py" get "$1" "$2"; }
+llm_tmux() { # llm_tmux NAME ARGS… — 종류에 맞게 tmux 를 sbox 사용자로 실행
     local name=$1; shift
     if [[ $NAME_KIND == vm ]]; then vmu "$name" nix shell nixpkgs#tmux -c tmux "$@"; else vmu "$name" tmux "$@"; fi
 }
-cmd_claude() {
+cmd_llm() {
+    local agent=${1:-}; shift || true
+    [[ -n $agent ]] || die "사용법: sbox.sh llm AGENT NAME [--dir 폴더] [--bypass] [--attach] [--version V] [--update]  (정의된 에이전트: $(python3 "$SBOX_DIR/llm.py" list | cut -f1 | tr '\n' ' '))"
+    local tool cmd bypass_flags token_env token_path envs first_run patterns
+    tool=$(agent_get "$agent" tool) || exit 1
+    cmd=$(agent_get "$agent" cmd) || exit 1
+    bypass_flags=$(agent_get "$agent" bypass_flags 2>/dev/null || true)
+    token_env=$(agent_get "$agent" token_env) || exit 1
+    token_path=$(agent_get "$agent" token_path) || exit 1
+    envs=$(agent_get "$agent" env 2>/dev/null || true)
+    first_run=$(agent_get "$agent" first_run 2>/dev/null || echo none)
+    patterns=$(agent_get "$agent" dialog_patterns 2>/dev/null || true)
     local name=${1:-}; shift || true
-    [[ -n $name ]] || die "사용법: sbox.sh claude NAME [--dir 폴더] [--bypass] [--attach] [--claude-version V] [--update]"
-    local dir="$VM_HOME/work" bypass=0 attach=0 cver="" update=0
+    [[ -n $name ]] || die "사용법: sbox.sh llm $agent NAME [--dir 폴더] [--bypass] [--attach] [--version V] [--update]"
+    local dir="$VM_HOME/work" bypass=0 attach=0 ver_req="" update=0
     while (($#)); do
         case $1 in
             --dir) dir=${2:?}; shift ;;
             --bypass) bypass=1 ;;
             --attach) attach=1 ;;
-            --claude-version) cver=${2:?}; shift ;;
+            --version|--claude-version) ver_req=${2:?}; shift ;;
             --update) update=1 ;;
             *) die "알 수 없는 인자: $1" ;;
         esac
@@ -687,23 +703,29 @@ cmd_claude() {
     done
     check_name "$name"
     [[ $dir == /home/$VM_USER/* ]] || die "--dir 은 안쪽 /home/$VM_USER/ 아래여야 합니다(받은 값: $dir)"
-    vmu "$name" test -s "$TOKEN_PATH" </dev/null || die "토큰이 없습니다 — 'sbox.sh token $name' 으로 주입하세요"
+    ((bypass)) && [[ -z $bypass_flags ]] && die "$agent 정의에 bypass_flags 가 없어 --bypass 를 쓸 수 없습니다"
+    vmu "$name" test -s "$token_path" </dev/null || die "토큰이 없습니다 — 'sbox.sh token $name $agent' 으로 주입하세요"
     vmu "$name" mkdir -p "$dir" </dev/null
-    local pathpre="DISABLE_AUTOUPDATER=1 "   # 읽기 전용 마운트라 자동 갱신은 못 하고, 하려다 실패 메시지만 낸다 — 끈다
+    local pre="" e
+    for e in $envs; do pre+="$e "; done   # 읽기 전용 마운트라 자동 갱신은 못 하고 실패 메시지만 낸다 — 정의의 env 로 끈다
     if [[ $NAME_KIND == ct ]]; then
         vmx "$name" sh -c 'command -v tmux >/dev/null 2>&1 || { apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux >/dev/null; }' </dev/null \
             || die "tmux 설치 실패(컨테이너 안 apt)"
-        # Claude 는 개발환경(de) 도구 — 공식 네이티브 바이너리를 호스트가 서명된 manifest(GPG)·SHA256 으로 검증해 읽기 전용 마운트(S46).
-        # 최신 채널(기본 stable ≈ 1주 지연, 사용자 방침): 없을 때 또는 --update 일 때 받고 쓰이지 않는 옛 버전은 정리한다. 특정 버전이 필요하면 --claude-version.
-        if ((update)) || ! incus exec "$name" --env "PATH=$CT_PATH" -- sh -c 'test -x /usr/local/bin/claude' </dev/null; then
-            cmd_tools "$name" "claude${cver:+=$cver}" || die "도구 층 Claude 설치 실패"
+        # 에이전트는 개발환경(de) 도구 — 호스트가 서명 검증해 읽기 전용 마운트. 최신 채널(카탈로그 기본, claude 는 stable ≈ 1주 지연 — 사용자 방침):
+        # 없을 때 또는 --update 일 때 받고 쓰이지 않는 옛 버전은 정리한다. 특정 버전이 필요하면 --version.
+        if ((update)) || ! incus exec "$name" --env "PATH=$CT_PATH" -- sh -c "test -x /usr/local/bin/$cmd" </dev/null; then
+            cmd_tools "$name" "$tool${ver_req:+=$ver_req}" || die "도구 층 $tool 설치 실패"
         fi
+    else
+        vmu "$name" sh -c "command -v $cmd >/dev/null 2>&1 || test -x \"\$HOME/.nix-profile/bin/$cmd\"" </dev/null \
+            || die "VM 에 $cmd 가 없습니다 — $agent 의 VM 설치 방식은 아직 정의돼 있지 않습니다(claude 는 골든의 홈 설정이 설치)"
     fi
-    # 첫 실행 설정 병합(기존 값은 보존): ~/.claude.json 의 온보딩 완료·폴더 신뢰, ~/.claude/settings.json 의 테마·(bypass 면) 경고 생략
-    local f
-    for f in .claude.json .claude/settings.json; do
-        { vmu "$name" sh -c "cat \"\$HOME/$f\" 2>/dev/null || echo '{}'" </dev/null \
-            | python3 -c 'import sys,json
+    if [[ $first_run == claude ]]; then
+        # 첫 실행 설정 병합(기존 값은 보존): ~/.claude.json 의 온보딩 완료·폴더 신뢰, ~/.claude/settings.json 의 테마·(bypass 면) 경고 생략
+        local f
+        for f in .claude.json .claude/settings.json; do
+            { vmu "$name" sh -c "cat \"\$HOME/$f\" 2>/dev/null || echo '{}'" </dev/null \
+                | python3 -c 'import sys,json
 f,d,b=sys.argv[1],sys.argv[2],sys.argv[3]=="1"
 try: j=json.load(sys.stdin)
 except ValueError: j={}
@@ -714,37 +736,38 @@ else:
     j.setdefault("theme","auto")
     if b: j["skipDangerousModePermissionPrompt"]=True
 print(json.dumps(j))' "$f" "$dir" "$bypass" \
-            | vmu "$name" sh -c "umask 077; mkdir -p \"\$HOME/.claude\"; cat > \"\$HOME/$f.new\" && mv \"\$HOME/$f.new\" \"\$HOME/$f\""; } \
-            || die "$f 설정 병합 실패"
-    done
-    local flags=""; ((bypass)) && flags="--dangerously-skip-permissions"
-    local start_script='dir=$1; tok=$2; flags=$3; pre=$4
-tmux has-session -t claude 2>/dev/null && { echo "이미 실행 중"; exit 0; }
+                | vmu "$name" sh -c "umask 077; mkdir -p \"\$HOME/.claude\"; cat > \"\$HOME/$f.new\" && mv \"\$HOME/$f.new\" \"\$HOME/$f\""; } \
+                || die "$f 설정 병합 실패"
+        done
+    fi
+    local flags=""; ((bypass)) && flags=$bypass_flags
+    local start_script='dir=$1; tok=$2; flags=$3; pre=$4; tenv=$5; cmd=$6; sess=$7
+tmux has-session -t "$sess" 2>/dev/null && { echo "이미 실행 중"; exit 0; }
 cd "$dir" || exit 1
-tmux new-session -d -s claude -x 200 -y 50 "${pre}CLAUDE_CODE_OAUTH_TOKEN=\$(cat $tok) exec claude $flags"
+tmux new-session -d -s "$sess" -x 200 -y 50 "${pre}${tenv}=\$(cat $tok) exec $cmd $flags"
 echo "시작함"'
     local out
     if [[ $NAME_KIND == vm ]]; then
-        out=$(vmu "$name" nix shell nixpkgs#tmux -c sh -c "$start_script" sh "$dir" "$TOKEN_PATH" "$flags" "$pathpre") || die "tmux 세션 시작 실패"
+        out=$(vmu "$name" nix shell nixpkgs#tmux -c sh -c "$start_script" sh "$dir" "$token_path" "$flags" "$pre" "$token_env" "$cmd" "$agent") || die "tmux 세션 시작 실패"
     else
-        out=$(vmu "$name" sh -c "$start_script" sh "$dir" "$TOKEN_PATH" "$flags" "$pathpre") || die "tmux 세션 시작 실패"
+        out=$(vmu "$name" sh -c "$start_script" sh "$dir" "$token_path" "$flags" "$pre" "$token_env" "$cmd" "$agent") || die "tmux 세션 시작 실패"
     fi
-    audit info claude "$name" "tmux 세션 claude: $out (dir $dir, bypass=$bypass)"
-    # 첫 실행 안내 화면이 남아 있으면(Claude Code 버전이 바뀌어 설정 키가 달라졌을 수 있음) 알린다 — 안 알리면 사람이 붙었을 때 처음 알게 된다
-    if [[ $out == 시작함 ]]; then
+    audit info llm "$name" "$agent tmux 세션: $out (dir $dir, bypass=$bypass)"
+    # 첫 실행 안내 화면이 남아 있으면(에이전트 버전이 바뀌어 설정 키·문구가 달라졌을 수 있음) 알린다 — 안 알리면 사람이 붙었을 때 처음 알게 된다
+    if [[ $out == 시작함 && -n $patterns ]]; then
         sleep 12
         local pane
-        pane=$(claude_tmux "$name" capture-pane -p -t claude </dev/null 2>/dev/null || true)
-        if grep -qiE "Choose the text style|Security notes|trust this folder|Bypass Permissions mode|Let.s get started|Press Enter to continue" <<<"$pane"; then
-            audit critical claude "$name" "첫 실행 안내 화면이 남아 있음 — Claude Code 버전 변화로 설정 병합 키가 어긋났을 수 있음"
-            say "경고: Claude 첫 실행 안내 화면이 남아 있습니다(설정 병합 키가 이 Claude Code 버전과 어긋났을 수 있음) — 붙어서 넘기고 core/scripts/sbox.sh 의 병합 키를 확인하세요"
+        pane=$(llm_tmux "$name" capture-pane -p -t "$agent" </dev/null 2>/dev/null || true)
+        if grep -qiE "$patterns" <<<"$pane"; then
+            audit critical llm "$name" "$agent 첫 실행 안내 화면이 남아 있음 — 버전 변화로 설정 병합 키가 어긋났을 수 있음"
+            say "경고: $agent 첫 실행 안내 화면이 남아 있습니다(설정 병합 키가 이 버전과 어긋났을 수 있음) — 붙어서 넘기고 core/scripts/sbox.sh·core/sbox/llm.toml 을 확인하세요"
         fi
     fi
     local ver
-    ver=$(vmu "$name" sh -c 'PATH="$HOME/.npm-global/bin:$PATH"; command -v claude >/dev/null && claude --version 2>/dev/null | head -1' </dev/null 2>/dev/null || true)
-    say "Claude 세션 $out${ver:+ ($ver)} — 붙기: sbox.sh claude $name --attach  (떼기: Ctrl-b d)"
+    ver=$(vmu "$name" sh -c "PATH=\"\$HOME/.nix-profile/bin:\$PATH\"; $(agent_get "$agent" version_cmd 2>/dev/null || echo "$cmd --version") 2>/dev/null | head -1" </dev/null 2>/dev/null || true)
+    say "$agent 세션 $out${ver:+ ($ver)} — 붙기: sbox.sh llm $agent $name --attach  (떼기: Ctrl-b d)"
     if ((attach)); then
-        claude_tmux "$name" attach -t claude
+        llm_tmux "$name" attach -t "$agent"
     fi
 }
 
@@ -760,9 +783,10 @@ case "${1:-}" in
     rebuild-golden) shift; cmd_rebuild_golden "$@" ;;
     iso) shift; cmd_iso "$@" ;;
     cache) shift; cmd_cache "${1:-}" ;;
-    token) shift; cmd_token "${1:-}" ;;
+    token) shift; cmd_token "${1:-}" "${2:-}" ;;
     home) shift; cmd_home "${1:-}" ;;
-    claude) shift; cmd_claude "$@" ;;
+    llm) shift; cmd_llm "$@" ;;
+    claude) shift; echo "sbox: 'sbox.sh claude' 는 'sbox.sh llm claude' 의 별칭입니다" >&2; cmd_llm claude "$@" ;;
     tools) shift; cmd_tools "$@" ;;
     list) cmd_list ;;
     *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
