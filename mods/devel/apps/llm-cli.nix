@@ -414,6 +414,11 @@ in {
       source = ../../_data/claude-skills/donghans-host-resources;
       force = true;
     };
+    # 프로젝트 → sbox ct 버전 매니페스트·생성 인자 제안(plan dev-sandbox-pilot §29, S36)
+    home.file.".claude/skills/donghans-sbox-init" = {
+      source = ../../_data/claude-skills/donghans-sbox-init;
+      force = true;
+    };
     home.file.".claude/skills/donghans-doc-rigor" = {
       source = ../../_data/claude-skills/donghans-doc-rigor;
       force = true;
