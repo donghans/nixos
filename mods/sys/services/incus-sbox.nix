@@ -55,7 +55,7 @@ in {
     # 컨테이너의 cgroup 은 기본으로 cgroup 루트 바로 밑(`lxc.payload.<이름>`)에 생겨 user.slice·system.slice 와 같은 급의 형제로 경쟁한다
     # (ct 10개면 사용자 세션의 10배 몫을 요구할 수 있다 — 2026-11-23 직접 확인). `sboxctl create` 가 ct 마다 raw.lxc 로 이 slice 아래에 둔다
     # (`%n` 이 치환되지 않아 프로필 한 줄로는 안 된다 — 시험). 우선순위: user.slice(9000, core.cgroups.nix) > system.slice(100) > sbox.slice(50).
-    #  - MemoryHigh 50%: 넘으면 ct 들이 회수·지연(죽지 않음). MemoryMax 70%: 최후 상한(이 안에서만 cgroup OOM 이 일어나 호스트 몫이 남는다).
+    #  - MemoryHigh 50%: 넘으면 ct 들이 회수·지연(죽지 않음 — 시험: 한도를 넘는 점유는 심하게 늦춰져 기어가고 호스트 PSI 가 오른다). MemoryMax 70%: 최후 상한(시험: 닿으면 8초 만에 sbox 안에서만 OOM kill, 호스트 무영향).
     #  - CPUQuota: 코어의 60% — 합계가 호스트 코어를 다 가져가지 못하게(weight 는 경쟁할 때만 효과). TasksMax: 합계 프로세스 수.
     # systemd-oomd 로 sbox 를 먼저 죽이는 설정은 일부러 넣지 않았다(OOM 최소화 방침 — 필요하면 2차에서 ManagedOOMMemoryPressure).
     systemd.slices.sbox = {
@@ -66,6 +66,9 @@ in {
           IOWeight = 50;
           MemoryHigh = "50%";
           MemoryMax = "70%";
+          # 스왑 상한: 없으면 sbox 가 호스트의 zram·디스크 스왑을 독점한다(2026-11-23 시험: 상한 없이 max 를 넘겨 쓰자 스왑으로 흡수돼 OOM 이 나지 않고 호스트 PSI 만 51% 까지 올랐다).
+          # RAM 대비 비율이라 호스트가 달라져도 따라간다.
+          MemorySwapMax = "15%";
           TasksMax = 16000;
         }
         // lib.optionalAttrs (config.workspace.cpuCount != null) {

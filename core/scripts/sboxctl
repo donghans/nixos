@@ -447,7 +447,7 @@ print(" ".join(a["address"] for a in d.get("eth0",{}).get("addresses",[]) if a["
 }
 
 cmd_create() {
-    local name="" cache=1 token=1 home=1 kind="" flavor="" release="" legacy=0 nesting=0 cpu=2 mem=8GiB disk="" docker=auto
+    local name="" cache=1 token=1 home=1 kind="" flavor="" release="" legacy=0 nesting=0 cpu=2 mem="" disk="" docker=auto
     TOOLS_ARGS=()   # ct 전용: 만든 직후 도구 층에 넘길 인자(--from-repo·--manifest·--tool·--update) — 다시 만들 때 같은 버전이 재적용되게
     while (($#)); do
         case $1 in
@@ -472,6 +472,7 @@ cmd_create() {
         esac
         shift
     done
+    [[ -n $mem ]] || mem=$(default_ct_mem)   # 호스트 RAM 에 맞춘 기본값(다른 호스트에서도 자동으로 따라감)
     # 종류는 필수·기본값 없음: 빠뜨리면 실패한다(VM 용 보안 가정이 컨테이너로 번지지 않게 — plan §15 조건 ①)
     case "$kind" in
         vm) ;;
@@ -886,6 +887,9 @@ echo "시작함"'
 SBOX_SLICE="sbox.slice"
 slice_raw_lxc() { # ct 이름이 들어가는 raw.lxc 두 줄(프로필로는 못 한다: %n 이 치환되지 않음 — 시험). S62 는 raw.lxc 가 정확히 이 두 줄인지 점검한다.
     printf 'lxc.cgroup.dir.container=%s/lxc.payload.%s\nlxc.cgroup.dir.monitor=%s/lxc.monitor.%s' "$SBOX_SLICE" "$1" "$SBOX_SLICE" "$1"
+}
+default_ct_mem() { # 호스트 RAM 의 25%, 최소 2GiB·최대 8GiB(0.5GiB 단위). 사용자가 --memory 로 정하면 쓰이지 않는다(2026-11-23: DB 스택 수요로 상향, 호스트별로 자동 조정)
+    awk '/^MemTotal:/{g=$2/1048576*0.25; if(g>8)g=8; if(g<2)g=2; printf "%.1fGiB", int(g*2)/2}' /proc/meminfo
 }
 mem_bytes() { # 2GiB·512MiB·1G 같은 값을 바이트로
     python3 -c 'import re,sys
