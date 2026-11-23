@@ -16,6 +16,8 @@
 #   sboxctl destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
 #   sboxctl golden [SRC_INSTANCE]                     SRC(기본 dev-nixos)를 정상 종료 후 복제해 골든(sbox-golden-vm@gold)을 새로 만듦
 #   sboxctl rebuild-golden [--stale-ok]               ISO+nixstrap(NIXSTRAP_AUTO)로 골든을 처음부터 새로 만듦(약 15분)
+#   sboxctl broker create|status                      L7 관문(broker) ct 생성·상태 — 프로젝트 ct 의 모든 외부 연결은 이 ct 의 CONNECT 프록시만 거친다(S61, pilot §29-25)
+#   sboxctl egress NAME [--from-repo DIR|--manifest F] [--allow host[:port]]...  ct 를 broker 에 연결(NIC ACL·프록시 환경·허용목록). create 는 broker 가 있으면 자동으로 부른다
 #   sboxctl list                                      sbox-* 인스턴스 목록
 #   sboxctl iso [--stale-ok]                          설치 ISO 만 미리 빌드(캐시면 약 20초, nixstrap 수정 직후면 약 7분)
 #   sboxctl depwatch scan|list|report|tier NAME general|critical  프로젝트 의존성 위험 신호 점검(읽기 전용·감지만, plan sbox-depwatch) — list·report 는 --json(ctl 공통 봉투)
@@ -430,6 +432,9 @@ print(" ".join(a["address"] for a in d.get("eth0",{}).get("addresses",[]) if a["
     if ((${DOCKER:-0})); then
         cmd_docker "$name" "${DOCKER_ARGS[@]}" || die "$name 은 만들어졌지만 Docker 설치에 실패했습니다 — 'sboxctl docker $name …' 로 다시 시도하세요"
     fi
+    if [[ $name != "$BROKER" ]] && incus info "$BROKER" >/dev/null 2>&1 </dev/null; then
+        cmd_egress "$name" ${EGRESS_MAN:+--manifest "$EGRESS_MAN"} || die "$name 은 만들어졌지만 broker 연결에 실패했습니다 — 'sboxctl egress $name' 로 다시 시도하세요"
+    fi
     if ((${#TOOLS_ARGS[@]} == 0)); then
         say "알림: 도구(Node·Go·Rust·Python·Compose·uv)는 'sboxctl tools $name --from-repo <저장소>' 또는 create 의 --from-repo/--tool 로 읽기 전용 도구 층을 붙입니다"
     fi
@@ -476,6 +481,7 @@ cmd_create() {
                 esac
             done
             [[ -z $_man && -n $_repo ]] && _man="$HOME/.config/sbox/manifests/$(basename "${_repo%/}").toml"
+            EGRESS_MAN=$_man
             if [[ $docker == auto ]]; then
                 docker=1   # 기본 켬(늘 쓰는 도구) — 끄는 길은 --no-docker(이번 한 번) 또는 매니페스트 [override] docker = "no"(영구)
                 local _rc=0
@@ -616,6 +622,7 @@ cmd_destroy() {
         fi
     fi
     incus delete -f "$name"
+    egress_detach "$name"
     if ((force)); then
         audit critical destroy "$name" "--force: 번들 없이 삭제"
     else
@@ -868,6 +875,151 @@ echo "시작함"'
     fi
 }
 
+
+# ---- L7 관문(broker) — plan dev-sandbox-pilot §29-25 (S61 최소 구현) ----
+BROKER="sbox-ct-debian13-broker"
+BROKER_PORT=3128
+EGRESS_MAN=""   # cmd_create 가 매니페스트 경로를 채운다(자동 연결에 쓰임)
+EGRESS_ACL="sbox-egress"
+EGRESS_STATE="${SBOX_EGRESS_STATE:-$HOME/.local/state/sbox/egress-clients.json}"   # 정본(호스트). broker 의 /etc/broker/clients.json 은 이것의 사본
+
+ct_ip() { # ct_ip NAME — eth0 의 IPv4 한 개
+    incus list "$1" -f json </dev/null | python3 -c 'import sys,json
+d=json.load(sys.stdin)[0]["state"]["network"].get("eth0",{}).get("addresses",[])
+print(next((a["address"] for a in d if a["family"]=="inet"),""))'
+}
+
+broker_push() { # 호스트의 상태 파일을 broker 에 원자적으로 놓는다(프록시는 mtime 이 바뀌면 다시 읽음)
+    incus file push --uid 0 --gid 0 --mode 0644 "$EGRESS_STATE" "$BROKER/etc/broker/clients.json.new" </dev/null >/dev/null || die "broker 에 설정을 넣지 못했습니다"
+    incus exec "$BROKER" -- mv /etc/broker/clients.json.new /etc/broker/clients.json </dev/null || die "broker 설정 교체 실패"
+}
+
+cmd_broker() {
+    case "${1:-}" in
+        create) ;;
+        status)
+            incus info "$BROKER" >/dev/null 2>&1 </dev/null || { say "broker 없음 — 'sboxctl broker create'"; return 0; }
+            say "broker $BROKER  $(ct_ip "$BROKER"):$BROKER_PORT  $(incus exec "$BROKER" -- systemctl is-active sbox-broker </dev/null 2>&1 | head -n1)"
+            python3 "$SBOX_DIR/egress.py" show --state "$EGRESS_STATE" | python3 -c 'import sys,json
+d=json.load(sys.stdin)
+print("  기본 허용 %d개" % len(d.get("default_allow",[])))
+for ip,c in sorted(d.get("clients",{}).items()): print("  %-16s %s (+%d)" % (ip,c["name"],len(c["allow"])))'
+            incus exec "$BROKER" -- tail -n 5 /var/log/broker/access.log </dev/null 2>/dev/null || true
+            return 0 ;;
+        *) die "사용법: sboxctl broker create|status" ;;
+    esac
+    incus info "$BROKER" >/dev/null 2>&1 </dev/null && die "$BROKER 는 이미 있습니다"
+    TOOLS_ARGS=(); DOCKER=0
+    create_ct "$BROKER" debian 13 0 0 1 512MiB 0 5GiB
+    # broker 는 프로젝트 ct 들이 L2 로 닿아야 하므로 포트 격리를 끈다(프로젝트 ct 는 켜져 있어 서로는 못 봄) — 설정을 바꾸려면 정지 필요
+    incus stop "$BROKER" </dev/null
+    incus config device override "$BROKER" eth0 security.port_isolation=false </dev/null
+    incus start "$BROKER" </dev/null; wait_ct "$BROKER"
+    local ip; ip=$(ct_ip "$BROKER"); [[ -n $ip ]] || die "broker IP 를 못 읽었습니다"
+    incus config device set "$BROKER" eth0 ipv4.address="$ip" </dev/null    # 프로젝트 ct 의 ACL 이 이 주소를 가리키므로 고정
+    incus exec "$BROKER" --env "PATH=$CT_PATH" -- sh -c 'apt-get install -y -qq --no-install-recommends python3 >/dev/null' </dev/null || die "broker: python3 설치 실패"   # python3-minimal 에는 asyncio 가 없다(2026-11-23 겪음)
+    incus exec "$BROKER" -- mkdir -p /usr/local/lib/sbox-broker /etc/broker </dev/null
+    incus file push "$SBOX_DIR/broker_proxy.py" "$BROKER/usr/local/lib/sbox-broker/broker_proxy.py" </dev/null >/dev/null
+    incus exec "$BROKER" -- sh -c 'cat > /etc/systemd/system/sbox-broker.service' </dev/null <<UNIT
+[Unit]
+Description=sbox broker (L7 egress CONNECT proxy)
+After=network-online.target
+[Service]
+ExecStart=/usr/bin/python3 -I /usr/local/lib/sbox-broker/broker_proxy.py --listen 0.0.0.0 --port $BROKER_PORT --config /etc/broker/clients.json --log /var/log/broker/access.log
+User=nobody
+LogsDirectory=broker
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+[Install]
+WantedBy=multi-user.target
+UNIT
+    if [[ ! -f $EGRESS_STATE ]]; then   # 클라이언트 없는 상태 파일(기본 허용 세트만)
+        python3 "$SBOX_DIR/egress.py" remove --state "$EGRESS_STATE" --name __none__ >/dev/null
+    fi
+    broker_push
+    incus exec "$BROKER" -- sh -c 'systemctl daemon-reload && systemctl enable --now sbox-broker' </dev/null >/dev/null 2>&1 || die "broker 서비스 시작 실패"
+    audit info broker-create "$BROKER" "broker $ip:$BROKER_PORT"
+    say "완료: broker $ip:$BROKER_PORT — 프로젝트 ct 는 'sboxctl egress NAME' 으로 연결(create 는 자동)"
+}
+
+cmd_egress() { # cmd_egress NAME [--from-repo DIR|--manifest F] [--allow H[:P]]...
+    local name=${1:-}; shift || true
+    check_name "$name"
+    [[ $NAME_KIND == ct ]] || die "egress 는 ct 전용입니다"
+    [[ $name != "$BROKER" ]] || die "broker 자신은 연결하지 않습니다"
+    incus info "$BROKER" >/dev/null 2>&1 </dev/null || die "broker 가 없습니다 — 먼저 'sboxctl broker create'"
+    local man="" ; local -a allow=()
+    while (($#)); do
+        case $1 in
+            --from-repo) man="$HOME/.config/sbox/manifests/$(basename "${2%/}").toml"; shift ;;
+            --manifest) man=${2:?}; shift ;;
+            --allow) allow+=(--allow "${2:?}"); shift ;;
+            *) die "알 수 없는 옵션: $1" ;;
+        esac
+        shift
+    done
+    local ip bip; ip=$(ct_ip "$name"); bip=$(ct_ip "$BROKER")
+    [[ -n $ip && -n $bip ]] || die "ct·broker 의 IP 를 읽지 못했습니다"
+    python3 "$SBOX_DIR/egress.py" set --state "$EGRESS_STATE" --name "$name" --ip "$ip" ${man:+--manifest "$man"} "${allow[@]}" || die "허용목록 계산 실패"
+    broker_push
+    # NIC ACL: broker 의 프록시 포트(+게이트웨이 DNS)만 허용, 나머지 송신은 drop(기록)
+    if ! incus network acl show "$EGRESS_ACL" >/dev/null 2>&1 </dev/null; then
+        incus network acl create "$EGRESS_ACL" </dev/null >/dev/null
+    fi
+    # 규칙 전체를 한 번에 교체(broker IP 가 바뀌었어도 같은 모양, 중복 없음) — 주의: 파이프 뒤에 </dev/null 을 붙이면 입력이 사라진다
+    python3 - "$EGRESS_ACL" "$bip" "$BROKER_PORT" <<'PY' | incus network acl edit "$EGRESS_ACL" || die "ACL 규칙 실패"
+import sys, json
+n, bip, port = sys.argv[1:4]
+print(json.dumps({"name": n, "description": "sbox ct 송신: broker 프록시와 게이트웨이 DNS 만", "egress": [
+  {"action": "allow", "protocol": "tcp", "destination": bip + "/32", "destination_port": port, "state": "enabled"},
+  {"action": "allow", "protocol": "udp", "destination": "10.100.1.1/32", "destination_port": "53", "state": "enabled"},
+  {"action": "allow", "protocol": "tcp", "destination": "10.100.1.1/32", "destination_port": "53", "state": "enabled"}], "ingress": []}))
+PY
+    local verb=set
+    incus config device show "$name" </dev/null | grep -q '^eth0:' || verb=override
+    if [[ $verb == override ]]; then
+        incus config device override "$name" eth0 ipv4.address="$ip" security.ipv4_filtering=true security.acls="$EGRESS_ACL" \
+            security.acls.default.egress.action=drop security.acls.default.egress.logged=true </dev/null || die "NIC 설정 실패"
+    else
+        incus config device set "$name" eth0 ipv4.address="$ip" security.ipv4_filtering=true security.acls="$EGRESS_ACL" \
+            security.acls.default.egress.action=drop security.acls.default.egress.logged=true </dev/null || die "NIC 설정 실패"
+    fi
+    # ct 안: 프록시 환경 — apt 는 전용 설정, 나머지는 환경변수(로그인·systemd 모두), rootless Docker 데몬은 사용자 서비스 환경
+    local px="http://$bip:$BROKER_PORT"
+    incus exec "$name" --env "PATH=$CT_PATH" -- sh -c "
+        set -e
+        # broker 는 CONNECT 만 받는다 — apt 저장소를 https 로 바꾸고 https 프록시만 건다(http:// 는 403)
+        sed -i 's#http://#https://#g' /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
+        printf 'Acquire::https::Proxy \"%s\";\n' '$px' > /etc/apt/apt.conf.d/99sbox-broker
+        sed -i '/^# sbox-broker begin/,/^# sbox-broker end/d' /etc/environment
+        printf '# sbox-broker begin\nHTTP_PROXY=%s\nHTTPS_PROXY=%s\nhttp_proxy=%s\nhttps_proxy=%s\nNO_PROXY=localhost,127.0.0.1,10.100.1.1\nno_proxy=localhost,127.0.0.1,10.100.1.1\n# sbox-broker end\n' '$px' '$px' '$px' '$px' >> /etc/environment
+        if [ -d /home/$VM_USER ]; then
+            d=/home/$VM_USER/.config/systemd/user/docker.service.d; mkdir -p \$d
+            printf '[Service]\nEnvironment=\"HTTP_PROXY=%s\" \"HTTPS_PROXY=%s\" \"NO_PROXY=localhost,127.0.0.1\"\n' '$px' '$px' > \$d/sbox-broker.conf
+            chown -R $VM_USER: /home/$VM_USER/.config 2>/dev/null || true
+            # 이미 떠 있는 rootless Docker 데몬은 환경을 다시 읽어야 한다(설치 뒤 연결하는 흐름이라 필수)
+            U=\$(id -u $VM_USER)
+            if [ -S /run/user/\$U/bus ] && [ -e /home/$VM_USER/.config/systemd/user/default.target.wants/docker.service ]; then
+                su -s /bin/sh $VM_USER -c \"export XDG_RUNTIME_DIR=/run/user/\$U; systemctl --user daemon-reload; systemctl --user restart docker\" || true
+            fi
+        fi" </dev/null || die "ct 안 프록시 설정 실패"
+    audit info egress "$name" "broker 연결 $ip → $bip:$BROKER_PORT (NIC ACL $EGRESS_ACL, 기본 drop)"
+    say "완료: $name ($ip) 는 이제 broker($bip:$BROKER_PORT)로만 외부에 나갑니다 — 허용목록은 'sboxctl broker status'"
+}
+
+egress_detach() { # destroy 가 부름 — broker 표에서 지움(broker 가 없으면 조용히 넘어감)
+    [[ -f $EGRESS_STATE ]] || return 0
+    python3 "$SBOX_DIR/egress.py" remove --state "$EGRESS_STATE" --name "$1" >/dev/null 2>&1 || return 0
+    incus info "$BROKER" >/dev/null 2>&1 </dev/null && broker_push || true
+}
+
 cmd_list() { incus list '^sbox-' -c ns4 -f compact; }
 
 case "${1:-}" in
@@ -885,6 +1037,8 @@ case "${1:-}" in
     llm) shift; cmd_llm "$@" ;;
     tools) shift; cmd_tools "$@" ;;
     docker) shift; cmd_docker "$@" ;;
+    broker) shift; cmd_broker "$@" ;;
+    egress) shift; cmd_egress "$@" ;;
     depwatch) shift; python3 "$SBOX_DIR/depwatch.py" "$@" ;;
     list) cmd_list ;;
     *) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
