@@ -890,7 +890,7 @@ slice_raw_lxc() { # ct 이름이 들어가는 raw.lxc 두 줄(프로필로는 �
     printf 'lxc.cgroup.dir.container=%s/lxc.payload.%s\nlxc.cgroup.dir.monitor=%s/lxc.monitor.%s' "$SBOX_SLICE" "$1" "$SBOX_SLICE" "$1"
 }
 default_ct_mem() { # 호스트 RAM 의 25%, 최소 2GiB·최대 8GiB(0.5GiB 단위). 사용자가 --memory 로 정하면 쓰이지 않는다(2026-11-23: DB 스택 수요로 상향, 호스트별로 자동 조정)
-    awk '/^MemTotal:/{g=$2/1048576*0.25; if(g>8)g=8; if(g<2)g=2; printf "%.1fGiB", int(g*2)/2}' /proc/meminfo
+    awk '/^MemTotal:/{g=$2/1048576*0.25; if(g>8)g=8; if(g<2)g=2; printf "%dMiB", int(g*2)*512}' /proc/meminfo   # Incus 는 소수 GiB(7.5GiB)를 거부한다 — 정수 MiB 로(2026-11-23 겪음)
 }
 mem_bytes() { # 2GiB·512MiB·1G 같은 값을 바이트로
     python3 -c 'import re,sys
