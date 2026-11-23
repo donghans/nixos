@@ -45,6 +45,9 @@ in {
           "ipv4.address" = "10.100.1.1/24";
           "ipv4.nat" = "true";
           "ipv6.address" = "none";
+          # DHCP 는 .100–.199 만(VM·골든·broker). ct 는 broker 가 있으면 sboxctl 이 만들 때부터 .200–.250 의 고정 주소를 배정한다 — 호스트가 주소 범위로
+          # ct 를 구분해 게이트웨이 DNS 를 막을 수 있게(NIC ACL 로는 브리지 자신의 DNS 를 못 막는다, pilot §29-29). 범위를 바꾸면 sbox-guard 의 아래 규칙도 같이.
+          "ipv4.dhcp.ranges" = "10.100.1.100-10.100.1.199";
           # 상위 DNS 를 공용으로 고정한다 — 안 그러면 호스트 dnsmasq 가 resolv.conf 의 tailnet DNS 를 따라가 VM 이 tailnet 이름을 해석한다(incus.nix 와 같은 이유).
           "raw.dnsmasq" = "server=1.1.1.1\nserver=8.8.8.8\nfilter-AAAA";
         };
@@ -127,6 +130,10 @@ in {
           type filter hook input priority -10; policy accept;
           iifname "sboxbr0" ct state established,related accept
           iifname "sboxbr0" udp dport 67 accept
+          # ct 대역(.200–.250)은 게이트웨이 DNS 를 쓰지 못한다 — ct 의 외부 연결은 broker 프록시(이름은 broker 가 해석)뿐이고, DNS 는 터널링 유출 경로라(S70-a, pilot §29-29).
+          # broker·VM·골든은 DHCP 범위(.100–.199)라 영향 없음. 아래 accept 보다 앞에 있어야 한다.
+          iifname "sboxbr0" ip saddr 10.100.1.200-10.100.1.250 ip daddr 10.100.1.1 meta l4proto { tcp, udp } th dport 53 limit rate 6/minute burst 10 packets log prefix "sbox-guard drop-ct-dns: " level warn
+          iifname "sboxbr0" ip saddr 10.100.1.200-10.100.1.250 ip daddr 10.100.1.1 meta l4proto { tcp, udp } th dport 53 drop
           iifname "sboxbr0" ip daddr 10.100.1.1 udp dport 53 accept
           iifname "sboxbr0" ip daddr 10.100.1.1 tcp dport 53 accept
           ${nixServeCacheRule}

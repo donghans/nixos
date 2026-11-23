@@ -403,6 +403,12 @@ create_ct() { # create_ct NAME FLAVOR RELEASE LEGACY NESTING CPU MEM TOKEN
     mem_preflight "$mem"
     local -a opts=(-p sbox-ct -c "limits.cpu=$cpu" -c "limits.memory=$mem" -c limits.memory.enforce=soft)
     opts+=(-c "raw.lxc=$(slice_raw_lxc "$name")")
+    # broker 가 있으면 ct 를 만들 때부터 .200–.250 고정 주소(S70-a) — DHCP 로 받은 주소는 DNS 가 열려 있는 범위라 쓰지 않는다
+    if [[ $name != "$BROKER" ]] && incus info "$BROKER" >/dev/null 2>&1 </dev/null; then
+        local _ctip; _ctip=$(alloc_ct_ip) || die "ct 고정 주소($CT_IP_PREFIX.$CT_IP_FIRST–$CT_IP_LAST)가 모두 쓰이고 있습니다"
+        opts+=(-d "eth0,ipv4.address=$_ctip")
+        say "고정 주소 $_ctip (broker 경유 전용 범위 — 게이트웨이 DNS 는 호스트가 막음)"
+    fi
     [[ -n $disk ]] && opts+=(-d "root,size=$disk")
     ((nesting)) && opts+=(-c security.nesting=true)
     local _try _err
@@ -423,6 +429,10 @@ create_ct() { # create_ct NAME FLAVOR RELEASE LEGACY NESTING CPU MEM TOKEN
     # 비 root 사용자 sbox: sudo 그룹에 넣지 않는다(Claude 에게 root 를 주지 않는 방침 — plan §15)
     incus exec "$name" --env "PATH=$CT_PATH" -- sh -c "id $VM_USER >/dev/null 2>&1 || useradd -m -s /bin/bash $VM_USER" </dev/null \
         || die "사용자 $VM_USER 생성 실패"
+    # broker 가 있으면 도구·Docker 설치(apt)보다 먼저 연결한다 — 이 범위의 ct 는 게이트웨이 DNS 를 못 쓰므로 apt 도 broker 프록시로 나가야 한다(S70-a)
+    if [[ $name != "$BROKER" ]] && incus info "$BROKER" >/dev/null 2>&1 </dev/null; then
+        cmd_egress "$name" ${EGRESS_MAN:+--manifest "$EGRESS_MAN"} || die "$name 은 만들어졌지만 broker 연결에 실패했습니다 — 'sboxctl egress $name' 로 다시 시도하세요"
+    fi
     ((token)) && cmd_token "$name"
     install_sbox_mem "$name" || say "경고: sbox-mem 설치 실패 — 'sboxctl resources $name' 로 다시 시도하세요"
 
@@ -438,9 +448,6 @@ print(" ".join(a["address"] for a in d.get("eth0",{}).get("addresses",[]) if a["
     fi
     if ((${DOCKER:-0})); then
         cmd_docker "$name" "${DOCKER_ARGS[@]}" || die "$name 은 만들어졌지만 Docker 설치에 실패했습니다 — 'sboxctl docker $name …' 로 다시 시도하세요"
-    fi
-    if [[ $name != "$BROKER" ]] && incus info "$BROKER" >/dev/null 2>&1 </dev/null; then
-        cmd_egress "$name" ${EGRESS_MAN:+--manifest "$EGRESS_MAN"} || die "$name 은 만들어졌지만 broker 연결에 실패했습니다 — 'sboxctl egress $name' 로 다시 시도하세요"
     fi
     if ((${#TOOLS_ARGS[@]} == 0)); then
         say "알림: 도구(Node·Go·Rust·Python·Compose·uv)는 'sboxctl tools $name --from-repo <저장소>' 또는 create 의 --from-repo/--tool 로 읽기 전용 도구 층을 붙입니다"
@@ -936,6 +943,22 @@ cmd_resources() { # cmd_resources NAME — 기존 ct 를 sbox.slice 아래로(�
     install_sbox_mem "$name" || die "sbox-mem 설치 실패"
     audit info resources "$name" "sbox.slice 아래로 이동·sbox-mem 설치"
     say "완료: $name 은 이제 $SBOX_SLICE 아래입니다"
+}
+
+# ---- S70-a: ct 고정 주소(.200–.250) — 호스트가 이 범위로 ct 를 구분해 게이트웨이 DNS 를 막는다(incus-sbox.nix 의 sbox-guard) ----
+CT_IP_PREFIX="10.100.1"; CT_IP_FIRST=200; CT_IP_LAST=250
+alloc_ct_ip() { # 쓰이지 않은 첫 주소. 쓰는 중인 주소 = 모든 인스턴스의 고정·현재 IPv4
+    local used i
+    used=$(incus query "/1.0/instances?recursion=2" </dev/null | python3 -c 'import sys,json
+for i in json.load(sys.stdin):
+    c=i.get("expanded_devices",{}).get("eth0",{})
+    if c.get("ipv4.address"): print(c["ipv4.address"])
+    for a in (i.get("state") or {}).get("network",{}) and i["state"]["network"].get("eth0",{}).get("addresses",[]):
+        if a["family"]=="inet": print(a["address"])')
+    for ((i = CT_IP_FIRST; i <= CT_IP_LAST; i++)); do
+        grep -qx "$CT_IP_PREFIX.$i" <<<"$used" || { echo "$CT_IP_PREFIX.$i"; return 0; }
+    done
+    return 1
 }
 
 # ---- L7 관문(broker) — plan dev-sandbox-pilot §29-25 (S61 최소 구현) ----
