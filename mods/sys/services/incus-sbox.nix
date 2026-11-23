@@ -51,6 +51,33 @@ in {
       }
     ];
 
+    # sbox 전체의 자원 합계 상한 (plan dev-sandbox-pilot §29-27, S69 1차 — 보안이 아니라 호스트가 응답 불가가 되지 않게).
+    # 컨테이너의 cgroup 은 기본으로 cgroup 루트 바로 밑(`lxc.payload.<이름>`)에 생겨 user.slice·system.slice 와 같은 급의 형제로 경쟁한다
+    # (ct 10개면 사용자 세션의 10배 몫을 요구할 수 있다 — 2026-11-23 직접 확인). `sboxctl create` 가 ct 마다 raw.lxc 로 이 slice 아래에 둔다
+    # (`%n` 이 치환되지 않아 프로필 한 줄로는 안 된다 — 시험). 우선순위: user.slice(9000, core.cgroups.nix) > system.slice(100) > sbox.slice(50).
+    #  - MemoryHigh 50%: 넘으면 ct 들이 회수·지연(죽지 않음). MemoryMax 70%: 최후 상한(이 안에서만 cgroup OOM 이 일어나 호스트 몫이 남는다).
+    #  - CPUQuota: 코어의 60% — 합계가 호스트 코어를 다 가져가지 못하게(weight 는 경쟁할 때만 효과). TasksMax: 합계 프로세스 수.
+    # systemd-oomd 로 sbox 를 먼저 죽이는 설정은 일부러 넣지 않았다(OOM 최소화 방침 — 필요하면 2차에서 ManagedOOMMemoryPressure).
+    systemd.slices.sbox = {
+      description = "sbox 격리 환경(ct) 합계 자원 상한";
+      sliceConfig =
+        {
+          CPUWeight = 50;
+          IOWeight = 50;
+          MemoryHigh = "50%";
+          MemoryMax = "70%";
+          TasksMax = 16000;
+        }
+        // lib.optionalAttrs (config.workspace.cpuCount != null) {
+          CPUQuota = "${toString (config.workspace.cpuCount * 60)}%";
+        };
+    };
+    # slice 가 incus 보다 먼저 떠 있어야 ct 의 cgroup 부모가 한도를 가진 상태로 생긴다
+    systemd.services.incus = {
+      wants = ["sbox.slice"];
+      after = ["sbox.slice"];
+    };
+
     # 모든 sbox 컨테이너가 지킬 최소 하드닝 프로필 (plan dev-sandbox-pilot §29-20, 로드맵 S63). sboxctl create --kind ct 가 `-p sbox-ct` 로 붙인다.
     # default 프로필(incusbr0 NIC)을 대신하므로 NIC·루트 디스크를 여기서 직접 선언한다. preseed 는 프로필을 지우지 않는다.
     #  - security.idmap.isolated + size 1000000: ct 마다 호스트 uid 범위가 겹치지 않는다. 기본 65536 은 rootless Docker(subuid 65536 필요)가 깨진다.

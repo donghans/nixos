@@ -18,6 +18,7 @@
 #   sboxctl rebuild-golden [--stale-ok]               ISO+nixstrap(NIXSTRAP_AUTO)로 골든을 처음부터 새로 만듦(약 15분)
 #   sboxctl broker create|status                      L7 관문(broker) ct 생성·상태 — 프로젝트 ct 의 모든 외부 연결은 이 ct 의 CONNECT 프록시만 거친다(S61, pilot §29-25)
 #   sboxctl egress NAME [--from-repo DIR|--manifest F] [--allow host[:port]]...  ct 를 broker 에 연결(NIC ACL·프록시 환경·허용목록). create 는 broker 가 있으면 자동으로 부른다
+#   sboxctl resources NAME                            기존 ct 를 sbox.slice(합계 자원 상한) 아래로 옮기고 sbox-mem 설치(재시작 필요, S69)
 #   sboxctl list                                      sbox-* 인스턴스 목록
 #   sboxctl iso [--stale-ok]                          설치 ISO 만 미리 빌드(캐시면 약 20초, nixstrap 수정 직후면 약 7분)
 #   sboxctl depwatch scan|list|report|tier NAME general|critical  프로젝트 의존성 위험 신호 점검(읽기 전용·감지만, plan sbox-depwatch) — list·report 는 --json(ctl 공통 봉투)
@@ -396,7 +397,11 @@ create_ct() { # create_ct NAME FLAVOR RELEASE LEGACY NESTING CPU MEM TOKEN
 
     say "생성: $name ← images:$image (비특권 컨테이너, cpu $cpu·메모리 $mem$( ((nesting)) && echo ', nesting' ))"
     incus profile show sbox-ct >/dev/null 2>&1 </dev/null || die "프로필 sbox-ct 가 없습니다 — 호스트에 incus-sbox 모듈(mods/sys/services/incus-sbox.nix)이 적용돼야 합니다(nixup os)"
-    local -a opts=(-p sbox-ct -c "limits.cpu=$cpu" -c "limits.memory=$mem")
+    # 메모리 한도는 소프트(memory.high)다 — 호스트 여유가 있으면 넘어 쓰고 압박일 때만 회수·지연, 죽이지 않는다(2026-11-23 시험: 1GiB 한도에서 1.8GiB 점유가 성공,
+    # high 이벤트만 증가). 호스트 보호는 sbox.slice 의 합계 상한(incus-sbox.nix)이 맡는다. 상한 자체는 사용자 요청으로 높임(DB 스택을 Docker 로 다 띄우면 무겁다).
+    mem_preflight "$mem"
+    local -a opts=(-p sbox-ct -c "limits.cpu=$cpu" -c "limits.memory=$mem" -c limits.memory.enforce=soft)
+    opts+=(-c "raw.lxc=$(slice_raw_lxc "$name")")
     [[ -n $disk ]] && opts+=(-d "root,size=$disk")
     ((nesting)) && opts+=(-c security.nesting=true)
     local _try _err
@@ -418,6 +423,7 @@ create_ct() { # create_ct NAME FLAVOR RELEASE LEGACY NESTING CPU MEM TOKEN
     incus exec "$name" --env "PATH=$CT_PATH" -- sh -c "id $VM_USER >/dev/null 2>&1 || useradd -m -s /bin/bash $VM_USER" </dev/null \
         || die "사용자 $VM_USER 생성 실패"
     ((token)) && cmd_token "$name"
+    install_sbox_mem "$name" || say "경고: sbox-mem 설치 실패 — 'sboxctl resources $name' 로 다시 시도하세요"
 
     local ip
     ip=$(incus list "$name" -f json </dev/null | python3 -c 'import sys,json
@@ -441,7 +447,7 @@ print(" ".join(a["address"] for a in d.get("eth0",{}).get("addresses",[]) if a["
 }
 
 cmd_create() {
-    local name="" cache=1 token=1 home=1 kind="" flavor="" release="" legacy=0 nesting=0 cpu=2 mem=2GiB disk="" docker=auto
+    local name="" cache=1 token=1 home=1 kind="" flavor="" release="" legacy=0 nesting=0 cpu=2 mem=8GiB disk="" docker=auto
     TOOLS_ARGS=()   # ct 전용: 만든 직후 도구 층에 넘길 인자(--from-repo·--manifest·--tool·--update) — 다시 만들 때 같은 버전이 재적용되게
     while (($#)); do
         case $1 in
@@ -876,6 +882,57 @@ echo "시작함"'
 }
 
 
+# ---- S69 자원 보호: ct 를 sbox.slice 아래에 두고, 만들기 전에 호스트 여유를 본다 (plan dev-sandbox-pilot §29-27) ----
+SBOX_SLICE="sbox.slice"
+slice_raw_lxc() { # ct 이름이 들어가는 raw.lxc 두 줄(프로필로는 못 한다: %n 이 치환되지 않음 — 시험). S62 는 raw.lxc 가 정확히 이 두 줄인지 점검한다.
+    printf 'lxc.cgroup.dir.container=%s/lxc.payload.%s\nlxc.cgroup.dir.monitor=%s/lxc.monitor.%s' "$SBOX_SLICE" "$1" "$SBOX_SLICE" "$1"
+}
+mem_bytes() { # 2GiB·512MiB·1G 같은 값을 바이트로
+    python3 -c 'import re,sys
+m=re.fullmatch(r"(\d+(?:\.\d+)?)\s*([KMGT]?)(i?B)?",sys.argv[1].strip(),re.I)
+print(int(float(m.group(1))*{"":1,"K":1024,"M":1024**2,"G":1024**3,"T":1024**4}[m.group(2).upper()]) if m else 0)' "$1"
+}
+mem_preflight() { # mem_preflight 요청한한도 — 호스트 여유가 너무 적으면 거부, 빠듯하면 알림(「새로 띄우기 전 확인」 방침)
+    local want avail gib
+    want=$(mem_bytes "$1"); avail=$(awk '/^MemAvailable:/{print $2*1024}' /proc/meminfo)
+    [[ -n $avail ]] || return 0
+    gib=$(awk -v b="$avail" 'BEGIN{printf "%.1f", b/1073741824}')
+    if ((avail < 3 * 1073741824)); then
+        die "호스트 가용 메모리가 ${gib}GiB 로 너무 적어 새 ct 를 만들지 않습니다(3GiB 미만) — 먼저 'hostres' 로 상태를 확인하세요"
+    fi
+    if ((avail < want + 4 * 1073741824)); then
+        say "알림: 호스트 가용 메모리 ${gib}GiB — 이 ct 의 한도($1)가 크면 한도까지 쓰는 순간 호스트가 느려질 수 있습니다(소프트 한도·sbox 합계 상한이 완충)"
+    fi
+    if [[ -r /sys/fs/cgroup/$SBOX_SLICE/memory.current && -r /sys/fs/cgroup/$SBOX_SLICE/memory.high ]]; then
+        local cur high; cur=$(cat /sys/fs/cgroup/$SBOX_SLICE/memory.current); high=$(cat /sys/fs/cgroup/$SBOX_SLICE/memory.high)
+        if [[ $high != max ]] && ((cur * 100 / high >= 80)); then
+            say "알림: sbox 전체가 이미 합계 상한(high)의 $((cur * 100 / high))% 를 쓰고 있습니다 — 다른 sbox 를 먼저 정리하는 편이 좋습니다"
+        fi
+    fi
+}
+install_sbox_mem() { # install_sbox_mem NAME — ct 안에 sbox-mem 과 로그인 알림을 설치
+    incus file push --uid 0 --gid 0 --mode 0755 "$SBOX_DIR/sbox-mem.sh" "$1/usr/local/bin/sbox-mem" </dev/null >/dev/null || return 1
+    incus exec "$1" -- sh -c 'cat > /etc/profile.d/sbox-mem.sh' </dev/null <<'PROF'
+# 로그인할 때 메모리가 한도에 가까우면 한 줄 알림(sbox-mem 으로 자세히)
+if [ -r /sys/fs/cgroup/memory.current ] && [ "$(cat /sys/fs/cgroup/memory.high)" != max ]; then
+  _c=$(cat /sys/fs/cgroup/memory.current); _h=$(cat /sys/fs/cgroup/memory.high)
+  [ "$_h" -gt 0 ] 2>/dev/null && [ $((_c * 100 / _h)) -ge 80 ] && echo "sbox: 메모리 $((_c * 100 / _h))% (high 대비) — 'sbox-mem' 으로 확인" >&2
+fi
+PROF
+}
+cmd_resources() { # cmd_resources NAME — 기존 ct 를 sbox.slice 아래로(재시작) + sbox-mem 설치
+    local name=${1:-}; check_name "$name"
+    [[ $NAME_KIND == ct ]] || die "resources 는 ct 전용입니다"
+    incus info "$name" >/dev/null 2>&1 </dev/null || die "$name 이 없습니다"
+    [[ -d /sys/fs/cgroup/$SBOX_SLICE ]] || die "$SBOX_SLICE 가 없습니다 — 호스트에 incus-sbox 모듈 변경이 적용돼야 합니다(nixup os)"
+    incus config set "$name" raw.lxc="$(slice_raw_lxc "$name")" </dev/null || die "raw.lxc 설정 실패"
+    incus restart "$name" </dev/null || die "재시작 실패"
+    wait_ct "$name"
+    install_sbox_mem "$name" || die "sbox-mem 설치 실패"
+    audit info resources "$name" "sbox.slice 아래로 이동·sbox-mem 설치"
+    say "완료: $name 은 이제 $SBOX_SLICE 아래입니다"
+}
+
 # ---- L7 관문(broker) — plan dev-sandbox-pilot §29-25 (S61 최소 구현) ----
 BROKER="sbox-ct-debian13-broker"
 BROKER_PORT=3128
@@ -1038,6 +1095,7 @@ case "${1:-}" in
     tools) shift; cmd_tools "$@" ;;
     docker) shift; cmd_docker "$@" ;;
     broker) shift; cmd_broker "$@" ;;
+    resources) shift; cmd_resources "${1:-}" ;;
     egress) shift; cmd_egress "$@" ;;
     depwatch) shift; python3 "$SBOX_DIR/depwatch.py" "$@" ;;
     list) cmd_list ;;

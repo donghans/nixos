@@ -20,9 +20,12 @@ mkPartOf "mods.gui" ({
     then null
     else "${toString ((cpuCount - reserveCores) * 100)}%";
 in {
+  # 주의(2026-11-23 발견·수정): NixOS 의 `systemd.slices.<이름>` 은 유닛 이름이 `<이름>.slice` 가 된다. 예전에는 키를 "user.slice" 처럼 썼고
+  # 그러면 `user.slice.slice` 라는 엉뚱한 유닛이 만들어져 **이 파일의 가중치·상한이 한 번도 적용되지 않았다**(런타임 `cpu.weight` 가 전부 100).
+  # 그래서 이 설정이 처음 실제로 켜지는 변경이다 — 켜지면 system.slice 에 MemoryHigh·CPUQuota 가 걸려 빌드·Docker 시험이 느려질 수 있다.
   os = lib.mkIf config.mods.gui.enable {
     # (목적: Hyprland/Waybar 등 로그인 세션 전체가 여기 속함 — 빌드/서비스 부하와 경쟁 시 압도적 우선)
-    systemd.slices."user.slice".sliceConfig = {
+    systemd.slices.user.sliceConfig = {
       CPUWeight = 9000;
       IOWeight = 9000;
     };
@@ -30,7 +33,7 @@ in {
     # (목적: nix-daemon 빌드 등 시스템 서비스 — user.slice 대비 낮은 weight + 메모리 상한 + 절대 상한)
     # (이유: MemoryHigh 없이 메모리 압박이 오면 zram 압축이 CPU를 추가로 잠식해 이중으로 렉 유발.
     #        CPUQuota는 weight와 별개로 "총 수요 초과" 상황에서도 예약된 코어를 실제로 비워둠)
-    systemd.slices."system.slice".sliceConfig = {
+    systemd.slices.system.sliceConfig = {
       CPUWeight = 100;
       IOWeight = 100;
       MemoryHigh = "70%";
@@ -41,15 +44,15 @@ in {
     #        에디터 등 개별 앱(app.slice/app-graphical.slice)보다 항상 우선하도록)
     # (이유: 앱이 자체 scope로 분리돼 있어도(uwsm app / Chromium 자체 통합) session.slice와
     #        동일 weight(기본 100)면 무거운 앱 하나가 컴포지터 프레임 처리와 동급으로 경쟁함)
-    systemd.user.slices."session.slice".sliceConfig = {
+    systemd.user.slices.session.sliceConfig = {
       CPUWeight = 2000;
       IOWeight = 2000;
     };
-    systemd.user.slices."app.slice".sliceConfig = {
+    systemd.user.slices.app.sliceConfig = {
       CPUWeight = 200;
       IOWeight = 200;
     };
-    systemd.user.slices."app-graphical.slice".sliceConfig = {
+    systemd.user.slices."app-graphical".sliceConfig = {
       CPUWeight = 200;
       IOWeight = 200;
     };
