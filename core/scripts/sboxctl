@@ -3,7 +3,7 @@
 # 종류(--kind): vm = nixos OS 단위 시험용 VM(구현됨). ct = 프로젝트용 컨테이너(v1: debian·ubuntu — §23 S1). 종류는 필수 인자이고 기본값이 없다.
 # 이름: sbox-vm-<이름> / sbox-ct-<flavor><버전(점 제거)>-<이름>(예 sbox-ct-debian13-proj), 골든은 sbox-golden-vm(VM 전용). VM 안 사용자 이름은 sbox, 호스트명은 sbox-nixos(2026-11-22 devvm·dev-nixos 에서 변경).
 #
-#   sboxctl create --kind ct --flavor debian|ubuntu [--release R] [--legacy] [--nesting] [--cpu N] [--memory M] [NAME]  컨테이너 생성(v1)
+#   sboxctl create --kind ct --flavor debian|ubuntu [--release R] [--legacy] [--nesting] [--cpu N] [--memory M] [--disk 용량] [NAME]  컨테이너 생성(v1)
 #   sboxctl releases [flavor]                          쓸 수 있는 릴리스 표(core/sbox/releases.toml)
 #   sboxctl create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
 #   (ct 만) create 에 --from-repo DIR | --manifest F | --tool TOOL[=SPEC] (반복) | --update 를 주면 만든 직후 도구 층을 자동 적용 — 같은 매니페스트로 다시 만들면 같은 버전
@@ -364,7 +364,7 @@ wait_ct() { # wait_ct NAME — 컨테이너가 exec 에 응답하고 기본 경�
 
 # 컨테이너 종류 v1 (plan dev-sandbox-pilot §23 S1~S3). 정책: 비특권만, 비 root 사용자 sbox 에 sudo 없음, 종료된 릴리스는 --legacy 필요.
 create_ct() { # create_ct NAME FLAVOR RELEASE LEGACY NESTING CPU MEM TOKEN
-    local name=$1 flavor=$2 release=$3 legacy=$4 nesting=$5 cpu=$6 mem=$7 token=$8
+    local name=$1 flavor=$2 release=$3 legacy=$4 nesting=$5 cpu=$6 mem=$7 token=$8 disk=${9:-}
     [[ -n $flavor ]] || die "ct 종류는 --flavor 가 필요합니다(debian|ubuntu)"
     case $flavor in
         debian|ubuntu) ;;
@@ -393,7 +393,9 @@ create_ct() { # create_ct NAME FLAVOR RELEASE LEGACY NESTING CPU MEM TOKEN
     incus network show "$NETWORK" >/dev/null 2>&1 || die "브리지 $NETWORK 가 없습니다"
 
     say "생성: $name ← images:$image (비특권 컨테이너, cpu $cpu·메모리 $mem$( ((nesting)) && echo ', nesting' ))"
-    local -a opts=(-n "$NETWORK" -c "limits.cpu=$cpu" -c "limits.memory=$mem")
+    incus profile show sbox-ct >/dev/null 2>&1 </dev/null || die "프로필 sbox-ct 가 없습니다 — 호스트에 incus-sbox 모듈(mods/sys/services/incus-sbox.nix)이 적용돼야 합니다(nixup os)"
+    local -a opts=(-p sbox-ct -c "limits.cpu=$cpu" -c "limits.memory=$mem")
+    [[ -n $disk ]] && opts+=(-d "root,size=$disk")
     ((nesting)) && opts+=(-c security.nesting=true)
     local _try _err
     for _try in 1 2 3; do
@@ -434,7 +436,7 @@ print(" ".join(a["address"] for a in d.get("eth0",{}).get("addresses",[]) if a["
 }
 
 cmd_create() {
-    local name="" cache=1 token=1 home=1 kind="" flavor="" release="" legacy=0 nesting=0 cpu=2 mem=2GiB docker=auto
+    local name="" cache=1 token=1 home=1 kind="" flavor="" release="" legacy=0 nesting=0 cpu=2 mem=2GiB disk="" docker=auto
     TOOLS_ARGS=()   # ct 전용: 만든 직후 도구 층에 넘길 인자(--from-repo·--manifest·--tool·--update) — 다시 만들 때 같은 버전이 재적용되게
     while (($#)); do
         case $1 in
@@ -453,6 +455,7 @@ cmd_create() {
             --nesting) nesting=1 ;;
             --cpu) shift; cpu=${1:-} ;;
             --memory) shift; mem=${1:-} ;;
+            --disk) shift; disk=${1:-} ;;
             -*) die "알 수 없는 옵션: $1" ;;
             *) name=$1 ;;
         esac
@@ -482,7 +485,7 @@ cmd_create() {
             fi
             ((docker)) && nesting=1
             DOCKER=$docker
-            create_ct "$name" "$flavor" "$release" "$legacy" "$nesting" "$cpu" "$mem" "$token"; return ;;
+            create_ct "$name" "$flavor" "$release" "$legacy" "$nesting" "$cpu" "$mem" "$token" "$disk"; return ;;
         "") die "--kind vm|ct 가 필요합니다(기본값 없음)" ;;
         *) die "알 수 없는 종류: $kind (vm|ct)" ;;
     esac

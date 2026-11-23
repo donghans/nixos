@@ -51,6 +51,39 @@ in {
       }
     ];
 
+    # 모든 sbox 컨테이너가 지킬 최소 하드닝 프로필 (plan dev-sandbox-pilot §29-20, 로드맵 S63). sboxctl create --kind ct 가 `-p sbox-ct` 로 붙인다.
+    # default 프로필(incusbr0 NIC)을 대신하므로 NIC·루트 디스크를 여기서 직접 선언한다. preseed 는 프로필을 지우지 않는다.
+    #  - security.idmap.isolated + size 1000000: ct 마다 호스트 uid 범위가 겹치지 않는다. 기본 65536 은 rootless Docker(subuid 65536 필요)가 깨진다.
+    #    size 변경은 실행 중이면 설정만 바뀌고 uid_map 은 재시작 전까지 그대로다(§29-22 시험).
+    #  - nic security.port_isolation: 같은 브리지의 ct↔ct 직접 통신 차단(게이트웨이로는 통신 가능).
+    #  - 루트 디스크 size: btrfs quota 상한(실사용분만 차지). ct 별로 `sboxctl create --disk` 로 덮어쓴다. 실행 중에도 변경 가능.
+    #  - limits.processes: fork 폭탄 방지(ct 별 상한).
+    virtualisation.incus.preseed.profiles = [
+      {
+        name = "sbox-ct";
+        description = "sbox 컨테이너 공통 하드닝 (mods/sys/services/incus-sbox.nix)";
+        config = {
+          "security.idmap.isolated" = "true";
+          "security.idmap.size" = "1000000";
+          "limits.processes" = "4096";
+        };
+        devices = {
+          eth0 = {
+            name = "eth0";
+            type = "nic";
+            network = "sboxbr0";
+            "security.port_isolation" = "true";
+          };
+          root = {
+            path = "/";
+            pool = "default";
+            type = "disk";
+            size = "20GiB";
+          };
+        };
+      }
+    ];
+
     # VM 이 IPv6 RA 를 브리지로 보낼 때 호스트 IPv6 라우팅이 바뀌는 것을 방지(incus.nix 의 incusbr0 와 같은 이유)
     boot.kernel.sysctl."net.ipv6.conf.sboxbr0.accept_ra" = 0;
 
