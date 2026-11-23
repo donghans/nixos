@@ -44,13 +44,18 @@ in {
     #        에디터 등 개별 앱(app.slice/app-graphical.slice)보다 항상 우선하도록)
     # (이유: 앱이 자체 scope로 분리돼 있어도(uwsm app / Chromium 자체 통합) session.slice와
     #        동일 weight(기본 100)면 무거운 앱 하나가 컴포지터 프레임 처리와 동급으로 경쟁함)
+    # (메모리 축, 2026-11-23 추가 — plan dev-sandbox-pilot §29-27 보강 3): CPU·IO 가중치만으로는 앱이 메모리로 컴포지터를 굶기는 것을 못 막는다.
+    #  session.slice 는 MemoryLow 로 회수에서 보호(RAM 의 3%, 컴포지터·세션 기반이 쓰는 양보다 넉넉히), app.slice 는 MemoryHigh 로
+    #  RAM 의 75% 를 넘으면 앱이 먼저 느려지게(죽이지 않음) 해 시스템·세션 몫을 남긴다. 비율이라 호스트가 달라져도 따라간다.
     systemd.user.slices.session.sliceConfig = {
       CPUWeight = 2000;
       IOWeight = 2000;
+      MemoryLow = "3%";
     };
     systemd.user.slices.app.sliceConfig = {
       CPUWeight = 200;
       IOWeight = 200;
+      MemoryHigh = "75%";
     };
     systemd.user.slices."app-graphical".sliceConfig = {
       CPUWeight = 200;
