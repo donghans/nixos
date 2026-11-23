@@ -56,7 +56,7 @@ in {
     #  - security.idmap.isolated + size 1000000: ct 마다 호스트 uid 범위가 겹치지 않는다. 기본 65536 은 rootless Docker(subuid 65536 필요)가 깨진다.
     #    size 변경은 실행 중이면 설정만 바뀌고 uid_map 은 재시작 전까지 그대로다(§29-22 시험).
     #  - nic security.port_isolation: 같은 브리지의 ct↔ct 직접 통신 차단(게이트웨이로는 통신 가능).
-    #  - 루트 디스크 size: btrfs quota 상한(실사용분만 차지). ct 별로 `sboxctl create --disk` 로 덮어쓴다. 실행 중에도 변경 가능.
+    #  - 루트 디스크 size: btrfs quota 상한(기본 10GiB — 일반 Node+DB 개발은 3GiB 안팎, pilot §29-23; 큰 프로젝트만 --disk 로 올림). ct 별로 `sboxctl create --disk` 로 덮어쓴다. 실행 중에도 변경 가능.
     #  - limits.processes: fork 폭탄 방지(ct 별 상한).
     virtualisation.incus.preseed.profiles = [
       {
@@ -78,7 +78,7 @@ in {
             path = "/";
             pool = "default";
             type = "disk";
-            size = "20GiB";
+            size = "10GiB";
           };
         };
       }
