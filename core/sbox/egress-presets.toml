@@ -50,6 +50,18 @@ allow = ["pypi.org:443", "files.pythonhosted.org:443"]
 desc = "Alpine 패키지(apk) — node:*-alpine 같은 Alpine 기반 이미지의 빌드 안에서 쓴다"
 allow = ["dl-cdn.alpinelinux.org:443"]
 
+[preset.ghcr]
+desc = "GitHub Container Registry(ghcr.io) 이미지 — Dockerfile 의 FROM·COPY --from 이 ghcr.io 를 쓰는 프로젝트(예: astral-sh/uv). 블롭은 pkg-containers 도메인에서 받는다"
+allow = ["ghcr.io:443", "pkg-containers.githubusercontent.com:443"]
+
+[preset.nodesource]
+desc = "NodeSource apt 저장소·설치 스크립트(deb.nodesource.com) — Dockerfile 이 setup_XX.x 로 Node 를 설치하는 경우"
+allow = ["deb.nodesource.com:443"]
+
+[preset.mongodb-apt]
+desc = "MongoDB apt 저장소(repo.mongodb.org)와 서명 키(www.mongodb.org) — Dockerfile 이 MongoDB 를 직접 설치하는 경우"
+allow = ["repo.mongodb.org:443", "www.mongodb.org:443", "pgp.mongodb.com:443"]
+
 [preset.git-github]
 desc = "GitHub 소스(git over https)"
 allow = ["github.com:443", "codeload.github.com:443", "objects.githubusercontent.com:443", "raw.githubusercontent.com:443"]

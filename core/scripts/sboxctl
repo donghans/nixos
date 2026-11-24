@@ -996,12 +996,8 @@ broker_push() { # 호스트의 상태 파일을 broker 에 원자적으로 놓�
 broker_install() { # broker_install IP — 프록시 코드·서비스 유닛 설치(create 와 update 가 같이 씀). 서비스는 호출한 쪽이 시작
     local ip=$1
     incus exec "$BROKER" -- mkdir -p /usr/local/lib/sbox-broker /etc/broker </dev/null
-    # broker 자신의 이름 해석: 호스트 dnsmasq(게이트웨이)를 거치지 않고 공용 DNS 에 직접 — 호스트 dnsmasq 의 첫 상위(1.1.1.1)가 이 망에서 막혀 모든 새 이름이 5초씩 걸려
-    # ct(musl 은 5초에 포기)의 DNS 가 「일시 오류」로 실패했다(2026-11-24, pilot §29-38). 순서: 8.8.8.8 → 1.1.1.1 → 9.9.9.9 (resolved 는 죽은 서버를 건너뛰고 되는 서버를 기억함)
-    incus exec "$BROKER" -- sh -c 'mkdir -p /etc/systemd/resolved.conf.d /etc/systemd/network/eth0.network.d
-        printf "[Resolve]\nDNS=8.8.8.8 1.1.1.1 9.9.9.9\nDomains=~.\n" > /etc/systemd/resolved.conf.d/sbox-broker.conf
-        printf "[DHCPv4]\nUseDNS=no\n" > /etc/systemd/network/eth0.network.d/sbox-broker.conf
-        (networkctl reload && networkctl reconfigure eth0; systemctl restart systemd-resolved) >/dev/null 2>&1 || true' </dev/null
+    # broker 의 이름 해석은 프록시 프로그램이 직접 한다(상위 DNS 여러 곳에 동시에 질의 — pilot §29-38). 예전에 넣었던 resolved·networkd 드롭인은 치운다
+    incus exec "$BROKER" -- sh -c 'rm -f /etc/systemd/resolved.conf.d/sbox-broker.conf /etc/systemd/network/eth0.network.d/sbox-broker.conf' </dev/null
     # 게이트웨이 규칙(방식 B, pilot §29-37): ct 의 443·80 은 이 컴퓨터의 프록시로 redirect, 나머지 전달(forward)은 명시적 기본 거부 + ip_forward 0.
     # 나중에 누가 masquerade 를 넣어도 열린 라우터가 되지 않게(pilot §29-36 에서 재현). 체인 이름에 fwd 를 쓰지 말 것(nft 예약어).
     incus exec "$BROKER" --env "PATH=$CT_PATH" -- sh -c 'command -v nft >/dev/null || { apt-get install -y -qq --no-install-recommends nftables >/dev/null; }' </dev/null || die "broker: nftables 설치 실패"

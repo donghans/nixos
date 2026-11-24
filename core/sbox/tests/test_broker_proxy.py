@@ -15,6 +15,10 @@ import broker_proxy as bp  # noqa: E402
 n = {"ok": 0, "bad": 0}
 
 
+async def local_resolver(name):          # 시험은 실제 DNS 를 쓰지 않는다
+    return ["127.0.0.1"] if name == "localhost" else []
+
+
 def check(name, cond, extra=""):
     n["ok" if cond else "bad"] += 1
     if not cond:
@@ -148,7 +152,7 @@ async def run():
     write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": [f"localhost:{eport}"]}}})
     bp._logf = open(os.devnull, "w")
     # 시험용: 사설 대상 허용 프록시와 거부 프록시
-    px = bp.Proxy(bp.Config(cfgfile), allow_private_targets=True)
+    px = bp.Proxy(bp.Config(cfgfile), allow_private_targets=True, resolver=local_resolver)
     srv = await asyncio.start_server(px.handle, "127.0.0.1", 0)
     pport = srv.sockets[0].getsockname()[1]
     r, w, head = await talk(pport, f"CONNECT localhost:{eport} HTTP/1.1\r\nHost: x\r\n\r\n".encode())
@@ -171,7 +175,7 @@ async def run():
     check("설정 재적용·default_allow", head.startswith(b"HTTP/1.1 200"), head)
     w.close()
     # ⑤ 사설 해석 거부
-    px2 = bp.Proxy(bp.Config(cfgfile), allow_private_targets=False)
+    px2 = bp.Proxy(bp.Config(cfgfile), allow_private_targets=False, resolver=local_resolver)
     srv2 = await asyncio.start_server(px2.handle, "127.0.0.1", 0)
     p2 = srv2.sockets[0].getsockname()[1]
     r, w, head = await talk(p2, f"CONNECT localhost:{eport} HTTP/1.1\r\n\r\n".encode())
@@ -190,7 +194,7 @@ async def run():
     bp.SNI_PORTS.discard(eport)
     # ⑧ 투명 TLS 수신(S70-b-lite): 프록시 요청 없이 ClientHello 만 보내도 SNI 로 판단·전달
     write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": [f"localhost:{eport}"]}}})
-    px3 = bp.Proxy(bp.Config(cfgfile), allow_private_targets=True, tls_upstream_port=eport)
+    px3 = bp.Proxy(bp.Config(cfgfile), allow_private_targets=True, tls_upstream_port=eport, resolver=local_resolver)
     srv3 = await asyncio.start_server(px3.handle_tls, "127.0.0.1", 0, limit=32768)
     p3 = srv3.sockets[0].getsockname()[1]
     r, w = await asyncio.open_connection("127.0.0.1", p3)
@@ -210,7 +214,7 @@ async def run():
     w.write(hello[:20]); await w.drain(); w.write(hello[20:]); await w.drain()     # 조각나서 와도
     check("투명: 조각난 ClientHello", await asyncio.wait_for(r.readexactly(len(hello)), 5) == hello)
     w.close()
-    px4 = bp.Proxy(bp.Config(cfgfile), allow_private_targets=False, tls_upstream_port=eport)
+    px4 = bp.Proxy(bp.Config(cfgfile), allow_private_targets=False, tls_upstream_port=eport, resolver=local_resolver)
     srv4 = await asyncio.start_server(px4.handle_tls, "127.0.0.1", 0, limit=32768)
     r, w = await asyncio.open_connection("127.0.0.1", srv4.sockets[0].getsockname()[1])
     w.write(hello); await w.drain()
@@ -218,7 +222,7 @@ async def run():
     w.close()
     # 투명 평문 HTTP(80): 이름:80 이 명시된 이름만, Host 로 판단
     write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": [f"localhost:{eport}"]}}})
-    px5 = bp.Proxy(bp.Config(cfgfile), allow_private_targets=True, http_upstream_port=eport)
+    px5 = bp.Proxy(bp.Config(cfgfile), allow_private_targets=True, http_upstream_port=eport, resolver=local_resolver)
     srv5 = await asyncio.start_server(px5.handle_http, "127.0.0.1", 0, limit=9000)
     p5 = srv5.sockets[0].getsockname()[1]
     req = b"GET /x HTTP/1.1\r\nHost: localhost:80\r\n\r\n"
@@ -277,6 +281,47 @@ async def run():
     write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["deb.debian.org:80"]}}})
     check("dns: 80 만 허용된 이름도 진짜 주소", (await ask("deb.debian.org")).endswith(bytes([151, 101, 2, 132])))
     tr.close()
+    # 상위 DNS 동시 질의(resolve_a): 한 곳이 죽어 있어도 다른 곳의 응답을 쓴다, NXDOMAIN 은 [], 전부 죽으면 OSError
+    class Up(asyncio.DatagramProtocol):
+        def __init__(self, mode): self.mode = mode
+        def connection_made(self, t): self.t = t
+        def datagram_received(self, d, a):
+            if self.mode == "dead":
+                return
+            qp = bp.parse_question(d)
+            qid, name, qtype, question = qp
+            if self.mode == "nx":
+                self.t.sendto(bp.build_answer(qid, question, qtype, 3), a)
+            elif self.mode == "bad-id":
+                self.t.sendto(bp.build_answer((qid + 1) & 0xFFFF, question, qtype, 0, ["6.6.6.6"]), a)
+            else:
+                self.t.sendto(bp.build_answer(qid, question, qtype, 0, ["93.184.216.34", "93.184.216.35"]), a)
+    ups = {}
+    for m in ("dead", "ok", "nx", "bad-id"):
+        t_, _ = await loop.create_datagram_endpoint(lambda m=m: Up(m), local_addr=("127.0.0.1", 0))
+        ups[m] = t_
+    # resolve_a 는 서버 포트가 53 고정이라 시험에서는 포트를 바꿔 쓸 수 있게 (host, port) 도 받는다 — 여기서는 함수의 응답 파서만 직접 확인한다
+    pkt = dns_query("a.example")
+    rsp = bp.build_answer(0x1234, pkt[12:], 1, 0, ["1.2.3.4", "5.6.7.8"])
+    check("A 응답 파서: 주소 둘", bp.parse_a_answers(rsp, 0x1234) == (0, ["1.2.3.4", "5.6.7.8"]), bp.parse_a_answers(rsp, 0x1234))
+    check("A 응답 파서: id 다르면 무시", bp.parse_a_answers(rsp, 0x1235) is None)
+    check("A 응답 파서: NXDOMAIN", bp.parse_a_answers(bp.build_answer(0x1234, pkt[12:], 1, 3), 0x1234) == (3, []))
+    check("A 응답 파서: 잘린 것·질의 패킷은 None", bp.parse_a_answers(rsp[:20], 0x1234) is None and bp.parse_a_answers(pkt, 0x1234) is None)
+    tc = bytearray(rsp); tc[2] |= 0x02
+    check("A 응답 파서: TC(잘림) 표시는 None", bp.parse_a_answers(bytes(tc), 0x1234) is None)
+    sv = {m: ("127.0.0.1", t_.get_extra_info("sockname")[1]) for m, t_ in ups.items()}
+    t0 = loop.time()
+    r1 = await bp.resolve_a("a.example", [sv["dead"], sv["ok"]], timeout=3)
+    check("resolve_a: 죽은 서버가 있어도 산 서버 응답을 바로 씀", r1 == ["93.184.216.34", "93.184.216.35"] and loop.time() - t0 < 1.5, (r1, loop.time() - t0))
+    check("resolve_a: NXDOMAIN 은 []", await bp.resolve_a("a.example", [sv["dead"], sv["nx"]], timeout=3) == [])
+    check("resolve_a: id 가 틀린 응답은 무시하고 정상 응답 채택", await bp.resolve_a("a.example", [sv["bad-id"], sv["ok"]], timeout=3) == ["93.184.216.34", "93.184.216.35"])
+    try:
+        await bp.resolve_a("a.example", [sv["dead"], sv["bad-id"]], timeout=1); check("resolve_a: 전부 무응답이면 OSError", False)
+    except OSError:
+        check("resolve_a: 전부 무응답이면 OSError", True)
+    check("resolve_a: 잘못된 이름은 []", await bp.resolve_a("a..example", [sv["ok"]], timeout=1) == [])
+    for t_ in ups.values():
+        t_.close()
     # 연결 경쟁: 첫 주소가 죽어 있어도(응답 없음 — 시험에서는 닫힌 포트의 다른 주소) 두 번째가 바로 쓰인다
     t0 = asyncio.get_running_loop().time()
     rr, ww = await bp.connect_race(["198.51.100.1", "127.0.0.1"], eport, stagger=0.2, timeout=3)

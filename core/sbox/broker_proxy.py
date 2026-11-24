@@ -91,6 +91,106 @@ def parse_sni(data):
     return None
 
 
+UPSTREAM_DNS = ["8.8.8.8", "9.9.9.9", "1.1.1.1"]   # 시험·운영 모두 --upstream-dns 로 바꾼다
+
+
+def parse_a_answers(data, qid):
+    """DNS 응답 패킷에서 A 레코드 주소 목록을 꺼낸다. (rcode, [ip...]) — id 가 다르거나 잘렸거나 응답이 아니면 None. CNAME 사슬은 따라가지 않고 A 만 모은다(재귀 서버가 같이 준다)."""
+    try:
+        if len(data) < 12 or int.from_bytes(data[0:2], "big") != qid or not data[2] & 0x80 or data[2] & 0x02:   # id·QR·TC
+            return None
+        rcode = data[3] & 0x0F
+        qd, an = int.from_bytes(data[4:6], "big"), int.from_bytes(data[6:8], "big")
+        pos = 12
+
+        def skip_name(p):
+            while True:
+                n = data[p]
+                if n == 0:
+                    return p + 1
+                if n & 0xC0 == 0xC0:
+                    return p + 2
+                p += 1 + n
+        for _ in range(qd):
+            pos = skip_name(pos) + 4
+        ips = []
+        for _ in range(an):
+            pos = skip_name(pos)
+            rtype, rdlen = int.from_bytes(data[pos:pos + 2], "big"), int.from_bytes(data[pos + 8:pos + 10], "big")
+            rdata = data[pos + 10:pos + 10 + rdlen]
+            if len(rdata) != rdlen:
+                return None
+            if rtype == 1 and rdlen == 4:
+                ips.append(socket.inet_ntoa(rdata))
+            pos += 10 + rdlen
+        return rcode, ips
+    except (IndexError, ValueError):
+        return None
+
+
+async def resolve_a(name, servers=None, timeout=3.0):
+    """이름의 IPv4 목록. 상위 DNS 여러 곳에 **동시에** 물어 먼저 온 유효한 응답을 쓴다(한 곳이 막혀 있어도 기다리지 않는다 — 이 망에서 1.1.1.1 이 막혀
+    systemd-resolved·dnsmasq 가 새 이름마다 지연·실패했다, pilot §29-38). 질의마다 임의 출발 포트·임의 id. 없는 이름(NXDOMAIN)은 []. 전부 실패하면 OSError."""
+    servers = servers or UPSTREAM_DNS
+    loop = asyncio.get_running_loop()
+    qid = int.from_bytes(os.urandom(2), "big")
+    labels = name.rstrip(".").split(".")
+    if not name or any(not 0 < len(x) < 64 for x in labels):
+        return []
+    pkt = qid.to_bytes(2, "big") + (0x0100).to_bytes(2, "big") + b"\0\1\0\0\0\0\0\0" + b"".join(bytes([len(x)]) + x.encode("ascii", "ignore") for x in labels) + b"\0\0\1\0\1"
+    got = asyncio.Queue()
+    transports = []
+
+    class P(asyncio.DatagramProtocol):
+        def datagram_received(self, data, addr):
+            r = parse_a_answers(data, qid)
+            if r is not None:
+                got.put_nowait(r)
+    try:
+        for srv in servers:
+            try:
+                t, _ = await loop.create_datagram_endpoint(P, remote_addr=(srv, 53) if isinstance(srv, str) else tuple(srv))
+                t.sendto(pkt)
+                transports.append(t)
+            except OSError:
+                continue
+        deadline = loop.time() + timeout
+        nx = False
+        while True:
+            left = deadline - loop.time()
+            if left <= 0:
+                break
+            try:
+                rcode, ips = await asyncio.wait_for(got.get(), left)
+            except asyncio.TimeoutError:
+                break
+            if rcode == 0 and ips:
+                return ips
+            if rcode == 3:
+                nx = True
+                break
+            if rcode == 0:          # 이름은 있으나 A 없음
+                return []
+            # SERVFAIL 등 — 다른 서버의 응답을 더 기다린다
+        if nx:
+            return []
+        raise OSError("DNS 상위 서버가 모두 응답하지 않음: " + name)
+    finally:
+        for t in transports:
+            t.close()
+
+
+def orig_dst(writer):
+    """redirect 되기 전의 원래 목적지(`ip:port`) — 감사용 기록(SNI 가 없거나 거부된 연결이 어디로 가려던 것인지). REDIRECT 가 아니면 None."""
+    try:
+        sock = writer.get_extra_info("socket")
+        raw = sock.getsockopt(socket.SOL_IP, 80, 16)          # SO_ORIGINAL_DST
+        port = int.from_bytes(raw[2:4], "big")
+        return f"{socket.inet_ntoa(raw[4:8])}:{port}"
+    except (OSError, AttributeError, ValueError):
+        return None
+
+
 async def connect_race(addrs, port, stagger=0.3, timeout=CONNECT_TIMEOUT):
     """주소 여러 개를 시차(stagger 초)를 두고 동시에 시도해 먼저 연결되는 것을 쓴다(happy eyeballs 식). CDN 이 돌려준 주소 중 하나가 죽어 있어도
     그 주소의 연결 시한(10초)을 줄줄이 기다리지 않는다 — 순서대로 시도하던 때 pypi.org 가 37초 만에 실패해 pip 이 읽기 시간 초과로 빌드가 깨졌다(2026-11-24, 핫스팟 망)."""
@@ -176,10 +276,11 @@ async def pipe(r, w, counter, key):
 
 
 class Proxy:
-    def __init__(self, cfg, allow_private_targets=False, tls_upstream_port=443, http_upstream_port=80):
+    def __init__(self, cfg, allow_private_targets=False, tls_upstream_port=443, http_upstream_port=80, resolver=None):
         self.cfg, self.allow_private, self.sem = cfg, allow_private_targets, asyncio.Semaphore(MAX_CONNS)
         self.tls_upstream_port = tls_upstream_port   # 시험에서만 바꾼다
         self.http_upstream_port = http_upstream_port
+        self.resolver = resolver or resolve_a
 
     def decide(self, client_ip, host, port):
         data = self.cfg.get()
@@ -209,13 +310,17 @@ class Proxy:
                 pass
 
     async def open_upstream(self, host, port):
-        """이름 해석은 이 프록시가 한다 — 사설 대역이면 거부. (reader, writer, 사유) — 실패하면 writer 가 None."""
+        """이름 해석은 이 프록시가 한다(상위 DNS 에 직접·IPv4 만) — 사설 대역이면 거부. (reader, writer, 사유) — 실패하면 writer 가 None."""
         try:
-            infos = await asyncio.wait_for(asyncio.get_running_loop().getaddrinfo(
-                host, port, type=socket.SOCK_STREAM), CONNECT_TIMEOUT)
-        except (asyncio.TimeoutError, OSError):
+            ipaddress.ip_address(host)
+            addrs = [host]
+        except ValueError:
+            try:
+                addrs = await self.resolver(host)
+            except (asyncio.TimeoutError, OSError):
+                return None, None, "resolve-failed"
+        if not addrs:
             return None, None, "resolve-failed"
-        addrs = [i[4][0] for i in infos]
         if not self.allow_private and any(is_private(a) for a in addrs):
             return None, None, "resolved-private"
         r, w = await connect_race(addrs, port)
@@ -227,6 +332,9 @@ class Proxy:
         """투명 TLS 수신(S70-b-lite): ct 가 허용된 이름을 DNS 스텁에서 broker IP 로 받아 그대로 접속해 온다."""
         peer = writer.get_extra_info("peername") or ("?", 0)
         rec = {"client": peer[0], "host": "", "port": self.tls_upstream_port, "mode": "transparent", "verdict": "deny", "reason": "", "up": 0, "down": 0}
+        od = orig_dst(writer)
+        if od:
+            rec["orig"] = od
         t0 = time.monotonic()
         up_w = None
         try:
@@ -280,6 +388,9 @@ class Proxy:
         """투명 평문 HTTP 수신(포트 80): 첫 요청의 Host 헤더로 판단한다 — 허용목록에 `이름:80` 이 명시된 이름만(예: Debian·Ubuntu 이미지의 apt). 본문은 해석하지 않는다."""
         peer = writer.get_extra_info("peername") or ("?", 0)
         rec = {"client": peer[0], "host": "", "port": self.http_upstream_port, "mode": "transparent-http", "verdict": "deny", "reason": "", "up": 0, "down": 0}
+        od = orig_dst(writer)
+        if od:
+            rec["orig"] = od
         t0 = time.monotonic()
         up_w = None
         try:
@@ -427,7 +538,7 @@ class DnsStub(asyncio.DatagramProtocol):
 
     def __init__(self, proxy, resolver=None):
         self.proxy, self.transport = proxy, None
-        self.resolver = resolver or self._resolve
+        self.resolver = resolver or proxy.resolver
         self.cache, self.inflight = {}, {}      # 이름 → (만료 시각, 주소 목록) / 진행 중인 조회(같은 이름의 재전송 질의를 한 번만 조회)
 
     async def lookup(self, name):
@@ -450,10 +561,6 @@ class DnsStub(asyncio.DatagramProtocol):
             self.inflight[name] = asyncio.ensure_future(work())
             self.inflight[name].add_done_callback(lambda _f, n=name: self.inflight.pop(n, None))
         return await asyncio.shield(self.inflight[name])
-
-    async def _resolve(self, name):
-        infos = await asyncio.wait_for(asyncio.get_running_loop().getaddrinfo(name, 443, family=socket.AF_INET, type=socket.SOCK_STREAM), CONNECT_TIMEOUT)
-        return sorted({i[4][0] for i in infos})
 
     def connection_made(self, transport):
         self.transport = transport
@@ -511,9 +618,11 @@ def main(argv):
     ap.add_argument("--allow-private-targets", action="store_true", help="시험 전용 — 사설 대역 대상 허용")
     ap.add_argument("--tls-port", type=int, default=0, help="투명 TLS 수신 포트(0 = 끔, 운영은 443)")
     ap.add_argument("--http-port", type=int, default=0, help="투명 평문 HTTP 수신 포트(0 = 끔, 운영은 80 — 허용목록에 이름:80 이 있는 이름만)")
+    ap.add_argument("--upstream-dns", default=",".join(UPSTREAM_DNS), help="상위 DNS(쉼표 구분) — 전부에 동시에 묻는다")
     ap.add_argument("--dns-listen", default="", help="DNS 스텁이 받을 주소(broker 자신의 IP — systemd-resolved 가 127.0.0.53 을 쓰므로 와일드카드 불가)")
     ap.add_argument("--dns-port", type=int, default=53)
     a = ap.parse_args(argv)
+    UPSTREAM_DNS[:] = [x for x in a.upstream_dns.split(",") if x]
     if a.log != "-":
         os.makedirs(os.path.dirname(a.log), exist_ok=True)
         _logf = open(a.log, "a", buffering=1)
