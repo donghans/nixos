@@ -3,7 +3,7 @@
 # 종류(--kind): vm = nixos OS 단위 시험용 VM(구현됨). ct = 프로젝트용 컨테이너(v1: debian·ubuntu — §23 S1). 종류는 필수 인자이고 기본값이 없다.
 # 이름: sbox-vm-<이름> / sbox-ct-<flavor><버전(점 제거)>-<이름>(예 sbox-ct-debian13-proj), 골든은 sbox-golden-vm(VM 전용). VM 안 사용자 이름은 sbox, 호스트명은 sbox-nixos(2026-11-22 devvm·dev-nixos 에서 변경).
 #
-#   sboxctl create --kind ct --flavor debian|ubuntu [--release R] [--legacy] [--nesting] [--cpu N] [--memory M] [--disk 용량] [NAME]  컨테이너 생성(v1)
+#   sboxctl create --kind ct --flavor debian|ubuntu [--release R] [--legacy] [--nesting] [--cpu N] [--memory M] [--disk 용량] (--from-repo DIR|--manifest F|--no-project) [NAME]  컨테이너 생성(v1)
 #   sboxctl releases [flavor]                          쓸 수 있는 릴리스 표(core/sbox/releases.toml)
 #   sboxctl create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
 #   (ct 만) create 에 --from-repo DIR | --manifest F | --tool TOOL[=SPEC] (반복) | --update 를 주면 만든 직후 도구 층을 자동 적용 — 같은 매니페스트로 다시 만들면 같은 버전
@@ -17,7 +17,7 @@
 #   sboxctl golden [SRC_INSTANCE]                     SRC(기본 dev-nixos)를 정상 종료 후 복제해 골든(sbox-golden-vm@gold)을 새로 만듦
 #   sboxctl rebuild-golden [--stale-ok]               ISO+nixstrap(NIXSTRAP_AUTO)로 골든을 처음부터 새로 만듦(약 15분)
 #   sboxctl broker create|status                      L7 관문(broker) ct 생성·상태 — 프로젝트 ct 의 모든 외부 연결은 이 ct 의 CONNECT 프록시만 거친다(S61, pilot §29-25)
-#   sboxctl egress NAME [--from-repo DIR|--manifest F] [--allow host[:port]]...  ct 를 broker 에 연결(NIC ACL·프록시 환경·허용목록). create 는 broker 가 있으면 자동으로 부른다
+#   sboxctl egress NAME [--from-repo DIR|--manifest F] [--allow host[:port]]... [--open]  ct 를 broker 에 연결(인자 없으면 create 때 기록한 user.sbox.manifest·egress-open 사용 NIC ACL·프록시 환경·허용목록). create 는 broker 가 있으면 자동으로 부른다
 #   sboxctl audit [NAME…]                             격리 불변식 점검(읽기 전용) — raw.*·특권·낯선 장치·프로필 이탈·포트 격리·idmap 을 sboxctl 이 만든 모양과 대조(S62 첫 조각)
 #   sboxctl resources NAME                            기존 ct 를 sbox.slice(합계 자원 상한) 아래로 옮기고 sbox-mem 설치(재시작 필요, S69)
 #   sboxctl list                                      sbox-* 인스턴스 목록
@@ -431,6 +431,7 @@ create_ct() { # create_ct NAME FLAVOR RELEASE LEGACY NESTING CPU MEM TOKEN
         || die "사용자 $VM_USER 생성 실패"
     # broker 가 있으면 도구·Docker 설치(apt)보다 먼저 연결한다 — 이 범위의 ct 는 게이트웨이 DNS 를 못 쓰므로 apt 도 broker 프록시로 나가야 한다(S70-a)
     if [[ $name != "$BROKER" ]] && incus info "$BROKER" >/dev/null 2>&1 </dev/null; then
+        ((EGRESS_OPEN)) && incus config set "$name" user.sbox.egress-open=1 </dev/null   # create 에서 이미 사용자 확인을 받았다
         cmd_egress "$name" ${EGRESS_MAN:+--manifest "$EGRESS_MAN"} || die "$name 은 만들어졌지만 broker 연결에 실패했습니다 — 'sboxctl egress $name' 로 다시 시도하세요"
     fi
     ((token)) && cmd_token "$name"
@@ -449,13 +450,18 @@ print(" ".join(a["address"] for a in d.get("eth0",{}).get("addresses",[]) if a["
     if ((${DOCKER:-0})); then
         cmd_docker "$name" "${DOCKER_ARGS[@]}" || die "$name 은 만들어졌지만 Docker 설치에 실패했습니다 — 'sboxctl docker $name …' 로 다시 시도하세요"
     fi
+    # 도구 적용으로 매니페스트가 생기거나 바뀌었을 수 있으니 허용목록을 다시 계산(처음 연결은 apt 를 위해 flavor·always 만으로 했음)
+    if [[ $name != "$BROKER" ]] && incus info "$BROKER" >/dev/null 2>&1 </dev/null; then
+        cmd_egress "$name" >/dev/null || say "경고: 허용목록 재계산 실패 — 'sboxctl egress $name' 로 다시 시도하세요"
+    fi
     if ((${#TOOLS_ARGS[@]} == 0)); then
         say "알림: 도구(Node·Go·Rust·Python·Compose·uv)는 'sboxctl tools $name --from-repo <저장소>' 또는 create 의 --from-repo/--tool 로 읽기 전용 도구 층을 붙입니다"
     fi
 }
 
 cmd_create() {
-    local name="" cache=1 token=1 home=1 kind="" flavor="" release="" legacy=0 nesting=0 cpu=2 mem="" disk="" docker=auto
+    local name="" cache=1 token=1 home=1 kind="" flavor="" release="" legacy=0 nesting=0 cpu=2 mem="" disk="" docker=auto noproject=0
+    EGRESS_OPEN=0
     TOOLS_ARGS=()   # ct 전용: 만든 직후 도구 층에 넘길 인자(--from-repo·--manifest·--tool·--update) — 다시 만들 때 같은 버전이 재적용되게
     while (($#)); do
         case $1 in
@@ -464,6 +470,7 @@ cmd_create() {
             --tool) TOOLS_ARGS+=("${2:?}"); shift ;;
             --update) TOOLS_ARGS+=(--update) ;;
             --no-docker) docker=0 ;;
+            --no-project) noproject=1 ;;
             --no-cache) cache=0 ;;
             --no-token) token=0 ;;
             --no-home) home=0 ;;
@@ -497,6 +504,12 @@ cmd_create() {
             done
             [[ -z $_man && -n $_repo ]] && _man="$HOME/.config/sbox/manifests/$(basename "${_repo%/}").toml"
             EGRESS_MAN=$_man
+            # 프로젝트(매니페스트) 없이는 송신 허용을 계산할 수 없다 — 조용히 전부 열리지 않게 명시적 선택과 확인을 요구한다
+            if [[ -z $_man ]]; then
+                ((noproject)) || die "프로젝트가 필요합니다: --from-repo <저장소> (또는 --manifest <파일>). 프로젝트 없이 만들려면 --no-project — 모든 송신 프리셋이 열리므로 확인을 받습니다"
+                confirm_open_egress "$name" || die "취소했습니다"
+                EGRESS_OPEN=1
+            fi
             if [[ $docker == auto ]]; then
                 docker=1   # 기본 켬(늘 쓰는 도구) — 끄는 길은 --no-docker(이번 한 번) 또는 매니페스트 [override] docker = "no"(영구)
                 local _rc=0
@@ -964,6 +977,7 @@ for i in json.load(sys.stdin):
 # ---- L7 관문(broker) — plan dev-sandbox-pilot §29-25 (S61 최소 구현) ----
 BROKER="sbox-ct-debian13-broker"
 BROKER_PORT=3128
+EGRESS_OPEN=0  # 1 이면 프로젝트 없이 모든 프리셋을 연 ct(--no-project)
 EGRESS_MAN=""   # cmd_create 가 매니페스트 경로를 채운다(자동 연결에 쓰임)
 EGRESS_ACL="sbox-egress"
 EGRESS_STATE="${SBOX_EGRESS_STATE:-$HOME/.local/state/sbox/egress-clients.json}"   # 정본(호스트). broker 의 /etc/broker/clients.json 은 이것의 사본
@@ -1037,15 +1051,23 @@ UNIT
     say "완료: broker $ip:$BROKER_PORT — 프로젝트 ct 는 'sboxctl egress NAME' 으로 연결(create 는 자동)"
 }
 
+confirm_open_egress() { # 프로젝트 없는 ct 의 「모든 송신 프리셋 허용」을 사람이 입력으로 확인(비대화형이면 거부)
+    [[ -t 0 && -t 1 ]] || { say "비대화형이라 확인할 수 없습니다(--no-project 는 터미널에서만)"; return 1; }
+    say "경고: $1 은 프로젝트가 없어 모든 송신 프리셋(패키지 저장소·Docker·GitHub·LLM API 등 약 27곳)이 열립니다. 프로젝트별 허용으로 좁혀지지 않습니다."
+    local ans; read -r -p "계속하려면 정확히 'open' 을 입력: " ans
+    [[ $ans == open ]]
+}
+
 cmd_egress() { # cmd_egress NAME [--from-repo DIR|--manifest F] [--allow H[:P]]...
     local name=${1:-}; shift || true
     check_name "$name"
     [[ $NAME_KIND == ct ]] || die "egress 는 ct 전용입니다"
     [[ $name != "$BROKER" ]] || die "broker 자신은 연결하지 않습니다"
     incus info "$BROKER" >/dev/null 2>&1 </dev/null || die "broker 가 없습니다 — 먼저 'sboxctl broker create'"
-    local man="" ; local -a allow=()
+    local man="" open=0 ; local -a allow=()
     while (($#)); do
         case $1 in
+            --open) open=1 ;;
             --from-repo) man="$HOME/.config/sbox/manifests/$(basename "${2%/}").toml"; shift ;;
             --manifest) man=${2:?}; shift ;;
             --allow) allow+=(--allow "${2:?}"); shift ;;
@@ -1053,9 +1075,20 @@ cmd_egress() { # cmd_egress NAME [--from-repo DIR|--manifest F] [--allow H[:P]].
         esac
         shift
     done
+    # 인자가 없으면 만들 때 기록한 연결(user.sbox.manifest·user.sbox.egress-open)을 쓴다 — ct 와 매니페스트의 연결이 기록으로 남는다
+    if [[ -z $man ]] && ((!open)); then
+        man=$(incus config get "$name" user.sbox.manifest </dev/null 2>/dev/null || true)
+        [[ $(incus config get "$name" user.sbox.egress-open </dev/null 2>/dev/null || true) == 1 ]] && open=1
+    fi
+    [[ -n $man ]] || ((open)) || die "$name 에 연결된 프로젝트가 없습니다 — --from-repo <저장소>|--manifest <파일>, 또는 확인을 거친 --open"
+    if [[ -n $man ]]; then incus config set "$name" user.sbox.manifest="$man" </dev/null; fi
+    if ((open)) && [[ -z $man ]] && [[ $(incus config get "$name" user.sbox.egress-open </dev/null 2>/dev/null || true) != 1 ]]; then
+        confirm_open_egress "$name" || die "취소했습니다"
+        incus config set "$name" user.sbox.egress-open=1 </dev/null
+    fi
     local ip bip; ip=$(ct_ip "$name"); bip=$(ct_ip "$BROKER")
     [[ -n $ip && -n $bip ]] || die "ct·broker 의 IP 를 읽지 못했습니다"
-    python3 "$SBOX_DIR/egress.py" set --state "$EGRESS_STATE" --name "$name" --ip "$ip" ${man:+--manifest "$man"} "${allow[@]}" || die "허용목록 계산 실패"
+    python3 "$SBOX_DIR/egress.py" set --state "$EGRESS_STATE" --name "$name" --ip "$ip" ${man:+--manifest "$man"} $( ((open)) && [[ -z $man ]] && echo --open ) "${allow[@]}" || die "허용목록 계산 실패"
     broker_push
     # NIC ACL: broker 의 프록시 포트(+게이트웨이 DNS)만 허용, 나머지 송신은 drop(기록)
     if ! incus network acl show "$EGRESS_ACL" >/dev/null 2>&1 </dev/null; then

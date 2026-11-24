@@ -41,8 +41,11 @@ def presets_table():
 
 
 def manifest_data(path):
-    if not path or not os.path.exists(path):
+    """None = 매니페스트를 지정하지 않음(= 열린 허용 요청). 지정했는데 아직 파일이 없으면 {}(create 중 — flavor·always 만 계산, 도구 적용 뒤 다시 계산)."""
+    if not path:
         return None
+    if not os.path.exists(path):
+        return {}
     with open(path, "rb") as f:
         return tomllib.load(f)
 
@@ -57,14 +60,16 @@ def flavor_of(name):
     return m.group(1) if m else None
 
 
-def compute(name, manifest_path, extra=()):
+def compute(name, manifest_path, extra=(), open_all=False):
     """ct 하나의 허용목록 → (규칙 → 출처 표시 dict). 출처 = 프리셋 이름 | "egress" | "--allow"."""
     t = presets_table()
     pre = t.get("preset", {})
     m = manifest_data(manifest_path)
     net = (m or {}).get("network", {})
-    if m is None:                                   # 매니페스트 없음 → 호환: 모든 프리셋
-        names = list(pre)
+    if m is None:
+        if not open_all:
+            raise SystemExit("매니페스트가 지정되지 않았습니다 — --manifest 를 주거나, 프로젝트 없이 모든 프리셋을 허용하려면 --open 을 명시하세요")
+        names = list(pre)                           # 열린 허용: 모든 프리셋(위험 — 호출한 쪽이 사용자 확인을 받는다)
     else:
         names = list(t.get("always", []))
         names += t.get("auto", {}).get("flavor", {}).get(flavor_of(name), [])
@@ -101,7 +106,7 @@ def main(argv):
     ap.add_argument("cmd", choices=["set", "remove", "show"])
     ap.add_argument("--state", required=True)
     ap.add_argument("--name"); ap.add_argument("--ip"); ap.add_argument("--manifest")
-    ap.add_argument("--allow", action="append", default=[])
+    ap.add_argument("--allow", action="append", default=[]); ap.add_argument("--open", action="store_true")
     a = ap.parse_args(argv)
     data = load(a.state)
     if a.cmd == "show":
@@ -115,7 +120,7 @@ def main(argv):
     if a.cmd == "set":
         if not a.ip:
             raise SystemExit("--ip 가 필요합니다")
-        rules = compute(a.name, a.manifest, a.allow)
+        rules = compute(a.name, a.manifest, a.allow, a.open)
         clients[a.ip] = {"name": a.name, "allow": sorted(rules), "sources": dict(sorted(rules.items()))}
         by = {}
         for s_ in rules.values():
