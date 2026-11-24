@@ -11,6 +11,12 @@
   - 포트 443 은 TLS ClientHello 의 SNI 가 요청한 호스트와 같아야 한다(다르면 도메인 위장으로 보고 끊음). 다른 포트는 SNI 검사를 하지 않는다.
   - 일반 HTTP 프록시 요청(GET http://…)은 지원하지 않는다(403) — CONNECT 만. http:// 저장소는 https 로 바꿔 쓴다.
   - 요청마다 한 줄 JSON 기록(시각·클라이언트·호스트·포트·판정·사유·바이트·초). 차단 없이 전수 기록(사용자 승인 2026-11-23 ⑤).
+투명 경로(S70-b-lite, 프록시 설정을 모르는 프로그램용 — pilot §29-31):
+  - DNS 스텁: ct 의 resolver 로 지정된다. 그 ct 의 허용목록에 `이름:443` 이 있는 이름만 broker IP 로 답하고(A), 나머지는 NXDOMAIN.
+    AAAA·그 밖의 유형은 「없음」(빈 답)으로 답해 IPv4 로만 가게 한다. 질의는 한 줄 JSON 으로 기록.
+  - TLS 443 수신: 연결한 프로그램이 broker 주소로 오면 첫 ClientHello 의 SNI 를 읽어 같은 허용 판단·사설 대역 거부로 처리한다.
+    목적지는 SNI 이름을 broker 가 직접 해석해서 정한다(클라이언트가 준 주소는 쓰지 않는다). SNI 가 없으면 끊는다.
+  - 평문·비 443·비 TLS 연결, 터널 안 내용은 이 경로의 범위 밖이다(CONNECT 프록시 또는 S72 어댑터).
 설정 파일(JSON, 요청마다 mtime 이 바뀌었는지 보고 다시 읽음 — 변경에 재시작 불필요):
   {"default_allow": ["host:port", ...], "clients": {"10.100.1.57": {"name": "sbox-ct-…", "allow": ["github.com:443", "*.npmjs.org:443"]}}}
 """
@@ -131,8 +137,9 @@ async def pipe(r, w, counter, key):
 
 
 class Proxy:
-    def __init__(self, cfg, allow_private_targets=False):
+    def __init__(self, cfg, allow_private_targets=False, tls_upstream_port=443):
         self.cfg, self.allow_private, self.sem = cfg, allow_private_targets, asyncio.Semaphore(MAX_CONNS)
+        self.tls_upstream_port = tls_upstream_port   # 시험에서만 바꾼다
 
     def decide(self, client_ip, host, port):
         data = self.cfg.get()
@@ -161,6 +168,77 @@ class Proxy:
             except OSError:
                 pass
 
+    async def open_upstream(self, host, port):
+        """이름 해석은 이 프록시가 한다 — 사설 대역이면 거부. (reader, writer, 사유) — 실패하면 writer 가 None."""
+        try:
+            infos = await asyncio.wait_for(asyncio.get_running_loop().getaddrinfo(
+                host, port, type=socket.SOCK_STREAM), CONNECT_TIMEOUT)
+        except (asyncio.TimeoutError, OSError):
+            return None, None, "resolve-failed"
+        addrs = [i[4][0] for i in infos]
+        if not self.allow_private and any(is_private(a) for a in addrs):
+            return None, None, "resolved-private"
+        for a in addrs:
+            try:
+                r, w = await asyncio.wait_for(asyncio.open_connection(a, port), CONNECT_TIMEOUT)
+                return r, w, ""
+            except (asyncio.TimeoutError, OSError):
+                continue
+        return None, None, "connect-failed"
+
+    async def handle_tls(self, reader, writer):
+        """투명 TLS 수신(S70-b-lite): ct 가 허용된 이름을 DNS 스텁에서 broker IP 로 받아 그대로 접속해 온다."""
+        peer = writer.get_extra_info("peername") or ("?", 0)
+        rec = {"client": peer[0], "host": "", "port": self.tls_upstream_port, "mode": "transparent", "verdict": "deny", "reason": "", "up": 0, "down": 0}
+        t0 = time.monotonic()
+        up_w = None
+        try:
+            async with self.sem:
+                first = b""
+                try:
+                    async def fill():
+                        nonlocal first
+                        while True:
+                            chunk = await reader.read(16384)
+                            if not chunk:
+                                return
+                            first += chunk
+                            if len(first) >= 5 and (first[0] != 0x16 or len(first) >= 5 + int.from_bytes(first[3:5], "big")):
+                                return
+                            if len(first) > 16384 + 5:
+                                return
+                    await asyncio.wait_for(fill(), HEAD_TIMEOUT)
+                except asyncio.TimeoutError:
+                    pass
+                sni = parse_sni(first)
+                if not sni or len(sni) > 253:
+                    rec["reason"] = "no-sni"
+                else:
+                    rec["host"] = sni
+                    ok, why, name = self.decide(rec["client"], sni, self.tls_upstream_port)
+                    rec["name"], rec["reason"] = name, why
+                    if ok:
+                        up_r, up_w, why = await self.open_upstream(sni, self.tls_upstream_port)
+                        if up_w is None:
+                            rec["reason"] = why
+                        else:
+                            rec["verdict"] = "allow"
+                            counter = {"up": len(first), "down": 0}
+                            up_w.write(first); await up_w.drain()
+                            await asyncio.gather(pipe(reader, up_w, counter, "up"), pipe(up_r, writer, counter, "down"))
+                            rec["up"], rec["down"] = counter["up"], counter["down"]
+        except Exception as e:
+            rec["reason"] = rec["reason"] or "error:" + type(e).__name__
+        finally:
+            rec["secs"] = round(time.monotonic() - t0, 2)
+            log(rec)
+            for w in (writer, up_w):
+                try:
+                    if w:
+                        w.close()
+                except OSError:
+                    pass
+
     async def _serve(self, reader, writer, rec):
         try:
             head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), HEAD_TIMEOUT)
@@ -184,27 +262,11 @@ class Proxy:
         rec["name"], rec["reason"] = name, why
         if not ok:
             writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"); await writer.drain(); return
-        # 이름 해석은 이 프록시가 한다 — 사설 대역이면 거부
-        try:
-            infos = await asyncio.wait_for(asyncio.get_running_loop().getaddrinfo(
-                host, port, type=socket.SOCK_STREAM), CONNECT_TIMEOUT)
-        except (asyncio.TimeoutError, OSError):
-            rec["reason"] = "resolve-failed"
-            writer.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n"); await writer.drain(); return
-        addrs = [i[4][0] for i in infos]
-        if not self.allow_private and any(is_private(a) for a in addrs):
-            rec["reason"] = "resolved-private"
-            writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"); await writer.drain(); return
-        up_r = up_w = None
-        for a in addrs:
-            try:
-                up_r, up_w = await asyncio.wait_for(asyncio.open_connection(a, port), CONNECT_TIMEOUT)
-                break
-            except (asyncio.TimeoutError, OSError):
-                continue
+        up_r, up_w, why = await self.open_upstream(host, port)
         if up_w is None:
-            rec["reason"] = "connect-failed"
-            writer.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n"); await writer.drain(); return
+            rec["reason"] = why
+            code = b"403 Forbidden" if why == "resolved-private" else b"502 Bad Gateway"
+            writer.write(b"HTTP/1.1 " + code + b"\r\nContent-Length: 0\r\n\r\n"); await writer.drain(); return
         writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n"); await writer.drain()
         first = b""
         if port in SNI_PORTS:                     # 첫 TLS 레코드의 SNI 가 요청한 호스트와 같아야 한다
@@ -224,10 +286,83 @@ class Proxy:
         rec["up"], rec["down"] = counter["up"], counter["down"]
 
 
-async def main_async(listen, port, cfg_path, allow_private):
+# ---- DNS 스텁 (S70-b-lite) ----
+def parse_question(data):
+    """DNS 질의 패킷 → (id, 이름, 유형, 질문 구간 바이트) 또는 None. 압축 포인터·여러 질문·응답 패킷은 거부."""
+    try:
+        if len(data) < 17 or len(data) > 512:
+            return None
+        qid = int.from_bytes(data[0:2], "big")
+        flags = int.from_bytes(data[2:4], "big")
+        if flags & 0x8000 or (flags >> 11) & 0xF != 0:        # 응답이거나 표준 질의가 아님
+            return None
+        if int.from_bytes(data[4:6], "big") != 1:
+            return None
+        pos, labels = 12, []
+        while True:
+            n = data[pos]
+            if n == 0:
+                pos += 1
+                break
+            if n & 0xC0 or n > 63:
+                return None
+            labels.append(data[pos + 1:pos + 1 + n].decode("ascii", "strict").lower())
+            if len(labels[-1]) != n:
+                return None
+            pos += 1 + n
+        qtype = int.from_bytes(data[pos:pos + 2], "big")
+        qclass = int.from_bytes(data[pos + 2:pos + 4], "big")
+        if len(data) < pos + 4 or qclass != 1:
+            return None
+        name = ".".join(labels)
+        if not name or len(name) > 253:
+            return None
+        return qid, name, qtype, data[12:pos + 4]
+    except (IndexError, UnicodeDecodeError):
+        return None
+
+
+def build_answer(qid, question, qtype, rcode, ip=None, ttl=30):
+    """응답 패킷. ip 가 있고 qtype 이 A(1)이면 A 레코드 하나를 붙인다."""
+    ans = b""
+    if ip and qtype == 1 and rcode == 0:
+        ans = b"\xc0\x0c" + (1).to_bytes(2, "big") + (1).to_bytes(2, "big") + ttl.to_bytes(4, "big") + (4).to_bytes(2, "big") + socket.inet_aton(ip)
+    flags = 0x8180 | rcode                                      # QR·RD·RA
+    return qid.to_bytes(2, "big") + flags.to_bytes(2, "big") + (1).to_bytes(2, "big") + (1 if ans else 0).to_bytes(2, "big") + b"\0\0\0\0" + question + ans
+
+
+class DnsStub(asyncio.DatagramProtocol):
+    def __init__(self, proxy, answer_ip):
+        self.proxy, self.answer_ip, self.transport = proxy, answer_ip, None
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def datagram_received(self, data, addr):
+        q = parse_question(data)
+        if not q:
+            return
+        qid, name, qtype, question = q
+        ok, why, who = self.proxy.decide(addr[0], name, 443)
+        if ok:
+            reply, rc = build_answer(qid, question, qtype, 0, self.answer_ip), "ok" if qtype == 1 else "ok-empty"
+        else:
+            reply, rc = build_answer(qid, question, qtype, 3), "nxdomain"
+        self.transport.sendto(reply, addr)
+        log({"event": "dns", "client": addr[0], "name": name, "qtype": qtype, "result": rc, "reason": why})
+
+
+async def main_async(listen, port, cfg_path, allow_private, tls_listen=None, tls_port=0, dns_listen=None, dns_port=53, answer_ip=None):
     proxy = Proxy(Config(cfg_path), allow_private)
     server = await asyncio.start_server(proxy.handle, listen, port, limit=MAX_HEAD + 1024)
     log({"event": "start", "listen": f"{listen}:{port}", "config": cfg_path})
+    extra = []
+    if tls_port:
+        extra.append(await asyncio.start_server(proxy.handle_tls, tls_listen or listen, tls_port, limit=32768))
+        log({"event": "start-tls", "listen": f"{tls_listen or listen}:{tls_port}"})
+    if dns_listen and answer_ip:
+        await asyncio.get_running_loop().create_datagram_endpoint(lambda: DnsStub(proxy, answer_ip), local_addr=(dns_listen, dns_port))
+        log({"event": "start-dns", "listen": f"{dns_listen}:{dns_port}", "answer": answer_ip})
     async with server:
         await server.serve_forever()
 
@@ -241,11 +376,15 @@ def main(argv):
     ap.add_argument("--config", default="/etc/broker/clients.json")
     ap.add_argument("--log", default="/var/log/broker/access.log")
     ap.add_argument("--allow-private-targets", action="store_true", help="시험 전용 — 사설 대역 대상 허용")
+    ap.add_argument("--tls-port", type=int, default=0, help="투명 TLS 수신 포트(0 = 끔, 운영은 443)")
+    ap.add_argument("--dns-listen", default="", help="DNS 스텁이 받을 주소(broker 자신의 IP — systemd-resolved 가 127.0.0.53 을 쓰므로 와일드카드 불가)")
+    ap.add_argument("--dns-port", type=int, default=53)
+    ap.add_argument("--answer-ip", default="", help="허용된 이름에 A 로 답할 주소(보통 broker IP)")
     a = ap.parse_args(argv)
     if a.log != "-":
         os.makedirs(os.path.dirname(a.log), exist_ok=True)
         _logf = open(a.log, "a", buffering=1)
-    asyncio.run(main_async(a.listen, a.port, a.config, a.allow_private_targets))
+    asyncio.run(main_async(a.listen, a.port, a.config, a.allow_private_targets, tls_port=a.tls_port, dns_listen=a.dns_listen or None, dns_port=a.dns_port, answer_ip=a.answer_ip or None))
 
 
 if __name__ == "__main__":

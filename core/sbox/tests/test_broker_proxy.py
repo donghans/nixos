@@ -4,6 +4,7 @@
  ① 와일드카드는 접미사만 맞고 본 도메인·비슷한 이름은 안 맞는다 ② 사설·루프백·CGNAT·IPv4 매핑 주소는 사설로 본다
  ③ ClientHello 에서 SNI 를 꺼내되 깨진·잘린·TLS 아닌 입력은 None ④ 모르는 클라이언트·허용 밖·CONNECT 아닌 요청은 403
  ⑤ 해석 결과가 사설 대역이면 허용된 이름이라도 거부 ⑥ SNI 포트에서 SNI 가 다르면 끊고, 같으면 통과 ⑦ 허용된 터널은 바이트를 그대로 전달
+ ⑧ 투명 TLS 수신(S70-b-lite) ⑨ DNS 스텁: 허용된 이름만 broker IP, 나머지 NXDOMAIN, 깨진 질의 무시
 실행: python3 -I core/sbox/tests/test_broker_proxy.py  (mods/_tools/run-tests.sh 의 sbox-broker-proxy)"""
 import asyncio, json, os, ssl, sys, tempfile
 
@@ -82,6 +83,25 @@ except SystemExit:
     check("프리셋: 알 수 없는 이름 거부", True)
 
 
+# ⑨ DNS 스텁 패킷: 질의 파싱·응답 조립
+def dns_query(name, qtype=1, ident=0x1234, flags=0x0100):
+    q = b"".join(bytes([len(x)]) + x.encode() for x in name.split(".")) + b"\0"
+    return ident.to_bytes(2, "big") + flags.to_bytes(2, "big") + b"\0\1\0\0\0\0\0\0" + q + qtype.to_bytes(2, "big") + b"\0\1"
+
+
+pq = bp.parse_question(dns_query("Registry.NPMJS.org"))
+check("dns 질의 파싱", pq and pq[0] == 0x1234 and pq[1] == "registry.npmjs.org" and pq[2] == 1, pq)
+check("dns 응답 패킷은 무시", bp.parse_question(dns_query("a.b", flags=0x8100)) is None)
+check("dns 질문 둘은 거부", bp.parse_question(dns_query("a.b")[:4] + b"\0\2" + dns_query("a.b")[6:]) is None)
+check("dns 압축 포인터 거부", bp.parse_question(b"\0\1\1\0\0\1\0\0\0\0\0\0\xc0\x0c\0\1\0\1") is None)
+check("dns 잘린 입력 거부", bp.parse_question(dns_query("a.b")[:15]) is None and bp.parse_question(b"") is None)
+ans = bp.build_answer(7, pq[3], 1, 0, "10.100.1.163")
+check("dns A 응답", ans[:2] == b"\0\7" and ans[3] & 0xF == 0 and ans[6:8] == b"\0\1" and ans.endswith(bytes([10, 100, 1, 163])), ans)
+nx = bp.build_answer(7, pq[3], 1, 3)
+check("dns NXDOMAIN", nx[3] & 0xF == 3 and nx[6:8] == b"\0\0")
+check("dns AAAA 는 빈 답", bp.build_answer(7, pq[3], 28, 0, "10.100.1.163")[6:8] == b"\0\0")
+
+
 async def echo_server():
     async def h(r, w):
         while True:
@@ -151,7 +171,57 @@ async def run():
     check("SNI 일치는 통과(에코)", await asyncio.wait_for(r.readexactly(len(hello)), 5) == hello)
     w.close()
     bp.SNI_PORTS.discard(eport)
-    for s in (srv, srv2, es):
+    # ⑧ 투명 TLS 수신(S70-b-lite): 프록시 요청 없이 ClientHello 만 보내도 SNI 로 판단·전달
+    write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": [f"localhost:{eport}"]}}})
+    px3 = bp.Proxy(bp.Config(cfgfile), allow_private_targets=True, tls_upstream_port=eport)
+    srv3 = await asyncio.start_server(px3.handle_tls, "127.0.0.1", 0, limit=32768)
+    p3 = srv3.sockets[0].getsockname()[1]
+    r, w = await asyncio.open_connection("127.0.0.1", p3)
+    hello = client_hello("localhost")
+    w.write(hello); await w.drain()
+    check("투명: 허용 SNI 는 전달(에코)", await asyncio.wait_for(r.readexactly(len(hello)), 5) == hello)
+    w.close()
+    r, w = await asyncio.open_connection("127.0.0.1", p3)
+    w.write(client_hello("evil.example")); await w.drain()
+    check("투명: 허용 밖 SNI 는 끊김", await asyncio.wait_for(r.read(4096), 5) == b"")
+    w.close()
+    r, w = await asyncio.open_connection("127.0.0.1", p3)
+    w.write(b"GET / HTTP/1.1\r\n\r\n"); await w.drain()
+    check("투명: TLS 아님·SNI 없음은 끊김", await asyncio.wait_for(r.read(4096), 5) == b"")
+    w.close()
+    r, w = await asyncio.open_connection("127.0.0.1", p3)
+    w.write(hello[:20]); await w.drain(); w.write(hello[20:]); await w.drain()     # 조각나서 와도
+    check("투명: 조각난 ClientHello", await asyncio.wait_for(r.readexactly(len(hello)), 5) == hello)
+    w.close()
+    px4 = bp.Proxy(bp.Config(cfgfile), allow_private_targets=False, tls_upstream_port=eport)
+    srv4 = await asyncio.start_server(px4.handle_tls, "127.0.0.1", 0, limit=32768)
+    r, w = await asyncio.open_connection("127.0.0.1", srv4.sockets[0].getsockname()[1])
+    w.write(hello); await w.drain()
+    check("투명: 사설로 해석되면 끊김", await asyncio.wait_for(r.read(4096), 5) == b"")
+    w.close()
+    # DNS 스텁 UDP 왕복
+    write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["registry.npmjs.org:443", "*.github.com:443", "db.x:5432"]}}})
+    loop = asyncio.get_running_loop()
+    tr, _ = await loop.create_datagram_endpoint(lambda: bp.DnsStub(px3, "10.100.1.163"), local_addr=("127.0.0.1", 0))
+    dport = tr.get_extra_info("sockname")[1]
+
+    class Q(asyncio.DatagramProtocol):
+        def __init__(self): self.fut = loop.create_future()
+        def datagram_received(self, d, a): self.fut.set_result(d)
+
+    async def ask(name, qtype=1):
+        qp = Q()
+        t, _ = await loop.create_datagram_endpoint(lambda: qp, remote_addr=("127.0.0.1", dport))
+        t.sendto(dns_query(name, qtype))
+        d = await asyncio.wait_for(qp.fut, 5); t.close(); return d
+    d = await ask("registry.npmjs.org")
+    check("dns: 허용 이름 → broker IP", d[3] & 0xF == 0 and d.endswith(bytes([10, 100, 1, 163])), d)
+    check("dns: 와일드카드 허용", (await ask("api.github.com"))[6:8] == b"\0\1")
+    check("dns: 허용 밖 → NXDOMAIN", (await ask("evil.example"))[3] & 0xF == 3)
+    check("dns: 443 이 아닌 규칙만 있는 이름 → NXDOMAIN", (await ask("db.x"))[3] & 0xF == 3)
+    check("dns: 허용 이름 AAAA 는 빈 답", (await ask("registry.npmjs.org", 28))[6:8] == b"\0\0")
+    tr.close()
+    for s in (srv, srv2, srv3, srv4, es):
         s.close()
 
 

@@ -16,7 +16,7 @@
 #   sboxctl destroy NAME [--force] [--discard-dirty]  번들을 먼저 꺼내고 지움(번들 실패·미커밋 변경 있으면 거부)
 #   sboxctl golden [SRC_INSTANCE]                     SRC(기본 dev-nixos)를 정상 종료 후 복제해 골든(sbox-golden-vm@gold)을 새로 만듦
 #   sboxctl rebuild-golden [--stale-ok]               ISO+nixstrap(NIXSTRAP_AUTO)로 골든을 처음부터 새로 만듦(약 15분)
-#   sboxctl broker create|status                      L7 관문(broker) ct 생성·상태 — 프로젝트 ct 의 모든 외부 연결은 이 ct 의 CONNECT 프록시만 거친다(S61, pilot §29-25)
+#   sboxctl broker create|status|update               L7 관문(broker) ct 생성·상태 — 프로젝트 ct 의 모든 외부 연결은 이 ct 의 CONNECT 프록시만 거친다(S61, pilot §29-25)
 #   sboxctl egress NAME [--from-repo DIR|--manifest F] [--allow host[:port]]... [--open]  ct 를 broker 에 연결(인자 없으면 create 때 기록한 user.sbox.manifest·egress-open 사용 NIC ACL·프록시 환경·허용목록). create 는 broker 가 있으면 자동으로 부른다
 #   sboxctl audit [NAME…]                             격리 불변식 점검(읽기 전용) — raw.*·특권·낯선 장치·프로필 이탈·포트 격리·idmap 을 sboxctl 이 만든 모양과 대조(S62 첫 조각)
 #   sboxctl resources NAME                            기존 ct 를 sbox.slice(합계 자원 상한) 아래로 옮기고 sbox-mem 설치(재시작 필요, S69)
@@ -993,6 +993,34 @@ broker_push() { # 호스트의 상태 파일을 broker 에 원자적으로 놓�
     incus exec "$BROKER" -- mv /etc/broker/clients.json.new /etc/broker/clients.json </dev/null || die "broker 설정 교체 실패"
 }
 
+broker_install() { # broker_install IP — 프록시 코드·서비스 유닛 설치(create 와 update 가 같이 씀). 서비스는 호출한 쪽이 시작
+    local ip=$1
+    incus exec "$BROKER" -- mkdir -p /usr/local/lib/sbox-broker /etc/broker </dev/null
+    incus file push "$SBOX_DIR/broker_proxy.py" "$BROKER/usr/local/lib/sbox-broker/broker_proxy.py" </dev/null >/dev/null
+    incus exec "$BROKER" -- sh -c 'cat > /etc/systemd/system/sbox-broker.service' </dev/null <<UNIT
+[Unit]
+Description=sbox broker (L7 egress: CONNECT proxy + 투명 TLS 443 + DNS stub)
+After=network-online.target
+[Service]
+ExecStart=/usr/bin/python3 -I /usr/local/lib/sbox-broker/broker_proxy.py --listen 0.0.0.0 --port $BROKER_PORT --tls-port 443 --dns-listen $ip --answer-ip $ip --config /etc/broker/clients.json --log /var/log/broker/access.log
+User=nobody
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+LogsDirectory=broker
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+[Install]
+WantedBy=multi-user.target
+UNIT
+}
+
 cmd_broker() {
     case "${1:-}" in
         create) ;;
@@ -1008,7 +1036,16 @@ for ip,c in sorted(d.get("clients",{}).items()):
     print("  %-16s %s 허용 %d개 (%s)" % (ip,c["name"],len(c["allow"]),", ".join("%s %d"%kv for kv in by.items())))'
             incus exec "$BROKER" -- tail -n 5 /var/log/broker/access.log </dev/null 2>/dev/null || true
             return 0 ;;
-        *) die "사용법: sboxctl broker create|status" ;;
+        update)   # 프록시 코드·유닛을 다시 설치하고 재시작(기존 broker 를 새 기능으로 올림)
+            incus info "$BROKER" >/dev/null 2>&1 </dev/null || die "broker 가 없습니다"
+            local bip; bip=$(ct_ip "$BROKER"); [[ -n $bip ]] || die "broker IP 를 읽지 못했습니다"
+            broker_install "$bip"; broker_push
+            incus exec "$BROKER" -- sh -c 'systemctl daemon-reload && systemctl restart sbox-broker' </dev/null || die "broker 재시작 실패"
+            sleep 1; incus exec "$BROKER" -- systemctl is-active sbox-broker </dev/null || die "broker 가 시작되지 않았습니다 — incus exec $BROKER -- journalctl -u sbox-broker"
+            say "완료: broker 갱신($bip — 프록시 $BROKER_PORT·투명 TLS 443·DNS 53). 이미 연결된 ct 는 'sboxctl egress NAME' 으로 다시 연결(ACL·DNS 설정)"
+            audit info broker-update "$BROKER" "broker 갱신 $bip"
+            return 0 ;;
+        *) die "사용법: sboxctl broker create|status|update" ;;
     esac
     incus info "$BROKER" >/dev/null 2>&1 </dev/null && die "$BROKER 는 이미 있습니다"
     TOOLS_ARGS=(); DOCKER=0
@@ -1020,28 +1057,7 @@ for ip,c in sorted(d.get("clients",{}).items()):
     local ip; ip=$(ct_ip "$BROKER"); [[ -n $ip ]] || die "broker IP 를 못 읽었습니다"
     incus config device set "$BROKER" eth0 ipv4.address="$ip" </dev/null    # 프로젝트 ct 의 ACL 이 이 주소를 가리키므로 고정
     incus exec "$BROKER" --env "PATH=$CT_PATH" -- sh -c 'apt-get install -y -qq --no-install-recommends python3 >/dev/null' </dev/null || die "broker: python3 설치 실패"   # python3-minimal 에는 asyncio 가 없다(2026-11-23 겪음)
-    incus exec "$BROKER" -- mkdir -p /usr/local/lib/sbox-broker /etc/broker </dev/null
-    incus file push "$SBOX_DIR/broker_proxy.py" "$BROKER/usr/local/lib/sbox-broker/broker_proxy.py" </dev/null >/dev/null
-    incus exec "$BROKER" -- sh -c 'cat > /etc/systemd/system/sbox-broker.service' </dev/null <<UNIT
-[Unit]
-Description=sbox broker (L7 egress CONNECT proxy)
-After=network-online.target
-[Service]
-ExecStart=/usr/bin/python3 -I /usr/local/lib/sbox-broker/broker_proxy.py --listen 0.0.0.0 --port $BROKER_PORT --config /etc/broker/clients.json --log /var/log/broker/access.log
-User=nobody
-LogsDirectory=broker
-Restart=always
-RestartSec=2
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-PrivateDevices=true
-ProtectKernelTunables=true
-ProtectControlGroups=true
-[Install]
-WantedBy=multi-user.target
-UNIT
+    broker_install "$ip"
     if [[ ! -f $EGRESS_STATE ]]; then   # 클라이언트 없는 상태 파일(기본 허용 세트만)
         python3 "$SBOX_DIR/egress.py" remove --state "$EGRESS_STATE" --name __none__ >/dev/null
     fi
@@ -1098,10 +1114,9 @@ cmd_egress() { # cmd_egress NAME [--from-repo DIR|--manifest F] [--allow H[:P]].
     python3 - "$EGRESS_ACL" "$bip" "$BROKER_PORT" <<'PY' | incus network acl edit "$EGRESS_ACL" || die "ACL 규칙 실패"
 import sys, json
 n, bip, port = sys.argv[1:4]
-print(json.dumps({"name": n, "description": "sbox ct 송신: broker 프록시와 게이트웨이 DNS 만", "egress": [
-  {"action": "allow", "protocol": "tcp", "destination": bip + "/32", "destination_port": port, "state": "enabled"},
-  {"action": "allow", "protocol": "udp", "destination": "10.100.1.1/32", "destination_port": "53", "state": "enabled"},
-  {"action": "allow", "protocol": "tcp", "destination": "10.100.1.1/32", "destination_port": "53", "state": "enabled"}], "ingress": []}))
+print(json.dumps({"name": n, "description": "sbox ct 송신: broker(프록시·투명 TLS 443·DNS 스텁 53) 만", "egress": [
+  {"action": "allow", "protocol": "tcp", "destination": bip + "/32", "destination_port": port + ",443,53", "state": "enabled"},
+  {"action": "allow", "protocol": "udp", "destination": bip + "/32", "destination_port": "53", "state": "enabled"}], "ingress": []}))
 PY
     local verb=set
     incus config device show "$name" </dev/null | grep -q '^eth0:' || verb=override
@@ -1119,6 +1134,12 @@ PY
         # broker 는 CONNECT 만 받는다 — apt 저장소를 https 로 바꾸고 https 프록시만 건다(http:// 는 403)
         sed -i 's#http://#https://#g' /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
         printf 'Acquire::https::Proxy \"%s\";\n' '$px' > /etc/apt/apt.conf.d/99sbox-broker
+        # DNS 는 broker 스텁만(허용된 이름만 broker IP 로 답한다 — S70-b-lite). DHCP 가 주는 게이트웨이 DNS 는 쓰지 않는다
+        mkdir -p /etc/systemd/network/eth0.network.d
+        printf '[Network]\nDNS=%s\n[DHCPv4]\nUseDNS=no\n' '$bip' > /etc/systemd/network/eth0.network.d/sbox-dns.conf
+        mkdir -p /etc/systemd/resolved.conf.d
+        printf '[Resolve]\nDomains=~.\n' > /etc/systemd/resolved.conf.d/sbox-dns.conf
+        (networkctl reload && networkctl reconfigure eth0 && systemctl restart systemd-resolved) >/dev/null 2>&1 || true
         sed -i '/^# sbox-broker begin/,/^# sbox-broker end/d' /etc/environment
         printf '# sbox-broker begin\nHTTP_PROXY=%s\nHTTPS_PROXY=%s\nhttp_proxy=%s\nhttps_proxy=%s\nNO_PROXY=localhost,127.0.0.1,10.100.1.1\nno_proxy=localhost,127.0.0.1,10.100.1.1\n# sbox-broker end\n' '$px' '$px' '$px' '$px' >> /etc/environment
         if [ -d /home/$VM_USER ]; then
