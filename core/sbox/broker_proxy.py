@@ -91,6 +91,44 @@ def parse_sni(data):
     return None
 
 
+async def connect_race(addrs, port, stagger=0.3, timeout=CONNECT_TIMEOUT):
+    """주소 여러 개를 시차(stagger 초)를 두고 동시에 시도해 먼저 연결되는 것을 쓴다(happy eyeballs 식). CDN 이 돌려준 주소 중 하나가 죽어 있어도
+    그 주소의 연결 시한(10초)을 줄줄이 기다리지 않는다 — 순서대로 시도하던 때 pypi.org 가 37초 만에 실패해 pip 이 읽기 시간 초과로 빌드가 깨졌다(2026-11-24, 핫스팟 망)."""
+    addrs = list(dict.fromkeys(addrs))[:6]
+    if not addrs:
+        return None, None
+    done = asyncio.Queue()
+
+    async def one(i, a):
+        try:
+            await asyncio.sleep(i * stagger)
+            await done.put(await asyncio.wait_for(asyncio.open_connection(a, port), timeout))
+        except (asyncio.TimeoutError, OSError):
+            await done.put(None)
+    tasks = [asyncio.ensure_future(one(i, a)) for i, a in enumerate(addrs)]
+    winner, fails = None, 0
+    try:
+        while fails < len(tasks):
+            res = await done.get()
+            if res is None:
+                fails += 1
+                continue
+            winner = res
+            break
+    finally:
+        for t in tasks:
+            t.cancel()
+        # 이미 연결에 성공했는데 우리가 안 쓰게 된 것은 닫는다
+        while not done.empty():
+            extra = done.get_nowait()
+            if extra is not None and extra is not winner:
+                try:
+                    extra[1].close()
+                except OSError:
+                    pass
+    return winner if winner else (None, None)
+
+
 class Config:
     def __init__(self, path):
         self.path, self.mtime, self.data = path, -1, {"default_allow": [], "clients": {}}
@@ -180,12 +218,9 @@ class Proxy:
         addrs = [i[4][0] for i in infos]
         if not self.allow_private and any(is_private(a) for a in addrs):
             return None, None, "resolved-private"
-        for a in addrs:
-            try:
-                r, w = await asyncio.wait_for(asyncio.open_connection(a, port), CONNECT_TIMEOUT)
-                return r, w, ""
-            except (asyncio.TimeoutError, OSError):
-                continue
+        r, w = await connect_race(addrs, port)
+        if w is not None:
+            return r, w, ""
         return None, None, "connect-failed"
 
     async def handle_tls(self, reader, writer):

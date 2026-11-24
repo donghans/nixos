@@ -268,6 +268,14 @@ async def run():
     write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["deb.debian.org:80"]}}})
     check("dns: 80 만 허용된 이름도 진짜 주소", (await ask("deb.debian.org")).endswith(bytes([151, 101, 2, 132])))
     tr.close()
+    # 연결 경쟁: 첫 주소가 죽어 있어도(응답 없음 — 시험에서는 닫힌 포트의 다른 주소) 두 번째가 바로 쓰인다
+    t0 = asyncio.get_running_loop().time()
+    rr, ww = await bp.connect_race(["198.51.100.1", "127.0.0.1"], eport, stagger=0.2, timeout=3)
+    check("연결 경쟁: 죽은 주소 뒤의 살아 있는 주소로 연결(빠르게)", ww is not None and asyncio.get_running_loop().time() - t0 < 2.5, (ww, asyncio.get_running_loop().time() - t0))
+    if ww:
+        ww.close()
+    check("연결 경쟁: 전부 실패하면 (None, None)", await bp.connect_race(["127.0.0.1"], 1, stagger=0.1, timeout=2) == (None, None))
+    check("연결 경쟁: 빈 목록", await bp.connect_race([], 80) == (None, None))
     for s in (srv, srv2, srv3, srv4, es):
         s.close()
 
