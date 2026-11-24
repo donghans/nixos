@@ -12,7 +12,7 @@
   - 일반 HTTP 프록시 요청(GET http://…)은 지원하지 않는다(403) — CONNECT 만. http:// 저장소는 https 로 바꿔 쓴다.
   - 요청마다 한 줄 JSON 기록(시각·클라이언트·호스트·포트·판정·사유·바이트·초). 차단 없이 전수 기록(사용자 승인 2026-11-23 ⑤).
 투명 경로(S70-b-lite, 프록시 설정을 모르는 프로그램용 — pilot §29-31):
-  - DNS 스텁: ct 의 resolver 로 지정된다. 그 ct 의 허용목록에 `이름:443` 이 있는 이름만 broker IP 로 답하고(A), 나머지는 NXDOMAIN.
+  - DNS 스텁: ct 의 resolver 로 지정된다. 그 ct 의 허용목록에 `이름:443`(또는 `:80`)이 있는 이름만 **진짜 공인 IPv4**(broker 가 직접 조회, 사설이면 거부)로 답하고, 나머지는 NXDOMAIN. ct 의 기본 게이트웨이가 broker 이고 broker 의 nft 가 그 연결의 443·80 을 아래 수신기로 돌린다(pilot §29-37).
     AAAA·그 밖의 유형은 「없음」(빈 답)으로 답해 IPv4 로만 가게 한다. 질의는 한 줄 JSON 으로 기록.
   - TLS 443 수신: 연결한 프로그램이 broker 주소로 오면 첫 ClientHello 의 SNI 를 읽어 같은 허용 판단·사설 대역 거부로 처리한다.
     목적지는 SNI 이름을 broker 가 직접 해석해서 정한다(클라이언트가 준 주소는 쓰지 않는다). SNI 가 없으면 끊는다.
@@ -370,39 +370,63 @@ def parse_question(data):
         return None
 
 
-def build_answer(qid, question, qtype, rcode, ip=None, ttl=30):
-    """응답 패킷. ip 가 있고 qtype 이 A(1)이면 A 레코드 하나를 붙인다."""
+def build_answer(qid, question, qtype, rcode, ips=None, ttl=30):
+    """응답 패킷. ips(문자열 IPv4 목록 또는 단일 문자열)가 있고 qtype 이 A(1)이면 A 레코드를 붙인다."""
+    if isinstance(ips, str):
+        ips = [ips]
     ans = b""
-    if ip and qtype == 1 and rcode == 0:
-        ans = b"\xc0\x0c" + (1).to_bytes(2, "big") + (1).to_bytes(2, "big") + ttl.to_bytes(4, "big") + (4).to_bytes(2, "big") + socket.inet_aton(ip)
+    if ips and qtype == 1 and rcode == 0:
+        for ip in ips:
+            ans += b"\xc0\x0c" + (1).to_bytes(2, "big") + (1).to_bytes(2, "big") + ttl.to_bytes(4, "big") + (4).to_bytes(2, "big") + socket.inet_aton(ip)
     flags = 0x8180 | rcode                                      # QR·RD·RA
-    return qid.to_bytes(2, "big") + flags.to_bytes(2, "big") + (1).to_bytes(2, "big") + (1 if ans else 0).to_bytes(2, "big") + b"\0\0\0\0" + question + ans
+    an = len(ips) if ans else 0
+    return qid.to_bytes(2, "big") + flags.to_bytes(2, "big") + (1).to_bytes(2, "big") + an.to_bytes(2, "big") + b"\0\0\0\0" + question + ans
 
 
 class DnsStub(asyncio.DatagramProtocol):
-    def __init__(self, proxy, answer_ip):
-        self.proxy, self.answer_ip, self.transport = proxy, answer_ip, None
+    """허용된 이름만 **진짜 공인 IPv4** 로 답한다(방식 B, pilot §29-37) — ct 의 기본 게이트웨이가 broker 라서 그 주소로 가는 443·80 연결이 broker 의 redirect 로 프록시에 닿는다.
+    사설·루프백 등으로 해석되는 이름은 거부한다(DNS 재바인딩·LAN 도달 방지 — 프록시의 사설 해석 거부와 같은 규칙). 해석은 broker 가 한다(ct 가 고를 수 없음)."""
+    TTL = 30
+
+    def __init__(self, proxy, resolver=None):
+        self.proxy, self.transport = proxy, None
+        self.resolver = resolver or self._resolve
+
+    async def _resolve(self, name):
+        infos = await asyncio.wait_for(asyncio.get_running_loop().getaddrinfo(name, 443, family=socket.AF_INET, type=socket.SOCK_STREAM), CONNECT_TIMEOUT)
+        return sorted({i[4][0] for i in infos})
 
     def connection_made(self, transport):
         self.transport = transport
 
     def datagram_received(self, data, addr):
         q = parse_question(data)
-        if not q:
-            return
+        if q:
+            asyncio.ensure_future(self.answer(q, addr))
+
+    async def answer(self, q, addr):
         qid, name, qtype, question = q
         ok, why, who = self.proxy.decide(addr[0], name, 443)
         if not ok:
-            ok, why, who = self.proxy.decide(addr[0], name, 80)   # 평문 80 만 허용된 이름(apt 등)도 broker 로 안내
+            ok, why, who = self.proxy.decide(addr[0], name, 80)   # 평문 80 만 허용된 이름(apt 등)도 안내
+        ips, rc = [], "nxdomain"
         if ok:
-            reply, rc = build_answer(qid, question, qtype, 0, self.answer_ip), "ok" if qtype == 1 else "ok-empty"
-        else:
-            reply, rc = build_answer(qid, question, qtype, 3), "nxdomain"
-        self.transport.sendto(reply, addr)
-        log({"event": "dns", "client": addr[0], "name": name, "qtype": qtype, "result": rc, "reason": why})
+            if qtype != 1:
+                rc = "ok-empty"                                    # AAAA·그 밖: 「없음」(IPv4 로만 가게 함)
+            else:
+                try:
+                    ips = [i for i in await self.resolver(name) if not is_private(i)]
+                except (asyncio.TimeoutError, OSError):
+                    ips = []
+                rc = "ok" if ips else "servfail"
+                if not ips:
+                    why = "resolve-failed-or-private"
+        code = {"ok": 0, "ok-empty": 0, "nxdomain": 3, "servfail": 2}[rc]
+        self.transport.sendto(build_answer(qid, question, qtype, code, ips[:4] if ips else None, self.TTL), addr)
+        log({"event": "dns", "client": addr[0], "name": name, "qtype": qtype, "result": rc, "reason": why, "answers": ips[:4]})
 
 
-async def main_async(listen, port, cfg_path, allow_private, tls_listen=None, tls_port=0, http_port=0, dns_listen=None, dns_port=53, answer_ip=None):
+async def main_async(listen, port, cfg_path, allow_private, tls_listen=None, tls_port=0, http_port=0, dns_listen=None, dns_port=53):
     proxy = Proxy(Config(cfg_path), allow_private)
     server = await asyncio.start_server(proxy.handle, listen, port, limit=MAX_HEAD + 1024)
     log({"event": "start", "listen": f"{listen}:{port}", "config": cfg_path})
@@ -413,9 +437,9 @@ async def main_async(listen, port, cfg_path, allow_private, tls_listen=None, tls
     if http_port:
         extra.append(await asyncio.start_server(proxy.handle_http, tls_listen or listen, http_port, limit=MAX_HEAD + 1024))
         log({"event": "start-http", "listen": f"{tls_listen or listen}:{http_port}"})
-    if dns_listen and answer_ip:
-        await asyncio.get_running_loop().create_datagram_endpoint(lambda: DnsStub(proxy, answer_ip), local_addr=(dns_listen, dns_port))
-        log({"event": "start-dns", "listen": f"{dns_listen}:{dns_port}", "answer": answer_ip})
+    if dns_listen:
+        await asyncio.get_running_loop().create_datagram_endpoint(lambda: DnsStub(proxy), local_addr=(dns_listen, dns_port))
+        log({"event": "start-dns", "listen": f"{dns_listen}:{dns_port}"})
     async with server:
         await server.serve_forever()
 
@@ -433,12 +457,11 @@ def main(argv):
     ap.add_argument("--http-port", type=int, default=0, help="투명 평문 HTTP 수신 포트(0 = 끔, 운영은 80 — 허용목록에 이름:80 이 있는 이름만)")
     ap.add_argument("--dns-listen", default="", help="DNS 스텁이 받을 주소(broker 자신의 IP — systemd-resolved 가 127.0.0.53 을 쓰므로 와일드카드 불가)")
     ap.add_argument("--dns-port", type=int, default=53)
-    ap.add_argument("--answer-ip", default="", help="허용된 이름에 A 로 답할 주소(보통 broker IP)")
     a = ap.parse_args(argv)
     if a.log != "-":
         os.makedirs(os.path.dirname(a.log), exist_ok=True)
         _logf = open(a.log, "a", buffering=1)
-    asyncio.run(main_async(a.listen, a.port, a.config, a.allow_private_targets, tls_port=a.tls_port, http_port=a.http_port, dns_listen=a.dns_listen or None, dns_port=a.dns_port, answer_ip=a.answer_ip or None))
+    asyncio.run(main_async(a.listen, a.port, a.config, a.allow_private_targets, tls_port=a.tls_port, http_port=a.http_port, dns_listen=a.dns_listen or None, dns_port=a.dns_port))
 
 
 if __name__ == "__main__":

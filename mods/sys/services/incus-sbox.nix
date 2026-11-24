@@ -144,6 +144,11 @@ in {
         }
         chain forward {
           type filter hook forward priority -10; policy accept;
+          # ct 대역(.200–.250)은 호스트를 지나 브리지 밖(인터넷)으로 나가지 못한다 — ct 의 외부 연결은 broker 가 길목(기본 게이트웨이)에서 받아 프록시로만 나간다(방식 B,
+          # pilot §29-37). ct 안에서 경로를 호스트로 되돌려도(권한 상승이 있어야 가능) 여기서 막힌다. broker·VM·골든은 DHCP 범위(.100–.199)라 영향 없음.
+          # NIC ACL 이 tcp 443·80 을 아무 곳이나 허용하므로(가로채기 때문에) 이 규칙이 fail-closed 의 마지막 보루다.
+          iifname "sboxbr0" oifname != "sboxbr0" ip saddr 10.100.1.200-10.100.1.250 limit rate 6/minute burst 10 packets log prefix "sbox-guard drop-ct-out: " level warn
+          iifname "sboxbr0" oifname != "sboxbr0" ip saddr 10.100.1.200-10.100.1.250 drop
           iifname "sboxbr0" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } limit rate 6/minute burst 10 packets log prefix "sbox-guard drop-forward-private: " level warn
           iifname "sboxbr0" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } drop
           oifname "sboxbr0" iifname != "sboxbr0" ct state established,related accept

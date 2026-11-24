@@ -996,13 +996,33 @@ broker_push() { # 호스트의 상태 파일을 broker 에 원자적으로 놓�
 broker_install() { # broker_install IP — 프록시 코드·서비스 유닛 설치(create 와 update 가 같이 씀). 서비스는 호출한 쪽이 시작
     local ip=$1
     incus exec "$BROKER" -- mkdir -p /usr/local/lib/sbox-broker /etc/broker </dev/null
+    # 게이트웨이 규칙(방식 B, pilot §29-37): ct 의 443·80 은 이 컴퓨터의 프록시로 redirect, 나머지 전달(forward)은 명시적 기본 거부 + ip_forward 0.
+    # 나중에 누가 masquerade 를 넣어도 열린 라우터가 되지 않게(pilot §29-36 에서 재현). 체인 이름에 fwd 를 쓰지 말 것(nft 예약어).
+    incus exec "$BROKER" --env "PATH=$CT_PATH" -- sh -c 'command -v nft >/dev/null || { apt-get install -y -qq --no-install-recommends nftables >/dev/null; }' </dev/null || die "broker: nftables 설치 실패"
+    incus exec "$BROKER" -- sh -c 'cat > /etc/nftables.conf && printf "net.ipv4.ip_forward = 0\n" > /etc/sysctl.d/99-sbox-broker.conf && sysctl -q -p /etc/sysctl.d/99-sbox-broker.conf && systemctl enable nftables >/dev/null 2>&1 && nft -f /etc/nftables.conf' </dev/null <<'NFT'
+#!/usr/sbin/nft -f
+flush ruleset
+table ip sbox_gateway {
+    chain pre {
+        type nat hook prerouting priority dstnat; policy accept;
+        iifname "eth0" ip saddr 10.100.1.200-10.100.1.250 tcp dport 443 redirect to :443
+        iifname "eth0" ip saddr 10.100.1.200-10.100.1.250 tcp dport 80 redirect to :80
+    }
+}
+table inet sbox_gateway_filter {
+    chain forwardguard {
+        type filter hook forward priority 0; policy drop;
+    }
+}
+NFT
+    [[ $? -eq 0 ]] || die "broker: 게이트웨이 규칙 적용 실패"
     incus file push "$SBOX_DIR/broker_proxy.py" "$BROKER/usr/local/lib/sbox-broker/broker_proxy.py" </dev/null >/dev/null
     incus exec "$BROKER" -- sh -c 'cat > /etc/systemd/system/sbox-broker.service' </dev/null <<UNIT
 [Unit]
 Description=sbox broker (L7 egress: CONNECT proxy + 투명 TLS 443 + DNS stub)
 After=network-online.target
 [Service]
-ExecStart=/usr/bin/python3 -I /usr/local/lib/sbox-broker/broker_proxy.py --listen 0.0.0.0 --port $BROKER_PORT --tls-port 443 --http-port 80 --dns-listen $ip --answer-ip $ip --config /etc/broker/clients.json --log /var/log/broker/access.log
+ExecStart=/usr/bin/python3 -I /usr/local/lib/sbox-broker/broker_proxy.py --listen 0.0.0.0 --port $BROKER_PORT --tls-port 443 --http-port 80 --dns-listen $ip --config /etc/broker/clients.json --log /var/log/broker/access.log
 User=nobody
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
@@ -1111,13 +1131,7 @@ cmd_egress() { # cmd_egress NAME [--from-repo DIR|--manifest F] [--allow H[:P]].
         incus network acl create "$EGRESS_ACL" </dev/null >/dev/null
     fi
     # 규칙 전체를 한 번에 교체(broker IP 가 바뀌었어도 같은 모양, 중복 없음) — 주의: 파이프 뒤에 </dev/null 을 붙이면 입력이 사라진다
-    python3 - "$EGRESS_ACL" "$bip" "$BROKER_PORT" <<'PY' | incus network acl edit "$EGRESS_ACL" || die "ACL 규칙 실패"
-import sys, json
-n, bip, port = sys.argv[1:4]
-print(json.dumps({"name": n, "description": "sbox ct 송신: broker(프록시·투명 TLS 443·평문 80·DNS 스텁 53) 만", "egress": [
-  {"action": "allow", "protocol": "tcp", "destination": bip + "/32", "destination_port": port + ",443,80,53", "state": "enabled"},
-  {"action": "allow", "protocol": "udp", "destination": bip + "/32", "destination_port": "53", "state": "enabled"}], "ingress": []}))
-PY
+    python3 "$SBOX_DIR/egress.py" acl --broker "$bip" --port "$BROKER_PORT" --acl-name "$EGRESS_ACL" | incus network acl edit "$EGRESS_ACL" || die "ACL 규칙 실패"
     local verb=set
     incus config device show "$name" </dev/null | grep -q '^eth0:' || verb=override
     if [[ $verb == override ]]; then
@@ -1134,9 +1148,9 @@ PY
         # broker 는 CONNECT 만 받는다 — apt 저장소를 https 로 바꾸고 https 프록시만 건다(http:// 는 403)
         sed -i 's#http://#https://#g' /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
         printf 'Acquire::https::Proxy \"%s\";\n' '$px' > /etc/apt/apt.conf.d/99sbox-broker
-        # DNS 는 broker 스텁만(허용된 이름만 broker IP 로 답한다 — S70-b-lite). DHCP 가 주는 게이트웨이 DNS 는 쓰지 않는다
+        # DNS 는 broker 스텁만(허용된 이름만 진짜 주소로 답한다), 기본 게이트웨이는 broker(방식 B, pilot §29-37) — DHCP 가 주는 게이트웨이·DNS 는 쓰지 않는다
         mkdir -p /etc/systemd/network/eth0.network.d
-        printf '[Network]\nDNS=%s\n[DHCPv4]\nUseDNS=no\n' '$bip' > /etc/systemd/network/eth0.network.d/sbox-dns.conf
+        printf '[Network]\nDNS=%s\nGateway=%s\n[DHCPv4]\nUseDNS=no\nUseGateway=no\n' '$bip' '$bip' > /etc/systemd/network/eth0.network.d/sbox-dns.conf
         mkdir -p /etc/systemd/resolved.conf.d
         printf '[Resolve]\nDomains=~.\n' > /etc/systemd/resolved.conf.d/sbox-dns.conf
         (networkctl reload && networkctl reconfigure eth0 && systemctl restart systemd-resolved) >/dev/null 2>&1 || true

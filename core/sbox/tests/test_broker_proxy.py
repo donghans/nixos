@@ -83,6 +83,21 @@ except SystemExit:
     check("프리셋: 알 수 없는 이름 거부", True)
 
 
+# ⑩ ct NIC ACL(방식 B): 사설 대역 drop 은 broker 한 주소만 빼고 정확히 나머지 전부
+import ipaddress  # noqa: E402
+rules = egress.acl("x", "10.100.1.163", "3128")["egress"]
+dropnets = [ipaddress.ip_network(c) for c in [r for r in rules if r["action"] == "drop"][0]["destination"].split(",")]
+check("ACL: broker 는 drop 에 안 걸림", not any(ipaddress.ip_address("10.100.1.163") in n for n in dropnets))
+check("ACL: 같은 /24 의 이웃은 drop", any(ipaddress.ip_address("10.100.1.162") in n for n in dropnets) and any(ipaddress.ip_address("10.100.1.164") in n for n in dropnets))
+check("ACL: 호스트·다른 사설 대역은 drop", all(any(ipaddress.ip_address(a) in n for n in dropnets) for a in ("10.100.1.1", "10.0.0.1", "172.16.5.5", "192.168.1.1", "100.100.100.100", "169.254.169.254")))
+check("ACL: 크기 합 = 사설 전체 − broker 1개", sum(n.num_addresses for n in dropnets) == sum(ipaddress.ip_network(x).num_addresses for x in egress.PRIVATE_NETS) - 1)
+check("ACL: 공인 주소는 drop 에 안 걸림", not any(ipaddress.ip_address("20.200.245.247") in n for n in dropnets))
+check("ACL: tcp 443·80 아무 곳 허용·udp 는 broker:53 만", any(r["action"] == "allow" and r.get("protocol") == "tcp" and "destination" not in r and r["destination_port"] == "443,80" for r in rules)
+      and [r for r in rules if r.get("protocol") == "udp"] == [{"action": "allow", "protocol": "udp", "destination": "10.100.1.163/32", "destination_port": "53", "state": "enabled"}])
+b2 = egress.acl("x", "192.168.7.7", "3128")["egress"][-1]["destination"].split(",")
+check("ACL: broker 가 다른 사설 대역이어도 같은 규칙", not any(ipaddress.ip_address("192.168.7.7") in ipaddress.ip_network(c) for c in b2))
+
+
 # ⑨ DNS 스텁 패킷: 질의 파싱·응답 조립
 def dns_query(name, qtype=1, ident=0x1234, flags=0x0100):
     q = b"".join(bytes([len(x)]) + x.encode() for x in name.split(".")) + b"\0"
@@ -95,11 +110,13 @@ check("dns 응답 패킷은 무시", bp.parse_question(dns_query("a.b", flags=0x
 check("dns 질문 둘은 거부", bp.parse_question(dns_query("a.b")[:4] + b"\0\2" + dns_query("a.b")[6:]) is None)
 check("dns 압축 포인터 거부", bp.parse_question(b"\0\1\1\0\0\1\0\0\0\0\0\0\xc0\x0c\0\1\0\1") is None)
 check("dns 잘린 입력 거부", bp.parse_question(dns_query("a.b")[:15]) is None and bp.parse_question(b"") is None)
-ans = bp.build_answer(7, pq[3], 1, 0, "10.100.1.163")
-check("dns A 응답", ans[:2] == b"\0\7" and ans[3] & 0xF == 0 and ans[6:8] == b"\0\1" and ans.endswith(bytes([10, 100, 1, 163])), ans)
+ans = bp.build_answer(7, pq[3], 1, 0, ["140.82.112.3", "140.82.112.4"])
+check("dns A 응답(둘)", ans[:2] == b"\0\7" and ans[3] & 0xF == 0 and ans[6:8] == b"\0\2" and ans.endswith(bytes([140, 82, 112, 4])), ans)
+ans1 = bp.build_answer(7, pq[3], 1, 0, "140.82.112.3")
+check("dns A 응답(하나, 문자열)", ans1[6:8] == b"\0\1" and ans1.endswith(bytes([140, 82, 112, 3])), ans1)
 nx = bp.build_answer(7, pq[3], 1, 3)
 check("dns NXDOMAIN", nx[3] & 0xF == 3 and nx[6:8] == b"\0\0")
-check("dns AAAA 는 빈 답", bp.build_answer(7, pq[3], 28, 0, "10.100.1.163")[6:8] == b"\0\0")
+check("dns AAAA 는 빈 답", bp.build_answer(7, pq[3], 28, 0, "140.82.112.3")[6:8] == b"\0\0")
 
 
 async def echo_server():
@@ -220,7 +237,14 @@ async def run():
     # DNS 스텁 UDP 왕복
     write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["registry.npmjs.org:443", "*.github.com:443", "db.x:5432"]}}})
     loop = asyncio.get_running_loop()
-    tr, _ = await loop.create_datagram_endpoint(lambda: bp.DnsStub(px3, "10.100.1.163"), local_addr=("127.0.0.1", 0))
+    fake = {"registry.npmjs.org": ["104.16.1.1"], "api.github.com": ["140.82.112.5"], "deb.debian.org": ["151.101.2.132"], "priv.example": ["10.1.2.3"]}
+
+    async def fake_resolver(name):
+        if name == "boom.example":
+            raise OSError("no")
+        return fake.get(name, [])
+    stub = bp.DnsStub(px3, fake_resolver)
+    tr, _ = await loop.create_datagram_endpoint(lambda: stub, local_addr=("127.0.0.1", 0))
     dport = tr.get_extra_info("sockname")[1]
 
     class Q(asyncio.DatagramProtocol):
@@ -233,14 +257,16 @@ async def run():
         t.sendto(dns_query(name, qtype))
         d = await asyncio.wait_for(qp.fut, 5); t.close(); return d
     d = await ask("registry.npmjs.org")
-    check("dns: 허용 이름 → broker IP", d[3] & 0xF == 0 and d.endswith(bytes([10, 100, 1, 163])), d)
-    check("dns: 와일드카드 허용", (await ask("api.github.com"))[6:8] == b"\0\1")
+    check("dns: 허용 이름 → 진짜 주소(broker IP 아님)", d[3] & 0xF == 0 and d.endswith(bytes([104, 16, 1, 1])), d)
+    check("dns: 와일드카드 허용", (await ask("api.github.com")).endswith(bytes([140, 82, 112, 5])))
     check("dns: 허용 밖 → NXDOMAIN", (await ask("evil.example"))[3] & 0xF == 3)
     check("dns: 443 이 아닌 규칙만 있는 이름 → NXDOMAIN", (await ask("db.x"))[3] & 0xF == 3)
+    write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["priv.example:443", "boom.example:443", "empty.example:443", "registry.npmjs.org:443"]}}})
+    check("dns: 사설로 해석되는 이름은 SERVFAIL(재바인딩 방지)", (await ask("priv.example"))[3] & 0xF == 2)
+    check("dns: 조회 실패는 SERVFAIL", (await ask("boom.example"))[3] & 0xF == 2 and (await ask("empty.example"))[3] & 0xF == 2)
+    check("dns: 허용 이름 AAAA 는 빈 답", (await ask("registry.npmjs.org", 28))[6:8] == b"\0\0" and (await ask("registry.npmjs.org", 28))[3] & 0xF == 0)
     write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["deb.debian.org:80"]}}})
-    check("dns: 80 만 허용된 이름도 broker IP", (await ask("deb.debian.org"))[6:8] == b"\0\1")
-    write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["registry.npmjs.org:443"]}}})
-    check("dns: 허용 이름 AAAA 는 빈 답", (await ask("registry.npmjs.org", 28))[6:8] == b"\0\0")
+    check("dns: 80 만 허용된 이름도 진짜 주소", (await ask("deb.debian.org")).endswith(bytes([151, 101, 2, 132])))
     tr.close()
     for s in (srv, srv2, srv3, srv4, es):
         s.close()

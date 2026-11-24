@@ -3,9 +3,10 @@
   egress.py set    --state F --name N --ip IP [--manifest M] [--allow H[:P]]...   클라이언트 추가·갱신
   egress.py remove --state F --name N
   egress.py show   --state F
+  egress.py acl    --broker IP [--port 3128]   ct NIC ACL(JSON, 방식 B)
 상태 파일 = broker_proxy.py 의 설정 형식({"default_allow": [...], "clients": {IP: {"name", "allow"}}}). 허용 프리셋은 egress-presets.toml(S71) — 클라이언트별 allow 는 프리셋·매니페스트로 계산해 채운다.
 """
-import argparse, json, os, re, sys, tempfile, tomllib
+import argparse, ipaddress, json, os, re, sys, tempfile, tomllib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -101,13 +102,45 @@ def compute(name, manifest_path, extra=(), open_all=False):
     return out
 
 
+PRIVATE_NETS = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16"]
+
+
+def private_minus(broker_ip):
+    """사설 대역 전체에서 broker 한 주소만 뺀 CIDR 목록. Incus ACL 은 drop 이 allow 보다 먼저 평가되므로(pilot §29-35 ②)
+    「사설 대역 drop」 은 broker 를 제외해서 만들어야 broker 로 가는 길이 열려 있다."""
+    b = ipaddress.ip_network(broker_ip + "/32")
+    out = []
+    for n in PRIVATE_NETS:
+        net = ipaddress.ip_network(n)
+        out += [str(x) for x in (net.address_exclude(b) if b.subnet_of(net) else [net])]
+    return out
+
+
+def acl(name, broker_ip, proxy_port):
+    """ct 의 NIC ACL(방식 B, pilot §29-37): broker 의 프록시·DNS, 어디로든 tcp 443·80(broker 의 redirect 가 받음), 사설 대역은 broker 를 빼고 drop.
+    기본 egress 동작은 NIC 쪽에서 drop 으로 따로 지정한다. 그래서 UDP(QUIC)·그 밖의 포트는 broker 의 udp 53 외에는 막힌다."""
+    return {"name": name, "description": "sbox ct 송신(방식 B): broker(프록시·DNS)와 어디로든 tcp 443·80(broker 게이트웨이가 redirect), 사설 대역은 broker 만 예외로 drop", "egress": [
+        {"action": "allow", "protocol": "tcp", "destination": broker_ip + "/32", "destination_port": f"{proxy_port},53", "state": "enabled"},
+        {"action": "allow", "protocol": "udp", "destination": broker_ip + "/32", "destination_port": "53", "state": "enabled"},
+        {"action": "allow", "protocol": "tcp", "destination_port": "443,80", "state": "enabled"},
+        {"action": "drop", "destination": ",".join(private_minus(broker_ip)), "state": "enabled"}], "ingress": []}
+
+
 def main(argv):
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["set", "remove", "show"])
-    ap.add_argument("--state", required=True)
+    ap.add_argument("cmd", choices=["set", "remove", "show", "acl"])
+    ap.add_argument("--state")
+    ap.add_argument("--broker"); ap.add_argument("--port", default="3128"); ap.add_argument("--acl-name", default="sbox-egress")
     ap.add_argument("--name"); ap.add_argument("--ip"); ap.add_argument("--manifest")
     ap.add_argument("--allow", action="append", default=[]); ap.add_argument("--open", action="store_true")
     a = ap.parse_args(argv)
+    if a.cmd == "acl":
+        if not a.broker:
+            raise SystemExit("--broker 가 필요합니다")
+        print(json.dumps(acl(a.acl_name, a.broker, a.port)))
+        return 0
+    if not a.state:
+        raise SystemExit("--state 가 필요합니다")
     data = load(a.state)
     if a.cmd == "show":
         print(json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True)); return 0
