@@ -1,0 +1,55 @@
+# sbox broker 송신 허용 프리셋 (plan dev-sandbox-pilot §29-30, S71). 「어떤 도구·OS·에이전트가 어떤 도메인을 쓰나」를 기재한 표.
+# 프로젝트(ct)의 허용목록 = always + 자동(flavor·도구) + 매니페스트 [network] presets + [network] egress − [network] exclude.
+#   매니페스트 [network]:  presets = ["rust"]  egress = ["api.stripe.com", "db.internal:5432"]  exclude = ["claude.ai:443", "go"]
+#   exclude 는 「호스트:포트」 한 항목, 또는 프리셋 이름(그 프리셋 전체) — 이름이 겹치면 프리셋 이름으로 본다.
+# 매니페스트가 아예 없으면(프로젝트 연결 없이 만든 ct) 호환을 위해 모든 프리셋을 허용한다(예전 「전부에게 27개」와 같다).
+# 항목은 「정확한 호스트:포트」(와일드카드는 맨 앞 `*.` 만, 포트 생략 시 443). CONNECT 전용이라 http(80)는 안 된다. 추가·삭제할 때는 이유를 주석으로 남긴다.
+
+always = ["git-github", "llm-claude", "docker"]   # 모든 ct 에 — Docker 는 기본 설치(--no-docker 제외, 그때는 매니페스트 exclude = ["docker"])
+
+[auto.flavor]    # sboxctl create --flavor
+debian = ["os-debian"]
+ubuntu = ["os-ubuntu"]
+
+[auto.tool]      # 매니페스트 [inferred]·[override]·[resolved] 에 이 도구가 있으면
+node = ["node"]
+rust = ["rust"]
+go = ["go"]
+python = ["python"]
+uv = ["python"]
+
+[preset.os-debian]
+desc = "Debian apt 미러"
+allow = ["deb.debian.org:443", "security.debian.org:443"]
+
+[preset.os-ubuntu]
+desc = "Ubuntu apt 미러"
+allow = ["archive.ubuntu.com:443", "security.ubuntu.com:443"]
+
+[preset.docker]
+desc = "rootless Docker 설치(download.docker.com)와 이미지 pull. 이미지 블롭 CDN 두 곳 — cloudfront 가 빠지면 pull 이 마지막에 403(2026-11-23). 새 레지스트리·CDN 은 프로젝트 egress 에"
+allow = ["download.docker.com:443", "registry-1.docker.io:443", "auth.docker.io:443", "production.cloudflare.docker.com:443", "production.cloudfront.docker.com:443"]
+
+[preset.node]
+desc = "Node.js 배포·npm"
+allow = ["registry.npmjs.org:443", "nodejs.org:443"]
+
+[preset.rust]
+desc = "rustup·crates.io"
+allow = ["static.rust-lang.org:443", "index.crates.io:443", "static.crates.io:443", "crates.io:443"]
+
+[preset.go]
+desc = "Go 모듈 프록시·체크섬"
+allow = ["proxy.golang.org:443", "sum.golang.org:443", "go.dev:443"]
+
+[preset.python]
+desc = "PyPI"
+allow = ["pypi.org:443", "files.pythonhosted.org:443"]
+
+[preset.git-github]
+desc = "GitHub 소스(git over https)"
+allow = ["github.com:443", "codeload.github.com:443", "objects.githubusercontent.com:443", "raw.githubusercontent.com:443"]
+
+[preset.llm-claude]
+desc = "Claude Code 인증·API"
+allow = ["api.anthropic.com:443", "console.anthropic.com:443", "claude.ai:443"]

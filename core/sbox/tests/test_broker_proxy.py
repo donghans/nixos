@@ -58,6 +58,25 @@ tools.write_manifest(mp, "p", "/x", {}, {}, {}, tier="critical", network=None)
 check("network 없으면 허용 0개", egress.manifest_egress(mp) == [])
 
 
+# S71 프리셋 계산: 자동(flavor·도구)·presets·egress·exclude(규칙·프리셋 이름)·매니페스트 없음·알 수 없는 프리셋
+def pm(**net):
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "m.toml")
+    tools.write_manifest(p, "p", "/x", {"node": {"spec": "22", "source": "t"}}, {}, {}, tier=None, network=net or None)
+    return p
+r = egress.compute("sbox-ct-debian13-p", pm())
+check("프리셋: debian+node+always", "deb.debian.org:443" in r and "registry.npmjs.org:443" in r and "github.com:443" in r and r["github.com:443"] == "git-github", sorted(r))
+check("프리셋: 안 쓰는 도구는 없음", "static.crates.io:443" not in r and "archive.ubuntu.com:443" not in r)
+r = egress.compute("sbox-ct-ubuntu2404-p", pm(presets=["rust"], egress=["api.stripe.com"], exclude=["claude.ai:443", "docker"]))
+check("프리셋: presets·egress 추가", r.get("crates.io:443") == "rust" and r.get("api.stripe.com:443") == "egress" and "archive.ubuntu.com:443" in r)
+check("프리셋: exclude 규칙·프리셋 이름", "claude.ai:443" not in r and "api.anthropic.com:443" in r and "registry-1.docker.io:443" not in r)
+check("프리셋: 매니페스트 없으면 전부", len(egress.compute("sbox-ct-debian13-x", None)) >= 27)
+try:
+    egress.compute("sbox-ct-debian13-p", pm(presets=["nope"])); check("프리셋: 알 수 없는 이름 거부", False)
+except SystemExit:
+    check("프리셋: 알 수 없는 이름 거부", True)
+
+
 async def echo_server():
     async def h(r, w):
         while True:

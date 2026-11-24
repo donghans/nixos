@@ -987,8 +987,11 @@ cmd_broker() {
             say "broker $BROKER  $(ct_ip "$BROKER"):$BROKER_PORT  $(incus exec "$BROKER" -- systemctl is-active sbox-broker </dev/null 2>&1 | head -n1)"
             python3 "$SBOX_DIR/egress.py" show --state "$EGRESS_STATE" | python3 -c 'import sys,json
 d=json.load(sys.stdin)
-print("  기본 허용 %d개" % len(d.get("default_allow",[])))
-for ip,c in sorted(d.get("clients",{}).items()): print("  %-16s %s (+%d)" % (ip,c["name"],len(c["allow"])))'
+print("  공통 허용 %d개(S71 이후 보통 0 — 허용은 프리셋으로 클라이언트별)" % len(d.get("default_allow",[])))
+for ip,c in sorted(d.get("clients",{}).items()):
+    by={}
+    for s in c.get("sources",{}).values(): by[s]=by.get(s,0)+1
+    print("  %-16s %s 허용 %d개 (%s)" % (ip,c["name"],len(c["allow"]),", ".join("%s %d"%kv for kv in by.items())))'
             incus exec "$BROKER" -- tail -n 5 /var/log/broker/access.log </dev/null 2>/dev/null || true
             return 0 ;;
         *) die "사용법: sboxctl broker create|status" ;;

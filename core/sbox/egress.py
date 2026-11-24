@@ -3,9 +3,9 @@
   egress.py set    --state F --name N --ip IP [--manifest M] [--allow H[:P]]...   클라이언트 추가·갱신
   egress.py remove --state F --name N
   egress.py show   --state F
-상태 파일 = broker_proxy.py 의 설정 형식({"default_allow": [...], "clients": {IP: {"name", "allow"}}}). 기본 허용 세트는 egress.toml.
+상태 파일 = broker_proxy.py 의 설정 형식({"default_allow": [...], "clients": {IP: {"name", "allow"}}}). 허용 프리셋은 egress-presets.toml(S71) — 클라이언트별 allow 는 프리셋·매니페스트로 계산해 채운다.
 """
-import argparse, json, os, sys, tempfile, tomllib
+import argparse, json, os, re, sys, tempfile, tomllib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -35,16 +35,65 @@ def save(path, data):
     os.replace(tmp, path)
 
 
-def defaults():
-    with open(os.path.join(HERE, "egress.toml"), "rb") as f:
-        return [norm(r) for r in tomllib.load(f).get("default_allow", [])]
+def presets_table():
+    with open(os.path.join(HERE, "egress-presets.toml"), "rb") as f:
+        return tomllib.load(f)
+
+
+def manifest_data(path):
+    if not path or not os.path.exists(path):
+        return None
+    with open(path, "rb") as f:
+        return tomllib.load(f)
 
 
 def manifest_egress(path):
-    if not path or not os.path.exists(path):
-        return []
-    with open(path, "rb") as f:
-        return [norm(r) for r in tomllib.load(f).get("network", {}).get("egress", [])]
+    d = manifest_data(path) or {}
+    return [norm(r) for r in d.get("network", {}).get("egress", [])]
+
+
+def flavor_of(name):
+    m = re.match(r"sbox-ct-([a-z]+)\d", name or "")
+    return m.group(1) if m else None
+
+
+def compute(name, manifest_path, extra=()):
+    """ct 하나의 허용목록 → (규칙 → 출처 표시 dict). 출처 = 프리셋 이름 | "egress" | "--allow"."""
+    t = presets_table()
+    pre = t.get("preset", {})
+    m = manifest_data(manifest_path)
+    net = (m or {}).get("network", {})
+    if m is None:                                   # 매니페스트 없음 → 호환: 모든 프리셋
+        names = list(pre)
+    else:
+        names = list(t.get("always", []))
+        names += t.get("auto", {}).get("flavor", {}).get(flavor_of(name), [])
+        have = set()
+        for sec in ("inferred", "override", "resolved"):
+            have |= set(m.get(sec, {}))
+        for tool, ps in t.get("auto", {}).get("tool", {}).items():
+            if tool in have:
+                names += ps
+        names += net.get("presets", [])
+    unknown = [n for n in names if n not in pre]
+    if unknown:
+        raise SystemExit(f"알 수 없는 프리셋: {', '.join(unknown)} (있는 것: {', '.join(sorted(pre))})")
+    excl = [e.strip() for e in net.get("exclude", [])]
+    skip_presets = {e for e in excl if e in pre}
+    skip_rules = {norm(e) for e in excl if e not in pre}
+    out = {}
+    for n in dict.fromkeys(names):
+        if n in skip_presets:
+            continue
+        for r in pre[n].get("allow", []):
+            out.setdefault(norm(r), n)
+    for r in manifest_egress(manifest_path):
+        out.setdefault(r, "egress")
+    for r in extra:
+        out.setdefault(norm(r), "--allow")
+    for r in skip_rules:
+        out.pop(r, None)
+    return out
 
 
 def main(argv):
@@ -59,16 +108,19 @@ def main(argv):
         print(json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True)); return 0
     if not a.name:
         raise SystemExit("--name 이 필요합니다")
-    data["default_allow"] = defaults()
+    data["default_allow"] = []                           # S71 부터 공통 세트 없음 — 전부 클라이언트별(프리셋 계산 결과)
     clients = data.setdefault("clients", {})
     for ip in [ip for ip, c in clients.items() if c.get("name") == a.name]:
         del clients[ip]                                  # 이름이 같으면 이전 IP 항목을 지운다(IP 가 바뀐 경우)
     if a.cmd == "set":
         if not a.ip:
             raise SystemExit("--ip 가 필요합니다")
-        extra = sorted(set(manifest_egress(a.manifest) + [norm(r) for r in a.allow]))
-        clients[a.ip] = {"name": a.name, "allow": extra}
-        print(f"{a.name} {a.ip}: 기본 {len(data['default_allow'])}개 + 추가 {len(extra)}개")
+        rules = compute(a.name, a.manifest, a.allow)
+        clients[a.ip] = {"name": a.name, "allow": sorted(rules), "sources": dict(sorted(rules.items()))}
+        by = {}
+        for s_ in rules.values():
+            by[s_] = by.get(s_, 0) + 1
+        print(f"{a.name} {a.ip}: 허용 {len(rules)}개 (" + ", ".join(f"{k} {v}" for k, v in by.items()) + ")")
     save(a.state, data)
     return 0
 
