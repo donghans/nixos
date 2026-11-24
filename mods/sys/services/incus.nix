@@ -35,6 +35,8 @@ mkMod __curPos "Incus hypervisor" ({
             iifname "incusbr0" ip daddr 10.100.0.1 udp dport 53 accept
             iifname "incusbr0" ip daddr 10.100.0.1 tcp dport 53 accept
             iifname "incusbr0" icmp type echo-request accept
+            # 핫스팟 모드에서 호스트가 이 브리지의 forward TCP 를 redsocks(12345)로 REDIRECT 한다(hosts/msi-summit-me/hotspot-proxy-dispatcher.nix, 킬 스위치).
+            iifname "incusbr0" ip daddr 10.100.0.1 tcp dport 12345 accept
             iifname "incusbr0" drop
           }
         '';
@@ -45,6 +47,7 @@ mkMod __curPos "Incus hypervisor" ({
         iifname "incusbr0" ip daddr 10.100.0.1 udp dport 53 accept
         iifname "incusbr0" ip daddr 10.100.0.1 tcp dport 53 accept
         iifname "incusbr0" icmp type echo-request accept
+        iifname "incusbr0" ip daddr 10.100.0.1 tcp dport 12345 accept
       '';
     })
     (lib.mkIf cfg.enable {

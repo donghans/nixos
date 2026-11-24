@@ -137,6 +137,9 @@ in {
           iifname "sboxbr0" ip daddr 10.100.1.1 udp dport 53 accept
           iifname "sboxbr0" ip daddr 10.100.1.1 tcp dport 53 accept
           ${nixServeCacheRule}
+          # 핫스팟 모드(킬 스위치)에서 호스트가 broker·VM(DHCP 범위)의 forward TCP 를 redsocks(12345)로 REDIRECT 한다(hosts/msi-summit-me/hotspot-proxy-dispatcher.nix).
+          # ct 대역(.200–.250)은 해당 없음 — 여기서 열지 않는다.
+          iifname "sboxbr0" ip saddr 10.100.1.100-10.100.1.199 ip daddr 10.100.1.1 tcp dport 12345 accept
           # 막힌 시도의 흔적(커널 로그 → journald): 초당 폭주해도 로그는 분당 6건(+순간 10건)까지만. 접두사로 grep 한다:
           #   journalctl -k | grep 'sbox-guard'  (plan dev-sandbox-pilot §13 — 가시성 보강 2)
           iifname "sboxbr0" limit rate 6/minute burst 10 packets log prefix "sbox-guard drop-input: " level warn
@@ -163,6 +166,7 @@ in {
       iifname "sboxbr0" udp dport 67 accept
       iifname "sboxbr0" ip daddr 10.100.1.1 udp dport 53 accept
       iifname "sboxbr0" ip daddr 10.100.1.1 tcp dport 53 accept
+      iifname "sboxbr0" ip saddr 10.100.1.100-10.100.1.199 ip daddr 10.100.1.1 tcp dport 12345 accept
       ${nixServeCacheRule}
     '';
 
