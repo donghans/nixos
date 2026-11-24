@@ -8,7 +8,7 @@
 #   sboxctl create --kind vm [NAME] [--no-cache] [--no-token] [--no-home]   골든 이미지에서 새 VM 생성(기본 이름 sbox-vm-YYMMDD-HHMM)
 #   (ct 만) create 에 --from-repo DIR | --manifest F | --tool TOOL[=SPEC] (반복) | --update 를 주면 만든 직후 도구 층을 자동 적용 — 같은 매니페스트로 다시 만들면 같은 버전
 #   sboxctl tools NAME [--from-repo DIR|--manifest F] [--update] [node=22]  컨테이너에 읽기 전용 도구 층 붙임(호스트가 받아 sha256 검증, 버전은 매니페스트에 고정, v1: node)
-#   sboxctl docker NAME [--from-repo DIR|--manifest F] [--update] [--no-compose]  컨테이너(ct, --nesting 필수) 안에 rootless Docker 설치(공식 apt, 키는 호스트가 고정 보관·교차 확인, 버전은 쿨다운 적용·매니페스트에 고정, Compose 는 도구 층)
+#   sboxctl docker NAME [--from-repo DIR|--manifest F] [--update] [--no-compose]  컨테이너(ct, --nesting 필수) 안에 rootless Docker 설치(공식 apt, 키는 호스트가 고정 보관·교차 확인, 버전은 쿨다운 적용·매니페스트에 고정, Compose 는 도구 층) — 설치 뒤 buildx(도구 층)·ct 안 특권 포트 sysctl(80 이상)·Docker 정리 자동화(builder gc 4GB + 매일 미태그 이미지·72h 넘은 중단 컨테이너 정리)
 #   (ct 만) create 는 기본으로 --nesting 을 켜고 Docker 까지 설치한다(늘 쓰는 도구 — 사용자 2026-11-23). 끄려면 --no-docker(이번 한 번) 또는 매니페스트 [override] docker = "no"(영구)
 #   sboxctl llm AGENT NAME [--dir D] [--bypass] [--attach] [--version V] [--update]  안(vm·ct)에서 tmux 로 LLM 에이전트 대화형 세션 시작(정의 core/sbox/llm.toml, 첫 실행 안내 미리 처리·남으면 경고).
 #   sboxctl bundle NAME                               VM 안 저장소를 git bundle 로 호스트에 꺼냄(지우기 전 규율)
@@ -794,6 +794,43 @@ for n in json.load(sys.stdin)["notes"]: print("sbox: "+n, file=sys.stderr)'
         incus exec "$name" --env "PATH=$CT_PATH" -- test -e /usr/local/lib/docker/cli-plugins/docker-compose </dev/null 2>/dev/null \
             || { if [[ -n $manifest && -f $manifest ]]; then cmd_tools "$name" --manifest "$manifest" compose=latest; else cmd_tools "$name" compose=latest; fi; } || say "경고: 도구 층 Compose 연결 실패 — 'sboxctl tools $name compose=latest' 로 다시 시도하세요"
     fi
+    # 5) buildx(도구 층, Sigstore 검증) — 레거시 빌더는 중간·미태그 이미지를 남겨 genple 에서 회수 가능한 낭비가 80% 였다(pilot §29-41)
+    if ((compose)); then
+        incus exec "$name" --env "PATH=$CT_PATH" -- test -e /usr/local/lib/docker/cli-plugins/docker-buildx </dev/null 2>/dev/null \
+            || { if [[ -n $manifest && -f $manifest ]]; then cmd_tools "$name" --manifest "$manifest" buildx=latest; else cmd_tools "$name" buildx=latest; fi; } || say "경고: 도구 층 buildx 연결 실패 — 'sboxctl tools $name buildx=latest' 로 다시 시도하세요"
+    fi
+    # 6) 특권 포트(80·443 게시): ct 의 net 네임스페이스 sysctl 이라 호스트에는 영향 없음. rootless Docker 가 -p 80:… 를 열려면 필요(80 이상만 허용 — 22 같은 낮은 포트는 계속 특권).
+    "${ex[@]}" sh -ec 'printf "net.ipv4.ip_unprivileged_port_start = 80\n" > /etc/sysctl.d/99-sbox-ports.conf; sysctl -q -p /etc/sysctl.d/99-sbox-ports.conf' </dev/null \
+        || say "경고: ct 안 net.ipv4.ip_unprivileged_port_start 설정 실패 — 80·443 게시가 거부될 수 있습니다"
+    # 7) Docker 정리 자동화(ct 안, sbox 사용자 systemd): 빌드 캐시는 데몬이 한도(4GB)로 스스로 정리, 쓰이지 않는 미태그 이미지·72시간 넘은 중단 컨테이너는 매일 정리. 볼륨·태그된 이미지는 건드리지 않는다.
+    "${ex[@]}" sh -ec 'd=/home/sbox/.config/docker; mkdir -p $d /home/sbox/.config/systemd/user
+        cat > $d/daemon.json <<EOF2
+{"builder": {"gc": {"enabled": true, "defaultKeepStorage": "4GB"}}}
+EOF2
+        cat > /home/sbox/.config/systemd/user/sbox-docker-prune.service <<EOF2
+[Unit]
+Description=sbox: 쓰이지 않는 미태그 이미지·오래된 중단 컨테이너 정리(볼륨·태그된 이미지는 유지)
+[Service]
+Type=oneshot
+Nice=19
+Environment=DOCKER_HOST=unix://%t/docker.sock
+ExecStart=/usr/bin/docker container prune -f --filter until=72h
+ExecStart=/usr/bin/docker image prune -f
+EOF2
+        cat > /home/sbox/.config/systemd/user/sbox-docker-prune.timer <<EOF2
+[Unit]
+Description=sbox: Docker 정리(매일)
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF2
+        chown -R sbox: /home/sbox/.config' </dev/null || die "Docker 정리 설정 기록 실패"
+    "${ex[@]}" su -s /bin/sh sbox -c 'U=$(id -u); export XDG_RUNTIME_DIR=/run/user/$U DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$U/bus HOME=/home/sbox
+        systemctl --user daemon-reload && systemctl --user enable --now sbox-docker-prune.timer >/dev/null && systemctl --user restart docker' </dev/null \
+        || say "경고: Docker 정리 타이머·gc 설정 적용 실패 — ct 안에서 'systemctl --user status sbox-docker-prune.timer' 를 보세요"
     audit info docker "$name" "rootless Docker: docker-ce $dv, containerd.io $cv (${distro} ${codename}), 키 고정 ${key_file##*/}, apt-mark hold"
     say "완료: $name — rootless Docker(docker-ce $dv). sbox 사용자로 'docker info'(Security Options: rootless). 올리려면 'sboxctl docker $name --update'(쿨다운 다시 적용)"
 }

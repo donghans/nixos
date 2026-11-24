@@ -169,6 +169,26 @@ name = "docker-compose"
 docker-compose = "docker-compose"
 "/usr/local/lib/docker/cli-plugins/docker-compose" = "docker-compose"
 
+[buildx]
+role = "re"
+desc = "Docker Buildx (BuildKit 빌더, 공식 GitHub 릴리스 단일 바이너리, docker CLI 플러그인으로 연결) — 레거시 빌더가 남기는 중간 이미지 낭비를 없애고 빌드 캐시를 한도에 맞춰 정리한다(pilot §29-41)"
+resolver = { type = "github-release", repo = "docker/buildx", tag_prefix = "v" }
+url = "https://github.com/docker/buildx/releases/download/v{version}/buildx-v{version}.linux-amd64"
+checksum = { type = "sums-file", url = "https://github.com/docker/buildx/releases/download/v{version}/checksums.txt", name = "buildx-v{version}.linux-amd64" }
+[buildx.signature]
+type = "sigstore"
+bundle_from = "asset"
+bundle_url = "https://github.com/docker/buildx/releases/download/v{version}/buildx-v{version}.linux-amd64.sigstore.json"
+issuer = "https://token.actions.githubusercontent.com"
+identity_regexp = "^https://github.com/docker/github-builder/\\.github/workflows/bake\\.yml@"
+note = "compose 와 같은 공유 빌더 신원(v0.39.1 인증서의 SAN 으로 직접 확인, 2026-11-25) — 공유 빌더의 취약점은 이를 쓰는 모든 프로젝트에 번진다"
+[buildx.archive]
+type = "binary"
+name = "docker-buildx"
+[buildx.links]
+docker-buildx = "docker-buildx"
+"/usr/local/lib/docker/cli-plugins/docker-buildx" = "docker-buildx"
+
 [uv]
 role = "re"
 desc = "uv (Python 패키지·프로젝트 관리자, 공식 GitHub 릴리스)"
