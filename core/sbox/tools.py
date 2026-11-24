@@ -997,12 +997,12 @@ def status_waybar():
             last = None
     problems = [f["msg"] for f in st.get("last_findings", []) if f["level"] == "mismatch"] + list(st.get("ct_alerts", [])) + list(st.get("pin_alerts", []))
     if problems:
-        return {"text": "󰒃 신뢰 교차검증 경고", "class": "alert", "tooltip": "\n".join(problems[:6])}
+        return {"text": "🛡 신뢰 교차검증 경고", "class": "alert", "tooltip": "\n".join(problems[:6])}
     if last is None:
-        return {"text": "󰒃 교차검증 미실행", "class": "due", "tooltip": f"`tools.py crosscheck-run` 로 처음 실행하세요(주기 {interval})"}
+        return {"text": "🛡 교차검증 미실행", "class": "due", "tooltip": f"`tools.py crosscheck-run` 로 처음 실행하세요(주기 {interval})"}
     age = (now - last) / 86400
     if age >= days:
-        return {"text": f"󰒃 교차검증 {int(age)}일", "class": "due", "tooltip": f"마지막 실행 {int(age)}일 전(주기 {interval}) — `tools.py crosscheck-run`"}
+        return {"text": f"🛡 교차검증 {int(age)}일", "class": "due", "tooltip": f"마지막 실행 {int(age)}일 전(주기 {interval}) — `tools.py crosscheck-run`"}
     return {"text": "", "class": "ok", "tooltip": f"교차검증 정상({int(age)}일 전, 주기 {interval})"}
 
 
