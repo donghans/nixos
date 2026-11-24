@@ -75,11 +75,12 @@ check("프리셋: 안 쓰는 도구는 없음", "static.crates.io:443" not in r 
 r = egress.compute("sbox-ct-ubuntu2404-p", pm(presets=["rust"], egress=["api.stripe.com"], exclude=["claude.ai:443", "docker"]))
 check("프리셋: presets·egress 추가", r.get("crates.io:443") == "rust" and r.get("api.stripe.com:443") == "egress" and "archive.ubuntu.com:443" in r)
 check("프리셋: exclude 규칙·프리셋 이름", "claude.ai:443" not in r and "api.anthropic.com:443" in r and "registry-1.docker.io:443" not in r)
-check("프리셋: --open 이면 전부", len(egress.compute("sbox-ct-debian13-x", None, open_all=True)) >= 27)
+rm = egress.compute("sbox-ct-debian13-x", None, minimal=True)
+check("프리셋: --minimal(프로젝트 없음)은 always+flavor 만", "deb.debian.org:443" in rm and "github.com:443" in rm and "registry.npmjs.org:443" not in rm and "static.crates.io:443" not in rm and rm == egress.compute("sbox-ct-debian13-x", "/nonexistent.toml"), sorted(rm))
 try:
-    egress.compute("sbox-ct-debian13-x", None); check("프리셋: 매니페스트도 --open 도 없으면 거부", False)
+    egress.compute("sbox-ct-debian13-x", None); check("프리셋: 매니페스트도 --minimal 도 없으면 거부", False)
 except SystemExit:
-    check("프리셋: 매니페스트도 --open 도 없으면 거부", True)
+    check("프리셋: 매니페스트도 --minimal 도 없으면 거부", True)
 check("프리셋: 지정했지만 파일 없음(create 중) = flavor·always 만", "registry.npmjs.org:443" not in egress.compute("sbox-ct-debian13-x", "/nonexistent.toml") and "deb.debian.org:443" in egress.compute("sbox-ct-debian13-x", "/nonexistent.toml"))
 try:
     egress.compute("sbox-ct-debian13-p", pm(presets=["nope"])); check("프리셋: 알 수 없는 이름 거부", False)
