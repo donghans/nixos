@@ -16,7 +16,8 @@
     AAAA·그 밖의 유형은 「없음」(빈 답)으로 답해 IPv4 로만 가게 한다. 질의는 한 줄 JSON 으로 기록.
   - TLS 443 수신: 연결한 프로그램이 broker 주소로 오면 첫 ClientHello 의 SNI 를 읽어 같은 허용 판단·사설 대역 거부로 처리한다.
     목적지는 SNI 이름을 broker 가 직접 해석해서 정한다(클라이언트가 준 주소는 쓰지 않는다). SNI 가 없으면 끊는다.
-  - 평문·비 443·비 TLS 연결, 터널 안 내용은 이 경로의 범위 밖이다(CONNECT 프록시 또는 S72 어댑터).
+  - 평문 HTTP(80): 허용목록에 `이름:80` 이 **명시된** 이름만, 첫 요청의 Host 헤더로 판단(apt 저장소 같은 서명된 평문). 나머지 평문은 거부.
+  - 비 443·비 80·비 TLS 연결, 터널 안 내용은 이 경로의 범위 밖이다(CONNECT 프록시 또는 S72 어댑터).
 설정 파일(JSON, 요청마다 mtime 이 바뀌었는지 보고 다시 읽음 — 변경에 재시작 불필요):
   {"default_allow": ["host:port", ...], "clients": {"10.100.1.57": {"name": "sbox-ct-…", "allow": ["github.com:443", "*.npmjs.org:443"]}}}
 """
@@ -137,9 +138,10 @@ async def pipe(r, w, counter, key):
 
 
 class Proxy:
-    def __init__(self, cfg, allow_private_targets=False, tls_upstream_port=443):
+    def __init__(self, cfg, allow_private_targets=False, tls_upstream_port=443, http_upstream_port=80):
         self.cfg, self.allow_private, self.sem = cfg, allow_private_targets, asyncio.Semaphore(MAX_CONNS)
         self.tls_upstream_port = tls_upstream_port   # 시험에서만 바꾼다
+        self.http_upstream_port = http_upstream_port
 
     def decide(self, client_ip, host, port):
         data = self.cfg.get()
@@ -225,6 +227,52 @@ class Proxy:
                             rec["verdict"] = "allow"
                             counter = {"up": len(first), "down": 0}
                             up_w.write(first); await up_w.drain()
+                            await asyncio.gather(pipe(reader, up_w, counter, "up"), pipe(up_r, writer, counter, "down"))
+                            rec["up"], rec["down"] = counter["up"], counter["down"]
+        except Exception as e:
+            rec["reason"] = rec["reason"] or "error:" + type(e).__name__
+        finally:
+            rec["secs"] = round(time.monotonic() - t0, 2)
+            log(rec)
+            for w in (writer, up_w):
+                try:
+                    if w:
+                        w.close()
+                except OSError:
+                    pass
+
+    async def handle_http(self, reader, writer):
+        """투명 평문 HTTP 수신(포트 80): 첫 요청의 Host 헤더로 판단한다 — 허용목록에 `이름:80` 이 명시된 이름만(예: Debian·Ubuntu 이미지의 apt). 본문은 해석하지 않는다."""
+        peer = writer.get_extra_info("peername") or ("?", 0)
+        rec = {"client": peer[0], "host": "", "port": self.http_upstream_port, "mode": "transparent-http", "verdict": "deny", "reason": "", "up": 0, "down": 0}
+        t0 = time.monotonic()
+        up_w = None
+        try:
+            async with self.sem:
+                try:
+                    head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), HEAD_TIMEOUT)
+                except (asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError):
+                    head = b""
+                host = ""
+                for ln in head.split(b"\r\n")[1:]:
+                    k, _, v = ln.partition(b":")
+                    if k.strip().lower() == b"host":
+                        host = v.strip().decode("latin-1").lower().rsplit(":", 1)[0] if v.strip().isascii() else ""
+                        break
+                if not head or not host or len(host) > 253:
+                    rec["reason"] = "no-host"
+                else:
+                    rec["host"] = host
+                    ok, why, name = self.decide(rec["client"], host, self.http_upstream_port)
+                    rec["name"], rec["reason"] = name, why
+                    if ok:
+                        up_r, up_w, why = await self.open_upstream(host, self.http_upstream_port)
+                        if up_w is None:
+                            rec["reason"] = why
+                        else:
+                            rec["verdict"] = "allow"
+                            counter = {"up": len(head), "down": 0}
+                            up_w.write(head); await up_w.drain()
                             await asyncio.gather(pipe(reader, up_w, counter, "up"), pipe(up_r, writer, counter, "down"))
                             rec["up"], rec["down"] = counter["up"], counter["down"]
         except Exception as e:
@@ -344,6 +392,8 @@ class DnsStub(asyncio.DatagramProtocol):
             return
         qid, name, qtype, question = q
         ok, why, who = self.proxy.decide(addr[0], name, 443)
+        if not ok:
+            ok, why, who = self.proxy.decide(addr[0], name, 80)   # 평문 80 만 허용된 이름(apt 등)도 broker 로 안내
         if ok:
             reply, rc = build_answer(qid, question, qtype, 0, self.answer_ip), "ok" if qtype == 1 else "ok-empty"
         else:
@@ -352,7 +402,7 @@ class DnsStub(asyncio.DatagramProtocol):
         log({"event": "dns", "client": addr[0], "name": name, "qtype": qtype, "result": rc, "reason": why})
 
 
-async def main_async(listen, port, cfg_path, allow_private, tls_listen=None, tls_port=0, dns_listen=None, dns_port=53, answer_ip=None):
+async def main_async(listen, port, cfg_path, allow_private, tls_listen=None, tls_port=0, http_port=0, dns_listen=None, dns_port=53, answer_ip=None):
     proxy = Proxy(Config(cfg_path), allow_private)
     server = await asyncio.start_server(proxy.handle, listen, port, limit=MAX_HEAD + 1024)
     log({"event": "start", "listen": f"{listen}:{port}", "config": cfg_path})
@@ -360,6 +410,9 @@ async def main_async(listen, port, cfg_path, allow_private, tls_listen=None, tls
     if tls_port:
         extra.append(await asyncio.start_server(proxy.handle_tls, tls_listen or listen, tls_port, limit=32768))
         log({"event": "start-tls", "listen": f"{tls_listen or listen}:{tls_port}"})
+    if http_port:
+        extra.append(await asyncio.start_server(proxy.handle_http, tls_listen or listen, http_port, limit=MAX_HEAD + 1024))
+        log({"event": "start-http", "listen": f"{tls_listen or listen}:{http_port}"})
     if dns_listen and answer_ip:
         await asyncio.get_running_loop().create_datagram_endpoint(lambda: DnsStub(proxy, answer_ip), local_addr=(dns_listen, dns_port))
         log({"event": "start-dns", "listen": f"{dns_listen}:{dns_port}", "answer": answer_ip})
@@ -377,6 +430,7 @@ def main(argv):
     ap.add_argument("--log", default="/var/log/broker/access.log")
     ap.add_argument("--allow-private-targets", action="store_true", help="시험 전용 — 사설 대역 대상 허용")
     ap.add_argument("--tls-port", type=int, default=0, help="투명 TLS 수신 포트(0 = 끔, 운영은 443)")
+    ap.add_argument("--http-port", type=int, default=0, help="투명 평문 HTTP 수신 포트(0 = 끔, 운영은 80 — 허용목록에 이름:80 이 있는 이름만)")
     ap.add_argument("--dns-listen", default="", help="DNS 스텁이 받을 주소(broker 자신의 IP — systemd-resolved 가 127.0.0.53 을 쓰므로 와일드카드 불가)")
     ap.add_argument("--dns-port", type=int, default=53)
     ap.add_argument("--answer-ip", default="", help="허용된 이름에 A 로 답할 주소(보통 broker IP)")
@@ -384,7 +438,7 @@ def main(argv):
     if a.log != "-":
         os.makedirs(os.path.dirname(a.log), exist_ok=True)
         _logf = open(a.log, "a", buffering=1)
-    asyncio.run(main_async(a.listen, a.port, a.config, a.allow_private_targets, tls_port=a.tls_port, dns_listen=a.dns_listen or None, dns_port=a.dns_port, answer_ip=a.answer_ip or None))
+    asyncio.run(main_async(a.listen, a.port, a.config, a.allow_private_targets, tls_port=a.tls_port, http_port=a.http_port, dns_listen=a.dns_listen or None, dns_port=a.dns_port, answer_ip=a.answer_ip or None))
 
 
 if __name__ == "__main__":

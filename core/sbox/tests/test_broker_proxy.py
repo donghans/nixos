@@ -199,6 +199,24 @@ async def run():
     w.write(hello); await w.drain()
     check("투명: 사설로 해석되면 끊김", await asyncio.wait_for(r.read(4096), 5) == b"")
     w.close()
+    # 투명 평문 HTTP(80): 이름:80 이 명시된 이름만, Host 로 판단
+    write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": [f"localhost:{eport}"]}}})
+    px5 = bp.Proxy(bp.Config(cfgfile), allow_private_targets=True, http_upstream_port=eport)
+    srv5 = await asyncio.start_server(px5.handle_http, "127.0.0.1", 0, limit=9000)
+    p5 = srv5.sockets[0].getsockname()[1]
+    req = b"GET /x HTTP/1.1\r\nHost: localhost:80\r\n\r\n"
+    r, w = await asyncio.open_connection("127.0.0.1", p5)
+    w.write(req); await w.drain()
+    check("투명 HTTP: 허용 Host 는 전달(에코)", await asyncio.wait_for(r.readexactly(len(req)), 5) == req)
+    w.close()
+    for bad in (b"GET / HTTP/1.1\r\nHost: evil.example\r\n\r\n", b"GET / HTTP/1.1\r\n\r\n", b"junk"):
+        r, w = await asyncio.open_connection("127.0.0.1", p5)
+        w.write(bad); await w.drain()
+        if bad == b"junk":
+            w.write_eof()
+        check("투명 HTTP: 허용 밖·Host 없음·깨진 요청은 끊김 " + repr(bad[:12]), await asyncio.wait_for(r.read(4096), 15) == b"")
+        w.close()
+    srv5.close()
     # DNS 스텁 UDP 왕복
     write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["registry.npmjs.org:443", "*.github.com:443", "db.x:5432"]}}})
     loop = asyncio.get_running_loop()
@@ -219,6 +237,9 @@ async def run():
     check("dns: 와일드카드 허용", (await ask("api.github.com"))[6:8] == b"\0\1")
     check("dns: 허용 밖 → NXDOMAIN", (await ask("evil.example"))[3] & 0xF == 3)
     check("dns: 443 이 아닌 규칙만 있는 이름 → NXDOMAIN", (await ask("db.x"))[3] & 0xF == 3)
+    write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["deb.debian.org:80"]}}})
+    check("dns: 80 만 허용된 이름도 broker IP", (await ask("deb.debian.org"))[6:8] == b"\0\1")
+    write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["registry.npmjs.org:443"]}}})
     check("dns: 허용 이름 AAAA 는 빈 답", (await ask("registry.npmjs.org", 28))[6:8] == b"\0\0")
     tr.close()
     for s in (srv, srv2, srv3, srv4, es):

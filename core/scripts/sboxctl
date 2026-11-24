@@ -1002,7 +1002,7 @@ broker_install() { # broker_install IP — 프록시 코드·서비스 유닛 �
 Description=sbox broker (L7 egress: CONNECT proxy + 투명 TLS 443 + DNS stub)
 After=network-online.target
 [Service]
-ExecStart=/usr/bin/python3 -I /usr/local/lib/sbox-broker/broker_proxy.py --listen 0.0.0.0 --port $BROKER_PORT --tls-port 443 --dns-listen $ip --answer-ip $ip --config /etc/broker/clients.json --log /var/log/broker/access.log
+ExecStart=/usr/bin/python3 -I /usr/local/lib/sbox-broker/broker_proxy.py --listen 0.0.0.0 --port $BROKER_PORT --tls-port 443 --http-port 80 --dns-listen $ip --answer-ip $ip --config /etc/broker/clients.json --log /var/log/broker/access.log
 User=nobody
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
@@ -1114,8 +1114,8 @@ cmd_egress() { # cmd_egress NAME [--from-repo DIR|--manifest F] [--allow H[:P]].
     python3 - "$EGRESS_ACL" "$bip" "$BROKER_PORT" <<'PY' | incus network acl edit "$EGRESS_ACL" || die "ACL 규칙 실패"
 import sys, json
 n, bip, port = sys.argv[1:4]
-print(json.dumps({"name": n, "description": "sbox ct 송신: broker(프록시·투명 TLS 443·DNS 스텁 53) 만", "egress": [
-  {"action": "allow", "protocol": "tcp", "destination": bip + "/32", "destination_port": port + ",443,53", "state": "enabled"},
+print(json.dumps({"name": n, "description": "sbox ct 송신: broker(프록시·투명 TLS 443·평문 80·DNS 스텁 53) 만", "egress": [
+  {"action": "allow", "protocol": "tcp", "destination": bip + "/32", "destination_port": port + ",443,80,53", "state": "enabled"},
   {"action": "allow", "protocol": "udp", "destination": bip + "/32", "destination_port": "53", "state": "enabled"}], "ingress": []}))
 PY
     local verb=set

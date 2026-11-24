@@ -20,11 +20,11 @@ uv = ["python"]
 
 [preset.os-debian]
 desc = "Debian apt 미러"
-allow = ["deb.debian.org:443", "security.debian.org:443"]
+allow = ["deb.debian.org:443", "security.debian.org:443", "deb.debian.org:80", "security.debian.org:80"]   # :80 — Debian 이미지(Docker 빌드 안 apt)는 http 로 받는다. 서명 검증되는 저장소만
 
 [preset.os-ubuntu]
 desc = "Ubuntu apt 미러"
-allow = ["archive.ubuntu.com:443", "security.ubuntu.com:443"]
+allow = ["archive.ubuntu.com:443", "security.ubuntu.com:443", "archive.ubuntu.com:80", "security.ubuntu.com:80"]   # :80 — Ubuntu 이미지 apt 용
 
 [preset.docker]
 desc = "rootless Docker 설치(download.docker.com)와 이미지 pull. 이미지 블롭 CDN 두 곳 — cloudfront 가 빠지면 pull 이 마지막에 403(2026-11-23). 새 레지스트리·CDN 은 프로젝트 egress 에"
@@ -45,6 +45,10 @@ allow = ["proxy.golang.org:443", "sum.golang.org:443", "go.dev:443"]
 [preset.python]
 desc = "PyPI"
 allow = ["pypi.org:443", "files.pythonhosted.org:443"]
+
+[preset.alpine]
+desc = "Alpine 패키지(apk) — node:*-alpine 같은 Alpine 기반 이미지의 빌드 안에서 쓴다"
+allow = ["dl-cdn.alpinelinux.org:443"]
 
 [preset.git-github]
 desc = "GitHub 소스(git over https)"
