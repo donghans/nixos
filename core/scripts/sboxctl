@@ -18,7 +18,7 @@
 #   sboxctl rebuild-golden [--stale-ok]               ISO+nixstrap(NIXSTRAP_AUTO)로 골든을 처음부터 새로 만듦(약 15분)
 #   sboxctl broker create|status|update               L7 관문(broker) ct 생성·상태 — 프로젝트 ct 의 모든 외부 연결은 이 ct 의 CONNECT 프록시만 거친다(S61, pilot §29-25)
 #   sboxctl egress NAME [--from-repo DIR|--manifest F] [--allow host[:port]]... [--open]  ct 를 broker 에 연결(인자 없으면 create 때 기록한 user.sbox.manifest·egress-open 사용 NIC ACL·프록시 환경·허용목록). create 는 broker 가 있으면 자동으로 부른다
-#   sboxctl audit [NAME…]                             격리 불변식 점검(읽기 전용) — raw.*·특권·낯선 장치·프로필 이탈·포트 격리·idmap 을 sboxctl 이 만든 모양과 대조(S62 첫 조각)
+#   sboxctl audit [NAME…]                             격리 불변식 점검(읽기 전용) — raw.*·특권·낯선 장치·프로필 이탈·포트 격리·idmap 과 방식 B(ct NIC ACL·공유 ACL·broker 게이트웨이 ip_forward=0/forward drop·호스트 sbox-guard)를 sboxctl 이 만든 모양과 대조(S62)
 #   sboxctl resources NAME                            기존 ct 를 sbox.slice(합계 자원 상한) 아래로 옮기고 sbox-mem 설치(재시작 필요, S69)
 #   sboxctl list                                      sbox-* 인스턴스 목록
 #   sboxctl iso [--stale-ok]                          설치 ISO 만 미리 빌드(캐시면 약 20초, nixstrap 수정 직후면 약 7분)

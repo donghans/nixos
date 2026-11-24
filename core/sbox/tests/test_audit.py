@@ -41,4 +41,36 @@ VM = {"name": "sbox-vm-x", "type": "virtual-machine", "expanded_config": {"raw.q
 check("vm 정상", audit.check(VM) == [])
 vm2 = copy.deepcopy(VM); vm2["expanded_config"]["raw.qemu"] = "-cpu host"
 check("vm raw.qemu 변경", audit.check(vm2) != [])
+
+# --- 방식 B 불변식(pilot §29-37): ct NIC·공유 ACL·broker 게이트웨이·호스트 sbox-guard ---
+import egress  # noqa: E402
+def eg(f):
+    d = copy.deepcopy(GOOD); d["expanded_devices"]["eth0"].update({"security.acls": "sbox-egress", "security.acls.default.egress.action": "drop",
+        "security.ipv4_filtering": "true", "ipv4.address": "10.100.1.205"}); f(d); return audit.check_ct_egress(d)
+check("ACL 없는 ct 는 위반 아닌 주의", eg(lambda d: d["expanded_devices"]["eth0"].pop("security.acls")) == ([], eg(lambda d: d["expanded_devices"]["eth0"].pop("security.acls"))[1]) and eg(lambda d: d["expanded_devices"]["eth0"].pop("security.acls"))[1] != [])
+check("연결된 ct 정상", eg(lambda d: None) == ([], []), eg(lambda d: None))
+check("다른 ACL 이름", eg(lambda d: d["expanded_devices"]["eth0"].update({"security.acls": "x"}))[0] != [])
+check("기본 송신 allow", eg(lambda d: d["expanded_devices"]["eth0"].update({"security.acls.default.egress.action": "allow"}))[0] != [])
+check("ipv4_filtering 끔", eg(lambda d: d["expanded_devices"]["eth0"].update({"security.ipv4_filtering": "false"}))[0] != [])
+check("ct 대역 밖 주소", eg(lambda d: d["expanded_devices"]["eth0"].update({"ipv4.address": "10.100.1.150"}))[0] != [])
+BIP = "10.100.1.163"
+GACL = egress.acl("sbox-egress", BIP, "3128")
+check("ACL 정상", audit.check_acl(GACL, BIP) == [])
+a2 = copy.deepcopy(GACL); a2["egress"].insert(0, {"action": "allow", "protocol": "tcp", "destination_port": "22", "state": "enabled"})
+check("ACL 에 허용 추가", audit.check_acl(a2, BIP) != [])
+a3 = copy.deepcopy(GACL); a3["egress"][-1]["destination"] = "192.168.0.0/16"
+check("사설 drop 축소", audit.check_acl(a3, BIP) != [])
+check("ACL 못 읽음", audit.check_acl(None, BIP) != [])
+RS = "table inet sbox_gateway_filter {\n\tchain forwardguard {\n\t\ttype filter hook forward priority filter; policy drop;\n\t}\n}\n"
+check("broker 정상", audit.check_broker("0\n", RS) == [])
+check("broker ip_forward 1", audit.check_broker("1\n", RS) != [])
+check("broker policy accept", audit.check_broker("0", RS.replace("policy drop", "policy accept")) != [])
+check("broker masquerade", audit.check_broker("0", RS + "table ip n { chain p { masquerade } }") != [])
+check("broker forward accept", audit.check_broker("0", RS.replace("policy drop;\n", "policy drop;\n\t\tiifname eth0 accept\n")) != [])
+check("broker 못 읽음은 None", audit.check_broker(None, RS) is None)
+HG = 'table inet sbox-guard {\n\tchain forward {\n\t\tiifname "sboxbr0" oifname != "sboxbr0" ip saddr 10.100.1.200-10.100.1.250 drop\n\t}\n}\n'
+check("호스트 가드 정상", audit.check_host_guard(HG) == [])
+check("호스트 가드 표 없음", audit.check_host_guard("table inet x {\n}\n") != [])
+check("호스트 가드 규칙 없음", audit.check_host_guard(HG.replace(" drop\n", " accept\n")) != [])
+check("호스트 못 읽음은 None", audit.check_host_guard(None) is None)
 print(f"{n['ok']} 통과 / {n['bad']} 실패"); sys.exit(1 if n["bad"] else 0)
