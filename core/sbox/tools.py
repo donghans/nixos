@@ -1082,7 +1082,7 @@ def q(x):
     return json.dumps(str(x), ensure_ascii=False)
 
 
-def write_manifest(path, project, repo, inferred, override, resolved, tier=None, network=None):
+def write_manifest(path, project, repo, inferred, override, resolved, tier=None, network=None, resources=None):
     lines = ["# sbox 프로젝트 버전 매니페스트(plan dev-sandbox-pilot §29). [inferred]·[resolved] 는 sbox 가 다시 쓰고, [override] 는 사람이 씁니다.",
              "# [resolved] 는 re(실행환경) 도구만 — de(개발환경) 도구는 항상 최신이라 고정하지 않습니다.",
              "[project]", f"name = {q(project)}", f"repo = {q(repo)}"] + ([f"tier = {q(tier)}"] if tier else []) + ["", "[inferred]"]
@@ -1098,6 +1098,8 @@ def write_manifest(path, project, repo, inferred, override, resolved, tier=None,
                 lines.append(f"{k} = {str(v).lower()}")
             elif isinstance(v, (str, int)):
                 lines.append(f"{k} = {q(v) if isinstance(v, str) else v}")
+    if resources:   # [resources] 도 사람이 쓰는 구역(ct 디스크 크기 등) — 다시 쓸 때 보존
+        lines += ["", "[resources]"] + [f"{k} = {q(v)}" for k, v in sorted(resources.items())]
     for k, v in sorted(resolved.items()):
         lines += ["", f"[resolved.{k}]", f"spec = {q(v['spec'])}", f"version = {q(v['version'])}"] + [f"{kk} = {q(vv)}" for kk, vv in v.items() if kk not in ("spec", "version")]   # 추가 키(docker 의 containerd 등)도 보존
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1167,12 +1169,32 @@ def plan(a):
         resolved["docker"] = resolved_old["docker"]   # 도구 층이 아닌 항목([resolved.docker], dockerctl.py 가 씀)은 다시 쓸 때 그대로 보존
     if docker_ov is not None:
         override["docker"] = docker_ov
-    write_manifest(path, project, repo, inferred, override, resolved, tier=(old.get("project") or {}).get("tier"), network=old.get("network"))  # 등급은 사람이 정한 값 — 다시 쓸 때 보존(안 하면 critical 이 조용히 general 로 돌아감)
+    write_manifest(path, project, repo, inferred, override, resolved, tier=(old.get("project") or {}).get("tier"), network=old.get("network"), resources=old.get("resources"))  # 등급은 사람이 정한 값 — 다시 쓸 때 보존(안 하면 critical 이 조용히 general 로 돌아감)
     return {"manifest": path, "tools": out, "unsupported": unsupported}
 
 
+DISK_RE = re.compile(r"^[1-9]\d*(\.\d+)?(MiB|GiB|TiB|MB|GB|TB)$")
+
+
+def resource(path, key):
+    """매니페스트 [resources] 의 값(없으면 None). disk 는 incus 가 받는 형식(예: 20GiB)만 — 잘못된 값은 조용히 무시하지 않고 실패한다."""
+    if not path or not os.path.isfile(path):
+        return None
+    with open(path, "rb") as f:
+        v = (tomllib.load(f).get("resources") or {}).get(key)
+    if v is None:
+        return None
+    if key == "disk" and not (isinstance(v, str) and DISK_RE.match(v)):
+        fail(f"{path}: [resources] disk 값이 잘못됐습니다({v!r}) — 예: \"20GiB\"")
+    return v
+
+
 def main(a):
-    if a and a[0] == "catalog":
+    if a and a[0] == "resource" and len(a) == 3:
+        v = resource(a[1], a[2])
+        if v is not None:
+            print(v)
+    elif a and a[0] == "catalog":
         print(json.dumps({k: {"role": v.get("role"), "desc": v.get("desc")} for k, v in catalog().items()}, ensure_ascii=False))
     elif a and a[0] == "resolve" and len(a) in (2, 3):
         print(resolve(a[1], a[2] if len(a) == 3 else None))
