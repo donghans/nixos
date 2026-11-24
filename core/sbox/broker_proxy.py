@@ -130,7 +130,7 @@ def parse_a_answers(data, qid):
 
 async def resolve_a(name, servers=None, timeout=3.0):
     """이름의 IPv4 목록. 상위 DNS 여러 곳에 **동시에** 물어 먼저 온 유효한 응답을 쓴다(한 곳이 막혀 있어도 기다리지 않는다 — 이 망에서 1.1.1.1 이 막혀
-    systemd-resolved·dnsmasq 가 새 이름마다 지연·실패했다, pilot §29-38). 질의마다 임의 출발 포트·임의 id. 없는 이름(NXDOMAIN)은 []. 전부 실패하면 OSError."""
+    systemd-resolved·dnsmasq 가 새 이름마다 지연·실패했다, pilot §29-38). UDP 와 TCP 로 동시에(한쪽이 막힌 망 대응). 질의마다 임의 출발 포트·임의 id. 없는 이름(NXDOMAIN)은 []. 전부 실패하면 OSError."""
     servers = servers or UPSTREAM_DNS
     loop = asyncio.get_running_loop()
     qid = int.from_bytes(os.urandom(2), "big")
@@ -139,21 +139,41 @@ async def resolve_a(name, servers=None, timeout=3.0):
         return []
     pkt = qid.to_bytes(2, "big") + (0x0100).to_bytes(2, "big") + b"\0\1\0\0\0\0\0\0" + b"".join(bytes([len(x)]) + x.encode("ascii", "ignore") for x in labels) + b"\0\0\1\0\1"
     got = asyncio.Queue()
-    transports = []
+    transports, tcp_tasks = [], []
 
     class P(asyncio.DatagramProtocol):
         def datagram_received(self, data, addr):
             r = parse_a_answers(data, qid)
             if r is not None:
                 got.put_nowait(r)
+
+    async def via_tcp(host, port):
+        # UDP 가 막힌 망(핫스팟 킬 스위치 — 호스트가 forward 되는 UDP 를 막고 TCP 만 프록시로 돌림, pilot §29-39)에서도 되도록 TCP 도 같이 시도한다
+        w = None
+        try:
+            r, w = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
+            w.write(len(pkt).to_bytes(2, "big") + pkt)
+            await w.drain()
+            n = int.from_bytes(await asyncio.wait_for(r.readexactly(2), timeout), "big")
+            data = await asyncio.wait_for(r.readexactly(n), timeout)
+            res = parse_a_answers(data, qid)
+            if res is not None:
+                got.put_nowait(res)
+        except (asyncio.TimeoutError, OSError, asyncio.IncompleteReadError):
+            pass
+        finally:
+            if w is not None:
+                w.close()
     try:
         for srv in servers:
+            host, port = (srv, 53) if isinstance(srv, str) else tuple(srv)
             try:
-                t, _ = await loop.create_datagram_endpoint(P, remote_addr=(srv, 53) if isinstance(srv, str) else tuple(srv))
+                t, _ = await loop.create_datagram_endpoint(P, remote_addr=(host, port))
                 t.sendto(pkt)
                 transports.append(t)
             except OSError:
-                continue
+                pass
+            tcp_tasks.append(asyncio.ensure_future(via_tcp(host, port)))
         deadline = loop.time() + timeout
         nx = False
         while True:
@@ -178,6 +198,8 @@ async def resolve_a(name, servers=None, timeout=3.0):
     finally:
         for t in transports:
             t.close()
+        for t in tcp_tasks:
+            t.cancel()
 
 
 def orig_dst(writer):

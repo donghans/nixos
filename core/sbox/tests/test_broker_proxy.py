@@ -310,6 +310,17 @@ async def run():
     tc = bytearray(rsp); tc[2] |= 0x02
     check("A 응답 파서: TC(잘림) 표시는 None", bp.parse_a_answers(bytes(tc), 0x1234) is None)
     sv = {m: ("127.0.0.1", t_.get_extra_info("sockname")[1]) for m, t_ in ups.items()}
+    # TCP 만 되는 상위(UDP 는 무응답): 같은 포트에 TCP 서버를 따로 열어 응답
+    async def tcp_dns(r, w):
+        n = int.from_bytes(await r.readexactly(2), "big")
+        d = await r.readexactly(n)
+        qid_, name_, qt_, qq_ = bp.parse_question(d)
+        resp = bp.build_answer(qid_, qq_, qt_, 0, ["198.51.100.7"])
+        w.write(len(resp).to_bytes(2, "big") + resp); await w.drain(); w.close()
+    tsrv = await asyncio.start_server(tcp_dns, "127.0.0.1", sv["dead"][1])
+    r_tcp = await bp.resolve_a("only-tcp.example", [sv["dead"]], timeout=3)
+    check("resolve_a: UDP 가 막혀도 TCP 로 해석", r_tcp == ["198.51.100.7"], r_tcp)
+    tsrv.close()
     t0 = loop.time()
     r1 = await bp.resolve_a("a.example", [sv["dead"], sv["ok"]], timeout=3)
     check("resolve_a: 죽은 서버가 있어도 산 서버 응답을 바로 씀", r1 == ["93.184.216.34", "93.184.216.35"] and loop.time() - t0 < 1.5, (r1, loop.time() - t0))
