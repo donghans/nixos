@@ -237,9 +237,13 @@ async def run():
     # DNS 스텁 UDP 왕복
     write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["registry.npmjs.org:443", "*.github.com:443", "db.x:5432"]}}})
     loop = asyncio.get_running_loop()
+    calls = []
     fake = {"registry.npmjs.org": ["104.16.1.1"], "api.github.com": ["140.82.112.5"], "deb.debian.org": ["151.101.2.132"], "priv.example": ["10.1.2.3"]}
 
     async def fake_resolver(name):
+        calls.append(name)
+        if name == "slow.example":
+            await asyncio.sleep(0.5); return ["151.101.9.9"]
         if name == "boom.example":
             raise OSError("no")
         return fake.get(name, [])
@@ -261,7 +265,12 @@ async def run():
     check("dns: 와일드카드 허용", (await ask("api.github.com")).endswith(bytes([140, 82, 112, 5])))
     check("dns: 허용 밖 → NXDOMAIN", (await ask("evil.example"))[3] & 0xF == 3)
     check("dns: 443 이 아닌 규칙만 있는 이름 → NXDOMAIN", (await ask("db.x"))[3] & 0xF == 3)
-    write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["priv.example:443", "boom.example:443", "empty.example:443", "registry.npmjs.org:443"]}}})
+    write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["priv.example:443", "boom.example:443", "empty.example:443", "registry.npmjs.org:443", "slow.example:443"]}}})
+    n0 = calls.count("registry.npmjs.org")
+    await ask("registry.npmjs.org"); await ask("registry.npmjs.org")
+    check("dns: 같은 이름 반복 질의는 캐시(조회 1회 이하)", calls.count("registry.npmjs.org") - n0 == 0)
+    ra = await asyncio.gather(ask("slow.example"), ask("slow.example"), ask("slow.example"))
+    check("dns: 같은 이름 동시 질의는 조회 1번을 같이 기다림", calls.count("slow.example") == 1 and all(x.endswith(bytes([151, 101, 9, 9])) for x in ra), calls)
     check("dns: 사설로 해석되는 이름은 SERVFAIL(재바인딩 방지)", (await ask("priv.example"))[3] & 0xF == 2)
     check("dns: 조회 실패는 SERVFAIL", (await ask("boom.example"))[3] & 0xF == 2 and (await ask("empty.example"))[3] & 0xF == 2)
     check("dns: 허용 이름 AAAA 는 빈 답", (await ask("registry.npmjs.org", 28))[6:8] == b"\0\0" and (await ask("registry.npmjs.org", 28))[3] & 0xF == 0)

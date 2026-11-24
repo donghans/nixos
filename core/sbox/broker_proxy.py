@@ -423,9 +423,33 @@ class DnsStub(asyncio.DatagramProtocol):
     사설·루프백 등으로 해석되는 이름은 거부한다(DNS 재바인딩·LAN 도달 방지 — 프록시의 사설 해석 거부와 같은 규칙). 해석은 broker 가 한다(ct 가 고를 수 없음)."""
     TTL = 30
 
+    CACHE_SECS = 60
+
     def __init__(self, proxy, resolver=None):
         self.proxy, self.transport = proxy, None
         self.resolver = resolver or self._resolve
+        self.cache, self.inflight = {}, {}      # 이름 → (만료 시각, 주소 목록) / 진행 중인 조회(같은 이름의 재전송 질의를 한 번만 조회)
+
+    async def lookup(self, name):
+        """조회 결과(사설 제외)를 잠시 캐시하고, 같은 이름을 동시에 묻는 질의(musl 은 응답이 늦으면 재전송한다)는 한 번의 조회를 같이 기다린다."""
+        now = time.monotonic()
+        hit = self.cache.get(name)
+        if hit and hit[0] > now:
+            return hit[1]
+        if name not in self.inflight:
+            async def work():
+                try:
+                    ips = [i for i in await self.resolver(name) if not is_private(i)]
+                except (asyncio.TimeoutError, OSError):
+                    ips = []
+                if ips:
+                    self.cache[name] = (time.monotonic() + self.CACHE_SECS, ips)
+                    if len(self.cache) > 2048:
+                        self.cache.pop(next(iter(self.cache)))
+                return ips
+            self.inflight[name] = asyncio.ensure_future(work())
+            self.inflight[name].add_done_callback(lambda _f, n=name: self.inflight.pop(n, None))
+        return await asyncio.shield(self.inflight[name])
 
     async def _resolve(self, name):
         infos = await asyncio.wait_for(asyncio.get_running_loop().getaddrinfo(name, 443, family=socket.AF_INET, type=socket.SOCK_STREAM), CONNECT_TIMEOUT)
@@ -449,10 +473,7 @@ class DnsStub(asyncio.DatagramProtocol):
             if qtype != 1:
                 rc = "ok-empty"                                    # AAAA·그 밖: 「없음」(IPv4 로만 가게 함)
             else:
-                try:
-                    ips = [i for i in await self.resolver(name) if not is_private(i)]
-                except (asyncio.TimeoutError, OSError):
-                    ips = []
+                ips = await self.lookup(name)
                 rc = "ok" if ips else "servfail"
                 if not ips:
                     why = "resolve-failed-or-private"
