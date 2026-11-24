@@ -196,7 +196,7 @@ in {
                 oifname "$INTERFACE" limit rate 6/minute burst 10 packets log prefix "hotspot-killswitch drop-out: " level warn
                 oifname "$INTERFACE" counter drop
             }
-            chain fwd {
+            chain forwardguard {
                 type filter hook forward priority filter; policy accept;
                 oifname "$INTERFACE" ip daddr { $GW_IP, ${privateRanges} } accept
                 oifname "$INTERFACE" limit rate 6/minute burst 10 packets log prefix "hotspot-killswitch drop-fwd: " level warn
