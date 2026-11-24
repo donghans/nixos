@@ -18,6 +18,7 @@
 mkMod __curPos "격리 개발 VM 용 incus 브리지(sboxbr0)와 호스트 방화벽" ({
   config,
   lib,
+  pkgs,
   ...
 }: let
   # sboxbr0 전용 Nix 캐시(nix-serve-sbox.nix, 포트 5000) 예외. 그 모듈이 같은 hook+priority(-10)의
@@ -77,6 +78,31 @@ in {
         // lib.optionalAttrs (config.workspace.cpuCount != null) {
           CPUQuota = "${toString (config.workspace.cpuCount * 60)}%";
         };
+    };
+    # ct 사이·ct 안의 같은 내용을 btrfs 에서 물리적으로 합친다(plan dev-sandbox-pilot §29-41 방법 3). Docker 이미지 레이어·node_modules 는 프로젝트마다·이미지마다
+    # 같은 파일이 여러 벌이라(genple ct 의 Docker 데이터 21GB 중 약 10.7GB 가 같은 내용으로 추정 — duperemove 모의 실행) 호스트 물리 디스크를 크게 아낀다.
+    # 격리에는 영향이 없다(커널이 바이트가 같은지 확인한 뒤 같은 블록을 가리키게만 함). **ct 의 디스크 한도(qgroup)는 줄지 않는다** — 공유 블록도 각 ct 몫으로 센다.
+    # 대상은 ct 의 rootfs 만(VM 의 큰 raw 디스크는 읽는 비용이 커서 제외). 느려도 되는 일이라 가장 낮은 우선순위, **전원이 연결됐을 때만** 돈다(노트북 배터리).
+    systemd.services.sbox-dedupe = {
+      description = "sbox ct 의 btrfs 중복 제거(duperemove)";
+      unitConfig.ConditionACPower = true;
+      serviceConfig = {
+        Type = "oneshot";
+        StateDirectory = "sbox-dedupe";
+        Nice = 19;
+        IOSchedulingClass = "idle";
+        CPUSchedulingPolicy = "idle";
+        MemoryHigh = "2G";
+        ExecStart = "${pkgs.duperemove}/bin/duperemove -dr --skip-zeroes --hashfile=/var/lib/sbox-dedupe/containers.hash /var/lib/incus/storage-pools/default/containers";
+      };
+    };
+    systemd.timers.sbox-dedupe = {
+      wantedBy = ["timers.target"];
+      timerConfig = {
+        OnCalendar = "weekly";
+        Persistent = true;
+        RandomizedDelaySec = "2h";
+      };
     };
     # slice 가 incus 보다 먼저 떠 있어야 ct 의 cgroup 부모가 한도를 가진 상태로 생긴다
     systemd.services.incus = {
