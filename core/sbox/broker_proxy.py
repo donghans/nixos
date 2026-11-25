@@ -22,11 +22,13 @@
   {"default_allow": ["host:port", ...], "clients": {"10.100.1.57": {"name": "sbox-ct-…", "allow": ["github.com:443", "*.npmjs.org:443"]}}}
 """
 import asyncio
+import hmac
 import ipaddress
 import json
 import os
 import re
 import socket
+import ssl
 import sys
 import time
 
@@ -37,6 +39,8 @@ IDLE_TIMEOUT = 600
 MAX_CONNS = 512
 PER_CLIENT_CONNS = 128   # 한 클라이언트(ct)가 전체 슬롯을 독점하지 못하게(pilot §29-45)
 SLOT_WAIT = 5            # 슬롯을 기다리는 최대 초 — 넘으면 busy 로 거부(무한 대기 방지)
+INJECT_MAX_HEAD = 32768        # 키 주입 어댑터가 받는 요청 헤더 상한(anthropic-beta 등 헤더가 길다)
+INJECT_MAX_BODY = 64 * 1024 * 1024   # 요청 본문 상한(긴 대화 문맥)
 SNI_PORTS = {443}   # 이 포트의 터널은 첫 TLS 레코드의 SNI 가 요청 호스트와 같아야 한다
 
 _PRIVATE_NETS = [ipaddress.ip_network(n) for n in (
@@ -409,6 +413,8 @@ class Proxy:
         self.tls_upstream_port = tls_upstream_port   # 시험에서만 바꾼다
         self.http_upstream_port = http_upstream_port
         self.resolver = resolver or resolve_a
+        self.adapters = {}                           # 이름 → {upstream, port, secret, tls} (시작 때 --adapter 로 정함 — 클라이언트가 못 바꾼다)
+        self._secret_cache = {}                      # 경로 → (mtime, 값)
 
     def slot(self, client_ip):
         """연결 슬롯(전역 MAX_CONNS + 클라이언트별 PER_CLIENT_CONNS). 기다림은 SLOT_WAIT 초까지 — 넘으면 BusyError."""
@@ -604,6 +610,141 @@ class Proxy:
                 except OSError:
                     pass
 
+
+    def _secret(self, path):
+        """주입할 진짜 토큰(파일, 0400). 요청마다 mtime 만 보고 바뀌면 다시 읽는다. 값은 로그·오류에 절대 쓰지 않는다. 없으면 None."""
+        try:
+            m = os.stat(path).st_mtime_ns
+            hit = self._secret_cache.get(path)
+            if hit and hit[0] == m:
+                return hit[1]
+            with open(path) as f:
+                v = f.read().strip()
+            self._secret_cache[path] = (m, v)
+            return v or None
+        except OSError:
+            return None
+
+    async def handle_inject(self, adapter, reader, writer):
+        """키 주입 어댑터(S64, 경계 A 의 예외): ct 는 `broker:포트` 로 **평문** 요청을 보내고 인증 값은 **자리표시자**다. broker 가 클라이언트(출발지 IP)별
+        자리표시자와 정확히 일치할 때만 진짜 값으로 바꿔 **고정된 업스트림**에 TLS 로 보낸다. 요청 하나만 전달(Connection: close), 본문은 Content-Length 만 지원,
+        본문·헤더 값은 기록하지 않는다(메서드·경로(쿼리 제외)·상태·바이트만)."""
+        cfg = self.adapters[adapter]
+        peer = writer.get_extra_info("peername") or ("?", 0)
+        rec = {"client": peer[0], "adapter": adapter, "host": cfg["upstream"], "port": cfg["port"], "mode": "inject", "verdict": "deny", "reason": "", "up": 0, "down": 0}
+        t0 = time.monotonic()
+        up_w = None
+
+        async def refuse(code, reason):
+            rec["reason"] = reason
+            try:
+                writer.write(f"HTTP/1.1 {code}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".encode()); await writer.drain()
+            except (ConnectionError, OSError):
+                pass
+
+        try:
+            async with self.slot(rec["client"]):
+                try:
+                    head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), HEAD_TIMEOUT)
+                except (asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError):
+                    return await refuse("400 Bad Request", "bad-head")
+                lines = head.split(b"\r\n")[:-2]
+                rl = lines[0].split(b" ") if lines else []
+                if len(rl) != 3 or rl[0] not in (b"GET", b"HEAD", b"POST") or not rl[1].startswith(b"/") or not rl[2].startswith(b"HTTP/1."):
+                    return await refuse("400 Bad Request", "bad-request")
+                rec["method"] = rl[0].decode()
+                rec["path"] = rl[1].split(b"?", 1)[0][:200].decode("latin-1")
+                fwd, auth, clen, bad = [], None, None, ""
+                for ln in lines[1:]:
+                    if b"\n" in ln or b"\r" in ln:
+                        bad = bad or "bad-header"; continue
+                    k, sep, v = ln.partition(b":")
+                    if not sep or not k or k != k.strip():
+                        bad = bad or "bad-header"; continue
+                    kl, v = k.lower(), v.strip()
+                    if kl == b"authorization":
+                        if auth is not None:
+                            bad = bad or "dup-auth"
+                        auth = v
+                    elif kl == b"content-length":
+                        if clen is not None or not v.isdigit():
+                            bad = bad or "bad-content-length"
+                        else:
+                            clen = int(v)
+                    elif kl in (b"transfer-encoding", b"expect"):
+                        bad = bad or "chunked-not-supported"
+                    elif kl == b"x-api-key":
+                        bad = bad or "x-api-key-not-supported"       # --bare 경로(API 키 헤더)는 아직 지원하지 않는다
+                    elif kl in (b"host", b"connection", b"proxy-connection", b"keep-alive", b"upgrade", b"te", b"proxy-authorization"):
+                        continue
+                    else:
+                        fwd.append(ln)
+                if bad:
+                    return await refuse("400 Bad Request" if bad != "chunked-not-supported" else "501 Not Implemented", bad)
+                if rl[0] == b"POST" and clen is None:
+                    return await refuse("411 Length Required", "no-content-length")
+                if clen is None:
+                    clen = 0
+                if clen > INJECT_MAX_BODY:
+                    return await refuse("413 Payload Too Large", "body-too-large")
+                data = self.cfg.get()
+                c = data.get("clients", {}).get(rec["client"])
+                if c is None:
+                    return await refuse("403 Forbidden", "unknown-client")
+                rec["name"] = c.get("name", "")
+                ph = (c.get("inject") or {}).get(adapter, {}).get("placeholder")
+                real_hdr = None
+                if auth is not None:
+                    scheme, _, tok = auth.partition(b" ")
+                    if not ph or scheme.lower() != b"bearer" or not hmac.compare_digest(tok.strip(), ph.encode()):
+                        # 표에 없는 값·다른 클라이언트의 자리표시자·진짜처럼 보이는 값 — 교체하지 않고 거부하고 눈에 띄게 기록(침해 신호)
+                        return await refuse("403 Forbidden", "placeholder-mismatch")
+                    secret = self._secret(cfg["secret"])
+                    if not secret:
+                        return await refuse("503 Service Unavailable", "no-secret")
+                    real_hdr = b"Authorization: Bearer " + secret.encode()
+                up_r, up_w, why = await self.open_upstream(cfg["upstream"], cfg["port"])
+                if up_w is None:
+                    return await refuse("502 Bad Gateway", why)
+                if cfg["tls"]:
+                    await up_w.start_tls(ssl.create_default_context(), server_hostname=cfg["upstream"])
+                rec["verdict"] = "allow"
+                out = [rl[0] + b" " + rl[1] + b" HTTP/1.1", b"Host: " + cfg["upstream"].encode()] + fwd
+                if real_hdr:
+                    out.append(real_hdr)
+                if rl[0] == b"POST":
+                    out.append(b"Content-Length: " + str(clen).encode())
+                out.append(b"Connection: close")
+                counter = {"up": 0, "down": 0}
+                up_w.write(b"\r\n".join(out) + b"\r\n\r\n")
+                left = clen
+                while left > 0:                       # 본문은 정확히 Content-Length 바이트만 — 뒤에 겹쳐 오는 두 번째 요청은 전달하지 않는다
+                    chunk = await asyncio.wait_for(reader.read(min(65536, left)), IDLE_TIMEOUT)
+                    if not chunk:
+                        break
+                    up_w.write(chunk); counter["up"] += len(chunk); left -= len(chunk)
+                    await up_w.drain()
+                first = await asyncio.wait_for(up_r.read(65536), IDLE_TIMEOUT)
+                if first:
+                    m = re.match(rb"HTTP/1\.[01] (\d{3})", first)
+                    rec["status"] = int(m.group(1)) if m else 0
+                    counter["down"] += len(first); writer.write(first); await writer.drain()
+                    await pipe(up_r, writer, counter, "down")
+                rec["up"], rec["down"] = counter["up"] + sum(len(x) for x in out), counter["down"]
+        except BusyError:
+            rec["reason"] = "busy"
+        except Exception as e:
+            rec["reason"] = rec["reason"] or "error:" + type(e).__name__
+        finally:
+            rec["secs"] = round(time.monotonic() - t0, 2)
+            log(rec)
+            for w in (writer, up_w):
+                try:
+                    if w:
+                        w.close()
+                except OSError:
+                    pass
+
     async def _serve(self, reader, writer, rec):
         try:
             head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), HEAD_TIMEOUT)
@@ -757,7 +898,7 @@ class DnsStub(asyncio.DatagramProtocol):
         log({"event": "dns", "client": addr[0], "name": name, "qtype": qtype, "result": rc, "reason": why, "answers": ips[:4]})
 
 
-async def main_async(listen, port, cfg_path, allow_private, tls_listen=None, tls_port=0, http_port=0, dns_listen=None, dns_port=53):
+async def main_async(listen, port, cfg_path, allow_private, tls_listen=None, tls_port=0, http_port=0, dns_listen=None, dns_port=53, adapters=(), adapter_plain=False):
     proxy = Proxy(Config(cfg_path), allow_private)
     server = await asyncio.start_server(proxy.handle, listen, port, limit=MAX_HEAD + 1024)
     log({"event": "start", "listen": f"{listen}:{port}", "config": cfg_path})
@@ -768,6 +909,13 @@ async def main_async(listen, port, cfg_path, allow_private, tls_listen=None, tls
     if http_port:
         extra.append(await asyncio.start_server(proxy.handle_http, tls_listen or listen, http_port, limit=MAX_HEAD + 1024))
         log({"event": "start-http", "listen": f"{tls_listen or listen}:{http_port}"})
+    for spec in adapters:                       # NAME=포트,업스트림호스트,비밀파일[,업스트림포트]
+        name, _, rest = spec.partition("=")
+        f = rest.split(",")
+        aport, up, secret = int(f[0]), f[1], f[2]
+        proxy.adapters[name] = {"upstream": up, "port": int(f[3]) if len(f) > 3 else 443, "secret": secret, "tls": not adapter_plain}
+        extra.append(await asyncio.start_server(lambda r, w, n=name: proxy.handle_inject(n, r, w), tls_listen or listen, aport, limit=INJECT_MAX_HEAD + 1024))
+        log({"event": "start-adapter", "adapter": name, "listen": f"{tls_listen or listen}:{aport}", "upstream": f"{up}:{proxy.adapters[name]['port']}"})
     if dns_listen:
         await asyncio.get_running_loop().create_datagram_endpoint(lambda: DnsStub(proxy), local_addr=(dns_listen, dns_port))
         log({"event": "start-dns", "listen": f"{dns_listen}:{dns_port}"})
@@ -789,13 +937,15 @@ def main(argv):
     ap.add_argument("--upstream-dns", default=",".join(UPSTREAM_DNS), help="상위 DNS(쉼표 구분) — 전부에 동시에 묻는다")
     ap.add_argument("--dns-listen", default="", help="DNS 스텁이 받을 주소(broker 자신의 IP — systemd-resolved 가 127.0.0.53 을 쓰므로 와일드카드 불가)")
     ap.add_argument("--dns-port", type=int, default=53)
+    ap.add_argument("--adapter", action="append", default=[], help="키 주입 어댑터 NAME=수신포트,업스트림호스트,비밀파일[,업스트림포트] (예: anthropic=3130,api.anthropic.com,/run/broker-secrets/anthropic)")
+    ap.add_argument("--adapter-plain-upstream", action="store_true", help="시험 전용 — 어댑터 업스트림을 TLS 없이 연결")
     a = ap.parse_args(argv)
     UPSTREAM_DNS[:] = [x for x in a.upstream_dns.split(",") if x]
     if a.log != "-":
         os.makedirs(os.path.dirname(a.log), exist_ok=True)
         _logpath = a.log
         _logf = open(a.log, "a", buffering=1)
-    asyncio.run(main_async(a.listen, a.port, a.config, a.allow_private_targets, tls_port=a.tls_port, http_port=a.http_port, dns_listen=a.dns_listen or None, dns_port=a.dns_port))
+    asyncio.run(main_async(a.listen, a.port, a.config, a.allow_private_targets, tls_port=a.tls_port, http_port=a.http_port, dns_listen=a.dns_listen or None, dns_port=a.dns_port, adapters=a.adapter, adapter_plain=a.adapter_plain_upstream))
 
 
 if __name__ == "__main__":

@@ -331,9 +331,25 @@ home_apply() { # 이름 규칙 검사 없이 홈 적용(rebuild-golden 이 골�
     fi
 }
 
-cmd_token() { # cmd_token NAME [AGENT] — 에이전트(기본 claude)의 토큰을 등록표에서 꺼내 안쪽 tmpfs 에 주입
-    local name=$1 agent=${2:-claude}
+cmd_token() { # cmd_token NAME [AGENT] [--inject] — 에이전트(기본 claude)의 토큰을 안쪽 tmpfs 에 주입. --inject: 진짜 토큰 대신 **자리표시자**를 넣고 broker 가 진짜 값을 붙이게 한다(S64, C안)
+    local name=$1 agent=${2:-claude} inject=0
+    [[ ${3:-} == --inject ]] && inject=1
     check_name "$name"
+    if ((inject)); then
+        [[ $agent == claude ]] || die "--inject 는 claude 만 지원합니다(Anthropic 어댑터)"
+        incus info "$BROKER" >/dev/null 2>&1 </dev/null || die "broker 가 없습니다"
+        local tpath ph rnd
+        tpath=$(agent_get "$agent" token_path) || exit 1
+        resolve_ids "$name"
+        rnd=$(python3 -c 'import secrets,string;print("".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))')
+        ph="sk-ant-oat01-sbox-placeholder-${name#sbox-ct-}-$rnd"     # 사람·스캐너가 가짜임을 알아보는 표지 + ct 별 난수(§29-58)
+        python3 "$SBOX_DIR/egress.py" inject-set --state "$EGRESS_STATE" --name "$name" --placeholder "$ph" || die "자리표시자 등록 실패(먼저 'sboxctl egress $name')"
+        broker_push
+        printf %s "$ph" | incus exec "$name" --env PATH="$EXEC_PATH" -- sh -c "set -e; umask 077; d=\$(dirname $tpath); mkdir -p \$d; cat > $tpath; chown -R $VM_UID:$VM_GID \$d; chmod 700 \$d" </dev/stdin || die "자리표시자를 ct 에 넣지 못했습니다"
+        audit info token "$name" "claude 자리표시자 주입(broker 가 진짜 값을 붙임, ct 에 진짜 토큰 없음)"
+        say "자리표시자 주입 완료($agent: $tpath) — 진짜 토큰은 broker 에만 있습니다('sboxctl broker secret'). 세션은 'sboxctl llm' 이 ANTHROPIC_BASE_URL 을 자동으로 맞춥니다"
+        return 0
+    fi
     command -v donghans >/dev/null || die "donghans 명령이 없습니다"
     local secret tpath
     secret=$(agent_get "$agent" secret) || exit 1
@@ -882,7 +898,13 @@ cmd_llm() {
     vmu "$name" test -s "$token_path" </dev/null || die "토큰이 없습니다 — 'sboxctl token $name $agent' 으로 주입하세요"
     vmu "$name" mkdir -p "$dir" </dev/null
     local pre="" e
-    for e in $envs; do pre+="$e "; done   # 읽기 전용 마운트라 자동 갱신은 못 하고 실패 메시지만 낸다 — 정의의 env 로 끈다
+    for e in $envs; do pre+="$e "; done
+    # S64: 이 ct 에 자리표시자가 등록돼 있으면 broker 의 키 주입 어댑터로 보낸다(토큰은 자리표시자, 진짜 값은 broker 에만). 프록시 환경변수가 이 평문 요청을 가로채지 않게 NO_PROXY.
+    if [[ $agent == claude ]] && incus info "$BROKER" >/dev/null 2>&1 </dev/null \
+        && [[ -n $(python3 "$SBOX_DIR/egress.py" inject-get --state "$EGRESS_STATE" --name "$name" 2>/dev/null) ]]; then
+        local _bip; _bip=$(ct_ip "$BROKER")
+        pre+="ANTHROPIC_BASE_URL=http://$_bip:$BROKER_INJECT_PORT NO_PROXY=$_bip no_proxy=$_bip "
+    fi   # 읽기 전용 마운트라 자동 갱신은 못 하고 실패 메시지만 낸다 — 정의의 env 로 끈다
     if [[ $NAME_KIND == ct ]]; then
         vmx "$name" sh -c 'command -v tmux >/dev/null 2>&1 || { apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux >/dev/null; }' </dev/null \
             || die "tmux 설치 실패(컨테이너 안 apt)"
@@ -1067,6 +1089,16 @@ broker_push() { # 호스트의 상태 파일을 broker 에 넣는다 — 프록�
     incus file push --uid 0 --gid 0 --mode 0644 "$EGRESS_STATE" "$BROKER/etc/broker/clients.json" </dev/null >/dev/null || die "broker 에 설정을 넣지 못했습니다"
 }
 
+BROKER_INJECT_PORT=3130
+broker_secret_push() { # 진짜 토큰(등록표)을 broker 의 tmpfs 에 넣는다 — 값은 환경변수→표준입력으로만 흐르고 ct 에는 닿지 않는다(S64)
+    command -v donghans >/dev/null || { say "경고: donghans 명령이 없어 broker 비밀을 넣지 못했습니다"; return 1; }
+    local secret; secret=$(agent_get claude secret) || return 1
+    # shellcheck disable=SC2016
+    donghans secret run --env "$secret" -- sh -c 'printf %s "$(printenv "$3")" | incus file push - "$1/run/broker-secrets/anthropic" --uid 65534 --gid 65534 --mode 0400' sh "$BROKER" "" "$secret" >/dev/null \
+        || { say "경고: broker 에 토큰을 넣지 못했습니다 — 'sboxctl broker secret'"; return 1; }
+    audit info broker-secret "$BROKER" "anthropic 토큰을 broker tmpfs 에 주입($secret, 값은 기록 안 함)"
+}
+
 broker_active() { incus exec "$BROKER" -- "$BROKER_BIN/systemctl" is-active sbox-broker </dev/null 2>&1 | head -n1; }
 
 wait_broker() { # 최소 이미지에는 ip·sh -c 가 없다 — 서비스가 active 가 될 때까지 기다린다(최대 약 2분)
@@ -1112,6 +1144,7 @@ broker_launch() { # broker_launch IP — 이미지로 broker ct 를 만들고(�
         python3 "$SBOX_DIR/egress.py" remove --state "$EGRESS_STATE" --name __none__ >/dev/null
     fi
     broker_push
+    broker_secret_push || true
     echo "$real"
 }
 
@@ -1139,13 +1172,14 @@ for ip,c in sorted(d.get("clients",{}).items()):
             audit info broker-update "$BROKER" "broker 교체 $ip (이미지 $(incus image info "$BROKER_IMAGE" </dev/null 2>/dev/null | sed -n 's/^Fingerprint: //p' | cut -c1-12))"
             say "완료: broker 교체($ip — 프록시 $BROKER_PORT·투명 TLS 443·DNS 53). 주소가 같으면 ct 재연결은 필요 없습니다"
             return 0 ;;
+        secret) incus info "$BROKER" >/dev/null 2>&1 </dev/null || die "broker 가 없습니다"; broker_secret_push || exit 1; say "완료: broker 에 anthropic 토큰 주입(tmpfs)"; return 0 ;;
         create)
             incus info "$BROKER" >/dev/null 2>&1 </dev/null && die "$BROKER 는 이미 있습니다"
             incus image info "$BROKER_IMAGE" </dev/null >/dev/null 2>&1 || { [[ -d $BROKER_IMG_DIR ]] || broker_image_build; }
             local ip; ip=$(broker_launch "${2:-}")
             audit info broker-create "$BROKER" "broker $ip:$BROKER_PORT"
             say "완료: broker $ip:$BROKER_PORT — 프로젝트 ct 는 'sboxctl egress NAME' 으로 연결(create 는 자동)" ;;
-        *) die "사용법: sboxctl broker create [IP]|status|update [--build]" ;;
+        *) die "사용법: sboxctl broker create [IP]|status|update [--build]|secret" ;;
     esac
 }
 
@@ -1240,7 +1274,7 @@ case "${1:-}" in
     rebuild-golden) shift; cmd_rebuild_golden "$@" ;;
     iso) shift; cmd_iso "$@" ;;
     cache) shift; cmd_cache "${1:-}" ;;
-    token) shift; cmd_token "${1:-}" "${2:-}" ;;
+    token) shift; cmd_token "${1:-}" "${2:-}" "${3:-}" ;;
     home) shift; cmd_home "${1:-}" ;;
     llm) shift; cmd_llm "$@" ;;
     tools) shift; cmd_tools "$@" ;;

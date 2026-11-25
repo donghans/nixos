@@ -45,7 +45,7 @@ in
   nix.channel.enable = false;      # nix-channel-init 서비스가 실패하던 것도 같이 사라짐
   services.nscd.enable = false;
   system.nssModules = lib.mkForce [ ];
-  networking.firewall.allowedTCPPorts = [ 80 443 3128 ];   # NixOS 방화벽이 기본으로 input 을 막는다 — broker 가 받는 포트만 연다
+  networking.firewall.allowedTCPPorts = [ 80 443 3128 3130 ];   # NixOS 방화벽이 기본으로 input 을 막는다 — broker 가 받는 포트만 연다
   networking.firewall.allowedUDPPorts = [ 53 ];
 
   # 게이트웨이 규칙(방식 B, pilot §29-37): ct 의 443·80 은 이 컴퓨터의 프록시로 redirect, forward 는 명시적 기본 거부.
@@ -68,7 +68,10 @@ in
   '';
   boot.kernel.sysctl."net.ipv4.ip_forward" = 0;
 
-  systemd.tmpfiles.rules = [ "d /etc/broker 0755 root root -" ];
+  systemd.tmpfiles.rules = [
+    "d /etc/broker 0755 root root -"
+    "d /run/broker-secrets 0700 nobody nogroup -"   # 키 주입 어댑터(S64)의 진짜 토큰 — tmpfs 라 재시작하면 사라지고 호스트가 다시 밀어 넣는다
+  ];
 
   systemd.services.sbox-broker = {
     description = "sbox broker (L7 egress: CONNECT proxy + 투명 TLS 443 + DNS stub)";
@@ -76,7 +79,7 @@ in
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
     serviceConfig = {
-      ExecStart = "${pkgs.python3}/bin/python3 -I ${brokerPy} --listen 0.0.0.0 --port ${toString port} --tls-port 443 --http-port 80 --dns-listen 0.0.0.0 --config /etc/broker/clients.json --log /var/log/broker/access.log";
+      ExecStart = "${pkgs.python3}/bin/python3 -I ${brokerPy} --listen 0.0.0.0 --port ${toString port} --tls-port 443 --http-port 80 --dns-listen 0.0.0.0 --adapter anthropic=3130,api.anthropic.com,/run/broker-secrets/anthropic --config /etc/broker/clients.json --log /var/log/broker/access.log";
       User = "nobody";
       AmbientCapabilities = "CAP_NET_BIND_SERVICE";
       CapabilityBoundingSet = "CAP_NET_BIND_SERVICE";

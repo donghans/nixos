@@ -129,11 +129,14 @@ def private_minus(broker_ip):
     return out
 
 
+INJECT_PORT = "3130"   # 키 주입 어댑터(S64) 수신 포트 — ct 가 broker 로 평문 요청을 보내는 곳
+
+
 def acl(name, broker_ip, proxy_port):
     """ct 의 NIC ACL(방식 B, pilot §29-37): broker 의 프록시·DNS, 어디로든 tcp 443·80(broker 의 redirect 가 받음), 사설 대역은 broker 를 빼고 drop.
     기본 egress 동작은 NIC 쪽에서 drop 으로 따로 지정한다. 그래서 UDP(QUIC)·그 밖의 포트는 broker 의 udp 53 외에는 막힌다."""
     return {"name": name, "description": "sbox ct 송신(방식 B): broker(프록시·DNS)와 어디로든 tcp 443·80(broker 게이트웨이가 redirect), 사설 대역은 broker 만 예외로 drop", "egress": [
-        {"action": "allow", "protocol": "tcp", "destination": broker_ip + "/32", "destination_port": f"{proxy_port},53", "state": "enabled"},
+        {"action": "allow", "protocol": "tcp", "destination": broker_ip + "/32", "destination_port": f"{proxy_port},{INJECT_PORT},53", "state": "enabled"},
         {"action": "allow", "protocol": "udp", "destination": broker_ip + "/32", "destination_port": "53", "state": "enabled"},
         {"action": "allow", "protocol": "tcp", "destination_port": "443,80", "state": "enabled"},
         {"action": "drop", "destination": ",".join(private_minus(broker_ip)), "state": "enabled"}], "ingress": []}
@@ -141,7 +144,8 @@ def acl(name, broker_ip, proxy_port):
 
 def main(argv):
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["set", "remove", "show", "acl"])
+    ap.add_argument("cmd", choices=["set", "remove", "show", "acl", "inject-set", "inject-get", "inject-clear"])
+    ap.add_argument("--adapter", default="anthropic"); ap.add_argument("--placeholder")
     ap.add_argument("--state")
     ap.add_argument("--broker"); ap.add_argument("--port", default="3128"); ap.add_argument("--acl-name", default="sbox-egress")
     ap.add_argument("--name"); ap.add_argument("--ip"); ap.add_argument("--manifest")
@@ -161,13 +165,34 @@ def main(argv):
         raise SystemExit("--name 이 필요합니다")
     data["default_allow"] = []                           # S71 부터 공통 세트 없음 — 전부 클라이언트별(프리셋 계산 결과)
     clients = data.setdefault("clients", {})
+    old_inject = {}
     for ip in [ip for ip, c in clients.items() if c.get("name") == a.name]:
-        del clients[ip]                                  # 이름이 같으면 이전 IP 항목을 지운다(IP 가 바뀐 경우)
+        old_inject = clients[ip].get("inject") or old_inject   # 키 주입 자리표시자는 허용목록을 다시 계산해도 유지한다
+        if a.cmd != "inject-set" and a.cmd != "inject-clear" and a.cmd != "inject-get":
+            del clients[ip]                              # 이름이 같으면 이전 IP 항목을 지운다(IP 가 바뀐 경우)
+    if a.cmd == "inject-get":
+        ent = next((c for c in clients.values() if c.get("name") == a.name), None)
+        print(((ent or {}).get("inject") or {}).get(a.adapter, {}).get("placeholder", ""))
+        return 0
+    if a.cmd in ("inject-set", "inject-clear"):
+        ent = next((c for c in clients.values() if c.get("name") == a.name), None)
+        if ent is None:
+            raise SystemExit(f"{a.name} 는 broker 에 연결돼 있지 않습니다 — 먼저 'sboxctl egress {a.name}'")
+        if a.cmd == "inject-set":
+            if not a.placeholder or len(a.placeholder) < 40 or "placeholder" not in a.placeholder:
+                raise SystemExit("--placeholder 는 40자 이상이고 'placeholder' 표지가 들어 있어야 합니다(사람·스캐너가 가짜임을 알아보게)")
+            ent.setdefault("inject", {})[a.adapter] = {"placeholder": a.placeholder}
+        else:
+            (ent.get("inject") or {}).pop(a.adapter, None)
+        save(a.state, data)
+        return 0
     if a.cmd == "set":
         if not a.ip:
             raise SystemExit("--ip 가 필요합니다")
         rules = compute(a.name, a.manifest, a.allow, a.minimal)
         clients[a.ip] = {"name": a.name, "allow": sorted(rules), "sources": dict(sorted(rules.items()))}
+        if old_inject:
+            clients[a.ip]["inject"] = old_inject
         by = {}
         for s_ in rules.values():
             by[s_] = by.get(s_, 0) + 1
