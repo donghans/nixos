@@ -297,13 +297,35 @@ class Config:
 
 
 _logf = None
+_logpath = None
+LOG_MAX = 50 * 1024 * 1024   # 이 크기를 넘으면 회전(.1 … .5 보관) — 기록이 broker ct 의 작은 디스크(5GiB)를 채우지 않게
+LOG_KEEP = 5
+_logn = 0
+
+
+def _rotate_log():
+    """access.log → .1 … .LOG_KEEP 로 밀고 새로 연다. 회전 실패는 기록을 계속 남기는 쪽으로(기록을 잃는 것이 더 나쁨)."""
+    global _logf
+    try:
+        _logf.close()
+        for i in range(LOG_KEEP - 1, 0, -1):
+            if os.path.exists(f"{_logpath}.{i}"):
+                os.replace(f"{_logpath}.{i}", f"{_logpath}.{i + 1}")
+        os.replace(_logpath, _logpath + ".1")
+    except OSError:
+        pass
+    _logf = open(_logpath, "a", buffering=1)
 
 
 def log(rec):
+    global _logn
     rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), **rec}
     line = json.dumps(rec, ensure_ascii=False)
     if _logf:
         _logf.write(line + "\n"); _logf.flush()
+        _logn += 1
+        if _logn % 100 == 0 and _logpath and os.fstat(_logf.fileno()).st_size > LOG_MAX:
+            _rotate_log()
     else:
         print(line, flush=True)
 
@@ -728,7 +750,7 @@ async def main_async(listen, port, cfg_path, allow_private, tls_listen=None, tls
 
 
 def main(argv):
-    global _logf
+    global _logf, _logpath
     import argparse
     ap = argparse.ArgumentParser(description="sbox broker CONNECT 프록시")
     ap.add_argument("--listen", default="0.0.0.0")
@@ -745,6 +767,7 @@ def main(argv):
     UPSTREAM_DNS[:] = [x for x in a.upstream_dns.split(",") if x]
     if a.log != "-":
         os.makedirs(os.path.dirname(a.log), exist_ok=True)
+        _logpath = a.log
         _logf = open(a.log, "a", buffering=1)
     asyncio.run(main_async(a.listen, a.port, a.config, a.allow_private_targets, tls_port=a.tls_port, http_port=a.http_port, dns_listen=a.dns_listen or None, dns_port=a.dns_port))
 

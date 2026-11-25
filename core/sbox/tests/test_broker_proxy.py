@@ -260,7 +260,11 @@ async def run():
     w.write(b"GET /a HTTP/1.1\r\nHost: localhost:80\r\nConnection: keep-alive\r\nUpgrade: websocket\r\n\r\nGET /b HTTP/1.1\r\nHost: evil.example\r\n\r\n"); await w.drain()
     got = await asyncio.wait_for(r.readexactly(len(b"GET /a HTTP/1.1\r\nHost: localhost:80\r\nConnection: close\r\n\r\n")), 5)
     w.write(b"GET /c HTTP/1.1\r\nHost: evil.example\r\n\r\n"); await w.drain()
-    check("투명 HTTP: keep-alive·Upgrade 제거, 겹친 요청은 전달 안 함", got == b"GET /a HTTP/1.1\r\nHost: localhost:80\r\nConnection: close\r\n\r\n" and b"evil" not in got)
+    try:                                   # 에코 서버는 전달된 바이트를 그대로 돌려준다 — 겹친 요청·이어 보낸 요청이 전달됐다면 evil 이 되돌아온다
+        extra = await asyncio.wait_for(r.read(4096), 1.5)
+    except asyncio.TimeoutError:
+        extra = b""
+    check("투명 HTTP: keep-alive·Upgrade 제거, 겹친·이어 보낸 요청은 전달 안 함", got == b"GET /a HTTP/1.1\r\nHost: localhost:80\r\nConnection: close\r\n\r\n" and b"evil" not in got and b"evil" not in extra, extra)
     w.close()
     for bad in (b"GET http://evil.example/ HTTP/1.1\r\nHost: localhost:80\r\n\r\n",           # 절대 URI
                 b"GET / HTTP/1.1\r\nHost: localhost:80\r\nHost: evil.example\r\n\r\n",       # 중복 Host
