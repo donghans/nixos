@@ -32,6 +32,26 @@ in {
       Install.WantedBy = ["timers.target"];
     };
 
+    # sbox broker 의 키 주입 비밀 자동 복구(S64, pilot §29-81·82): 비밀은 broker ct 의 tmpfs 에만 있어 호스트 재부팅·broker 재시작 때 비워진다.
+    # 2분마다 `sboxctl broker secret --if-missing` 이 broker 가 떠 있는데 비밀이 없을 때만 `donghans secret` 등록표에서 다시 넣는다(정상이면 아무것도 안 함).
+    # DB(tailnet)에 닿지 못하면 실패로 남고 다음 주기에 다시 시도한다. 끄기: 호스트 toml 의 incus-sbox 를 끄거나 이 두 블록을 지우고 nixup.
+    systemd.user.services.sbox-broker-secret = lib.mkIf sboxHost {
+      Unit.Description = "sbox broker anthropic secret re-inject (only when missing)";
+      Service = {
+        Type = "oneshot";
+        Environment = ["PATH=%h/.nix-profile/bin:/run/current-system/sw/bin"];
+        ExecStart = "${pkgs.bash}/bin/bash %h/nixos/core/scripts/sboxctl broker secret --if-missing";
+      };
+    };
+    systemd.user.timers.sbox-broker-secret = lib.mkIf sboxHost {
+      Unit.Description = "sbox broker secret check (every 2 minutes)";
+      Timer = {
+        OnBootSec = "90s";
+        OnUnitActiveSec = "2min";
+      };
+      Install.WantedBy = ["timers.target"];
+    };
+
     # waybar 세션 시작
     wayland.windowManager.hyprland.settings.exec-once = lib.mkOrder 900 [
       "uwsm app -- sh -c 'sleep 2 && ${pkgs.waybar}/bin/waybar'"

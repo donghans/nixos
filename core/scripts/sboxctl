@@ -1153,6 +1153,7 @@ cmd_broker() {
         status)
             incus info "$BROKER" >/dev/null 2>&1 </dev/null || { say "broker 없음 — 'sboxctl broker create'"; return 0; }
             say "broker $BROKER  $(ct_ip "$BROKER"):$BROKER_PORT  $(broker_active)"
+            incus exec "$BROKER" -- "$BROKER_BIN/bash" -c '[ -s /run/broker-secrets/anthropic ]' </dev/null >/dev/null 2>&1 && say "  anthropic 비밀: 있음" || say "  anthropic 비밀: **없음** — 'sboxctl broker secret' (없으면 키 주입 ct 의 요청이 503)"
             python3 "$SBOX_DIR/egress.py" show --state "$EGRESS_STATE" | python3 -c 'import sys,json
 d=json.load(sys.stdin)
 print("  공통 허용 %d개(S71 이후 보통 0 — 허용은 프리셋으로 클라이언트별)" % len(d.get("default_allow",[])))
@@ -1172,14 +1173,22 @@ for ip,c in sorted(d.get("clients",{}).items()):
             audit info broker-update "$BROKER" "broker 교체 $ip (이미지 $(incus image info "$BROKER_IMAGE" </dev/null 2>/dev/null | sed -n 's/^Fingerprint: //p' | cut -c1-12))"
             say "완료: broker 교체($ip — 프록시 $BROKER_PORT·투명 TLS 443·DNS 53). 주소가 같으면 ct 재연결은 필요 없습니다"
             return 0 ;;
-        secret) incus info "$BROKER" >/dev/null 2>&1 </dev/null || die "broker 가 없습니다"; broker_secret_push || exit 1; say "완료: broker 에 anthropic 토큰 주입(tmpfs)"; return 0 ;;
+        secret)   # [--if-missing]: broker 가 떠 있는데 비밀이 비어 있을 때만 넣는다(호스트 재부팅·broker 재시작 뒤 자동 복구용 — 타이머가 주기적으로 부른다, 정상이면 조용히 종료)
+            if [[ ${2:-} == --if-missing ]]; then
+                incus info "$BROKER" >/dev/null 2>&1 </dev/null || return 0
+                [[ $(broker_active) == active ]] || return 0
+                incus exec "$BROKER" -- "$BROKER_BIN/bash" -c '[ -s /run/broker-secrets/anthropic ]' </dev/null >/dev/null 2>&1 && return 0
+                broker_secret_push && say "broker 의 anthropic 토큰이 비어 있어 다시 넣었습니다" || return 1
+                return 0
+            fi
+            incus info "$BROKER" >/dev/null 2>&1 </dev/null || die "broker 가 없습니다"; broker_secret_push || exit 1; say "완료: broker 에 anthropic 토큰 주입(tmpfs)"; return 0 ;;
         create)
             incus info "$BROKER" >/dev/null 2>&1 </dev/null && die "$BROKER 는 이미 있습니다"
             incus image info "$BROKER_IMAGE" </dev/null >/dev/null 2>&1 || { [[ -d $BROKER_IMG_DIR ]] || broker_image_build; }
             local ip; ip=$(broker_launch "${2:-}")
             audit info broker-create "$BROKER" "broker $ip:$BROKER_PORT"
             say "완료: broker $ip:$BROKER_PORT — 프로젝트 ct 는 'sboxctl egress NAME' 으로 연결(create 는 자동)" ;;
-        *) die "사용법: sboxctl broker create [IP]|status|update [--build]|secret" ;;
+        *) die "사용법: sboxctl broker create [IP]|status|update [--build]|secret [--if-missing]" ;;
     esac
 }
 
