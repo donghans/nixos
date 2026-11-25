@@ -1082,7 +1082,39 @@ def q(x):
     return json.dumps(str(x), ensure_ascii=False)
 
 
-def write_manifest(path, project, repo, inferred, override, resolved, tier=None, network=None, resources=None):
+KNOWN_SECTIONS = {"project", "inferred", "override", "network", "resources", "resolved"}
+
+
+def _toml_val(v):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, str):
+        return q(v)
+    if isinstance(v, list):
+        return "[" + ", ".join(_toml_val(x) for x in v) + "]"
+    raise ValueError(f"매니페스트에 쓸 수 없는 값 형식: {type(v).__name__}")
+
+
+def _toml_key(k):
+    return k if re.fullmatch(r"[A-Za-z0-9_-]+", str(k)) else q(k)   # 점·슬래시가 든 키(예: package.json)는 따옴표로 — 안 그러면 표 경로로 쪼개져 읽힌다
+
+
+def toml_tables(prefix, d):
+    """중첩 dict 를 TOML 표로 쓴다(사람이 쓰는 알 수 없는 구역 — [tasks.*]·[trust]·[agent] 등 — 을 다시 쓸 때 보존하려고). 스칼라·문자열 목록·하위 표만 지원."""
+    out, sub = [], []
+    for k, v in d.items():
+        (sub if isinstance(v, dict) else out).append((k, v))
+    lines = []
+    if out or not sub:
+        lines += ["", f"[{prefix}]"] + [f"{_toml_key(k)} = {_toml_val(v)}" for k, v in out]
+    for k, v in sub:
+        lines += toml_tables(f"{prefix}.{_toml_key(k)}", v)
+    return lines
+
+
+def write_manifest(path, project, repo, inferred, override, resolved, tier=None, network=None, resources=None, extra=None):
     lines = ["# sbox 프로젝트 버전 매니페스트(plan dev-sandbox-pilot §29). [inferred]·[resolved] 는 sbox 가 다시 쓰고, [override] 는 사람이 씁니다.",
              "# [resolved] 는 re(실행환경) 도구만 — de(개발환경) 도구는 항상 최신이라 고정하지 않습니다.",
              "[project]", f"name = {q(project)}", f"repo = {q(repo)}"] + ([f"tier = {q(tier)}"] if tier else []) + ["", "[inferred]"]
@@ -1100,6 +1132,9 @@ def write_manifest(path, project, repo, inferred, override, resolved, tier=None,
                 lines.append(f"{k} = {q(v) if isinstance(v, str) else v}")
     if resources:   # [resources] 도 사람이 쓰는 구역(ct 디스크 크기 등) — 다시 쓸 때 보존
         lines += ["", "[resources]"] + [f"{k} = {q(v)}" for k, v in sorted(resources.items())]
+    for k, v in sorted((extra or {}).items()):   # 알려지지 않은 사람 구역([tasks]·[trust]·[agent] …)은 그대로 보존 — 다시 쓸 때 조용히 사라지면 안 된다
+        if k not in KNOWN_SECTIONS and isinstance(v, dict):
+            lines += toml_tables(_toml_key(k), v)
     for k, v in sorted(resolved.items()):
         lines += ["", f"[resolved.{k}]", f"spec = {q(v['spec'])}", f"version = {q(v['version'])}"] + [f"{kk} = {q(vv)}" for kk, vv in v.items() if kk not in ("spec", "version")]   # 추가 키(docker 의 containerd 등)도 보존
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1169,7 +1204,7 @@ def plan(a):
         resolved["docker"] = resolved_old["docker"]   # 도구 층이 아닌 항목([resolved.docker], dockerctl.py 가 씀)은 다시 쓸 때 그대로 보존
     if docker_ov is not None:
         override["docker"] = docker_ov
-    write_manifest(path, project, repo, inferred, override, resolved, tier=(old.get("project") or {}).get("tier"), network=old.get("network"), resources=old.get("resources"))  # 등급은 사람이 정한 값 — 다시 쓸 때 보존(안 하면 critical 이 조용히 general 로 돌아감)
+    write_manifest(path, project, repo, inferred, override, resolved, tier=(old.get("project") or {}).get("tier"), network=old.get("network"), resources=old.get("resources"), extra={k: v for k, v in old.items() if k not in KNOWN_SECTIONS})  # 등급은 사람이 정한 값 — 다시 쓸 때 보존(안 하면 critical 이 조용히 general 로 돌아감)
     return {"manifest": path, "tools": out, "unsupported": unsupported}
 
 

@@ -1017,6 +1017,89 @@ cmd_skills() { # cmd_skills NAME add SKILL… | list | clear — 호스트의 do
     esac
 }
 
+cmd_taskd() { # cmd_taskd NAME [--manifest F] [--approve] [--remove] — ct 안 **실행자(taskd)** 를 설치·갱신한다(plan sbox-project-policy R6, pilot §29-91)
+    local name=${1:-}; shift || true
+    check_name "$name"
+    [[ $NAME_KIND == ct ]] || die "taskd 는 ct 전용입니다"
+    local man="" approve=0 remove=0
+    while (($#)); do
+        case $1 in
+            --manifest) man=${2:?}; shift ;;
+            --approve) approve=1 ;;
+            --remove) remove=1 ;;
+            *) die "알 수 없는 인자: $1" ;;
+        esac
+        shift
+    done
+    if ((remove)); then
+        incus exec "$name" -- sh -c 'systemctl disable --now sbox-taskd 2>/dev/null; rm -f /etc/systemd/system/sbox-taskd.service /usr/local/bin/sbox; rm -rf /usr/local/lib/sbox-taskd /etc/sbox' </dev/null
+        audit info taskd "$name" "taskd 제거"; say "제거: $name 의 taskd"; return 0
+    fi
+    [[ -n $man ]] || man=$(incus config get "$name" user.sbox.manifest </dev/null 2>/dev/null || true)
+    [[ -n $man && -f $man ]] || die "매니페스트를 찾지 못했습니다 — --manifest <파일> (ct 에 연결된 매니페스트: user.sbox.manifest)"
+    resolve_ids "$name"
+    # 1) 정의 파일(pins) 현재 다이제스트를 ct 안에서 읽는다
+    local need digs tmp; need=$(python3 "$SBOX_DIR/tasks.py" needed --manifest "$man") || die "매니페스트의 [tasks] 검증 실패"
+    tmp=$(mktemp -d); digs="$tmp/digests.json"
+    python3 - "$need" "$name" "$digs" <<'PY'
+import json, subprocess, sys
+need, name, out = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3]
+res = {}
+for rel in need:
+    r = subprocess.run(["incus", "exec", name, "--", "sha256sum", f"/home/sbox/work/{rel}"], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    if r.returncode == 0:
+        res[rel] = r.stdout.split()[0]
+json.dump(res, open(out, "w"))
+PY
+    # 2) 설정 만들기(승인 전이면 여기서 멈춘다 — 사람이 내용을 보고 --approve)
+    local flags=(); ((approve)) && flags+=(--approve)
+    python3 "$SBOX_DIR/tasks.py" build --manifest "$man" --digests "$digs" --out "$tmp/tasks.json" "${flags[@]}" || { rm -rf "$tmp"; die "작업 설정을 만들지 못했습니다"; }
+    # 3) ct 준비: python3, 실행 사용자 sbox-run(root 아님, 에이전트 사용자 그룹 sbox), 작업 사본 그룹 쓰기
+    incus exec "$name" --env "PATH=$CT_PATH" -- sh -c '
+        command -v python3 >/dev/null 2>&1 || { apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3 >/dev/null; }
+        id sbox-run >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/sbox-run --shell /usr/sbin/nologin sbox-run
+        usermod -aG '"$VM_USER"' sbox-run
+        mkdir -p /usr/local/lib/sbox-taskd /etc/sbox /var/log/sbox-taskd /run/sbox-taskd /home/'"$VM_USER"'/work
+        chown sbox-run:'"$VM_USER"' /var/log/sbox-taskd /var/lib/sbox-run
+        chmod 2775 /home/'"$VM_USER"'/work; chmod -R g+rwX /home/'"$VM_USER"'/work 2>/dev/null; find /home/'"$VM_USER"'/work -type d -exec chmod g+s {} + 2>/dev/null; chmod g+x /home/'"$VM_USER"'
+        true' </dev/null || die "ct 준비 실패"
+    incus file push "$SBOX_DIR/taskd.py" "$name/usr/local/lib/sbox-taskd/taskd.py" --uid 0 --gid 0 --mode 0644 </dev/null >/dev/null || die "taskd.py 설치 실패"
+    incus file push "$SBOX_DIR/sbox_client.py" "$name/usr/local/bin/sbox" --uid 0 --gid 0 --mode 0755 </dev/null >/dev/null || die "sbox 클라이언트 설치 실패"
+    incus file push "$tmp/tasks.json" "$name/etc/sbox/tasks.json" --uid 0 --gid 0 --mode 0644 </dev/null >/dev/null || die "tasks.json 설치 실패"
+    # 4) 시스템 유닛(root 가 마운트·제한을 걸고 sbox-run 으로 내려간다 — 작업 프로세스가 상속: 새 권한 금지·네임스페이스 금지·시스템 읽기 전용)
+    incus exec "$name" -- sh -c "cat > /etc/systemd/system/sbox-taskd.service" </dev/null <<UNIT
+[Unit]
+Description=sbox taskd (선언된 작업만 실행하는 실행자)
+After=network.target
+[Service]
+User=sbox-run
+Group=$VM_USER
+RuntimeDirectory=sbox-taskd
+RuntimeDirectoryMode=0750
+ExecStart=/usr/bin/python3 -I /usr/local/lib/sbox-taskd/taskd.py --socket /run/sbox-taskd/sock --config /etc/sbox/tasks.json --log /var/log/sbox-taskd/taskd.log --allow-uid $VM_UID --group $VM_GID
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/$VM_USER/work /var/log/sbox-taskd /var/lib/sbox-run
+PrivateTmp=true
+PrivateDevices=true
+RestrictNamespaces=true
+LockPersonality=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+[Install]
+WantedBy=multi-user.target
+UNIT
+    incus exec "$name" -- sh -c "systemctl daemon-reload && systemctl enable sbox-taskd >/dev/null 2>&1 && systemctl restart sbox-taskd" </dev/null || die "taskd 서비스 시작 실패"
+    sleep 1
+    incus exec "$name" -- systemctl is-active sbox-taskd </dev/null | grep -q '^active' || die "taskd 가 시작되지 않았습니다 — incus exec $name -- journalctl -u sbox-taskd"
+    rm -rf "$tmp"
+    audit info taskd "$name" "taskd 설치·갱신($(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["tasks"]))' <(incus file pull "$name/etc/sbox/tasks.json" - </dev/null)) 개 작업, approve=$approve)"
+    say "완료: $name 의 taskd 실행 중 — 에이전트·사용자는 'sbox list' 와 'sbox run <작업>' 만 쓴다(승인: --approve)"
+}
+
 # ---- S69 자원 보호: ct 를 sbox.slice 아래에 두고, 만들기 전에 호스트 여유를 본다 (plan dev-sandbox-pilot §29-27) ----
 SBOX_SLICE="sbox.slice"
 slice_raw_lxc() { # ct 이름이 들어가는 raw.lxc 두 줄(프로필로는 못 한다: %n 이 치환되지 않음 — 시험). S62 는 raw.lxc 가 정확히 이 두 줄인지 점검한다.
@@ -1323,6 +1406,7 @@ case "${1:-}" in
     home) shift; cmd_home "${1:-}" ;;
     llm) shift; cmd_llm "$@" ;;
     skills) shift; cmd_skills "$@" ;;
+    taskd) shift; cmd_taskd "$@" ;;
     tools) shift; cmd_tools "$@" ;;
     docker) shift; cmd_docker "$@" ;;
     broker) shift; cmd_broker "$@" ;;

@@ -44,4 +44,26 @@ try:
 except SystemExit:
     bad = True
 check("잘못된 disk 는 실패", bad)
+# 알려지지 않은 사람 구역([tasks.*]·[trust]·[agent])은 다시 쓸 때 보존된다(조용히 사라지면 작업 선언·신뢰 수준이 없어진다)
+import tomllib
+extra = {"tasks": {"dev": {"argv": ["npm", "run", "dev"], "cwd": "web", "kind": "service", "pins": ["package.json"], "pinned": {"package.json": "sha256:abc"}}},
+         "trust": {"level": "trusted", "by": "사람 \"x\""}, "agent": {"skills": ["sbox-qa"]}}
+tools.write_manifest(mp, "p", d, {}, {}, {}, extra=extra)
+back = tomllib.load(open(mp, "rb"))
+check("[tasks] 왕복 보존(argv 목록·하위 표 포함)", back.get("tasks") == extra["tasks"], back.get("tasks"))
+check("[trust]·[agent] 왕복 보존(따옴표 이스케이프 포함)", back.get("trust") == extra["trust"] and back.get("agent") == extra["agent"], back)
+check("알려진 구역은 extra 로 덮이지 않음", tomllib.load(open(mp, "rb")).get("project", {}).get("name") == "p")
+tools.write_manifest(mp, "p", d, {}, {}, {}, extra={"network": {"egress": ["x.example"]}, "tasks": {"a": {"argv": ["ls"]}}})
+back = tomllib.load(open(mp, "rb"))
+check("extra 의 알려진 구역 이름(network)은 무시", "network" not in back and back.get("tasks") == {"a": {"argv": ["ls"]}}, back)
+# 실제 다시 쓰기 경로(tools.plan)를 지나도 보존된다 — 도구가 없는 빈 저장소로(네트워크 안 씀)
+import tempfile
+er = tempfile.mkdtemp()
+tools.write_manifest(mp, "p", er, {}, {}, {}, extra=extra)
+try:
+    tools.plan(["--manifest", mp, "--repo", er])
+except SystemExit:
+    pass
+back = tomllib.load(open(mp, "rb"))
+check("tools.plan 으로 다시 써도 [tasks]·[trust]·[agent] 보존", back.get("tasks") == extra["tasks"] and back.get("trust") == extra["trust"] and back.get("agent") == extra["agent"], back)
 print(f"{n['ok']} 통과 / {n['bad']} 실패"); sys.exit(1 if n["bad"] else 0)
