@@ -30,6 +30,11 @@ check("프로필 이탈", any("프로필" in b for b in mut(lambda d: d.update({
 check("idmap 격리 끔", any("idmap" in b for b in mut(lambda d: d["expanded_config"].update({"security.idmap.isolated": "false"}))))
 check("낯선 장치(호스트 경로)", any("허용 목록에 없는" in b for b in mut(lambda d: d["expanded_devices"].update({"home": {"type": "disk", "source": "/home/x", "path": "/h"}}))))
 check("읽기 전용 아닌 tools-", any("tools-" in b for b in mut(lambda d: d["expanded_devices"]["tools-node-22"].update({"readonly": "false"}))))
+SK = {"type": "disk", "readonly": "true", "source": "/nix/store/abc-hm_x", "path": "/etc/claude-code/.claude/skills/donghans-x"}
+check("스킬 읽기 전용 마운트는 허용", not any("sbox-skill" in b for b in mut(lambda d: d["expanded_devices"].update({"sbox-skill-donghans-x": dict(SK)}))))
+check("읽기 전용 아닌 스킬 장치는 위반", any("sbox-skill-" in b and "읽기 전용" in b for b in mut(lambda d: d["expanded_devices"].update({"sbox-skill-donghans-x": dict(SK, readonly="false")}))))
+check("nix store 밖 출처의 스킬 장치는 위반", any("nix store" in b for b in mut(lambda d: d["expanded_devices"].update({"sbox-skill-donghans-x": dict(SK, source="/home/donghans/.claude/skills/x")}))))
+check("관리 스킬 경로 밖의 스킬 장치는 위반", any("관리 스킬 경로" in b for b in mut(lambda d: d["expanded_devices"].update({"sbox-skill-donghans-x": dict(SK, path="/home/sbox/.claude/skills/x")}))))
 check("USB 장치", any("허용 목록에 없는" in b for b in mut(lambda d: d["expanded_devices"].update({"u": {"type": "usb"}}))))
 check("포트 격리 끔", any("포트 격리" in b for b in mut(lambda d: d["expanded_devices"]["eth0"].update({"security.port_isolation": "false"}))))
 check("루트 size 없음", any("size" in b for b in mut(lambda d: d["expanded_devices"]["root"].pop("size"))))

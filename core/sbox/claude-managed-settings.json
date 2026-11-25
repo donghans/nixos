@@ -61,7 +61,8 @@
       "Edit(**/docker-compose*.yml)",
       "Edit(compose*.yml)",
       "Edit(.githooks/**)",
-      "Edit(.github/**)"
+      "Edit(.github/**)",
+      "Edit(~/.claude/**)"
     ]
   }
 }

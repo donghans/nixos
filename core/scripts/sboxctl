@@ -982,6 +982,35 @@ echo "시작함"'
 }
 
 
+cmd_skills() { # cmd_skills NAME add SKILL… | list | clear — 호스트의 donghans-* 스킬(nix store 의 해시 고정 경로)을 ct 의 **관리 스킬 경로**에 읽기 전용으로 마운트한다(R8, pilot §29-86)
+    local name=${1:-} sub=${2:-}; shift 2 2>/dev/null || true
+    check_name "$name"
+    [[ $NAME_KIND == ct ]] || die "스킬 마운트는 ct 전용입니다"
+    case $sub in
+        add)
+            (($#)) || die "사용법: sboxctl skills NAME add donghans-스킬이름…"
+            local sk src
+            for sk in "$@"; do
+                [[ $sk =~ ^donghans-[a-z0-9-]+$ ]] || die "스킬 이름은 donghans-* 만 허용합니다(받은 값: $sk)"
+                src=$(readlink -f "$HOME/.claude/skills/$sk") || die "$sk 를 찾지 못했습니다"
+                [[ -f $src/SKILL.md ]] || die "$src/SKILL.md 가 없습니다"
+                [[ $src == /nix/store/* ]] || die "$sk 는 nix store 경로가 아니라(해시 고정 아님) 마운트를 거부합니다: $src"
+                incus config device remove "$name" "sbox-skill-$sk" </dev/null >/dev/null 2>&1 || true
+                incus config device add "$name" "sbox-skill-$sk" disk source="$src" path="/etc/claude-code/.claude/skills/$sk" readonly=true </dev/null >/dev/null \
+                    || die "$sk 마운트 실패"
+                audit info skills "$name" "스킬 읽기 전용 마운트: $sk ($src)"
+                say "마운트: $sk → /etc/claude-code/.claude/skills/$sk (읽기 전용, $src)"
+            done ;;
+        list)
+            incus config device list "$name" </dev/null | grep '^sbox-skill-' | sed 's/^sbox-skill-/  /' || say "  (마운트된 스킬 없음)" ;;
+        clear)
+            local d
+            for d in $(incus config device list "$name" </dev/null | grep '^sbox-skill-'); do incus config device remove "$name" "$d" </dev/null >/dev/null; say "제거: $d"; done
+            audit info skills "$name" "스킬 마운트 전부 제거" ;;
+        *) die "사용법: sboxctl skills NAME add SKILL…|list|clear" ;;
+    esac
+}
+
 # ---- S69 자원 보호: ct 를 sbox.slice 아래에 두고, 만들기 전에 호스트 여유를 본다 (plan dev-sandbox-pilot §29-27) ----
 SBOX_SLICE="sbox.slice"
 slice_raw_lxc() { # ct 이름이 들어가는 raw.lxc 두 줄(프로필로는 못 한다: %n 이 치환되지 않음 — 시험). S62 는 raw.lxc 가 정확히 이 두 줄인지 점검한다.
@@ -1287,6 +1316,7 @@ case "${1:-}" in
     token) shift; cmd_token "${1:-}" "${2:-}" "${3:-}" ;;
     home) shift; cmd_home "${1:-}" ;;
     llm) shift; cmd_llm "$@" ;;
+    skills) shift; cmd_skills "$@" ;;
     tools) shift; cmd_tools "$@" ;;
     docker) shift; cmd_docker "$@" ;;
     broker) shift; cmd_broker "$@" ;;

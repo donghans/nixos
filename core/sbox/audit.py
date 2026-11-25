@@ -46,6 +46,14 @@ def check(inst):
                     bad.append("루트 디스크에 size 한도가 없음")
             elif d.startswith("tools-") and t == "disk" and c.get("readonly") == "true":
                 pass
+            elif d.startswith("sbox-skill-") and t == "disk":
+                # donghans 스킬의 읽기 전용 마운트(R8): 읽기 전용·nix store(해시 고정) 출처·관리 스킬 경로 아래만 허용
+                if c.get("readonly") != "true":
+                    bad.append(f"스킬 장치 {d} 가 읽기 전용이 아님")
+                elif not str(c.get("source", "")).startswith("/nix/store/"):
+                    bad.append(f"스킬 장치 {d} 의 출처가 nix store 가 아님: {c.get('source')}")
+                elif not str(c.get("path", "")).startswith("/etc/claude-code/.claude/skills/"):
+                    bad.append(f"스킬 장치 {d} 의 경로가 관리 스킬 경로 밖: {c.get('path')}")
             else:
                 bad.append(f"허용 목록에 없는 장치 {d}: {c}")
         if cfg.get("security.idmap.isolated") != "true":
