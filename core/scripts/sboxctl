@@ -896,6 +896,18 @@ cmd_llm() {
             || die "VM 에 $cmd 가 없습니다 — $agent 의 VM 설치 방식은 아직 정의돼 있지 않습니다(claude 는 골든의 홈 설정이 설치)"
     fi
     if [[ $first_run == claude ]]; then
+        # ⑱ 업데이트 제동(plan dev-sandbox-pilot §29-50·51): 관리 설정(root 소유 644 — 에이전트 사용자가 못 고침)의 permissions.ask 로
+        # 의존성 설치·갱신 명령은 bypass 모드에서도 사람 확인을 거치게 한다(프로젝트 allow 로 못 풂 — 실제 ct 시험). 우회 변형(sh -c 등)은 못 막는 속도 제동이다.
+        # VM 은 NixOS 라 /etc 선언 방식이 다르고 미설계 — ct 만 적용한다.
+        if [[ $NAME_KIND == ct ]]; then
+            incus exec "$name" -- mkdir -p /etc/claude-code </dev/null \
+                && incus file push "$SBOX_DIR/claude-managed-settings.json" "$name/etc/claude-code/managed-settings.json" --uid 0 --gid 0 --mode 0644 \
+                || die "관리 설정(업데이트 제동) 설치 실패"
+        else
+            say "참고: VM 에는 의존성 갱신 제동(관리 설정)이 아직 적용되지 않습니다(ct 만)"
+        fi
+    fi
+    if [[ $first_run == claude ]]; then
         # 첫 실행 설정 병합(기존 값은 보존): ~/.claude.json 의 온보딩 완료·폴더 신뢰, ~/.claude/settings.json 의 테마·(bypass 면) 경고 생략
         local f
         for f in .claude.json .claude/settings.json; do
