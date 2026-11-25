@@ -154,8 +154,9 @@ def main(argv):
         except subprocess.CalledProcessError:
             host.append(("ACL sbox-egress", None))
     if broker:
-        host.append(("broker 게이트웨이", check_broker(sh(["incus", "exec", broker["name"], "--", "sysctl", "-n", "net.ipv4.ip_forward"]),
-                                                     sh(["incus", "exec", broker["name"], "--", "nft", "list", "ruleset"]))))
+        # 최소 NixOS 이미지에는 PATH·sysctl 이 없다 — ct 안의 bash 로 /proc 를 읽고(`incus file pull` 은 호스트 네트워크 이름공간 값을 읽어 틀린다 — 2026-11-25 실제로 속음) nft 는 절대 경로로 부른다(pilot §29-76)
+        host.append(("broker 게이트웨이", check_broker(sh(["incus", "exec", broker["name"], "--", "/run/current-system/sw/bin/bash", "-c", "read -r v < /proc/sys/net/ipv4/ip_forward; echo $v"]),
+                                                     sh(["incus", "exec", broker["name"], "--", "/run/current-system/sw/bin/nft", "list", "ruleset"]))))
     host.append(("호스트 sbox-guard", check_host_guard(sh(["nft", "list", "ruleset"]) or sh(["sudo", "-n", "nft", "list", "ruleset"]))))
     for label, res in host:
         if res is None:

@@ -1047,8 +1047,11 @@ for i in json.load(sys.stdin):
 }
 
 # ---- L7 관문(broker) — plan dev-sandbox-pilot §29-25 (S61 최소 구현) ----
-BROKER="sbox-ct-debian13-broker"
+BROKER="sbox-ct-nixos2605-broker"   # 최소 NixOS 이미지(core/sbox/broker-image — pilot §29-60·76). 이전 Debian ct(sbox-ct-debian13-broker)는 대체됨
 BROKER_PORT=3128
+BROKER_IMAGE="sbox-broker-nix"      # incus 로컬 이미지 별칭
+BROKER_IMG_DIR="${SBOX_BROKER_IMG_DIR:-$HOME/.local/state/sbox/broker-image}"
+BROKER_BIN=/run/current-system/sw/bin   # NixOS 이미지에는 PATH 가 없다 — 절대 경로로 부른다
 EGRESS_MINIMAL=0  # 1 이면 프로젝트 없이 최소 세트만 연 ct(--no-project)
 EGRESS_MAN=""   # cmd_create 가 매니페스트 경로를 채운다(자동 연결에 쓰임)
 EGRESS_ACL="sbox-egress"
@@ -1060,73 +1063,63 @@ d=json.load(sys.stdin)[0]["state"]["network"].get("eth0",{}).get("addresses",[])
 print(next((a["address"] for a in d if a["family"]=="inet"),""))'
 }
 
-broker_push() { # 호스트의 상태 파일을 broker 에 원자적으로 놓는다(프록시는 mtime 이 바뀌면 다시 읽음)
-    incus file push --uid 0 --gid 0 --mode 0644 "$EGRESS_STATE" "$BROKER/etc/broker/clients.json.new" </dev/null >/dev/null || die "broker 에 설정을 넣지 못했습니다"
-    incus exec "$BROKER" -- mv /etc/broker/clients.json.new /etc/broker/clients.json </dev/null || die "broker 설정 교체 실패"
+broker_push() { # 호스트의 상태 파일을 broker 에 넣는다 — 프록시는 mtime 이 바뀌면 다시 읽고, 읽다 실패하면 마지막 정상 설정을 유지하며 다음 요청에 다시 읽는다
+    incus file push --uid 0 --gid 0 --mode 0644 "$EGRESS_STATE" "$BROKER/etc/broker/clients.json" </dev/null >/dev/null || die "broker 에 설정을 넣지 못했습니다"
 }
 
-broker_install() { # broker_install IP — 프록시 코드·서비스 유닛 설치(create 와 update 가 같이 씀). 서비스는 호출한 쪽이 시작
+broker_active() { incus exec "$BROKER" -- "$BROKER_BIN/systemctl" is-active sbox-broker </dev/null 2>&1 | head -n1; }
+
+wait_broker() { # 최소 이미지에는 ip·sh -c 가 없다 — 서비스가 active 가 될 때까지 기다린다(최대 약 2분)
+    local _
+    for _ in $(seq 1 60); do
+        [[ $(broker_active) == active ]] && return 0
+        sleep 2
+    done
+    die "broker 서비스가 2분 안에 시작되지 않았습니다 — incus exec $BROKER -- $BROKER_BIN/journalctl -u sbox-broker"
+}
+
+broker_image_build() { # 이미지를 새로 빌드해 incus 에 가져온다(별칭 교체). 빌드는 오래 걸릴 수 있다(첫 빌드 약 30분).
+    mkdir -p "$BROKER_IMG_DIR"
+    bash "$SBOX_DIR/broker-image/build.sh" "$BROKER_IMG_DIR" >&2 || die "broker 이미지 빌드 실패"
+    broker_image_import
+}
+
+broker_image_import() {
+    local meta rootfs
+    meta=$(ls "$BROKER_IMG_DIR"/metadata/tarball/*.tar.xz 2>/dev/null | head -n1); rootfs=$(ls "$BROKER_IMG_DIR"/rootfs/tarball/*.tar.xz 2>/dev/null | head -n1)
+    [[ -n $meta && -n $rootfs ]] || die "빌드된 broker 이미지가 없습니다 — 'sboxctl broker update --build'"
+    incus image delete "$BROKER_IMAGE" </dev/null >/dev/null 2>&1 || true
+    incus image import "$meta" "$rootfs" --alias "$BROKER_IMAGE" </dev/null >/dev/null || die "broker 이미지 가져오기 실패"
+}
+
+broker_launch() { # broker_launch IP — 이미지로 broker ct 를 만들고(고정 주소) 시작, 설정을 밀어 넣는다
     local ip=$1
-    incus exec "$BROKER" -- mkdir -p /usr/local/lib/sbox-broker /etc/broker </dev/null
-    # broker 의 이름 해석은 프록시 프로그램이 직접 한다(상위 DNS 여러 곳에 동시에 질의 — pilot §29-38). 예전에 넣었던 resolved·networkd 드롭인은 치운다
-    incus exec "$BROKER" -- sh -c 'rm -f /etc/systemd/resolved.conf.d/sbox-broker.conf /etc/systemd/network/eth0.network.d/sbox-broker.conf' </dev/null
-    # 게이트웨이 규칙(방식 B, pilot §29-37): ct 의 443·80 은 이 컴퓨터의 프록시로 redirect, 나머지 전달(forward)은 명시적 기본 거부 + ip_forward 0.
-    # 나중에 누가 masquerade 를 넣어도 열린 라우터가 되지 않게(pilot §29-36 에서 재현). 체인 이름에 fwd 를 쓰지 말 것(nft 예약어).
-    incus exec "$BROKER" --env "PATH=$CT_PATH" -- sh -c 'command -v nft >/dev/null || { apt-get install -y -qq --no-install-recommends nftables >/dev/null; }' </dev/null || die "broker: nftables 설치 실패"
-    incus exec "$BROKER" -- sh -c 'cat > /etc/nftables.conf && printf "net.ipv4.ip_forward = 0\n" > /etc/sysctl.d/99-sbox-broker.conf && sysctl -q -p /etc/sysctl.d/99-sbox-broker.conf && systemctl enable nftables >/dev/null 2>&1 && nft -f /etc/nftables.conf' </dev/null <<'NFT'
-#!/usr/sbin/nft -f
-flush ruleset
-table ip sbox_gateway {
-    chain pre {
-        type nat hook prerouting priority dstnat; policy accept;
-        iifname "eth0" ip saddr 10.100.1.200-10.100.1.250 tcp dport 443 redirect to :443
-        iifname "eth0" ip saddr 10.100.1.200-10.100.1.250 tcp dport 80 redirect to :80
-    }
-}
-table inet sbox_gateway_filter {
-    chain forwardguard {
-        type filter hook forward priority 0; policy drop;
-    }
-}
-NFT
-    [[ $? -eq 0 ]] || die "broker: 게이트웨이 규칙 적용 실패"
-    incus file push "$SBOX_DIR/broker_proxy.py" "$BROKER/usr/local/lib/sbox-broker/broker_proxy.py" </dev/null >/dev/null
-    incus exec "$BROKER" -- sh -c 'cat > /etc/systemd/system/sbox-broker.service' </dev/null <<UNIT
-[Unit]
-Description=sbox broker (L7 egress: CONNECT proxy + 투명 TLS 443 + DNS stub)
-After=network-online.target
-[Service]
-ExecStart=/usr/bin/python3 -I /usr/local/lib/sbox-broker/broker_proxy.py --listen 0.0.0.0 --port $BROKER_PORT --tls-port 443 --http-port 80 --dns-listen $ip --config /etc/broker/clients.json --log /var/log/broker/access.log
-User=nobody
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-LogsDirectory=broker
-Restart=always
-RestartSec=2
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-PrivateDevices=true
-ProtectKernelTunables=true
-ProtectControlGroups=true
-# 커널 공격면 축소(pilot §29-62): 이 프로세스는 TCP/UDP·유닉스 소켓만 쓴다 — netlink(nf_tables 접근 경로)와 새 사용자·네트워크 네임스페이스 생성을 막는다
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-RestrictNamespaces=true
-LockPersonality=true
-ProtectKernelModules=true
-ProtectKernelLogs=true
-[Install]
-WantedBy=multi-user.target
-UNIT
+    incus image info "$BROKER_IMAGE" </dev/null >/dev/null 2>&1 || broker_image_import
+    mem_preflight 512MiB
+    incus init "$BROKER_IMAGE" "$BROKER" -p sbox-ct -c limits.cpu=1 -c limits.memory=512MiB -c limits.memory.enforce=soft \
+        -c "raw.lxc=$(slice_raw_lxc "$BROKER")" -d root,size=5GiB </dev/null >/dev/null || die "broker ct 생성 실패"
+    # 프로젝트 ct 들이 L2 로 닿아야 하므로 포트 격리를 끈다(프로젝트 ct 는 켜져 있어 서로는 못 봄), 주소는 ACL 이 가리키므로 고정
+    incus config device override "$BROKER" eth0 security.port_isolation=false ${ip:+ipv4.address=$ip} </dev/null >/dev/null || die "broker NIC 설정 실패"
+    if incus config show "$BROKER" --expanded 2>/dev/null </dev/null | grep -qE '^\s*security\.privileged:\s*"?true'; then
+        incus delete -f "$BROKER" </dev/null >/dev/null 2>&1 || true
+        die "정책 위반: 특권 컨테이너가 됐습니다 — 거부하고 삭제했습니다"
+    fi
+    incus start "$BROKER" </dev/null
+    wait_broker
+    local real; real=$(ct_ip "$BROKER"); [[ -n $real ]] || die "broker IP 를 읽지 못했습니다"
+    [[ -z $ip || $real == "$ip" ]] || say "경고: broker 주소가 요청($ip)과 다릅니다($real) — 'sboxctl egress NAME' 으로 ct 를 다시 연결하세요"
+    if [[ ! -f $EGRESS_STATE ]]; then   # 클라이언트 없는 상태 파일(기본 허용 세트만)
+        python3 "$SBOX_DIR/egress.py" remove --state "$EGRESS_STATE" --name __none__ >/dev/null
+    fi
+    broker_push
+    echo "$real"
 }
 
 cmd_broker() {
     case "${1:-}" in
-        create) ;;
         status)
             incus info "$BROKER" >/dev/null 2>&1 </dev/null || { say "broker 없음 — 'sboxctl broker create'"; return 0; }
-            say "broker $BROKER  $(ct_ip "$BROKER"):$BROKER_PORT  $(incus exec "$BROKER" -- systemctl is-active sbox-broker </dev/null 2>&1 | head -n1)"
+            say "broker $BROKER  $(ct_ip "$BROKER"):$BROKER_PORT  $(broker_active)"
             python3 "$SBOX_DIR/egress.py" show --state "$EGRESS_STATE" | python3 -c 'import sys,json
 d=json.load(sys.stdin)
 print("  공통 허용 %d개(S71 이후 보통 0 — 허용은 프리셋으로 클라이언트별)" % len(d.get("default_allow",[])))
@@ -1134,37 +1127,26 @@ for ip,c in sorted(d.get("clients",{}).items()):
     by={}
     for s in c.get("sources",{}).values(): by[s]=by.get(s,0)+1
     print("  %-16s %s 허용 %d개 (%s)" % (ip,c["name"],len(c["allow"]),", ".join("%s %d"%kv for kv in by.items())))'
-            incus exec "$BROKER" -- tail -n 5 /var/log/broker/access.log </dev/null 2>/dev/null || true
+            incus file pull "$BROKER/var/log/broker/access.log" - </dev/null 2>/dev/null | tail -n 5 || true
             return 0 ;;
-        update)   # 프록시 코드·유닛을 다시 설치하고 재시작(기존 broker 를 새 기능으로 올림)
-            incus info "$BROKER" >/dev/null 2>&1 </dev/null || die "broker 가 없습니다"
-            local bip; bip=$(ct_ip "$BROKER"); [[ -n $bip ]] || die "broker IP 를 읽지 못했습니다"
-            broker_install "$bip"; broker_push
-            incus exec "$BROKER" -- sh -c 'systemctl daemon-reload && systemctl restart sbox-broker' </dev/null || die "broker 재시작 실패"
-            sleep 1; incus exec "$BROKER" -- systemctl is-active sbox-broker </dev/null || die "broker 가 시작되지 않았습니다 — incus exec $BROKER -- journalctl -u sbox-broker"
-            say "완료: broker 갱신($bip — 프록시 $BROKER_PORT·투명 TLS 443·DNS 53). 이미 연결된 ct 는 'sboxctl egress NAME' 으로 다시 연결(ACL·DNS 설정)"
-            audit info broker-update "$BROKER" "broker 갱신 $bip"
+        update)   # [--build]: 이미지를 (필요하면 다시 빌드해) 가져온 뒤 ct 를 교체한다 — 같은 주소·같은 설정. 상태는 호스트의 상태 파일뿐이라 잃는 것이 없다(접속 기록은 ct 와 함께 사라짐: 필요하면 먼저 복사)
+            incus info "$BROKER" >/dev/null 2>&1 </dev/null || die "broker 가 없습니다 — 'sboxctl broker create'"
+            [[ ${2:-} == --build ]] && broker_image_build || broker_image_import
+            local old; old=$(ct_ip "$BROKER"); [[ -n $old ]] || die "broker IP 를 읽지 못했습니다"
+            say "broker 교체: $BROKER ($old) 를 지우고 새 이미지로 같은 주소에 다시 만듭니다"
+            incus delete -f "$BROKER" </dev/null >/dev/null || die "기존 broker 삭제 실패"
+            local ip; ip=$(broker_launch "$old")
+            audit info broker-update "$BROKER" "broker 교체 $ip (이미지 $(incus image info "$BROKER_IMAGE" </dev/null 2>/dev/null | sed -n 's/^Fingerprint: //p' | cut -c1-12))"
+            say "완료: broker 교체($ip — 프록시 $BROKER_PORT·투명 TLS 443·DNS 53). 주소가 같으면 ct 재연결은 필요 없습니다"
             return 0 ;;
-        *) die "사용법: sboxctl broker create|status|update" ;;
+        create)
+            incus info "$BROKER" >/dev/null 2>&1 </dev/null && die "$BROKER 는 이미 있습니다"
+            incus image info "$BROKER_IMAGE" </dev/null >/dev/null 2>&1 || { [[ -d $BROKER_IMG_DIR ]] || broker_image_build; }
+            local ip; ip=$(broker_launch "${2:-}")
+            audit info broker-create "$BROKER" "broker $ip:$BROKER_PORT"
+            say "완료: broker $ip:$BROKER_PORT — 프로젝트 ct 는 'sboxctl egress NAME' 으로 연결(create 는 자동)" ;;
+        *) die "사용법: sboxctl broker create [IP]|status|update [--build]" ;;
     esac
-    incus info "$BROKER" >/dev/null 2>&1 </dev/null && die "$BROKER 는 이미 있습니다"
-    TOOLS_ARGS=(); DOCKER=0
-    create_ct "$BROKER" debian 13 0 0 1 512MiB 0 5GiB
-    # broker 는 프로젝트 ct 들이 L2 로 닿아야 하므로 포트 격리를 끈다(프로젝트 ct 는 켜져 있어 서로는 못 봄) — 설정을 바꾸려면 정지 필요
-    incus stop "$BROKER" </dev/null
-    incus config device override "$BROKER" eth0 security.port_isolation=false </dev/null
-    incus start "$BROKER" </dev/null; wait_ct "$BROKER"
-    local ip; ip=$(ct_ip "$BROKER"); [[ -n $ip ]] || die "broker IP 를 못 읽었습니다"
-    incus config device set "$BROKER" eth0 ipv4.address="$ip" </dev/null    # 프로젝트 ct 의 ACL 이 이 주소를 가리키므로 고정
-    incus exec "$BROKER" --env "PATH=$CT_PATH" -- sh -c 'apt-get install -y -qq --no-install-recommends python3 >/dev/null' </dev/null || die "broker: python3 설치 실패"   # python3-minimal 에는 asyncio 가 없다(2026-11-23 겪음)
-    broker_install "$ip"
-    if [[ ! -f $EGRESS_STATE ]]; then   # 클라이언트 없는 상태 파일(기본 허용 세트만)
-        python3 "$SBOX_DIR/egress.py" remove --state "$EGRESS_STATE" --name __none__ >/dev/null
-    fi
-    broker_push
-    incus exec "$BROKER" -- sh -c 'systemctl daemon-reload && systemctl enable --now sbox-broker' </dev/null >/dev/null 2>&1 || die "broker 서비스 시작 실패"
-    audit info broker-create "$BROKER" "broker $ip:$BROKER_PORT"
-    say "완료: broker $ip:$BROKER_PORT — 프로젝트 ct 는 'sboxctl egress NAME' 으로 연결(create 는 자동)"
 }
 
 cmd_egress() { # cmd_egress NAME [--from-repo DIR|--manifest F] [--allow H[:P]]...
