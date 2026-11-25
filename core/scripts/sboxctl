@@ -1110,6 +1110,12 @@ PrivateTmp=true
 PrivateDevices=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
+# 커널 공격면 축소(pilot §29-62): 이 프로세스는 TCP/UDP·유닉스 소켓만 쓴다 — netlink(nf_tables 접근 경로)와 새 사용자·네트워크 네임스페이스 생성을 막는다
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
 [Install]
 WantedBy=multi-user.target
 UNIT
