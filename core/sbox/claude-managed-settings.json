@@ -42,7 +42,26 @@
       "Bash(npm ci *)",
       "Bash(npm clean-install *)",
       "Bash(yarn install --frozen-lockfile*)",
-      "Bash(pnpm install --frozen-lockfile*)"
+      "Bash(pnpm install --frozen-lockfile*)",
+      "Edit(CLAUDE.md)",
+      "Edit(**/CLAUDE.md)",
+      "Edit(.claude/**)",
+      "Edit(**/.claude/**)",
+      "Edit(.mcp.json)",
+      "Edit(**/.mcp.json)",
+      "Edit(package.json)",
+      "Edit(**/package.json)",
+      "Edit(package-lock.json)",
+      "Edit(**/package-lock.json)",
+      "Edit(pnpm-lock.yaml)",
+      "Edit(yarn.lock)",
+      "Edit(Dockerfile*)",
+      "Edit(**/Dockerfile*)",
+      "Edit(docker-compose*.yml)",
+      "Edit(**/docker-compose*.yml)",
+      "Edit(compose*.yml)",
+      "Edit(.githooks/**)",
+      "Edit(.github/**)"
     ]
   }
 }
