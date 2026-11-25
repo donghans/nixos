@@ -270,7 +270,11 @@ async def run():
                 b"GET / HTTP/1.1\r\nHost: localhost:80\r\nHost: evil.example\r\n\r\n",       # 중복 Host
                 b"POST / HTTP/1.1\r\nHost: localhost:80\r\nContent-Length: 5\r\n\r\nhello",   # 본문 있는 메서드
                 b"GET / HTTP/1.1\r\nHost: localhost:80\r\nX: a\nHost: evil.example\r\n\r\n",  # 낱개 줄바꿈으로 숨긴 헤더
-                b"GET / HTTP/1.1\r\nHost: localhost:80\r\nTransfer-Encoding: chunked\r\n\r\n"):
+                b"GET / HTTP/1.1\r\nHost: localhost:80\r\nTransfer-Encoding: chunked\r\n\r\n",
+                b"GET / HTTP/1.1\r\nHost: localhost:80\r\nContent-Length:\r\n\r\n",           # 빈 Content-Length(CVE-2023-40225 유형)
+                b"GET / HTTP/1.1\r\nHost: localhost:80\r\n: x\r\n\r\n",                       # 빈 헤더 이름(CVE-2023-25725 유형)
+                b"GET / HTTP/1.1\r\nHost : localhost:80\r\n\r\n",                              # 이름 뒤 공백
+                b"GET / HTTP/1.1\r\nHost: localhost:80\r\nX: a\r\n b\r\n\r\n"):            # 줄 이어쓰기(obs-fold)
         r, w = await asyncio.open_connection("127.0.0.1", p5)
         w.write(bad); await w.drain()
         check("투명 HTTP: 모호·본문 요청은 거부 " + repr(bad[:24]), await asyncio.wait_for(r.read(4096), 15) == b"")

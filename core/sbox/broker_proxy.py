@@ -530,13 +530,16 @@ class Proxy:
                     if b"\n" in ln or b"\r" in ln:
                         bad = bad or "bad-header"      # 낱개 줄바꿈으로 헤더를 숨기는 수법
                         continue
-                    k, _, v = ln.partition(b":")
-                    kl = k.strip().lower()
+                    k, sep, v = ln.partition(b":")
+                    if not sep or not k or k != k.strip():
+                        bad = bad or "bad-header"      # 콜론 없음·빈 이름(HAProxy CVE-2023-25725 유형)·이름 뒤 공백·줄 이어쓰기(앞 공백) — 서버마다 해석이 갈린다
+                        continue
+                    kl = k.lower()
                     if kl == b"host":
                         hosts.append(v.strip()); fwd.append(ln)
                     elif kl in (b"connection", b"proxy-connection", b"keep-alive", b"upgrade", b"te"):
                         continue                       # 연결 유지·프로토콜 전환 금지 — 아래서 Connection: close 로 바꾼다
-                    elif kl in (b"transfer-encoding", b"expect") or (kl == b"content-length" and v.strip() not in (b"", b"0")):
+                    elif kl in (b"transfer-encoding", b"expect") or (kl == b"content-length" and v.strip() != b"0"):   # 빈 Content-Length 도 거부(HAProxy CVE-2023-40225 유형)
                         bad = bad or "body-not-allowed"
                     else:
                         fwd.append(ln)
