@@ -25,6 +25,7 @@ import asyncio
 import ipaddress
 import json
 import os
+import re
 import socket
 import sys
 import time
@@ -34,11 +35,13 @@ HEAD_TIMEOUT = 10
 CONNECT_TIMEOUT = 10
 IDLE_TIMEOUT = 600
 MAX_CONNS = 512
+PER_CLIENT_CONNS = 128   # 한 클라이언트(ct)가 전체 슬롯을 독점하지 못하게(pilot §29-45)
+SLOT_WAIT = 5            # 슬롯을 기다리는 최대 초 — 넘으면 busy 로 거부(무한 대기 방지)
 SNI_PORTS = {443}   # 이 포트의 터널은 첫 TLS 레코드의 SNI 가 요청 호스트와 같아야 한다
 
 _PRIVATE_NETS = [ipaddress.ip_network(n) for n in (
     "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12",
-    "192.0.0.0/24", "192.168.0.0/16", "198.18.0.0/15", "224.0.0.0/4", "240.0.0.0/4",
+    "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
     "::1/128", "fc00::/7", "fe80::/10", "::/128", "ff00::/8")]
 
 
@@ -56,39 +59,65 @@ def host_matches(pattern, host):
     return pattern == host
 
 
+_HOST_RE = re.compile(r"[a-z0-9_]([a-z0-9_.-]*[a-z0-9_])?")
+
+
+def valid_host(h):
+    """허용 판단·DNS 질의에 쓰는 호스트는 ASCII 영숫자·`.`·`-`·`_` 만(IDN 은 punycode 로). 그 밖은 정규화가 서로 다르게 읽힐 수 있어 거부한다(예: 비 ASCII 가 DNS 패킷 길이를 어긋나게 함, pilot §29-45)."""
+    return bool(h) and len(h) <= 253 and _HOST_RE.fullmatch(h) is not None
+
+
 def rule_matches(rule, host, port):
     h, _, p = rule.rpartition(":")
     return bool(h) and p == str(port) and host_matches(h, host)
 
 
-def parse_sni(data):
-    """TLS ClientHello 에서 server_name 을 꺼낸다. 아니면 None. 길이를 모두 검사한다(잘린 입력은 None)."""
+ECH_EXT = {0xfe0d, 0xffce}   # encrypted_client_hello·구 ESNI — 안쪽 SNI 를 숨겨 허용 도메인을 위장할 수 있다(pilot §29-45)
+
+
+def parse_hello(data):
+    """TLS ClientHello → (sni 또는 None, 문제 표지). 표지: "" 정상 · "ech" 암호화 SNI 확장 있음 · "dup-ext" 같은 확장 중복 · "multi-name" server_name 여러 개.
+    길이를 모두 검사한다(잘린 입력은 (None, ""))."""
     try:
         if len(data) < 5 or data[0] != 0x16:
-            return None
+            return None, ""
         rec_len = int.from_bytes(data[3:5], "big")
         body = data[5:5 + rec_len]
         if not body or body[0] != 0x01:
-            return None
+            return None, ""
         pos = 4 + 2 + 32                       # 핸드셰이크 헤더 + 버전 + 랜덤
         sid = body[pos]; pos += 1 + sid
         cs = int.from_bytes(body[pos:pos + 2], "big"); pos += 2 + cs
         cm = body[pos]; pos += 1 + cm
         ext_total = int.from_bytes(body[pos:pos + 2], "big"); pos += 2
         end = min(pos + ext_total, len(body))
+        sni, flag, seen = None, "", set()
         while pos + 4 <= end:
             etype = int.from_bytes(body[pos:pos + 2], "big")
             elen = int.from_bytes(body[pos + 2:pos + 4], "big")
             pos += 4
-            if etype == 0 and elen >= 5:
+            if etype in seen:
+                flag = flag or "dup-ext"      # 서버마다 첫째·마지막을 달리 읽는다 — 모호하면 거부
+            seen.add(etype)
+            if etype in ECH_EXT:
+                flag = flag or "ech"
+            if etype == 0 and elen >= 5 and sni is None:
                 lst = body[pos + 2:pos + elen]
                 if lst and lst[0] == 0:
                     n = int.from_bytes(lst[1:3], "big")
-                    return lst[3:3 + n].decode("ascii", "strict").lower()
+                    sni = lst[3:3 + n].decode("ascii", "strict").lower()
+                    if 3 + n != len(lst):
+                        flag = flag or "multi-name"
             pos += elen
+        return sni, flag
     except (IndexError, UnicodeDecodeError, ValueError):
-        return None
-    return None
+        return None, ""
+
+
+def parse_sni(data):
+    """호환 래퍼: 모호하거나 ECH 면 None."""
+    sni, flag = parse_hello(data)
+    return None if flag else sni
 
 
 UPSTREAM_DNS = ["8.8.8.8", "9.9.9.9", "1.1.1.1"]   # 시험·운영 모두 --upstream-dns 로 바꾼다
@@ -135,7 +164,7 @@ async def resolve_a(name, servers=None, timeout=3.0):
     loop = asyncio.get_running_loop()
     qid = int.from_bytes(os.urandom(2), "big")
     labels = name.rstrip(".").split(".")
-    if not name or any(not 0 < len(x) < 64 for x in labels):
+    if not valid_host(name.rstrip(".").lower()) or any(not 0 < len(x) < 64 for x in labels):
         return []
     pkt = qid.to_bytes(2, "big") + (0x0100).to_bytes(2, "big") + b"\0\1\0\0\0\0\0\0" + b"".join(bytes([len(x)]) + x.encode("ascii", "ignore") for x in labels) + b"\0\0\1\0\1"
     got = asyncio.Queue()
@@ -297,14 +326,71 @@ async def pipe(r, w, counter, key):
             pass
 
 
+class BusyError(Exception):
+    pass
+
+
+class _Slot:
+    def __init__(self, proxy, client):
+        self.p, self.c = proxy, client
+
+    async def __aenter__(self):
+        p = self.p
+        if p.per_client.get(self.c, 0) >= PER_CLIENT_CONNS:
+            raise BusyError("per-client")
+        p.per_client[self.c] = p.per_client.get(self.c, 0) + 1
+        try:
+            await asyncio.wait_for(p.sem.acquire(), SLOT_WAIT)
+        except asyncio.TimeoutError:
+            self._release_client()
+            raise BusyError("global")
+        return self
+
+    def _release_client(self):
+        p = self.p
+        p.per_client[self.c] -= 1
+        if p.per_client[self.c] <= 0:
+            del p.per_client[self.c]
+
+    async def __aexit__(self, *a):
+        self.p.sem.release()
+        self._release_client()
+
+
 class Proxy:
     def __init__(self, cfg, allow_private_targets=False, tls_upstream_port=443, http_upstream_port=80, resolver=None):
         self.cfg, self.allow_private, self.sem = cfg, allow_private_targets, asyncio.Semaphore(MAX_CONNS)
+        self.per_client = {}
         self.tls_upstream_port = tls_upstream_port   # 시험에서만 바꾼다
         self.http_upstream_port = http_upstream_port
         self.resolver = resolver or resolve_a
 
+    def slot(self, client_ip):
+        """연결 슬롯(전역 MAX_CONNS + 클라이언트별 PER_CLIENT_CONNS). 기다림은 SLOT_WAIT 초까지 — 넘으면 BusyError."""
+        return _Slot(self, client_ip)
+
+    async def read_hello(self, reader, first=b""):
+        """첫 TLS 레코드 하나를 다 읽는다(조각나 도착해도 합침, HEAD_TIMEOUT 까지). 투명·CONNECT 경로가 같이 쓴다."""
+        try:
+            async def fill():
+                nonlocal first
+                while True:
+                    if len(first) >= 5 and (first[0] != 0x16 or len(first) >= 5 + int.from_bytes(first[3:5], "big")):
+                        return
+                    if len(first) > 16384 + 5:
+                        return
+                    chunk = await reader.read(16384)
+                    if not chunk:
+                        return
+                    first += chunk
+            await asyncio.wait_for(fill(), HEAD_TIMEOUT)
+        except asyncio.TimeoutError:
+            pass
+        return first
+
     def decide(self, client_ip, host, port):
+        if not valid_host(host):
+            return False, "bad-host", ""
         data = self.cfg.get()
         c = data.get("clients", {}).get(client_ip)
         if c is None:
@@ -319,8 +405,10 @@ class Proxy:
         rec = {"client": peer[0], "host": "", "port": 0, "verdict": "deny", "reason": "", "up": 0, "down": 0}
         t0 = time.monotonic()
         try:
-            async with self.sem:
+            async with self.slot(rec["client"]):
                 await self._serve(reader, writer, rec)
+        except BusyError:
+            rec["reason"] = "busy"
         except Exception as e:                    # 한 연결의 예외가 프록시를 죽이지 않게
             rec["reason"] = rec["reason"] or "error:" + type(e).__name__
         finally:
@@ -360,25 +448,12 @@ class Proxy:
         t0 = time.monotonic()
         up_w = None
         try:
-            async with self.sem:
-                first = b""
-                try:
-                    async def fill():
-                        nonlocal first
-                        while True:
-                            chunk = await reader.read(16384)
-                            if not chunk:
-                                return
-                            first += chunk
-                            if len(first) >= 5 and (first[0] != 0x16 or len(first) >= 5 + int.from_bytes(first[3:5], "big")):
-                                return
-                            if len(first) > 16384 + 5:
-                                return
-                    await asyncio.wait_for(fill(), HEAD_TIMEOUT)
-                except asyncio.TimeoutError:
-                    pass
-                sni = parse_sni(first)
-                if not sni or len(sni) > 253:
+            async with self.slot(rec["client"]):
+                first = await self.read_hello(reader)
+                sni, flag = parse_hello(first)
+                if flag:
+                    rec["reason"] = flag                  # ech·dup-ext·multi-name — 모호하면 거부
+                elif not sni or len(sni) > 253:
                     rec["reason"] = "no-sni"
                 else:
                     rec["host"] = sni
@@ -394,6 +469,8 @@ class Proxy:
                             up_w.write(first); await up_w.drain()
                             await asyncio.gather(pipe(reader, up_w, counter, "up"), pipe(up_r, writer, counter, "down"))
                             rec["up"], rec["down"] = counter["up"], counter["down"]
+        except BusyError:
+            rec["reason"] = "busy"
         except Exception as e:
             rec["reason"] = rec["reason"] or "error:" + type(e).__name__
         finally:
@@ -416,18 +493,38 @@ class Proxy:
         t0 = time.monotonic()
         up_w = None
         try:
-            async with self.sem:
+            async with self.slot(rec["client"]):
                 try:
                     head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), HEAD_TIMEOUT)
                 except (asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError):
                     head = b""
-                host = ""
-                for ln in head.split(b"\r\n")[1:]:
+                host, bad, fwd = "", "", []
+                lines = head.split(b"\r\n")[:-2] if head else []
+                rl = lines[0].split(b" ") if lines else []
+                if len(rl) != 3 or rl[0] not in (b"GET", b"HEAD") or not rl[1].startswith(b"/"):
+                    bad = "bad-request"        # 절대 URI(GET http://다른호스트/)는 서버가 Host 대신 쓰므로 거부, 본문을 보내는 메서드(POST 등)도 거부
+                hosts = []
+                for ln in lines[1:]:
+                    if b"\n" in ln or b"\r" in ln:
+                        bad = bad or "bad-header"      # 낱개 줄바꿈으로 헤더를 숨기는 수법
+                        continue
                     k, _, v = ln.partition(b":")
-                    if k.strip().lower() == b"host":
-                        host = v.strip().decode("latin-1").lower().rsplit(":", 1)[0] if v.strip().isascii() else ""
-                        break
-                if not head or not host or len(host) > 253:
+                    kl = k.strip().lower()
+                    if kl == b"host":
+                        hosts.append(v.strip()); fwd.append(ln)
+                    elif kl in (b"connection", b"proxy-connection", b"keep-alive", b"upgrade", b"te"):
+                        continue                       # 연결 유지·프로토콜 전환 금지 — 아래서 Connection: close 로 바꾼다
+                    elif kl in (b"transfer-encoding", b"expect") or (kl == b"content-length" and v.strip() not in (b"", b"0")):
+                        bad = bad or "body-not-allowed"
+                    else:
+                        fwd.append(ln)
+                if len(hosts) == 1 and hosts[0].isascii():
+                    host = hosts[0].decode("latin-1").lower().rsplit(":", 1)[0]
+                elif len(hosts) > 1:
+                    bad = bad or "dup-host"            # 중복 Host — 서버마다 읽는 쪽이 다르다
+                if bad:
+                    rec["reason"] = bad
+                elif not head or not host or len(host) > 253:
                     rec["reason"] = "no-host"
                 else:
                     rec["host"] = host
@@ -439,10 +536,14 @@ class Proxy:
                             rec["reason"] = why
                         else:
                             rec["verdict"] = "allow"
+                            # 요청 하나만 전달한다 — 같은 연결의 뒤 요청은 Host 를 검사하지 못하므로 Connection: close 로 바꿔 서버가 응답 뒤 끊게 한다
+                            head = b"\r\n".join([lines[0]] + fwd + [b"Connection: close"]) + b"\r\n\r\n"
                             counter = {"up": len(head), "down": 0}
                             up_w.write(head); await up_w.drain()
-                            await asyncio.gather(pipe(reader, up_w, counter, "up"), pipe(up_r, writer, counter, "down"))
+                            await pipe(up_r, writer, counter, "down")     # 클라이언트가 이어 보내는 바이트(겹친 두 번째 요청 등)는 더 전달하지 않는다 — 본문 없는 GET·HEAD 한 번이면 충분
                             rec["up"], rec["down"] = counter["up"], counter["down"]
+        except BusyError:
+            rec["reason"] = "busy"
         except Exception as e:
             rec["reason"] = rec["reason"] or "error:" + type(e).__name__
         finally:
@@ -486,13 +587,10 @@ class Proxy:
         writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n"); await writer.drain()
         first = b""
         if port in SNI_PORTS:                     # 첫 TLS 레코드의 SNI 가 요청한 호스트와 같아야 한다
-            try:
-                first = await asyncio.wait_for(reader.read(16384), HEAD_TIMEOUT)
-            except asyncio.TimeoutError:
-                first = b""
-            sni = parse_sni(first)
-            if sni != host:
-                rec["reason"] = "sni-mismatch" if sni else "no-sni"
+            first = await self.read_hello(reader)
+            sni, flag = parse_hello(first)
+            if flag or sni != host:
+                rec["reason"] = flag or ("sni-mismatch" if sni else "no-sni")
                 up_w.close(); return
         rec["verdict"] = "allow"
         counter = {"up": len(first), "down": 0}

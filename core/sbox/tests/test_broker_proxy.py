@@ -51,6 +51,21 @@ ch = client_hello("example.com")
 check("sni 잘림", bp.parse_sni(ch[:30]) is None and bp.parse_sni(ch[:5]) is None)
 check("sni 비TLS", bp.parse_sni(b"GET / HTTP/1.1\r\n\r\n") is None and bp.parse_sni(b"") is None)
 check("sni 깨진 길이", bp.parse_sni(ch[:5] + b"\xff" * 60) is None)
+# 모호한 ClientHello 거부(pilot §29-45): ECH·중복 확장·여러 server_name
+def hello_ext(exts):
+    sn = "example.com".encode()
+    ext_sni = b"\x00\x00" + (len(sn) + 5).to_bytes(2, "big") + (len(sn) + 3).to_bytes(2, "big") + b"\x00" + len(sn).to_bytes(2, "big") + sn
+    allx = b"".join(exts) if exts else ext_sni
+    body = b"\x01" + (2 + 32 + 1 + 2 + 2 + 2 + 2 + len(allx)).to_bytes(3, "big") + b"\x03\x03" + b"\0" * 32 + b"\0" + b"\x00\x02\x13\x01" + b"\x01\x00" + len(allx).to_bytes(2, "big") + allx
+    return b"\x16\x03\x01" + len(body).to_bytes(2, "big") + body
+SNI = lambda n: b"\x00\x00" + (len(n) + 5).to_bytes(2, "big") + (len(n) + 3).to_bytes(2, "big") + b"\x00" + len(n).to_bytes(2, "big") + n
+check("hello 정상", bp.parse_hello(hello_ext([])) == ("example.com", ""))
+check("hello ECH 확장 → ech", bp.parse_hello(hello_ext([SNI(b"example.com"), b"\xfe\x0d\x00\x02ab"])) == ("example.com", "ech") and bp.parse_sni(hello_ext([SNI(b"example.com"), b"\xfe\x0d\x00\x02ab"])) is None)
+check("hello 중복 확장 → dup-ext", bp.parse_hello(hello_ext([SNI(b"example.com"), SNI(b"evil.example")]))[1] == "dup-ext")
+two = b"\x00\x00" + (2 + 3 + 11 + 3 + 12).to_bytes(2, "big") + (3 + 11 + 3 + 12).to_bytes(2, "big") + b"\x00\x00\x0bexample.com" + b"\x00\x00\x0cevil.example"
+check("hello 이름 여러 개 → multi-name", bp.parse_hello(hello_ext([two]))[1] == "multi-name", bp.parse_hello(hello_ext([two])))
+check("비 ASCII·이상한 호스트는 valid_host 거부", not bp.valid_host("é.example.com") and not bp.valid_host("a b.com") and not bp.valid_host("") and not bp.valid_host("a/b.com") and bp.valid_host("registry.npmjs.org") and bp.valid_host("a_b.example.com"))
+check("문서·테스트 대역도 사설로 취급", all(bp.is_private(x) for x in ("192.0.2.1", "198.51.100.7", "203.0.113.9", "192.88.99.1")) and not bp.is_private("8.8.8.8"))
 
 
 # ⑧ 매니페스트의 [network] egress 가 tools.write_manifest 로 다시 써져도 사라지지 않는다(2026-11-23 실제로 사라져 broker 허용이 0개가 됐음)
@@ -81,6 +96,14 @@ try:
     egress.compute("sbox-ct-debian13-x", None); check("프리셋: 매니페스트도 --minimal 도 없으면 거부", False)
 except SystemExit:
     check("프리셋: 매니페스트도 --minimal 도 없으면 거부", True)
+def norm_fails(r):
+    try:
+        egress.norm(r); return False
+    except SystemExit:
+        return True
+check("와일드카드: 공개 접미사·사용자 콘텐츠 서비스는 거부", all(norm_fails(x) for x in ("*.com", "*.github.io", "*.s3.amazonaws.com", "*.x.cloudfront.net", "*.pages.dev")))
+check("와일드카드: 정상 도메인·정확한 호스트는 허용", egress.norm("*.example.com") == "*.example.com:443" and egress.norm("bucket.s3.amazonaws.com:443") == "bucket.s3.amazonaws.com:443")
+check("허용 항목: 비 ASCII·공백 거부", norm_fails("é.example.com") and norm_fails("a b.com"))
 check("프리셋: 지정했지만 파일 없음(create 중) = flavor·always 만", "registry.npmjs.org:443" not in egress.compute("sbox-ct-debian13-x", "/nonexistent.toml") and "deb.debian.org:443" in egress.compute("sbox-ct-debian13-x", "/nonexistent.toml"))
 try:
     egress.compute("sbox-ct-debian13-p", pm(presets=["nope"])); check("프리셋: 알 수 없는 이름 거부", False)
@@ -227,10 +250,27 @@ async def run():
     srv5 = await asyncio.start_server(px5.handle_http, "127.0.0.1", 0, limit=9000)
     p5 = srv5.sockets[0].getsockname()[1]
     req = b"GET /x HTTP/1.1\r\nHost: localhost:80\r\n\r\n"
+    want = b"GET /x HTTP/1.1\r\nHost: localhost:80\r\nConnection: close\r\n\r\n"   # 요청 하나만 전달 — Connection: close 가 붙는다
     r, w = await asyncio.open_connection("127.0.0.1", p5)
     w.write(req); await w.drain()
-    check("투명 HTTP: 허용 Host 는 전달(에코)", await asyncio.wait_for(r.readexactly(len(req)), 5) == req)
+    check("투명 HTTP: 허용 Host 는 전달(에코, Connection: close 추가)", await asyncio.wait_for(r.readexactly(len(want)), 5) == want)
     w.close()
+    # 에코 서버는 받은 만큼 돌려준다 — 겹쳐 보낸 두 번째 요청(Host 위장)·keep-alive 헤더는 전달되지 않아야 한다
+    r, w = await asyncio.open_connection("127.0.0.1", p5)
+    w.write(b"GET /a HTTP/1.1\r\nHost: localhost:80\r\nConnection: keep-alive\r\nUpgrade: websocket\r\n\r\nGET /b HTTP/1.1\r\nHost: evil.example\r\n\r\n"); await w.drain()
+    got = await asyncio.wait_for(r.readexactly(len(b"GET /a HTTP/1.1\r\nHost: localhost:80\r\nConnection: close\r\n\r\n")), 5)
+    w.write(b"GET /c HTTP/1.1\r\nHost: evil.example\r\n\r\n"); await w.drain()
+    check("투명 HTTP: keep-alive·Upgrade 제거, 겹친 요청은 전달 안 함", got == b"GET /a HTTP/1.1\r\nHost: localhost:80\r\nConnection: close\r\n\r\n" and b"evil" not in got)
+    w.close()
+    for bad in (b"GET http://evil.example/ HTTP/1.1\r\nHost: localhost:80\r\n\r\n",           # 절대 URI
+                b"GET / HTTP/1.1\r\nHost: localhost:80\r\nHost: evil.example\r\n\r\n",       # 중복 Host
+                b"POST / HTTP/1.1\r\nHost: localhost:80\r\nContent-Length: 5\r\n\r\nhello",   # 본문 있는 메서드
+                b"GET / HTTP/1.1\r\nHost: localhost:80\r\nX: a\nHost: evil.example\r\n\r\n",  # 낱개 줄바꿈으로 숨긴 헤더
+                b"GET / HTTP/1.1\r\nHost: localhost:80\r\nTransfer-Encoding: chunked\r\n\r\n"):
+        r, w = await asyncio.open_connection("127.0.0.1", p5)
+        w.write(bad); await w.drain()
+        check("투명 HTTP: 모호·본문 요청은 거부 " + repr(bad[:24]), await asyncio.wait_for(r.read(4096), 15) == b"")
+        w.close()
     for bad in (b"GET / HTTP/1.1\r\nHost: evil.example\r\n\r\n", b"GET / HTTP/1.1\r\n\r\n", b"junk"):
         r, w = await asyncio.open_connection("127.0.0.1", p5)
         w.write(bad); await w.drain()
@@ -239,6 +279,24 @@ async def run():
         check("투명 HTTP: 허용 밖·Host 없음·깨진 요청은 끊김 " + repr(bad[:12]), await asyncio.wait_for(r.read(4096), 15) == b"")
         w.close()
     srv5.close()
+    # 연결 슬롯: 한 클라이언트가 상한을 넘으면 즉시 거부, 다른 클라이언트는 영향 없음, 해제하면 다시 가능(pilot §29-45)
+    old_pc = bp.PER_CLIENT_CONNS; bp.PER_CLIENT_CONNS = 2
+    pxs = bp.Proxy(bp.Config(cfgfile))
+    a1, a2 = pxs.slot("10.0.0.1"), pxs.slot("10.0.0.1")
+    await a1.__aenter__(); await a2.__aenter__()
+    try:
+        await pxs.slot("10.0.0.1").__aenter__(); over = False
+    except bp.BusyError:
+        over = True
+    other = pxs.slot("10.0.0.2"); await other.__aenter__()
+    check("슬롯: 클라이언트별 상한 초과는 거부", over)
+    check("슬롯: 다른 클라이언트는 영향 없음", pxs.per_client.get("10.0.0.2") == 1)
+    await a1.__aexit__(); await other.__aexit__()
+    again = pxs.slot("10.0.0.1"); await again.__aenter__()
+    check("슬롯: 해제하면 다시 가능·정리됨", pxs.per_client == {"10.0.0.1": 2})
+    await again.__aexit__(); await a2.__aexit__()
+    check("슬롯: 전부 해제되면 표가 비고 세마포어 복구", pxs.per_client == {} and pxs.sem._value == bp.MAX_CONNS)
+    bp.PER_CLIENT_CONNS = old_pc
     # DNS 스텁 UDP 왕복
     write({"default_allow": [], "clients": {"127.0.0.1": {"name": "t1", "allow": ["registry.npmjs.org:443", "*.github.com:443", "db.x:5432"]}}})
     loop = asyncio.get_running_loop()

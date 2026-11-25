@@ -11,12 +11,25 @@ import argparse, ipaddress, json, os, re, sys, tempfile, tomllib
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+# 아무나 하위 이름·버킷·페이지를 만들 수 있는 서비스의 접미사 — 와일드카드로 허용하면 공격자 소유 이름이 통과한다(pilot §29-45). 정확한 호스트는 허용 가능. 항목을 늘릴 때는 이유를 적는다.
+USER_CONTENT_SUFFIXES = {
+    "github.io", "githubusercontent.com", "amazonaws.com", "cloudfront.net", "appspot.com", "web.app", "firebaseapp.com", "pages.dev", "workers.dev",
+    "vercel.app", "netlify.app", "herokuapp.com", "azurewebsites.net", "blob.core.windows.net", "azureedge.net", "onrender.com", "fly.dev", "ngrok.io",
+    "ngrok-free.app", "trycloudflare.com", "gitlab.io", "bitbucket.io", "r2.dev", "supabase.co", "repl.co", "glitch.me", "000webhostapp.com"}
+
+
 def norm(rule):
     h, sep, p = rule.strip().lower().rpartition(":")
     if not sep or not p.isdigit():
         h, p = rule.strip().lower(), "443"
     if not h or any(c in h for c in " /\\\t") or h.count("*") > 1 or ("*" in h and not h.startswith("*.")):
         raise SystemExit(f"잘못된 허용 항목: {rule!r} (호스트[:포트], 와일드카드는 맨 앞 `*.` 만)")
+    if not h.isascii() or any(not (c.isalnum() or c in ".-_*") for c in h):
+        raise SystemExit(f"잘못된 허용 항목: {rule!r} (ASCII 영숫자·`.`·`-`·`_` 만 — IDN 은 punycode 로)")
+    if h.startswith("*."):
+        base = h[2:]
+        if base.count(".") < 1 or base in USER_CONTENT_SUFFIXES or any(base.endswith("." + x) for x in USER_CONTENT_SUFFIXES):
+            raise SystemExit(f"허용할 수 없는 와일드카드: {rule!r} — 공개 접미사(`*.com`)이거나 아무나 하위 이름을 만들 수 있는 서비스({base})라, 허용하면 공격자 소유 이름으로 데이터를 보낼 수 있다. 필요한 정확한 호스트를 적으세요")
     return f"{h}:{p}"
 
 
