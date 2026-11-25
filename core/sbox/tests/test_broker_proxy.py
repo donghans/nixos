@@ -60,6 +60,20 @@ def hello_ext(exts):
     return b"\x16\x03\x01" + len(body).to_bytes(2, "big") + body
 SNI = lambda n: b"\x00\x00" + (len(n) + 5).to_bytes(2, "big") + (len(n) + 3).to_bytes(2, "big") + b"\x00" + len(n).to_bytes(2, "big") + n
 check("hello 정상", bp.parse_hello(hello_ext([])) == ("example.com", ""))
+good = hello_ext([])
+def fix_len(d, hs_delta=0, ext_delta=0):   # 길이 필드만 어긋나게(레코드는 그대로)
+    b = bytearray(d)
+    if hs_delta: b[6:9] = (int.from_bytes(b[6:9], "big") + hs_delta).to_bytes(3, "big")
+    return bytes(b)
+check("hello 핸드셰이크 길이 불일치 → malformed", bp.parse_hello(fix_len(good, 1))[1] == "malformed" and bp.parse_hello(fix_len(good, -1))[1] == "malformed")
+check("hello 잘린 레코드는 판정 보류(None,'')", bp.parse_hello(good[:-3]) == (None, ""))
+bad_ext = bytearray(good); i = 5 + 4 + 2 + 32 + 1 + 2 + 2 + 2          # 확장 총길이 필드 위치(세션 ID 0·암호군 1개·압축 1개)
+bad_ext[i:i + 2] = (int.from_bytes(bad_ext[i:i + 2], "big") + 1).to_bytes(2, "big")
+check("hello 확장 총길이 불일치 → malformed", bp.parse_hello(bytes(bad_ext))[1] == "malformed", bp.parse_hello(bytes(bad_ext)))
+odd_cs = bytearray(good); j = 5 + 4 + 2 + 32 + 1; odd_cs[j:j + 2] = b"\x00\x03"
+check("hello 암호군 길이가 홀수 → malformed", bp.parse_hello(bytes(odd_cs))[1] == "malformed")
+long_sid = bytearray(good); long_sid[5 + 4 + 2 + 32] = 33
+check("hello 세션 ID 33바이트 → malformed", bp.parse_hello(bytes(long_sid))[1] == "malformed")
 check("hello ECH 확장 → ech", bp.parse_hello(hello_ext([SNI(b"example.com"), b"\xfe\x0d\x00\x02ab"])) == ("example.com", "ech") and bp.parse_sni(hello_ext([SNI(b"example.com"), b"\xfe\x0d\x00\x02ab"])) is None)
 check("hello 중복 확장 → dup-ext", bp.parse_hello(hello_ext([SNI(b"example.com"), SNI(b"evil.example")]))[1] == "dup-ext")
 two = b"\x00\x00" + (2 + 3 + 11 + 3 + 12).to_bytes(2, "big") + (3 + 11 + 3 + 12).to_bytes(2, "big") + b"\x00\x00\x0bexample.com" + b"\x00\x00\x0cevil.example"

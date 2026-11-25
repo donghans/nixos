@@ -76,38 +76,61 @@ ECH_EXT = {0xfe0d, 0xffce}   # encrypted_client_hello·구 ESNI — 안쪽 SNI �
 
 
 def parse_hello(data):
-    """TLS ClientHello → (sni 또는 None, 문제 표지). 표지: "" 정상 · "ech" 암호화 SNI 확장 있음 · "dup-ext" 같은 확장 중복 · "multi-name" server_name 여러 개.
+    """TLS ClientHello → (sni 또는 None, 문제 표지). 표지: "" 정상 · "ech" 암호화 SNI 확장 있음 · "dup-ext" 같은 확장 중복 · "multi-name" server_name 여러 개 ·
+    "malformed" 길이가 안 맞음(핸드셰이크·확장 구간·암호군 길이 불일치 등 — 주요 TLS 서버(OpenSSL·Go)가 거부하는 깨진 hello 를 우리만 통과시켜 서로 다른 이름을 읽게 되는 일을 줄이려고, pilot §29-49).
     길이를 모두 검사한다(잘린 입력은 (None, ""))."""
     try:
         if len(data) < 5 or data[0] != 0x16:
             return None, ""
         rec_len = int.from_bytes(data[3:5], "big")
+        if len(data) < 5 + rec_len:
+            return None, ""                    # 레코드가 아직 다 안 왔다(잘림) — 호출한 쪽이 더 읽거나 거부
         body = data[5:5 + rec_len]
         if not body or body[0] != 0x01:
             return None, ""
+        if int.from_bytes(body[1:4], "big") != len(body) - 4:
+            return None, "malformed"           # 핸드셰이크 길이 ≠ 레코드 안 남은 길이(조각난 ClientHello 도 여기서 거부 — 일반 클라이언트는 한 레코드로 보낸다)
         pos = 4 + 2 + 32                       # 핸드셰이크 헤더 + 버전 + 랜덤
-        sid = body[pos]; pos += 1 + sid
-        cs = int.from_bytes(body[pos:pos + 2], "big"); pos += 2 + cs
-        cm = body[pos]; pos += 1 + cm
+        sid = body[pos]
+        if sid > 32:
+            return None, "malformed"
+        pos += 1 + sid
+        cs = int.from_bytes(body[pos:pos + 2], "big")
+        if cs < 2 or cs % 2:
+            return None, "malformed"
+        pos += 2 + cs
+        cm = body[pos]
+        if cm < 1:
+            return None, "malformed"
+        pos += 1 + cm
         ext_total = int.from_bytes(body[pos:pos + 2], "big"); pos += 2
-        end = min(pos + ext_total, len(body))
+        end = pos + ext_total
+        if end != len(body):
+            return None, "malformed"           # 확장 구간이 레코드 끝과 딱 맞아야 한다(뒤에 남는 바이트·모자람 모두 거부)
         sni, flag, seen = None, "", set()
-        while pos + 4 <= end:
+        while pos < end:
+            if pos + 4 > end:
+                return None, "malformed"
             etype = int.from_bytes(body[pos:pos + 2], "big")
             elen = int.from_bytes(body[pos + 2:pos + 4], "big")
             pos += 4
+            if pos + elen > end:
+                return None, "malformed"
             if etype in seen:
                 flag = flag or "dup-ext"      # 서버마다 첫째·마지막을 달리 읽는다 — 모호하면 거부
             seen.add(etype)
             if etype in ECH_EXT:
                 flag = flag or "ech"
-            if etype == 0 and elen >= 5 and sni is None:
-                lst = body[pos + 2:pos + elen]
-                if lst and lst[0] == 0:
-                    n = int.from_bytes(lst[1:3], "big")
-                    sni = lst[3:3 + n].decode("ascii", "strict").lower()
-                    if 3 + n != len(lst):
-                        flag = flag or "multi-name"
+            if etype == 0 and sni is None:
+                lst = body[pos:pos + elen]
+                if len(lst) < 5 or int.from_bytes(lst[0:2], "big") != len(lst) - 2 or lst[2] != 0:
+                    return None, "malformed"
+                n = int.from_bytes(lst[3:5], "big")
+                if 5 + n > len(lst):
+                    return None, "malformed"
+                sni = lst[5:5 + n].decode("ascii", "strict").lower()
+                if 5 + n != len(lst):
+                    flag = flag or "multi-name"
             pos += elen
         return sni, flag
     except (IndexError, UnicodeDecodeError, ValueError):
