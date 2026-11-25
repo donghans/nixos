@@ -924,7 +924,8 @@ cmd_llm() {
         if [[ $NAME_KIND == ct ]]; then
             incus exec "$name" -- mkdir -p /etc/claude-code </dev/null \
                 && incus file push "$SBOX_DIR/claude-managed-settings.json" "$name/etc/claude-code/managed-settings.json" --uid 0 --gid 0 --mode 0644 \
-                || die "관리 설정(업데이트 제동) 설치 실패"
+                && incus file push "$SBOX_DIR/claude-managed-mcp.json" "$name/etc/claude-code/managed-mcp.json" --uid 0 --gid 0 --mode 0644 \
+                || die "관리 설정(업데이트 제동·MCP 차단) 설치 실패"   # managed-mcp.json = {} : 프로젝트 .mcp.json 의 MCP 서버(예: poriring 의 npx playwright@latest)를 막는다(pilot §29-83·85)
         else
             say "참고: VM 에는 의존성 갱신 제동(관리 설정)이 아직 적용되지 않습니다(ct 만)"
         fi
