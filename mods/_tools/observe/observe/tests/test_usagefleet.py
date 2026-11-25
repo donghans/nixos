@@ -42,7 +42,9 @@ BIN = os.path.join(TMP, "bin"); os.makedirs(BIN)
 def fake(body):
     p = os.path.join(BIN, "observectl"); open(p, "w").write("#!/bin/sh\n" + body + "\n"); os.chmod(p, os.stat(p).st_mode | stat.S_IEXEC)
 os.environ["PATH"] = BIN + os.pathsep + os.environ["PATH"]
-check("load: observectl 이 없으면 (None, 사유)", uf.load() == (None, "observectl 이 없습니다") or uf.load()[0] is None)
+_P = os.environ["PATH"]; os.environ["PATH"] = BIN  # 호스트에 진짜 observectl 이 있어도 「없는 경우」를 시험하도록 격리
+r0 = uf.load(); os.environ["PATH"] = _P
+check("load: observectl 이 없으면 (None, 사유)", r0[0] is None)
 fake("echo '" + json.dumps(DATA) + "'")
 d, note = uf.load()
 check("load: 성공이면 데이터·안내 없음, 캐시 파일 생성", d and d["me"] == "nb" and note is None and os.path.exists(uf.cache_path()))
