@@ -991,8 +991,14 @@ cmd_skills() { # cmd_skills NAME add SKILL… | list | clear — 호스트의 do
             (($#)) || die "사용법: sboxctl skills NAME add donghans-스킬이름…"
             local sk src
             for sk in "$@"; do
-                [[ $sk =~ ^donghans-[a-z0-9-]+$ ]] || die "스킬 이름은 donghans-* 만 허용합니다(받은 값: $sk)"
-                src=$(readlink -f "$HOME/.claude/skills/$sk") || die "$sk 를 찾지 못했습니다"
+                if [[ $sk =~ ^sbox-[a-z0-9-]+$ ]]; then   # sbox 전용 스킬: 저장소(core/sbox/skills)의 사본을 nix store 에 넣어(내용 해시 경로) 마운트한다 — 호스트 스킬을 그대로 쓰지 않음
+                    [[ -f $SBOX_DIR/skills/$sk/SKILL.md ]] || die "$SBOX_DIR/skills/$sk/SKILL.md 가 없습니다"
+                    src=$(nix-store --add "$SBOX_DIR/skills/$sk") || die "$sk 를 nix store 에 넣지 못했습니다"
+                elif [[ $sk =~ ^donghans-[a-z0-9-]+$ ]]; then
+                    src=$(readlink -f "$HOME/.claude/skills/$sk") || die "$sk 를 찾지 못했습니다"
+                else
+                    die "스킬 이름은 sbox-*(저장소 core/sbox/skills) 또는 donghans-* 만 허용합니다(받은 값: $sk)"
+                fi
                 [[ -f $src/SKILL.md ]] || die "$src/SKILL.md 가 없습니다"
                 [[ $src == /nix/store/* ]] || die "$sk 는 nix store 경로가 아니라(해시 고정 아님) 마운트를 거부합니다: $src"
                 incus config device remove "$name" "sbox-skill-$sk" </dev/null >/dev/null 2>&1 || true
