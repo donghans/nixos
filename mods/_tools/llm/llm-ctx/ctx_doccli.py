@@ -12,9 +12,10 @@
   sync      (동기화 담당) 인박스의 제안을 검사해 반영한다. 세션 밖에서 서비스로 돈다.
   cleanup   끝난 세션의 낡은 뷰를 지운다.
   import-docs   폴더의 .md 를 문서로 반입한다(제안 경로 — 동기화 담당이 검사해 반영). 원본은 건드리지 않는다.
-  import-files  폴더의 비 md 자료(json·log·html·스크립트 등)를 `files` 영역에 복사한다(서버 호스트에서만; 스크린샷·비밀은 건너뜀).
+  import-files  폴더의 비 md 자료(json·log·html·스크립트 등)를 `files` 영역에 복사한다(스크린샷·비밀은 건너뜀). 서버 호스트는 직접 쓰고, 그 밖의 호스트는 DB 대기열로 올린다(서버가 다시 검사해 반영, 요청당 500개·20MB).
   import-held   import-files 가 「검사 불가」로 보류한 파일 중 사용자가 허용한 것만 검사 없이 받는다(하네스가 실행 전에 사용자 확인을 띄운다; 비밀 후보는 허용돼도 안 받음).
   files     `files` 영역의 목록을 보인다. 읽기만 한다.
+  files-pull    (서버 호스트가 아닌 곳) 서버의 `files` 저장소를 가져온다(첫 실행은 clone, 이후 fast-forward 만 — 로컬에만 있는 변경이 있으면 거부).
   audit     프로젝트 폴더에서 git 이 무시하는데 ctx 에 없는 작업 자료를 찾는다. 읽기만 한다.
   init      (실행 전 사용자 확인) 프로젝트를 매니페스트에 등록하고 저장소를 만든다.
 """
@@ -419,7 +420,7 @@ def _sync_once(store, push, force_push=False):
         return 1                      # 비밀 검사 없이 반영·push 하지 않는다(fail-closed) — 제안은 인박스·대기열에 남고 다음 점검 때 다시 시도
     if queued:
         try:
-            pulled = dq.pull_queue(store, H.connect)
+            pulled = dq.pull_queue(store, H.connect, m)
             if pulled:
                 print(f"[sync] 대기열에서 {len(pulled)}건을 가져왔다", flush=True)
         except Exception as e:        # 표가 아직 없음(스키마 서비스·동기화 서비스 재시작 순서) 등 — 파일 인박스 경로와 push 를 막지 않는다
@@ -466,7 +467,7 @@ def cmd_sync(a):
 
 # ---------------------------------------------------------------- 반입·탐지(파편화 정리)
 def _writer_host() -> bool:
-    """자료 영역(files)은 서버 호스트(동기화 담당이 있는 곳)에서만 쓴다 — 노트북에서 쓰면 두 호스트의 files 저장소가 갈라진다."""
+    """자료 영역(files) 저장소에 **직접 쓰는** 곳은 서버 호스트(동기화 담당이 있는 곳) 하나뿐이다 — 두 호스트가 쓰면 files 저장소가 갈라진다. 그 밖의 호스트는 `import-files` 가 DB 대기열(op=files)로 올리고 서버가 반영한다."""
     forced = os.environ.get("CTX_ALLOW_FILES_WRITE")   # "1" 허용 · "0" 금지(시험) · 없으면 호스트 판별
     if forced in ("0", "1"):
         return forced == "1"
@@ -563,6 +564,33 @@ def cmd_import_docs(a):
     return 0
 
 
+def _import_files_via_queue(a, store, proj, src, masker):
+    """로컬에서 `import_files(dry_run)` 로 통과 목록을 구해 보고하고, 그 파일을 op=files 행으로 올린 뒤 서버의 결과를 기다려 보인다."""
+    sid = _need_session(a)
+    rep = st.import_files(store, proj, src, a.dest or "", masker, True, allow=tuple(getattr(a, "allow", ()) or ()), reason=getattr(a, "reason", "") or "")
+    print(f"프로젝트 {proj} · 원본 {src} → files/{a.dest or ''} · 이 호스트는 서버가 아니라 DB 대기열로 올린다(서버가 다시 검사해 반영)")
+    print(f"올릴 것 {len(rep['imported'])} · 스크린샷(저장 안 함) {len(rep['images'])} · 보류 {len(rep['held'])}")
+    for rel, why in rep["refused"]:
+        print(f"  허용 거부: {rel} — {why}")
+    for rel, why in rep["held"][: a.limit]:
+        print(f"  보류: {rel} — {why}")
+    if not rep["imported"]:
+        print("올릴 파일이 없다.")
+        return 0 if not rep["held"] else 1
+    code, msg, pid = dq.submit_files(sid, H.HOST, proj, a.dest or "", src, [rel for rel, _ in rep["imported"]],
+                                     [rel for rel, _ in rep["overridden"]], getattr(a, "reason", "") or "", H.connect, H.load_masker)
+    if code:
+        print(msg, file=sys.stderr)
+        return 1
+    print(msg)
+    r = dq.wait_row(H.connect, pid, float(os.environ.get("CTX_PROPOSE_WAIT", 60)))
+    if not r or r["status"] in dq.OPEN_STATUSES:
+        print(f"{proj}/files: **아직 반영되지 않았다**(서버가 처리하는 중{'' if r else ' — 상태를 읽지 못했다'}) — `donghans ctx doc status` 로 확인한다. 같은 자료를 다시 올리지 않는다(종료 코드 0 이어도 반영 완료가 아니다)")
+        return 0
+    print(r["msg"] + (f"\n(files 커밋 {r['commit']} — 이 호스트에서 읽으려면 `donghans ctx doc files-pull`)" if r.get("commit") else ""))
+    return 0 if r["status"] in dq.OK_STATUSES else 1
+
+
 def cmd_import_held(a):
     """검사만 못 한 보류 파일을 사용자 허용으로 받는다. 허용 자체는 하네스의 `ask` 규칙(실행 전 사용자 확인)이 강제한다 — 이 명령은 그 확인을 대신하지 못한다."""
     if not a.files:
@@ -575,12 +603,13 @@ def cmd_import_held(a):
 
 def cmd_import_files(a):
     store, proj = _project(a)
-    if not a.dry_run and not _writer_host():
-        sys.exit("자료 영역(files)은 서버 호스트(동기화 담당이 있는 곳)에서만 쓴다 — 이 호스트에는 `ctx-doc-sync` 가 없다")
+    via_queue = not a.dry_run and not _writer_host()
     src = os.path.abspath(a.src)
     if not os.path.isdir(src):
         sys.exit(f"폴더가 아니다: {src}")
     masker = _need_masker()
+    if via_queue:                         # 서버가 아닌 호스트: files 저장소에 직접 쓰지 않고 통과분을 DB 대기열로 올린다(서버가 다시 판정해 반영)
+        return _import_files_via_queue(a, store, proj, src, masker)
     rep = st.import_files(store, proj, src, a.dest or "", masker, a.dry_run, allow=tuple(getattr(a, "allow", ()) or ()), reason=getattr(a, "reason", "") or "")
     print(f"프로젝트 {proj} · 원본 {src} → files/{a.dest or ''}" + (" · (dry-run)" if a.dry_run else ""))
     print(f"복사{'할 것' if a.dry_run else ''} {len(rep['imported'])} · 이미 같음 {len(rep['same'])} · 스크린샷(저장 안 함) {len(rep['images'])} · 보류 {len(rep['held'])}"
@@ -602,9 +631,51 @@ def cmd_import_files(a):
     return 0
 
 
+def cmd_files_pull(a):
+    """서버의 files 저장소를 이 호스트로 가져온다(읽기 전용 사본). 첫 실행은 clone, 이후는 fast-forward 만 — 로컬에만 있는 커밋·더러운 작업 트리가 있으면 덮어쓰지 않고 거부한다."""
+    store, proj = _project(a)
+    if _writer_host():
+        sys.exit("이 호스트가 files 저장소의 정본이다 — files-pull 은 서버가 아닌 호스트에서 쓴다")
+    fd = st.files_dir(store, proj)
+    src = os.environ.get("CTX_FILES_MIRROR") or (dq.mirror_for(proj) + "/files")
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10")
+    git = lambda *args, cwd=fd: subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, env=env, timeout=120)
+    if not os.path.isdir(os.path.join(fd, ".git")):
+        if os.path.isdir(fd) and os.listdir(fd):
+            sys.exit(f"{fd} 에 git 저장소가 아닌 파일이 있다 — 덮어쓰지 않는다(옮기거나 지운 뒤 다시)")
+        os.makedirs(os.path.dirname(fd), exist_ok=True)
+        r = subprocess.run(["git", "clone", "-q", src, fd], capture_output=True, text=True, env=env, timeout=300)
+        if r.returncode:
+            sys.exit(f"서버의 files 저장소를 가져오지 못했다({src}): {(r.stderr or r.stdout).strip()}")
+        print(f"{proj}: files 를 처음 가져왔다 — {len(st.list_files(store, proj))}개")
+        return 0
+    has_commits = git("rev-parse", "-q", "--verify", "HEAD").returncode == 0
+    if git("remote", "get-url", "origin").returncode != 0:
+        if has_commits:
+            sys.exit(f"{fd} 에 서버와 이어지지 않은 로컬 커밋이 있다 — 덮어쓰지 않는다")
+        git("remote", "add", "origin", src)
+    if git("status", "--porcelain").stdout.strip():
+        sys.exit(f"{fd} 의 작업 트리에 로컬 변경이 있다 — 덮어쓰지 않는다")
+    r = git("fetch", "-q", "origin", "HEAD")
+    if r.returncode:
+        sys.exit(f"서버의 files 저장소를 가져오지 못했다: {(r.stderr or r.stdout).strip()}")
+    if not has_commits:
+        r = git("checkout", "-q", "-B", "main", "FETCH_HEAD")
+    elif git("merge-base", "--is-ancestor", "HEAD", "FETCH_HEAD").returncode != 0:
+        sys.exit(f"{fd} 에 서버에 없는 로컬 커밋이 있다 — 덮어쓰지 않는다(fast-forward 만 한다)")
+    else:
+        r = git("merge", "-q", "--ff-only", "FETCH_HEAD")
+    if r.returncode:
+        sys.exit(f"files 를 갱신하지 못했다: {(r.stderr or r.stdout).strip()}")
+    print(f"{proj}: files 를 최신으로 맞췄다 — {len(st.list_files(store, proj))}개 (커밋 {git('rev-parse', '--short', 'HEAD').stdout.strip()})")
+    return 0
+
+
 def cmd_files(a):
     store, proj = _project(a)
     rows = st.list_files(store, proj, a.prefix or "")
+    if not rows and not _writer_host():
+        print("(이 호스트는 서버가 아니라 files 가 자동으로 오지 않는다 — 서버 자료는 `donghans ctx doc files-pull` 로 가져온다)")
     print(f"프로젝트 {proj} ({st.files_dir(store, proj)}) — 자료 {len(rows)}개 · {sum(s for _, s in rows) / 1e6:.2f}MB")
     for rel, size in rows[: a.limit]:
         print(f"- {rel} ({size:,}B)")
@@ -689,12 +760,13 @@ def register(ctx_sub, helpers):
     p.add_argument("--prefix", default="local", help="문서 이름 앞에 붙일 경로(기본 local)"); p.add_argument("--kind", choices=st.KINDS, help="종류(기본: qa/ 로 시작하면 qa, 아니면 note)")
     p.add_argument("--origin-label", help="머리말 origin_path 의 앞부분(기본: 폴더 이름)"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--wait", type=float, default=300, help="처리 결과를 기다리는 최대 초")
     p.add_argument("--manifest", help="결과 목록(상태·경로·해시)을 이 파일에 쓴다"); p.set_defaults(f=cmd_import_docs)
-    p = doc.add_parser("import-files", help="폴더의 비 md 자료를 files 영역에 복사한다(서버 호스트 전용; 스크린샷·비밀·검사 불가 파일은 건너뛰고 보고)"); p.add_argument("src"); P(p)
+    p = doc.add_parser("import-files", help="폴더의 비 md 자료를 files 영역에 복사한다(서버 호스트는 직접, 그 밖의 호스트는 DB 대기열로 — 서버가 다시 검사; 스크린샷·비밀·검사 불가 파일은 건너뛰고 보고)"); p.add_argument("src"); P(p); S(p)
     p.add_argument("--to", dest="dest", default="", help="files 안의 하위 경로(기본: 폴더 바로 아래)"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--limit", type=int, default=50)
     p.add_argument("--manifest", help="결과 목록(상태·경로·해시)을 이 파일에 쓴다"); p.set_defaults(f=cmd_import_files)
-    p = doc.add_parser("import-held", help="import-files 가 검사 불가로 보류한 파일 중 사용자가 허용한 것만 검사 없이 받는다(하네스가 사용자 확인을 띄운다; 비밀 후보는 안 받음)"); p.add_argument("src"); P(p)
+    p = doc.add_parser("import-held", help="import-files 가 검사 불가로 보류한 파일 중 사용자가 허용한 것만 검사 없이 받는다(하네스가 사용자 확인을 띄운다; 비밀 후보는 안 받음)"); p.add_argument("src"); P(p); S(p)
     p.add_argument("--to", dest="dest", default="", help="files 안의 하위 경로(import-files 때와 같게)"); p.add_argument("--files", nargs="+", metavar="상대경로", help="허용할 보류 파일(원본 폴더 기준 상대경로)")
     p.add_argument("--reason", default="", help="검사 없이 받는 이유(커밋에 남는다)"); p.add_argument("--dry-run", action="store_true"); p.set_defaults(f=cmd_import_held)
     p = doc.add_parser("files", help="files 영역의 자료 목록(읽기만)"); P(p); p.add_argument("prefix", nargs="?"); p.add_argument("--limit", type=int, default=50); p.set_defaults(f=cmd_files)
+    p = doc.add_parser("files-pull", help="(서버가 아닌 호스트) 서버의 files 저장소를 가져온다 — 첫 실행은 clone, 이후 fast-forward 만, 로컬에만 있는 변경이 있으면 거부"); P(p); p.set_defaults(f=cmd_files_pull)
     p = doc.add_parser("audit", help="프로젝트 폴더에서 git 이 무시하는데 ctx 에 없는 작업 자료를 찾는다(읽기만)"); P(p); p.add_argument("--root", help="프로젝트 폴더(기본: 현재 git 저장소)")
     p.add_argument("--paths", nargs="*", help="폴더 밖 추가 경로(예: ~/qa-shots)"); p.add_argument("--skip", nargs="*", help="세지 않을 하위 경로(예: librechat-original — 앱 실행 데이터)"); p.add_argument("--limit", type=int, default=30); p.set_defaults(f=cmd_audit)

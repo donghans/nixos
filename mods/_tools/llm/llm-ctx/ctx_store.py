@@ -909,7 +909,7 @@ def push_project(store: str, project: str, masker=None, manifest: dict | None = 
 
 # ---------------------------------------------------------------- 자료 영역(files) — 문서(.md)가 아닌 증거·데이터
 # `<store>/<프로젝트>/files/` 는 **별도 git 저장소**(중첩)다. 바깥 저장소는 `/files/` 를 무시하므로 바깥 저장소의 push(예: nixos → GitHub)가 자료를 보낼 수 없다.
-# files 저장소에는 remote 를 두지 않는다. 문서 흐름(제안·동기화 담당)과 무관하게 서버 호스트에서 `import-files` 로만 들어온다.
+# files 저장소에는 remote 를 두지 않는다. 쓰는 곳은 서버 호스트 하나(서버는 `import-files` 직접, 그 밖의 호스트는 DB 대기열 op=files 로 올리면 서버가 반영). 다른 호스트는 `ctx doc files-pull` 로 읽기 전용 사본을 둔다.
 FILES_DIR = "files"
 FILE_MAX_BYTES = 5_000_000
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico")
