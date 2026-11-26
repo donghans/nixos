@@ -274,12 +274,18 @@ def serve(td, sock_path, allow_uids, mode=0o660, group=None):
                 if not chunk:
                     break
                 buf += chunk
+            if not buf.strip():
+                return                                       # 요청 없이 연결만 하고 끊은 클라이언트(준비 확인 등) — 오류 응답을 보내지 않고 조용히 끝낸다
             try:
                 req = json.loads(buf.split(b"\n", 1)[0].decode())
                 if not isinstance(req, dict):
                     raise ValueError
             except ValueError:
-                send({"error": "bad-request"}); return
+                try:
+                    send({"error": "bad-request"})
+                except OSError:                              # 보낸 뒤 바로 끊은 클라이언트
+                    pass
+                return
             td.handle(req, send, uid)
         finally:
             try:

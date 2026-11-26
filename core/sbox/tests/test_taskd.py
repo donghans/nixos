@@ -42,10 +42,19 @@ td = taskd.Taskd(cfgp, os.path.join(d, "taskd.log"))
 sock = os.path.join(d, "s.sock")
 uid = os.getuid()
 threading.Thread(target=taskd.serve, args=(td, sock, {uid}), daemon=True).start()
-for _ in range(50):
-    if os.path.exists(sock):
-        break
-    time.sleep(0.05)
+def wait_listening(path, tries=100):
+    for _ in range(tries):                    # bind 만 된 소켓에 연결하면 거부된다 — 실제로 연결될 때까지 기다린다(간헐 실패 방지)
+        c = socket.socket(socket.AF_UNIX)
+        try:
+            c.connect(path); c.close(); return True
+        except OSError:
+            c.close(); time.sleep(0.05)
+    return False
+
+
+unhandled = []
+threading.excepthook = lambda args: unhandled.append(repr(args.exc_value))     # 연결 스레드의 처리되지 않은 예외를 모은다
+wait_listening(sock)
 
 
 def ask(obj, raw=None):
@@ -144,13 +153,18 @@ check("exec-argv 로 service 작업을 시작할 수 있다", r[0].get("ok") is 
 ask({"op": "stop", "task": "svc"})
 log = open(os.path.join(d, "taskd.log")).read()
 check("exec-argv 요청은 작업 이름·argv 와 함께 기록에 남는다(거부도)", '"op": "exec-argv"' in log and '"task": "nopin"' in log and "unknown-argv" in log, log[-300:])
+# ⑩ 견고성: 요청 없이 연결만 하고 끊거나, 깨진 요청을 보내고 바로 끊는 클라이언트가 데몬을 해치지 않는다(처리되지 않은 예외 0, 다음 요청 정상)
+for _ in range(5):
+    c = socket.socket(socket.AF_UNIX); c.connect(sock); c.close()
+c = socket.socket(socket.AF_UNIX); c.connect(sock); c.sendall(b"garbage\n"); c.close()
+c = socket.socket(socket.AF_UNIX); c.connect(sock); c.sendall(b"garbage"); c.shutdown(socket.SHUT_WR); c.close()
+time.sleep(0.5)
+check("⑩ 연결만 하고 끊거나 깨진 요청 뒤 바로 끊는 클라이언트가 연결 스레드에 처리되지 않은 예외를 남기지 않는다", unhandled == [], unhandled[:2])
+check("⑩ 그 뒤에도 정상 요청이 실행된다", text(ask({"op": "run", "task": "nopin"})).strip() == "ok")
 # ⑥ uid 제한
 td2 = taskd.Taskd(cfgp, os.path.join(d, "taskd2.log")); sock2 = os.path.join(d, "s2.sock")
 threading.Thread(target=taskd.serve, args=(td2, sock2, {uid + 12345}), daemon=True).start()
-for _ in range(50):
-    if os.path.exists(sock2):
-        break
-    time.sleep(0.05)
+wait_listening(sock2)
 c = socket.socket(socket.AF_UNIX); c.settimeout(5); c.connect(sock2); c.sendall(b'{"op":"run","task":"nopin"}\n')
 resp = c.recv(4096).decode(); c.close()
 check("허용되지 않은 uid 는 거부", "uid-not-allowed" in resp and "ok" not in resp.replace("uid-not-allowed", ""), resp)

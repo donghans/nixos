@@ -95,6 +95,16 @@ def check_ct_egress(inst, expected_acl_name="sbox-egress"):
     return bad, note
 
 
+def check_gate(inst, results):
+    """관문(S3, 미확인 U26) 불변식 — `sboxctl gate` 가 표지(user.sbox.gate=1)를 남긴 ct 만. results 는 gate_canary 의 [(라벨, 통과, 상세)] 또는 None(못 쟀음 — ct 정지 등).
+    관리 설정 env·관문 파일의 소유·권한·동작이 바뀌면(에이전트가 못 고치는 파일이 바뀌었거나 관문이 깨짐) 위반. 반환 (위반, 주의)."""
+    if inst.get("expanded_config", {}).get("user.sbox.gate") != "1":
+        return [], []
+    if results is None:
+        return [], ["관문이 설치된 ct 인데 실행 중이 아니라 관문 점검을 못 했음('sboxctl gate NAME --status' 로 시작한 뒤 확인)"]
+    return [f"관문 점검 실패: {label}" + (f" — {detail}" if detail else "") for label, ok, detail in results if not ok], []
+
+
 def check_acl(actual, broker_ip):
     """공유 ACL 이 egress.acl() 이 만드는 규칙과 정확히 같은지(사설 대역 drop 에서 broker 외 예외가 끼어들지 않았는지 포함)."""
     if actual is None:
@@ -148,6 +158,17 @@ def main(argv):
         if inst["type"] == "container" and not n.endswith(BROKER_SUFFIX):
             b2, note = check_ct_egress(inst)
             bad += b2
+        if inst["type"] == "container" and inst.get("expanded_config", {}).get("user.sbox.gate") == "1":
+            res = None
+            if inst.get("status") == "Running":
+                try:
+                    import gate_canary
+                    res = gate_canary.run_checks(n)
+                except Exception:                        # 점검 도구 자체의 실패는 「못 쟀음」(위반으로 세지 않음)
+                    res = None
+            b3, n3 = check_gate(inst, res)
+            bad += b3
+            note += n3
         print(("OK    " if not bad else "위반  ") + n)
         for b in bad:
             print("      - " + b)

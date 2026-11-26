@@ -78,4 +78,15 @@ check("호스트 가드 정상", audit.check_host_guard(HG) == [])
 check("호스트 가드 표 없음", audit.check_host_guard("table inet x {\n}\n") != [])
 check("호스트 가드 규칙 없음", audit.check_host_guard(HG.replace(" drop\n", " accept\n")) != [])
 check("호스트 못 읽음은 None", audit.check_host_guard(None) is None)
+# 관문(S3, U26): 표지가 있는 ct 만, 점검 결과에서 실패한 항목이 위반
+G_ON = {"expanded_config": {"user.sbox.gate": "1"}}
+OKRES = [("관문 파일이 root 소유 755", True, "root 755"), ("관리 설정 env.CLAUDE_CODE_SHELL 이 관문 경로", True, "")]
+BADRES = OKRES + [("관리 설정이 root 소유 644(에이전트가 못 고침)", False, "sbox 666")]
+check("관문: 표지가 없는 ct 는 점검 대상이 아니다", audit.check_gate({"expanded_config": {}}, BADRES) == ([], []))
+check("관문: 표지 값이 1 이 아니면 대상이 아니다", audit.check_gate({"expanded_config": {"user.sbox.gate": "0"}}, BADRES) == ([], []))
+check("관문: 모두 통과하면 위반 없음", audit.check_gate(G_ON, OKRES) == ([], []))
+bad, note = audit.check_gate(G_ON, BADRES)
+check("관문: 실패한 점검 항목은 위반(항목 이름·상세 포함)", len(bad) == 1 and "root 소유 644" in bad[0] and "sbox 666" in bad[0] and note == [], (bad, note))
+bad, note = audit.check_gate(G_ON, None)
+check("관문: 못 쟀으면(정지 등) 위반이 아니라 주의", bad == [] and len(note) == 1 and "실행 중이 아니라" in note[0], (bad, note))
 print(f"{n['ok']} 통과 / {n['bad']} 실패"); sys.exit(1 if n["bad"] else 0)

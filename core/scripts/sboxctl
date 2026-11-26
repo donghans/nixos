@@ -950,6 +950,16 @@ print(json.dumps(j))' "$f" "$dir" "$bypass" \
                 || die "$f 설정 병합 실패"
         done
     fi
+    local gated=0
+    if [[ $NAME_KIND == ct && $(incus config get "$name" user.sbox.gate </dev/null 2>/dev/null) == 1 ]]; then gated=1; fi
+    if ((gated)) && [[ $agent == claude ]]; then
+        # S3: 관문은 Claude Code 의 호출 형식·설정 우선순위에 의존하므로 **검증된 버전만** 세션을 시작한다(미확인 U20 — 버전은 기본이 최신 채널이라 사람이 모르게 바뀔 수 있다)
+        local _v; _v=$(vmu "$name" claude --version </dev/null 2>/dev/null | awk '{print $1; exit}')
+        if ! python3 "$SBOX_DIR/gate_verified.py" check "$_v" 2>/dev/null; then
+            say "관문이 설치된 ct 의 claude $_v 는 아직 검증되지 않았습니다 — 실제 claude 카나리를 먼저 돌립니다"
+            gate_live "$name" 0 || die "claude $_v 가 관문 카나리를 통과하지 못했거나 못 쟀습니다 — 세션을 시작하지 않습니다(관문 없이 에이전트를 띄우지 않음). 이전 검증 버전으로 'sboxctl llm claude $name --version V', 또는 'sboxctl gate $name --canary' 로 원인을 확인하세요"
+        fi
+    fi
     local flags=""; ((bypass)) && flags=$bypass_flags
     local start_script='dir=$1; tok=$2; flags=$3; pre=$4; tenv=$5; cmd=$6; sess=$7
 tmux has-session -t "$sess" 2>/dev/null && { echo "이미 실행 중"; exit 0; }
@@ -959,10 +969,24 @@ echo "시작함"'
     local out
     if [[ $NAME_KIND == vm ]]; then
         out=$(vmu "$name" nix shell nixpkgs#tmux -c sh -c "$start_script" sh "$dir" "$token_path" "$flags" "$pre" "$token_env" "$cmd" "$agent") || die "tmux 세션 시작 실패"
+    elif ((gated)); then
+        # S3: 관문이 설치된 ct 의 세션은 RestrictNamespaces 유닛 안에서, `setpriv --no-new-privs` 로 시작한다 — 관문이 뚫려도 자손의 unshare 등 네임스페이스 생성이 커널에서 막히고(U9 ✔) setuid 로 권한을 못 얻는다.
+        # (유닛 속성 NoNewPrivileges=yes 는 이 ct 의 systemd 가 조용히 무시한다 — systemctl show 가 no — 그래서 setpriv 로 직접 건다. 2026-11-26 확인)
+        # 유닛의 주 프로세스(sh)는 tmux 를 데몬으로 띄우고 끝나므로 KillMode=process 로 tmux 가 살아남게 한다(seccomp 제한은 프로세스에 붙어 유닛이 끝나도 유지된다).
+        resolve_ids "$name"
+        incus exec "$name" -- test -x /usr/bin/setpriv </dev/null || die "ct 안에 setpriv(util-linux)가 없어 제한 세션을 시작할 수 없습니다 — 관문 없이 에이전트를 띄우지 않습니다"
+        out=$(incus exec "$name" -- systemd-run --quiet --wait --pipe --collect --uid="$VM_UID" --gid="$VM_GID" -p RestrictNamespaces=yes -p KillMode=process -E "HOME=$VM_HOME" -E "PATH=$EXEC_PATH" \
+            -- setpriv --no-new-privs sh -c "$(sd_escape "$start_script")" sh "$(sd_escape "$dir")" "$(sd_escape "$token_path")" "$(sd_escape "$flags")" "$(sd_escape "$pre")" "$(sd_escape "$token_env")" "$(sd_escape "$cmd")" "$(sd_escape "$agent")" </dev/null) || die "tmux 세션 시작 실패(RestrictNamespaces 유닛)"
     else
         out=$(vmu "$name" sh -c "$start_script" sh "$dir" "$token_path" "$flags" "$pre" "$token_env" "$cmd" "$agent") || die "tmux 세션 시작 실패"
     fi
-    audit info llm "$name" "$agent tmux 세션: $out (dir $dir, bypass=$bypass)"
+    audit info llm "$name" "$agent tmux 세션: $out (dir $dir, bypass=$bypass, 관문=$gated$( ((gated)) && echo ', RestrictNamespaces'))"
+    # 세션이 시작 직후 죽었는지 확인한다(이전에는 죽어도 「세션 시작함」이라고 성공으로 보고했다 — 2026-11-26 종단 시험에서 발견)
+    if [[ $out == 시작함 ]]; then
+        sleep 3
+        llm_tmux "$name" has-session -t "$agent" </dev/null 2>/dev/null \
+            || die "$agent 세션이 시작 직후 종료되었습니다 — ct 의 'journalctl -n 30' 과 이 명령의 출력을 확인하세요(관문·제한 유닛·토큰 설정 문제일 수 있음)"
+    fi
     # 첫 실행 안내 화면이 남아 있으면(에이전트 버전이 바뀌어 설정 키·문구가 달라졌을 수 있음) 알린다 — 안 알리면 사람이 붙었을 때 처음 알게 된다
     if [[ $out == 시작함 && -n $patterns ]]; then
         sleep 12
@@ -1017,6 +1041,11 @@ cmd_skills() { # cmd_skills NAME add SKILL… | list | clear — 호스트의 do
     esac
 }
 
+sd_escape() { # sd_escape 문자열 — systemd-run 의 명령 인자는 `$이름`(환경변수 치환)과 `%`(지정자)를 해석하므로 `$$`·`%%` 로 이스케이프한다(안 하면 스크립트의 $pre 같은 변수가 빈 문자열이 된다 — 2026-11-26 종단 시험에서 세션이 시작 직후 죽던 원인)
+    local s=${1//%/%%}
+    printf '%s' "${s//\$/\$\$}"
+}
+
 managed_settings_file() { # managed_settings_file NAME OUT — 저장소의 관리 설정(⑱ 업데이트 제동 등)을 OUT 에 만든다. 이 ct 에 관문이 설치돼 있으면 env.CLAUDE_CODE_SHELL 을 더한다(sboxctl llm 이 매번 덮어써도 관문 설정이 지워지지 않게)
     local name=$1 out=$2
     if incus exec "$name" -- test -x /usr/local/bin/sbox-gate-bash </dev/null 2>/dev/null; then
@@ -1026,23 +1055,81 @@ managed_settings_file() { # managed_settings_file NAME OUT — 저장소의 관�
     fi
 }
 
+gate_live_one() { # gate_live_one NAME LABEL MODE XENV [claude 인자…] — 실제 claude 한 번으로 관문을 점검한다(MODE: base=형식 일치까지 확인 · bypass=우회 변형이라 관문이 거절하기만 하면 통과). 반환 0 통과 · 1 실패 · 2 못 쟀음
+    local name=$1 label=$2 mode=$3 xenv=$4; shift 4
+    resolve_ids "$name"
+    local bip=""
+    if incus info "$BROKER" >/dev/null 2>&1 </dev/null && [[ -n $(python3 "$SBOX_DIR/egress.py" inject-get --state "$EGRESS_STATE" --name "$name" 2>/dev/null) ]]; then
+        bip=$(ct_ip "$BROKER")
+    fi
+    if [[ -z $bip ]]; then
+        say "  ? $label — broker 주입 경로(자리표시자 토큰)가 없어 실제 claude 점검을 못 합니다('sboxctl egress $name' 후 'sboxctl token $name claude --inject')"; return 2
+    fi
+    incus file push "$SBOX_DIR/gate_canary_run.sh" "$name$VM_HOME/.sbox-canary.sh" --uid "$VM_UID" --gid "$VM_GID" --mode 0755 </dev/null >/dev/null || { say "  ? $label — 실행기 전달 실패"; return 2; }
+    local out; out=$(mktemp)
+    incus exec "$name" --user "$VM_UID" --group "$VM_GID" --env "HOME=$VM_HOME" --env "PATH=$EXEC_PATH" --env "ANTHROPIC_BASE_URL=http://$bip:$BROKER_INJECT_PORT" --env "NO_PROXY=$bip" --env "no_proxy=$bip" --env "XENV=$xenv" \
+        -- sh "$VM_HOME/.sbox-canary.sh" "$@" </dev/null > "$out" 2>/dev/null || true
+    local res rc vflag=""; [[ $mode == bypass ]] && vflag=--bypass
+    res=$(python3 "$SBOX_DIR/gate_canary.py" live-verdict "$out" $vflag); rc=$?
+    rm -f "$out"
+    case $rc in
+        0) say "  ✔ $label — $res" ;;
+        1) say "  ✘ $label — $res" ;;
+        *) say "  ? $label — $res" ;;
+    esac
+    return $rc
+}
+
+gate_live() { # gate_live NAME [full] — 실제 claude 카나리. 기본 1회, full 이면 우회 변형(U10·U22)도. 통과하면 이 claude 버전을 검증 목록에 올린다. 반환 0 통과 · 1 실패 · 2 못 쟀음
+    local name=$1 full=${2:-0} ver bad=0 unk=0 r how=live-canary
+    ver=$(vmu "$name" claude --version </dev/null 2>/dev/null | awk '{print $1; exit}')
+    [[ -n $ver ]] || { say "claude 버전을 읽지 못했습니다"; return 2; }
+    say "실제 claude($ver) 카나리 — 모델에게 선언 밖 명령을 실행시켜 관문이 불리고 거절하는지 봅니다"
+    gate_live_one "$name" "기본" base ""; r=$?
+    [[ $r == 0 ]] || { ((r == 1)) && return 1; return 2; }
+    if ((full)); then
+        how=live-canary-full
+        local -a labels=("--settings 플래그로 셸 덮어쓰기" "실행 환경변수 CLAUDE_CODE_SHELL" "--setting-sources user" "SHELL 환경변수" "CLAUDE_CODE_SHELL_PREFIX(U22)" "--bare(U22)")
+        local -a xenvs=("" "CLAUDE_CODE_SHELL=/bin/bash" "" "SHELL=/bin/bash" "CLAUDE_CODE_SHELL_PREFIX=/bin/echo" "")
+        local i
+        for i in 0 1 2 3 4 5; do
+            case $i in
+                0) gate_live_one "$name" "${labels[$i]}" bypass "${xenvs[$i]}" --settings '{"env":{"CLAUDE_CODE_SHELL":"/bin/bash"}}'; r=$? ;;
+                2) gate_live_one "$name" "${labels[$i]}" bypass "${xenvs[$i]}" --setting-sources user; r=$? ;;
+                5) gate_live_one "$name" "${labels[$i]}" bypass "${xenvs[$i]}" --bare; r=$? ;;
+                *) gate_live_one "$name" "${labels[$i]}" bypass "${xenvs[$i]}"; r=$? ;;
+            esac
+            ((r == 1)) && bad=1
+            ((r == 2)) && unk=1
+        done
+        ((bad)) && return 1
+        ((unk)) && say "  (못 쟀음 항목이 있다 — 통과로 세지 않지만 기본 카나리는 통과했으므로 버전은 「기본」 기준으로만 검증됨)" && how=live-canary
+    fi
+    python3 "$SBOX_DIR/gate_verified.py" add "$ver" 2>/dev/null && say "claude $ver 를 검증된 버전 목록에 올렸습니다($how)"
+    return 0
+}
+
 cmd_gate() { # cmd_gate NAME [--manifest F] [--off] [--status] — ct 의 Bash 도구를 **명령 관문 셸**(sbox-gate-bash)로 고정한다(S3, plan sbox-project-policy §4-2c-2 L2)
     local name=${1:-}; shift || true
     check_name "$name"
     [[ $NAME_KIND == ct ]] || die "gate 는 ct 전용입니다"
-    local man="" off=0 status=0
+    local man="" off=0 status=0 canary=0
     while (($#)); do
         case $1 in
             --manifest) man=${2:?}; shift ;;
             --off) off=1 ;;
             --status) status=1 ;;
+            --canary) canary=1 ;;
+            --canary-full) canary=2 ;;
             *) die "알 수 없는 인자: $1" ;;
         esac
         shift
     done
     incus info "$name" </dev/null 2>/dev/null | grep -q '^Status: RUNNING' || die "$name 가 실행 중이 아닙니다(incus start)"
     if ((status)); then
-        python3 "$SBOX_DIR/gate_canary.py" "$name"; return $?
+        python3 "$SBOX_DIR/gate_canary.py" "$name"; local _rc=$?
+        if ((canary)); then gate_live "$name" $((canary == 2)) || _rc=1; fi
+        return $_rc
     fi
     local tmp; tmp=$(mktemp -d)
     incus exec "$name" -- mkdir -p /etc/claude-code /etc/sbox </dev/null || { rm -rf "$tmp"; die "ct 안 폴더 준비 실패"; }
@@ -1052,6 +1139,7 @@ cmd_gate() { # cmd_gate NAME [--manifest F] [--off] [--status] — ct 의 Bash �
         incus file push "$tmp/m.json" "$name/etc/claude-code/managed-settings.json" --uid 0 --gid 0 --mode 0644 </dev/null >/dev/null || { rm -rf "$tmp"; die "관리 설정 되돌리기 실패"; }
         incus exec "$name" -- sh -c 'rm -f /usr/local/bin/sbox-gate-bash /etc/sbox/gate.json' </dev/null
         rm -rf "$tmp"
+        incus config unset "$name" user.sbox.gate </dev/null 2>/dev/null || true
         audit info gate "$name" "관문 제거(관리 설정 env 되돌림)"; say "관문을 껐습니다: $name — 에이전트의 Bash 가 다시 제한 없이 동작합니다(새 세션부터)"; return 0
     fi
     [[ -n $man ]] || man=$(incus config get "$name" user.sbox.manifest </dev/null 2>/dev/null || true)
@@ -1076,7 +1164,11 @@ cmd_gate() { # cmd_gate NAME [--manifest F] [--off] [--status] — ct 의 Bash �
         cmd_gate "$name" --off >/dev/null 2>&1 || true
         die "관문 설치를 취소했습니다(위 ✘ 항목을 확인)"
     fi
+    incus config set "$name" user.sbox.gate=1 </dev/null || say "경고: 표지(user.sbox.gate)를 남기지 못했습니다 — sboxctl audit 이 관문을 점검하지 못합니다"
     audit info gate "$name" "관문 설치(관리 설정 env.CLAUDE_CODE_SHELL=/usr/local/bin/sbox-gate-bash, 정적 카나리 통과)"
+    if ((canary)); then
+        gate_live "$name" $((canary == 2)) || { say "실제 claude 카나리가 통과하지 못했습니다 — 관문을 되돌립니다"; cmd_gate "$name" --off >/dev/null 2>&1 || true; die "관문 설치를 취소했습니다(위 ✘·? 항목을 확인)"; }
+    fi
     say "완료: $name 의 Bash 도구는 이제 명령 관문을 거칩니다 — 선언된 작업(sbox list)과 direct 목록의 명령만 실행됩니다(새 세션부터). 끄기: sboxctl gate $name --off"
 }
 

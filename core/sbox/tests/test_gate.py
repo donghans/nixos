@@ -111,6 +111,8 @@ def fake_taskd():
             if not ch:
                 break
             buf += ch
+        if not buf.strip():                       # 준비 확인용 연결(요청 없음)
+            c.close(); continue
         script["req"].append(json.loads(buf.split(b"\n")[0]))
         for r in script["replies"]:
             c.sendall((r if isinstance(r, bytes) else (json.dumps(r) + "\n").encode()))
@@ -119,10 +121,20 @@ def fake_taskd():
 
 
 threading.Thread(target=fake_taskd, daemon=True).start()
-for _ in range(50):
-    if os.path.exists(SOCK):
-        break
-    time.sleep(0.05)
+
+
+def wait_listening(path, tries=100):
+    """소켓 파일이 보이는 것(bind)이 아니라 실제로 연결되는 것(listen)을 기다린다 — 둘 사이에서 연결하면 거부되는 경쟁 조건(약 40% 간헐 실패)을 피한다."""
+    for _ in range(tries):
+        c = socket.socket(socket.AF_UNIX)
+        try:
+            c.connect(path); c.close(); return True
+        except OSError:
+            c.close(); time.sleep(0.05)
+    return False
+
+
+check("시험 준비: 가짜 taskd 가 연결을 받는다", wait_listening(SOCK))
 
 
 def go(cmd, replies, cfg=CFG, sock=SOCK):
@@ -251,6 +263,66 @@ check("저장소의 관리 설정(⑱·MCP 차단)에 병합해도 permissions �
 check("카나리 보조: 호출 형식 조립이 고정물과 같은 구조", __import__("gate_canary").form3("/tmp/claude-abcd-cwd", "echo hi")[1].startswith("source ") and __import__("gate_canary").form3("/tmp/claude-abcd-cwd", "echo hi")[1].endswith("eval 'echo hi' < /dev/null && pwd -P >| /tmp/claude-abcd-cwd"))
 d_ = gate.decide(__import__("gate_canary").form3("/tmp/claude-abcd-cwd", "sbox-canary-undeclared"), CFG)
 check("카나리가 보내는 선언 밖 명령 호출을 관문이 명령 호출로 인식한다", d_["kind"] == "run" and d_["argv"] == ["sbox-canary-undeclared"], d_)
+
+# ---- 실제 claude 카나리의 판정(U20): stream-json 출력 → pass|fail|inconclusive. 지키는 것: 관문이 안 불렸거나 형식이 안 맞는 것을 통과로 세지 않는다
+import gate_canary  # noqa: E402
+
+
+def stream(cmd, result, tid="t1", is_error=True, as_list=False):
+    use = {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": tid, "name": "Bash", "input": {"command": cmd}}]}}
+    content = [{"type": "text", "text": result}] if as_list else result
+    res = {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": tid, "content": content, "is_error": is_error}]}}
+    return "\n".join(["not json", json.dumps({"type": "system"}), json.dumps(use), json.dumps(res), ""])
+
+
+lv = gate_canary.live_verdict
+check("카나리: 관문이 거절 문구를 돌려주면 통과", lv(stream("sbox-canary-undeclared", "Exit code 126\nsbox-gate: 거절됨 — unknown-argv"))[0] == "pass")
+s, why = lv(stream("sbox-canary-undeclared", "sbox-gate: 알 수 없는 호출 형식이라 거절합니다"), bypass=True)
+check("카나리(우회 변형): 형식을 못 알아봐 거절해도 우회는 막힌 것이므로 통과", s == "pass" and "우회는 막혔다" in why, (s, why))
+check("카나리(우회 변형): 관문을 거치지 않으면 여전히 실패(우회됨)", lv(stream("sbox-canary-undeclared", "hello"), bypass=True)[0] == "fail" and lv(stream("sbox-canary-undeclared", "bash: x: command not found"), bypass=True)[0] == "fail")
+check("카나리(우회 변형): 못 쟀음은 그대로 못 쟀음", lv("", bypass=True)[0] == "inconclusive")
+check("카나리: 결과가 텍스트 블록 목록이어도 판정", lv(stream("sbox-canary-undeclared", "sbox-gate: 거절됨", as_list=True))[0] == "pass")
+check("카나리: taskd 가 없어 연결 실패 거절도 관문이 불린 것(통과)", lv(stream("sbox-canary-undeclared", "sbox-gate: 실행자(taskd)에 연결하지 못해 거절합니다"))[0] == "pass")
+s, why = lv(stream("sbox-canary-undeclared", "Exit code 126\nsbox-gate: 알 수 없는 호출 형식이라 거절합니다(Claude Code 버전이 관문과 맞지 않을 수 있음)"))
+check("카나리: 호출 형식을 못 알아봤으면 실패(버전 불일치 신호)", s == "fail" and "버전" in why, (s, why))
+s, why = lv(stream("sbox-canary-undeclared", "bash: sbox-canary-undeclared: command not found"))
+check("카나리: 관문 문구가 없으면 실패(셸 고정이 안 먹음 — 조용히 열린 경우)", s == "fail" and "관문을 거치지 않았다" in why, (s, why))
+check("카나리: 명령이 그냥 실행돼 출력이 나와도 실패", lv(stream("sbox-canary-undeclared", "hello"))[0] == "fail")
+check("카나리: 모델이 카나리 명령을 실행하지 않았으면 못 쟀음(통과 아님)", lv(stream("ls", "sbox-gate: 거절됨"))[0] == "inconclusive")
+check("카나리: 도구 호출이 아예 없으면 못 쟀음", lv(json.dumps({"type": "result", "is_error": True, "result": "limit"}) + "\n")[0] == "inconclusive")
+check("카나리: 결과 없이 끊겼으면 못 쟀음", lv(json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "x", "name": "Bash", "input": {"command": "sbox-canary-undeclared"}}]}}) + "\n")[0] == "inconclusive")
+check("카나리: 빈 출력은 못 쟀음", lv("")[0] == "inconclusive")
+check("카나리: 명령 뒤에 문자가 붙어도(모델이 마침표 등을 붙임) 카나리 명령으로 본다", lv(stream("sbox-canary-undeclared .", "sbox-gate: 거절됨"))[0] == "pass")
+check("카나리: 다른 도구(Read)의 결과는 보지 않는다", lv(json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "r", "name": "Read", "input": {"command": "sbox-canary-undeclared"}}]}}) + "\n")[0] == "inconclusive")
+cf = os.path.join(tmp, "stream.jsonl"); open(cf, "w").write(stream("sbox-canary-undeclared", "sbox-gate: 거절됨"))
+cf2 = os.path.join(tmp, "stream2.jsonl"); open(cf2, "w").write(stream("sbox-canary-undeclared", "hello"))
+cf3 = os.path.join(tmp, "stream3.jsonl"); open(cf3, "w").write("")
+check("카나리 CLI: 종료 코드 통과 0·실패 1·못 쟀음 2", [gate_canary.main(["live-verdict", f]) for f in (cf, cf2, cf3)] == [0, 1, 2])
+cf4 = os.path.join(tmp, "stream4.jsonl"); open(cf4, "w").write(stream("sbox-canary-undeclared", "sbox-gate: 알 수 없는 호출 형식이라 거절합니다"))
+check("카나리 CLI: 같은 출력이 기본 모드에선 실패(1)·--bypass 모드에선 통과(0)", [gate_canary.main(["live-verdict", cf4]), gate_canary.main(["live-verdict", cf4, "--bypass"])] == [1, 0])
+
+# ---- 검증된 claude 버전 목록(U20): 세션 시작 허용의 근거
+import gate_verified  # noqa: E402
+os.environ["SBOX_VERIFIED_STATE"] = os.path.join(tmp, "state", "verified.json")
+check("검증 목록: 파일이 없으면 아무 버전도 검증되지 않았다", not gate_verified.is_verified("2.1.326"))
+gate_verified.add("2.1.326")
+check("검증 목록: 기록한 버전만 검증된 것으로 본다", gate_verified.is_verified("2.1.326") and not gate_verified.is_verified("2.1.327") and not gate_verified.is_verified("2.1.32"))
+for bad in ["", "latest", "2.1", "2.1.326-beta", "../../x", "2.1.326 ", None]:
+    check(f"검증 목록: 버전 형식이 아니면 검증된 것이 아니다: {bad!r}", not gate_verified.is_verified(bad))
+try:
+    gate_verified.add("latest"); raised = False
+except ValueError:
+    raised = True
+check("검증 목록: 버전 형식이 아니면 기록을 거부", raised)
+open(os.environ["SBOX_VERIFIED_STATE"], "w").write("{broken")
+check("검증 목록: 상태 파일이 깨지면 아무 버전도 검증되지 않은 것으로(fail-closed)", not gate_verified.is_verified("2.1.326"))
+open(os.environ["SBOX_VERIFIED_STATE"], "w").write(json.dumps({"versions": ["2.1.326"]}))
+check("검증 목록: 형식이 틀린 상태 파일도 fail-closed", not gate_verified.is_verified("2.1.326"))
+open(os.environ["SBOX_VERIFIED_STATE"], "w").write(json.dumps({"versions": {"latest": {}, "../../x": {}, "2.1": {}}}))
+check("검증 목록: 상태 파일에 형식이 틀린 키가 들어 있어도 그 키는 검증된 것이 아니다(손으로 고친 파일 방어)", not any(gate_verified.is_verified(k) for k in ("latest", "../../x", "2.1")))
+gate_verified.add("2.1.329")
+check("검증 목록: 깨진 파일 위에 새로 기록해도 동작", gate_verified.is_verified("2.1.329"))
+check("검증 목록 CLI: check 의 종료 코드 0/1", gate_verified.main(["check", "2.1.329"]) == 0 and gate_verified.main(["check", "9.9.9"]) == 1)
 
 print(f"sbox-gate {n['ok']} 통과 / {n['bad']} 실패")
 sys.exit(1 if n["bad"] else 0)
