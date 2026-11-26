@@ -51,6 +51,18 @@ def protect_patterns(manifest):
     return pats
 
 
+def gate_direct(manifest):
+    """관문 셸의 direct 목록(매니페스트 `[gate] direct = [["ls","-la"], …]` — 정확한 argv 만, bash 없이 직접 실행되는 읽기 전용 점검). 없으면 None(관문 기본값 사용)."""
+    with open(manifest, "rb") as f:
+        sec = tomllib.load(f).get("gate") or {}
+    d = sec.get("direct")
+    if d is None:
+        return None
+    if not (isinstance(d, list) and all(isinstance(a, list) and a and all(isinstance(x, str) and x for x in a) for a in d)):
+        raise SystemExit("[gate] direct 는 문자열 목록의 목록이어야 합니다(예: [[\"ls\", \"-la\"]])")
+    return d
+
+
 def needed(manifest):
     return sorted({p for t in load(manifest).values() for p in t["pins"]})
 
@@ -91,12 +103,14 @@ def set_pinned(path, newpins):
 
 def main(argv):
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["needed", "build", "patterns"])
+    ap.add_argument("cmd", choices=["needed", "build", "patterns", "gate-direct"])
     ap.add_argument("--manifest", required=True)
     ap.add_argument("--digests"); ap.add_argument("--approve", action="store_true"); ap.add_argument("--out"); ap.add_argument("--protected")
     a = ap.parse_args(argv)
     if a.cmd == "needed":
         print(json.dumps(needed(a.manifest))); return 0
+    if a.cmd == "gate-direct":
+        print(json.dumps({"direct": gate_direct(a.manifest)} if gate_direct(a.manifest) is not None else {})); return 0
     if a.cmd == "patterns":
         print(json.dumps(protect_patterns(a.manifest))); return 0
     digests = json.load(open(a.digests)) if a.digests else {}

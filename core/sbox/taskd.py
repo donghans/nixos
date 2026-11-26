@@ -2,6 +2,7 @@
 """sbox taskd — ct 안에서 도는 **실행자**(plan sbox-project-policy R6, pilot §29-91). 에이전트는 셸 대신 이 데몬에 「선언된 작업 이름」만 요청한다.
 - 작업은 root 소유 설정(/etc/sbox/tasks.json)에만 있다: 고정 argv·cwd·종류(oneshot|service)·**정의 파일 다이제스트(pins)**. 요청에는 이름 말고 아무것도 못 얹는다(인자·환경 없음).
 - 실행 전에 pins 의 파일을 다시 해시해 승인 때 기록한 값과 다르면 **거부**한다(에이전트가 package.json 의 scripts 를 고쳐 승인된 이름의 뜻을 바꾸는 것을 막음 — 다시 승인은 사람이 호스트에서).
+- **`exec-argv`(S3, R6b)**: 요청이 선언된 작업의 argv 와 **토큰 하나까지 같을 때만**(접두·와일드카드·순서 바꿈 없음) 그 작업을 실행한다 — 관문 셸(gate.py)이 에이전트의 평소 명령(`npm test`)을 이 요청으로 바꿔 보낸다. 요청에는 `op`·`argv` 말고 아무것도 못 얹고 pins·보호 경로 검사는 `run` 과 같다.
 - 셸을 쓰지 않는다(argv 직접 실행). 새 세션(프로세스 그룹)·고정 환경·시간 제한·출력 상한. 소켓은 파일 권한과 SO_PEERCRED 로 허용된 uid 만.
 표준 라이브러리만 쓴다(ct 의 python3 하나로 도는 것이 목적)."""
 import argparse, hashlib, json, os, re, signal, socket, struct, subprocess, sys, threading, time
@@ -106,6 +107,21 @@ class Taskd:
             return None, "unknown-task"
         return (cfg, name, task), ""
 
+    def resolve_argv(self, req):
+        """exec-argv 요청 검증 → ((cfg, name, task), 오류, 허용 argv 목록). 요청의 argv 가 선언된 작업의 argv 와 한 토큰도 다르지 않을 때만 그 작업을 돌려준다."""
+        extra = set(req) - {"op", "argv"}
+        if extra:
+            return None, "extra-fields:" + ",".join(sorted(extra)), None
+        argv = req.get("argv")
+        if not (isinstance(argv, list) and 0 < len(argv) <= 64 and all(isinstance(x, str) and x and len(x) <= 2048 and "\x00" not in x for x in argv)):
+            return None, "bad-argv", None
+        cfg = self.cfg()
+        tasks = cfg.get("tasks", {})
+        hits = sorted(n for n, t in tasks.items() if t.get("argv") == argv)
+        if not hits:
+            return None, "unknown-argv", sorted((n, t.get("argv")) for n, t in tasks.items())
+        return (cfg, hits[0], tasks[hits[0]]), "", None
+
     def run_oneshot(self, cfg, name, task, send):
         cwd = inside(cfg["root"], task.get("cwd", "."))
         if cwd is None:
@@ -176,12 +192,24 @@ class Taskd:
                 cfg = self.cfg()
                 send({"tasks": {n: {"argv": t["argv"], "kind": t.get("kind", "oneshot"), "cwd": t.get("cwd", "."), "pins": sorted((t.get("pins") or {}))} for n, t in cfg.get("tasks", {}).items()}})
                 rec["result"] = "ok"; return
-            if op not in ("run", "status", "stop", "logs"):
+            if op not in ("run", "status", "stop", "logs", "exec-argv"):
                 send({"error": "bad-op"}); rec["result"] = "bad-op"; return
-            r, err = self.resolve(req)
-            if err:
-                send({"error": err}); rec["result"] = err; return
+            if op == "exec-argv":
+                r, err, allowed = self.resolve_argv(req)
+                rec["argv"] = req.get("argv") if isinstance(req.get("argv"), list) else None
+                if err:
+                    resp = {"error": err}
+                    if allowed is not None:
+                        resp["allowed"] = [{"task": n, "argv": a} for n, a in allowed]
+                        resp["hint"] = "선언되지 않은 명령입니다 — 필요하면 사람에게 `[tasks]` 추가를 요청하세요(호스트에서 `sboxctl taskd`)"
+                    send(resp); rec["result"] = err; return
+                op = "run"                       # 이후는 run 과 같은 경로(정의 파일·보호 경로 검사 포함)
+            else:
+                r, err = self.resolve(req)
+                if err:
+                    send({"error": err}); rec["result"] = err; return
             cfg, name, task = r
+            rec["task"] = name
             kind = task.get("kind", "oneshot")
             if op == "run":
                 bad = self.check_pins(cfg, task)

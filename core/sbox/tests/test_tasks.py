@@ -72,5 +72,14 @@ expect_exit("cwd 에 .. 가 있으면 거부", with_task('argv = ["a"]\ncwd = ".
 expect_exit("pins 에 .. 가 있으면 거부", with_task('argv = ["a"]\npins = ["../x"]\n'), "상대 경로")
 p = os.path.join(d, "bad.toml"); open(p, "w").write('[tasks."Bad Name"]\nargv = ["a"]\n')
 expect_exit("작업 이름 형식 위반", lambda: tasks.load(p), "소문자")
+# ---- [gate] direct(S3): 관문 셸의 읽기 전용 점검 목록
+gp = os.path.join(d, "gate.toml")
+open(gp, "w").write('[gate]\ndirect = [["ls", "-la"], ["git", "status"]]\n')
+check("[gate] direct 를 읽는다", tasks.gate_direct(gp) == [["ls", "-la"], ["git", "status"]])
+for label, body in {"문자열 목록이 아님": 'direct = ["ls"]', "빈 argv": 'direct = [[]]', "숫자 토큰": 'direct = [["ls", 1]]', "빈 문자열 토큰": 'direct = [["ls", ""]]'}.items():
+    open(gp, "w").write("[gate]\n" + body + "\n")
+    expect_exit(f"[gate] direct 형식 위반 거부: {label}", lambda: tasks.gate_direct(gp), "[gate] direct")
+open(gp, "w").write('[project]\nname = "p"\n')
+check("[gate] 절이 없는 매니페스트는 None", tasks.gate_direct(gp) is None)
 print(f"sbox-tasks {n['ok']} 통과 / {n['bad']} 실패")
 sys.exit(1 if n["bad"] else 0)
