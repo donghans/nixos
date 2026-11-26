@@ -43,6 +43,20 @@ check("기본 집합 확장(깊이·폴더째)", sorted(got) == sorted(want), so
 check("node_modules·.git 안은 제외", not any(x.startswith(("node_modules", ".git/")) for x in got), got)
 check("폴더째 보호면 안쪽 파일은 따로 안 나옴", ".claude/settings.json" not in got and ".github/workflows/ci.yml" not in got)
 check("없는 경로는 목록에 없음", ".githooks" in got and "go.sum" not in got and "Cargo.lock" not in got)
+# Flutter(사용자 결정 2026-11-26 ⑩): pororing 계열은 기본 패턴 밖이라 의존성 정의가 보호되지 않았다
+froot = os.path.join(d, "flutter"); os.makedirs(froot)
+for rel in ["pubspec.yaml", "pubspec.lock", "ios/Podfile", "ios/Podfile.lock", "lib/main.dart", "android/app/build.gradle"]:
+    touch(froot, rel)
+fgot = protect.expand(froot, protect.DEFAULT_PROTECT)
+# dirinfo: 폴더째 보호된 경로의 안쪽 요약(승인 화면이 「.claude 130개」처럼 접어 보이는 데 쓴다)
+for rel in [".claude/hooks/a.sh", ".claude/hooks/b.py", ".claude/skills/s/SKILL.md", ".claude/settings.json"]:
+    touch(froot, rel)
+os.symlink("/etc", os.path.join(froot, ".claude", "link"))
+di = protect.dirinfo(froot, [".claude", "pubspec.yaml", "nonexist"])
+check("dirinfo: 폴더만 요약하고(파일·없는 경로는 제외) 파일 수·스크립트 수·상위 구성을 센다", list(di) == [".claude"] and di[".claude"]["files"] == 4 and di[".claude"]["scripts"] == 2 and di[".claude"]["top"] == {"hooks": 2, "skills": 1, "settings.json": 1}, di)
+check("dirinfo: 심볼릭 링크는 따라가지 않는다(/etc 의 파일이 세어지지 않는다)", di[".claude"]["files"] == 4)
+check("dirinfo: 상한을 넘으면 truncated", protect.dirinfo(froot, [".claude"], cap=2)[".claude"]["truncated"] is True)
+check("Flutter 의존성 정의(pubspec.*·Podfile*)가 기본으로 보호된다", sorted(fgot) == ["ios/Podfile", "ios/Podfile.lock", "pubspec.lock", "pubspec.yaml"], fgot)
 
 # ③ 거부
 os.symlink("/etc/passwd", os.path.join(root, "yarn.lock"))

@@ -8,6 +8,7 @@ import fnmatch, glob, json, os, sys
 DEFAULT_PROTECT = [
     "CLAUDE.md", ".claude/**", ".mcp.json", "package.json",
     "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock", "go.sum", "uv.lock", "poetry.lock",
+    "pubspec.yaml", "pubspec.lock", "Podfile", "Podfile.lock",        # Flutter(사용자 결정 2026-11-26 ⑩ — 이력 측정에서 pororing 계열이 보호 밖이었음)
     "Dockerfile*", "docker-compose*.yml", ".githooks/**", ".github/**",
 ]
 PRUNE = (".git", "node_modules")
@@ -62,14 +63,49 @@ def mounted_ro(mountinfo_text, path):
     return bool(best and best[1] and best[0] != "/")
 
 
+SCRIPT_EXT = (".sh", ".bash", ".py", ".js", ".mjs", ".cjs", ".ts", ".rb", ".pl", ".ps1", ".bat", ".cmd")
+
+
+def dirinfo(root, rels, cap=20000):
+    """보호 경로 중 폴더의 안쪽 요약 {상대경로: {files, scripts, top}} — 승인 화면이 「.claude/ 130개」처럼 접어 보이는 데 쓴다. 심볼릭 링크는 따라가지 않고, cap 개를 넘으면 센 만큼만(truncated)."""
+    out = {}
+    for rel in rels:
+        base = os.path.join(root, rel)
+        if not os.path.isdir(base) or os.path.islink(base):
+            continue
+        n = scripts = 0
+        top = {}
+        truncated = False
+        for dp, dn, fn in os.walk(base, followlinks=False):
+            for f in fn:
+                n += 1
+                scripts += f.endswith(SCRIPT_EXT)
+                sub = os.path.relpath(dp, base).split(os.sep)[0]
+                key = f if sub == "." else sub
+                top[key] = top.get(key, 0) + 1
+                if n >= cap:
+                    truncated = True
+                    break
+            if truncated:
+                break
+        out[rel] = {"files": n, "scripts": scripts, "top": dict(sorted(top.items(), key=lambda kv: -kv[1])[:6]), "truncated": truncated}
+    return out
+
+
 def main(argv):
+    if len(argv) >= 3 and argv[0] == "dirinfo":
+        try:
+            print(json.dumps(dirinfo(argv[1], json.loads(argv[2])), ensure_ascii=False))
+        except ValueError as e:
+            print(str(e), file=sys.stderr); return 2
+        return 0
     if len(argv) >= 3 and argv[0] == "expand":
         try:
             print(json.dumps(expand(argv[1], json.loads(argv[2]))))
         except ValueError as e:
             print(str(e), file=sys.stderr); return 2
         return 0
-    print("usage: protect.py expand ROOT '[patterns json]'", file=sys.stderr); return 2
+    print("usage: protect.py expand ROOT '[patterns json]' | dirinfo ROOT '[relative paths json]'", file=sys.stderr); return 2
 
 
 if __name__ == "__main__":

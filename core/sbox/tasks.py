@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """sbox 작업 선언(plan sbox-project-policy R6): 매니페스트의 [tasks.<이름>] → ct 의 /etc/sbox/tasks.json. 호스트에서 돈다(표준 라이브러리만).
-[tasks.dev]  argv = ["npm","run","dev"] · cwd = "web"(작업 사본 기준 상대) · kind = "oneshot"|"service" · pins = ["package.json"](정의 파일, cwd 기준 아닌 작업 사본 기준 상대 경로) · timeout = 600
+[tasks.dev]  argv = ["npm","run","dev"] · cwd = "web"(작업 사본 기준 상대) · kind = "oneshot"|"service" · pins = ["package.json"](정의 파일, cwd 기준 아닌 작업 사본 기준 상대 경로) · timeout = 600 · note = "사람이 읽을 설명"(승인 화면에만 보임, 승인 대상 아님)
 [tasks.dev.pinned]  "web/package.json" = "<sha256>"   ← 사람이 승인할 때 sbox 가 기록(--approve). 에이전트가 정의 파일을 바꾸면 이 값과 달라져 실행이 거부된다."""
 import argparse, json, os, re, sys, tomllib
 
@@ -31,7 +31,8 @@ def load(manifest):
             if os.path.isabs(rel) or ".." in rel.split("/"):
                 raise SystemExit(f"[tasks.{name}] 경로 {rel!r} 는 작업 사본 안의 상대 경로여야 합니다")
         out[name] = {"argv": argv, "kind": kind, "cwd": t.get("cwd", "."), "pins": list(t.get("pins") or []),
-                     "pinned": dict(t.get("pinned") or {}), "timeout": int(t.get("timeout", 900)), "env": dict(t.get("env") or {})}
+                     "pinned": dict(t.get("pinned") or {}), "timeout": int(t.get("timeout", 900)), "env": dict(t.get("env") or {}),
+                     "note": str(t.get("note") or "")}
     return out
 
 
