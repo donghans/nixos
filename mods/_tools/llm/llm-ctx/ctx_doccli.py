@@ -631,13 +631,24 @@ def cmd_import_files(a):
     return 0
 
 
+def _files_mirror_src(store, proj):
+    """서버의 files 저장소 주소. 시험용 `CTX_FILES_MIRROR` > 이 호스트의 바깥 저장소가 서버를 가리키는 `origin`(`<사용자>@<서버>:ctx/<프로젝트>`) + `/files` > `mirror_for`(이 호스트 이름 기준이라 서버에서만 맞다 — 마지막 수단)."""
+    if os.environ.get("CTX_FILES_MIRROR"):
+        return os.environ["CTX_FILES_MIRROR"]
+    r = st._git(os.path.join(store, proj), "remote", "get-url", "origin", check=False)
+    url = (r.stdout or "").strip() if r.returncode == 0 else ""
+    if dq.MIRROR_RE.match(url):
+        return url + "/files"
+    return dq.mirror_for(proj) + "/files"
+
+
 def cmd_files_pull(a):
     """서버의 files 저장소를 이 호스트로 가져온다(읽기 전용 사본). 첫 실행은 clone, 이후는 fast-forward 만 — 로컬에만 있는 커밋·더러운 작업 트리가 있으면 덮어쓰지 않고 거부한다."""
     store, proj = _project(a)
     if _writer_host():
         sys.exit("이 호스트가 files 저장소의 정본이다 — files-pull 은 서버가 아닌 호스트에서 쓴다")
     fd = st.files_dir(store, proj)
-    src = os.environ.get("CTX_FILES_MIRROR") or (dq.mirror_for(proj) + "/files")
+    src = _files_mirror_src(store, proj)
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10")
     git = lambda *args, cwd=fd: subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, env=env, timeout=120)
     if not os.path.isdir(os.path.join(fd, ".git")):
