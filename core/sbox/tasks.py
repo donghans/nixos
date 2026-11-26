@@ -4,6 +4,9 @@
 [tasks.dev.pinned]  "web/package.json" = "<sha256>"   ← 사람이 승인할 때 sbox 가 기록(--approve). 에이전트가 정의 파일을 바꾸면 이 값과 달라져 실행이 거부된다."""
 import argparse, json, os, re, sys, tomllib
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import protect  # noqa: E402
+
 NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,40}")
 WORK = "/home/sbox/work"
 
@@ -32,11 +35,26 @@ def load(manifest):
     return out
 
 
+def protect_patterns(manifest):
+    """보호 경로 패턴 = 기본 집합 + [protect] add − [protect] remove (policy R7·§3 ⑧). 매니페스트의 [protect] add/remove 는 상대 경로 패턴 목록."""
+    with open(manifest, "rb") as f:
+        sec = tomllib.load(f).get("protect") or {}
+    add, rem = sec.get("add") or [], sec.get("remove") or []
+    for k, v in (("add", add), ("remove", rem)):
+        if not (isinstance(v, list) and all(isinstance(x, str) and x for x in v)):
+            raise SystemExit(f"[protect] {k} 는 문자열 목록이어야 합니다")
+    pats = [p for p in protect.DEFAULT_PROTECT if p not in rem] + [p for p in add if p not in protect.DEFAULT_PROTECT]
+    for p in pats:
+        if os.path.isabs(p) or ".." in p.split("/"):
+            raise SystemExit(f"[protect] 패턴 {p!r} 는 작업 사본 안의 상대 경로여야 합니다")
+    return pats
+
+
 def needed(manifest):
     return sorted({p for t in load(manifest).values() for p in t["pins"]})
 
 
-def build(manifest, digests, approve):
+def build(manifest, digests, approve, protected=None):
     tasks, outcfg, newpins = load(manifest), {}, {}
     for name, t in tasks.items():
         pins = {}
@@ -54,7 +72,8 @@ def build(manifest, digests, approve):
             else:
                 pins[rel] = ok
         outcfg[name] = {"argv": t["argv"], "cwd": t["cwd"], "kind": t["kind"], "pins": pins, "timeout": t["timeout"], "env": t["env"]}
-    return {"version": 1, "root": WORK, "home": "/var/lib/sbox-run", "logdir": "/var/log/sbox-taskd", "tasks": outcfg}, newpins
+    return {"version": 1, "root": WORK, "home": "/var/lib/sbox-run", "logdir": "/var/log/sbox-taskd", "tasks": outcfg,
+            "protect": protect_patterns(manifest), "protected": sorted(protected or [])}, newpins
 
 
 def set_pinned(path, newpins):
@@ -71,14 +90,16 @@ def set_pinned(path, newpins):
 
 def main(argv):
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["needed", "build"])
+    ap.add_argument("cmd", choices=["needed", "build", "patterns"])
     ap.add_argument("--manifest", required=True)
-    ap.add_argument("--digests"); ap.add_argument("--approve", action="store_true"); ap.add_argument("--out")
+    ap.add_argument("--digests"); ap.add_argument("--approve", action="store_true"); ap.add_argument("--out"); ap.add_argument("--protected")
     a = ap.parse_args(argv)
     if a.cmd == "needed":
         print(json.dumps(needed(a.manifest))); return 0
+    if a.cmd == "patterns":
+        print(json.dumps(protect_patterns(a.manifest))); return 0
     digests = json.load(open(a.digests)) if a.digests else {}
-    cfg, newpins = build(a.manifest, digests, a.approve)
+    cfg, newpins = build(a.manifest, digests, a.approve, json.load(open(a.protected)) if a.protected else [])
     json.dump(cfg, open(a.out, "w"), ensure_ascii=False, indent=1)
     if a.approve and newpins:
         set_pinned(a.manifest, newpins)

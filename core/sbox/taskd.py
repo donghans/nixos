@@ -6,6 +6,9 @@
 표준 라이브러리만 쓴다(ct 의 python3 하나로 도는 것이 목적)."""
 import argparse, hashlib, json, os, re, signal, socket, struct, subprocess, sys, threading, time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I 로 돌면 스크립트 폴더가 경로에 없다 — root 소유 폴더라 안전
+import protect  # noqa: E402
+
 NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,40}")
 MAX_OUT = 8 * 1024 * 1024
 DEFAULT_TIMEOUT = 900
@@ -58,6 +61,29 @@ class Taskd:
                 return f"pin-missing:{rel}"
             if got != want:
                 return f"pin-mismatch:{rel}"
+        return ""
+
+    def check_protect(self, cfg, mountinfo=None):
+        """R7(가): ① 보호 패턴에 지금 맞는 경로가 설치 때 목록과 같은지(새 제어 파일이 생기면 거부 — 사람이 `sboxctl taskd` 로 갱신) ② 목록의 모든 경로가 읽기 전용 마운트인지(유닛이 안 돌았거나 설정이 어긋나면 거부)."""
+        pats, listed = cfg.get("protect"), cfg.get("protected")
+        if pats is None:
+            return ""                              # 보호 설정이 없는 옛 설정 — 거부하지 않는다(R7 미적용 상태)
+        root = cfg["root"]
+        try:
+            now = protect.expand(root, pats)
+        except ValueError as e:
+            return f"protect-invalid:{e}"
+        new = sorted(set(now) - set(listed or []))
+        if new:
+            return "protect-stale:" + ",".join(new[:5])
+        if mountinfo is None:
+            try:
+                mountinfo = open("/proc/self/mountinfo").read()
+            except OSError:
+                return "protect-unverifiable"
+        for rel in listed or []:
+            if not protect.mounted_ro(mountinfo, os.path.join(root, rel)):
+                return f"protect-not-ro:{rel}"
         return ""
 
     def env(self, cfg, task):
@@ -161,6 +187,10 @@ class Taskd:
                 bad = self.check_pins(cfg, task)
                 if bad:
                     send({"error": bad, "hint": "정의 파일이 승인 때와 다릅니다 — 사람이 호스트에서 `sboxctl taskd … --approve` 로 다시 승인해야 실행됩니다"})
+                    rec["result"] = bad; return
+                bad = self.check_protect(cfg)
+                if bad:
+                    send({"error": bad, "hint": "보호 경로(제어 파일)가 설치 때와 다르거나 읽기 전용이 아닙니다 — 새 제어 파일이 생겼다면 사람이 호스트에서 `sboxctl taskd NAME` 로 갱신해야 실행됩니다"})
                     rec["result"] = bad; return
                 if kind == "service":
                     self.start_service(cfg, name, task, send); rec["result"] = "started"
