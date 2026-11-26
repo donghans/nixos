@@ -89,7 +89,7 @@ def _ignored_note(payload: dict) -> dict | None:
     except OSError:
         pass
     msg = (f"[ctx 안내] {path} 는 git 이 추적하지 않는 경로라 이 PC 의 이 폴더에만 남는다(노트북↔데스크톱 파편화). 작업 문서(.md)는 `donghans ctx doc propose <kind> <name> --file …`, "
-           "증거·데이터는 `donghans ctx doc import-files`(서버 호스트)로 ctx 에 둔다. 임시 파일이면 무시해도 된다. 이미 만든 파편은 `donghans ctx doc audit` 로 찾는다.")
+           "증거·데이터는 `donghans ctx doc import-files`(서버가 아닌 호스트는 DB 대기열로 올려 서버가 반영)로 ctx 에 둔다. 임시 파일이면 무시해도 된다. 이미 만든 파편은 `donghans ctx doc audit` 로 찾는다.")
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": msg}}
 
 

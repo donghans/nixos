@@ -199,8 +199,10 @@ check("import-docs: 본문 바이트 그대로 + origin_path 머리말", body ==
 check("import-docs: 목록 파일", "held\tsec.md" in open(f"{TMP}/m.tsv").read())
 rc, out, err = run("import-docs", IMP, "--origin-label", "docs", sid=A)
 check("import-docs: 다시 해도 이미 있음(멱등)", rc == 0 and "반영 0" in out and "이미 있음 3" in out, out + err)
-rc, out, err = run("import-files", IMP, "--to", "imp", sid=A, cwd=WORK, env={"CTX_ALLOW_FILES_WRITE": "0"})
-check("import-files: 서버 호스트가 아니면 거부(동기화 담당 없음)", rc != 0 and "서버 호스트" in (out + err), out + err)
+rc, out, err = run("import-files", IMP, "--to", "imp", sid=A, cwd=WORK, env={"CTX_ALLOW_FILES_WRITE": "0", "CTX_PROPOSE_WAIT": "1"})
+nq = conn.execute("SELECT count(*) FROM doc_proposals WHERE op='files' AND status='queued'").fetchone()[0]; conn.commit()
+check("import-files: 서버 호스트가 아니면 files 에 직접 쓰지 않고 DB 대기열(op=files)로 올린다", rc == 0 and "대기열에 넣었다" in out and nq == 1 and not os.path.exists(f"{STORE}/proj/files/imp/data.json"), out + err)
+conn.execute("DELETE FROM doc_proposals WHERE op='files'"); conn.commit()
 rc, out, err = run("import-files", IMP, "--to", "imp", sid=A, env={"CTX_ALLOW_FILES_WRITE": "1"})
 check("import-files: json 만 복사(md 는 .md 도 텍스트라 같이 — 이미지는 저장 안 함)", rc == 0 and os.path.isfile(f"{STORE}/proj/files/imp/data.json") and not os.path.exists(f"{STORE}/proj/files/imp/shot.png") and "스크린샷(저장 안 함) 1" in out, out + err)
 open(f"{IMP}/blob.bin", "wb").write(b"\x00\x01bin")
@@ -208,8 +210,10 @@ rc, out, err = run("import-files", IMP, "--to", "imp", sid=A, env={"CTX_ALLOW_FI
 check("import-files: 검사 불가 blob.bin 은 보류", "보류: blob.bin" in out and not os.path.exists(f"{STORE}/proj/files/imp/blob.bin"), out + err)
 rc, out, err = run("import-held", IMP, "--to", "imp", "--files", "blob.bin", sid=A, env={"CTX_ALLOW_FILES_WRITE": "1"})
 check("import-held: 사유(--reason) 없으면 거부", rc != 0 and "--reason" in (out + err), out + err)
-rc, out, err = run("import-held", IMP, "--to", "imp", "--files", "blob.bin", "--reason", "시험용 이진", sid=A, env={"CTX_ALLOW_FILES_WRITE": "0"})
-check("import-held: 서버 호스트가 아니면 거부", rc != 0 and "서버 호스트" in (out + err), out + err)
+rc, out, err = run("import-held", IMP, "--to", "imp", "--files", "blob.bin", "--reason", "시험용 이진", sid=A, env={"CTX_ALLOW_FILES_WRITE": "0", "CTX_PROPOSE_WAIT": "1"})
+pl = conn.execute("SELECT payload FROM doc_proposals WHERE op='files' AND status='queued'").fetchone(); conn.commit()
+check("import-held: 서버 호스트가 아니면 허용 목록(allow)·사유를 담아 대기열로 올린다", rc == 0 and pl is not None and pl[0]["allow"] == ["blob.bin"] and pl[0]["reason"] == "시험용 이진" and not os.path.exists(f"{STORE}/proj/files/imp/blob.bin"), out + err)
+conn.execute("DELETE FROM doc_proposals WHERE op='files'"); conn.commit()
 rc, out, err = run("import-held", IMP, "--to", "imp", "--files", "blob.bin", "--reason", "시험용 이진", sid=A, env={"CTX_ALLOW_FILES_WRITE": "1"})
 check("import-held: 허용한 보류 파일만 받는다", rc == 0 and os.path.isfile(f"{STORE}/proj/files/imp/blob.bin") and "사용자 허용으로 검사 없이 받음: blob.bin" in out, out + err)
 os.remove(f"{IMP}/blob.bin")
@@ -550,6 +554,118 @@ orig_rbh = dq.refresh_by_head; dq.refresh_by_head = lambda *a, **k: _time.sleep(
 t0 = _time.time(); dq.hook_refresh(WORK, cc.connect, lambda c: URL); el = _time.time() - t0
 dq.refresh_by_head = orig_rbh; dq.HOOK_REFRESH_TIMEOUT = orig_to
 check("R8 최신화가 느려도 훅은 상한(HOOK_REFRESH_TIMEOUT) 안에 돌아온다", el < 2.5, f"{el:.1f}s")
+
+
+# ---- 자료 영역(files) 제안 대기열(plan ctx-files-queue): 노트북이 올리고 서버가 다시 판정해 반영한다
+import base64
+conn.execute("DELETE FROM doc_proposals WHERE op='files'"); conn.commit()
+FQ = f"{TMP}/fq"; os.makedirs(f"{FQ}/sub")
+open(f"{FQ}/ok.json", "w").write('{"v": 2}\n'); open(f"{FQ}/sub/n.txt", "w").write("중첩 파일\n"); open(f"{FQ}/tool.py", "w").write("print('x')\n")
+NOTEBOOK = {"CTX_ALLOW_FILES_WRITE": "0", "CTX_PROPOSE_WAIT": "1"}
+
+
+def put(pid, files, dest="fq2", allow=(), reason=""):
+    payload = {"dest": dest, "allow": list(allow), "reason": reason, "files": [{"rel": r, "b64": base64.b64encode(d).decode()} for r, d in files]}
+    dq.enqueue(conn, pid, QS, "testhost", "proj/files", "files", None, "", payload); conn.commit()
+
+
+def frow(pid):
+    r = conn.execute("SELECT status, msg, commit_sha, payload, body FROM doc_proposals WHERE id=%s", (pid,)).fetchone(); conn.commit(); return r
+
+
+# T3 정상 경로: 노트북 제출 → 서버 처리 → files 저장소 커밋, 해결 뒤 payload 가 비워진다
+rc, out, err = run("import-files", FQ, "--to", "fq", sid=QS, env=NOTEBOOK)
+check("F1 노트북 제출이 대기열 행을 만든다", rc == 0 and "대기열에 넣었다" in out and "올릴 것 3" in out, out + err)
+pid_f1 = conn.execute("SELECT id FROM doc_proposals WHERE op='files' ORDER BY created_at DESC LIMIT 1").fetchone()[0]; conn.commit()
+check("F1 제출 직후 행은 queued 이고 payload 에 파일이 있다", frow(pid_f1)[0] == "queued" and len(frow(pid_f1)[3]["files"]) == 3)
+dq.pull_queue(STORE, cc.connect, masker)
+r = frow(pid_f1)
+check("F1 서버가 처리하면 applied + 커밋 해시", r[0] == "applied" and r[2], str(r[:3]))
+check("F1 올린 파일이 바이트 그대로 서버 files 저장소에 들어갔다", open(f"{STORE}/proj/files/fq/ok.json", "rb").read() == b'{"v": 2}\n' and open(f"{STORE}/proj/files/fq/sub/n.txt", encoding="utf-8").read() == "중첩 파일\n")
+check("F1 해결된 행의 payload·body 는 비워진다(큰 본문이 DB 에 남지 않는다)", r[3] is None and r[4] is None, str(r[3])[:60])
+check("F1 임시 폴더가 남지 않는다", not os.path.isdir(f"{STORE}/_filesinbox") or os.listdir(f"{STORE}/_filesinbox") == [])
+
+# T1a 서버는 클라이언트의 검사를 믿지 않는다: 등록된 비밀 값이 든 파일을 직접 대기열에 넣어도 반입하지 않는다
+put("files-t-secret", [("leak.txt", "메모 hunter2 끝\n".encode()), ("fine.txt", b"ok\n")], dest="fq2")
+dq.pull_queue(STORE, cc.connect, masker)
+r = frow("files-t-secret")
+check("T1a 등록 비밀 값이 든 파일은 서버가 반입하지 않고(보류) 문제 없는 파일만 반입한다", not os.path.exists(f"{STORE}/proj/files/fq2/leak.txt") and os.path.exists(f"{STORE}/proj/files/fq2/fine.txt") and r[0] == "applied", str(r))
+check("T1a 결과 문구에 보류 목록(파일명)이 있다", "leak.txt" in r[1], r[1])
+check("T1a 비밀 값 자체는 결과·행에 남지 않는다", "hunter2" not in (r[1] or "") and r[3] is None)
+
+# T1b 이진 held 는 allow 없이는 안 받고, allow 가 있으면 받는다(비밀 후보는 allow 로도 풀리지 않는다)
+put("files-t-bin", [("b.bin", b"\x00\x01\x02")], dest="fq3")
+dq.pull_queue(STORE, cc.connect, masker)
+check("T1b 이진 파일은 allow 없이 반입되지 않는다", frow("files-t-bin")[0] == "rejected" and not os.path.exists(f"{STORE}/proj/files/fq3/b.bin"), str(frow("files-t-bin")[:2]))
+put("files-t-bin2", [("b.bin", b"\x00\x01\x02")], dest="fq3", allow=["b.bin"], reason="시험용 이진")
+dq.pull_queue(STORE, cc.connect, masker)
+check("T1b allow 가 있으면 이진 파일을 받는다", frow("files-t-bin2")[0] == "applied" and os.path.exists(f"{STORE}/proj/files/fq3/b.bin"), str(frow("files-t-bin2")[:2]))
+put("files-t-bin3", [("s.txt", "pw hunter2\n".encode())], dest="fq3", allow=["s.txt"], reason="비밀 후보 허용 시도")
+dq.pull_queue(STORE, cc.connect, masker)
+check("T1b allow 로도 비밀 후보(내용 검사로 잡힌 등록 비밀)는 풀리지 않는다", not os.path.exists(f"{STORE}/proj/files/fq3/s.txt") and frow("files-t-bin3")[0] == "rejected", str(frow("files-t-bin3")[:2]))
+
+# T2 경로·한도 방어: files 저장소 밖으로 쓰지 못하고, 거부되면 아무것도 반영하지 않는다
+before_commit = subprocess.run(["git", "-C", f"{STORE}/proj/files", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+for i, (files, dest) in enumerate([([("../evil.txt", b"x")], "fq4"), ([("/abs.txt", b"x")], "fq4"), ([("a//b.txt", b"x")], "fq4"), ([("ok.txt", b"x")], "../up"), ([("a\\b.txt", b"x")], "fq4"),
+                                    ([(f"f{n}.txt", b"x") for n in range(dq.FILES_MAX_COUNT + 1)], "fq4")]):
+    put(f"files-t-bad{i}", files, dest=dest)
+dq.pull_queue(STORE, cc.connect, masker)
+check("T2 위험한 경로·dest·개수 초과는 모두 rejected", all(frow(f"files-t-bad{i}")[0] == "rejected" for i in range(6)), str([frow(f"files-t-bad{i}")[:2] for i in range(6)]))
+check("T2 files 저장소 밖·안 어디에도 쓰이지 않았고 커밋도 늘지 않았다", not os.path.exists(f"{STORE}/proj/evil.txt") and not os.path.exists(f"{STORE}/proj/files/evil.txt") and not os.path.exists(f"{STORE}/up")
+      and subprocess.run(["git", "-C", f"{STORE}/proj/files", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip() == before_commit)
+big = [("big.txt", b"a" * 6_000_000)] * 4                       # 합계 24MB > 20MB (파일당 5MB 한도 전에 합계 한도에서 막힌다)
+put("files-t-big", big)
+dq.pull_queue(STORE, cc.connect, masker)
+check("T2 합계 20MB 초과는 rejected", frow("files-t-big")[0] == "rejected" and "상한" in (frow("files-t-big")[1] or ""), str(frow("files-t-big")[:2]))
+put("files-t-target", [("x.txt", b"x")])
+conn.execute("UPDATE doc_proposals SET target='ghostproj/files' WHERE id='files-t-target'"); conn.commit()
+dq.pull_queue(STORE, cc.connect, masker)
+check("T2 서버에 없는 프로젝트 target 은 rejected", frow("files-t-target")[0] == "rejected", str(frow("files-t-target")[:2]))
+check("T3 모든 종결 경로(applied·rejected)에서 payload 가 비워진다", conn.execute("SELECT count(*) FROM doc_proposals WHERE op='files' AND status<>'queued' AND payload IS NOT NULL").fetchone()[0] == 0); conn.commit()
+
+# 검사기가 없으면 건드리지 않는다(fail-closed) — 다음 점검 때 검사기와 함께 처리된다
+put("files-t-nomask", [("nm.txt", b"later\n")], dest="fq5")
+dq.pull_queue(STORE, cc.connect, None)
+check("F6 비밀 검사기가 없으면 op=files 행을 처리하지 않고 queued 로 둔다", frow("files-t-nomask")[0] == "queued" and not os.path.exists(f"{STORE}/proj/files/fq5/nm.txt"))
+dq.pull_queue(STORE, cc.connect, masker)
+check("F6 검사기가 생기면 처리된다", frow("files-t-nomask")[0] == "applied" and os.path.exists(f"{STORE}/proj/files/fq5/nm.txt"))
+# 서버가 죽어 남은 임시 폴더는 다음 pull_queue 가 지운다
+os.makedirs(f"{STORE}/_filesinbox/stale-xyz"); open(f"{STORE}/_filesinbox/stale-xyz/f", "w").write("x")
+dq.pull_queue(STORE, cc.connect, masker)
+check("F5 크래시로 남은 _filesinbox 는 pull_queue 시작 때 정리된다", not os.path.exists(f"{STORE}/_filesinbox/stale-xyz"))
+# 노트북 쪽: 올릴 한도 초과·비밀 선검사
+open(f"{FQ}/secret.txt", "w").write("pw hunter2\n")
+rc, out, err = run("import-files", FQ, "--to", "fq6", sid=QS, env=NOTEBOOK)
+nrows = conn.execute("SELECT count(*) FROM doc_proposals WHERE op='files' AND status='queued'").fetchone()[0]; conn.commit()
+check("F7 노트북은 등록 비밀이 든 파일을 보류하고 나머지만 올린다(비밀은 DB 에 안 들어간다)", rc == 0 and "보류: secret.txt" in out and "올릴 것 3" in out and nrows == 1, out + err)
+check("F7 DB 의 payload 에 비밀 값이 없다", "hunter2" not in str(conn.execute("SELECT payload FROM doc_proposals WHERE op='files' AND status='queued'").fetchone()[0])); conn.commit()
+conn.execute("DELETE FROM doc_proposals WHERE op='files'"); conn.commit()
+
+# T4 files-pull: 노트북이 서버의 files 저장소를 가져온다(ssh 대신 로컬 경로를 CTX_FILES_MIRROR 로 주입)
+LSTORE = f"{TMP}/lctx"; os.makedirs(f"{LSTORE}/proj")
+open(f"{LSTORE}/manifest.toml", "w").write(f'[projects.proj]\nrepo_url = "{URL}"\nowner = "personal"\n')
+subprocess.run(["git", "init", "-q", f"{LSTORE}/proj"], check=True)
+PULL_ENV = {"CTX_ALLOW_FILES_WRITE": "0", "CTX_STORE_DIR": LSTORE, "CTX_FILES_MIRROR": f"{STORE}/proj/files"}
+rc, out, err = run_q("files-pull", "--project", "proj", sid=QS, env=PULL_ENV)
+check("T4 첫 실행은 clone — 서버의 자료가 노트북에 생긴다", rc == 0 and "처음 가져왔다" in out and open(f"{LSTORE}/proj/files/fq/ok.json").read() == '{"v": 2}\n', out + err)
+rc, out, err = run_q("files", "--project", "proj", sid=QS, env=PULL_ENV)
+check("T4 files 명령이 가져온 자료를 보인다", "fq/ok.json" in out, out + err)
+open(f"{STORE}/proj/files/fq/new.txt", "w").write("서버에서 새로\n")
+subprocess.run(["git", "-C", f"{STORE}/proj/files", "add", "-A"], check=True); subprocess.run(["git", "-C", f"{STORE}/proj/files", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "server add"], check=True)
+rc, out, err = run_q("files-pull", "--project", "proj", sid=QS, env=PULL_ENV)
+check("T4 서버에 새 커밋이 있으면 fast-forward 로 가져온다", rc == 0 and os.path.exists(f"{LSTORE}/proj/files/fq/new.txt"), out + err)
+open(f"{LSTORE}/proj/files/fq/ok.json", "w").write("로컬에서 고침\n")
+rc, out, err = run_q("files-pull", "--project", "proj", sid=QS, env=PULL_ENV)
+check("T4 더러운 작업 트리는 덮어쓰지 않고 거부한다", rc != 0 and "로컬 변경" in (out + err) and open(f"{LSTORE}/proj/files/fq/ok.json").read() == "로컬에서 고침\n", out + err)
+subprocess.run(["git", "-C", f"{LSTORE}/proj/files", "checkout", "-q", "--", "."], check=True)
+open(f"{LSTORE}/proj/files/local-only.txt", "w").write("로컬에만 있는 커밋\n")
+subprocess.run(["git", "-C", f"{LSTORE}/proj/files", "add", "-A"], check=True); subprocess.run(["git", "-C", f"{LSTORE}/proj/files", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "local only"], check=True)
+open(f"{STORE}/proj/files/fq/new2.txt", "w").write("서버 또 새로\n")
+subprocess.run(["git", "-C", f"{STORE}/proj/files", "add", "-A"], check=True); subprocess.run(["git", "-C", f"{STORE}/proj/files", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "server add 2"], check=True)
+rc, out, err = run_q("files-pull", "--project", "proj", sid=QS, env=PULL_ENV)
+check("T4 로컬에만 있는 커밋이 있으면 덮어쓰지 않고 거부한다(서버와 갈라진 경우)", rc != 0 and "로컬 커밋" in (out + err) and os.path.exists(f"{LSTORE}/proj/files/local-only.txt") and not os.path.exists(f"{LSTORE}/proj/files/fq/new2.txt"), out + err)
+rc, out, err = run_q("files-pull", "--project", "proj", sid=QS, env={"CTX_ALLOW_FILES_WRITE": "1", "CTX_STORE_DIR": LSTORE, "CTX_FILES_MIRROR": f"{STORE}/proj/files"})
+check("T4 서버(쓰기 호스트)에서는 files-pull 을 하지 않는다", rc != 0 and "정본" in (out + err), out + err)
 
 # T13 표가 없는 옛 스키마에서도 파일 인박스 경로는 막히지 않는다(마지막 시험 — 표를 지운다)
 conn.execute("DROP TABLE doc_proposals"); conn.commit()

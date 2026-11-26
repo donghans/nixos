@@ -12,13 +12,16 @@
   wait_row / sync_view              결과 기다리기 / 반영 뒤 읽기 뷰 맞추기(거짓 충돌 방지)
   status_summary                    이 세션의 대기·충돌·거부와 최근 알림
   flush_outbox / import_inbox       서버 불가 중 보관분 재전송 / 옛 방식 제안 파일을 대기열로 옮기기
-  pull_queue / collect_results / record_results / maintenance   (동기화 담당이 쓴다)
+  submit_files / files_payload_error   자료 영역(files) 제출(op=files) — 노트북이 통과한 파일을 base64 로 담아 올린다(서버가 다시 판정)
+  pull_queue / collect_results / record_results / maintenance   (동기화 담당이 쓴다; op=init·op=files 는 pull_queue 가 직접 실행)
 """
 import fcntl
 import getpass
 import json
+import base64
 import os
 import re
+import shutil
 import socket
 import subprocess
 import threading
@@ -39,6 +42,10 @@ HOOK_REFRESH_TIMEOUT = 8.0     # SessionStart 훅의 최신화 상한(초)
 MIRROR_RE = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:ctx/([A-Za-z0-9][A-Za-z0-9._-]{0,60})$")
 OWNER_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 REPO_URL_RE = re.compile(r"^https://[A-Za-z0-9.-]+(/[A-Za-z0-9._-]+){1,4}$")
+FILES_MAX_COUNT = 500            # 자료 제출(op=files) 한 요청의 파일 수 상한
+FILES_MAX_TOTAL = 20_000_000    # 〃 풀린 바이트 합 상한(jsonb 를 한 트랜잭션이 들고 있으므로 작게)
+FILES_REL_MAX = 300             # 〃 상대 경로 길이 상한
+FILES_MSG_LIST = 20             # 〃 결과 msg 에 싣는 보류·거부 목록 상한
 OPEN_STATUSES = ("queued", "fetched")
 OK_STATUSES = ("applied", "same")
 
@@ -163,6 +170,71 @@ def submit(store: str, session: str, host: str, project: str, kind: str, name: s
         outbox_put(store, session, pid, text)
         return 0, f"{target}: 서버에 접속하지 못해 **보관만 했다**(아직 반영되지 않았다, {type(e).__name__}) — 다음 `donghans ctx doc` 실행 때 다시 보낸다", "outbox:" + pid
     return 0, f"{target}: 제안을 대기열에 넣었다", pid
+
+
+def files_payload_error(payload) -> str | None:
+    """op=files 요청 본문의 형식 검사(노트북 제출 전·서버 실행 전 양쪽). 문제가 있으면 이유, 없으면 None. 경로 성분·크기·개수만 본다(내용 검사는 import_files 가 서버에서 한다)."""
+    if not isinstance(payload, dict):
+        return "payload 가 객체가 아니다"
+    dest, allow, reason, files = payload.get("dest", ""), payload.get("allow", []), payload.get("reason", ""), payload.get("files")
+    if not isinstance(dest, str) or (dest and (dest.startswith("/") or any(p in ("", "..", ".") for p in dest.split("/")))):
+        return "dest 는 `..`·절대 경로·빈 칸을 쓸 수 없다"
+    if not (isinstance(allow, list) and all(isinstance(x, str) for x in allow)) or not isinstance(reason, str) or len(reason) > 500:
+        return "allow·reason 형식이 올바르지 않다"
+    if not isinstance(files, list) or not files:
+        return "files 가 비어 있다"
+    if len(files) > FILES_MAX_COUNT:
+        return f"파일 {len(files)}개 > 상한 {FILES_MAX_COUNT}개 — 나눠서 올린다"
+    total = 0
+    for f in files:
+        rel, b64 = (f.get("rel"), f.get("b64")) if isinstance(f, dict) else (None, None)
+        if not isinstance(rel, str) or not isinstance(b64, str) or not rel or len(rel) > FILES_REL_MAX or rel.startswith("/") or "\x00" in rel or "\\" in rel \
+                or any(p in ("", ".", "..") for p in rel.split("/")):
+            return f"경로가 올바르지 않다: {str(rel)[:80]!r}"
+        total += len(b64) * 3 // 4
+        if total > FILES_MAX_TOTAL * 1.02:       # base64 길이로 거친 선검사(정확한 합은 풀어 쓸 때 다시 센다)
+            return f"합계가 상한 {FILES_MAX_TOTAL:,}바이트를 넘는다 — 나눠서 올린다"
+    return None
+
+
+def submit_files(session: str, host: str, project: str, dest: str, src: str, rels: list, allow, reason: str, connect, load_masker) -> tuple[int, str, str | None]:
+    """노트북(쓰기 호스트가 아닌 곳)의 자료 제출. 통과한 파일(rels, src 기준 상대 경로)을 base64 로 담아 op=files 행으로 넣는다. (결과코드, 메시지, 행 id).
+    서버가 같은 검사를 다시 한다(클라이언트의 검사를 믿지 않는다) — 여기서는 DB 에 비밀이 들어가기 전의 마지막 확인과 크기·개수 상한만 본다."""
+    files, total = [], 0
+    for rel in rels:
+        data = open(os.path.join(src, rel), "rb").read()
+        total += len(data)
+        files.append({"rel": rel, "b64": base64.b64encode(data).decode("ascii")})
+        if len(files) > FILES_MAX_COUNT or total > FILES_MAX_TOTAL:
+            return 1, f"{project}/files: 한 번에 올릴 수 있는 한도(파일 {FILES_MAX_COUNT}개·{FILES_MAX_TOTAL // 1_000_000}MB)를 넘는다 — 폴더를 나눠서 올린다(큰 자료는 서버에서 직접)", None
+    payload = {"dest": dest, "allow": sorted(allow or []), "reason": reason or "", "files": files}
+    why = files_payload_error(payload)
+    if why:
+        return 1, f"{project}/files: {why}", None
+    masker = None
+    try:
+        with connect(timeout=3, readonly=True) as c:
+            masker = load_masker(c)
+    except Exception:
+        masker = None
+    if masker is not None:                       # 등록된 비밀은 DB 에 넣지 않는다(문서 제안과 같은 선검사; 서버도 다시 검사한다)
+        for f in files:
+            try:
+                txt = base64.b64decode(f["b64"]).decode("utf-8")
+            except ValueError:
+                continue
+            if masker.text(txt) != txt:
+                return 1, f"{project}/files: {f['rel']} 에 등록된 비밀 값이 들어 있어 올리지 않는다 — 비밀은 `donghans secret` 으로 두고 자료에는 넣지 않는다", None
+    target, pid = f"{project}/files", st.proposal_id(project, "files", dest or "root")
+    try:
+        with connect(timeout=3) as c:
+            if has_open(c, session, target):
+                return 1, f"{target}: 이 세션의 이전 자료 제출이 아직 처리 중이다 — 기다리거나 `donghans ctx doc status` 로 확인한다", None
+            enqueue(c, pid, session, host, target, "files", None, "", payload)
+            c.commit()
+    except Exception as e:
+        return 1, f"{target}: 서버에 접속하지 못해 올리지 못했다({type(e).__name__}) — 서버가 켜지면 다시 올린다(자료는 보관하지 않는다)", None
+    return 0, f"{target}: 자료 {len(files)}개({total:,}바이트)를 대기열에 넣었다", pid
 
 
 def wait_row(connect, pid: str, timeout: float, sleep=time.sleep, poll: float = 0.5) -> dict | None:
@@ -314,15 +386,23 @@ def _result_path(store: str, pid: str) -> str:
     return os.path.join(st.inbox_dir(store), "_results", pid + ".json")
 
 
-def pull_queue(store: str, connect) -> list[str]:
-    """queued 행을 가져와(fetched) 기존 파일 형식 제안으로 풀어 놓는다. 쓰기 가능한 연결이 필요하다. 가져온 id 목록을 돌려준다."""
+def pull_queue(store: str, connect, masker=None) -> list[str]:
+    """queued 행을 가져와(fetched) 기존 파일 형식 제안으로 풀어 놓는다. 쓰기 가능한 연결이 필요하다. 가져온 id 목록을 돌려준다.
+    op=init·op=files 는 파일 인박스를 거치지 않고 같은 트랜잭션에서 바로 실행한다. op=files 는 비밀 검사기(masker)가 있어야 처리한다(없으면 행을 그대로 둔다 — fail-closed)."""
     out = []
+    _clean_files_inbox(store)
     with connect(timeout=5) as c:
         rows = c.execute("SELECT id, session_id, host, target, op, base_hash, body, created_at, payload FROM doc_proposals WHERE status='queued' ORDER BY created_at, id FOR UPDATE SKIP LOCKED").fetchall()
         for pid, sid, host, target, op, base, body, created, payload in rows:
             if op == "init":      # 파일 인박스·_results 를 타지 않고 같은 트랜잭션에서 바로 실행한다(fetched 를 거치지 않으므로 복구 규칙과 겹치지 않는다)
                 status, msg = _run_init(store, target, payload)
-                c.execute("UPDATE doc_proposals SET status=%s, msg=%s, body=NULL, resolved_at=now() WHERE id=%s", (status, msg, pid))
+                c.execute("UPDATE doc_proposals SET status=%s, msg=%s, body=NULL, payload=NULL, resolved_at=now() WHERE id=%s", (status, msg, pid))
+                continue
+            if op == "files":
+                if masker is None:
+                    continue
+                status, msg, commit = _run_files(store, target, payload, masker, pid)
+                c.execute("UPDATE doc_proposals SET status=%s, msg=%s, commit_sha=%s, body=NULL, payload=NULL, resolved_at=now() WHERE id=%s", (status, msg, commit, pid))
                 continue
             parts = (target or "").split("/", 2)
             why = None
@@ -333,7 +413,7 @@ def pull_queue(store: str, connect) -> list[str]:
             elif op not in ("write", "delete") or (op == "write" and not (body or "").strip()):
                 why = "op 또는 본문이 올바르지 않다"
             if why:
-                c.execute("UPDATE doc_proposals SET status='rejected', msg=%s, body=NULL, resolved_at=now() WHERE id=%s", (why, pid))
+                c.execute("UPDATE doc_proposals SET status='rejected', msg=%s, body=NULL, payload=NULL, resolved_at=now() WHERE id=%s", (why, pid))
                 continue
             d = os.path.join(st.inbox_dir(store), sid)
             path = os.path.join(d, pid + ".proposal.md")
@@ -359,6 +439,54 @@ def _run_init(store: str, project: str, payload: dict | None) -> tuple[str, str]
         return "applied", st.init_project(store, project, repo_url, owner, "")
     except Exception as e:
         return "rejected", f"{project}: init 실패 — {type(e).__name__}: {e}"
+
+
+def _clean_files_inbox(store: str) -> None:
+    """서버가 도중에 죽어 남은 임시 폴더를 지운다(pull_queue 는 단일 워커가 부르므로 진행 중인 것이 없다)."""
+    shutil.rmtree(os.path.join(store, "_filesinbox"), ignore_errors=True)
+
+
+def _run_files(store: str, target: str, payload, masker, pid: str) -> tuple[str, str, str | None]:
+    """op=files 행을 서버에서 실행한다 — 임시 폴더에 풀어 `import_files`(서버의 비밀 검사기로 다시 판정)로 files 저장소에 한 번의 커밋으로 반입한다.
+    (status, msg, commit). 예외는 잡아 rejected 로 바꾼다(안 그러면 같은 행을 영원히 다시 시도한다)."""
+    tmp = None
+    try:
+        project, _, tail = (target or "").partition("/")
+        if tail != "files" or project not in st.load_manifest(store):
+            return "rejected", f"{target}: 자료 제출의 target 이 올바르지 않거나 서버에 없는 프로젝트다", None
+        if not safe_component(pid):
+            return "rejected", f"{target}: 행 id 가 경로로 쓸 수 없는 값이다", None
+        why = files_payload_error(payload)
+        if why:
+            return "rejected", f"{target}: {why}", None
+        tmp = os.path.join(store, "_filesinbox", pid)
+        shutil.rmtree(tmp, ignore_errors=True)
+        total = 0
+        for f in payload["files"]:
+            data = base64.b64decode(f["b64"], validate=True)
+            total += len(data)
+            if total > FILES_MAX_TOTAL:
+                return "rejected", f"{target}: 풀린 합계가 상한 {FILES_MAX_TOTAL:,}바이트를 넘는다", None
+            path = os.path.join(tmp, *f["rel"].split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as fh:
+                fh.write(data)
+        rep = st.import_files(store, project, tmp, payload.get("dest", ""), masker, False, allow=tuple(payload.get("allow") or ()), reason=payload.get("reason", ""))
+        n = lambda k: len(rep[k])
+        head = f"{target}: 반입 {n('imported')} · 이미 같음 {n('same')} · 스크린샷(저장 안 함) {n('images')} · 보류 {n('held')}"
+        lines = [head]
+        for k, label in (("overridden", "사용자 허용으로 검사 없이 받음"), ("refused", "허용 거부"), ("held", "보류")):
+            for rel, why in rep[k][:FILES_MSG_LIST]:
+                lines.append(f"  {label}: {rel} — {why}")
+            if len(rep[k]) > FILES_MSG_LIST:
+                lines.append(f"  … {label} {len(rep[k]) - FILES_MSG_LIST}개 더")
+        status = "applied" if rep["imported"] else ("same" if not rep["held"] and not rep["refused"] else "rejected")
+        return status, "\n".join(lines), rep["commit"]
+    except Exception as e:
+        return "rejected", f"{target}: 자료 반입 실패 — {type(e).__name__}: {e}", None
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 def collect_results(store: str, connect) -> list[tuple[str, str, dict]]:
@@ -388,7 +516,7 @@ def record_results(store: str, connect, results: list[tuple[str, str, dict]]) ->
                     d = st.read_doc(store, project, kind, name)
                     doc_hash = d["hash"] if d else None
             keep_body = r["status"] == "conflict"
-            c.execute("UPDATE doc_proposals SET status=%s, msg=%s, commit_sha=%s, doc_hash=%s, resolved_at=now(), body=CASE WHEN %s THEN body ELSE NULL END WHERE id=%s",
+            c.execute("UPDATE doc_proposals SET status=%s, msg=%s, commit_sha=%s, doc_hash=%s, resolved_at=now(), payload=NULL, body=CASE WHEN %s THEN body ELSE NULL END WHERE id=%s",
                       (r["status"], r.get("msg", ""), r.get("commit"), doc_hash, keep_body, pid))
         c.commit()
 
