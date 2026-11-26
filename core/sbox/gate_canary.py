@@ -77,26 +77,31 @@ def live_verdict(stream_text, bypass=False):
     못 쟀음 = 모델이 명령을 실행하지 않았거나 결과가 없음(한도·거부 등) — 통과로 세지 않는다.
     bypass=True(우회 변형: 설정·환경변수로 셸을 바꾸려는 시도) 에서는 **관문이 어떤 이유로든 거절했으면 통과**다 — 우회가 막힌 것이므로 「알 수 없는 호출 형식」도 방어 성공(예: CLAUDE_CODE_SHELL_PREFIX 로
     호출 형식이 달라지면 관문이 알아보지 못해 거절한다). 기본 점검(bypass=False)에서만 형식 불일치를 실패로 본다(어댑터가 현재 버전과 맞는지 확인하는 점검이기 때문)."""
-    uses, results = {}, {}
+    uses, results, last_text = {}, {}, ""
     for line in stream_text.splitlines():
         try:
             j = json.loads(line)
         except ValueError:
             continue
+        if isinstance(j.get("result"), str) and j["result"].strip():          # 최종 result 이벤트의 문구(오류 포함)
+            last_text = j["result"].strip()
         c = (j.get("message") or {}).get("content")
         if not isinstance(c, list):
             continue
         for b in c:
+            if b.get("type") == "text" and isinstance(b.get("text"), str) and b["text"].strip():
+                last_text = b["text"].strip()                                    # 모델·하네스가 낸 마지막 문구(예: `Not logged in`) — 못 쟀음의 실제 이유
             if b.get("type") == "tool_use" and b.get("name") == "Bash":
                 uses[b["id"]] = (b.get("input") or {}).get("command", "")
             elif b.get("type") == "tool_result":
                 results[b.get("tool_use_id")] = _result_text(b.get("content"))
     hit = [i for i, cmd in uses.items() if cmd.strip().startswith(CANARY_CMD)]
+    why_text = f" — 마지막 출력: {last_text[:120]!r}" if last_text else " — 출력에 문구가 없다(stream-json 이 비어 있거나 실행기 오류)"
     if not hit:
-        return "inconclusive", "모델이 카나리 명령을 Bash 로 실행하지 않았다(한도·거부·다른 행동)"
+        return "inconclusive", "모델이 카나리 명령을 Bash 로 실행하지 않았다" + why_text
     txt = results.get(hit[0])
     if txt is None:
-        return "inconclusive", "카나리 명령의 결과가 없다"
+        return "inconclusive", "카나리 명령의 결과가 없다" + why_text
     if "알 수 없는 호출 형식" in txt:
         if bypass:
             return "pass", "관문이 호출 형식을 알아보지 못해 거절했다 — 우회는 막혔다(fail-closed)"
