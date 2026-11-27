@@ -222,6 +222,44 @@ try:
         conn.commit()
         _r, notes3 = ce.semantic_search(conn, "billing", emb_fake, cd.AUTO_RE)
         check("색인 대기: 아직 색인 안 된 메시지가 있으면 알린다", any("색인 대기: 1건" in x for x in notes3), str(notes3))
+        # 기본 검색 = 글자 일치 + 의미 검색 후보 블록(--literal·CTX_NO_SEMANTIC·호환 안 되는 옵션이면 생략)
+        import argparse, io, contextlib
+        os.environ["CTX_EMBED_URL"] = URL; os.environ.pop("CTX_NO_SEMANTIC", None)
+
+        def ns2(**kw):
+            d = dict(query=["x"], repo=None, here=False, role=None, session=None, kind=None, days=None, limit=15, include_excluded=False, count=False, by=None,
+                     not_=None, semantic=False, literal=False, local=False, tz="Asia/Seoul", raw=False)
+            d.update(kw); return argparse.Namespace(**d)
+
+        def run(a_):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                try:
+                    rc = cc.cmd_search(a_)
+                except SystemExit as e:
+                    rc = e.code
+            return rc, out.getvalue(), err.getvalue()
+        H.reqs.clear()
+        rc, out, err = run(ns2(query=["deploy billing"]))
+        check("기본 검색: 글자 일치가 없어도 의미 검색 후보 블록이 붙는다", "의미 검색 후보" in out and "billing service on friday" in out and H.reqs != [], out[:300] + err[:200])
+        rc, out, err = run(ns2(query=["billing"]))
+        keys = re.findall(r"^\[(.+?)\] (\S+)", out, flags=re.M)
+        check("기본 검색: 글자 일치 결과와 의미 검색 후보가 겹치지 않는다(같은 메시지가 두 번 나오지 않음)", keys and len(set(keys)) == len(keys), str(keys))
+        H.reqs.clear()
+        rc, out, err = run(ns2(query=["deploy billing"], literal=True))
+        check("--literal: 의미 검색 블록도 임베딩 요청도 없다", "의미 검색 후보" not in out and H.reqs == [] and rc == 0, out[:200])
+        os.environ["CTX_NO_SEMANTIC"] = "1"
+        rc, out, err = run(ns2(query=["deploy billing"]))
+        check("CTX_NO_SEMANTIC=1: 의미 검색 블록도 임베딩 요청도 없다", "의미 검색 후보" not in out and H.reqs == [], out[:200])
+        os.environ.pop("CTX_NO_SEMANTIC")
+        rc, out, err = run(ns2(query=["billing"], kind="all"))
+        check("호환 안 되는 옵션(--kind)이면 의미 검색을 생략하고 그 사실을 알린다", "의미 검색 생략" in err and "의미 검색 후보" not in out and H.reqs == [], err[:200])
+        rc, out, err = run(ns2(query=["billing"], count=True))
+        check("--count 에는 의미 검색을 붙이지 않는다", "의미 검색 후보" not in out and H.reqs == [])
+        os.environ.pop("CTX_EMBED_URL", None)
+        rc, out, err = run(ns2(query=["deploy billing"]))
+        check("임베딩 설정이 없어도 글자 일치 검색은 정상이고 의미 검색 쪽은 사유를 알린다", rc == 0 and "의미 검색 불가" in err and "설정 없음" in err, err[:200])
+        os.environ["CTX_EMBED_URL"] = URL
         # 표가 없는 서버 → 대체 + 알림 + 연결이 계속 쓸 수 있다
         conn.execute("DROP TABLE message_chunks"); conn.commit()
         res4, notes4 = ce.semantic_search(conn, "billing deploy friday", emb_fake, cd.AUTO_RE)
@@ -231,20 +269,54 @@ try:
         import argparse
         cs.add_secret(conn, "q_secret", "literal", "qsecretvalue987654", force=True); conn.commit()
         H.reqs.clear(); os.environ["CTX_EMBED_URL"] = URL
-        ns = dict(query=["qsecretvalue987654"], repo=None, here=False, role=None, session=None, kind=None, days=None, limit=15, include_excluded=False, count=False, by=None, not_=None, semantic=True, raw=False)
+        ns = dict(query=["qsecretvalue987654"], repo=None, here=False, role=None, session=None, kind=None, days=None, limit=15, include_excluded=False, count=False, by=None, not_=None, semantic=True, literal=False, local=False, tz="Asia/Seoul", raw=False)
         try:
-            cc.cmd_search_semantic(argparse.Namespace(**ns)); ok = False
+            cc.cmd_search(argparse.Namespace(**ns)); ok = False
         except SystemExit as e:
             ok = "비밀" in str(e.code)
         check("질의에 등록된 비밀이 있으면 임베딩 요청 없이 거부한다", ok and H.reqs == [], str(H.reqs))
         for opt, val in (("kind", "all"), ("role", "user"), ("count", True), ("by", "day"), ("not_", ["x"])):
             try:
-                cc.cmd_search_semantic(argparse.Namespace(**{**ns, "query": ["billing"], opt: val})); ok = False
+                cc.cmd_search(argparse.Namespace(**{**ns, "query": ["billing"], opt: val})); ok = False
             except SystemExit as e:
                 ok = "--semantic" in str(e.code)
             check(f"--semantic 과 {opt} 를 같이 주면 거부한다", ok)
         r = subprocess.run([sys.executable, os.path.join(ROOT, "llm_ctx.py"), "ctx", "embed-index", "--raw"], capture_output=True, text=True, env=pg.env())
         check("embed-index 는 --raw 를 받지 않는다(치환 해제 불가)", r.returncode != 0 and "unrecognized" in r.stderr, r.stderr[-200:])
+        # DB(정본) 연결 불가 → 이 호스트의 로컬 기록으로 자동 폴백 / --local
+        import ctx_local as cl
+        pdir = os.path.join(pg.home, ".claude", "projects", "-tmp-proj"); os.makedirs(pdir, exist_ok=True)
+        with open(os.path.join(pdir, "sess1234-0000.jsonl"), "w") as fh:
+            for rec in (
+                {"type": "user", "timestamp": "2026-11-20T01:00:00Z", "message": {"role": "user", "content": "zebra stripes question password=Abcdef123456xyz"}},
+                {"type": "assistant", "timestamp": "2026-11-20T01:00:05Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "zebra answer"}, {"type": "tool_use", "name": "Bash", "input": {"command": "zebra"}}]}},
+                {"type": "user", "timestamp": "2026-11-20T01:00:09Z", "message": {"role": "user", "content": [{"type": "tool_result", "content": "zebra tool output"}]}},
+                {"type": "user", "timestamp": "2026-11-20T01:00:10Z", "message": {"role": "user", "content": "<task-notification> zebra auto"}},
+            ):
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        good_dsn = os.environ["CLAUDE_CTX_DSN"]
+        os.environ["CLAUDE_CTX_DSN"] = "host=/nonexistent port=1 dbname=x user=y"
+        try:
+            rc, out, err = run(ns2(query=["zebra"]))
+        finally:
+            os.environ["CLAUDE_CTX_DSN"] = good_dsn
+        check("DB 연결 불가: 알리고(「정본(DB) 연결 불가」) 로컬 기록으로 대신 찾는다(종료 코드 0)", rc == 0 and "정본(DB) 연결 불가" in err and "이 호스트" in err and "zebra stripes question" in out and "zebra answer" in out, out[:200] + err[:200])
+        check("로컬 폴백: 도구 결과·자동 메시지는 결과에 없다", "tool output" not in out and "zebra auto" not in out)
+        check("로컬 폴백: 비밀 후보(password=값)는 가려진다", "Abcdef123456xyz" not in out and "[protected]" in out, out[:300])
+        check("로컬 폴백: 한계(이 호스트만·없다는 뜻이 아님)를 항상 알린다", "다른 호스트" in err and "기록이 없다는 뜻이 아니다" in err)
+        H.reqs.clear()
+        rc, out, err = run(ns2(query=["zebra"], local=True))
+        check("--local: DB·임베딩 서버 없이 로컬 기록만 본다", rc == 0 and "zebra stripes question" in out and H.reqs == [] and "정본(DB) 연결 불가" not in err)
+        res_l, nf, to = cl.search_local("zebra", cd.AUTO_RE, here_cwd="/tmp/proj")
+        check("로컬 폴백: --here 는 경로를 폴더 이름(`/`·`.` → `-`)으로 바꿔 그 프로젝트만 본다", len(res_l) == 2 and nf == 1)
+        res_l, nf, to = cl.search_local("zebra", here_cwd="/other/place")
+        check("로컬 폴백: 다른 경로의 --here 는 결과 없음(읽은 파일 0)", res_l == [] and nf == 0)
+        res_l, _nf, _to = cl.search_local("zebra", cd.AUTO_RE, role="assistant")
+        check("로컬 폴백: --role assistant 는 모델 응답만", len(res_l) == 1 and res_l[0]["role"] == "assistant")
+        res_l, _nf, _to = cl.search_local("ZEBRA", cd.AUTO_RE)
+        check("로컬 폴백: 대소문자 무시", len(res_l) == 2)
+        res_l, nf, _to = cl.search_local("zebra", session="nomatch")
+        check("로컬 폴백: --session 접두가 안 맞으면 파일을 읽지 않는다", res_l == [] and nf == 0)
         conn.close()
     finally:
         pg.stop()

@@ -102,7 +102,7 @@ mkModOf "mods.devel" __curPos "LLM CLI tools" ({
   # (observe 의 usageui 와 같은 방식). 훅·타이머·사용자가 부르는 `donghans` 는 모두 이 래퍼다.
   ctxSrc = pkgs.runCommand "llm-ctx-src" {} ''
     mkdir -p $out
-    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_embed.py" "ctx_secrets.py" "ctx_instr.py" "ctx_store.py" "ctx_doccli.py" "ctx_docqueue.py" "ctx_toolhook.py" "ctxdata.py" "ctxchart.py" "ctxcards.py" "ctxaudit.py" "protocolcheck.py" "protocolhook.py" "protocol_text.py" "llmcards.py" "llmhost_view.py" "llmhost_artifacts.py" "llmhost_ctl.py" "llmlimit.py" "llmui.py"]}
+    ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-ctx + "/${f}"} $out/${f}") ["llm_ctx.py" "ctx_embed.py" "ctx_local.py" "ctx_secrets.py" "ctx_instr.py" "ctx_store.py" "ctx_doccli.py" "ctx_docqueue.py" "ctx_toolhook.py" "ctxdata.py" "ctxchart.py" "ctxcards.py" "ctxaudit.py" "protocolcheck.py" "protocolhook.py" "protocol_text.py" "llmcards.py" "llmhost_view.py" "llmhost_artifacts.py" "llmhost_ctl.py" "llmlimit.py" "llmui.py"]}
     ${lib.concatMapStringsSep "\n" (f: "cp ${../../_tools/llm/llm-sessions + "/${f}"} $out/${f}") ["llm_sessions.py" "tmuxsess.py"]}
     cp ${../../_tools/_lib/uikit/uikit.py} $out/uikit.py
     # llm-host(세션 호스트 코어, llm-trust 11): llmhost_ctl.find_host_dir 이 ctxSrc/llm-host 를 찾는다(환경변수 LLMUI_HOST_DIR 없이). 시험·실측 스크립트(tests, fake_claude, *_real)는 싣지 않는다.

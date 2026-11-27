@@ -514,9 +514,7 @@ def _search_kinds(spec):
     return ks
 
 
-def cmd_search(a):
-    if getattr(a, "semantic", False):
-        return cmd_search_semantic(a)
+def _search_literal(a, shown=None):
     repo = _repo_filter(a)
     q = " ".join(a.query)
     kinds = _search_kinds(a.kind)
@@ -573,6 +571,8 @@ def cmd_search(a):
             rows = c.execute(sql, args)
         for ts, sid, role, kind, host, rurl, br, text in rows:
             n += 1
+            if shown is not None:
+                shown.add((sid, ts))
             t = mk.text(text or "")                         # 치환을 먼저 하고 자른다(경계에서 잘린 비밀 조각이 남지 않게)
             i = t.lower().find(q.lower())
             st = max((i if i >= 0 else 0) - 60, 0)
@@ -595,18 +595,19 @@ def cmd_search(a):
     return 0
 
 
-def cmd_search_semantic(a):
-    """`search --semantic`: 철자 유사 + 임베딩(문장 청크)을 순위 결합(RRF)해 사용자 프롬프트에서 후보를 낸다. 계획: ctx plan/ctx-의미검색-S2.
-    임베딩이 안 되면(설정 없음·서버 불가·표 없음) 철자 유사만으로 내고 사유를 stderr 에 반드시 적는다."""
-    bad = [n for n, v in (("--kind", a.kind), ("--role", a.role), ("--count", getattr(a, "count", False)), ("--by", getattr(a, "by", None)), ("--not", getattr(a, "not_", None))) if v]
-    if bad:
-        sys.exit(f"--semantic 은 {', '.join(bad)} 와 함께 쓸 수 없다(의미 검색은 사용자 프롬프트만 본다)")
+def cmd_search_semantic(a, exclude=None, block=False):
+    """철자 유사 + 임베딩(문장 청크)을 순위 결합(RRF)해 사용자 프롬프트에서 후보를 낸다. 계획: ctx plan/ctx-의미검색-S2.
+    exclude: 이미 보여 준 (session_id, ts) — 글자 일치 결과 뒤에 붙는 블록일 때 중복을 뺀다. 임베딩이 안 되면(설정 없음·서버 불가·표 없음) 철자 유사만으로 내고 사유를 stderr 에 적는다."""
     import ctx_embed as ce, ctxdata as cd
     repo = _repo_filter(a)
     q = " ".join(a.query)
+    limit = min(a.limit, 8) if block else a.limit
     with connect(readonly=True) as c:
         mk = _masker(a, c)
         if mk.hits(q):      # 임베딩 요청을 보내기 전에 막는다 — 질의가 비밀을 담은 채 임베딩 서버로 나가지 않게
+            if block:
+                print("[의미 검색 생략: 검색어에 등록된 비밀이 들어 있다]", file=sys.stderr)
+                return 0
             sys.exit("검색어에 등록된 비밀이 들어 있어 검색하지 않는다(존재 여부가 드러나므로)")
         try:
             emb = ce.make_embedder()
@@ -614,7 +615,11 @@ def cmd_search_semantic(a):
             def emb(_texts, _e=e):
                 raise _e
         res, notices = ce.semantic_search(c, q, emb, cd.AUTO_RE, repo=repo, session=a.session, days=a.days,
-                                          include_excluded=getattr(a, "include_excluded", False), limit=a.limit)
+                                          include_excluded=getattr(a, "include_excluded", False), limit=limit + (len(exclude) if exclude else 0))
+        if exclude:
+            res = [r for r in res if (r["session_id"], r["ts"]) not in exclude][:limit]
+        if block and res:
+            print("\n── 의미 검색 후보(철자 유사 + 임베딩, 사용자 프롬프트, 위 글자 일치 결과에 없는 것) ──")
         for r in res:
             t = mk.text(r["chunk"] or r["text"] or "")
             if not r["chunk"]:       # 철자 유사로만 잡힌 메시지는 청크가 없을 수 있다 — 일치 주변을 보인다
@@ -624,10 +629,66 @@ def cmd_search_semantic(a):
             else:
                 t = t[:240]
             print(mk.text(f"[{r['ts']:%Y-%m-%d %H:%M}] {r['session_id'][:8]} user/prompt @{r['host']} {r['repo_url'] or '-'}#{r['branch'] or '-'}  (점수 {r['score']:.4f} · {'+'.join(r['sources'])})") + f"\n  {t.strip()!r}")
-        print(f"\n[의미 검색: 후보 {len(res)}건(철자 유사 + 임베딩 순위 결합, 사용자 프롬프트만). 점수가 낮다고 기록이 없다는 뜻은 아니다 — 후보다]", file=sys.stderr)
+        print(f"\n[의미 검색: 후보 {len(res)}건(철자 유사 + 임베딩 순위 결합, 사용자 프롬프트만). 점수가 낮다고 기록이 없다는 뜻은 아니다 — 후보다]" if not block else
+              f"[의미 검색 후보 {len(res)}건 — 끄려면 --literal]", file=sys.stderr)
         for n in notices:
             print(n, file=sys.stderr)
     return 0
+
+
+def cmd_search_local(a, reason=None):
+    """`search --local` / DB 접속 불가 시 자동 폴백: 이 호스트의 트랜스크립트에서 글자 그대로 찾는다(ctx_local.py). 한계를 항상 알린다."""
+    import ctx_local as cl, ctxdata as cd
+    q = " ".join(a.query)
+    mk = cs.StrictMasker([])      # 등록표는 DB 에 있어 못 읽는다 — 비밀 후보만 가린다
+    if reason:
+        print(f"[정본(DB) 연결 불가: {reason}. 이 호스트의 로컬 대화 기록만 검색한다]", file=sys.stderr)
+    role = a.role if getattr(a, "role", None) in ("user", "assistant") else None
+    res, nfiles, timed_out = cl.search_local(q, cd.AUTO_RE, here_cwd=os.getcwd() if a.here else None, days=a.days, role=role, session=a.session, limit=a.limit)
+    for r in res:
+        print(mk.text(f"[{r['ts'][:16].replace('T', ' ')}] {r['session_id'][:8]} {r['role']}/{r['kind']} @이 호스트(로컬)") + f"\n  {mk.text(cl.snippet(r['text'], q))!r}")
+    print(f"\n[로컬 검색: {len(res)}건 — 이 호스트의 ~/.claude/projects 기록 {nfiles}개 파일만 봤다. 다른 호스트의 대화·DB 에 적재된 최근분은 없다. "
+          f"못 찾았다고 기록이 없다는 뜻이 아니다{' (시간 제한으로 일부만 훑음)' if timed_out else ''}]", file=sys.stderr)
+    return 0
+
+
+def _semantic_compatible(a):
+    """의미 검색은 사용자 프롬프트만 본다 — 이 옵션들과는 같이 못 쓴다."""
+    kind = _search_kinds(a.kind) if a.kind else None
+    return not ((kind and set(kind) != {"prompt"}) or (a.role not in (None, "user")) or getattr(a, "count", False)
+                or getattr(a, "by", None) or getattr(a, "not_", None))
+
+
+def cmd_search(a):
+    """기본: 글자 일치 검색(기존 그대로) + 이어서 의미 검색 후보(글자 일치에 없는 사용자 프롬프트). --literal·CTX_NO_SEMANTIC=1 이면 글자 일치만,
+    --semantic 이면 의미 검색만, --local 이면 이 호스트의 로컬 기록만. 정본(DB)에 못 붙으면 알리고 로컬 기록으로 대신 찾는다."""
+    if getattr(a, "local", False):
+        return cmd_search_local(a)
+    if getattr(a, "semantic", False):
+        bad = [n for n, v in (("--kind", a.kind), ("--role", a.role), ("--count", getattr(a, "count", False)), ("--by", getattr(a, "by", None)), ("--not", getattr(a, "not_", None))) if v]
+        if bad:
+            sys.exit(f"--semantic 은 {', '.join(bad)} 와 함께 쓸 수 없다(의미 검색은 사용자 프롬프트만 본다)")
+        try:
+            return cmd_search_semantic(a)
+        except psycopg.OperationalError as e:
+            return cmd_search_local(a, reason=str(e).strip().splitlines()[0][:120])
+    try:
+        shown = set()
+        rc = _search_literal(a, shown)
+        want = not (getattr(a, "literal", False) or os.environ.get("CTX_NO_SEMANTIC"))
+        if want and getattr(a, "count", False) is False:
+            if _semantic_compatible(a):
+                try:
+                    cmd_search_semantic(a, exclude=shown, block=True)
+                except psycopg.OperationalError:
+                    raise
+                except Exception as e:       # 의미 검색 쪽 문제가 글자 일치 결과를 깨지 않게 — 알리고 넘어간다
+                    print(f"[의미 검색 생략: {type(e).__name__}: {str(e).splitlines()[0][:100]}]", file=sys.stderr)
+            else:
+                print("[의미 검색 생략: --kind·--role·--not·--by 와 함께 쓸 수 없다(사용자 프롬프트만 본다) — 글자 일치 결과만]", file=sys.stderr)
+        return rc
+    except psycopg.OperationalError as e:
+        return cmd_search_local(a, reason=str(e).strip().splitlines()[0][:120])
 
 
 def cmd_embed_index(a):
@@ -1475,7 +1536,9 @@ def main():
     p = ctx.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--session", help="세션 ID 앞자리로 한정"); p.add_argument("--kind", help="검색할 메시지 종류(쉼표 목록 또는 all). 기본 prompt,response — tool_use·tool_result(명령 호출·결과)·other 는 지정해야 검색된다"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.add_argument("--include-excluded", action="store_true")
     p.add_argument("--count", action="store_true", help="본문 대신 건수만(같은 필터가 고른 행). --by 로 묶는 기준 지정"); p.add_argument("--by", choices=["day", "session", "kind"], help="--count 의 묶음 기준(기본 day)")
     p.add_argument("--tz", default="Asia/Seoul", help="--count --by day 의 날짜 기준 시간대(기본 Asia/Seoul)"); p.add_argument("--not", dest="not_", action="append", metavar="정규식", help="본문이 이 정규식(대소문자 무시)에 맞으면 제외(반복 가능)")
-    p.add_argument("--semantic", action="store_true", help="철자 유사 + 임베딩(문장 청크)을 순위 결합해 사용자 프롬프트에서 후보를 찾는다(표현이 달라도 찾는다; --kind·--role·--count·--by·--not 과 함께 쓸 수 없다)"); p.set_defaults(f=cmd_search)
+    p.add_argument("--semantic", action="store_true", help="의미 검색만(철자 유사 + 임베딩 순위 결합, 사용자 프롬프트). 기본 검색은 글자 일치 뒤에 이 후보를 덧붙인다; --kind·--role·--count·--by·--not 과 함께 쓸 수 없다")
+    p.add_argument("--literal", action="store_true", help="글자 일치 검색만(의미 검색 후보를 덧붙이지 않는다). 환경변수 CTX_NO_SEMANTIC=1 도 같다")
+    p.add_argument("--local", action="store_true", help="정본(DB) 없이 이 호스트의 로컬 대화 기록(~/.claude/projects)에서 글자 그대로 찾는다 — DB 에 못 붙으면 자동으로 이렇게 된다"); p.set_defaults(f=cmd_search)
     p = ctx.add_parser("embed-index", help="사용자 프롬프트를 문장 청크로 나눠 임베딩해 message_chunks 에 넣는다(멱등, 서버 호스트에서 — 쓰기 접속)"); p.add_argument("--limit", type=int, help="이번에 처리할 메시지 수 상한"); p.add_argument("--dry-run", action="store_true", help="대상 메시지·청크 수만 센다"); p.set_defaults(f=cmd_embed_index)
     p = ctx.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.add_argument("--include-excluded", action="store_true"); p.set_defaults(f=cmd_recent)
     p = ctx.add_parser("session"); p.add_argument("sid"); p.add_argument("--n", type=int); p.add_argument("--full", action="store_true"); p.add_argument("--from", dest="from_uuid"); p.add_argument("--to", dest="to_uuid"); p.set_defaults(f=cmd_session)
