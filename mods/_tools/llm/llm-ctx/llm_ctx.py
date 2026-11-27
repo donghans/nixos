@@ -515,6 +515,8 @@ def _search_kinds(spec):
 
 
 def cmd_search(a):
+    if getattr(a, "semantic", False):
+        return cmd_search_semantic(a)
     repo = _repo_filter(a)
     q = " ".join(a.query)
     kinds = _search_kinds(a.kind)
@@ -591,6 +593,65 @@ def cmd_search(a):
             elif n == 0:
                 print(f"\n[검색 범위: {','.join(kinds)} — 0건. 다른 종류({', '.join(skipped)})에도 없다]", file=sys.stderr)
     return 0
+
+
+def cmd_search_semantic(a):
+    """`search --semantic`: 철자 유사 + 임베딩(문장 청크)을 순위 결합(RRF)해 사용자 프롬프트에서 후보를 낸다. 계획: ctx plan/ctx-의미검색-S2.
+    임베딩이 안 되면(설정 없음·서버 불가·표 없음) 철자 유사만으로 내고 사유를 stderr 에 반드시 적는다."""
+    bad = [n for n, v in (("--kind", a.kind), ("--role", a.role), ("--count", getattr(a, "count", False)), ("--by", getattr(a, "by", None)), ("--not", getattr(a, "not_", None))) if v]
+    if bad:
+        sys.exit(f"--semantic 은 {', '.join(bad)} 와 함께 쓸 수 없다(의미 검색은 사용자 프롬프트만 본다)")
+    import ctx_embed as ce, ctxdata as cd
+    repo = _repo_filter(a)
+    q = " ".join(a.query)
+    with connect(readonly=True) as c:
+        mk = _masker(a, c)
+        if mk.hits(q):      # 임베딩 요청을 보내기 전에 막는다 — 질의가 비밀을 담은 채 임베딩 서버로 나가지 않게
+            sys.exit("검색어에 등록된 비밀이 들어 있어 검색하지 않는다(존재 여부가 드러나므로)")
+        try:
+            emb = ce.make_embedder()
+        except ce.EmbedError as e:
+            def emb(_texts, _e=e):
+                raise _e
+        res, notices = ce.semantic_search(c, q, emb, cd.AUTO_RE, repo=repo, session=a.session, days=a.days,
+                                          include_excluded=getattr(a, "include_excluded", False), limit=a.limit)
+        for r in res:
+            t = mk.text(r["chunk"] or r["text"] or "")
+            if not r["chunk"]:       # 철자 유사로만 잡힌 메시지는 청크가 없을 수 있다 — 일치 주변을 보인다
+                i = t.lower().find(q.lower())
+                st = max((i if i >= 0 else 0) - 60, 0)
+                t = t[st:st + 240]
+            else:
+                t = t[:240]
+            print(mk.text(f"[{r['ts']:%Y-%m-%d %H:%M}] {r['session_id'][:8]} user/prompt @{r['host']} {r['repo_url'] or '-'}#{r['branch'] or '-'}  (점수 {r['score']:.4f} · {'+'.join(r['sources'])})") + f"\n  {t.strip()!r}")
+        print(f"\n[의미 검색: 후보 {len(res)}건(철자 유사 + 임베딩 순위 결합, 사용자 프롬프트만). 점수가 낮다고 기록이 없다는 뜻은 아니다 — 후보다]", file=sys.stderr)
+        for n in notices:
+            print(n, file=sys.stderr)
+    return 0
+
+
+def cmd_embed_index(a):
+    """`embed-index`: 사용자 프롬프트를 문장 청크로 나눠(비밀 치환 뒤) 임베딩 서버로 보내 message_chunks 에 넣는다. 멱등. 쓰기 접속 — 서버 호스트에서 쓴다."""
+    import ctx_embed as ce, ctxdata as cd
+    t0 = time.time()
+    with connect(readonly=a.dry_run) as c:
+        mk = cs.load_masker(c)       # `--raw` 로 치환이 풀리는 _masker 를 쓰지 않는다(원문이 임베딩 서버로 가지 않게)
+        emb = None
+        try:
+            emb = ce.make_embedder(timeout=ce.BATCH_TIMEOUT)
+        except ce.EmbedError as e:
+            if not a.dry_run:
+                sys.exit(f"임베딩 서버를 쓸 수 없다: {e}")
+            print(f"(임베딩 서버 설정 없음 — dry-run 은 건수만 센다: {e})")
+        try:
+            st = ce.index_messages(c, mk, emb, cd.AUTO_RE, limit=a.limit, dry_run=a.dry_run)
+        except Exception as e:
+            if ce._is_missing_table(e):
+                sys.exit("message_chunks 표가 없다 — schema.sql 의 마이그레이션 8 을 서버에 적용한 뒤 다시 실행한다(서버 호스트 nixup os).")
+            raise
+    kind = "대상(dry-run)" if a.dry_run else "처리"
+    print(f"{kind}: 메시지 {st['messages']}건 · 청크 {st['chunks']}개 · 건너뜀(내용 없음) {st['skipped']}건 · 실패 {st['failed']}개 · {time.time() - t0:.1f}초")
+    return 1 if st["failed"] else 0
 
 
 def cmd_recent(a):
@@ -1413,7 +1474,9 @@ def main():
     p = ctx.add_parser("ingest"); p.add_argument("--days", type=int, default=2); p.add_argument("--all", action="store_true"); p.add_argument("--no-otel", action="store_true"); p.add_argument("--reparse-queued", action="store_true", help="이미 읽은 파일에서 사람이 작업 도중 보낸 메시지(queued_command)만 다시 읽어 빠진 행을 채운다(기본 건수만, --apply 로 넣음)"); p.add_argument("--apply", action="store_true"); p.set_defaults(f=cmd_ingest)
     p = ctx.add_parser("search"); p.add_argument("query", nargs="+"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--role"); p.add_argument("--session", help="세션 ID 앞자리로 한정"); p.add_argument("--kind", help="검색할 메시지 종류(쉼표 목록 또는 all). 기본 prompt,response — tool_use·tool_result(명령 호출·결과)·other 는 지정해야 검색된다"); p.add_argument("--days", type=int); p.add_argument("--limit", type=int, default=15); p.add_argument("--include-excluded", action="store_true")
     p.add_argument("--count", action="store_true", help="본문 대신 건수만(같은 필터가 고른 행). --by 로 묶는 기준 지정"); p.add_argument("--by", choices=["day", "session", "kind"], help="--count 의 묶음 기준(기본 day)")
-    p.add_argument("--tz", default="Asia/Seoul", help="--count --by day 의 날짜 기준 시간대(기본 Asia/Seoul)"); p.add_argument("--not", dest="not_", action="append", metavar="정규식", help="본문이 이 정규식(대소문자 무시)에 맞으면 제외(반복 가능)"); p.set_defaults(f=cmd_search)
+    p.add_argument("--tz", default="Asia/Seoul", help="--count --by day 의 날짜 기준 시간대(기본 Asia/Seoul)"); p.add_argument("--not", dest="not_", action="append", metavar="정규식", help="본문이 이 정규식(대소문자 무시)에 맞으면 제외(반복 가능)")
+    p.add_argument("--semantic", action="store_true", help="철자 유사 + 임베딩(문장 청크)을 순위 결합해 사용자 프롬프트에서 후보를 찾는다(표현이 달라도 찾는다; --kind·--role·--count·--by·--not 과 함께 쓸 수 없다)"); p.set_defaults(f=cmd_search)
+    p = ctx.add_parser("embed-index", help="사용자 프롬프트를 문장 청크로 나눠 임베딩해 message_chunks 에 넣는다(멱등, 서버 호스트에서 — 쓰기 접속)"); p.add_argument("--limit", type=int, help="이번에 처리할 메시지 수 상한"); p.add_argument("--dry-run", action="store_true", help="대상 메시지·청크 수만 센다"); p.set_defaults(f=cmd_embed_index)
     p = ctx.add_parser("recent"); p.add_argument("--repo"); p.add_argument("--here", action="store_true"); p.add_argument("--limit", type=int, default=10); p.add_argument("--include-excluded", action="store_true"); p.set_defaults(f=cmd_recent)
     p = ctx.add_parser("session"); p.add_argument("sid"); p.add_argument("--n", type=int); p.add_argument("--full", action="store_true"); p.add_argument("--from", dest="from_uuid"); p.add_argument("--to", dest="to_uuid"); p.set_defaults(f=cmd_session)
     p = ctx.add_parser("msg", help="한 메시지의 완전한 본문(도구 호출 포함)"); p.add_argument("uuid", help="메시지 uuid 앞자리(ctx session 출력의 8자 등)"); p.add_argument("--max", type=int, default=8000, help="출력 글자 수 상한(기본 8000)"); p.add_argument("--all", action="store_true", help="상한 없이 전부"); p.add_argument("--session", help="(에이전트 셸) 파일을 둘 세션 ID(기본: 환경변수 CLAUDE_CODE_SESSION_ID)"); p.set_defaults(f=cmd_msg)

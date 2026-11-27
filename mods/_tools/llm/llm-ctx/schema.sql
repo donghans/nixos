@@ -278,3 +278,19 @@ CREATE TABLE IF NOT EXISTS observe_units (
 );
 INSERT INTO schema_version (v) VALUES (5) ON CONFLICT DO NOTHING;  -- 5: observe_focus_hourly·changes·periodic·units
 
+
+-- 의미 검색(계획: ctx plan/ctx-의미검색-S2) — 사용자 프롬프트의 문장 청크 임베딩. 파생 데이터라 DROP 해도 손실 없음(embed-index 로 다시 만든다).
+-- 청크 본문은 비밀 치환을 거친 뒤의 텍스트다(원문 위치 열 없음). embedding NULL = 건너뜀(치환 뒤 의미 있는 글자가 없는 메시지).
+-- 벡터 인덱스(HNSW)는 만들지 않는다(청크 1만 개대에서는 정확 검색이 충분하고, HNSW 는 필터를 사후 적용해 결과가 조용히 줄어든다).
+CREATE TABLE IF NOT EXISTS message_chunks (
+  uuid        text NOT NULL REFERENCES messages(uuid) ON DELETE CASCADE,
+  chunk_no    int  NOT NULL,
+  chunk_text  text NOT NULL,
+  model       text NOT NULL,
+  embedding   vector(1024),
+  embedded_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (uuid, chunk_no, model)
+);
+-- 철자 유사(word_similarity) 검색 전용 부분 인덱스: 기존 messages_trgm 은 전 메시지를 덮어 후보가 너무 많아 서버에서 4~12초 걸렸다.
+CREATE INDEX IF NOT EXISTS messages_trgm_userprompt ON messages USING gin (text gin_trgm_ops) WHERE kind = 'prompt' AND role = 'user';
+INSERT INTO schema_version (v) VALUES (8) ON CONFLICT DO NOTHING;  -- 8: message_chunks, messages_trgm_userprompt
