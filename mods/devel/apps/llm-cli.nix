@@ -299,6 +299,26 @@ in {
       Install.WantedBy = ["timers.target"];
     };
 
+    # 의미 검색 색인(서버 호스트에서만): 새 사용자 프롬프트를 문장 청크로 임베딩해 message_chunks 에 넣는다(계획: ctx plan/ctx-의미검색-S2, 색인 주기 조사 2026-11-28 —
+    # 새 프롬프트가 하루 약 90~190건·피크 시간당 30~45건이라 10분 주기로 충분하다). 멱등이라 여러 번 돌아도 안전하고, 임베딩 서버(power-gpu-me)가 꺼져 있으면 그 주기는
+    # 건너뛰고 다음에 이어간다(앞의 `-` 는 실패해도 유닛을 실패로 보지 않는다는 뜻). 노트북은 상시 서비스를 깔지 않는다 — 대화는 서버 DB 로 들어오므로 서버가 색인한다(ctx-doc-sync 와 같은 이유).
+    systemd.user.services.claude-ctx-embed-index = lib.mkIf config.mods.sys.services.llm-ctx.enable {
+      Unit.Description = "llm-ctx semantic-search indexer (new user prompts -> message_chunks)";
+      Service = {
+        Type = "oneshot";
+        ExecStart = "-${claudeCtx}/bin/donghans ctx embed-index --limit 500";
+        Nice = 19;
+      };
+    };
+    systemd.user.timers.claude-ctx-embed-index = lib.mkIf config.mods.sys.services.llm-ctx.enable {
+      Unit.Description = "llm-ctx semantic-search indexer schedule";
+      Timer = {
+        OnBootSec = "5min";
+        OnUnitActiveSec = "10min";
+      };
+      Install.WantedBy = ["timers.target"];
+    };
+
     # 작업 문서 저장소(~/ctx)의 동기화 담당: 인박스의 제안을 검사(읽은 판·비밀·머리말)해 커밋한다. 쓰기 경로는 서버 역할 호스트(llm-ctx 서버)에서만 둔다 —
     # 다른 호스트(노트북)는 전력 측정에 변수를 섞지 않으려고 상시 서비스를 깔지 않고, 문서는 읽기 뷰만 쓴다(plan2 05 §4-4-7 의 6).
     systemd.user.services.ctx-doc-sync = lib.mkIf config.mods.sys.services.llm-ctx.enable {
